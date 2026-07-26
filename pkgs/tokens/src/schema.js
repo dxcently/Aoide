@@ -1,0 +1,118 @@
+// src/schema.js — the authoritative v0 token schema (CONTRACTS.md §1).
+//
+// This is what `aoide-tokens lint` (and, transitively, `rice lint`) validates
+// against. The nix option type (modules/nucleus/options.nix) is a permissive
+// gate; THIS is the authoritative validator.
+//
+// v0 lives inside a W3C design-tokens container: a token is an object carrying
+// `$value` (and optionally `$type`). References use the `{group.name}` alias
+// syntax that Style Dictionary resolves. The palette tier is base16-closed; the
+// component tier is bar.* / notif.* / window.*, each field `nullOr hex` where
+// null means "fall back to the palette" (the FACET applies the fallback; the
+// stage emitter resolves it fully — see resolve.js).
+
+"use strict";
+
+const HEX = /^#?[0-9a-fA-F]{6}$/;
+
+// The closed v0 shape: which keys exist in each tier, and the component→palette
+// fallback map (CONTRACTS.md §1). Component values may also be null.
+const PALETTE_KEYS = ["bg", "fg", "accent", "urgent"];
+
+const COMPONENT_FALLBACK = {
+  bar: { bg: "bg", fg: "fg", accent: "accent" },
+  notif: { bg: "bg", fg: "fg", urgent: "urgent" },
+  window: { border: "accent", borderInactive: "bg" },
+};
+
+// Accept either a bare hex string or a W3C token object ({ $value, $type }).
+// A reference like "{palette.bg}" is a valid $value (resolved later).
+function tokenValue(node) {
+  if (node == null) return null;
+  if (typeof node === "string") return node;
+  if (typeof node === "object" && "$value" in node) return node.$value;
+  return undefined; // signals "not a token leaf"
+}
+
+function isRef(v) {
+  return typeof v === "string" && /^\{[^}]+\}$/.test(v);
+}
+
+// Validate a resolved (dereferenced) value: must be hex, or null for a
+// component field (null is legal at the schema tier; the emitter resolves it).
+function checkColor(value, path, errors, { allowNull }) {
+  if (value === null || value === undefined) {
+    if (allowNull) return;
+    errors.push(`${path}: missing (expected hex #rrggbb)`);
+    return;
+  }
+  if (typeof value !== "string") {
+    errors.push(`${path}: expected hex string, got ${typeof value}`);
+    return;
+  }
+  if (isRef(value)) return; // unresolved reference — resolver checks target
+  if (!HEX.test(value)) {
+    errors.push(`${path}: "${value}" is not a hex colour (#rrggbb)`);
+  }
+}
+
+// Validate a v0 token container. Returns { ok, errors }. Works on the RAW
+// container (references still present) — reference targets are checked
+// structurally, full resolution is validated separately after Style Dictionary.
+function validate(container) {
+  const errors = [];
+
+  if (container == null || typeof container !== "object") {
+    return { ok: false, errors: ["root: token file must be a JSON object"] };
+  }
+
+  // Palette tier — required and closed.
+  const palette = container.palette;
+  if (palette == null || typeof palette !== "object") {
+    errors.push("palette: required group missing");
+  } else {
+    for (const k of PALETTE_KEYS) {
+      const v = tokenValue(palette[k]);
+      if (v === undefined) {
+        errors.push(`palette.${k}: required`);
+      } else {
+        checkColor(v, `palette.${k}`, errors, { allowNull: false });
+      }
+    }
+    for (const k of Object.keys(palette)) {
+      if (!PALETTE_KEYS.includes(k)) {
+        errors.push(`palette.${k}: unknown key (v0 palette is closed)`);
+      }
+    }
+  }
+
+  // Component tier — optional groups, each field nullOr hex.
+  for (const [group, fields] of Object.entries(COMPONENT_FALLBACK)) {
+    const g = container[group];
+    if (g == null) continue; // whole group optional
+    if (typeof g !== "object") {
+      errors.push(`${group}: expected a token group object`);
+      continue;
+    }
+    for (const field of Object.keys(g)) {
+      if (!(field in fields)) {
+        errors.push(`${group}.${field}: unknown key (v0 ${group} is closed)`);
+        continue;
+      }
+      const v = tokenValue(g[field]);
+      checkColor(v, `${group}.${field}`, errors, { allowNull: true });
+    }
+  }
+
+  return { ok: errors.length === 0, errors };
+}
+
+module.exports = {
+  SCHEMA_VERSION: "0",
+  HEX,
+  PALETTE_KEYS,
+  COMPONENT_FALLBACK,
+  tokenValue,
+  isRef,
+  validate,
+};

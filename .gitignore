@@ -7,4 +7,9 @@ song/auditions/
 # Content-pipeline + audit runtime (repo root):
 catalog/
 index/
+log
 log/
+
+# Nix build outputs
+result
+result-*

@@ -1,0 +1,69 @@
+// TokenState.qml — shared design-token state, hot-reloaded from stage/tokens.json.
+//
+// Singleton: every surface widget binds to properties here. When tokens.json
+// is atomically replaced (write-temp-then-rename per CONTRACTS.md §4), the
+// FileView fires a change signal and all bindings update in one pass — the
+// full arrangement hot-reloads without a QML restart.
+//
+// Token schema v0 (CONTRACTS.md §1): palette + bar.* / notif.* / window.*
+// All values are concrete hex strings (fallbacks already applied by the token
+// emitter — Quickshell never sees null).
+
+import QtQuick
+import Quickshell.Io
+
+QtObject {
+    id: root
+
+    // ── Token file path ────────────────────────────────────────────────────
+    // Stage path: ~/Aoide/song/stage/tokens.json (gitignored runtime; the nix
+    // build never depends on this path — checks.no-song-read enforces that).
+    readonly property string tokenPath: Qt.resolvedUrl(
+        (StandardPaths.writableLocation(StandardPaths.HomeLocation)) +
+        "/Aoide/song/stage/tokens.json"
+    )
+
+    // ── Parsed token object ────────────────────────────────────────────────
+    property var raw: ({
+        "schemaVersion": "0",
+        "palette": { "bg": "#1e1e2e", "fg": "#cdd6f4", "accent": "#89b4fa", "urgent": "#f38ba8" },
+        "bar":    { "bg": "#1e1e2e", "fg": "#cdd6f4", "accent": "#89b4fa" },
+        "notif":  { "bg": "#1e1e2e", "fg": "#cdd6f4", "urgent": "#f38ba8" },
+        "window": { "border": "#89b4fa", "borderInactive": "#1e1e2e" }
+    })
+
+    // ── Palette shortcuts ──────────────────────────────────────────────────
+    readonly property color paletteBg:     raw.palette ? raw.palette.bg     : "#1e1e2e"
+    readonly property color paletteFg:     raw.palette ? raw.palette.fg     : "#cdd6f4"
+    readonly property color paletteAccent: raw.palette ? raw.palette.accent : "#89b4fa"
+    readonly property color paletteUrgent: raw.palette ? raw.palette.urgent : "#f38ba8"
+
+    // ── Bar component shortcuts ────────────────────────────────────────────
+    readonly property color barBg:     raw.bar ? raw.bar.bg     : paletteBg
+    readonly property color barFg:     raw.bar ? raw.bar.fg     : paletteFg
+    readonly property color barAccent: raw.bar ? raw.bar.accent : paletteAccent
+
+    // ── Notif component shortcuts ──────────────────────────────────────────
+    readonly property color notifBg:     raw.notif ? raw.notif.bg     : paletteBg
+    readonly property color notifFg:     raw.notif ? raw.notif.fg     : paletteFg
+    readonly property color notifUrgent: raw.notif ? raw.notif.urgent : paletteUrgent
+
+    // ── Window component shortcuts ─────────────────────────────────────────
+    readonly property color windowBorder:         raw.window ? raw.window.border         : paletteAccent
+    readonly property color windowBorderInactive: raw.window ? raw.window.borderInactive : paletteBg
+
+    // ── File watcher — atomic hot-reload ──────────────────────────────────
+    FileView {
+        id: tokenFile
+        path: root.tokenPath
+        onTextChanged: {
+            try {
+                var parsed = JSON.parse(tokenFile.text)
+                root.raw = parsed
+            } catch (e) {
+                console.warn("[aoide/tokens] Failed to parse tokens.json:", e)
+            }
+        }
+        Component.onCompleted: tokenFile.reload()
+    }
+}

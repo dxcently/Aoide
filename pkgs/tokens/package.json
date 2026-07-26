@@ -1,0 +1,22 @@
+{
+  "name": "aoide-tokens",
+  "version": "0.0.0",
+  "description": "Aoide design-token engine: Style Dictionary resolver + v0 schema lint + live-side emitters (stage/tokens.json, hyprctl, terminal OSC).",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "aoide-tokens": "src/cli.js"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node src/cli.js lint test/fixtures/valid.json"
+  },
+  "dependencies": {
+    "style-dictionary": "4.3.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -19,8 +19,11 @@
   aoide.enable = true;
   aoide.user = "khoa";
 
-  # Wave-1 facet/aggregation flags land here as one line each, e.g.:
-  #   aoide.facets.quickshell.enable = true;
-  #   aoide.facets.compositor.enable = true;
-  #   aoide.facets.stylix.enable     = true;
+  # Wave-1 facets — the whole desktop, one line each.
+  aoide.facets.quickshell.enable = true;
+  aoide.facets.compositor.enable = true;
+  aoide.facets.stylix.enable = true;
+
+  # Shipped dendrites (off unless wanted; aoide.mcp.enable stays false — house policy).
+  aoide.obsidian.enable = false;
 }
