@@ -47,10 +47,14 @@ let
     assertCheck "surface-ownership" (badOwner == [ ])
       "surfaces with no owner: ${builtins.toString badOwner}";
 
-  # ── Check 2: no song/ read at build time ──────────────────────────────────
-  # Asserts that no walked module path lives under a `song/` runtime dir. This
-  # is the structural guard: modules live in `modules/`, never in `song/`, so
-  # the nix build cannot come to depend on ephemeral runtime state.
+  # ── Check 2: no song/ RUNTIME read at build time ───────────────────────────
+  # Asserts that no walked module path lives under a `song/` RUNTIME dir. The
+  # ban is scoped to ephemeral runtime state (stage/ · backstage/ · auditions/
+  # · catalog/ · index/) — `stage/` can never become load-bearing for the
+  # frozen half. It deliberately does NOT list `song/repertoire/`: committed
+  # songs there are VERSIONED SCORE, legitimately walked at eval by
+  # lib/mkHost.nix (each song's rice.nix self-gates on `aoide.song`). Walking
+  # repertoire therefore never trips this check — only runtime infixes offend.
   noSongRead =
     modulePaths:
     let
@@ -67,7 +71,38 @@ let
     in
     assertCheck "no-song-read" (offenders == [ ])
       "modules read song/ runtime paths at build time: ${builtins.toString offenders}";
+
+  # ── Check 3: song shape (host-agnostic discipline) ─────────────────────────
+  # A committed song under song/repertoire/<name>/ carries ONLY notes: its
+  # rice.nix sets aoide.notes (palette + component tiers) and — later —
+  # cover/chime references inside song/. It must NEVER set host options
+  # (monitors, hardware, services) or enable facets/dendrites: the VENUE (host)
+  # decides its instruments, the SONG carries only the notes (CONTRACTS.md §5).
+  #
+  # A cheap STRUCTURAL slice of that discipline is enforced here: every walked
+  # repertoire path is a file named `rice.nix` (the song's module entry). This
+  # catches stray `.nix` in a song folder that would silently join the module
+  # merge and could set arbitrary host options.
+  #
+  # TODO(song-shape v1): the full "only defines aoide.notes" invariant needs
+  # per-module isolated eval + option-definition diffing — disproportionate for
+  # v0. Until then the invariant is a DOCUMENTED CONVENTION (CONTRACTS.md §5 /
+  # docs/BUILD.md), backed by this structural rice.nix-only gate and code review.
+  songShape =
+    repertoirePaths:
+    let
+      strays = builtins.filter (
+        p: let s = toString p; in !lib.hasSuffix "/rice.nix" s
+      ) repertoirePaths;
+    in
+    assertCheck "song-shape" (strays == [ ])
+      "repertoire holds non-rice.nix modules (a song is rice.nix only): ${builtins.toString strays}";
 in
 {
-  inherit assertCheck surfaceOwnership noSongRead;
+  inherit
+    assertCheck
+    surfaceOwnership
+    noSongRead
+    songShape
+    ;
 }

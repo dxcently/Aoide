@@ -155,6 +155,79 @@ file.
 
 ---
 
+## 5. Song shape — **v0**
+
+A **song** (rice) is a committed, **host-agnostic** score. The design thesis:
+a song is host-agnostic; ANY host in the fleet performs it by naming it, and
+the performance adapts to that host's specifics and its enabled facet/dendrite
+set. The **venue (host) decides its instruments; the song carries only the
+notes.**
+
+### Selection — `aoide.song`
+
+`aoide.song` (str, default `"default"`, declared in
+`modules/nucleus/options.nix`) names the song this host performs. A host
+replays any committed song with **one line**:
+
+```nix
+# hosts/<host>/default.nix
+aoide.song = "moonlight";
+```
+
+Naming no song performs song `"default"` — the shipped standard
+(`modules/rime/default/rice.nix`), the guaranteed-present baseline.
+
+### Self-registration (dendrite discipline)
+
+Committed songs live under `song/repertoire/<name>/rice.nix`. `lib/mkHost.nix`
+walks `song/repertoire` (via `lib/walk.nix`, same as `modules/`) into every
+host, so **adding a song is a new folder — never an edit to an import list**.
+The empty repertoire (just `.gitkeep`) walks to `[]` and is tolerated.
+
+Each song's `rice.nix` **self-gates**, exactly like a dendrite:
+
+```nix
+# song/repertoire/<name>/rice.nix
+{ lib, config, ... }:
+{
+  config = lib.mkIf (config.aoide.song == "<name>") {
+    aoide.notes.palette = { bg = "…"; fg = "…"; accent = "…"; urgent = "…"; };
+    # component tier (bar/notif/window) — null falls back to palette
+  };
+}
+```
+
+### Rules (host-agnostic discipline)
+
+- A song sets **ONLY `aoide.notes`** (palette + component tiers) and — later —
+  cover/chime references inside `song/`.
+- A song **NEVER** sets host options (monitors, hardware, services) and
+  **NEVER** enables facets or dendrites. Those are the venue's decision.
+- All note values are **literal nix** — a song never reads `song/` runtime
+  paths (`stage/` · `backstage/` · `auditions/`), same as the standard.
+- Shelving/subfolders follow the walker rules (a `/_` path is skipped).
+
+### Repertoire is versioned score, not runtime
+
+`checks.no-song-read` (§4) bans reading `song/` **runtime** dirs at eval
+(`stage/` · `backstage/` · `auditions/` · `catalog/` · `index/`). It
+deliberately does **not** list `song/repertoire/`: committed songs there are
+versioned score, legitimately walked at eval. Walking repertoire never trips
+the check.
+
+### Enforcement
+
+`checks.song-shape` structurally asserts every walked repertoire path is a
+`rice.nix` (a song's module entry) — catching a stray `.nix` that could set
+arbitrary host options. The **full** "only defines `aoide.notes`" invariant is
+a documented convention here (isolated per-module option-diffing is
+disproportionate for v0; see the `TODO(song-shape v1)` in `lib/checks.nix`).
+
+**Migration to v1:** the update playbook migrates `song/repertoire/*/rice.nix`
+and `notes.json` from v0 to v1 with the note schema (§1).
+
+---
+
 ## Versioning
 
 - A contract version is a single integer, tracked in this file's section

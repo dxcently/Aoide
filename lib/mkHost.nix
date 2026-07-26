@@ -20,6 +20,16 @@ let
   # Modules that walk from `../modules` — the whole snowflake, self-registered.
   discovered = walk ../modules;
 
+  # Committed songs self-register like dendrites: every song's rice.nix under
+  # `song/repertoire/<name>/` is walked in and guards itself on
+  # `aoide.song == "<name>"` (see CONTRACTS.md §5). Adding a song is a new
+  # folder — never an edit to an import list. `walk` already filters non-`.nix`
+  # and `/_`-shelved paths; the `.gitkeep`-only empty dir walks to `[]`, so an
+  # empty repertoire is tolerated. `song/repertoire/**` is versioned score, NOT
+  # a runtime dir, so reading it at eval does not violate `checks.no-song-read`
+  # (that ban covers stage/ · backstage/ · auditions/ only).
+  repertoire = walk ../song/repertoire;
+
   # home-manager and stylix ride as NixOS modules when their inputs are present.
   # Kept tolerant: if an input is absent (minimal eval), we simply omit it so
   # `nix flake check` still evaluates.
@@ -39,6 +49,7 @@ inputs.nixpkgs.lib.nixosSystem {
   };
   modules =
     discovered
+    ++ repertoire
     ++ hmModule
     ++ stylixModule
     ++ [

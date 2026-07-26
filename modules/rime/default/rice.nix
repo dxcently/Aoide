@@ -10,20 +10,21 @@
 #   - All note values are literal nix expressions, not file reads.
 #
 # This module is discovered by the walker (lib/walk.nix) and applies when
-# aoide.enable is true. It sets aoide.notes to the default rice's palette
-# and component overrides. A user's adopted rice overrides these via
-# song/repertoire/<name>/rice.nix (which sets the same options with higher
-# priority using lib.mkForce or mkOverride).
+# `aoide.song == "default"` — i.e. when the host performs the standard. It is
+# song "default": the guaranteed-present baseline any host gets when it names
+# no other song. Committed songs live under song/repertoire/<name>/rice.nix and
+# guard the same way on `aoide.song == "<name>"` (CONTRACTS.md §5); naming one
+# in a host swaps this whole notes fan-out with zero other edits.
 #
 # The base16 scheme used here is Catppuccin Mocha — chosen as the Aoide
 # default for its wide ecosystem support, legible contrast ratios, and
 # established community tooling (Melete can reason about it by name).
 { lib, config, ... }:
 {
-  # Only apply when the framework is enabled. The default rice is the
-  # unconditional baseline — hosts that want a different default override
-  # aoide.notes in their own rice.nix.
-  config = lib.mkIf config.aoide.enable {
+  # Only apply when this host performs song "default". The standard is the
+  # guaranteed baseline — a host that names no song performs it. A song sets
+  # ONLY aoide.notes; never host options or facet/dendrite enables.
+  config = lib.mkIf (config.aoide.song == "default") {
 
     # ── Palette tier (base16 Catppuccin Mocha) ─────────────────────────────
     # base00 → bg, base05 → fg, base0D → accent, base08 → urgent.

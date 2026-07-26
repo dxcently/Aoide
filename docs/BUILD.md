@@ -38,6 +38,7 @@ none of them except your own dendrite/facet flags.
 | Option                         | Type                         | Notes |
 | ------------------------------ | ---------------------------- | ----- |
 | `aoide.enable`                 | bool                         | framework master switch |
+| `aoide.song`                   | str (default `"default"`)    | the song this host performs; names a `song/repertoire/<name>/` (or the shipped standard) |
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` fork |
 | `aoide.notes.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
 | `aoide.notes.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
@@ -106,6 +107,42 @@ state, never load-bearing for the nix build.
 
 ---
 
+## Authoring a song (replayable rice)
+
+A **song** is a committed, host-agnostic rice. Any host in the fleet performs it
+by naming it — the score adapts to that host's specifics and its enabled
+facet/dendrite set. **The venue (host) decides its instruments; the song
+carries only the notes.**
+
+Drop a folder under `song/repertoire/<name>/` — `lib/mkHost.nix` walks it in
+like a dendrite, so there is no import list to edit. The song's `rice.nix`
+self-gates on `aoide.song`:
+
+```nix
+# song/repertoire/moonlight/rice.nix
+{ lib, config, ... }:
+{
+  config = lib.mkIf (config.aoide.song == "moonlight") {
+    aoide.notes.palette = { bg = "#0b1021"; fg = "#c8d3f5"; accent = "#82aaff"; urgent = "#ff757f"; };
+    # component tier (bar/notif/window) — null falls back to palette
+  };
+}
+```
+
+Replay it on any host with **one line** in `hosts/<host>/default.nix`:
+`aoide.song = "moonlight";`. Naming no song performs song `"default"` — the
+shipped standard (`modules/rime/default/rice.nix`).
+
+**Host-agnostic rules (CONTRACTS.md §5):** a song sets ONLY `aoide.notes` (and,
+later, cover/chime refs inside `song/`). It NEVER sets host options (monitors,
+hardware, services) and NEVER enables facets/dendrites — those are the venue's.
+Note values are literal nix; a song never reads `song/` runtime paths. The
+`song/repertoire/**` tree is versioned score (not a runtime dir), so walking it
+does not violate `checks.no-song-read`. `checks.song-shape` asserts each walked
+repertoire path is a `rice.nix`.
+
+---
+
 ## Package handoffs — exactly what each agent drops in
 
 Both packages are `callPackage ./pkgs/<name> { }` in `flake.nix`. They are
@@ -158,7 +195,10 @@ Provide:
 `lib/checks.nix` rides as flake `checks`:
 
 - `surface-ownership` — every `aoide.surfaces.<name>` names a non-empty owner.
-- `no-song-read` — no discovered module lives under a `song/` runtime dir.
+- `no-song-read` — no discovered module lives under a `song/` **runtime** dir
+  (`song/repertoire/**` is versioned score, legitimately walked).
+- `song-shape` — every walked `song/repertoire/**` path is a `rice.nix`
+  (host-agnostic song discipline; CONTRACTS.md §5).
 - `pkg-aoide`, `pkg-aoide-notes` — the two packages build (exercises the
   packaging contract).
 
