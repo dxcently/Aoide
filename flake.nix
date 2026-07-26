@@ -89,6 +89,11 @@
           song-shape = checks.songShape (walk ./song/repertoire);
           pkg-aoide = self.packages.${system}.aoide;
           pkg-aoide-notes = self.packages.${system}.aoide-notes;
+          # VM boot test — boots the Aoide desktop config headless and asserts
+          # the stack comes up (multi-user.target, aoide + aoide-notes on PATH,
+          # greetd enabled, aoided + shellbridge user services active, graph
+          # commands pass).  Requires KVM on the build host.
+          vm-boot = import ./lib/vmTest.nix { inherit pkgs inputs lib; };
         }
       );
 
