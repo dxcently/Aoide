@@ -16,10 +16,14 @@
 #
 # To enable on yomi-strix, add to hosts/yomi-strix/default.nix:
 #   aoide.obsidian.enable = true;
-{ config, lib, pkgs, ... }:
 {
-  options.aoide.obsidian.enable = lib.mkEnableOption
-    "Obsidian knowledge-base integration (vault watcher + bar widget)";
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+{
+  options.aoide.obsidian.enable = lib.mkEnableOption "Obsidian knowledge-base integration (vault watcher + bar widget)";
 
   config = lib.mkIf config.aoide.obsidian.enable {
 
@@ -34,7 +38,7 @@
       description = "Register Obsidian window class with shellbridge";
 
       wantedBy = [ "shellbridge.service" ];
-      after    = [ "shellbridge.service" ];
+      after = [ "shellbridge.service" ];
 
       serviceConfig = {
         Type = "oneshot";

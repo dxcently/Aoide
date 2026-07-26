@@ -35,4 +35,24 @@
   # The aoide user's home-manager baseline (facets write into this user's home:
   # QML tree, hyprland.conf). stateVersion pins HM's compat behaviour.
   home-manager.users.${config.aoide.user}.home.stateVersion = lib.mkDefault "25.11";
+
+  # ── Baseline dev-tool dendrites ───────────────────────────────────────────
+  # The dev-tool dendrites ported from dxflake belong on every Aoide box, so
+  # they default ON here. mkDefault keeps a host free to opt any of them out
+  # (a per-host `aoide.<name>.enable = false;` wins), matching how the framework
+  # and MCP flags above are defaulted. Per-feature dendrites still each gate on
+  # their own `aoide.<name>.enable` (CONTRACTS.md §2) — this just flips the
+  # baseline. Contrast the desktop-app dendrites (e.g. obsidian) which stay OFF
+  # and are opted in per host.
+  aoide.bash.enable = lib.mkDefault true;
+  aoide.nh.enable = lib.mkDefault true;
+  aoide.git.enable = lib.mkDefault true;
+  aoide.kitty.enable = lib.mkDefault true;
+  aoide.neovim.enable = lib.mkDefault true;
+  aoide.starship.enable = lib.mkDefault true;
+  aoide.mcfly.enable = lib.mkDefault true;
+  aoide.btop.enable = lib.mkDefault true;
+  aoide.yazi.enable = lib.mkDefault true;
+  aoide.fastfetch.enable = lib.mkDefault true;
+  aoide.devtools.enable = lib.mkDefault true;
 }
