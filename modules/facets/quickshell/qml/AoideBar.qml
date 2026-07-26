@@ -246,6 +246,18 @@ Item {
             spacing: 8
             Layout.alignment: Qt.AlignVCenter
 
+            // Far-left end-cap ornament: compact clef tail (ornament vocab).
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "ৎ𝄢"
+                color: root.notes.barFg
+                opacity: 0.5
+                style: Text.Outline
+                styleColor: "#000000"
+                font.family: "monospace"
+                font.pixelSize: 13
+            }
+
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "𝄞"
@@ -408,6 +420,20 @@ Item {
                 font.family: "monospace"
                 font.pixelSize: 13
             }
+
+            // Far-right end-cap ornament: staff run closing on a final
+            // barline (composed from the ornament alphabet — mirrors the
+            // left clef-tail cap; " / " functional seps stay untouched).
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "𝄚𝅦𝄚𝄂"
+                color: root.notes.barFg
+                opacity: 0.5
+                style: Text.Outline
+                styleColor: "#000000"
+                font.family: "monospace"
+                font.pixelSize: 13
+            }
         }
     }
 
@@ -419,20 +445,33 @@ Item {
         x: Math.min(root.width - width - 8,
                     Math.max(8, volText.mapToItem(root, 0, 0).x - 8))
         y: root.height + 2
-        width: volSliderText.implicitWidth + 16
-        height: volSliderText.implicitHeight + 12
+        width: volCol.implicitWidth + 16
+        height: volCol.implicitHeight + 12
         radius: 4
         color: root.notes.barBg
         opacity: 0.92
         border.color: root.notes.barAccent
         border.width: 1
-        Text {
-            id: volSliderText
+        Column {
+            id: volCol
             anchors.centerIn: parent
-            text: root.volMuted ? "muted" : (root.volSlider(root.volPct) + " " + root.volPct + "%")
-            color: root.notes.barFg
-            font.family: "monospace"
-            font.pixelSize: 12
+            spacing: 2
+            // Popout top rule: short staff-run divider (ornament vocab).
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "𝄂𝄚𝅦𝄚"
+                color: root.notes.barAccent
+                opacity: 0.5
+                font.family: "monospace"
+                font.pixelSize: 11
+            }
+            Text {
+                id: volSliderText
+                text: root.volMuted ? "muted" : (root.volSlider(root.volPct) + " " + root.volPct + "%")
+                color: root.notes.barFg
+                font.family: "monospace"
+                font.pixelSize: 12
+            }
         }
     }
 
@@ -453,6 +492,15 @@ Item {
             id: battCol
             anchors.centerIn: parent
             spacing: 2
+            // Popout top rule: short staff-run divider (ornament vocab).
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "𝄂𝄚𝅦𝄚"
+                color: root.notes.barAccent
+                opacity: 0.5
+                font.family: "monospace"
+                font.pixelSize: 11
+            }
             Text {
                 text: root.battBar(root.battPct) + " " + root.battPct + "%"
                 color: root.battWarn ? root.notes.paletteUrgent : root.notes.barFg

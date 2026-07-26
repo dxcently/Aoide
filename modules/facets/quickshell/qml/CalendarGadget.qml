@@ -75,6 +75,18 @@ Item {
         id: column
         spacing: 0
 
+        // ── Ornament top rule: short staff run above the grid (ornament
+        // vocab). Standalone — the staff glyphs are wide SMP chars, so they
+        // sit ABOVE the box rather than inside the alignment-exact ┌─┐ math.
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "𝄂𝄚𝅦𝄚"
+            color: root.notes.paletteAccent
+            opacity: 0.5
+            font.family: "monospace"
+            font.pixelSize: 11
+        }
+
         // ── Top rule + title ─────────────────────────────────────────────
         Text {
             text: root.rule("┌", "┐")

@@ -308,6 +308,19 @@ Item {
 
                 // Absorb slack so the stack tops out cleanly.
                 Item { Layout.fillWidth: true; Layout.fillHeight: true }
+
+                // ── Dock footer rule: staff run with clef (ornament vocab,
+                // verbatim — trailing U+3164 hangul filler included). The
+                // header keeps its computed ═ math; this standalone rule is
+                // the dock's one footer ornament seam.
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: "𝄂𝄚𝅦𝄚𝄞𝅄ㅤ"
+                    color: notes.paletteAccent
+                    opacity: 0.5
+                    font.family: "monospace"
+                    font.pixelSize: 13
+                }
             }
         }
     }

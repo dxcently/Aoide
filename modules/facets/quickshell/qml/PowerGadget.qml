@@ -130,6 +130,16 @@ Item {
             font.pixelSize: 12
         }
 
+        // ── Section divider: short staff run between battery and network
+        // (ornament vocabulary — a stave fragment, one per seam).
+        Text {
+            text: "𝄂𝄚𝅦𝄚"
+            color: root.notes.paletteAccent
+            opacity: 0.45
+            font.family: "monospace"
+            font.pixelSize: 11
+        }
+
         // ── Network row ──────────────────────────────────────────────────
         Row {
             spacing: 6

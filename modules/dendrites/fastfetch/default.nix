@@ -41,7 +41,10 @@
             modules = [
               {
                 type = "custom";
-                format = "=─=─=─=─=─=─=─=─=─=─=─=─  𓏲𝄢  ─=─=─=─=─=─=─=─=─=─=─=─=";
+                # Staff-run frame rule (ornament vocabulary): opening clef,
+                # stave fragments with barlines + notes, 𓏲𝄢 kept centered,
+                # closing on a final barline.
+                format = "𝄞𝄚𝄚𝅦𝄚𝄀𝄚𝅘𝅥𝄚𝄚♪𝄚𝄁𝄚𝅦𝄚𝄚  𓏲𝄢  𝄚𝄚𝅦𝄚𝄁𝄚♪𝄚𝄚𝅘𝅥𝄚𝄀𝄚𝅦𝄚𝄚𝄂";
               }
               {
                 type = "title";
@@ -55,7 +58,8 @@
               { type = "break"; }
               {
                 type = "custom";
-                format = "  hardware -------------------------------------------";
+                # Section rule with a short staff-run prefix (ornament vocab).
+                format = "  𝄂𝄚𝅦𝄚 hardware ---------------------------------------";
               }
               {
                 type = "gpu";
@@ -76,7 +80,8 @@
               { type = "break"; }
               {
                 type = "custom";
-                format = "  software -------------------------------------------";
+                # Section rule with a short staff-run prefix (ornament vocab).
+                format = "  𝄂𝄚𝅦𝄚 software ---------------------------------------";
               }
               {
                 type = "wm";
@@ -109,7 +114,10 @@
               }
               {
                 type = "custom";
-                format = "=─=─=─=─=─=─=─=─=─=─=─=─  𓏲𝄢  ─=─=─=─=─=─=─=─=─=─=─=─=";
+                # Staff-run frame rule (ornament vocabulary): opening clef,
+                # stave fragments with barlines + notes, 𓏲𝄢 kept centered,
+                # closing on a final barline.
+                format = "𝄞𝄚𝄚𝅦𝄚𝄀𝄚𝅘𝅥𝄚𝄚♪𝄚𝄁𝄚𝅦𝄚𝄚  𓏲𝄢  𝄚𝄚𝅦𝄚𝄁𝄚♪𝄚𝄚𝅘𝅥𝄚𝄀𝄚𝅦𝄚𝄚𝄂";
               }
             ];
           };

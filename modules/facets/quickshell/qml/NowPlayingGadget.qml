@@ -123,6 +123,17 @@ Item {
             }
         }
 
+        // ── Divider: short staff run between marquee and progress (ornament
+        // vocabulary — a stave fragment, not a functional separator).
+        Text {
+            visible: root.hasPlayer
+            text: "𝄂𝄚𝅦𝄚"
+            color: root.notes.paletteAccent
+            opacity: 0.45
+            font.family: "monospace"
+            font.pixelSize: 11
+        }
+
         // ── ASCII progress bar ───────────────────────────────────────────
         Text {
             visible: root.hasPlayer

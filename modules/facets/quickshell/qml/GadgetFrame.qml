@@ -88,6 +88,21 @@ Item {
             implicitHeight: childrenRect.height
         }
 
+        // ── Footer ornament: clef-tail end-cap (ornament vocabulary) ─────
+        // Placed INSIDE the frame, right-aligned above the footer rule: the
+        // staff/clef glyphs are wide SMP characters whose cell width doesn't
+        // match the ═ fill math, so they decorate the interior rather than
+        // the computed box border (which must stay alignment-exact).
+        Text {
+            anchors.right: parent.right
+            anchors.rightMargin: Math.round(root.cellW)
+            text: "ৎ𝄢"
+            color: notes.paletteAccent
+            opacity: 0.55
+            font.family: "monospace"
+            font.pixelSize: root.chromePx
+        }
+
         // ── ASCII footer ─────────────────────────────────────────────────
         Text {
             width: parent.width
