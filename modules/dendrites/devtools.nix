@@ -64,9 +64,12 @@
       curl # transfer data with URLs
       wget # non-interactive network downloader
       claude-code # agentic AI coding assistant
-      godot # 2D/3D cross-platform game engine
-      arduino-ide # IDE for Arduino microcontrollers
-      jupyter # interactive computational notebooks
+      # Shelved: heavyweight one-project tools from the dxflake set — not
+      # sensible baseline defaults. Re-enable by uncommenting (same convention
+      # as neovim.nix's shelved languages).
+      # godot # 2D/3D cross-platform game engine
+      # arduino-ide # IDE for Arduino microcontrollers
+      # jupyter # interactive computational notebooks
       typst # markup-based document typesetting
       tinymist # Typst language server
       nixfmt # formatter for Nix source code
