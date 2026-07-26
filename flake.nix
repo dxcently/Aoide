@@ -24,6 +24,14 @@
     };
 
     hyprland.url = "github:hyprwm/Hyprland";
+
+    # nvf (Neovim-Flake) — the neovim dendrite's config framework (dxflake
+    # form, verbatim). Inputs can only live here; the dendrite reaches it via
+    # specialArgs (lib/mkHost.nix threads `inputs` into home-manager too).
+    nvf = {
+      url = "github:notashelf/nvf";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   # ── Outputs ────────────────────────────────────────────────────────────────

@@ -74,6 +74,12 @@ inputs.nixpkgs.lib.nixosSystem {
         lib.optionalAttrs (inputs ? home-manager) {
           home-manager.useGlobalPkgs = lib.mkDefault true;
           home-manager.useUserPackages = lib.mkDefault true;
+          # Thread the flake inputs into HM submodules too, so a dendrite's
+          # per-user config can import HM modules an input ships (the neovim
+          # dendrite pulls inputs.nvf.homeManagerModules.default).
+          home-manager.extraSpecialArgs = {
+            inherit inputs;
+          };
         }
       )
     ];
