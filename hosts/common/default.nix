@@ -5,7 +5,7 @@
 # yomi-strix). Holds the picks common to all Aoide boxes; per-host dirs add
 # machine-specific overrides. `hosts/` knows dendrites; dendrites never know
 # hosts.
-{ lib, ... }:
+{ config, lib, ... }:
 {
   # Turn the framework on everywhere. Individual facets/dendrites still gate on
   # their own `aoide.<name>.enable` flags (flipped per host).
@@ -19,4 +19,20 @@
   # having to restate these. Hosts override freely.
   system.stateVersion = lib.mkDefault "25.11";
   nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
+
+  # The aoide user: a normal account every facet/service hangs off (user
+  # services, home-manager files, greetd session). Hosts override freely.
+  users.users.${config.aoide.user} = {
+    isNormalUser = lib.mkDefault true;
+    extraGroups = lib.mkDefault [
+      "wheel"
+      "video"
+      "audio"
+      "networkmanager"
+    ];
+  };
+
+  # The aoide user's home-manager baseline (facets write into this user's home:
+  # QML tree, hyprland.conf). stateVersion pins HM's compat behaviour.
+  home-manager.users.${config.aoide.user}.home.stateVersion = lib.mkDefault "25.11";
 }

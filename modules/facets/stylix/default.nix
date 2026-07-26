@@ -140,17 +140,23 @@ let
     # below (stylix.image policy), not by disabling a target.
   };
 
-  # Every name in `surfaceToStylixTargets` is a REAL upstream Stylix target
-  # (mako/dunst/gtklock/hyprlock/gnome all declare `stylix.targets.<name>.enable`
-  # unconditionally — setting it false is a safe no-op even when the underlying
-  # program isn't installed). So we can disable them directly without probing
-  # option existence (which is unreliable through a submodule's freeform type).
-  disabledTargets = lib.unique (
+  # Stylix splits its targets across the NixOS module and the home-manager
+  # module (mako/dunst/gtklock/hyprlock are HM-side; the NixOS side has a
+  # different, smaller set). So the stand-down must be applied on EACH side,
+  # filtered by which `stylix.targets.<name>` options actually exist there —
+  # probing the given side's option tree keeps eval safe across Stylix
+  # versions and module layers.
+  collidingTargets = lib.unique (
     lib.flatten (map (n: surfaceToStylixTargets.${n} or [ ]) ownedSurfaceNames)
   );
-  targetDisableAttrs = lib.genAttrs disabledTargets (_: {
-    enable = lib.mkForce false;
-  });
+  # Given a side's option tree, disable every colliding target that exists there.
+  presentDisables =
+    opts:
+    lib.genAttrs (lib.filter (tn: (opts.stylix.targets or { }) ? ${tn}) collidingTargets) (_: {
+      enable = lib.mkForce false;
+    });
+  targetDisableAttrs = presentDisables options;
+  disabledTargets = lib.attrNames targetDisableAttrs;
 
   # `wallpaper` surface policy (deterministic, documented): the quickshell
   # wallpaper LAYER supersedes at render time, but Stylix's `image` remains the
@@ -195,11 +201,21 @@ in
           size = 24;
         };
       }
-      # Stand down for surfaces owned by other facets (quickshell). Empty today;
-      # structurally correct so the overlap check gains teeth as Agent C lands.
+      # Stand down for surfaces owned by other facets (quickshell) — NixOS side.
       // lib.optionalAttrs (disabledTargets != [ ]) {
         targets = targetDisableAttrs;
       };
+
+      # Stand down on the home-manager side too: Stylix's HM module carries the
+      # targets that collide with quickshell-owned surfaces (mako, dunst,
+      # gtklock, hyprlock, …). The submodule probes ITS OWN option tree, so this
+      # stays eval-safe whether or not the HM stylix module is imported for the
+      # user (stylix homeManagerIntegration autoImport).
+      home-manager.users.${config.aoide.user} =
+        { options, ... }:
+        {
+          config = lib.optionalAttrs (options ? stylix) { stylix.targets = presentDisables options; };
+        };
     }
   );
 }

@@ -75,7 +75,7 @@ in
     # The upstream Quickshell package lives in the pre-declared flake input
     # (flake.nix wires inputs.quickshell for exactly this).
     environment.systemPackages = [
-      inputs.quickshell.packages.${pkgs.system}.default
+      inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default
     ];
 
     # ── Install QML config tree into the user's Aoide fork ──────────────────
@@ -88,18 +88,16 @@ in
         source = "${quickshellConfig}/qml";
         recursive = true;
       };
-    };
 
-    # ── Quickshell autostart via Hyprland exec-once ─────────────────────────
-    # Placed in the Hyprland config so Quickshell starts with the compositor.
-    # The compositor facet (modules/facets/compositor/) owns Hyprland's main
-    # config; we add to extraConfig here — mkAfter so compositor defaults land
-    # first. This uses programs.hyprland.extraConfig; if the compositor facet
-    # uses a different mechanism, integration will need the autostart written
-    # there instead.
-    programs.hyprland.extraConfig = lib.mkAfter ''
-      # Aoide Quickshell — shell surface autostart
-      exec-once = quickshell -c ${shellQmlEntry}
-    '';
+      # ── Quickshell autostart via Hyprland exec-once ───────────────────────
+      # Placed in the Hyprland config so Quickshell starts with the compositor.
+      # The compositor facet owns hyprland.conf via home-manager's
+      # wayland.windowManager.hyprland; we append the autostart there — mkAfter
+      # so compositor token/bind defaults land first.
+      wayland.windowManager.hyprland.extraConfig = lib.mkAfter ''
+        # Aoide Quickshell — shell surface autostart
+        exec-once = quickshell -c ${shellQmlEntry}
+      '';
+    };
   };
 }

@@ -92,11 +92,24 @@ in
     # programs.hyprland.enable installs Hyprland, sets up the session
     # entry, and configures the NixOS service layer. The flake input
     # (inputs.hyprland) is pre-declared in flake.nix.
-    programs.hyprland = {
-      enable = true;
-      # Bake token + keybind config fragments into the Hyprland config.
-      # mkBefore so token overrides land before any per-user overrides.
-      extraConfig = lib.mkBefore (hyprTokenConfig + hyprBindConfig);
+    #
+    # NOTE: the NixOS-level module has no extraConfig — the config FILE is
+    # owned by home-manager's wayland.windowManager.hyprland below. System
+    # layer = session/portal; home layer = hyprland.conf. package = null in
+    # the home module so Hyprland is installed exactly once (system side).
+    programs.hyprland.enable = true;
+
+    home-manager.users.${config.aoide.user} = {
+      wayland.windowManager.hyprland = {
+        enable = true;
+        package = null;        # system programs.hyprland provides the binary
+        portalPackage = null;  # and the portal
+        configType = "hyprlang";  # explicit: classic hyprland.conf, not lua
+        # Bake token + keybind config fragments into hyprland.conf.
+        # mkBefore so token defaults land before any per-user overrides
+        # (the quickshell facet appends its autostart with mkAfter).
+        extraConfig = lib.mkBefore (hyprTokenConfig + hyprBindConfig);
+      };
     };
 
     # ── XDG portal for Hyprland ────────────────────────────────────────────
