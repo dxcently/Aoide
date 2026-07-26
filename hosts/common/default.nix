@@ -56,4 +56,16 @@
   aoide.fastfetch.enable = lib.mkDefault true;
   aoide.devtools.enable = lib.mkDefault true;
   aoide.fonts.enable = lib.mkDefault true;
+
+  # ── Melete / Mneme (the shipped agent + knowledge server) ──────────────────
+  # Aoide "ships with the Melete coding agent and the Mneme knowledge server"
+  # (wiki Feature-Set), and the always-on nucleus melete-adapter expects a
+  # Melete to dispatch to — so both default ON here, in the same baseline block
+  # as the dev-tool dendrites. They evaluate + activate with NO secrets/network:
+  # each service is guarded by ConditionPathExists on its runtime binary/config,
+  # so on a host that hasn't deployed the out-of-band binaries the units simply
+  # stay inactive (clean, documented cold-host state) rather than crash-looping.
+  # A host opts out with `aoide.{melete,mneme}.enable = false;` (mkDefault).
+  aoide.melete.enable = lib.mkDefault true;
+  aoide.mneme.enable = lib.mkDefault true;
 }

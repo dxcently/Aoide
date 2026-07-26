@@ -73,6 +73,12 @@
         {
           aoide = pkgs.callPackage ./pkgs/aoide { };
           aoide-notes = pkgs.callPackage ./pkgs/notes { };
+          # Melete AI harness + Mneme vault MCP server. Ported from dxflake;
+          # both are launcher wrappers over runtime-deployed binaries (their
+          # authenticated/out-of-band fetch is lifted to a runtime seam owned by
+          # modules/dendrites/{melete,mneme}.nix). See pkgs/{melete,mneme}.
+          melete = pkgs.callPackage ./pkgs/melete { };
+          mneme = pkgs.callPackage ./pkgs/mneme { };
           default = self.packages.${system}.aoide;
         }
       );

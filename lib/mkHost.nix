@@ -64,6 +64,8 @@ inputs.nixpkgs.lib.nixosSystem {
             (final: _prev: {
               aoide = final.callPackage ../pkgs/aoide { };
               aoide-notes = final.callPackage ../pkgs/notes { };
+              melete = final.callPackage ../pkgs/melete { };
+              mneme = final.callPackage ../pkgs/mneme { };
             })
           ];
         }
