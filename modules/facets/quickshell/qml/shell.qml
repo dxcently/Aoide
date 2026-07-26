@@ -54,17 +54,23 @@ ShellRoot {
     }
 
     // ── Gadget dock (surface #8, agentWidgets) ─────────────────────────────
-    // Win7-sidebar homage: right-edge column of ASCII-chromed gadgets on Aero-
-    // glass (translucent paletteBg over compositor blur). Persistent desktop
-    // layer, non-exclusive (does not reserve space) — sits over the wallpaper.
+    // Win7-sidebar homage: LEFT-edge PINNABLE POPUP of ASCII-chromed gadgets on
+    // Aero-glass (translucent paletteBg over compositor blur). Hidden by
+    // default; slides in on mouse hot-edge hover (pure QML) or on SUPER+G
+    // (shellbridge → dockToggle, open-and-pin). Non-exclusive (reserves no
+    // space) — sits over the wallpaper. Contains the DAG gadget → this popup is
+    // the primary DAG affordance.
     AoideAgentWidgets {
         notes: notes
         bridge: bridge
     }
 
     // ── Session-Graph (DAG) overlay ────────────────────────────────────────
-    // Watches song/stage/graph.json; toggled via shellbridge (Hyprland keybind
-    // execs `aoide shell graph toggle`). Row click → bridge.focusSession.
+    // DORMANT: standalone bridge-only overlay watching song/stage/graph.json.
+    // It has NO keybind now — SUPER+G summons the dock popup above (which holds
+    // the DAG gadget). Kept intact for a future dedicated full-screen DAG view;
+    // toggled only via shellbridge if a bind is re-added. Row click →
+    // bridge.focusSession.
     AoideSessionGraph {
         notes: notes
         bridge: bridge

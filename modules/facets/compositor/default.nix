@@ -74,8 +74,12 @@ let
     # Lock screen
     bind = SUPER, L, exec, aoide shell lock
 
-    # Session-Graph (DAG) overlay (shellbridge → AoideSessionGraph toggle)
-    bind = SUPER, G, exec, aoide shell graph toggle
+    # Gadget dock popup (shellbridge → AoideAgentWidgets open-and-pin).
+    # SUPER+G summons the LEFT-edge pinnable dock popup, which CONTAINS the DAG
+    # gadget (the dock is now the primary DAG affordance). The dock also opens
+    # on mouse hot-edge hover (pure QML). The standalone AoideSessionGraph
+    # overlay keeps NO bind — it is bridge-only/dormant (see its header note).
+    bind = SUPER, G, exec, aoide shell dock toggle
 
     # Rice preview / adopt shortcuts
     bind = SUPER SHIFT, P, exec, aoide rice preview

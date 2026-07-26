@@ -1,25 +1,58 @@
 // AoideAgentWidgets.qml — the gadget dock (surface #8, "agentWidgets").
 //
+// v1 REDESIGN: LEFT-edge *pinnable popup*. Was a right-edge, always-visible
+// column; now a hidden-by-default drawer that slides in from the LEFT screen
+// edge on (a) mouse hot-edge hover and (b) a keybind (SUPER+G → shellbridge →
+// dockOpen). Pinnable via an ASCII pin affordance in the header chrome. The
+// gadget stack + Win7-ASCII chrome (frames, gadgets) are UNCHANGED — only the
+// geometry glue and the reveal/hide state machine are new.
+//
 // Design mapping (rice intent — Windows 7 + ASCII note theming): Win7 *sidebar
-// gadgets* → an Aoide right-edge gadget dock. A vertical stack of gadgets, each
-// framed with box-drawing chrome (╔═[ TITLE ]═╗ title bar, ║ side rails, ╚═╝
-// footer) and rendered on Aero-glass — a semi-transparent paletteBg panel that
-// reads as frosted glass because the compositor facet enables Hyprland blur
-// (blur size 8, passes 3; see modules/facets/compositor + liner intent). ALL
-// colors come from notes (paletteBg/Fg/Accent/Urgent + bar/notif tier reads as
-// NoteState exposes them); the ASCII chrome is monospace. Zero hardcoded hex.
+// gadgets* → an Aoide gadget dock. A vertical stack of gadgets, each framed
+// with box-drawing chrome (╔═[ TITLE ]═╗ title bar, ║ side rails, ╚═╝ footer)
+// on Aero-glass — a semi-transparent paletteBg panel that reads as frosted
+// glass because the compositor facet enables Hyprland blur (blur size 8,
+// passes 3; see modules/facets/compositor + liner intent). ALL colors come
+// from notes (paletteBg/Fg/Accent/Urgent + bar/notif tiers as NoteState
+// exposes them); the ASCII chrome is monospace. Zero hardcoded hex.
+//
+// ── Reveal / hide state machine ─────────────────────────────────────────────
+// Three logical states drive the panel's x-position (slide via a Behavior):
+//
+//   STATE     | condition                                    | panel
+//   ----------|----------------------------------------------|--------
+//   hidden    | !pinned && !hotEdge && !overPanel            | off-screen
+//   peeking   | !pinned && (hotEdge || overPanel)            | shown (hover)
+//   pinned    | pinned  (bridge/keybind or [pin] clicked)    | shown (sticky)
+//
+// Derived open predicate:  open = pinned || hotEdge || overPanel
+//   - hotEdge   : pointer inside the thin left hot strip (always-present).
+//   - overPanel : pointer anywhere over the popup (the hot strip + popup are
+//                 ONE hover union, so hovering rows / clicking gadgets never
+//                 counts as "left the popup").
+//   - pinned    : sticky; survives the pointer leaving entirely.
+//
+// Transition detail (auto-hide grace): when NOT pinned and the pointer leaves
+// BOTH the hot strip and the popup, a ~400 ms grace timer arms; if the pointer
+// re-enters either region before it fires, the timer cancels and the panel
+// stays. This keeps crossing the ~gap between strip and panel from flapping.
+// Pinned short-circuits the timer entirely.
+//
+// Keybind (SUPER+G) → shellbridge → dockOpen(): opens AND pins. A keybind that
+// merely peeked would instantly auto-hide once the pointer settled, so the
+// bridge/keybind path is defined as open-and-pin (see dockShow/dockToggle).
+// Bridge wiring is stub-level today (the shellbridge socket loop is stubbed),
+// exactly like AoideLauncher's `visible_` / AoideSessionGraph's `visible_`.
 //
 // Layer / anchoring (precedent: AoideWallpaper + AoideOsd):
 //   The skeleton surfaces are plain Items hosted directly under ShellRoot in
-//   shell.qml — no explicit Quickshell PanelWindow/WlrLayershell wrapper is used
-//   yet (layer-shell typing is a v1 concern shared across every surface). Like
-//   AoideWallpaper (a desktop-layer, non-interactive backdrop) and AoideOsd /
-//   AoideSessionGraph (overlays anchored WITHIN their parent that never reserve
-//   space), this dock anchors itself to the RIGHT EDGE inside `parent` and does
-//   NOT reserve/exclude space the way the bar would — Win7 gadgets sit ON the
+//   shell.qml — no explicit Quickshell PanelWindow/WlrLayershell wrapper is
+//   used yet (layer-shell typing is a v1 concern shared across every surface).
+//   Like AoideWallpaper / AoideOsd, this dock anchors WITHIN `parent` and does
+//   NOT reserve/exclude space (non-exclusive) — Win7 gadgets sit ON the
 //   desktop, over the wallpaper, under windows. When surfaces gain real
 //   layer-shell wrappers (v1), this dock should claim a non-exclusive
-//   background/bottom layer, mirroring whatever AoideWallpaper adopts.
+//   top/overlay layer so the hot-edge hover reaches it above tiled windows.
 //
 // Geometry stays v0 defaults (no geometry note tier yet) — width/margins are
 // local constants, to become note reads in v1 (same posture as AoideBar).
@@ -38,67 +71,210 @@ Item {
     // ── Dock geometry (v0 local defaults; note reads in v1) ────────────────
     readonly property int dockWidth: 300
     readonly property int edgeMargin: 8
-    readonly property real glassOpacity: 0.72   // Aero-glass over compositor blur
+    readonly property int hotEdgeWidth: 5        // thin always-present hover strip
+    readonly property real glassOpacity: 0.72    // Aero-glass over compositor blur
+    readonly property int slideMs: 150           // Win7-vibe reveal animation
 
-    // ── Right-edge anchored, non-exclusive (does NOT reserve space) ────────
-    anchors.right: parent ? parent.right : undefined
-    anchors.top: parent ? parent.top : undefined
-    anchors.bottom: parent ? parent.bottom : undefined
-    anchors.rightMargin: edgeMargin
-    anchors.topMargin: edgeMargin
-    anchors.bottomMargin: edgeMargin
-    implicitWidth: dockWidth
+    // ── Fill the parent so the hot strip spans the full screen height ──────
+    // Non-exclusive: this Item reserves NO space (no anchors.margins on parent,
+    // no layer-shell exclusive zone) — it merely overlays `parent`.
+    anchors.fill: parent ? parent : undefined
 
-    // ── Gadget stack ───────────────────────────────────────────────────────
-    ColumnLayout {
-        anchors.right: parent.right
+    // ── State machine inputs ───────────────────────────────────────────────
+    property bool pinned: false      // sticky (bridge/keybind or [pin] click)
+    property bool hotEdge: false     // pointer inside the left hot strip
+    property bool overPanel: false   // pointer anywhere over the popup
+
+    // Derived: is the popup logically open? (peeking OR pinned)
+    readonly property bool dockOpen: pinned || hotEdge || overPanel
+
+    // ── Bridge-driven entry points (stub-level; mirror AoideLauncher) ──────
+    // shellbridge will send { cmd: "dock", action: "show|hide|toggle" } and
+    // call one of these. Keybind/bridge opens ALWAYS pin (see header note).
+    function dockShow()   { pinned = true }
+    function dockHide()   { pinned = false }   // falls back to hover peek
+    function dockToggle() { pinned = !pinned }
+
+    // ── Auto-hide grace timer ──────────────────────────────────────────────
+    // `shown` is what the panel's x actually binds to. Opening is immediate
+    // (dockOpen → shown right away); closing is GATED by the timer: when the
+    // hover union drops while unpinned, the timer arms and only its firing —
+    // with dockOpen still false — retracts the panel. Re-entering the strip or
+    // the popup within the ~400 ms window cancels the hide, so crossing the
+    // strip→panel gap (or briefly overshooting an edge) never flaps the dock.
+    property bool shown: false
+
+    Timer {
+        id: graceTimer
+        interval: 400
+        repeat: false
+        onTriggered: {
+            if (!root.dockOpen)
+                root.shown = false
+        }
+    }
+
+    onDockOpenChanged: {
+        if (dockOpen) {
+            graceTimer.stop()
+            shown = true
+        } else {
+            graceTimer.restart()
+        }
+    }
+
+    // ══ Left hot-edge strip — always present, pure QML (works live) ════════
+    // A thin full-height MouseArea pinned to the LEFT edge. Hovering it flips
+    // hotEdge → dockOpen → panel slides in. hoverEnabled so containsMouse
+    // tracks without a click.
+    MouseArea {
+        id: hotStrip
+        anchors.left: parent.left
         anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        width: root.hotEdgeWidth
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton   // hover-only; never steals clicks
+        onContainsMouseChanged: root.hotEdge = containsMouse
+    }
+
+    // ══ The sliding popup panel ════════════════════════════════════════════
+    // Anchored logically to the left; slides via x. Hidden: x = -width - margin
+    // (fully off-screen). Shown: x = edgeMargin. Behavior animates the reveal.
+    Item {
+        id: panel
+        y: root.edgeMargin
         width: root.dockWidth
-        spacing: 10
+        height: parent.height - 2 * root.edgeMargin
 
-        // ── Gadget 1: TERMINALS (Terminal-Commander roster) ──────────────
-        GadgetFrame {
-            Layout.fillWidth: true
-            notes: root.notes
-            title: "TERMINALS"
-            TerminalManagerGadget {
-                width: parent.width
-                notes: root.notes
-                bridge: root.bridge
+        // Slide reveal: off-screen when closed, edgeMargin when open.
+        x: root.shown ? root.edgeMargin
+                      : -(root.dockWidth + root.edgeMargin)
+        Behavior on x {
+            NumberAnimation {
+                duration: root.slideMs
+                easing.type: Easing.OutCubic
             }
         }
 
-        // ── Gadget 2: DAG (compact always-on session graph) ──────────────
-        GadgetFrame {
-            Layout.fillWidth: true
-            notes: root.notes
-            title: "DAG"
-            DagGraphGadget {
-                width: parent.width
-                notes: root.notes
-                bridge: root.bridge
-            }
+        // ── Popup hover union: a NoButton hoverEnabled catcher covering the
+        // whole panel. acceptedButtons: Qt.NoButton → clicks fall THROUGH to
+        // the gadgets/rows/pin beneath, but containsMouse still tracks the
+        // pointer anywhere over the popup. Placed FIRST (lowest z) so the pin
+        // button and gadget MouseAreas sit above it and receive their clicks.
+        MouseArea {
+            id: panelHover
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            onContainsMouseChanged: root.overPanel = containsMouse
         }
 
-        // ── Gadget 3: CLOCK (Win7-clock homage) ──────────────────────────
-        GadgetFrame {
-            Layout.fillWidth: true
-            notes: root.notes
-            title: "CLOCK"
-            ClockGadget {
-                width: parent.width
-                notes: root.notes
-            }
-        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
 
-        // ── Gadget 4: METERS (CPU/RAM ASCII gauges) ──────────────────────
-        GadgetFrame {
-            Layout.fillWidth: true
-            notes: root.notes
-            title: "METERS"
-            MeterGadget {
-                width: parent.width
-                notes: root.notes
+            // ══ Header chrome with pin affordance ══════════════════════════
+            // Matches GadgetFrame's box-drawing language: a double-rule title
+            // bar with a [pin] slot. Glyph: [■] pinned / [+] unpinned.
+            //   ╔═[ GADGETS ]══…══[■]═╗   (pinned)
+            //   ╔═[ GADGETS ]══…══[+]═╗   (unpinned)
+            Item {
+                Layout.fillWidth: true
+                implicitHeight: headerText.implicitHeight
+
+                // Fill-dashes are computed in JS so the ╗ lands flush right and
+                // the [pin] slot sits just before it (mirrors GadgetFrame.titleLine).
+                readonly property int chromePx: 12
+                readonly property real cellW: chromePx * 0.6
+                readonly property int cols: Math.max(16, Math.floor(width / cellW))
+                readonly property string pinGlyph: root.pinned ? "[■]" : "[+]"
+                function headerLine(cols) {
+                    var head = "╔═[ GADGETS ]"
+                    var tail = pinGlyph + "═╗"
+                    var fillCount = cols - head.length - tail.length
+                    if (fillCount < 0) fillCount = 0
+                    var fill = ""
+                    for (var i = 0; i < fillCount; i++) fill += "═"
+                    return head + fill + tail
+                }
+
+                Text {
+                    id: headerText
+                    width: parent.width
+                    text: parent.headerLine(parent.cols)
+                    color: notes.paletteAccent
+                    font.family: "monospace"
+                    font.pixelSize: parent.chromePx
+                    font.bold: true
+                    clip: true
+                }
+
+                // Click target over the [pin] slot at the right end. Sized to a
+                // few cells; toggles the sticky pin. Sits above panelHover.
+                MouseArea {
+                    width: 4 * parent.cellW
+                    height: parent.height
+                    anchors.right: parent.right
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.pinned = !root.pinned
+                }
+            }
+
+            // ══ Gadget stack (UNCHANGED — frames + gadgets as-is) ══════════
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 10
+
+                // ── Gadget 1: TERMINALS (Terminal-Commander roster) ──────
+                GadgetFrame {
+                    Layout.fillWidth: true
+                    notes: root.notes
+                    title: "TERMINALS"
+                    TerminalManagerGadget {
+                        width: parent.width
+                        notes: root.notes
+                        bridge: root.bridge
+                    }
+                }
+
+                // ── Gadget 2: DAG (compact always-on session graph) ──────
+                GadgetFrame {
+                    Layout.fillWidth: true
+                    notes: root.notes
+                    title: "DAG"
+                    DagGraphGadget {
+                        width: parent.width
+                        notes: root.notes
+                        bridge: root.bridge
+                    }
+                }
+
+                // ── Gadget 3: CLOCK (Win7-clock homage) ──────────────────
+                GadgetFrame {
+                    Layout.fillWidth: true
+                    notes: root.notes
+                    title: "CLOCK"
+                    ClockGadget {
+                        width: parent.width
+                        notes: root.notes
+                    }
+                }
+
+                // ── Gadget 4: METERS (CPU/RAM ASCII gauges) ──────────────
+                GadgetFrame {
+                    Layout.fillWidth: true
+                    notes: root.notes
+                    title: "METERS"
+                    MeterGadget {
+                        width: parent.width
+                        notes: root.notes
+                    }
+                }
+
+                // Absorb slack so the stack tops out cleanly.
+                Item { Layout.fillWidth: true; Layout.fillHeight: true }
             }
         }
     }

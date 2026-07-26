@@ -21,9 +21,14 @@
 //     (bridge.focusSession(windowAddress)), the same session-jump path the
 //     Terminal-Commander chips use. shellbridge dispatches `aoide graph focus`
 //     / `hyprctl dispatch focuswindow` — QML never shells out directly.
-//   - Visibility is a bridge-driven toggle (`visible_`), mirroring AoideLauncher:
-//     a Hyprland keybind execs `aoide shell graph toggle` → shellbridge →
-//     flips this flag. Hidden by default.
+//   - Visibility is a bridge-driven toggle (`visible_`), mirroring AoideLauncher.
+//     Hidden by default.
+//
+// STATUS (v1): DORMANT / bridge-only. This standalone overlay no longer owns a
+// keybind — SUPER+G now summons the LEFT-edge gadget-dock popup (AoideAgentWidgets),
+// which CONTAINS the DAG gadget and is the primary DAG affordance. This file is
+// kept intact (not deleted) as the seam for a future dedicated full-screen DAG
+// view; it flips `visible_` only if a shellbridge bind is re-added.
 
 import QtQuick
 import QtQuick.Layouts
