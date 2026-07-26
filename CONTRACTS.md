@@ -131,6 +131,15 @@ committed, never load-bearing for the nix build (enforced by
 `checks.no-song-read`). Emitted by the notes package (Agent A), shellbridge
 (Wave 1), and the aoide CLI (`aoide graph`); read by Quickshell.
 
+**Stage-dir resolution (the CLI ↔ unit seam).** Every stage reader/writer
+resolves the stage directory through one function; nothing computes it
+independently. Precedence: `$AOIDE_STAGE_DIR` when set to an **absolute** path
+(the systemd unit sets `AOIDE_STAGE_DIR=%h/Aoide/song/stage`,
+`modules/nucleus/shellbridge.nix`) → else `~/Aoide/song/stage` derived from
+`$AOIDE_USER`/`$HOME`. A relative or empty value is ignored (a runtime path is
+never resolved against an arbitrary cwd). On the default layout both agree; the
+override is what lets the unit — or a test/smoke run — relocate the stage tree.
+
 ### `song/stage/notes.json` — **v0**
 
 The resolved, flattened note values for Quickshell (QML reads this; hot-reload
