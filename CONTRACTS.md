@@ -48,6 +48,16 @@ Hex format: `#?[0-9a-fA-F]{6}` (leading `#` optional). The notes package
 (`pkgs/notes`, Agent A) owns the authoritative `rice lint` validator; the
 option type is a permissive gate only.
 
+### Cover-art tier (v0 — the wallpaper note)
+
+| Key         | Type            | Default | Falls back to                          |
+| ----------- | --------------- | ------- | -------------------------------------- |
+| `wallpaper` | `nullOr path`   | `null`  | facet's deterministic solid-colour PNG |
+
+A literal nix path (copied to the store — never a `song/` runtime read). The
+stylix facet bakes it as the base-context image; `null` bakes the solid-colour
+fallback derived from `palette.bg`.
+
 **Migration to v1:** the update playbook migrates `song/repertoire/*/rice.nix`
 and `notes.json` from v0 to v1 when the design-system workstream lands v1.
 

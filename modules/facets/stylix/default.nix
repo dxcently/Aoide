@@ -96,14 +96,20 @@ let
     base0F = stripHash p.urgent; # brown
   };
 
-  # A minimal, deterministic wallpaper: a solid-colour PNG from palette.bg.
-  # Stylix wants an `image`; generating one keeps the baked path buildable
-  # without shipping a binary asset and with NO song/ read. The rice engine
-  # (Wave-1 rime) overrides this per song with a real wallpaper — hence
-  # mkDefault. ImageMagick is a pure build-time input.
-  wallpaper = pkgs.runCommand "aoide-wallpaper.png" { } ''
+  # Deterministic solid-colour fallback wallpaper: a PNG from palette.bg. This
+  # is the cover the facet bakes when the song carries no `notes.wallpaper` —
+  # it keeps the baked path buildable without shipping a binary asset and with
+  # NO song/ read. ImageMagick is a pure build-time input.
+  solidWallpaper = pkgs.runCommand "aoide-wallpaper.png" { } ''
     ${pkgs.imagemagick}/bin/magick -size 1920x1080 "xc:#${stripHash p.bg}" "$out"
   '';
+
+  # The cover-art note (CONTRACTS.md §1): a song MAY carry a real wallpaper as a
+  # literal nix path (`aoide.notes.wallpaper`), which the option system copies to
+  # the store — this is note data, not a song/ runtime read. When the note is
+  # null the facet bakes the deterministic solid-colour fallback above, so the
+  # path stays buildable and drift-free either way.
+  wallpaper = if t.wallpaper != null then t.wallpaper else solidWallpaper;
 
   # ── surface-ownership overlap resolution ──────────────────────────────────
   # Read the registry (tolerate it empty). Any surface owned by a NON-stylix
@@ -185,9 +191,10 @@ in
         # The ONE base16 scheme — the baked fan-out's single source.
         base16Scheme = scheme;
 
-        # Wallpaper: a deterministic solid-colour default; the rice engine
-        # overrides per song. mkDefault keeps it host/rice-overridable. We set
-        # this EVEN WHEN quickshell owns the `wallpaper` surface
+        # Wallpaper: the song's cover-art note (`aoide.notes.wallpaper`) when it
+        # carries one, else a deterministic solid-colour fallback (from
+        # palette.bg). mkDefault keeps it host/rice-overridable. We set this EVEN
+        # WHEN quickshell owns the `wallpaper` surface
         # (`wallpaperOwnedElsewhere` = ${lib.boolToString wallpaperOwnedElsewhere}):
         # Stylix's image stays the base-context source and the fallback; the
         # quickshell wallpaper layer supersedes it live at render time.

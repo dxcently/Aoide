@@ -11,7 +11,12 @@
 # it wires no behaviour, so an empty config evaluates cleanly.
 { lib, config, ... }:
 let
-  inherit (lib) mkOption mkEnableOption types literalExpression;
+  inherit (lib)
+    mkOption
+    mkEnableOption
+    types
+    literalExpression
+    ;
 
   # A base16 hex colour, with or without leading '#'. Kept permissive so v0
   # note files stay easy to author; the notes package's `rice lint` is the
@@ -147,6 +152,18 @@ in
             type = windowType;
             default = { };
             description = "Component overrides for compositor window decoration.";
+          };
+          wallpaper = mkOption {
+            type = types.nullOr types.path;
+            default = null;
+            description = ''
+              The cover-art note: the wallpaper image this song carries, as a
+              literal nix path (copied to the store — never a song/ runtime
+              read). Facets bake it as the Stylix base-context image. null means
+              "no cover" — the stylix facet falls back to its deterministic
+              solid-colour derivation (from palette.bg), so the baked path stays
+              buildable with no binary asset.
+            '';
           };
         };
       };
