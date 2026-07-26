@@ -128,8 +128,8 @@ Contract guarantees:
 
 Live-side (rehearsal) state written to `song/stage/` — gitignored runtime, never
 committed, never load-bearing for the nix build (enforced by
-`checks.no-song-read`). Emitted by the notes package (Agent A) and shellbridge
-(Wave 1); read by Quickshell.
+`checks.no-song-read`). Emitted by the notes package (Agent A), shellbridge
+(Wave 1), and the aoide CLI (`aoide graph`); read by Quickshell.
 
 ### `song/stage/notes.json` — **v0**
 
@@ -152,6 +152,53 @@ applied) — Quickshell reads concrete colours, never `null`.
 
 Writes are atomic (write-temp-then-rename) so a hot-reload never reads a torn
 file.
+
+### `song/stage/sessions.json` / `hooks.json` — **v0**
+
+The shellbridge roster + live hook phases (full field tables in
+`modules/nucleus/shellbridge.nix`). Session records: `{ sessionId, agent,
+windowAddress, cwd, state, startedAt }`; hook records: `{ sessionId, phase,
+updatedAt }`.
+
+**Additive in v0:** a session record MAY carry an optional `parentSessionId`
+(string) naming the session that spawned it — the graph's spawned-by edge. Set
+by `aoide graph link` (cycle-checked), cleared by `aoide graph prune` when the
+parent is removed. Absent means "no spawned-by edge"; readers must tolerate
+both forms, and rewriters must round-trip fields they do not know.
+
+### `song/stage/projects.json` — **v0**
+
+Registered project anchor roots for the graph. Written by
+`aoide graph project add/remove` (atomic, idempotent); read by
+`aoide graph view/emit`.
+
+```json
+{ "schemaVersion": "0", "projects": [ { "name": "aoide", "path": "/home/khoa/Aoide" } ] }
+```
+
+### `song/stage/graph.json` — **v0**
+
+The **fully resolved** project/session DAG, written by `aoide graph emit`
+(atomic) for Quickshell to hot-reload — like stage notes, QML reads concrete
+values and computes nothing. Project nodes anchor session nodes by cwd
+(longest path-prefix wins, so nested projects anchor correctly); `spawned`
+edges come from `parentSessionId`. A session with a resolved parent carries
+only its `spawned` edge; root sessions carry an `anchors` edge (or none when
+unanchored).
+
+```json
+{
+  "schemaVersion": "0",
+  "nodes": [
+    { "id": "project:aoide", "kind": "project", "name": "aoide", "path": "/home/khoa/Aoide" },
+    { "id": "session:abc123", "kind": "session", "agent": "claude", "cwd": "/home/khoa/Aoide", "state": "running", "windowAddress": "0x…", "startedAt": "…" }
+  ],
+  "edges": [
+    { "from": "project:aoide", "to": "session:abc123", "kind": "anchors" },
+    { "from": "session:abc123", "to": "session:def456", "kind": "spawned" }
+  ]
+}
+```
 
 ---
 

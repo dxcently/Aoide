@@ -190,6 +190,35 @@ Provide:
 
 ---
 
+## The graph group (`aoide graph`) — projects + sessions as a DAG
+
+The Terminal-Commander roster, upgraded from a flat list to a DAG: registered
+**projects** are anchor nodes, agent **sessions** hang under them (anchored by
+cwd — longest path-prefix wins, so nested projects anchor correctly), and
+sessions nest under the session that spawned them (`parentSessionId`,
+CONTRACTS.md §4). Sessions matching no project group under a synthetic
+`(unanchored)` root. All state lives in `song/stage/` (gitignored runtime;
+atomic writes only); missing stage files read as empty registries.
+
+| Command                            | Does |
+| ---------------------------------- | ---- |
+| `aoide graph view [--focus <id>]`  | Unicode tree render (`◆` projects, `●` sessions, `▶` marks the focused node); `--json` emits the graph document |
+| `aoide graph project add <name> <path>` | register/update an anchor root in `song/stage/projects.json` (idempotent) |
+| `aoide graph project remove <name>`| unregister (ok + no-op if absent) |
+| `aoide graph project list`         | list the registered anchor roots |
+| `aoide graph link <child> <parent>`| set the spawned-by edge on the child session (rejects self-links and cycles; a not-yet-registered parent is recorded with a warning) |
+| `aoide graph focus <node>`         | jump to the session's window via `hyprctl dispatch focuswindow` (Terminal-Commander session jump) |
+| `aoide graph prune`                | drop `done` sessions + their hook records; orphaned children keep running with their `parentSessionId` cleared |
+| `aoide graph emit`                 | stage the resolved DAG to `song/stage/graph.json` for Quickshell hot-reload |
+
+Session live state is the latest hook phase from `hooks.json` when present
+(falling back to the roster `state`). Like every command, the group takes and
+emits `--json` with structured errors and reports exactly what changed. Stage
+shapes (`projects.json`, `graph.json`, the additive `parentSessionId` field on
+session records) are contract §4.
+
+---
+
 ## Checks you must keep green
 
 `lib/checks.nix` rides as flake `checks`:
