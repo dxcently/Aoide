@@ -40,8 +40,19 @@ Compositor keybinds (`modules/facets/compositor/default.nix`). The `SUPER` key i
 | `SUPER + L` | Lock the screen (`aoide shell lock`). |
 | `SUPER SHIFT + P` | `aoide rice preview` — rehearse the current rice live. |
 | `SUPER SHIFT + A` | `aoide rice adopt` — commit the previewed rice (user-gated). |
+| `SUPER + RETURN` | Open a terminal (kitty). |
+| `SUPER + Q` | Close the active window. |
+| `SUPER + V` / `SUPER + F` | Toggle floating / fullscreen. |
+| `SUPER + arrows` (or `H/J/K`) | Move focus (arrows: full set; H/J/K: vim left/down/up — right is arrow-only, `SUPER + L` stays lock). |
+| `SUPER SHIFT + arrows` (or `H/J/K`) | Move the window. |
+| `SUPER ALT + arrows` (or `H/J/K`) | Resize the window (repeats while held). |
+| `SUPER + 1–0` | Switch to workspace 1–10. |
+| `SUPER SHIFT + 1–0` | Move window to workspace 1–10. |
+| `ALT + Tab` | Previous workspace. |
+| `SUPER + X` / `SUPER + Z` | Toggle special workspace `magic` / `scratch` (`SHIFT` = move window there). |
+| `SUPER + leftdrag` / `rightdrag` | Move / resize window with the mouse. |
 
-> The `aoide shell *` verbs the keybinds call are not yet in the command schema — they are a documented open seam (the bridge path is stubbed). The hot-edge and pure-QML paths work today regardless.
+> The `aoide shell *` verbs the keybinds call are not yet in the command schema — they are a documented open seam (the bridge path is stubbed). The hot-edge and pure-QML paths work today regardless. dxflake's media/brightness hardware keys are deliberately unbound — the bar's volume cell owns audio by mouse.
 
 **Gadget dock** (`SUPER + G` or hover the left screen edge): a Windows-7-sidebar-homage popup — box-drawing chrome over Aero-glass blur, all colour from notes. Slides in on hot-edge hover, pins via the `[+]/[■]` header affordance. Holds the terminal roster, a compact session DAG, clock, meters, now-playing, power, and calendar gadgets.
 
@@ -233,7 +244,9 @@ Opt-in: the **`aoide.rebuild`** capability (off by default) grants a dedicated n
 
 ### Desktop keybinds
 
-`SUPER+SPACE` launcher · `SUPER+G` gadget dock · `SUPER+L` lock · `SUPER SHIFT+P` rice preview · `SUPER SHIFT+A` rice adopt — see [§1](#desktop-controls).
+Aoide workflows: `SUPER+SPACE` launcher · `SUPER+G` gadget dock · `SUPER+L` lock · `SUPER SHIFT+P` rice preview · `SUPER SHIFT+A` rice adopt.
+
+Window management (ported from dxflake): `SUPER+RETURN` terminal (kitty) · `SUPER+Q` close · `SUPER+V` floating · `SUPER+F` fullscreen · `SUPER+arrows` (or `H/J/K`) focus · `SUPER SHIFT+arrows` (or `H/J/K`) move window · `SUPER ALT+arrows` (or `H/J/K`) resize · `SUPER+1–0` switch to workspace 1–10 · `SUPER SHIFT+1–0` move window to workspace 1–10 · `ALT+Tab` previous workspace · `SUPER+X`/`SUPER+Z` special workspace `magic`/`scratch` (`SHIFT` = move there) · `SUPER+leftdrag`/`rightdrag` mouse move/resize — see [§1](#desktop-controls).
 
 ---
 

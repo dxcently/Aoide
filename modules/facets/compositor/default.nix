@@ -21,8 +21,9 @@ let
   t = config.aoide.notes;
 
   # ── Component-tier fallback helpers ────────────────────────────────────────
-  windowBorder         = if t.window.border         != null then t.window.border         else t.palette.accent;
-  windowBorderInactive = if t.window.borderInactive  != null then t.window.borderInactive  else t.palette.bg;
+  windowBorder = if t.window.border != null then t.window.border else t.palette.accent;
+  windowBorderInactive =
+    if t.window.borderInactive != null then t.window.borderInactive else t.palette.bg;
 
   # ── Derived geometry values ───────────────────────────────────────────────
   # v0 has no geometry-tier notes; these are opinionated defaults that serve
@@ -31,7 +32,7 @@ let
   gapOuter = 8;
   gapInner = 6;
   borderWidth = 2;
-  rounding = 8;   # window corner radius (px)
+  rounding = 8; # window corner radius (px)
   blurEnabled = true;
   blurPasses = 3;
   blurSize = 8;
@@ -84,6 +85,85 @@ let
     # Rice preview / adopt shortcuts
     bind = SUPER SHIFT, P, exec, aoide rice preview
     bind = SUPER SHIFT, A, exec, aoide rice adopt
+
+    # ── Window management (ported from dxflake hyprland dendrite) ────────
+    # Normalized to SUPER, matching the Aoide binds above. dxflake exec
+    # binds for tools Aoide doesn't ship (rofi, thunar, cliphist,
+    # hyprshot/satty, vesktop/discord, gpu-screen-recorder) are dropped —
+    # the launcher and the bar's power cell cover those seams. dxflake's
+    # media/brightness XF86 keys are also deliberately NOT bound (strict
+    # window-management scope; the bar's volume cell owns audio by mouse) —
+    # a known seam if hardware keys are wanted later.
+
+    # Terminal (the kitty dendrite ships kitty)
+    bind = SUPER, RETURN, exec, kitty
+
+    # Window controls
+    bind = SUPER, Q, killactive
+    bind = SUPER, V, togglefloating
+    bind = SUPER, F, fullscreen
+
+    # Focus movement — arrows carry the full left/down/up/right set; H/J/K
+    # add vim left/down/up. dxflake's SUPER+L (focus right) is NOT ported:
+    # SUPER+L is the Aoide lock bind above, so right stays arrow-only.
+    bind = SUPER, left, movefocus, l
+    bind = SUPER, down, movefocus, d
+    bind = SUPER, up, movefocus, u
+    bind = SUPER, right, movefocus, r
+    bind = SUPER, H, movefocus, l
+    bind = SUPER, J, movefocus, d
+    bind = SUPER, K, movefocus, u
+
+    # Move window (same directional scheme)
+    bind = SUPER SHIFT, left, movewindow, l
+    bind = SUPER SHIFT, down, movewindow, d
+    bind = SUPER SHIFT, up, movewindow, u
+    bind = SUPER SHIFT, right, movewindow, r
+    bind = SUPER SHIFT, H, movewindow, l
+    bind = SUPER SHIFT, J, movewindow, d
+    bind = SUPER SHIFT, K, movewindow, u
+
+    # Resize — binde repeats while held (dxflake's step sizes)
+    binde = SUPER ALT, left, resizeactive, -20 0
+    binde = SUPER ALT, down, resizeactive, 0 40
+    binde = SUPER ALT, up, resizeactive, 0 -40
+    binde = SUPER ALT, right, resizeactive, 20 0
+    binde = SUPER ALT, H, resizeactive, -20 0
+    binde = SUPER ALT, J, resizeactive, 0 40
+    binde = SUPER ALT, K, resizeactive, 0 -40
+
+    # Workspaces 1–10 — pairs with the bar's musical workspace glyphs
+    bind = SUPER, 1, workspace, 1
+    bind = SUPER, 2, workspace, 2
+    bind = SUPER, 3, workspace, 3
+    bind = SUPER, 4, workspace, 4
+    bind = SUPER, 5, workspace, 5
+    bind = SUPER, 6, workspace, 6
+    bind = SUPER, 7, workspace, 7
+    bind = SUPER, 8, workspace, 8
+    bind = SUPER, 9, workspace, 9
+    bind = SUPER, 0, workspace, 10
+    bind = SUPER SHIFT, 1, movetoworkspace, 1
+    bind = SUPER SHIFT, 2, movetoworkspace, 2
+    bind = SUPER SHIFT, 3, movetoworkspace, 3
+    bind = SUPER SHIFT, 4, movetoworkspace, 4
+    bind = SUPER SHIFT, 5, movetoworkspace, 5
+    bind = SUPER SHIFT, 6, movetoworkspace, 6
+    bind = SUPER SHIFT, 7, movetoworkspace, 7
+    bind = SUPER SHIFT, 8, movetoworkspace, 8
+    bind = SUPER SHIFT, 9, movetoworkspace, 9
+    bind = SUPER SHIFT, 0, movetoworkspace, 10
+    bind = ALT, Tab, workspace, previous
+
+    # Special workspaces — the bar's icon map carries magic and scratch
+    bind = SUPER, X, togglespecialworkspace, magic
+    bind = SUPER, Z, togglespecialworkspace, scratch
+    bind = SUPER SHIFT, X, movetoworkspace, special:magic
+    bind = SUPER SHIFT, Z, movetoworkspace, special:scratch
+
+    # Mouse — SUPER+leftdrag move, SUPER+rightdrag resize
+    bindm = SUPER, mouse:272, movewindow
+    bindm = SUPER, mouse:273, resizewindow
   '';
 in
 {
@@ -109,9 +189,9 @@ in
     home-manager.users.${config.aoide.user} = {
       wayland.windowManager.hyprland = {
         enable = true;
-        package = null;        # system programs.hyprland provides the binary
-        portalPackage = null;  # and the portal
-        configType = "hyprlang";  # explicit: classic hyprland.conf, not lua
+        package = null; # system programs.hyprland provides the binary
+        portalPackage = null; # and the portal
+        configType = "hyprlang"; # explicit: classic hyprland.conf, not lua
         # Bake note + keybind config fragments into hyprland.conf.
         # mkBefore so note defaults land before any per-user overrides
         # (the quickshell facet appends its autostart with mkAfter).
@@ -122,7 +202,7 @@ in
     # ── XDG portal for Hyprland ────────────────────────────────────────────
     xdg.portal = {
       enable = true;
-      extraPortals = [ ];  # xdg-desktop-portal-hyprland added via programs.hyprland
+      extraPortals = [ ]; # xdg-desktop-portal-hyprland added via programs.hyprland
     };
 
     # ── Environment variables for the Hyprland session ─────────────────────
