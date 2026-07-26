@@ -1,0 +1,10 @@
+# Runtime / ephemera — never versioned (see Song-Vocabulary in the wiki).
+# Performed-half live state:
+song/stage/
+song/backstage/
+song/auditions/
+
+# Content-pipeline + audit runtime (repo root):
+catalog/
+index/
+log/
