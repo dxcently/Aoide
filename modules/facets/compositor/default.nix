@@ -15,7 +15,12 @@
 #   - Reads ONLY aoide.notes (palette + component tiers).
 #   - Component-tier fallback applied locally.
 #   - NEVER reads song/ runtime paths (checks.no-song-read enforced structurally).
-{ config, lib, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   cfg = config.aoide.facets.compositor;
   t = config.aoide.notes;
@@ -192,10 +197,65 @@ in
         package = null; # system programs.hyprland provides the binary
         portalPackage = null; # and the portal
         configType = "hyprlang"; # explicit: classic hyprland.conf, not lua
+
+        # ── systemd / Wayland env handoff (the session-assembly seam) ──────
+        # This is what actually brings the desktop up. When enabled the HM
+        # module emits, at the TOP of hyprland.conf:
+        #   exec-once = dbus-update-activation-environment --systemd <vars>
+        #               && systemctl --user start hyprland-session.target
+        # hyprland-session.target BindsTo graphical-session.target, so this
+        # single line imports HYPRLAND_INSTANCE_SIGNATURE / WAYLAND_DISPLAY /
+        # XDG_CURRENT_DESKTOP into the systemd + D-Bus user environment and
+        # pulls up graphical-session.target — which is what every Aoide user
+        # service (quickshell, aoided, shellbridge) is `wantedBy`. Without it
+        # a bare Hyprland launch would start the compositor and NOTHING else.
+        #
+        # The HM module defaults `systemd.enable` to true; we set it EXPLICITLY
+        # so this contract survives a future edit to configType/settings that
+        # might otherwise silently drop the handoff. `variables` keeps the
+        # module default set (the vars listed above) — the clean HM path, not a
+        # hand-rolled exec-once dbus call.
+        systemd = {
+          enable = true;
+          variables = [
+            "DISPLAY"
+            "HYPRLAND_INSTANCE_SIGNATURE"
+            "WAYLAND_DISPLAY"
+            "XDG_CURRENT_DESKTOP"
+            "XDG_SESSION_TYPE"
+          ];
+        };
+
         # Bake note + keybind config fragments into hyprland.conf.
         # mkBefore so note defaults land before any per-user overrides
         # (the quickshell facet appends its autostart with mkAfter).
         extraConfig = lib.mkBefore (hyprNoteConfig + hyprBindConfig);
+      };
+
+      # ── Polkit authentication agent ───────────────────────────────────────
+      # security.polkit (the daemon) is pulled up by programs.hyprland/greetd,
+      # but a polkit DAEMON without an AGENT means privileged GUI actions
+      # (mounts, network edits, the aoided rebuild gate's future polkit prompt)
+      # have nothing to present the authentication dialog — they silently fail.
+      # hyprpolkitagent is the Hyprland project's QT/QML agent: the smallest
+      # choice consistent with this compositor stack. Defined as an explicit
+      # user service (journald-logged, Restart=on-failure) rather than relying
+      # on the packaged unit landing on the systemd search path — same idiom as
+      # the quickshell facet's shell service.
+      systemd.user.services.hyprpolkitagent = {
+        Unit = {
+          Description = "Hyprland Polkit authentication agent (GUI privilege prompts)";
+          PartOf = [ "graphical-session.target" ];
+          After = [ "graphical-session.target" ];
+          # Only meaningful once the Wayland session env is imported.
+          ConditionEnvironment = "WAYLAND_DISPLAY";
+        };
+        Service = {
+          ExecStart = "${pkgs.hyprpolkitagent}/libexec/hyprpolkitagent";
+          Restart = "on-failure";
+          RestartSec = 3;
+        };
+        Install.WantedBy = [ "graphical-session.target" ];
       };
     };
 

@@ -15,7 +15,13 @@
 #   - QML reads state files from song/stage/ at runtime (hot-reload).
 #   - QML issues commands via the shellbridge unix socket.
 #   - QML never speaks MCP or any agent protocol.
-{ config, lib, pkgs, inputs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  inputs,
+  ...
+}:
 let
   cfg = config.aoide.facets.quickshell;
   t = config.aoide.notes;
@@ -24,12 +30,12 @@ let
   # Each is: use the component override when set, else fall back to the palette.
   # Facets apply the fallback here (CONTRACTS.md §1 rule: "Facets apply the
   # fallback, not the option system").
-  barBg     = if t.bar.bg     != null then t.bar.bg     else t.palette.bg;
-  barFg     = if t.bar.fg     != null then t.bar.fg     else t.palette.fg;
+  barBg = if t.bar.bg != null then t.bar.bg else t.palette.bg;
+  barFg = if t.bar.fg != null then t.bar.fg else t.palette.fg;
   barAccent = if t.bar.accent != null then t.bar.accent else t.palette.accent;
 
-  notifBg     = if t.notif.bg     != null then t.notif.bg     else t.palette.bg;
-  notifFg     = if t.notif.fg     != null then t.notif.fg     else t.palette.fg;
+  notifBg = if t.notif.bg != null then t.notif.bg else t.palette.bg;
+  notifFg = if t.notif.fg != null then t.notif.fg else t.palette.fg;
   notifUrgent = if t.notif.urgent != null then t.notif.urgent else t.palette.urgent;
 
   # ── QML root — the full skeleton config installed into ~/Aoide/qml/ ────────
@@ -47,6 +53,9 @@ let
   # The user's fork provides ~/Aoide (aoide.user → /home/<user>/Aoide), so we
   # activate Quickshell pointing at that tree.
   shellQmlEntry = "/home/${config.aoide.user}/Aoide/qml/shell.qml";
+
+  # The Quickshell binary from the pre-declared flake input (flake.nix).
+  quickshellPkg = inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 in
 {
   # ── Option: aoide.facets.quickshell.enable ─────────────────────────────────
@@ -61,22 +70,22 @@ in
     # Declare every Quickshell-owned surface. Stylix reads this registry and
     # stands down for these surfaces (concepts/Notes).
     aoide.surfaces = {
-      bar.owner              = "quickshell";
-      notifications.owner    = "quickshell";
-      launcher.owner         = "quickshell";
-      osd.owner              = "quickshell";
-      lockscreen.owner       = "quickshell";
-      greeter.owner          = "quickshell";
-      wallpaper.owner        = "quickshell";
-      agentWidgets.owner     = "quickshell";
-      sessionGraph.owner     = "quickshell";
+      bar.owner = "quickshell";
+      notifications.owner = "quickshell";
+      launcher.owner = "quickshell";
+      osd.owner = "quickshell";
+      lockscreen.owner = "quickshell";
+      greeter.owner = "quickshell";
+      wallpaper.owner = "quickshell";
+      agentWidgets.owner = "quickshell";
+      sessionGraph.owner = "quickshell";
     };
 
     # ── Quickshell package ──────────────────────────────────────────────────
     # The upstream Quickshell package lives in the pre-declared flake input
     # (flake.nix wires inputs.quickshell for exactly this).
     environment.systemPackages = [
-      inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default
+      quickshellPkg
     ];
 
     # ── Install QML config tree into the user's Aoide fork ──────────────────
@@ -90,15 +99,35 @@ in
         recursive = true;
       };
 
-      # ── Quickshell autostart via Hyprland exec-once ───────────────────────
-      # Placed in the Hyprland config so Quickshell starts with the compositor.
-      # The compositor facet owns hyprland.conf via home-manager's
-      # wayland.windowManager.hyprland; we append the autostart there — mkAfter
-      # so compositor note/bind defaults land first.
-      wayland.windowManager.hyprland.extraConfig = lib.mkAfter ''
-        # Aoide Quickshell — shell surface autostart
-        exec-once = quickshell -c ${shellQmlEntry}
-      '';
+      # ── Quickshell autostart via systemd user service ─────────────────────
+      # The shell surface (bar/dock/wallpaper/notifications/OSD) is started by
+      # a systemd user service rather than a Hyprland exec-once. A service is
+      # the stronger session-assembly seam:
+      #   - Restart=on-failure — a QML crash respawns the whole shell instead
+      #     of leaving the desktop bare until the next login.
+      #   - journald — `journalctl --user -u aoide-quickshell` gives real logs
+      #     (an exec-once child's stderr is lost).
+      #   - graphical-session.target ordering — it starts only once the
+      #     compositor facet's env handoff (hyprland-session.target →
+      #     graphical-session.target, WAYLAND_DISPLAY/HYPRLAND_INSTANCE_SIGNATURE
+      #     imported) has fired, so Quickshell inherits a valid Wayland env.
+      # ConditionPathExists guards the shell entry so the unit fails cleanly
+      # (not crash-loops) if the QML tree hasn't landed in the fork yet.
+      systemd.user.services.aoide-quickshell = {
+        Unit = {
+          Description = "Aoide Quickshell — shell surface (bar/dock/wallpaper/notifications)";
+          PartOf = [ "graphical-session.target" ];
+          After = [ "graphical-session.target" ];
+          ConditionEnvironment = "WAYLAND_DISPLAY";
+          ConditionPathExists = shellQmlEntry;
+        };
+        Service = {
+          ExecStart = "${quickshellPkg}/bin/quickshell -c ${shellQmlEntry}";
+          Restart = "on-failure";
+          RestartSec = 3;
+        };
+        Install.WantedBy = [ "graphical-session.target" ];
+      };
     };
   };
 }

@@ -141,9 +141,13 @@ let
       "hyprlock"
     ];
     greeter = [ "gnome" ];
-    # bar / launcher / osd / agentWidgets / wallpaper: no colliding Stylix target
-    # (quickshell owns these purely in QML). `wallpaper` is handled separately
-    # below (stylix.image policy), not by disabling a target.
+    # Stylix on this pin auto-enables hyprpaper as the wallpaper DAEMON — a
+    # second painter fighting the quickshell wallpaper layer. Stand the daemon
+    # down when quickshell owns the surface; `stylix.image` itself stays set
+    # (mkDefault, below) as the base-context source either way.
+    wallpaper = [ "hyprpaper" ];
+    # bar / launcher / osd / agentWidgets: no colliding Stylix target
+    # (quickshell owns these purely in QML).
   };
 
   # Stylix splits its targets across the NixOS module and the home-manager
@@ -163,6 +167,23 @@ let
     });
   targetDisableAttrs = presentDisables options;
   disabledTargets = lib.attrNames targetDisableAttrs;
+
+  # Stylix's hyprland target carries a NESTED daemon knob —
+  # `targets.hyprland.hyprpaper.enable` — that turns on services.hyprpaper
+  # independently of the flat `targets.hyprpaper` name presentDisables covers.
+  # When quickshell owns the wallpaper surface, stand the daemon down through
+  # this knob too (same option-tree probing, so absent/renamed stays eval-safe).
+  hyprpaperDaemonDisable =
+    opts:
+    lib.optionalAttrs
+      (
+        wallpaperOwnedElsewhere
+        && (opts.stylix.targets or { }) ? hyprland
+        && opts.stylix.targets.hyprland ? hyprpaper
+      )
+      {
+        hyprland.hyprpaper.enable = lib.mkForce false;
+      };
 
   # `wallpaper` surface policy (deterministic, documented): the quickshell
   # wallpaper LAYER supersedes at render time, but Stylix's `image` remains the
@@ -247,7 +268,9 @@ in
       home-manager.users.${config.aoide.user} =
         { options, ... }:
         {
-          config = lib.optionalAttrs (options ? stylix) { stylix.targets = presentDisables options; };
+          config = lib.optionalAttrs (options ? stylix) {
+            stylix.targets = presentDisables options // hyprpaperDaemonDisable options;
+          };
         };
     }
   );
