@@ -149,10 +149,11 @@ pkgs.testers.runNixOSTest {
               home-manager.users.khoa.home.stateVersion = lib.mkDefault "25.11";
 
               # ── System packages on PATH ───────────────────────────────────
-              # aoide + aoide-notes + jq (for JSON validation).
+              # jq only (JSON validation). aoide + aoide-notes come from the
+              # nucleus (modules/nucleus/packages.nix) — the test must exercise
+              # the REAL install path, not mask its absence (which it did until
+              # the first live switch surfaced the gap).
               environment.systemPackages = [
-                pkgs.aoide
-                pkgs.aoide-notes
                 pkgs.jq
               ];
 
