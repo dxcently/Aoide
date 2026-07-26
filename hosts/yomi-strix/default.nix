@@ -1,10 +1,11 @@
 # hosts/yomi-strix/default.nix — the reference host.
 #
-# Flags only, plus a GUARDED hardware import. A host never imports module files
-# directly; it flips `aoide.*` flags and pulls its own ./hardware.nix. The
-# hardware import is guarded so eval works even before a real hardware scan
-# exists (Wave 0 ships a placeholder stub; a real host regenerates it).
-{ lib, ... }:
+# Flags + venue specifics, plus a GUARDED hardware import. A host never
+# imports module files directly; it flips `aoide.*` flags, states its own
+# hardware picks (the venue decides its instruments), and pulls ./hardware.nix.
+# First iteration: real profile ported from dxflake (the template), trimmed to
+# what boots this box and runs the desktop.
+{ lib, pkgs, ... }:
 {
   imports =
     [ ../common ]
@@ -13,6 +14,27 @@
     ++ lib.optional (builtins.pathExists ./hardware.nix) ./hardware.nix;
 
   networking.hostName = "yomi-strix";
+  networking.networkmanager.enable = true;
+
+  # ── Venue specifics (dxflake-templated, essentials only) ──────────────────
+  # Strix Halo (Ryzen AI Max) is new silicon — ride the latest kernel for the
+  # freshest amdgpu. gttsize/ttm let the iGPU borrow a large slice of the
+  # unified 32 GB pool (24 GiB GPU-mappable, ~8 GiB left for CPU/OS).
+  boot.kernelPackages = pkgs.linuxPackages_latest;
+  boot.kernelParams = [
+    "amdgpu.gttsize=24576" # MiB (24 GiB) of system RAM the GPU may map
+    "ttm.pages_limit=6291456" # 24 GiB in 4 KiB pages, matches gttsize
+  ];
+
+  # RDNA 3.5 iGPU: kernel driver + userspace graphics for the Hyprland facet.
+  services.xserver.videoDrivers = [ "amdgpu" ];
+  hardware.graphics = {
+    enable = true;
+    enable32Bit = true;
+  };
+
+  # 32 GB is modest while the iGPU eats RAM — compressed in-RAM swap cushion.
+  zramSwap.enable = true;
 
   # Aoide flags for this box. Facets/dendrites (Wave 1) read these; this line
   # is the entire host-side wiring for the desktop.
