@@ -1,11 +1,11 @@
 // shell.qml — Aoide Quickshell root.
 //
 // Entry point for the Quickshell session. Instantiates all surface widgets
-// and wires the shared token loader (TokenState singleton) so every widget
-// hot-reloads from song/stage/tokens.json when it changes.
+// and wires the shared note loader (NoteState singleton) so every widget
+// hot-reloads from song/stage/notes.json when it changes.
 //
 // Communication discipline (CONTRACTS.md / entities/Quickshell):
-//   - Reads state files from song/stage/ (TokenState watches tokens.json).
+//   - Reads state files from song/stage/ (NoteState watches notes.json).
 //   - Issues commands to shellbridge via unix socket (ShellBridge singleton).
 //   - Never speaks MCP or any agent protocol.
 
@@ -15,41 +15,41 @@ import Quickshell.Io
 
 ShellRoot {
     // ── Shared singletons (one instance for the whole session) ─────────────
-    TokenState { id: tokens }
+    NoteState { id: notes }
     ShellBridge { id: bridge }
 
     // ── Surface widgets ────────────────────────────────────────────────────
     // Each widget is a separate file so Melete can swap them independently.
-    // All read colors / typography / geometry from `tokens`; never hardcode.
+    // All read colors / typography / geometry from `notes`; never hardcode.
 
     AoideBar {
-        tokens: tokens
+        notes: notes
         bridge: bridge
     }
 
     AoideNotifications {
-        tokens: tokens
+        notes: notes
         bridge: bridge
     }
 
     AoideLauncher {
-        tokens: tokens
+        notes: notes
         bridge: bridge
     }
 
     AoideOsd {
-        tokens: tokens
+        notes: notes
     }
 
     AoideLockscreen {
-        tokens: tokens
+        notes: notes
     }
 
     AoideGreeter {
-        tokens: tokens
+        notes: notes
     }
 
     AoideWallpaper {
-        tokens: tokens
+        notes: notes
     }
 }

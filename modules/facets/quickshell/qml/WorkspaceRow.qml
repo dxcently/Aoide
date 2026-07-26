@@ -9,7 +9,7 @@ import QtQuick.Layouts
 
 Row {
     id: root
-    required property var tokens
+    required property var notes
     spacing: 4
 
     // STUB: static 1-5 until shellbridge emits stage/workspaces.json
@@ -19,13 +19,13 @@ Row {
             width: 24
             height: 24
             radius: 4
-            color: index === 0 ? tokens.barAccent : "transparent"
-            border.color: tokens.barAccent
+            color: index === 0 ? notes.barAccent : "transparent"
+            border.color: notes.barAccent
             border.width: 1
             Text {
                 anchors.centerIn: parent
                 text: index + 1
-                color: index === 0 ? tokens.barBg : tokens.barFg
+                color: index === 0 ? notes.barBg : notes.barFg
                 font.pixelSize: 11
             }
         }

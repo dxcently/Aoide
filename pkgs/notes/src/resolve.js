@@ -5,7 +5,7 @@
 // syntax). This module:
 //   1. hands the raw v0 container to Style Dictionary to dereference,
 //   2. applies the v0 component-tier null→palette fallback (CONTRACTS.md §1),
-//   3. returns a flat, fully-resolved token set the emitters consume.
+//   3. returns a flat, fully-resolved note set the emitters consume.
 //
 // The fallback is applied HERE for the live-side emitters so the stage file
 // carries concrete colours (Quickshell never reads null — CONTRACTS.md §4).
@@ -18,7 +18,7 @@
 // arrives under `.default` when required from CommonJS.
 const _sd = require("style-dictionary");
 const StyleDictionary = _sd.default || _sd;
-const { COMPONENT_FALLBACK, tokenValue, SCHEMA_VERSION } = require("./schema");
+const { COMPONENT_FALLBACK, noteValue, SCHEMA_VERSION } = require("./schema");
 
 function stripHash(v) {
   return typeof v === "string" && v.startsWith("#") ? v.slice(1) : v;
@@ -30,7 +30,7 @@ function withHash(v) {
 
 // Run the container through Style Dictionary purely to dereference `{a.b}`
 // aliases. We use its programmatic API with a no-op in-memory platform and read
-// back the dictionary of resolved tokens. Style Dictionary v4 is async.
+// back the dictionary of resolved notes. Style Dictionary v4 is async.
 async function dereference(container) {
   const sd = new StyleDictionary({
     tokens: container,
@@ -41,7 +41,7 @@ async function dereference(container) {
     log: { verbosity: "silent", warnings: "disabled" },
   });
 
-  // exportPlatform resolves references and returns the token tree for a
+  // exportPlatform resolves references and returns the note tree for a
   // platform without touching the filesystem.
   const resolved = await sd.exportPlatform("_resolve");
   return resolved;
@@ -49,10 +49,10 @@ async function dereference(container) {
 
 // Pull a leaf value out of the (possibly W3C-wrapped) resolved tree.
 function leaf(node) {
-  return withHash(tokenValue(node));
+  return withHash(noteValue(node));
 }
 
-// Produce the fully-resolved, flattened token set. Component fields absent or
+// Produce the fully-resolved, flattened note set. Component fields absent or
 // null fall back to their palette source per COMPONENT_FALLBACK.
 async function resolve(container) {
   const tree = await dereference(container);
@@ -68,7 +68,7 @@ async function resolve(container) {
     out[group] = {};
     const g = tree[group] || {};
     for (const [field, paletteKey] of Object.entries(fields)) {
-      const raw = tokenValue(g[field]);
+      const raw = noteValue(g[field]);
       out[group][field] =
         raw == null || raw === "" ? palette[paletteKey] : withHash(raw);
     }

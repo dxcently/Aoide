@@ -9,13 +9,15 @@ land with a migration note in `song/songbook/update-playbook.md`.
 
 ---
 
-## 1. Token schema — **v0**
+## 1. Note schema — **v0**
 
 The single seam between the frozen nix layer and the live desktop. Facets read
-`aoide.tokens` and **nothing else**. Declared in `modules/nucleus/options.nix`.
+`aoide.notes` and **nothing else**. Declared in `modules/nucleus/options.nix`.
 
-v0 lives inside the (future) W3C design-tokens container; the semantic and
-component tiers are the open v1 design-system work. v0 is deliberately minimal:
+Notes are Aoide's design-token layer; the container format remains the W3C
+design-tokens format. v0 lives inside the (future) W3C design-tokens container;
+the semantic and component tiers are the open v1 design-system work. v0 is
+deliberately minimal:
 
 ### Palette tier (closed — base16-derived)
 
@@ -42,12 +44,12 @@ apply the fallback, not the option system.
 | `window.border`         | `palette.accent`  |
 | `window.borderInactive` | `palette.bg`      |
 
-Hex format: `#?[0-9a-fA-F]{6}` (leading `#` optional). The token package
-(`pkgs/tokens`, Agent A) owns the authoritative `rice lint` validator; the
+Hex format: `#?[0-9a-fA-F]{6}` (leading `#` optional). The notes package
+(`pkgs/notes`, Agent A) owns the authoritative `rice lint` validator; the
 option type is a permissive gate only.
 
 **Migration to v1:** the update playbook migrates `song/repertoire/*/rice.nix`
-and `tokens.json` from v0 to v1 when the design-system workstream lands v1.
+and `notes.json` from v0 to v1 when the design-system workstream lands v1.
 
 ---
 
@@ -80,7 +82,7 @@ Rules:
 - Subfolders under `modules/dendrites/` are grouping only; the walker registers
   every file regardless.
 
-Facets (`modules/facets/`) are the same shape but MAY read `aoide.tokens` and
+Facets (`modules/facets/`) are the same shape but MAY read `aoide.notes` and
 MAY declare `aoide.surfaces.<name>.owner` — they read no other module.
 
 ---
@@ -126,13 +128,13 @@ Contract guarantees:
 
 Live-side (rehearsal) state written to `song/stage/` — gitignored runtime, never
 committed, never load-bearing for the nix build (enforced by
-`checks.no-song-read`). Emitted by the token package (Agent A) and shellbridge
+`checks.no-song-read`). Emitted by the notes package (Agent A) and shellbridge
 (Wave 1); read by Quickshell.
 
-### `song/stage/tokens.json` — **v0**
+### `song/stage/notes.json` — **v0**
 
-The resolved, flattened token values for Quickshell (QML reads this; hot-reload
-at rehearsal). Derived from the same `aoide.tokens` as the baked `rice.nix`
+The resolved, flattened note values for Quickshell (QML reads this; hot-reload
+at rehearsal). Derived from the same `aoide.notes` as the baked `rice.nix`
 fan-out, so preview and adopted state cannot diverge.
 
 ```json
@@ -157,7 +159,7 @@ file.
 
 - A contract version is a single integer, tracked in this file's section
   heading (`— v0`).
-- The token schema version is also surfaced in `stage/tokens.json`
+- The note schema version is also surfaced in `stage/notes.json`
   (`schemaVersion`) and in `aoide schema --json` (`schemaVersion`).
 - Bumping any version requires: (1) update this file, (2) add a playbook
   migration, (3) update the corresponding `checks` so the new contract is

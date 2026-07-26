@@ -1,11 +1,11 @@
 {
-  "name": "aoide-tokens",
+  "name": "aoide-notes",
   "version": "0.0.0",
-  "description": "Aoide design-token engine: Style Dictionary resolver + v0 schema lint + live-side emitters (stage/tokens.json, hyprctl, terminal OSC).",
+  "description": "Aoide notes engine: Style Dictionary resolver + v0 schema lint + live-side emitters (stage/notes.json, hyprctl, terminal OSC).",
   "license": "MIT",
   "type": "commonjs",
   "bin": {
-    "aoide-tokens": "src/cli.js"
+    "aoide-notes": "src/cli.js"
   },
   "files": [
     "src"

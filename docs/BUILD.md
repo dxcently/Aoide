@@ -22,7 +22,7 @@ no import list. To add a module, drop a file in the right layer:
 
 - `modules/nucleus/` — core, applies unconditionally (no `mkIf`).
 - `modules/dendrites/` — opt-in features, guarded on a flag.
-- `modules/facets/` — render surfaces, read `aoide.tokens` only.
+- `modules/facets/` — render surfaces, read `aoide.notes` only.
 - `modules/rime/` — rice engine + shipped default rices.
 
 **Shelving opt-out:** any path containing `/_` is skipped. Prefix a
@@ -39,15 +39,15 @@ none of them except your own dendrite/facet flags.
 | ------------------------------ | ---------------------------- | ----- |
 | `aoide.enable`                 | bool                         | framework master switch |
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` fork |
-| `aoide.tokens.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
-| `aoide.tokens.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
-| `aoide.tokens.notif.{bg,fg,urgent}` | nullOr hex              | component override; null → palette |
-| `aoide.tokens.window.{border,borderInactive}` | nullOr hex     | component override; null → palette |
+| `aoide.notes.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
+| `aoide.notes.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
+| `aoide.notes.notif.{bg,fg,urgent}` | nullOr hex              | component override; null → palette |
+| `aoide.notes.window.{border,borderInactive}` | nullOr hex     | component override; null → palette |
 | `aoide.surfaces.<name>.owner`  | str                          | surface-ownership registry |
 | `aoide.mcp.enable`             | bool (default false)         | MCP façade toggle |
 | `aoide.auditLog`               | str (default `/home/<user>/Aoide/log`) | single audit log |
 
-See `CONTRACTS.md §1` for the full token schema and fallback rules.
+See `CONTRACTS.md §1` for the full note schema and fallback rules.
 
 ---
 
@@ -75,14 +75,14 @@ hosts.
 
 ## Authoring a facet (Wave 1 — render surfaces)
 
-A facet renders appearance. It reads **only** `aoide.tokens`, and if it owns a
+A facet renders appearance. It reads **only** `aoide.notes`, and if it owns a
 surface it declares that in `aoide.surfaces`. Apply component fallbacks yourself.
 
 ```nix
 # modules/facets/quickshell/default.nix
 { config, lib, ... }:
 let
-  t = config.aoide.tokens;
+  t = config.aoide.notes;
   # component-tier fallback: null → palette (see CONTRACTS.md §1)
   barBg = if t.bar.bg != null then t.bar.bg else t.palette.bg;
 in
@@ -98,7 +98,7 @@ in
 The `checks.surface-ownership` assertion fails eval if a declared surface has no
 owner; the Stylix facet must read `config.aoide.surfaces` and disable its own
 derivation for any surface already owned (overlap resolution,
-`concepts/Design-Tokens`).
+`concepts/Notes`).
 
 **Never read `song/` runtime paths at build time.** `checks.no-song-read` fails
 eval if a module under a `song/` runtime dir is discovered. `stage/` is live
@@ -113,21 +113,21 @@ Wave-0 placeholders (trivial `runCommand` derivations that build green). Replace
 the `default.nix` **in place** — keep the file path and the `callPackage`
 signature so `flake.nix` never changes.
 
-### Agent A — token package (`pkgs/tokens/`) — Node / Style Dictionary
+### Agent A — notes package (`pkgs/notes/`) — Node / Style Dictionary
 
 Provide:
 
-- `pkgs/tokens/default.nix` — a `callPackage`-able derivation
-  (`buildNpmPackage { pname = "aoide-tokens"; … }`). Add `nodejs` /
+- `pkgs/notes/default.nix` — a `callPackage`-able derivation
+  (`buildNpmPackage { pname = "aoide-notes"; … }`). Add `nodejs` /
   `style-dictionary` as build inputs there; do **not** edit `flake.nix`.
-- `pkgs/tokens/package.json`, lockfile, and source — the resolver (tiered:
+- `pkgs/notes/package.json`, lockfile, and source — the resolver (tiered:
   palette → semantic → component), the `rice lint` schema validator, and the
   three live-side emitters:
-  - `song/stage/tokens.json` (Quickshell; atomic write — see `CONTRACTS.md §4`),
+  - `song/stage/notes.json` (Quickshell; atomic write — see `CONTRACTS.md §4`),
   - `hyprctl` dispatcher (compositor properties),
   - terminal OSC sequences (color injection).
 - Wrap Style Dictionary and the W3C design-tokens format; do not reimplement a
-  resolver. Build against **token schema v0** (`CONTRACTS.md §1`): palette is
+  resolver. Build against **note schema v0** (`CONTRACTS.md §1`): palette is
   base16-closed; component tier is `bar.*` / `notif.*` / `window.*`.
 
 ### Agent B — CLI + daemon (`pkgs/aoide/`) — Rust
@@ -159,7 +159,7 @@ Provide:
 
 - `surface-ownership` — every `aoide.surfaces.<name>` names a non-empty owner.
 - `no-song-read` — no discovered module lives under a `song/` runtime dir.
-- `pkg-aoide`, `pkg-aoide-tokens` — the two packages build (exercises the
+- `pkg-aoide`, `pkg-aoide-notes` — the two packages build (exercises the
   packaging contract).
 
 Run `nix flake check` before every commit.

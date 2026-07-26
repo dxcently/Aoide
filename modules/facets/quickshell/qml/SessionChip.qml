@@ -12,7 +12,7 @@ import QtQuick
 Rectangle {
     id: root
 
-    required property var tokens
+    required property var notes
     required property var sessionData  // { id, name, address, state }
 
     signal clicked
@@ -21,9 +21,9 @@ Rectangle {
     implicitHeight: 22
     radius: 4
     color: sessionData && sessionData.state === "active"
-           ? tokens.paletteAccent
-           : tokens.paletteBg
-    border.color: tokens.barAccent
+           ? notes.paletteAccent
+           : notes.paletteBg
+    border.color: notes.barAccent
     border.width: 1
 
     Text {
@@ -31,8 +31,8 @@ Rectangle {
         anchors.centerIn: parent
         text: sessionData ? sessionData.name : "?"
         color: sessionData && sessionData.state === "active"
-               ? tokens.barBg
-               : tokens.barFg
+               ? notes.barBg
+               : notes.barFg
         font.pixelSize: 11
     }
 

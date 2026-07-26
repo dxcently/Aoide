@@ -14,7 +14,7 @@ import Quickshell.Services.Notifications
 Item {
     id: root
 
-    required property var tokens
+    required property var notes
     required property var bridge
 
     // ── Notification server (owns the D-Bus name) ─────────────────────────
@@ -29,7 +29,7 @@ Item {
 
     // ── Notification list overlay ─────────────────────────────────────────
     // Slides in from the right edge. Populated from notifServer.notifications.
-    // Colors come entirely from tokens.
+    // Colors come entirely from notes.
     Column {
         id: notifList
         anchors.top: parent.top
@@ -41,7 +41,7 @@ Item {
         Repeater {
             model: notifServer.notifications
             delegate: NotificationCard {
-                tokens: root.tokens
+                notes: root.notes
                 notification: modelData
                 width: notifList.width
             }

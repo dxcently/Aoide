@@ -32,8 +32,8 @@ are no hidden overrides to undo before a transposition.
 
 ## Geometry
 
-v0 carries no geometry-tier tokens. The compositor facet uses these defaults
-(baked into `hyprTokenConfig` in `modules/facets/compositor/default.nix`):
+v0 carries no geometry-tier notes. The compositor facet uses these defaults
+(baked into `hyprNoteConfig` in `modules/facets/compositor/default.nix`):
 
 | Property     | Value |
 |---|---|
@@ -43,7 +43,7 @@ v0 carries no geometry-tier tokens. The compositor facet uses these defaults
 | rounding     | 8 px  |
 | blur         | enabled, size 8, passes 3 |
 
-When a geometry tier is added in v1, these become token reads.
+When a geometry tier is added in v1, these become note reads.
 
 ## Iteration Log
 

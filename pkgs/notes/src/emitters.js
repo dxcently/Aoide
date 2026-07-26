@@ -1,10 +1,10 @@
-// src/emitters.js — the three live-side emitters (concepts/Design-Tokens).
+// src/emitters.js — the three live-side emitters (concepts/Notes).
 //
-// All three consume the SAME fully-resolved token set from resolve.js, so the
+// All three consume the SAME fully-resolved note set from resolve.js, so the
 // three live targets can never disagree. Emitters are minimal but produce
 // well-formed output for the v0 schema.
 //
-//   1. stage    — song/stage/tokens.json for Quickshell (CONTRACTS.md §4).
+//   1. stage    — song/stage/notes.json for Quickshell (CONTRACTS.md §4).
 //   2. hyprctl  — `hyprctl` dispatch commands for the compositor.
 //   3. osc      — terminal OSC colour sequences.
 
@@ -12,7 +12,7 @@
 
 const { SCHEMA_VERSION } = require("./schema");
 
-// ── 1. stage/tokens.json (Quickshell) ──────────────────────────────────────
+// ── 1. stage/notes.json (Quickshell) ───────────────────────────────────────
 // The resolved, flattened values. Component fallbacks are already applied by
 // resolve.js, so Quickshell reads concrete colours, never null. Shape matches
 // CONTRACTS.md §4 exactly.

@@ -86,7 +86,7 @@ lib.mkIf config.aoide.enable {
   # Documented here as comments (not as options) because they are live-side
   # constants, not build-time configuration:
   #
-  #   song/stage/tokens.json    — resolved token colours (written by pkgs/tokens)
+  #   song/stage/notes.json     — resolved note colours (written by pkgs/notes)
   #   song/stage/sessions.json  — agent session roster (written by shellbridge)
   #   song/stage/hooks.json     — live Claude Code hook states (written by shellbridge)
   #

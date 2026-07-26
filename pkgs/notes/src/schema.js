@@ -1,10 +1,10 @@
-// src/schema.js — the authoritative v0 token schema (CONTRACTS.md §1).
+// src/schema.js — the authoritative v0 note schema (CONTRACTS.md §1).
 //
-// This is what `aoide-tokens lint` (and, transitively, `rice lint`) validates
+// This is what `aoide-notes lint` (and, transitively, `rice lint`) validates
 // against. The nix option type (modules/nucleus/options.nix) is a permissive
 // gate; THIS is the authoritative validator.
 //
-// v0 lives inside a W3C design-tokens container: a token is an object carrying
+// v0 lives inside a W3C design-tokens container: a note is a W3C design-token
 // `$value` (and optionally `$type`). References use the `{group.name}` alias
 // syntax that Style Dictionary resolves. The palette tier is base16-closed; the
 // component tier is bar.* / notif.* / window.*, each field `nullOr hex` where
@@ -25,13 +25,13 @@ const COMPONENT_FALLBACK = {
   window: { border: "accent", borderInactive: "bg" },
 };
 
-// Accept either a bare hex string or a W3C token object ({ $value, $type }).
+// Accept either a bare hex string or a W3C design-token object ({ $value, $type }).
 // A reference like "{palette.bg}" is a valid $value (resolved later).
-function tokenValue(node) {
+function noteValue(node) {
   if (node == null) return null;
   if (typeof node === "string") return node;
   if (typeof node === "object" && "$value" in node) return node.$value;
-  return undefined; // signals "not a token leaf"
+  return undefined; // signals "not a note leaf"
 }
 
 function isRef(v) {
@@ -56,14 +56,14 @@ function checkColor(value, path, errors, { allowNull }) {
   }
 }
 
-// Validate a v0 token container. Returns { ok, errors }. Works on the RAW
+// Validate a v0 note container. Returns { ok, errors }. Works on the RAW
 // container (references still present) — reference targets are checked
 // structurally, full resolution is validated separately after Style Dictionary.
 function validate(container) {
   const errors = [];
 
   if (container == null || typeof container !== "object") {
-    return { ok: false, errors: ["root: token file must be a JSON object"] };
+    return { ok: false, errors: ["root: note file must be a JSON object"] };
   }
 
   // Palette tier — required and closed.
@@ -72,7 +72,7 @@ function validate(container) {
     errors.push("palette: required group missing");
   } else {
     for (const k of PALETTE_KEYS) {
-      const v = tokenValue(palette[k]);
+      const v = noteValue(palette[k]);
       if (v === undefined) {
         errors.push(`palette.${k}: required`);
       } else {
@@ -91,7 +91,7 @@ function validate(container) {
     const g = container[group];
     if (g == null) continue; // whole group optional
     if (typeof g !== "object") {
-      errors.push(`${group}: expected a token group object`);
+      errors.push(`${group}: expected a note group object`);
       continue;
     }
     for (const field of Object.keys(g)) {
@@ -99,7 +99,7 @@ function validate(container) {
         errors.push(`${group}.${field}: unknown key (v0 ${group} is closed)`);
         continue;
       }
-      const v = tokenValue(g[field]);
+      const v = noteValue(g[field]);
       checkColor(v, `${group}.${field}`, errors, { allowNull: true });
     }
   }
@@ -112,7 +112,7 @@ module.exports = {
   HEX,
   PALETTE_KEYS,
   COMPONENT_FALLBACK,
-  tokenValue,
+  noteValue,
   isRef,
   validate,
 };

@@ -1,8 +1,8 @@
 # modules/nucleus/options.nix — THE OPTION CONTRACT.
 #
 # Every other module (dendrites, facets, rime) builds against the options
-# declared here. This is versioned in CONTRACTS.md (token schema v0). Facets
-# read ONLY `aoide.tokens` and `aoide.surfaces`; no module reads another
+# declared here. This is versioned in CONTRACTS.md (note schema v0). Facets
+# read ONLY `aoide.notes` and `aoide.surfaces`; no module reads another
 # module. The coupling discipline is enforced by lib/checks.nix, not by
 # politeness.
 #
@@ -14,8 +14,8 @@ let
   inherit (lib) mkOption mkEnableOption types literalExpression;
 
   # A base16 hex colour, with or without leading '#'. Kept permissive so v0
-  # token files stay easy to author; the token package's `rice lint` is the
-  # authoritative validator (see pkgs/tokens).
+  # note files stay easy to author; the notes package's `rice lint` is the
+  # authoritative validator (see pkgs/notes).
   hexColor = types.strMatching "#?[0-9a-fA-F]{6}";
 
   # ── Component override submodules ─────────────────────────────────────────
@@ -95,12 +95,13 @@ in
   options.aoide = {
     enable = mkEnableOption "the Aoide agent-wearable desktop framework";
 
-    # ── Token seam (v0 schema) — the ONLY thing facets read ────────────────
-    tokens = mkOption {
+    # ── Note seam (v0 schema) — the ONLY thing facets read ─────────────────
+    notes = mkOption {
       description = ''
-        The v0 design-token schema — the single seam between the frozen nix
-        layer and the live desktop. Facets consume this and nothing else.
-        Versioned as "token schema v0" in CONTRACTS.md.
+        The v0 note schema — the single seam between the frozen nix layer
+        and the live desktop. Facets consume this and nothing else. Notes are
+        Aoide's design-token layer; the container remains the W3C
+        design-tokens format. Versioned as "note schema v0" in CONTRACTS.md.
       '';
       default = { };
       type = types.submodule {

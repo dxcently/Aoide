@@ -1,7 +1,7 @@
 // NotificationCard.qml — single notification card (skeleton).
 //
-// Renders one notification. Colors from tokens; urgency mapped to
-// tokens.notifUrgent for urgent notifications, tokens.notifFg for normal.
+// Renders one notification. Colors from notes; urgency mapped to
+// notes.notifUrgent for urgent notifications, notes.notifFg for normal.
 
 import QtQuick
 import QtQuick.Layouts
@@ -9,15 +9,15 @@ import QtQuick.Layouts
 Rectangle {
     id: root
 
-    required property var tokens
+    required property var notes
     required property var notification  // Quickshell NotificationItem
 
     readonly property bool isUrgent:
         notification && notification.urgency === 2  // urgency: critical
 
-    color: tokens.notifBg
+    color: notes.notifBg
     radius: 6
-    border.color: isUrgent ? tokens.notifUrgent : tokens.windowBorder
+    border.color: isUrgent ? notes.notifUrgent : notes.windowBorder
     border.width: isUrgent ? 2 : 1
     implicitHeight: content.implicitHeight + 20
 
@@ -32,7 +32,7 @@ Rectangle {
 
         Text {
             text: notification ? notification.summary : ""
-            color: isUrgent ? tokens.notifUrgent : tokens.notifFg
+            color: isUrgent ? notes.notifUrgent : notes.notifFg
             font.bold: true
             font.pixelSize: 13
             Layout.fillWidth: true
@@ -41,7 +41,7 @@ Rectangle {
 
         Text {
             text: notification ? notification.body : ""
-            color: tokens.notifFg
+            color: notes.notifFg
             font.pixelSize: 12
             wrapMode: Text.WordWrap
             Layout.fillWidth: true

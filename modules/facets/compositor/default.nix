@@ -1,9 +1,9 @@
 # modules/facets/compositor/default.nix — Hyprland compositor facet.
 #
 # Wires Hyprland as the NixOS Wayland compositor and applies compositor-side
-# design tokens live via hyprctl. Token values (gaps, radius, borders, blur)
+# notes live via hyprctl. Note values (gaps, radius, borders, blur)
 # are baked into the Hyprland config at build time so they take effect on
-# session start; the token emitter package (pkgs/tokens) can re-dispatch
+# session start; the note emitter package (pkgs/notes) can re-dispatch
 # them live via hyprctl during a rehearsal (preview) pass.
 #
 # IPC socket: exposes the Hyprland IPC socket path for shellbridge to consume.
@@ -12,22 +12,22 @@
 # flow (concepts/Desktop-Architecture).
 #
 # Reading discipline (CONTRACTS.md §1):
-#   - Reads ONLY aoide.tokens (palette + component tiers).
+#   - Reads ONLY aoide.notes (palette + component tiers).
 #   - Component-tier fallback applied locally.
 #   - NEVER reads song/ runtime paths (checks.no-song-read enforced structurally).
 { config, lib, ... }:
 let
   cfg = config.aoide.facets.compositor;
-  t = config.aoide.tokens;
+  t = config.aoide.notes;
 
   # ── Component-tier fallback helpers ────────────────────────────────────────
   windowBorder         = if t.window.border         != null then t.window.border         else t.palette.accent;
   windowBorderInactive = if t.window.borderInactive  != null then t.window.borderInactive  else t.palette.bg;
 
   # ── Derived geometry values ───────────────────────────────────────────────
-  # v0 has no geometry-tier tokens; these are opinionated defaults that serve
+  # v0 has no geometry-tier notes; these are opinionated defaults that serve
   # as the immutable baseline. When a geometry tier is added (v1), replace
-  # these with token reads.
+  # these with note reads.
   gapOuter = 8;
   gapInner = 6;
   borderWidth = 2;
@@ -36,12 +36,12 @@ let
   blurPasses = 3;
   blurSize = 8;
 
-  # ── Hyprland config fragment — tokens baked in at build time ─────────────
-  # The token emitter (pkgs/tokens, Agent A) re-runs hyprctl keyword dispatch
+  # ── Hyprland config fragment — notes baked in at build time ──────────────
+  # The note emitter (pkgs/notes, Agent A) re-runs hyprctl keyword dispatch
   # during rehearsal to live-patch these values without a rebuild.
-  hyprTokenConfig = ''
-    # ── Aoide design tokens — compositor facet ───────────────────────────
-    # Generated from aoide.tokens at build time; live-patched by aoide-tokens
+  hyprNoteConfig = ''
+    # ── Aoide notes — compositor facet ───────────────────────────────────
+    # Generated from aoide.notes at build time; live-patched by aoide-notes
     # emitter during rice preview (hyprctl keyword).
 
     general {
@@ -105,10 +105,10 @@ in
         package = null;        # system programs.hyprland provides the binary
         portalPackage = null;  # and the portal
         configType = "hyprlang";  # explicit: classic hyprland.conf, not lua
-        # Bake token + keybind config fragments into hyprland.conf.
-        # mkBefore so token defaults land before any per-user overrides
+        # Bake note + keybind config fragments into hyprland.conf.
+        # mkBefore so note defaults land before any per-user overrides
         # (the quickshell facet appends its autostart with mkAfter).
-        extraConfig = lib.mkBefore (hyprTokenConfig + hyprBindConfig);
+        extraConfig = lib.mkBefore (hyprNoteConfig + hyprBindConfig);
       };
     };
 

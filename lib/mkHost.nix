@@ -44,7 +44,7 @@ inputs.nixpkgs.lib.nixosSystem {
     ++ [
       ../hosts/${name}
       # Inject the flake's own packages into pkgs so nucleus/facet modules can
-      # reference `pkgs.aoide` / `pkgs.aoide-tokens` — the SAME callPackage
+      # reference `pkgs.aoide` / `pkgs.aoide-notes` — the SAME callPackage
       # paths the flake's `packages` output uses, so there is one source.
       (
         { ... }:
@@ -52,7 +52,7 @@ inputs.nixpkgs.lib.nixosSystem {
           nixpkgs.overlays = [
             (final: _prev: {
               aoide = final.callPackage ../pkgs/aoide { };
-              aoide-tokens = final.callPackage ../pkgs/tokens { };
+              aoide-notes = final.callPackage ../pkgs/notes { };
             })
           ];
         }

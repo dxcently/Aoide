@@ -1,18 +1,18 @@
 #!/usr/bin/env node
-// src/cli.js — the `aoide-tokens` binary.
+// src/cli.js — the `aoide-notes` binary.
 //
 // Subcommands:
-//   lint    <tokens.json>            validate against v0 schema (rice lint uses this)
-//   resolve <tokens.json>            print the fully-resolved flat token set (JSON)
-//   emit stage   <tokens.json> [--out PATH]   write/print stage/tokens.json (atomic)
-//   emit hyprctl <tokens.json>       print hyprctl dispatch commands
-//   emit osc     <tokens.json>       print terminal OSC colour sequences
+//   lint    <notes.json>            validate against v0 schema (rice lint uses this)
+//   resolve <notes.json>            print the fully-resolved flat note set (JSON)
+//   emit stage   <notes.json> [--out PATH]   write/print stage/notes.json (atomic)
+//   emit hyprctl <notes.json>       print hyprctl dispatch commands
+//   emit osc     <notes.json>       print terminal OSC colour sequences
 //
 // Exit codes (aligned with the Aoide CLI convention, CONTRACTS.md §3):
 //   0 ok · 2 usage · 1 error (validation failure / bad input)
 //
 // A later `aoide` CLI (Agent B) shells out to this binary; the derivation
-// exposes it as `bin/aoide-tokens` and `passthru.mainProgram`.
+// exposes it as `bin/aoide-notes` and `passthru.mainProgram`.
 
 "use strict";
 
@@ -27,12 +27,12 @@ const { emitStage, emitHyprctl, emitOsc } = require("./emitters");
 const EXIT = { OK: 0, USAGE: 2, ERROR: 1 };
 
 function fail(code, msg) {
-  process.stderr.write(`aoide-tokens: ${msg}\n`);
+  process.stderr.write(`aoide-notes: ${msg}\n`);
   process.exit(code);
 }
 
-function readTokens(file) {
-  if (!file) fail(EXIT.USAGE, "missing <tokens.json> argument");
+function readNotes(file) {
+  if (!file) fail(EXIT.USAGE, "missing <notes.json> argument");
   let text;
   try {
     text = fs.readFileSync(file, "utf8");
@@ -51,13 +51,13 @@ function readTokens(file) {
 function atomicWriteJson(target, obj) {
   const dir = path.dirname(path.resolve(target));
   fs.mkdirSync(dir, { recursive: true });
-  const tmp = path.join(dir, `.tokens.${process.pid}.${Date.now()}.tmp`);
+  const tmp = path.join(dir, `.notes.${process.pid}.${Date.now()}.tmp`);
   fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + "\n");
   fs.renameSync(tmp, target);
 }
 
 function cmdLint(argv) {
-  const container = readTokens(argv[0]);
+  const container = readNotes(argv[0]);
   const { ok, errors } = schema.validate(container);
   if (ok) {
     process.stdout.write(
@@ -70,7 +70,7 @@ function cmdLint(argv) {
 }
 
 async function cmdResolve(argv) {
-  const container = readTokens(argv[0]);
+  const container = readNotes(argv[0]);
   const { ok, errors } = schema.validate(container);
   if (!ok) {
     process.stdout.write(JSON.stringify({ ok: false, errors }) + "\n");
@@ -91,7 +91,7 @@ async function cmdEmit(argv) {
     return true;
   });
 
-  const container = readTokens(posArgs[0]);
+  const container = readNotes(posArgs[0]);
   const { ok, errors } = schema.validate(container);
   if (!ok) {
     process.stdout.write(JSON.stringify({ ok: false, errors }) + "\n");
@@ -137,14 +137,14 @@ function shellQuote(s) {
 function usage() {
   process.stdout.write(
     [
-      "aoide-tokens — Aoide design-token engine (v0)",
+      "aoide-notes — Aoide notes engine (v0)",
       "",
       "Usage:",
-      "  aoide-tokens lint    <tokens.json>",
-      "  aoide-tokens resolve <tokens.json>",
-      "  aoide-tokens emit stage   <tokens.json> [--out PATH]",
-      "  aoide-tokens emit hyprctl <tokens.json>",
-      "  aoide-tokens emit osc     <tokens.json>",
+      "  aoide-notes lint    <notes.json>",
+      "  aoide-notes resolve <notes.json>",
+      "  aoide-notes emit stage   <notes.json> [--out PATH]",
+      "  aoide-notes emit hyprctl <notes.json>",
+      "  aoide-notes emit osc     <notes.json>",
       "",
     ].join("\n")
   );

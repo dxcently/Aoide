@@ -1,7 +1,7 @@
 # lib/checks.nix — the contractual coupling discipline, as flake checks.
 #
 # Two assertions ride as flake `checks` (see concepts/Governance and
-# concepts/Design-Tokens in the wiki):
+# concepts/Notes in the wiki):
 #
 #   1. surface-ownership — no render surface may have two owners. The
 #      Quickshell facet declares `aoide.surfaces.<name>.owner`; Stylix reads

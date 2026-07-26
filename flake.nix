@@ -64,7 +64,7 @@
         in
         {
           aoide = pkgs.callPackage ./pkgs/aoide { };
-          aoide-tokens = pkgs.callPackage ./pkgs/tokens { };
+          aoide-notes = pkgs.callPackage ./pkgs/notes { };
           default = self.packages.${system}.aoide;
         }
       );
@@ -85,13 +85,13 @@
           surface-ownership = checks.surfaceOwnership (hostCfg.aoide.surfaces or { });
           no-song-read = checks.noSongRead (walk ./modules);
           pkg-aoide = self.packages.${system}.aoide;
-          pkg-aoide-tokens = self.packages.${system}.aoide-tokens;
+          pkg-aoide-notes = self.packages.${system}.aoide-notes;
         }
       );
 
       # ── Dev shell ──────────────────────────────────────────────────────────
       # Rust (cargo/rustc) + Node toolchains + nix tools. This is the build
-      # surface Agents A (Node/tokens) and B (Rust/CLI) develop in.
+      # surface Agents A (Node/notes) and B (Rust/CLI) develop in.
       devShells = forAllSystems (
         system:
         let
@@ -107,7 +107,7 @@
               rustfmt
               clippy
               rust-analyzer
-              # Node — token package (wraps Style Dictionary)
+              # Node — notes package (wraps Style Dictionary)
               nodejs
               # Nix tooling
               nixfmt

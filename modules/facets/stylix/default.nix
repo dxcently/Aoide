@@ -1,14 +1,14 @@
 # modules/facets/stylix/default.nix — the Stylix facet (baked fan-out).
 #
-# Stylix is Aoide's "recording" side (concepts/Design-Tokens, entities/Stylix):
+# Stylix is Aoide's "recording" side (concepts/Notes, entities/Stylix):
 # ONE base16 scheme + fonts/cursor/wallpaper feed Stylix, which themes every
 # nix-manageable target — GTK/Qt, terminal, editors, boot. The live side
-# (stage/tokens.json + hyprctl + OSC) is the token package's job; this facet is
-# the baked half. Both derive from the same `aoide.tokens`, so preview and
+# (stage/notes.json + hyprctl + OSC) is the notes package's job; this facet is
+# the baked half. Both derive from the same `aoide.notes`, so preview and
 # adopted state cannot diverge ("zero drift").
 #
 # Contract discipline (CONTRACTS.md §2, docs/BUILD.md):
-#   * A facet reads ONLY `aoide.tokens` + `aoide.surfaces`. No other module.
+#   * A facet reads ONLY `aoide.notes` + `aoide.surfaces`. No other module.
 #   * It applies the component-tier null→palette fallback ITSELF (§1) — the
 #     option system stores null; the facet resolves it.
 #   * It reads the `aoide.surfaces` ownership registry and stands down (disables
@@ -27,7 +27,7 @@
 }:
 let
   cfg = config.aoide.facets.stylix;
-  t = config.aoide.tokens;
+  t = config.aoide.notes;
 
   # Stylix rides as a NixOS module only when its input is present (mkHost adds
   # it optionally). Gate on the OPTION being declared — reading `options` (not
@@ -36,7 +36,7 @@ let
   stylixPresent = options ? stylix;
 
   # ── hex helpers ───────────────────────────────────────────────────────────
-  # Stylix's base16Scheme attrset wants bare hex (no leading '#'); the token
+  # Stylix's base16Scheme attrset wants bare hex (no leading '#'); the note
   # option type is permissive (`#?[0-9a-fA-F]{6}`), so normalise.
   stripHash = c: lib.removePrefix "#" c;
 
@@ -44,12 +44,12 @@ let
   p = t.palette;
 
   # ── component-tier null→palette fallback (CONTRACTS.md §1) ─────────────────
-  # Applied HERE by the facet, exactly as the token package's resolver applies
+  # Applied HERE by the facet, exactly as the notes package's resolver applies
   # it for the live side — identical rules, so both fan-outs agree.
   fb = value: fallback: if value != null then value else fallback;
 
   # Resolved component-tier values (null → palette). Applied HERE by the facet,
-  # exactly as the token package's resolver applies it for the live side —
+  # exactly as the notes package's resolver applies it for the live side —
   # identical rules, so both fan-outs agree. These feed the base16 anchoring
   # below, so the component overrides genuinely reach the baked theme (not just
   # the palette): e.g. `bar.bg` drives the "lighter background" slot Stylix uses
@@ -109,7 +109,7 @@ let
   # Read the registry (tolerate it empty). Any surface owned by a NON-stylix
   # owner (the Quickshell facet, Agent C) is one Stylix must not also drive:
   # for each such surface Stylix stands down for the target(s) that would
-  # collide (concepts/Design-Tokens, "Stylix Overlap Resolution").
+  # collide (concepts/Notes, "Stylix Overlap Resolution").
   #
   # Agent C's registry (confirmed) owns these surfaces under "quickshell":
   #   bar · notifications · launcher · osd · lockscreen · greeter · wallpaper ·
@@ -168,7 +168,7 @@ let
 in
 {
   options.aoide.facets.stylix.enable =
-    lib.mkEnableOption "the Stylix baked-theme facet (base16 fan-out from aoide.tokens)";
+    lib.mkEnableOption "the Stylix baked-theme facet (base16 fan-out from aoide.notes)";
 
   # The baked Stylix settings. Only emitted when the stylix input is present:
   # `lib.optionalAttrs stylixPresent` keeps the `stylix` KEY out of `config`
@@ -193,7 +193,7 @@ in
         # quickshell wallpaper layer supersedes it live at render time.
         image = lib.mkDefault wallpaper;
 
-        # Cursor: a stock theme; v0 tokens carry no cursor field yet, so this is
+        # Cursor: a stock theme; v0 notes carry no cursor field yet, so this is
         # a sane default the rice engine / host can override.
         cursor = lib.mkDefault {
           package = pkgs.adwaita-icon-theme;

@@ -5,7 +5,7 @@
 # wallpaper, agentWidgets.
 #
 # Reading discipline (CONTRACTS.md §1):
-#   - Reads ONLY aoide.tokens (palette + component tiers) and aoide.surfaces.
+#   - Reads ONLY aoide.notes (palette + component tiers) and aoide.surfaces.
 #   - Component-tier fallback (null → palette) applied locally, never pushed
 #     back into the option system.
 #   - NEVER reads song/ runtime paths at build time (checks.no-song-read
@@ -18,7 +18,7 @@
 { config, lib, pkgs, inputs, ... }:
 let
   cfg = config.aoide.facets.quickshell;
-  t = config.aoide.tokens;
+  t = config.aoide.notes;
 
   # ── Component-tier fallback helpers ────────────────────────────────────────
   # Each is: use the component override when set, else fall back to the palette.
@@ -33,10 +33,10 @@ let
   notifUrgent = if t.notif.urgent != null then t.notif.urgent else t.palette.urgent;
 
   # ── QML root — the full skeleton config installed into ~/Aoide/qml/ ────────
-  # Each surface widget is a stub that reads its colors from tokens. The config
+  # Each surface widget is a stub that reads its colors from notes. The config
   # directory is placed in the user's Aoide tree so Quickshell picks it up at
-  # session start. At runtime Quickshell hot-reloads from song/stage/tokens.json
-  # via a FileView; the build only installs the structural QML, not the token
+  # session start. At runtime Quickshell hot-reloads from song/stage/notes.json
+  # via a FileView; the build only installs the structural QML, not the note
   # values themselves.
   quickshellConfig = pkgs.runCommand "aoide-quickshell-config" { } ''
     mkdir -p "$out/qml"
@@ -59,7 +59,7 @@ in
 
     # ── Surface-ownership registry ──────────────────────────────────────────
     # Declare every Quickshell-owned surface. Stylix reads this registry and
-    # stands down for these surfaces (concepts/Design-Tokens).
+    # stands down for these surfaces (concepts/Notes).
     aoide.surfaces = {
       bar.owner              = "quickshell";
       notifications.owner    = "quickshell";
@@ -93,7 +93,7 @@ in
       # Placed in the Hyprland config so Quickshell starts with the compositor.
       # The compositor facet owns hyprland.conf via home-manager's
       # wayland.windowManager.hyprland; we append the autostart there — mkAfter
-      # so compositor token/bind defaults land first.
+      # so compositor note/bind defaults land first.
       wayland.windowManager.hyprland.extraConfig = lib.mkAfter ''
         # Aoide Quickshell — shell surface autostart
         exec-once = quickshell -c ${shellQmlEntry}
