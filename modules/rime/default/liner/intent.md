@@ -48,6 +48,7 @@ When a geometry tier is added in v1, these become note reads.
 ## Iteration Log
 
 - 2026-07-26: initial shipped default; palette + component stubs; no cover yet.
+- 2026-07-26: gadget dock (agentWidgets) — Win7-sidebar homage: right-edge column of gadgets (TERMINALS/DAG/CLOCK/METERS) in ASCII/box-drawing chrome (╔═[ TITLE ]═╗, ├─ └─ tree limbs, [▓▓▓░░░] gauges); glass = translucent paletteBg (opacity ~0.72) over the compositor's Hyprland blur; all colors from notes; geometry stays v0 defaults (dock width/margins local until a geometry note tier lands).
 
 ## Notes for Melete
 

@@ -53,6 +53,15 @@ ShellRoot {
         notes: notes
     }
 
+    // ── Gadget dock (surface #8, agentWidgets) ─────────────────────────────
+    // Win7-sidebar homage: right-edge column of ASCII-chromed gadgets on Aero-
+    // glass (translucent paletteBg over compositor blur). Persistent desktop
+    // layer, non-exclusive (does not reserve space) — sits over the wallpaper.
+    AoideAgentWidgets {
+        notes: notes
+        bridge: bridge
+    }
+
     // ── Session-Graph (DAG) overlay ────────────────────────────────────────
     // Watches song/stage/graph.json; toggled via shellbridge (Hyprland keybind
     // execs `aoide shell graph toggle`). Row click → bridge.focusSession.
