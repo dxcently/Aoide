@@ -52,4 +52,12 @@ ShellRoot {
     AoideWallpaper {
         notes: notes
     }
+
+    // ── Session-Graph (DAG) overlay ────────────────────────────────────────
+    // Watches song/stage/graph.json; toggled via shellbridge (Hyprland keybind
+    // execs `aoide shell graph toggle`). Row click → bridge.focusSession.
+    AoideSessionGraph {
+        notes: notes
+        bridge: bridge
+    }
 }

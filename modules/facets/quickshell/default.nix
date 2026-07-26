@@ -2,7 +2,7 @@
 #
 # Renders the complete Aoide shell surface using Quickshell (QML runtime).
 # Surfaces owned: bar, notifications, launcher, osd, lockscreen, greeter,
-# wallpaper, agentWidgets.
+# wallpaper, agentWidgets, sessionGraph.
 #
 # Reading discipline (CONTRACTS.md §1):
 #   - Reads ONLY aoide.notes (palette + component tiers) and aoide.surfaces.
@@ -69,6 +69,7 @@ in
       greeter.owner          = "quickshell";
       wallpaper.owner        = "quickshell";
       agentWidgets.owner     = "quickshell";
+      sessionGraph.owner     = "quickshell";
     };
 
     # ── Quickshell package ──────────────────────────────────────────────────

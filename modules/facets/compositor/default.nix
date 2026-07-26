@@ -74,6 +74,9 @@ let
     # Lock screen
     bind = SUPER, L, exec, aoide shell lock
 
+    # Session-Graph (DAG) overlay (shellbridge → AoideSessionGraph toggle)
+    bind = SUPER, G, exec, aoide shell graph toggle
+
     # Rice preview / adopt shortcuts
     bind = SUPER SHIFT, P, exec, aoide rice preview
     bind = SUPER SHIFT, A, exec, aoide rice adopt
