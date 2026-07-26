@@ -207,6 +207,32 @@ in
           name = "Adwaita";
           size = 24;
         };
+
+        # Fonts: v0 notes carry no font field yet — sane default, host/rice
+        # overridable. Lekton Nerd Font Mono is Aoide's primary face (dxflake's
+        # exact choice); the fonts dendrite installs it plus the glyph-coverage
+        # set (symbola/noto) that backs the musical-notation UI. Stylix's `emoji`
+        # font is left at its own default (noto-fonts-color-emoji).
+        fonts = lib.mkDefault {
+          monospace = {
+            package = pkgs.nerd-fonts.lekton;
+            name = "Lekton Nerd Font Mono";
+          };
+          sansSerif = {
+            package = pkgs.nerd-fonts.lekton;
+            name = "Lekton Nerd Font Mono";
+          };
+          serif = {
+            package = pkgs.nerd-fonts.lekton;
+            name = "Lekton Nerd Font Mono";
+          };
+          sizes = {
+            applications = 14;
+            terminal = 14;
+            desktop = 14;
+            popups = 12;
+          };
+        };
       }
       # Stand down for surfaces owned by other facets (quickshell) — NixOS side.
       // lib.optionalAttrs (disabledTargets != [ ]) {

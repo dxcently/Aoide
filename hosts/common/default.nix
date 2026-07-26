@@ -55,4 +55,5 @@
   aoide.yazi.enable = lib.mkDefault true;
   aoide.fastfetch.enable = lib.mkDefault true;
   aoide.devtools.enable = lib.mkDefault true;
+  aoide.fonts.enable = lib.mkDefault true;
 }
