@@ -197,20 +197,45 @@ Your edits live in `hosts/`, `song/`, and **new** dendrite files — all additiv
 
 ### `aoide` — the CLI trunk
 
-`aoide <cmd>` is the **complete** capability surface; any agent with a shell is fully capable. Every command takes/emits `--json`, returns structured exit codes, and is idempotent. `aoide schema --json` is the machine-readable single source of truth (27 commands), and the MCP tool list is **generated from it** — one implementation, two doors, no drift. Run `aoide guide` for the tier-0 onboarding.
+`aoide <cmd>` is the **complete** capability surface; any agent with a shell is fully capable. Every command takes/emits `--json`, returns structured exit codes, and is idempotent. `aoide schema --json` is the machine-readable single source of truth (28 commands), and the MCP tool list is **generated from it** — one implementation, two doors, no drift. Run `aoide guide` for the tier-0 onboarding.
 
-The 27 commands, grouped (`real` = implemented; `stub` = exit `64`, not-implemented):
+The 28 commands, grouped (`real` = implemented; `stub` = exit `64`, not-implemented):
 
 - **Orientation** — `guide`, `schema`, `mcp serve` — all `real`.
 - **`rice` group** (the self-ricing loop): `rice lint` `real`; `rice gen`, `rice preview`, `rice adopt` (gated), `rice transpose` — `stub`.
 - **`content` group** (the discover→approve→ingest pipeline): `content register`, `content propose`, `content approve` (gated), `content ingest`, `content query` — all `stub`.
 - **`graph` group** (the session/project DAG — 8 commands, all `real`): `graph view`, `graph project add/remove/list`, `graph link`, `graph focus`, `graph prune`, `graph emit`.
+- **`baton`** (the conductor's terminal UI): `real` — an interactive, ASCII-art terminal UI over the same trunk (see below).
 - **Daemon runners** — `daemon` (aoided), `shellbridge`, `adapter melete` — all `real` skeletons.
 - **Lifecycle** — `make` (widget-maker), `update` (gated self-update), `onboard` (first-boot) — all `stub`.
 
 ### `aoide mcp serve --stdio`
 
 The stdio MCP server. Off by default (`aoide.mcp.enable = false`); agents spawn it per-session. Its tools derive from `schema --json`, so the MCP and CLI doors cannot diverge. Network MCP (the dedicated "Aoide connector") is **user-enabled only**, never by an agent.
+
+### `aoide baton` — the conductor's terminal UI
+
+An interactive terminal UI over the trunk, built to **conduct the running agent
+sessions and jump between them** — a conductor's baton, not a dashboard. It is a
+strict frontend: every action is a `Door::Cli` dispatch through the one
+dispatcher, so a baton action is audited exactly like a typed command, and reads
+reuse the `graph` pure functions. Four panels (`1`–`4`/`Tab`): **[1] SESSIONS** —
+the hero panel, the live DAG roster grouped under **collapsible project headers**
+(`h`/`l` fold/unfold, `[live/total]` badge), each session row a musical state
+glyph (♪ working · 𝄐 awaiting · 𝄽 idle · 𝄂 done), agent, cwd, elapsed clock and
+parent chain, with fresh arrivals accent-marked (`j`/`k` select, `Enter` jump to
+the window, `L` link a session under a parent, `a`/`d` add/remove a project, `p`
+prune, `e` emit); **[2] PROJECTS** (`a` add, `d` remove); **[3] LOG** — the audit
+tail; **[4] STATUS** — stage-tree health. `?` for help, `q` to quit. The chrome is
+the gadget dock's: box-drawing frames, `[▓░]` meters, and the staff-run ornaments
+lifted verbatim from the Quickshell QML. It honours `$AOIDE_STAGE_DIR` /
+`$AOIDE_AUDIT_LOG`, so a throwaway tempdir is a full rig — try it without a live
+desktop in one line:
+
+```sh
+export AOIDE_STAGE_DIR=$(mktemp -d) AOIDE_AUDIT_LOG=$AOIDE_STAGE_DIR/log
+pkgs/aoide/tests/fixtures/seed.sh "$AOIDE_STAGE_DIR" && aoide baton
+```
 
 ### `aoide-notes` — the note engine
 
@@ -241,7 +266,7 @@ Opt-in: the **`aoide.rebuild`** capability (off by default) grants a dedicated n
 
 `ad` · `adrebuild` · `adupdate` · `adboot` · `adtest` · `adbuild` · `adrollback` · `adcheck` · `adgens` · `adclean` — see [§1](#the-ad-rebuild-family).
 
-### `aoide` subcommands (from `schema --json`, 27)
+### `aoide` subcommands (from `schema --json`, 28)
 
 | Command | Status | Summary |
 |---|---|---|
@@ -271,6 +296,7 @@ Opt-in: the **`aoide.rebuild`** capability (off by default) grants a dedicated n
 | `aoide graph focus` | real | Jump to a session's window via `hyprctl focuswindow`. |
 | `aoide graph prune` | real | Drop `done` sessions + hook records; clear orphaned links. |
 | `aoide graph emit` | real | Stage the resolved DAG to `song/stage/graph.json` (atomic). |
+| `aoide baton` | real | Raise the baton: the interactive terminal UI to conduct the agent sessions — session DAG, projects, audit log, stage status (every action routes through the same dispatcher). |
 | `aoide adapter melete` | real | Run the melete-adapter: consume the neutral event stream (default-deny). |
 
 ### Shell QoL aliases (`bash` dendrite)
