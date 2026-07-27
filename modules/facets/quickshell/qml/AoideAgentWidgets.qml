@@ -67,6 +67,10 @@ Item {
     // ── Note + bridge dependencies (injected by shell.qml) ─────────────────
     required property var notes
     required property var bridge
+    // Shared session state (floating gadgets + DAG trace link). Each frame's
+    // [↗] tear-off calls shared.floatGadget(kind); the trace link rides through
+    // to the terminal/DAG gadgets below.
+    required property var shared
 
     // ── Dock geometry (v0 local defaults; note reads in v1) ────────────────
     readonly property int dockWidth: 300
@@ -145,7 +149,11 @@ Item {
         id: panel
         y: root.edgeMargin
         width: root.dockWidth
-        height: parent.height - 2 * root.edgeMargin
+        // Content-sized container: with only the agent pair inside, a
+        // full-height slab reads as empty glass — the container wraps its
+        // two widgets instead (clamped to the screen when content grows).
+        height: Math.min(parent.height - 2 * root.edgeMargin,
+                         panelCol.implicitHeight + 20)
 
         // Slide reveal: off-screen when closed, edgeMargin when open.
         x: root.shown ? root.edgeMargin
@@ -170,50 +178,133 @@ Item {
             onContainsMouseChanged: root.overPanel = containsMouse
         }
 
-        ColumnLayout {
+        // ── Pantheon wireframe-depth stack (container body) ────────────────
+        // Same recipe as GadgetFrame: two hollow offset outline copies (holoBlue,
+        // base0D) behind the container glass. VANISHING-POINT direction: the dock
+        // hugs the LEFT edge, so its back copies project RIGHT (toward screen
+        // centre) and only SLIGHTLY down (depthDy 0.45) — a right-dominant stack.
+        // Declared first → render behind the panel; the 10px panelCol margin
+        // absorbs the offset so nothing clips. Border-only, no MouseArea.
+        readonly property int depthOff1: 3
+        readonly property int depthOff2: 6
+        readonly property real depthDx: 1
+        readonly property real depthDy: 0.45
+        Rectangle {
+            x: parent.depthOff2 * parent.depthDx; y: parent.depthOff2 * parent.depthDy
+            width: parent.width; height: parent.height
+            radius: 6
+            color: "transparent"
+            border.color: root.notes.holoBlue
+            border.width: 1
+            opacity: 0.18
+        }
+        Rectangle {
+            x: parent.depthOff1 * parent.depthDx; y: parent.depthOff1 * parent.depthDy
+            width: parent.width; height: parent.height
+            radius: 6
+            color: "transparent"
+            border.color: root.notes.holoBlue
+            border.width: 1
+            opacity: 0.35
+        }
+
+        // ── The container body (khoa: the drawer IS a container) ───────────
+        // One Aero-glass panel the two agent gadgets sit INSIDE — the Win7
+        // sidebar reading. Glass + gloss + accent border, same language as
+        // the bar strip and GadgetFrame; the compositor's aoide-dock blur
+        // rule reads through the translucent body.
+        Rectangle {
             anchors.fill: parent
+            radius: 6
+            color: root.notes.paletteBg
+            opacity: root.glassOpacity
+        }
+        // Wireframe outline (front face) — crisp wireCyan hollow rule over glass.
+        Rectangle {
+            anchors.fill: parent
+            radius: 6
+            color: "transparent"
+            border.color: root.notes.wireCyan
+            border.width: 1
+            opacity: 0.5
+        }
+        Rectangle {
+            anchors.fill: parent
+            radius: 6
+            gradient: Gradient {
+                GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.10) }
+                GradientStop { position: 0.42; color: Qt.rgba(1, 1, 1, 0.03) }
+                GradientStop { position: 0.5;  color: Qt.rgba(1, 1, 1, 0.00) }
+                GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.03) }
+            }
+        }
+
+        ColumnLayout {
+            id: panelCol
+            anchors.fill: parent
+            anchors.margins: 10
             spacing: 10
 
-            // ══ Header chrome with pin affordance ══════════════════════════
-            // Matches GadgetFrame's box-drawing language: a double-rule title
-            // bar with a [pin] slot. Glyph: [■] pinned / [+] unpinned.
-            //   ╔═[ GADGETS ]══…══[■]═╗   (pinned)
-            //   ╔═[ GADGETS ]══…══[+]═╗   (unpinned)
+            // ══ Header callout with pin affordance ═════════════════════════
+            // The container's own Pantheon callout: `gadgets.case` on a short
+            // leader (echoing GadgetFrame), with a lowercase dotted pin token at
+            // the tail — `pin.on` when pinned, `pin.off` when peeking.
             Item {
                 Layout.fillWidth: true
-                implicitHeight: headerText.implicitHeight
+                implicitHeight: Math.max(headerText.implicitHeight, 12)
 
-                // Fill-dashes are computed in JS so the ╗ lands flush right and
-                // the [pin] slot sits just before it (mirrors GadgetFrame.titleLine).
-                readonly property int chromePx: 12
-                readonly property real cellW: chromePx * 0.6
-                readonly property int cols: Math.max(16, Math.floor(width / cellW))
-                readonly property string pinGlyph: root.pinned ? "[■]" : "[+]"
-                function headerLine(cols) {
-                    var head = "╔═[ GADGETS ]"
-                    var tail = pinGlyph + "═╗"
-                    var fillCount = cols - head.length - tail.length
-                    if (fillCount < 0) fillCount = 0
-                    var fill = ""
-                    for (var i = 0; i < fillCount; i++) fill += "═"
-                    return head + fill + tail
+                Row {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 4
+
+                    // Leader — anchor tick + rule + terminal dot (wireCyan dim).
+                    Canvas {
+                        id: headerLeader
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 13
+                        height: 10
+                        opacity: 0.6
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.reset(); ctx.clearRect(0, 0, width, height)
+                            ctx.strokeStyle = notes.wireCyan; ctx.fillStyle = notes.wireCyan
+                            ctx.lineWidth = 1
+                            var cy = height / 2
+                            ctx.beginPath(); ctx.moveTo(1, cy - 3); ctx.lineTo(1, cy + 3); ctx.stroke()
+                            ctx.beginPath(); ctx.moveTo(1, cy); ctx.lineTo(width - 2, cy); ctx.stroke()
+                            ctx.beginPath(); ctx.arc(width - 2, cy, 1.3, 0, 2 * Math.PI); ctx.fill()
+                        }
+                        Connections {
+                            target: notes
+                            function onWireCyanChanged() { headerLeader.requestPaint() }
+                        }
+                    }
+
+                    Text {
+                        id: headerText
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "gadgets.case"
+                        color: notes.paletteFg
+                        opacity: 0.6
+                        font.family: "monospace"
+                        font.pixelSize: 11
+                    }
                 }
 
+                // Pin token — lowercase dotted state at the tail; click toggles.
                 Text {
-                    id: headerText
-                    width: parent.width
-                    text: parent.headerLine(parent.cols)
-                    color: notes.paletteAccent
+                    id: pinToken
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.pinned ? "pin.on" : "pin.off"
+                    color: root.pinned ? notes.wireCyan : notes.paletteFg
+                    opacity: root.pinned ? 0.85 : 0.5
                     font.family: "monospace"
-                    font.pixelSize: parent.chromePx
-                    font.bold: true
-                    clip: true
+                    font.pixelSize: 10
                 }
-
-                // Click target over the [pin] slot at the right end. Sized to a
-                // few cells; toggles the sticky pin. Sits above panelHover.
                 MouseArea {
-                    width: 4 * parent.cellW
+                    width: pinToken.implicitWidth + 12
                     height: parent.height
                     anchors.right: parent.right
                     cursorShape: Qt.PointingHandCursor
@@ -221,88 +312,57 @@ Item {
                 }
             }
 
-            // ══ Gadget stack (UNCHANGED — frames + gadgets as-is) ══════════
+            // ══ Gadget stack — the AGENT pair only (v2 restructure) ════════
+            // The dock is a container for the two agent-facing gadgets:
+            // TERMINALS (session roster) and DAG (session graph). Every other
+            // gadget (now-playing, power, calendar, clock, meters) is its own
+            // widget spawned from a bar cell (BarPopout.qml via AoideBar).
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 10
 
-                // ── Gadget 1: TERMINALS (Terminal-Commander roster) ──────
+                // ── Gadget 1: BATON (mini conductor / roster mini-view) ──
                 GadgetFrame {
                     Layout.fillWidth: true
                     notes: root.notes
-                    title: "TERMINALS"
+                    title: "baton.control"
+                    floatable: true
+                    onFloatRequested: root.shared.floatGadget("BATON")
+                    BatonGadget {
+                        width: parent.width
+                        notes: root.notes
+                        shared: root.shared
+                    }
+                }
+
+                // ── Gadget 2: TERMINALS (Terminal-Commander roster) ──────
+                GadgetFrame {
+                    Layout.fillWidth: true
+                    notes: root.notes
+                    title: "terminals.roster"
+                    floatable: true
+                    onFloatRequested: root.shared.floatGadget("TERMINALS")
                     TerminalManagerGadget {
                         width: parent.width
                         notes: root.notes
                         bridge: root.bridge
+                        shared: root.shared
                     }
                 }
 
-                // ── Gadget 2: DAG (compact always-on session graph) ──────
+                // ── Gadget 3: DAG (compact always-on session graph) ──────
                 GadgetFrame {
                     Layout.fillWidth: true
                     notes: root.notes
-                    title: "DAG"
+                    title: "dag.trace"
+                    floatable: true
+                    onFloatRequested: root.shared.floatGadget("DAG")
                     DagGraphGadget {
                         width: parent.width
                         notes: root.notes
                         bridge: root.bridge
-                    }
-                }
-
-                // ── Gadget 3: NOW PLAYING (mpris, ASCII) ─────────────────
-                GadgetFrame {
-                    Layout.fillWidth: true
-                    notes: root.notes
-                    title: "NOW PLAYING"
-                    NowPlayingGadget {
-                        width: parent.width
-                        notes: root.notes
-                    }
-                }
-
-                // ── Gadget 4: POWER (battery rests + network glyph) ──────
-                GadgetFrame {
-                    Layout.fillWidth: true
-                    notes: root.notes
-                    title: "POWER"
-                    PowerGadget {
-                        width: parent.width
-                        notes: root.notes
-                    }
-                }
-
-                // ── Gadget 5: CALENDAR (ASCII month grid) ────────────────
-                GadgetFrame {
-                    Layout.fillWidth: true
-                    notes: root.notes
-                    title: "CALENDAR"
-                    CalendarGadget {
-                        width: parent.width
-                        notes: root.notes
-                    }
-                }
-
-                // ── Gadget 6: CLOCK (Win7-clock homage) ──────────────────
-                GadgetFrame {
-                    Layout.fillWidth: true
-                    notes: root.notes
-                    title: "CLOCK"
-                    ClockGadget {
-                        width: parent.width
-                        notes: root.notes
-                    }
-                }
-
-                // ── Gadget 7: METERS (CPU/RAM ASCII gauges) ──────────────
-                GadgetFrame {
-                    Layout.fillWidth: true
-                    notes: root.notes
-                    title: "METERS"
-                    MeterGadget {
-                        width: parent.width
-                        notes: root.notes
+                        shared: root.shared
                     }
                 }
 

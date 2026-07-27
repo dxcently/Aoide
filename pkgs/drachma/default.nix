@@ -61,6 +61,34 @@ buildNpmPackage {
     "$out/bin/drachma" emit stage   test/fixtures/valid.json > /dev/null
     "$out/bin/drachma" emit hyprctl test/fixtures/valid.json > /dev/null
     "$out/bin/drachma" emit osc     test/fixtures/valid.json > /dev/null
+
+    # Optional palette.hot (the one-neon trace colour): accepted when present,
+    # a bad hex rejected, and it flows through resolve → stage untouched.
+    "$out/bin/drachma" lint test/fixtures/valid-hot.json
+    "$out/bin/drachma" resolve test/fixtures/valid-hot.json | grep -q '"hot"'
+    "$out/bin/drachma" emit stage test/fixtures/valid-hot.json | grep -q '"hot"'
+    if "$out/bin/drachma" lint test/fixtures/invalid-hot.json; then
+      echo "drachma: invalid-hot.json should have failed lint" >&2
+      exit 1
+    fi
+
+    # Optional base16 tier (the full sixteen-slot terminal scheme): accepted when
+    # complete, flows through resolve → stage untouched, and is rejected when a
+    # slot is missing or malformed.
+    "$out/bin/drachma" lint test/fixtures/valid-base16.json
+    "$out/bin/drachma" resolve test/fixtures/valid-base16.json | grep -q '"base0C"'
+    "$out/bin/drachma" emit stage test/fixtures/valid-base16.json | grep -q '"base0C"'
+    if "$out/bin/drachma" lint test/fixtures/invalid-base16-missing.json; then
+      echo "drachma: invalid-base16-missing.json should have failed lint" >&2
+      exit 1
+    fi
+    if "$out/bin/drachma" lint test/fixtures/invalid-base16-hex.json; then
+      echo "drachma: invalid-base16-hex.json should have failed lint" >&2
+      exit 1
+    fi
+
+    # The assert-driven schema tests (hot-accepted / hot-bad-hex-rejected).
+    ${nodejs}/bin/node test/run.js
     runHook postInstallCheck
   '';
 

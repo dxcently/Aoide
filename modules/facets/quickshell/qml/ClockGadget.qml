@@ -39,7 +39,7 @@ Item {
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: "╔══════════════╗"
-            color: notes.paletteAccent
+            color: notes.wireCyan
             font.family: "monospace"
             font.pixelSize: 13
         }
@@ -51,7 +51,7 @@ Item {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "║"
-                color: notes.paletteAccent
+                color: notes.wireCyan
                 font.family: "monospace"
                 font.pixelSize: 26
             }
@@ -69,7 +69,7 @@ Item {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "║"
-                color: notes.paletteAccent
+                color: notes.wireCyan
                 font.family: "monospace"
                 font.pixelSize: 26
             }
@@ -79,7 +79,7 @@ Item {
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: "╚══════════════╝"
-            color: notes.paletteAccent
+            color: notes.wireCyan
             font.family: "monospace"
             font.pixelSize: 13
         }

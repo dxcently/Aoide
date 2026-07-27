@@ -10,6 +10,7 @@
 // emitter — Quickshell never sees null).
 
 import QtQuick
+import Quickshell
 import Quickshell.Io
 
 QtObject {
@@ -18,10 +19,8 @@ QtObject {
     // ── Note file path ─────────────────────────────────────────────────────
     // Stage path: ~/Aoide/song/stage/notes.json (gitignored runtime; the nix
     // build never depends on this path — checks.no-song-read enforces that).
-    readonly property string notePath: Qt.resolvedUrl(
-        (StandardPaths.writableLocation(StandardPaths.HomeLocation)) +
-        "/Aoide/song/stage/notes.json"
-    )
+    readonly property string notePath:
+        Quickshell.env("HOME") + "/Aoide/song/stage/notes.json"
 
     // ── Parsed note object ─────────────────────────────────────────────────
     property var raw: ({
@@ -37,6 +36,27 @@ QtObject {
     readonly property color paletteFg:     raw.palette ? raw.palette.fg     : "#cdd6f4"
     readonly property color paletteAccent: raw.palette ? raw.palette.accent : "#89b4fa"
     readonly property color paletteUrgent: raw.palette ? raw.palette.urgent : "#f38ba8"
+    // Hot/trace highlight — the one-neon element (optic-nerve green). Optional
+    // in the v0 note schema: falls back to the accent when palette.hot is
+    // absent, so a note file without it renders exactly as before.
+    readonly property color paletteHot:
+        (raw.palette && raw.palette.hot) ? raw.palette.hot : paletteAccent
+
+    // ── Base16 scheme → semantic Pantheon accents ──────────────────────────
+    // The optional top-level base16 block (drachma's base16 tier) carries the
+    // full sixteen-slot terminal scheme. The Pantheon wireframe field draws its
+    // multicolor accents from it under semantic names — the cool wireframe cyan,
+    // hologram periwinkle, violet brain-glow and glitch pink of the reference
+    // stills. When the block is ABSENT every accent falls back to paletteAccent,
+    // so a note file without base16 renders exactly as the round-3 rose field.
+    readonly property color wireCyan:   // base0C — wireframe outlines + leaders
+        (raw.base16 && raw.base16.base0C) ? raw.base16.base0C : paletteAccent
+    readonly property color holoBlue:   // base0D — depth-stack back copies
+        (raw.base16 && raw.base16.base0D) ? raw.base16.base0D : paletteAccent
+    readonly property color violet:     // base0E — DAG project volumes
+        (raw.base16 && raw.base16.base0E) ? raw.base16.base0E : paletteAccent
+    readonly property color glitchPink: // base08 — reserved glitch/alt accent
+        (raw.base16 && raw.base16.base08) ? raw.base16.base08 : paletteAccent
 
     // ── Bar component shortcuts ────────────────────────────────────────────
     readonly property color barBg:     raw.bar ? raw.bar.bg     : paletteBg
@@ -53,12 +73,16 @@ QtObject {
     readonly property color windowBorderInactive: raw.window ? raw.window.borderInactive : paletteBg
 
     // ── File watcher — atomic hot-reload ──────────────────────────────────
-    FileView {
+    // Declared as a property (not a default-child) because QtObject has no
+    // default property — nesting it directly fails to load.
+    property FileView noteFile: FileView {
         id: noteFile
         path: root.notePath
+        watchChanges: true
+        onFileChanged: noteFile.reload()
         onTextChanged: {
             try {
-                var parsed = JSON.parse(noteFile.text)
+                var parsed = JSON.parse(noteFile.text())
                 root.raw = parsed
             } catch (e) {
                 console.warn("[aoide/notes] Failed to parse notes.json:", e)

@@ -48,8 +48,18 @@ Item {
                     anchors { fill: parent; margins: 8 }
                     color: notes.paletteFg
                     font.pixelSize: 14
-                    placeholderText: "Search apps or commands…"
                     // STUB: onTextChanged filters results list
+
+                    // Placeholder overlay — plain TextInput has no
+                    // placeholderText (that is a Controls TextField property).
+                    Text {
+                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                        text: "Search apps or commands…"
+                        color: notes.paletteFg
+                        opacity: 0.5
+                        font.pixelSize: 14
+                        visible: searchInput.text.length === 0
+                    }
                 }
             }
 

@@ -13,6 +13,7 @@
 // No MCP, no HTTP, no shell exec from QML — shellbridge is the gate.
 
 import QtQuick
+import Quickshell
 import Quickshell.Io
 
 QtObject {
@@ -22,7 +23,9 @@ QtObject {
     // shellbridge daemon writes its socket here. Quickshell connects on first
     // command; reconnects automatically on disconnect.
     readonly property string socketPath: {
-        var runtimeDir = StandardPaths.writableLocation(StandardPaths.RuntimeLocation)
+        var runtimeDir = Quickshell.env("XDG_RUNTIME_DIR")
+        if (!runtimeDir || runtimeDir.length === 0)
+            runtimeDir = "/run/user/" + Quickshell.env("UID")
         return runtimeDir + "/aoide/shellbridge.sock"
     }
 

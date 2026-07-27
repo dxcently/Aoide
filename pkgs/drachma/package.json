@@ -11,7 +11,7 @@
     "src"
   ],
   "scripts": {
-    "test": "node src/cli.js lint test/fixtures/valid.json"
+    "test": "node test/run.js"
   },
   "dependencies": {
     "style-dictionary": "4.3.0"

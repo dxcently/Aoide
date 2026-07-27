@@ -19,6 +19,27 @@ const HEX = /^#?[0-9a-fA-F]{6}$/;
 // fallback map (CONTRACTS.md §1). Component values may also be null.
 const PALETTE_KEYS = ["bg", "fg", "accent", "urgent"];
 
+// Optional palette keys — present or absent, but when present must be a hex
+// colour (never null). `hot` is the one-neon trace/highlight colour (the
+// reference stills' optic-nerve green): notes WITHOUT it stay valid, and a
+// facet falls the surface back to `accent` when it is absent. Keeping it
+// optional preserves the v0 contract for every existing note file.
+const PALETTE_OPTIONAL_KEYS = ["hot"];
+
+// The base16 tier — an OPTIONAL top-level block (sibling of `palette`) carrying
+// the full sixteen-slot terminal scheme (the "pantheon bw" ramp + accent set).
+// All-or-nothing and CLOSED, exactly like the palette: when the block is present
+// every slot base00..base0F must be given (each a hex, never null), and any key
+// outside the sixteen is rejected. Notes WITHOUT it stay valid — a facet falls
+// the wireframe accents back to `accent` when the block is absent, so the v0
+// contract is preserved for every existing note file (same posture as `hot`).
+const BASE16_KEYS = [
+  "base00", "base01", "base02", "base03",
+  "base04", "base05", "base06", "base07",
+  "base08", "base09", "base0A", "base0B",
+  "base0C", "base0D", "base0E", "base0F",
+];
+
 const COMPONENT_FALLBACK = {
   bar: { bg: "bg", fg: "fg", accent: "accent" },
   notif: { bg: "bg", fg: "fg", urgent: "urgent" },
@@ -79,9 +100,39 @@ function validate(container) {
         checkColor(v, `palette.${k}`, errors, { allowNull: false });
       }
     }
+    // Optional keys — validated only when present (never null when given).
+    for (const k of PALETTE_OPTIONAL_KEYS) {
+      if (palette[k] === undefined) continue;
+      const v = noteValue(palette[k]);
+      checkColor(v, `palette.${k}`, errors, { allowNull: false });
+    }
     for (const k of Object.keys(palette)) {
-      if (!PALETTE_KEYS.includes(k)) {
+      if (!PALETTE_KEYS.includes(k) && !PALETTE_OPTIONAL_KEYS.includes(k)) {
         errors.push(`palette.${k}: unknown key (v0 palette is closed)`);
+      }
+    }
+  }
+
+  // Base16 tier — optional, all-or-nothing, closed. Validated only when the
+  // block is present; then every slot is required (a hex, never null) and no
+  // key outside the sixteen is allowed. Mirrors the palette's closed handling.
+  const base16 = container.base16;
+  if (base16 !== undefined) {
+    if (base16 == null || typeof base16 !== "object") {
+      errors.push("base16: expected a note group object");
+    } else {
+      for (const k of BASE16_KEYS) {
+        const v = noteValue(base16[k]);
+        if (v === undefined) {
+          errors.push(`base16.${k}: required (base16 is all-or-nothing)`);
+        } else {
+          checkColor(v, `base16.${k}`, errors, { allowNull: false });
+        }
+      }
+      for (const k of Object.keys(base16)) {
+        if (!BASE16_KEYS.includes(k)) {
+          errors.push(`base16.${k}: unknown key (base16 is closed)`);
+        }
       }
     }
   }
@@ -111,6 +162,8 @@ module.exports = {
   SCHEMA_VERSION: "0",
   HEX,
   PALETTE_KEYS,
+  PALETTE_OPTIONAL_KEYS,
+  BASE16_KEYS,
   COMPONENT_FALLBACK,
   noteValue,
   isRef,

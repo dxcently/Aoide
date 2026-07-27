@@ -17,13 +17,17 @@ const { SCHEMA_VERSION } = require("./schema");
 // resolve.js, so Quickshell reads concrete colours, never null. Shape matches
 // CONTRACTS.md §4 exactly.
 function emitStage(resolved) {
-  return {
+  const out = {
     schemaVersion: resolved.schemaVersion || SCHEMA_VERSION,
     palette: resolved.palette,
     bar: resolved.bar,
     notif: resolved.notif,
     window: resolved.window,
   };
+  // The base16 tier rides through untouched when present (Quickshell reads the
+  // wireframe accents from it — NoteState.qml). Omitted when the note lacks it.
+  if (resolved.base16) out.base16 = resolved.base16;
+  return out;
 }
 
 // ── 2. hyprctl dispatcher (compositor) ──────────────────────────────────────

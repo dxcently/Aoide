@@ -64,6 +64,16 @@ async function resolve(container) {
 
   const out = { schemaVersion: SCHEMA_VERSION, palette };
 
+  // Base16 tier — pass through as a flat, resolved block when present (each slot
+  // dereferenced like the palette). Absent → the key is simply omitted, and the
+  // facet falls the wireframe accents back to `accent`.
+  if (tree.base16) {
+    out.base16 = {};
+    for (const [k, node] of Object.entries(tree.base16)) {
+      out.base16[k] = leaf(node);
+    }
+  }
+
   for (const [group, fields] of Object.entries(COMPONENT_FALLBACK)) {
     out[group] = {};
     const g = tree[group] || {};

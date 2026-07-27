@@ -26,6 +26,18 @@ let
   t = config.aoide.notes;
 
   # ── Component-tier fallback helpers ────────────────────────────────────────
+  # No hex lives here by design (CONTRACTS.md §1/§5): the facet is host- and
+  # song-agnostic, so border colour is ALWAYS a note read, never a literal.
+  # This IS the substitution seam — window.border/window.borderInactive (or
+  # their palette.accent/palette.bg fallback) are set per-song in that song's
+  # rice.nix (e.g. song/repertoire/hero/rice.nix), which maps its own base16
+  # roles onto the component tier. For the Pantheon hero song, the intended
+  # mapping is base0C wireCyan (#5fd8e8) → window.border (active) and a dark
+  # muted ground, base01 (#141419) or base02 (#26262e) → window.borderInactive
+  # — but that assignment belongs in hero/rice.nix, not in this facet; today
+  # hero/rice.nix still carries the older dxflake-era BW pair (border =
+  # "#ffffff", borderInactive = "#000000"), so a song-side edit is what would
+  # actually change the rendered colour.
   windowBorder = if t.window.border != null then t.window.border else t.palette.accent;
   windowBorderInactive =
     if t.window.borderInactive != null then t.window.borderInactive else t.palette.bg;
@@ -37,7 +49,9 @@ let
   gapOuter = 8;
   gapInner = 6;
   borderWidth = 2;
-  rounding = 8; # window corner radius (px)
+  # Edged windows (khoa, with the bw border key): square corners — the
+  # dxflake read. The Pantheon wireframe language wants hard outlines too.
+  rounding = 0; # window corner radius (px)
   blurEnabled = true;
   blurPasses = 3;
   blurSize = 8;
@@ -67,6 +81,34 @@ let
             passes  = ${toString blurPasses}
         }
     }
+
+    # Glass for the quickshell surfaces (dxflake's "namespace waybar" rule,
+    # aoide-native namespaces — set per-PanelWindow in shell.qml). Blur reads
+    # through the bar's translucent barBg and the dock's Aero frames; the
+    # wallpaper surface (aoide-wallpaper) is deliberately NOT blurred.
+    # ignore_alpha keeps the surfaces' fully-transparent regions (the dock's
+    # retracted drawer, the bar's popout gutter) from rendering as a grey
+    # blur stripe. (Field names per the 0.5x rules rework: "ignorealpha" is
+    # rejected by hyprctl on 0.56 — verified live.)
+    layerrule = blur on, match:namespace aoide-bar
+    layerrule = blur on, match:namespace aoide-dock
+    layerrule = ignore_alpha 0.05, match:namespace aoide-bar
+    layerrule = ignore_alpha 0.05, match:namespace aoide-dock
+    # blur_popups extends the glass to the bar's PopupWindow children (the
+    # gadget popouts) — same 0.5x snake_case rework spelling as ignore_alpha.
+    layerrule = blur_popups on, match:namespace aoide-bar
+
+    # hyprglass (pkgs/hyprglass, loaded via the HM plugins list below):
+    # Liquid Glass on the quickshell surfaces, ON TOP of the blur+gloss —
+    # refraction/fresnel the flat gradient can't fake. Same namespaces as
+    # the layerrules; the wallpaper surface stays untouched.
+    plugin:hyprglass {
+        layers {
+            enabled = 1
+            namespaces = aoide-bar, aoide-dock
+            preset = glass
+        }
+    }
   '';
 
   # ── Hyprland keybinds for Aoide workflows ─────────────────────────────────
@@ -78,7 +120,7 @@ let
     bind = SUPER, SPACE, exec, aoide shell launcher toggle
 
     # Lock screen
-    bind = SUPER, L, exec, aoide shell lock
+    bind = SUPER, ESCAPE, exec, aoide shell lock
 
     # Gadget dock popup (shellbridge → AoideAgentWidgets open-and-pin).
     # SUPER+G summons the LEFT-edge pinnable dock popup, which CONTAINS the DAG
@@ -94,8 +136,10 @@ let
     # ── Window management (ported from dxflake hyprland dendrite) ────────
     # Normalized to SUPER, matching the Aoide binds above. dxflake exec
     # binds for tools Aoide doesn't ship (rofi, thunar, cliphist,
-    # hyprshot/satty, vesktop/discord, gpu-screen-recorder) are dropped —
-    # the launcher and the bar's power cell cover those seams. dxflake's
+    # vesktop/discord, gpu-screen-recorder) are dropped — the launcher and
+    # the bar's power cell cover those seams. The hyprshot/satty binds
+    # (SUPER+S / SUPER SHIFT+S) live in the screenshot dendrite, shipped
+    # WITH the tools (modules/dendrites/screenshot.nix). dxflake's
     # media/brightness XF86 keys are also deliberately NOT bound (strict
     # window-management scope; the bar's volume cell owns audio by mouse) —
     # a known seam if hardware keys are wanted later.
@@ -108,9 +152,10 @@ let
     bind = SUPER, V, togglefloating
     bind = SUPER, F, fullscreen
 
-    # Focus movement — arrows carry the full left/down/up/right set; H/J/K
-    # add vim left/down/up. dxflake's SUPER+L (focus right) is NOT ported:
-    # SUPER+L is the Aoide lock bind above, so right stays arrow-only.
+    # Focus movement — arrows carry the full left/down/up/right set; H/J/K/L
+    # complete the vim set (left/down/up/right). dxflake's SUPER+L was
+    # blocked here by the Aoide lock bind, so the lock moved to SUPER+ESCAPE
+    # above, freeing L — the full hjkl set is now live, matching arrows.
     bind = SUPER, left, movefocus, l
     bind = SUPER, down, movefocus, d
     bind = SUPER, up, movefocus, u
@@ -118,6 +163,7 @@ let
     bind = SUPER, H, movefocus, l
     bind = SUPER, J, movefocus, d
     bind = SUPER, K, movefocus, u
+    bind = SUPER, L, movefocus, r
 
     # Move window (same directional scheme)
     bind = SUPER SHIFT, left, movewindow, l
@@ -127,6 +173,7 @@ let
     bind = SUPER SHIFT, H, movewindow, l
     bind = SUPER SHIFT, J, movewindow, d
     bind = SUPER SHIFT, K, movewindow, u
+    bind = SUPER SHIFT, L, movewindow, r
 
     # Resize — binde repeats while held (dxflake's step sizes)
     binde = SUPER ALT, left, resizeactive, -20 0
@@ -197,6 +244,10 @@ in
         package = null; # system programs.hyprland provides the binary
         portalPackage = null; # and the portal
         configType = "hyprlang"; # explicit: classic hyprland.conf, not lua
+
+        # hyprglass — ABI-pinned to this Hyprland (see pkgs/hyprglass).
+        # HM emits the `plugin = <path>` line; config in hyprNoteConfig.
+        plugins = [ pkgs.hyprglass ];
 
         # ── systemd / Wayland env handoff (the session-assembly seam) ──────
         # This is what actually brings the desktop up. When enabled the HM

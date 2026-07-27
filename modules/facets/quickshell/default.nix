@@ -122,7 +122,10 @@ in
           ConditionPathExists = shellQmlEntry;
         };
         Service = {
-          ExecStart = "${quickshellPkg}/bin/quickshell -c ${shellQmlEntry}";
+          # `-p <path>` loads a config by PATH; `-c <name>` (used previously)
+          # treats the argument as a config NAME and fails on a path in
+          # quickshell 0.3.0.
+          ExecStart = "${quickshellPkg}/bin/quickshell -p ${shellQmlEntry}";
           Restart = "on-failure";
           RestartSec = 3;
         };

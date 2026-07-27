@@ -75,7 +75,7 @@ Item {
     FileView {
         id: routeFile
         path: "/proc/net/route"
-        onTextChanged: root.netKind = root.parseRoute(routeFile.text)
+        onTextChanged: root.netKind = root.parseRoute(routeFile.text())
         Component.onCompleted: routeFile.reload()
     }
     Timer {

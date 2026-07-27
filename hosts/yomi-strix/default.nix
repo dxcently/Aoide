@@ -7,11 +7,12 @@
 # what boots this box and runs the desktop.
 { lib, pkgs, ... }:
 {
-  imports =
-    [ ../common ]
-    # Guarded: import ./hardware.nix only if the file exists, so the flake
-    # still evaluates on a machine without a committed hardware scan.
-    ++ lib.optional (builtins.pathExists ./hardware.nix) ./hardware.nix;
+  imports = [
+    ../common
+  ]
+  # Guarded: import ./hardware.nix only if the file exists, so the flake
+  # still evaluates on a machine without a committed hardware scan.
+  ++ lib.optional (builtins.pathExists ./hardware.nix) ./hardware.nix;
 
   networking.hostName = "yomi-strix";
   networking.networkmanager.enable = true;
@@ -44,12 +45,18 @@
   # The song this host performs. Replay any committed song on ANY host with one
   # line — e.g. `aoide.song = "moonlight";` swaps the whole notes fan-out with
   # zero other edits (song/repertoire/moonlight/). Default = the shipped standard.
-  aoide.song = "default";
+  # "hero": the dusk-plum key drawn from the hero cover itself.
+  aoide.song = "hero";
 
   # Wave-1 facets — the whole desktop, one line each.
   aoide.facets.quickshell.enable = true;
   aoide.facets.compositor.enable = true;
   aoide.facets.stylix.enable = true;
+
+  # Screen capture — two callers, two dendrites (see each module header):
+  # hyprshot+satty for the human (SUPER+S), grim/slurp for agents ("vision").
+  aoide.screenshot.enable = true;
+  aoide.vision.enable = true;
 
   # Shipped dendrites (off unless wanted; aoide.mcp.enable stays false — house policy).
   aoide.obsidian.enable = false;

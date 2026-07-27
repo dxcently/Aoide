@@ -21,24 +21,21 @@ Item {
     id: root
     required property var notes
 
-    readonly property int cellSize: 24
+    readonly property int cellSize: 28
     readonly property int cellGap: 4
 
     implicitWidth: cellRow.implicitWidth
     implicitHeight: cellSize
 
-    // ── Musical format-icons (dxflake waybar) ──────────────────────────────
+    // ── Workspace labels: plain NUMBERS (pantheon redesign — khoa: forget
+    // the music-note delimiters). The two special workspaces keep their
+    // unicode marks: the one seasoning of "song" the row retains.
     function wsIcon(ws) {
         if (!ws) return "?"
         var name = ("" + (ws.name || "")).toLowerCase()
         if (name.indexOf("magic") !== -1) return "♬⋆.˚"
         if (name.indexOf("scratch") !== -1) return "ᝰ.ᐟ"
-        var byId = {
-            "1": "𝅘𝅥", "2": "♫", "3": "𝅘𝅥𝅯", "4": "♬", "5": "𝅘𝅥𝅱",
-            "6": "𝅗𝅥", "7": "𝅝", "8": "♯", "9": "♮", "10": "♭"
-        }
-        var g = byId["" + ws.id]
-        return g !== undefined ? g : ("" + ws.id)
+        return "" + ws.id
     }
 
     // Sorted live workspaces (by id) — ObjectModel exposes `.values`.
@@ -61,24 +58,6 @@ Item {
         id: cellRow
         spacing: root.cellGap
 
-        // ── Sliding active-box overlay (eases between cells) ──────────────
-        Rectangle {
-            id: activeBox
-            visible: root.activeIndex >= 0
-            z: 1
-            width: root.cellSize
-            height: root.cellSize
-            radius: 0
-            color: "transparent"
-            border.color: root.notes.barAccent
-            border.width: 1
-            x: root.activeIndex >= 0
-               ? root.activeIndex * (root.cellSize + root.cellGap) : 0
-            Behavior on x {
-                NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
-            }
-        }
-
         Repeater {
             model: root.wsList
             delegate: Item {
@@ -91,15 +70,50 @@ Item {
                 width: root.cellSize
                 height: root.cellSize
 
+                // ── Pantheon layering: every cell is a wireframe pane thrown
+                // over a depth echo — the echo cast toward the ROW'S CENTER,
+                // the vanishing point. Left cells cast right, right cells cast
+                // left, the inflection at dead center; the throw grows with
+                // distance so the whole row converges like a colonnade seen
+                // head-on. Downward y: the bar hangs from the top edge, so
+                // "toward screen center" is down.
+                readonly property real vanishDx: {
+                    var cellCenter = cell.x + root.cellSize / 2
+                    var rowCenter = cellRow.width / 2
+                    var d = (rowCenter - cellCenter) * 0.08
+                    return Math.max(-4, Math.min(4, d))
+                }
+
+                Rectangle { // back copy (depth stack)
+                    x: Math.round(cell.vanishDx)
+                    y: 3
+                    width: root.cellSize
+                    height: root.cellSize
+                    color: "transparent"
+                    border.color: root.notes.holoBlue
+                    border.width: 1
+                    opacity: 0.35
+                }
+
+                Rectangle { // front pane (the active cell wears the sliding
+                            // wireCyan activeBox instead — no double border)
+                    width: root.cellSize
+                    height: root.cellSize
+                    color: "transparent"
+                    border.color: root.notes.holoBlue
+                    border.width: 1
+                    opacity: cell.isActive ? 0 : 0.55
+                }
+
                 Text {
                     anchors.centerIn: parent
                     text: root.wsIcon(cell.modelData)
-                    color: cell.isActive ? root.notes.barAccent
-                          : (cell.isUrgent ? root.notes.paletteUrgent : root.notes.barFg)
+                    color: cell.isActive ? root.notes.wireCyan
+                          : (cell.isUrgent ? root.notes.glitchPink : root.notes.barFg)
                     style: Text.Outline
                     styleColor: "#000000"
                     font.family: "monospace"
-                    font.pixelSize: 15
+                    font.pixelSize: 17
                     font.bold: cell.isActive
 
                     // Urgent pulse (blink_red homage).
@@ -120,6 +134,47 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    // ── Sliding active-box overlay (eases between cells) ──────────────────
+    // A SIBLING of the Row, not a child: a Row positioner assigns x to every
+    // child, so an in-Row overlay gets slotted as item #0 (an empty square
+    // beside the cells — the v2 rendering bug) instead of floating over them.
+    Rectangle { // the active box's own depth echo — rides the eased x below,
+                // converging on the same vanishing point as the cell echoes.
+        visible: root.activeIndex >= 0
+        z: 1
+        width: root.cellSize
+        height: root.cellSize
+        color: "transparent"
+        border.color: root.notes.holoBlue
+        border.width: 1
+        opacity: 0.5
+        y: 3
+        x: {
+            var boxCenter = activeBox.x + root.cellSize / 2
+            var rowCenter = cellRow.width / 2
+            var d = (rowCenter - boxCenter) * 0.08
+            return activeBox.x + Math.round(Math.max(-4, Math.min(4, d)))
+        }
+    }
+
+    Rectangle {
+        id: activeBox
+        visible: root.activeIndex >= 0
+        z: 1
+        width: root.cellSize
+        height: root.cellSize
+        radius: 0
+        color: "transparent"
+        border.color: root.notes.wireCyan
+        border.width: 1
+        x: root.activeIndex >= 0
+           ? root.activeIndex * (root.cellSize + root.cellGap) : 0
+        y: 0
+        Behavior on x {
+            NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
         }
     }
 }
