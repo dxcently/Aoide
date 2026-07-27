@@ -1,6 +1,8 @@
 # modules/dendrites/fastfetch/default.nix — the fastfetch greeting.
 #
-# A DIRECTORY dendrite because it carries an asset (./ascii-fetch, the logo).
+# A DIRECTORY dendrite because it carries an asset (./ascii-fetch, the logo:
+# Aoide's lyre, drawn in the Pantheon wireframe — five strings, one per letter
+# of A·O·I·D·E, the crossbar their tuning, the soundbox their common ground).
 # The walker registers every .nix under modules/dendrites/, so this default.nix
 # self-registers exactly like a flat dendrite (CONTRACTS.md §2).
 #
@@ -32,8 +34,8 @@
             logo = {
               type = "auto";
               source = ./ascii-fetch;
-              width = 39;
-              height = 15;
+              width = 30;
+              height = 11;
             };
             display = {
               separator = "";
