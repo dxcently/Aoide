@@ -37,7 +37,9 @@ let
   gapOuter = 8;
   gapInner = 6;
   borderWidth = 2;
-  rounding = 8; # window corner radius (px)
+  # Edged windows (khoa, with the bw border key): square corners — the
+  # dxflake read. The Pantheon wireframe language wants hard outlines too.
+  rounding = 0; # window corner radius (px)
   blurEnabled = true;
   blurPasses = 3;
   blurSize = 8;

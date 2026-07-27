@@ -32,9 +32,12 @@
       fg = null;
       urgent = null;
     };
+    # Window frames go BW (khoa: edged shape, bw for now): white active
+    # hairline on black inactive — the dxflake window key, carried as a
+    # component-tier note so the song owns it, not the facet.
     aoide.notes.window = {
-      border = null;
-      borderInactive = null;
+      border = "#ffffff";
+      borderInactive = "#000000";
     };
 
     # ── Cover-art note ─────────────────────────────────────────────────────
