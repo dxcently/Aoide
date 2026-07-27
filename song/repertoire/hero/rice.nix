@@ -61,12 +61,13 @@
       fg = null;
       urgent = null;
     };
-    # Window frames go BW (khoa: edged shape, bw for now): white active
-    # hairline on black inactive — the dxflake window key, carried as a
-    # component-tier note so the song owns it, not the facet.
+    # Window frames join the Pantheon (khoa, round 5): the active hairline is
+    # base0C wireCyan — the same wireframe rule the bar's panes wear — and the
+    # inactive frame recedes to base01, the dark ground. The dxflake BW pair
+    # retires; the window key stays a component-tier note the song owns.
     aoide.notes.window = {
-      border = "#ffffff";
-      borderInactive = "#000000";
+      border = "#5fd8e8"; # base0C wireCyan — active
+      borderInactive = "#141419"; # base01 dark ground — inactive
     };
 
     # ── Cover-art note ─────────────────────────────────────────────────────

@@ -36,7 +36,7 @@
     "urgent": "#ff7a68"
   },
   "window": {
-    "border":         "#ffffff",
-    "borderInactive": "#000000"
+    "border":         "#5fd8e8",
+    "borderInactive": "#141419"
   }
 }
