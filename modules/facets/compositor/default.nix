@@ -26,6 +26,18 @@ let
   t = config.aoide.notes;
 
   # ── Component-tier fallback helpers ────────────────────────────────────────
+  # No hex lives here by design (CONTRACTS.md §1/§5): the facet is host- and
+  # song-agnostic, so border colour is ALWAYS a note read, never a literal.
+  # This IS the substitution seam — window.border/window.borderInactive (or
+  # their palette.accent/palette.bg fallback) are set per-song in that song's
+  # rice.nix (e.g. song/repertoire/hero/rice.nix), which maps its own base16
+  # roles onto the component tier. For the Pantheon hero song, the intended
+  # mapping is base0C wireCyan (#5fd8e8) → window.border (active) and a dark
+  # muted ground, base01 (#141419) or base02 (#26262e) → window.borderInactive
+  # — but that assignment belongs in hero/rice.nix, not in this facet; today
+  # hero/rice.nix still carries the older dxflake-era BW pair (border =
+  # "#ffffff", borderInactive = "#000000"), so a song-side edit is what would
+  # actually change the rendered colour.
   windowBorder = if t.window.border != null then t.window.border else t.palette.accent;
   windowBorderInactive =
     if t.window.borderInactive != null then t.window.borderInactive else t.palette.bg;
