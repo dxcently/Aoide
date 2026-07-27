@@ -187,12 +187,19 @@ Item {
             return notes.paletteAccent
         if (s === "done")
             return notes.paletteFg
+        // Blocked — a permission prompt sits mid-turn, a human is summoned: the
+        // Pantheon urgent role (glitchPink, base08), hotter than notif/await.
+        if (s.indexOf("block") !== -1)
+            return notes.glitchPink
         if (s.indexOf("notif") !== -1 || s.indexOf("await") !== -1)
             return notes.paletteUrgent
         return notes.paletteFg
     }
     function isDoneState(state) {
         return ("" + (state || "")).toLowerCase() === "done"
+    }
+    function isBlocked(state) {
+        return ("" + (state || "")).toLowerCase().indexOf("block") !== -1
     }
 
     // ── Short cwd (last two path segments) — mirrors GraphRow.shortCwd ──────
@@ -274,9 +281,20 @@ Item {
                 required property string windowAddress
 
                 readonly property bool done: root.isDoneState(state)
+                readonly property bool blocked: root.isBlocked(state)
                 readonly property bool traced:
                     root.shared && root.shared.tracedSessionId === sessionId
                                 && sessionId.length > 0
+
+                // Blocked rows pulse — the urgent-pulse idiom from WorkspaceRow
+                // (blink_red homage): a 600ms InOutQuad breath to 0.35 and back,
+                // forever, so the summoned human's eye lands on the row.
+                SequentialAnimation on opacity {
+                    running: rowItem.blocked
+                    loops: Animation.Infinite
+                    NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
+                    NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
+                }
 
                 // ── Neon halo (traced row only) — matches DAG's traced node ──
                 // THREE transparent rings, the row grown +6/+4/+2, in the HOT

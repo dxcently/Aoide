@@ -144,12 +144,19 @@ Item {
             return notes.paletteAccent
         if (s === "done")
             return notes.paletteFg
+        // Blocked — a session waits on a permission prompt mid-turn: the Pantheon
+        // urgent role (glitchPink, base08), hotter than a notif/await hue.
+        if (s.indexOf("block") !== -1)
+            return notes.glitchPink
         if (s.indexOf("notif") !== -1 || s.indexOf("await") !== -1)
             return notes.paletteUrgent
         return notes.paletteFg
     }
     function isDone(node) {
         return node && ("" + (node.state || "")).toLowerCase() === "done"
+    }
+    function isBlocked(node) {
+        return node && ("" + (node.state || "")).toLowerCase().indexOf("block") !== -1
     }
     function shortCwd(cwd) {
         if (!cwd)
@@ -238,6 +245,17 @@ Item {
                     : (rowHover.hovered && rowItem.isSession ? root.dimHover
                     : (rowItem.done ? root.dimDone
                     : (rowItem.isProject ? root.dimProject : root.dimIdle)))
+                readonly property bool blocked: root.isBlocked(rowItem.node)
+
+                // Blocked node pulses — the urgent-pulse idiom from WorkspaceRow
+                // (blink_red homage): a 600ms InOutQuad breath to 0.35 and back,
+                // forever, so the summoned human's eye finds the node in the DAG.
+                SequentialAnimation on opacity {
+                    running: rowItem.blocked
+                    loops: Animation.Infinite
+                    NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
+                    NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
+                }
 
                 Row {
                     anchors.left: parent.left

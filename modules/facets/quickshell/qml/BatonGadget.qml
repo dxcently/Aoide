@@ -85,9 +85,17 @@ Item {
         var l = ("" + (state || "")).toLowerCase()
         if (l === "done" || l === "stop")
             return notes.paletteFg
-        if (l.indexOf("await") !== -1 || l.indexOf("block") !== -1 || l === "notification")
+        // Blocked — a session sits on a permission prompt mid-turn and a human is
+        // summoned: the Pantheon urgent role (glitchPink, base08), a hotter alarm
+        // than a merely awaiting/idle session wears.
+        if (l.indexOf("block") !== -1)
+            return notes.glitchPink
+        if (l.indexOf("await") !== -1 || l === "notification")
             return notes.paletteUrgent
         return notes.paletteAccent
+    }
+    function isBlocked(state) {
+        return ("" + (state || "")).toLowerCase().indexOf("block") !== -1
     }
     function isDone(state) {
         var l = ("" + (state || "")).toLowerCase()
@@ -173,6 +181,16 @@ Item {
                 readonly property bool traced: root.isTraced(sRow.s ? sRow.s.sessionId : "")
                 width: content.width
                 spacing: 6
+
+                // Blocked rows pulse — the urgent-pulse idiom lifted verbatim from
+                // WorkspaceRow (blink_red homage): a 600ms InOutQuad breath to 0.35
+                // and back, forever, so a summoned human can't miss the row.
+                SequentialAnimation on opacity {
+                    running: root.isBlocked(sRow.s ? sRow.s.state : "")
+                    loops: Animation.Infinite
+                    NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
+                    NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
+                }
 
                 Text {
                     anchors.verticalCenter: parent.verticalCenter

@@ -155,8 +155,25 @@ Item {
     // Reuses the TerminalManagerGadget data seam (already-plumbed stage file).
     // Click → open the gadget dock (bridge dock verb, the AoideAgentWidgets path).
     property int sessionCount: 0
+    property bool sessionsBlocked: false
+    property bool hooksBlocked: false
+    // A human is summoned when ANY session's merged live state is blocked —
+    // either a roster state (sessions.json) OR a live hook phase (hooks.json,
+    // which overrides the roster in graph.rs::merged_sessions). Either source
+    // flips the ✎N cell from paletteHot to the urgent role (glitchPink) + pulse.
+    readonly property bool anyBlocked: sessionsBlocked || hooksBlocked
+    function anyStateBlocked(arr, key) {
+        if (!arr) return false
+        for (var i = 0; i < arr.length; i++) {
+            var v = arr[i] ? ("" + (arr[i][key] || "")).toLowerCase() : ""
+            if (v.indexOf("block") !== -1) return true
+        }
+        return false
+    }
     readonly property string sessionsPath:
         Quickshell.env("HOME") + "/Aoide/song/stage/sessions.json"
+    readonly property string hooksPath:
+        Quickshell.env("HOME") + "/Aoide/song/stage/hooks.json"
     FileView {
         id: sessionsFile
         path: root.sessionsPath
@@ -164,9 +181,21 @@ Item {
             try {
                 var d = JSON.parse(sessionsFile.text())
                 root.sessionCount = (d && d.sessions) ? d.sessions.length : 0
+                root.sessionsBlocked = root.anyStateBlocked(d && d.sessions, "state")
             } catch (e) { /* absent/garbage → hold count */ }
         }
         Component.onCompleted: sessionsFile.reload()
+    }
+    FileView {
+        id: hooksFile
+        path: root.hooksPath
+        onTextChanged: {
+            try {
+                var d = JSON.parse(hooksFile.text())
+                root.hooksBlocked = root.anyStateBlocked(d && d.hooks, "phase")
+            } catch (e) { /* absent/garbage → hold */ }
+        }
+        Component.onCompleted: hooksFile.reload()
     }
 
     // ── Network (procfs FileView — no NM service at this rev) ───────────────
@@ -352,12 +381,25 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: root.sessionCount > 0
                 text: "✎" + root.sessionCount
-                color: root.notes.paletteHot
+                // Blazes paletteHot at rest; when ANY session is blocked the cell
+                // switches to the urgent role (glitchPink) and pulses — a human
+                // summons the eye can't miss from across the bar.
+                color: root.anyBlocked ? root.notes.glitchPink : root.notes.paletteHot
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
                 font.pixelSize: 16
                 font.bold: true
+
+                // Urgent pulse (blink_red homage from WorkspaceRow): 600ms
+                // InOutQuad breath to 0.35 and back, forever, only while blocked.
+                SequentialAnimation on opacity {
+                    running: root.anyBlocked
+                    loops: Animation.Infinite
+                    NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
+                    NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
+                }
+
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
