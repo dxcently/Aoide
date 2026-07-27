@@ -400,6 +400,12 @@ Item {
             }
         }
 
+        // ══ TASKBAR: Win7 window buttons (fills the left gap) ══════════════
+        TaskbarRow {
+            notes: root.notes
+            Layout.alignment: Qt.AlignVCenter
+        }
+
         // ══ CENTER: clock (→ calendar popup)  /  window title ══════════════
         Item { Layout.fillWidth: true; implicitWidth: 1 }
 
