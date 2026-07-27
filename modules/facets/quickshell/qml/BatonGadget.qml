@@ -258,6 +258,8 @@ Item {
     FileView {
         id: sessionsFile
         path: root.sessionsPath
+        watchChanges: true
+        onFileChanged: sessionsFile.reload()
         onTextChanged: {
             try {
                 root.sessionsDoc = JSON.parse(sessionsFile.text())
@@ -272,6 +274,8 @@ Item {
     FileView {
         id: graphFile
         path: root.graphPath
+        watchChanges: true
+        onFileChanged: graphFile.reload()
         onTextChanged: {
             try {
                 root.graphDoc = JSON.parse(graphFile.text())

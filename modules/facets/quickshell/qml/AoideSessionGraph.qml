@@ -145,6 +145,8 @@ Item {
     FileView {
         id: graphFile
         path: root.graphPath
+        watchChanges: true
+        onFileChanged: graphFile.reload()
         onTextChanged: {
             try {
                 root.graph = JSON.parse(graphFile.text())

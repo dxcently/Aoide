@@ -78,6 +78,8 @@ QtObject {
     property FileView noteFile: FileView {
         id: noteFile
         path: root.notePath
+        watchChanges: true
+        onFileChanged: noteFile.reload()
         onTextChanged: {
             try {
                 var parsed = JSON.parse(noteFile.text())

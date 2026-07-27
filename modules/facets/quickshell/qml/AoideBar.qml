@@ -177,6 +177,8 @@ Item {
     FileView {
         id: sessionsFile
         path: root.sessionsPath
+        watchChanges: true
+        onFileChanged: sessionsFile.reload()
         onTextChanged: {
             try {
                 var d = JSON.parse(sessionsFile.text())
@@ -189,6 +191,8 @@ Item {
     FileView {
         id: hooksFile
         path: root.hooksPath
+        watchChanges: true
+        onFileChanged: hooksFile.reload()
         onTextChanged: {
             try {
                 var d = JSON.parse(hooksFile.text())
