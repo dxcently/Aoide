@@ -148,7 +148,52 @@ Aoide is a framework you **fork**, not a package. Fork upstream → `git clone <
 
 ---
 
-## 3. The aoide tools
+## 3. How Aoide updates
+
+Two axes move independently. **Dependency versions** are yours to bump on any schedule; the **framework itself** is upstream's shape, pulled in by merge. No background updater touches either — house policy, both go through the gated rebuild.
+
+### Dependency updates — routine, yours
+
+Bump the flake inputs (nixpkgs, home-manager, stylix, quickshell, hyprland, nvf) and rebuild in one step:
+
+```
+adupdate            # = nh os switch <flake> --update  → rewrites flake.lock, then switches
+```
+
+This only moves pinned dependency versions; the frozen machinery is untouched. See the [`ad*` table](#the-ad-rebuild-family) in §1.
+
+### Framework updates — upstream's shape, merged in
+
+The nucleus, lib, facets, and rime are upstream's to evolve. Fork-and-run keeps shared git history, so a framework update is a real merge, not a package swap:
+
+```
+git fetch upstream && git merge upstream/main    # improvements flow in; additive growth stays conflict-free
+adcheck && adrebuild                             # run the flake's checks, then switch
+```
+
+`aoide update` is the eventual guided path for this — fetch upstream, merge framework paths, run `checks`, detect contract bumps (`CONTRACTS.md`) and route them through `song/songbook/update-playbook.md`, then propose the gated rebuild. **Stub today** — exit `64` (`not-implemented`); use the two-line `git` form above meanwhile.
+
+### Who owns what
+
+Ownership follows radial distance from the nucleus (the snowflake's [mutation policy](../Aoide-Wiki/concepts/Snowflake-Anatomy.md#mutation-policy)) — not directory fences. It is tracked by git merge-base, and divergence from inherited files is warned, not blocked.
+
+| Layer | Owner | You do this |
+|---|---|---|
+| `modules/nucleus/` + `lib/` + `CONTRACTS.md` | upstream | Don't edit — merge cleanly. |
+| `modules/facets/` + `modules/rime/` | upstream | Toggle per host; render surfaces are upstream's. |
+| `modules/dendrites/` (shipped) | upstream ships | Toggle via `enable` flags. |
+| `modules/dendrites/<yours>.nix` | you | Grow new branches freely (new files). |
+| `hosts/` | you, entirely | Hardware, enabled facets/dendrites, song pick. |
+| `song/` + rime rice output | you (agent-written) | The songbook is where self-ricing writes back; gated at rebuild. |
+| `pkgs/aoide` + `pkgs/notes` | upstream | Don't edit — merge cleanly. |
+
+### Merge hygiene
+
+Your edits live in `hosts/`, `song/`, and **new** dendrite files — all additive, so upstream merges stay conflict-free by construction. Editing a nucleus, facet, or rime file is how you earn conflicts on the next merge; when you need a change there, PR it upstream instead of forking the shape.
+
+---
+
+## 4. The aoide tools
 
 ### `aoide` — the CLI trunk
 
@@ -190,7 +235,7 @@ Opt-in: the **`aoide.rebuild`** capability (off by default) grants a dedicated n
 
 ---
 
-## 4. Full command reference
+## 5. Full command reference
 
 ### Rebuild aliases (`bash` dendrite)
 
@@ -250,7 +295,7 @@ Window management (ported from dxflake): `SUPER+RETURN` terminal (kitty) · `SUP
 
 ---
 
-## 5. Dendrite & facet roster
+## 6. Dendrite & facet roster
 
 ### Facets (3) — the desktop surfaces, enabled per host
 
