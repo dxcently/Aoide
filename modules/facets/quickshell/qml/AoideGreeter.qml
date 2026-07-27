@@ -14,12 +14,8 @@ Item {
     // ── Greeter UI ─────────────────────────────────────────────────────────
     Rectangle {
         anchors.fill: parent
-        color: Qt.rgba(
-            parseInt(notes.paletteBg.slice(1,3), 16) / 255,
-            parseInt(notes.paletteBg.slice(3,5), 16) / 255,
-            parseInt(notes.paletteBg.slice(5,7), 16) / 255,
-            0.90
-        )
+        // paletteBg is a color (not a hex string) → use its .r/.g/.b channels.
+        color: Qt.rgba(notes.paletteBg.r, notes.paletteBg.g, notes.paletteBg.b, 0.90)
 
         ColumnLayout {
             anchors.centerIn: parent
@@ -60,12 +56,23 @@ Item {
                 border.width: 1
 
                 TextInput {
+                    id: greetPwInput
                     anchors { fill: parent; margins: 10 }
                     echoMode: TextInput.Password
                     color: notes.paletteFg
                     font.pixelSize: 15
-                    placeholderText: "Password"
                     // STUB: onAccepted → greetd create_session + start_session
+
+                    // Placeholder overlay — plain TextInput has no
+                    // placeholderText (Controls TextField property).
+                    Text {
+                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                        text: "Password"
+                        color: notes.paletteFg
+                        opacity: 0.5
+                        font.pixelSize: 15
+                        visible: greetPwInput.text.length === 0
+                    }
                 }
             }
 

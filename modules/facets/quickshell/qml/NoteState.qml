@@ -10,6 +10,7 @@
 // emitter — Quickshell never sees null).
 
 import QtQuick
+import Quickshell
 import Quickshell.Io
 
 QtObject {
@@ -18,10 +19,8 @@ QtObject {
     // ── Note file path ─────────────────────────────────────────────────────
     // Stage path: ~/Aoide/song/stage/notes.json (gitignored runtime; the nix
     // build never depends on this path — checks.no-song-read enforces that).
-    readonly property string notePath: Qt.resolvedUrl(
-        (StandardPaths.writableLocation(StandardPaths.HomeLocation)) +
-        "/Aoide/song/stage/notes.json"
-    )
+    readonly property string notePath:
+        Quickshell.env("HOME") + "/Aoide/song/stage/notes.json"
 
     // ── Parsed note object ─────────────────────────────────────────────────
     property var raw: ({
@@ -53,12 +52,14 @@ QtObject {
     readonly property color windowBorderInactive: raw.window ? raw.window.borderInactive : paletteBg
 
     // ── File watcher — atomic hot-reload ──────────────────────────────────
-    FileView {
+    // Declared as a property (not a default-child) because QtObject has no
+    // default property — nesting it directly fails to load.
+    property FileView noteFile: FileView {
         id: noteFile
         path: root.notePath
         onTextChanged: {
             try {
-                var parsed = JSON.parse(noteFile.text)
+                var parsed = JSON.parse(noteFile.text())
                 root.raw = parsed
             } catch (e) {
                 console.warn("[aoide/notes] Failed to parse notes.json:", e)

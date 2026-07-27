@@ -182,7 +182,7 @@ Item {
     FileView {
         id: statFile
         path: "/proc/stat"
-        onTextChanged: root.sampleCpu(statFile.text)
+        onTextChanged: root.sampleCpu(statFile.text())
     }
 
     // ── /proc/meminfo watcher (RAM) ────────────────────────────────────────
@@ -190,7 +190,7 @@ Item {
         id: memFile
         path: "/proc/meminfo"
         onTextChanged: {
-            var p = root.parseMem(memFile.text)
+            var p = root.parseMem(memFile.text())
             if (p >= 0)
                 root.ramPercent = p
         }

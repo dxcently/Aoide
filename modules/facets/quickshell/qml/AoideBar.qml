@@ -32,6 +32,7 @@
 
 import QtQuick
 import QtQuick.Layouts
+import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
 import Quickshell.Services.Pipewire
@@ -148,15 +149,14 @@ Item {
     // Reuses the TerminalManagerGadget data seam (already-plumbed stage file).
     // Click → open the gadget dock (bridge dock verb, the AoideAgentWidgets path).
     property int sessionCount: 0
-    readonly property string sessionsPath: Qt.resolvedUrl(
-        (StandardPaths.writableLocation(StandardPaths.HomeLocation)) +
-        "/Aoide/song/stage/sessions.json")
+    readonly property string sessionsPath:
+        Quickshell.env("HOME") + "/Aoide/song/stage/sessions.json"
     FileView {
         id: sessionsFile
         path: root.sessionsPath
         onTextChanged: {
             try {
-                var d = JSON.parse(sessionsFile.text)
+                var d = JSON.parse(sessionsFile.text())
                 root.sessionCount = (d && d.sessions) ? d.sessions.length : 0
             } catch (e) { /* absent/garbage → hold count */ }
         }
@@ -188,7 +188,7 @@ Item {
     FileView {
         id: routeFile
         path: "/proc/net/route"
-        onTextChanged: root.netKind = root.parseRoute(routeFile.text)
+        onTextChanged: root.netKind = root.parseRoute(routeFile.text())
         Component.onCompleted: routeFile.reload()
     }
     Timer {

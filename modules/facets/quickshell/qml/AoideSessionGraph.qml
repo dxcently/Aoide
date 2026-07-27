@@ -32,6 +32,7 @@
 
 import QtQuick
 import QtQuick.Layouts
+import Quickshell
 import Quickshell.Io
 
 Item {
@@ -54,10 +55,8 @@ Item {
     // ── Graph path ─────────────────────────────────────────────────────────
     // Stage path: ~/Aoide/song/stage/graph.json (gitignored runtime; the nix
     // build never depends on it — checks.no-song-read enforces that).
-    readonly property string graphPath: Qt.resolvedUrl(
-        (StandardPaths.writableLocation(StandardPaths.HomeLocation)) +
-        "/Aoide/song/stage/graph.json"
-    )
+    readonly property string graphPath:
+        Quickshell.env("HOME") + "/Aoide/song/stage/graph.json"
 
     // ── Row model: flattened, indented tree ────────────────────────────────
     // The DAG-flattening logic (buildRows) is CANONICAL in GraphModel.qml so
@@ -114,15 +113,26 @@ Item {
                 spacing: 2
                 visible: root.rows.length > 0
                 model: root.rows
-                delegate: GraphRow {
+                // Wrapper Item declares required modelData — GraphRow itself
+                // has required properties, which disables implicit modelData
+                // injection into the delegate root (Qt6 rule); the wrapper
+                // captures it and hands it to GraphRow.row.
+                delegate: Item {
+                    id: rowWrap
+                    required property var modelData
                     width: treeList.width
-                    notes: root.notes
-                    row: modelData
-                    // Click a session row → jump to its terminal via the
-                    // shellbridge session-jump gate (same path as the bar chips).
-                    onActivate: function (windowAddress) {
-                        if (windowAddress)
-                            root.bridge.focusSession(windowAddress)
+                    implicitHeight: gr.implicitHeight
+                    GraphRow {
+                        id: gr
+                        width: parent.width
+                        notes: root.notes
+                        row: rowWrap.modelData
+                        // Click a session row → jump to its terminal via the
+                        // shellbridge session-jump gate (same path as bar chips).
+                        onActivate: function (windowAddress) {
+                            if (windowAddress)
+                                root.bridge.focusSession(windowAddress)
+                        }
                     }
                 }
             }
@@ -137,7 +147,7 @@ Item {
         path: root.graphPath
         onTextChanged: {
             try {
-                root.graph = JSON.parse(graphFile.text)
+                root.graph = JSON.parse(graphFile.text())
             } catch (err) {
                 console.warn("[aoide/graph] Failed to parse graph.json:", err)
             }

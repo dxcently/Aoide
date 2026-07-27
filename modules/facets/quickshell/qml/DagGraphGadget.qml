@@ -15,6 +15,7 @@
 // shellbridge gate (bridge.focusSession), same as the overlay.
 
 import QtQuick
+import Quickshell
 import Quickshell.Io
 
 Item {
@@ -25,10 +26,8 @@ Item {
 
     property var graph: ({ "schemaVersion": "0", "nodes": [], "edges": [] })
 
-    readonly property string graphPath: Qt.resolvedUrl(
-        (StandardPaths.writableLocation(StandardPaths.HomeLocation)) +
-        "/Aoide/song/stage/graph.json"
-    )
+    readonly property string graphPath:
+        Quickshell.env("HOME") + "/Aoide/song/stage/graph.json"
 
     // ── Shared flattening (canonical in GraphModel.qml) ────────────────────
     GraphModel {
@@ -227,7 +226,7 @@ Item {
         path: root.graphPath
         onTextChanged: {
             try {
-                root.graph = JSON.parse(graphFile.text)
+                root.graph = JSON.parse(graphFile.text())
             } catch (err) {
                 console.warn("[aoide/dag] parse graph.json:", err)
             }
