@@ -83,6 +83,18 @@ let
     # blur_popups extends the glass to the bar's PopupWindow children (the
     # gadget popouts) — same 0.5x snake_case rework spelling as ignore_alpha.
     layerrule = blur_popups on, match:namespace aoide-bar
+
+    # hyprglass (pkgs/hyprglass, loaded via the HM plugins list below):
+    # Liquid Glass on the quickshell surfaces, ON TOP of the blur+gloss —
+    # refraction/fresnel the flat gradient can't fake. Same namespaces as
+    # the layerrules; the wallpaper surface stays untouched.
+    plugin:hyprglass {
+        layers {
+            enabled = 1
+            namespaces = aoide-bar, aoide-dock
+            preset = glass
+        }
+    }
   '';
 
   # ── Hyprland keybinds for Aoide workflows ─────────────────────────────────
@@ -215,6 +227,10 @@ in
         package = null; # system programs.hyprland provides the binary
         portalPackage = null; # and the portal
         configType = "hyprlang"; # explicit: classic hyprland.conf, not lua
+
+        # hyprglass — ABI-pinned to this Hyprland (see pkgs/hyprglass).
+        # HM emits the `plugin = <path>` line; config in hyprNoteConfig.
+        plugins = [ pkgs.hyprglass ];
 
         # ── systemd / Wayland env handoff (the session-assembly seam) ──────
         # This is what actually brings the desktop up. When enabled the HM
