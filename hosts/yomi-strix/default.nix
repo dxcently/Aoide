@@ -53,4 +53,5 @@
 
   # Shipped dendrites (off unless wanted; aoide.mcp.enable stays false — house policy).
   aoide.obsidian.enable = false;
+  aoide.firefox.enable = true;
 }
