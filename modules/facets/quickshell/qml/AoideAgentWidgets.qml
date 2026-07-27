@@ -145,7 +145,11 @@ Item {
         id: panel
         y: root.edgeMargin
         width: root.dockWidth
-        height: parent.height - 2 * root.edgeMargin
+        // Content-sized container: with only the agent pair inside, a
+        // full-height slab reads as empty glass — the container wraps its
+        // two widgets instead (clamped to the screen when content grows).
+        height: Math.min(parent.height - 2 * root.edgeMargin,
+                         panelCol.implicitHeight + 20)
 
         // Slide reveal: off-screen when closed, edgeMargin when open.
         x: root.shown ? root.edgeMargin
@@ -170,8 +174,34 @@ Item {
             onContainsMouseChanged: root.overPanel = containsMouse
         }
 
-        ColumnLayout {
+        // ── The container body (khoa: the drawer IS a container) ───────────
+        // One Aero-glass panel the two agent gadgets sit INSIDE — the Win7
+        // sidebar reading. Glass + gloss + accent border, same language as
+        // the bar strip and GadgetFrame; the compositor's aoide-dock blur
+        // rule reads through the translucent body.
+        Rectangle {
             anchors.fill: parent
+            radius: 6
+            color: root.notes.paletteBg
+            opacity: root.glassOpacity
+            border.color: root.notes.paletteAccent
+            border.width: 1
+        }
+        Rectangle {
+            anchors.fill: parent
+            radius: 6
+            gradient: Gradient {
+                GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.10) }
+                GradientStop { position: 0.42; color: Qt.rgba(1, 1, 1, 0.03) }
+                GradientStop { position: 0.5;  color: Qt.rgba(1, 1, 1, 0.00) }
+                GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.03) }
+            }
+        }
+
+        ColumnLayout {
+            id: panelCol
+            anchors.fill: parent
+            anchors.margins: 10
             spacing: 10
 
             // ══ Header chrome with pin affordance ══════════════════════════
