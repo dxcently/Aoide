@@ -34,6 +34,7 @@ ShellRoot {
         exclusiveZone: 0
         color: "transparent"
         WlrLayershell.layer: WlrLayer.Background
+        WlrLayershell.namespace: "aoide-wallpaper"
         mask: Region { width: 0; height: 0 }
 
         AoideWallpaper {
@@ -50,6 +51,10 @@ ShellRoot {
         exclusiveZone: 28
         color: "transparent"
         WlrLayershell.layer: WlrLayer.Top
+        // Distinct namespace → target of the compositor facet's glass
+        // layerrule (blur behind the translucent barBg — dxflake's
+        // "namespace waybar" posture, aoide-native name).
+        WlrLayershell.namespace: "aoide-bar"
 
         AoideBar {
             anchors.fill: parent
@@ -72,6 +77,7 @@ ShellRoot {
         exclusiveZone: 0
         color: "transparent"
         WlrLayershell.layer: WlrLayer.Top
+        WlrLayershell.namespace: "aoide-dock"
 
         mask: Region {
             // Always-live hot strip.

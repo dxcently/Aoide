@@ -67,6 +67,19 @@ let
             passes  = ${toString blurPasses}
         }
     }
+
+    # Glass for the quickshell surfaces (dxflake's "namespace waybar" rule,
+    # aoide-native namespaces — set per-PanelWindow in shell.qml). Blur reads
+    # through the bar's translucent barBg and the dock's Aero frames; the
+    # wallpaper surface (aoide-wallpaper) is deliberately NOT blurred.
+    # ignore_alpha keeps the surfaces' fully-transparent regions (the dock's
+    # retracted drawer, the bar's popout gutter) from rendering as a grey
+    # blur stripe. (Field names per the 0.5x rules rework: "ignorealpha" is
+    # rejected by hyprctl on 0.56 — verified live.)
+    layerrule = blur on, match:namespace aoide-bar
+    layerrule = blur on, match:namespace aoide-dock
+    layerrule = ignore_alpha 0.05, match:namespace aoide-bar
+    layerrule = ignore_alpha 0.05, match:namespace aoide-dock
   '';
 
   # ── Hyprland keybinds for Aoide workflows ─────────────────────────────────
