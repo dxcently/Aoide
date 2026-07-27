@@ -108,7 +108,7 @@ let
     bind = SUPER, SPACE, exec, aoide shell launcher toggle
 
     # Lock screen
-    bind = SUPER, L, exec, aoide shell lock
+    bind = SUPER, ESCAPE, exec, aoide shell lock
 
     # Gadget dock popup (shellbridge → AoideAgentWidgets open-and-pin).
     # SUPER+G summons the LEFT-edge pinnable dock popup, which CONTAINS the DAG
@@ -140,9 +140,10 @@ let
     bind = SUPER, V, togglefloating
     bind = SUPER, F, fullscreen
 
-    # Focus movement — arrows carry the full left/down/up/right set; H/J/K
-    # add vim left/down/up. dxflake's SUPER+L (focus right) is NOT ported:
-    # SUPER+L is the Aoide lock bind above, so right stays arrow-only.
+    # Focus movement — arrows carry the full left/down/up/right set; H/J/K/L
+    # complete the vim set (left/down/up/right). dxflake's SUPER+L was
+    # blocked here by the Aoide lock bind, so the lock moved to SUPER+ESCAPE
+    # above, freeing L — the full hjkl set is now live, matching arrows.
     bind = SUPER, left, movefocus, l
     bind = SUPER, down, movefocus, d
     bind = SUPER, up, movefocus, u
@@ -150,6 +151,7 @@ let
     bind = SUPER, H, movefocus, l
     bind = SUPER, J, movefocus, d
     bind = SUPER, K, movefocus, u
+    bind = SUPER, L, movefocus, r
 
     # Move window (same directional scheme)
     bind = SUPER SHIFT, left, movewindow, l
@@ -159,6 +161,7 @@ let
     bind = SUPER SHIFT, H, movewindow, l
     bind = SUPER SHIFT, J, movewindow, d
     bind = SUPER SHIFT, K, movewindow, u
+    bind = SUPER SHIFT, L, movewindow, r
 
     # Resize — binde repeats while held (dxflake's step sizes)
     binde = SUPER ALT, left, resizeactive, -20 0
