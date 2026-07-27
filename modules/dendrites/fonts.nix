@@ -11,14 +11,12 @@
 #     BMP and are NOT in a typical monospace font. Coverage rationale:
 #       * symbola + noto-fonts carry the Musical Symbols block (U+1D100…),
 #         so notation renders instead of tofu.
-#       * noto-fonts-cjk-sans + the two azuki fonts cover CJK / kana.
+#       * noto-fonts-cjk-sans covers CJK / kana.
 #       * noto-fonts-color-emoji carries colour emoji.
 #       * material-icons / font-awesome / fira-code-symbols carry UI glyphs.
 #       * nerd-fonts.lekton is the desktop's primary face (stylix facet points
 #         monospace/sans/serif at "Lekton Nerd Font Mono"); the other nerd
 #         fonts are alternates.
-#   - The two azuki fonts build from pkgs/azuki-font{,-b} (fetchzip from
-#     azukifont.com — no local asset, so callPackage is enough).
 #
 # Unfree note: corefonts is unfree. devtools.nix also sets
 # nixpkgs.config.allowUnfree = true inside its own mkIf, but a host could enable
@@ -53,8 +51,6 @@
       nerd-fonts.comic-shanns-mono # nerd-patched Comic Shanns Mono
       nerd-fonts.shure-tech-mono # nerd-patched Share Tech Mono
       nerd-fonts.lekton # primary desktop face (stylix points here)
-      (pkgs.callPackage ../../pkgs/azuki-font-b { }) # azuki kana font (B weight)
-      (pkgs.callPackage ../../pkgs/azuki-font { }) # azuki kana font
     ];
   };
 }
