@@ -70,6 +70,41 @@ Item {
                 width: root.cellSize
                 height: root.cellSize
 
+                // ── Pantheon layering: every cell is a wireframe pane thrown
+                // over a depth echo — the echo cast toward the ROW'S CENTER,
+                // the vanishing point. Left cells cast right, right cells cast
+                // left, the inflection at dead center; the throw grows with
+                // distance so the whole row converges like a colonnade seen
+                // head-on. Downward y: the bar hangs from the top edge, so
+                // "toward screen center" is down.
+                readonly property real vanishDx: {
+                    var cellCenter = cell.x + root.cellSize / 2
+                    var rowCenter = cellRow.width / 2
+                    var d = (rowCenter - cellCenter) * 0.08
+                    return Math.max(-4, Math.min(4, d))
+                }
+
+                Rectangle { // back copy (depth stack)
+                    x: Math.round(cell.vanishDx)
+                    y: 3
+                    width: root.cellSize
+                    height: root.cellSize
+                    color: "transparent"
+                    border.color: root.notes.holoBlue
+                    border.width: 1
+                    opacity: 0.35
+                }
+
+                Rectangle { // front pane (the active cell wears the sliding
+                            // wireCyan activeBox instead — no double border)
+                    width: root.cellSize
+                    height: root.cellSize
+                    color: "transparent"
+                    border.color: root.notes.holoBlue
+                    border.width: 1
+                    opacity: cell.isActive ? 0 : 0.55
+                }
+
                 Text {
                     anchors.centerIn: parent
                     text: root.wsIcon(cell.modelData)
@@ -106,6 +141,25 @@ Item {
     // A SIBLING of the Row, not a child: a Row positioner assigns x to every
     // child, so an in-Row overlay gets slotted as item #0 (an empty square
     // beside the cells — the v2 rendering bug) instead of floating over them.
+    Rectangle { // the active box's own depth echo — rides the eased x below,
+                // converging on the same vanishing point as the cell echoes.
+        visible: root.activeIndex >= 0
+        z: 1
+        width: root.cellSize
+        height: root.cellSize
+        color: "transparent"
+        border.color: root.notes.holoBlue
+        border.width: 1
+        opacity: 0.5
+        y: 3
+        x: {
+            var boxCenter = activeBox.x + root.cellSize / 2
+            var rowCenter = cellRow.width / 2
+            var d = (rowCenter - boxCenter) * 0.08
+            return activeBox.x + Math.round(Math.max(-4, Math.min(4, d)))
+        }
+    }
+
     Rectangle {
         id: activeBox
         visible: root.activeIndex >= 0
