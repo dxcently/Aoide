@@ -80,8 +80,8 @@ ShellRoot {
     PanelWindow {
         id: barWin
         anchors { top: true; left: true; right: true }
-        implicitHeight: 36
-        exclusiveZone: 36
+        implicitHeight: bar.implicitHeight
+        exclusiveZone: bar.stripHeight
         color: "transparent"
         WlrLayershell.layer: WlrLayer.Top
         // Distinct namespace → target of the compositor facet's glass
@@ -90,6 +90,7 @@ ShellRoot {
         WlrLayershell.namespace: "aoide-bar"
 
         AoideBar {
+            id: bar
             anchors.fill: parent
             notes: notes
             bridge: bridge

@@ -47,7 +47,11 @@ Item {
 
     // v3 geometry (khoa: "the bar is too small… don't be restricted by the
     // specifications") — a taller strip, roomier cells, larger type.
-    implicitHeight: 36
+    // v5: khoa — the clef is sized to FIT the strip (the pop-out apron was
+    // tried and rolled back; a taller transparent surface let the wallpaper
+    // bleed through under the hairline).
+    readonly property int stripHeight: 36
+    implicitHeight: stripHeight
 
     // ── Live "now" tick for the clock (1 s) ────────────────────────────────
     property var now: new Date()
@@ -242,7 +246,10 @@ Item {
 
     // ══ The strip — Aero-glass (translucent barBg over compositor blur) ═════
     Rectangle {
-        anchors.fill: parent
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: root.stripHeight
         color: root.notes.barBg
         opacity: 0.82           // glass: lets the Hyprland blur read through
     }
@@ -251,7 +258,10 @@ Item {
     // laid OVER the glass, bright top half, hard stop at the midline (the
     // signature Aero "sheen line"), faint bloom at the bottom edge.
     Rectangle {
-        anchors.fill: parent
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: root.stripHeight
         gradient: Gradient {
             GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.20) }
             GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, 0.06) }
@@ -260,69 +270,89 @@ Item {
         }
     }
 
-    // Hairline bottom edge.
+    // Hairline bottom edge — the bar keeps its rose glass, but the wireframe
+    // hairline joins the cool field (wireCyan, base0C — falls back to accent
+    // when base16 is absent).
     Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: parent.bottom
+        y: root.stripHeight - 1
         height: 1
-        color: root.notes.barAccent
+        color: root.notes.wireCyan
         opacity: 0.5
     }
 
-    // Pantheon depth echo: a second, dimmer hairline 2px above the edge rule.
-    // Two parallel lines read as a stacked slab (the bar's "offset volume"),
-    // the subtle bar-scale cousin of the gadgets' wireframe depth stack.
+    // Pantheon depth echo: a second, dimmer wireCyan hairline 2px above the edge
+    // rule. Two parallel lines read as a stacked slab (the bar's "offset
+    // volume") — the bar sits on the TOP edge, so its slab projects DOWN toward
+    // the screen-centre vanishing point; this is the subtle bar-scale cousin of
+    // the gadgets' holoBlue depth stack.
     Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 2
+        y: root.stripHeight - 3
         height: 1
-        color: root.notes.barAccent
+        color: root.notes.wireCyan
         opacity: 0.2
     }
 
+    // ── The clef power glyph — sized to sit fully inside the strip ─────────
+    // A root-level sibling (NOT in the RowLayout) so its vertical centring is
+    // against the strip, not a row's line box. 16px: the 𝄞 glyph paints far
+    // beyond its em box (~1.8×), so this is the largest size whose full paint
+    // extent still clears the 36px strip (22px clipped at the bottom).
+    Text {
+        id: clefText
+        x: 12
+        z: 2
+        anchors.verticalCenter: parent.verticalCenter
+        text: "𝄞"
+        color: root.notes.barFg
+        style: Text.Outline
+        styleColor: "#000000"
+        font.family: "monospace"
+        font.pixelSize: 16
+        font.bold: true
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            // Generic command object through the existing bridge sender
+            // (no new QML IPC machinery invented — shellbridge routes it).
+            onClicked: root.bridge.sendCommand({ cmd: "powermenu" })
+        }
+    }
+
+    // ── Centered workspaces (khoa: "the workspaces should be in the middle")
+    // — a sibling overlay at true screen-centre, the bar-scale echo of the
+    // vanishing-point rule. Same overlay idiom as WorkspaceRow's activeBox.
+    WorkspaceRow {
+        id: centeredWorkspaces
+        z: 2
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: Math.round((root.stripHeight - height) / 2)
+        notes: root.notes
+    }
+
     RowLayout {
-        anchors.fill: parent
-        anchors.leftMargin: 12
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: root.stripHeight
+        anchors.leftMargin: 34   // clears the clef (root sibling at x 12)
         anchors.rightMargin: 12
         spacing: 12
 
-        // ══ LEFT: power glyph + workspaces + sessions ══════════════════════
+        // ══ LEFT: sessions + gadget tray (clef is a root sibling above) ═════
         Row {
             spacing: 12
             Layout.alignment: Qt.AlignVCenter
-
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "𝄞"
-                color: root.notes.barFg
-                style: Text.Outline
-                styleColor: "#000000"
-                font.family: "monospace"
-                font.pixelSize: 22
-                font.bold: true
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    // Generic command object through the existing bridge sender
-                    // (no new QML IPC machinery invented — shellbridge routes it).
-                    onClicked: root.bridge.sendCommand({ cmd: "powermenu" })
-                }
-            }
-
-            WorkspaceRow {
-                anchors.verticalCenter: parent.verticalCenter
-                notes: root.notes
-            }
 
             // Aoide-native: live agent-sessions cell → click opens the dock.
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: root.sessionCount > 0
                 text: "✎" + root.sessionCount
-                color: root.notes.barAccent
+                color: root.notes.paletteHot
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
@@ -345,7 +375,7 @@ Item {
                 text: "♫"
                 width: implicitWidth + 10
                 horizontalAlignment: Text.AlignHCenter
-                color: root.openGadget === "np" ? root.notes.barAccent : root.notes.barFg
+                color: root.openGadget === "np" ? root.notes.wireCyan : root.notes.barFg
                 opacity: root.openGadget === "np" ? 1.0 : 0.75
                 style: Text.Outline
                 styleColor: "#000000"
@@ -363,7 +393,7 @@ Item {
                 text: "▦"
                 width: implicitWidth + 10
                 horizontalAlignment: Text.AlignHCenter
-                color: root.openGadget === "meters" ? root.notes.barAccent : root.notes.barFg
+                color: root.openGadget === "meters" ? root.notes.wireCyan : root.notes.barFg
                 opacity: root.openGadget === "meters" ? 1.0 : 0.75
                 style: Text.Outline
                 styleColor: "#000000"
@@ -381,7 +411,7 @@ Item {
                 text: "⌁"
                 width: implicitWidth + 10
                 horizontalAlignment: Text.AlignHCenter
-                color: root.openGadget === "power" ? root.notes.barAccent : root.notes.barFg
+                color: root.openGadget === "power" ? root.notes.wireCyan : root.notes.barFg
                 opacity: root.openGadget === "power" ? 1.0 : 0.75
                 style: Text.Outline
                 styleColor: "#000000"
@@ -399,7 +429,7 @@ Item {
                 text: "◔"
                 width: implicitWidth + 10
                 horizontalAlignment: Text.AlignHCenter
-                color: root.openGadget === "clock" ? root.notes.barAccent : root.notes.barFg
+                color: root.openGadget === "clock" ? root.notes.wireCyan : root.notes.barFg
                 opacity: root.openGadget === "clock" ? 1.0 : 0.75
                 style: Text.Outline
                 styleColor: "#000000"
@@ -423,7 +453,7 @@ Item {
                 id: clockText
                 anchors.verticalCenter: parent.verticalCenter
                 text: Qt.formatDateTime(root.now, "hh:mm AP  dddd MMM dd")
-                color: root.calShown ? root.notes.barAccent : root.notes.barFg
+                color: root.calShown ? root.notes.wireCyan : root.notes.barFg
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
@@ -503,7 +533,7 @@ Item {
                 text: root.battFull
                       ? "bat.full"
                       : ("bat." + root.battPct + (root.battCharging ? "+" : ""))
-                color: (root.battCrit || root.battWarn) ? root.notes.paletteUrgent
+                color: (root.battCrit || root.battWarn) ? root.notes.glitchPink
                                                         : root.notes.barFg
                 opacity: (root.battWarn && !root.blinkOn) ? 0.3 : 1.0
                 Behavior on opacity { NumberAnimation { duration: 400 } }
@@ -520,11 +550,13 @@ Item {
                 }
             }
 
-            // Network glyph — "{glyph} /"
+            // Network callout — a live link reads in the cool wireframe field
+            // (holoBlue, base0D); a dead link recedes to dim barFg. vol./bat.
+            // stay barFg so their changing digits keep maximum legibility.
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "link." + root.netKind
-                color: root.notes.barFg
+                color: root.netKind === "down" ? root.notes.barFg : root.notes.holoBlue
                 opacity: root.netKind === "down" ? 0.55 : 1.0
                 style: Text.Outline
                 styleColor: "#000000"
@@ -543,7 +575,7 @@ Item {
     BarPopout {
         notes: root.notes
         cell: volText
-        title: "VOLUME"
+        title: "volume.level"
         popoutWidth: 180
         shown: root.volShown && root.volAvail
         Text {
@@ -560,7 +592,7 @@ Item {
     BarPopout {
         notes: root.notes
         cell: battText
-        title: "BATTERY"
+        title: "battery.gauge"
         popoutWidth: 180
         shown: root.battShown && root.battAvail
         Column {
@@ -589,7 +621,7 @@ Item {
     BarPopout {
         notes: root.notes
         cell: clockText
-        title: "CALENDAR"
+        title: "calendar.sheet"
         popoutWidth: 220
         shown: root.calShown
         CalendarGadget {
@@ -602,7 +634,7 @@ Item {
     BarPopout {
         notes: root.notes
         cell: npCell
-        title: "NOW PLAYING"
+        title: "nowplaying.score"
         shown: root.openGadget === "np"
         NowPlayingGadget {
             width: parent.width
@@ -612,7 +644,7 @@ Item {
     BarPopout {
         notes: root.notes
         cell: meterCell
-        title: "METERS"
+        title: "meters.pulse"
         shown: root.openGadget === "meters"
         MeterGadget {
             width: parent.width
@@ -622,7 +654,7 @@ Item {
     BarPopout {
         notes: root.notes
         cell: pwrCell
-        title: "POWER"
+        title: "power.reserve"
         shown: root.openGadget === "power"
         PowerGadget {
             width: parent.width
@@ -632,7 +664,7 @@ Item {
     BarPopout {
         notes: root.notes
         cell: clkCell
-        title: "CLOCK"
+        title: "clock.face"
         shown: root.openGadget === "clock"
         ClockGadget {
             width: parent.width

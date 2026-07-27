@@ -42,6 +42,22 @@ QtObject {
     readonly property color paletteHot:
         (raw.palette && raw.palette.hot) ? raw.palette.hot : paletteAccent
 
+    // ── Base16 scheme → semantic Pantheon accents ──────────────────────────
+    // The optional top-level base16 block (drachma's base16 tier) carries the
+    // full sixteen-slot terminal scheme. The Pantheon wireframe field draws its
+    // multicolor accents from it under semantic names — the cool wireframe cyan,
+    // hologram periwinkle, violet brain-glow and glitch pink of the reference
+    // stills. When the block is ABSENT every accent falls back to paletteAccent,
+    // so a note file without base16 renders exactly as the round-3 rose field.
+    readonly property color wireCyan:   // base0C — wireframe outlines + leaders
+        (raw.base16 && raw.base16.base0C) ? raw.base16.base0C : paletteAccent
+    readonly property color holoBlue:   // base0D — depth-stack back copies
+        (raw.base16 && raw.base16.base0D) ? raw.base16.base0D : paletteAccent
+    readonly property color violet:     // base0E — DAG project volumes
+        (raw.base16 && raw.base16.base0E) ? raw.base16.base0E : paletteAccent
+    readonly property color glitchPink: // base08 — reserved glitch/alt accent
+        (raw.base16 && raw.base16.base08) ? raw.base16.base08 : paletteAccent
+
     // ── Bar component shortcuts ────────────────────────────────────────────
     readonly property color barBg:     raw.bar ? raw.bar.bg     : paletteBg
     readonly property color barFg:     raw.bar ? raw.bar.fg     : paletteFg

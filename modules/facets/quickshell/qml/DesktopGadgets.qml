@@ -41,6 +41,23 @@ PanelWindow {
 
     readonly property int gadgetWidth: 288
 
+    // ── Vanishing point (round 4) ──────────────────────────────────────────
+    // Floating gadgets project their depth-stack back copies toward the screen
+    // centre. `vpX`/`vpY` are that point (per the brief: 960,540); each delegate
+    // derives its own normalized direction from its live centre vs this point,
+    // so dragging a gadget across the centre flips the stack's lean.
+    readonly property real vpX: 960
+    readonly property real vpY: 540
+
+    // Callout vocabulary — the floating pane wears the same lowercase dotted
+    // label as its docked twin. `kind` stays the logic key (Loader switch).
+    function calloutFor(kind) {
+        if (kind === "BATON") return "baton.control"
+        if (kind === "TERMINALS") return "terminals.roster"
+        if (kind === "DAG") return "dag.trace"
+        return ("" + kind).toLowerCase()
+    }
+
     // ── Input mask: union of floating gadget rects ─────────────────────────
     // itemFor(i) reads floatRep.count → the binding re-runs when the floating
     // set changes; Region.item then tracks that delegate's live geometry.
@@ -59,7 +76,7 @@ PanelWindow {
     // ── Gadget content components (one per tear-off-able kind) ─────────────
     Component {
         id: batonComp
-        BatonGadget { notes: root.notes }
+        BatonGadget { notes: root.notes; shared: root.shared }
     }
     Component {
         id: termComp
@@ -108,7 +125,16 @@ PanelWindow {
                     anchors.top: parent.top
                     width: root.gadgetWidth
                     notes: root.notes
-                    title: fd.kind
+                    title: root.calloutFor(fd.kind)
+                    // Direction toward the vanishing point (960,540): the back
+                    // copies lean whichever way screen-centre lies from this
+                    // gadget's live centre. Normalized by a half-screen so it is
+                    // ±1 near an edge and eases to ~0 near centre. fd.x/fd.y are
+                    // live during drag, so the lean tracks the drag.
+                    depthDx: Math.max(-1, Math.min(1,
+                        (root.vpX - (fd.x + root.gadgetWidth / 2)) / 480))
+                    depthDy: Math.max(-1, Math.min(1,
+                        (root.vpY - (fd.y + frame.implicitHeight / 2)) / 270))
                     Loader {
                         width: parent.width
                         sourceComponent: fd.kind === "BATON" ? batonComp

@@ -73,8 +73,8 @@ Item {
                 Text {
                     anchors.centerIn: parent
                     text: root.wsIcon(cell.modelData)
-                    color: cell.isActive ? root.notes.barAccent
-                          : (cell.isUrgent ? root.notes.paletteUrgent : root.notes.barFg)
+                    color: cell.isActive ? root.notes.wireCyan
+                          : (cell.isUrgent ? root.notes.glitchPink : root.notes.barFg)
                     style: Text.Outline
                     styleColor: "#000000"
                     font.family: "monospace"
@@ -114,7 +114,7 @@ Item {
         height: root.cellSize
         radius: 0
         color: "transparent"
-        border.color: root.notes.barAccent
+        border.color: root.notes.wireCyan
         border.width: 1
         x: root.activeIndex >= 0
            ? root.activeIndex * (root.cellSize + root.cellGap) : 0

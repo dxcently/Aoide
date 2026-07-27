@@ -1,16 +1,26 @@
-// GadgetFrame.qml — one Win7-gadget frame with box-drawing (ASCII) chrome.
+// GadgetFrame.qml — one Pantheon PANE (round 4 — the pane replaces the box).
 //
-// Wraps a single gadget's content on an Aero-glass panel: a semi-transparent
-// paletteBg Rectangle (reads as frosted glass over the compositor's Hyprland
-// blur) bordered in paletteAccent, topped by an ASCII title bar rendered with
-// double box-drawing characters:  ╔═[ TITLE ]═╗ … ║ body ║ … ╚═══════════╝.
-// All colors from notes (zero hardcoded hex); the chrome is monospace.
+// Round 4 retired the Windows-7 ASCII double-box chrome (╔═[ TITLE ]═╗ … ╚═╝).
+// A gadget is now a PANTHEON PANE: a thin hollow WIREFRAME outline (base0C
+// wireCyan, dim) around the SAME translucent Aero glass body + gloss (the glass
+// stays — blur, sheen and frost are untouched), with the title rendered as a
+// small lowercase dotted CALLOUT label sitting on the pane's top edge, tapped by
+// a short angled LEADER line — the reference stills' `optic nerve.LE.dk.002`
+// token pattern. All colors from notes (zero hardcoded hex; the one literal is
+// the transparent fill of the outline/depth copies).
 //
 // Usage (default property → children land in the body):
-//   GadgetFrame { notes: notes; title: "CLOCK"; ClockGadget { notes: notes } }
+//   GadgetFrame { notes: notes; title: "baton.control"; BatonGadget { … } }
 //
-// The title bar's fill dashes are sized to the panel width in JS so the ╗ always
-// lands at the right edge (machine-checked in node — see the task report).
+// ── Vanishing-point depth (round 4) ─────────────────────────────────────────
+// The two hollow back-outline copies no longer offset a fixed down-right: they
+// project toward the SCREEN CENTRE (the refs' vanishing point at 960,540). Each
+// host sets `depthDx`/`depthDy` — a normalized -1..1 direction — and the frame
+// multiplies the offset magnitudes by it, so a pane on the left edge stacks
+// rightward, a pane below-centre stacks up, etc. Default +1/+1 (down-right)
+// suits the top-left field. Magnitudes are unchanged from round 3 — subtle by
+// design. A clipping host must add `depthExtent` of headroom on the side the
+// direction points (recheck when flipping a sign — it changes which side clips).
 
 import QtQuick
 
@@ -21,27 +31,18 @@ Item {
     property string title: ""
 
     // ── Tear-off affordance (Win7 "drag gadget to the desktop") ─────────────
-    // When `floatable`, a small [↗] token is folded into the title line's tail
-    // (exactly the pin idiom from AoideAgentWidgets — an in-chrome glyph, not a
-    // free-floating button, so the computed ═ fill stays alignment-exact) and a
-    // transparent MouseArea over the right end emits floatRequested(). The dock
-    // wires this to DesktopGadgets; BarPopout leaves it false (no tear-off).
+    // A small dim ↗ token folded into the callout row's tail; a transparent
+    // MouseArea over it emits floatRequested(). The dock wires this to
+    // DesktopGadgets; BarPopout leaves it false (no tear-off).
     property bool floatable: false
     signal floatRequested()
 
-    // ── Chrome recede on trace (round 3) ────────────────────────────────────
-    // While a session is traced (the one-neon element blazes green somewhere in
-    // the body), the frame's own chrome steps back so nothing competes with the
-    // hot element. When `chromeDim` is true the title line, footer, and the
-    // wireframe depth outlines (the frame's "borders") drop to chromeOpacity;
-    // the glass body and its hairline edge are left alone — only chrome recedes.
-    //
-    // The frame DISCOVERS the trace itself from its body child's existing
-    // `shared` object (the same `shared.tracedSessionId` DAG + TERMINALS already
-    // read): a frame recedes only when ITS OWN gadget is trace-aware AND a trace
-    // is live. DAG + TERMINALS children carry `shared`, so their frames dim; the
-    // dock container, BATON, CLOCK and every other gadget have no such child, so
-    // they are unaffected. The property stays overridable (a host may force it).
+    // ── Chrome recede on trace (round 3, carried forward) ───────────────────
+    // While a session is traced (the one-neon element blazes green in the body),
+    // the pane's own chrome (callout, leader, outline, depth copies) steps back
+    // to chromeOpacity so nothing competes with the hot element. The glass body
+    // is left alone. The frame DISCOVERS the trace from its body child's `shared`
+    // object; frames whose gadget is not trace-aware are unaffected. Overridable.
     property bool chromeDim: {
         var items = body.data
         for (var i = 0; i < items.length; i++) {
@@ -56,84 +57,61 @@ Item {
 
     // ── Glass tuning ────────────────────────────────────────────────────────
     property real glassOpacity: 0.72
-    readonly property int chromePx: 12      // monospace cell size for the chrome
-    readonly property real cellW: chromePx * 0.6  // approx monospace advance
 
     // ── Pantheon wireframe-depth seam (tunable constants) ───────────────────
-    // Two hollow OUTLINE copies of the panel, offset down-right behind the
-    // glass, at decreasing opacity — the "stacked offset volume" read from the
-    // reference stills, laid OVER the Aero glass. Transparent fill + border
-    // only (no MouseArea) so they never intercept input. Containers that clip
-    // (BarPopout window, DesktopGadgets delegate) must add `depthExtent` of
-    // right/bottom headroom or the back copy is cut off.
-    property int depthOff1: 3        // near copy offset (px)
-    property int depthOff2: 6        // far copy offset (px)
+    // Two hollow OUTLINE copies of the pane, offset toward the vanishing point
+    // behind the glass, at decreasing opacity — the "stacked offset volume" read
+    // from the reference stills. Transparent fill + border only (no MouseArea)
+    // so they never intercept input. Back copies are holoBlue (base0D) — a step
+    // cooler/dimmer than the wireCyan front outline, so the stack reads as depth.
+    property int depthOff1: 3        // near copy offset magnitude (px)
+    property int depthOff2: 6        // far copy offset magnitude (px)
     property real depthOpacity1: 0.35
     property real depthOpacity2: 0.18
     readonly property int depthExtent: depthOff2   // headroom a clipper must add
 
+    // Vanishing-point direction — normalized -1..1; +1/+1 = down-right (default,
+    // suits the top-left field). Hosts override per their position vs (960,540).
+    property real depthDx: 1
+    property real depthDy: 1
+
     // ── Body content sink (children nest here) ──────────────────────────────
     default property alias content: body.data
 
-    implicitHeight: frameColumn.implicitHeight + 16
-
-    // ── ASCII title line: ╔═[ TITLE ]═╗ padded to the panel width ──────────
-    // segments: "╔═[ " + title + " ]" then fill "═" then "╗". Guard against a
-    // title longer than the available run (fill clamps to >= 0).
-    function titleLine(cols) {
-        var head = "╔═[ " + root.title + " ]"
-        var tail = root.floatable ? "[↗]╗" : "╗"
-        var fillCount = cols - head.length - tail.length
-        if (fillCount < 0) fillCount = 0
-        var fill = ""
-        for (var i = 0; i < fillCount; i++) fill += "═"
-        return head + fill + tail
-    }
-    function footerLine(cols) {
-        var c = cols - 2
-        if (c < 0) c = 0
-        var mid = ""
-        for (var i = 0; i < c; i++) mid += "═"
-        return "╚" + mid + "╝"
-    }
-    // How many monospace cells fit across the panel interior.
-    readonly property int cols: Math.max(8, Math.floor(width / cellW))
+    implicitHeight: frameColumn.implicitHeight + 14
 
     // ── Wireframe depth stack (declared first → renders behind the glass) ───
-    // Far copy (dimmer, +6) then near copy (+3): only the offset sliver past
-    // the panel's bottom-right edge shows as a clean outline; the rest reads as
-    // a faint double-rule ghost through the translucent glass.
+    // Far copy (dimmer, ×off2) then near copy (×off1), each projected along the
+    // vanishing-point direction. Only the sliver past the pane edge shows as a
+    // clean outline; the rest reads as a faint double-rule ghost through glass.
     Rectangle {
-        x: root.depthOff2; y: root.depthOff2
+        x: root.depthOff2 * root.depthDx; y: root.depthOff2 * root.depthDy
         width: root.width; height: root.height
         radius: 4
         color: "transparent"
-        border.color: notes.paletteAccent
+        border.color: notes.holoBlue
         border.width: 1
         opacity: root.depthOpacity2 * root.chromeOpacity
     }
     Rectangle {
-        x: root.depthOff1; y: root.depthOff1
+        x: root.depthOff1 * root.depthDx; y: root.depthOff1 * root.depthDy
         width: root.width; height: root.height
         radius: 4
         color: "transparent"
-        border.color: notes.paletteAccent
+        border.color: notes.holoBlue
         border.width: 1
         opacity: root.depthOpacity1 * root.chromeOpacity
     }
 
-    // ── Glass panel ─────────────────────────────────────────────────────────
+    // ── Glass panel (unchanged — blur/frost/translucency stays) ─────────────
     Rectangle {
         anchors.fill: parent
         radius: 4
         color: notes.paletteBg
         opacity: root.glassOpacity      // translucency → glass over blur
-        border.color: notes.paletteAccent
-        border.width: 1
     }
 
-    // Gloss — the Aero sheen (same CSS-trick gradient as the bar strip):
-    // bright top half, hard stop at the midline, faint bloom at the bottom.
+    // Gloss — the Aero sheen (bright top half, hard midline stop, faint bloom).
     Rectangle {
         anchors.fill: parent
         radius: 4
@@ -145,24 +123,85 @@ Item {
         }
     }
 
+    // ── Wireframe outline (the front face — crisp hollow rule over the glass) ─
+    Rectangle {
+        anchors.fill: parent
+        radius: 4
+        color: "transparent"
+        border.color: notes.wireCyan
+        border.width: 1
+        opacity: 0.5 * root.chromeOpacity
+    }
+
     Column {
         id: frameColumn
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.margins: 4
+        anchors.margins: 6
         spacing: 3
 
-        // ── ASCII title bar ──────────────────────────────────────────────
-        Text {
+        // ── Callout title — lowercase dotted label on a short angled leader ──
+        Item {
             width: parent.width
-            text: root.titleLine(root.cols)
-            color: notes.paletteAccent
-            opacity: root.chromeOpacity
-            font.family: "monospace"
-            font.pixelSize: root.chromePx
-            font.bold: true
-            clip: true
+            implicitHeight: Math.max(calloutText.implicitHeight, 12)
+
+            Row {
+                id: calloutRow
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 4
+
+                // Leader — the refs' anchor tick + short rule tapping the label.
+                Canvas {
+                    id: leader
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 13
+                    height: 10
+                    opacity: 0.6 * root.chromeOpacity
+                    onPaint: {
+                        var ctx = getContext("2d")
+                        ctx.reset()
+                        ctx.clearRect(0, 0, width, height)
+                        ctx.strokeStyle = root.notes.wireCyan
+                        ctx.fillStyle = root.notes.wireCyan
+                        ctx.lineWidth = 1
+                        var cy = height / 2
+                        // anchor tick at the left, a horizontal rule, a terminal dot
+                        ctx.beginPath(); ctx.moveTo(1, cy - 3); ctx.lineTo(1, cy + 3); ctx.stroke()
+                        ctx.beginPath(); ctx.moveTo(1, cy); ctx.lineTo(width - 2, cy); ctx.stroke()
+                        ctx.beginPath(); ctx.arc(width - 2, cy, 1.3, 0, 2 * Math.PI); ctx.fill()
+                    }
+                    Connections {
+                        target: root.notes
+                        function onWireCyanChanged() { leader.requestPaint() }
+                    }
+                }
+
+                Text {
+                    id: calloutText
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.title
+                    color: notes.paletteFg
+                    opacity: 0.55 * root.chromeOpacity
+                    font.family: "monospace"
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                }
+            }
+
+            // Tear-off token — dim ↗ at the callout's tail (affordance, not song).
+            Text {
+                id: floatToken
+                visible: root.floatable
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: "↗"
+                color: notes.wireCyan
+                opacity: 0.6 * root.chromeOpacity
+                font.family: "monospace"
+                font.pixelSize: 12
+            }
         }
 
         // ── Body (children nest here via default alias) ──────────────────
@@ -171,31 +210,18 @@ Item {
             width: parent.width
             implicitHeight: childrenRect.height
         }
-
-        // ── ASCII footer ─────────────────────────────────────────────────
-        Text {
-            width: parent.width
-            text: root.footerLine(root.cols)
-            color: notes.paletteAccent
-            opacity: 0.7 * root.chromeOpacity
-            font.family: "monospace"
-            font.pixelSize: root.chromePx
-            clip: true
-        }
     }
 
-    // ── Tear-off click target ─────────────────────────────────────────────
-    // Sits over the [↗] token at the right end of the title line. Declared
-    // AFTER frameColumn so it stacks above the title Text and takes the click.
+    // ── Tear-off click target — over the ↗ token at the callout's right end ──
     MouseArea {
         visible: root.floatable
         enabled: root.floatable
-        width: 4 * root.cellW
-        height: root.chromePx + 8
+        width: 22
+        height: 22
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.rightMargin: 4
-        anchors.topMargin: 4
+        anchors.rightMargin: 3
+        anchors.topMargin: 3
         cursorShape: Qt.PointingHandCursor
         onClicked: root.floatRequested()
     }

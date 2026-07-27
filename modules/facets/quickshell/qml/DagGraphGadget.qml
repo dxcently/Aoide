@@ -268,8 +268,8 @@ Item {
                                 return
                             var step = root.indentStep
                             var h = height, cy = h / 2
-                            // Hot child → green leader + dot; rest → rose accent.
-                            var leaderColor = rowItem.traced ? notes.paletteHot : notes.paletteAccent
+                            // Hot child → green leader + dot; rest → wireCyan.
+                            var leaderColor = rowItem.traced ? notes.paletteHot : notes.wireCyan
                             ctx.strokeStyle = leaderColor
                             ctx.fillStyle = leaderColor
                             ctx.lineWidth = root.leaderWidth
@@ -364,24 +364,27 @@ Item {
                         }
 
                         // Outer outline. Traced node blazes: 2px HOT (green)
-                        // border, full bright, a faint fill. Rest nodes keep the
-                        // rose accent — one green element against a rose field.
+                        // border, full bright, a faint fill. Rest nodes wear the
+                        // cool wireframe field — PROJECT volumes violet (base0E),
+                        // SESSION volumes wireCyan (base0C) — one green element
+                        // blazing against that multicolor field.
                         Rectangle {
                             anchors.fill: parent
                             radius: 2
                             color: rowItem.traced ? notes.barBg : "transparent"
-                            border.color: rowItem.traced ? notes.paletteHot : notes.paletteAccent
+                            border.color: rowItem.traced ? notes.paletteHot
+                                          : (rowItem.isProject ? notes.violet : notes.wireCyan)
                             border.width: rowItem.traced ? 2 : 1
                             opacity: rowItem.outlineOpacity
                         }
-                        // Inner rule → double-line volume for PROJECT nodes.
+                        // Inner rule → double-line volume for PROJECT nodes (violet).
                         Rectangle {
                             visible: rowItem.isProject
                             anchors.fill: parent
                             anchors.margins: 2
                             radius: 1
                             color: "transparent"
-                            border.color: notes.paletteAccent
+                            border.color: notes.violet
                             border.width: 1
                             opacity: rowItem.outlineOpacity * 0.7
                         }

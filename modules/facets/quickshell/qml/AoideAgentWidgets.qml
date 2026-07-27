@@ -179,27 +179,31 @@ Item {
         }
 
         // ── Pantheon wireframe-depth stack (container body) ────────────────
-        // Same recipe as GadgetFrame: two hollow offset outline copies behind
-        // the container glass. Declared first → render behind the panel; the
-        // 10px panelCol margin absorbs the +6 offset so nothing clips. Border-
-        // only + no MouseArea → never intercept input.
+        // Same recipe as GadgetFrame: two hollow offset outline copies (holoBlue,
+        // base0D) behind the container glass. VANISHING-POINT direction: the dock
+        // hugs the LEFT edge, so its back copies project RIGHT (toward screen
+        // centre) and only SLIGHTLY down (depthDy 0.45) — a right-dominant stack.
+        // Declared first → render behind the panel; the 10px panelCol margin
+        // absorbs the offset so nothing clips. Border-only, no MouseArea.
         readonly property int depthOff1: 3
         readonly property int depthOff2: 6
+        readonly property real depthDx: 1
+        readonly property real depthDy: 0.45
         Rectangle {
-            x: parent.depthOff2; y: parent.depthOff2
+            x: parent.depthOff2 * parent.depthDx; y: parent.depthOff2 * parent.depthDy
             width: parent.width; height: parent.height
             radius: 6
             color: "transparent"
-            border.color: root.notes.paletteAccent
+            border.color: root.notes.holoBlue
             border.width: 1
             opacity: 0.18
         }
         Rectangle {
-            x: parent.depthOff1; y: parent.depthOff1
+            x: parent.depthOff1 * parent.depthDx; y: parent.depthOff1 * parent.depthDy
             width: parent.width; height: parent.height
             radius: 6
             color: "transparent"
-            border.color: root.notes.paletteAccent
+            border.color: root.notes.holoBlue
             border.width: 1
             opacity: 0.35
         }
@@ -214,8 +218,15 @@ Item {
             radius: 6
             color: root.notes.paletteBg
             opacity: root.glassOpacity
-            border.color: root.notes.paletteAccent
+        }
+        // Wireframe outline (front face) — crisp wireCyan hollow rule over glass.
+        Rectangle {
+            anchors.fill: parent
+            radius: 6
+            color: "transparent"
+            border.color: root.notes.wireCyan
             border.width: 1
+            opacity: 0.5
         }
         Rectangle {
             anchors.fill: parent
@@ -234,46 +245,66 @@ Item {
             anchors.margins: 10
             spacing: 10
 
-            // ══ Header chrome with pin affordance ══════════════════════════
-            // Matches GadgetFrame's box-drawing language: a double-rule title
-            // bar with a [pin] slot. Glyph: [■] pinned / [+] unpinned.
-            //   ╔═[ GADGETS ]══…══[■]═╗   (pinned)
-            //   ╔═[ GADGETS ]══…══[+]═╗   (unpinned)
+            // ══ Header callout with pin affordance ═════════════════════════
+            // The container's own Pantheon callout: `gadgets.case` on a short
+            // leader (echoing GadgetFrame), with a lowercase dotted pin token at
+            // the tail — `pin.on` when pinned, `pin.off` when peeking.
             Item {
                 Layout.fillWidth: true
-                implicitHeight: headerText.implicitHeight
+                implicitHeight: Math.max(headerText.implicitHeight, 12)
 
-                // Fill-dashes are computed in JS so the ╗ lands flush right and
-                // the [pin] slot sits just before it (mirrors GadgetFrame.titleLine).
-                readonly property int chromePx: 12
-                readonly property real cellW: chromePx * 0.6
-                readonly property int cols: Math.max(16, Math.floor(width / cellW))
-                readonly property string pinGlyph: root.pinned ? "[■]" : "[+]"
-                function headerLine(cols) {
-                    var head = "╔═[ GADGETS ]"
-                    var tail = pinGlyph + "═╗"
-                    var fillCount = cols - head.length - tail.length
-                    if (fillCount < 0) fillCount = 0
-                    var fill = ""
-                    for (var i = 0; i < fillCount; i++) fill += "═"
-                    return head + fill + tail
+                Row {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 4
+
+                    // Leader — anchor tick + rule + terminal dot (wireCyan dim).
+                    Canvas {
+                        id: headerLeader
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 13
+                        height: 10
+                        opacity: 0.6
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.reset(); ctx.clearRect(0, 0, width, height)
+                            ctx.strokeStyle = notes.wireCyan; ctx.fillStyle = notes.wireCyan
+                            ctx.lineWidth = 1
+                            var cy = height / 2
+                            ctx.beginPath(); ctx.moveTo(1, cy - 3); ctx.lineTo(1, cy + 3); ctx.stroke()
+                            ctx.beginPath(); ctx.moveTo(1, cy); ctx.lineTo(width - 2, cy); ctx.stroke()
+                            ctx.beginPath(); ctx.arc(width - 2, cy, 1.3, 0, 2 * Math.PI); ctx.fill()
+                        }
+                        Connections {
+                            target: notes
+                            function onWireCyanChanged() { headerLeader.requestPaint() }
+                        }
+                    }
+
+                    Text {
+                        id: headerText
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "gadgets.case"
+                        color: notes.paletteFg
+                        opacity: 0.6
+                        font.family: "monospace"
+                        font.pixelSize: 11
+                    }
                 }
 
+                // Pin token — lowercase dotted state at the tail; click toggles.
                 Text {
-                    id: headerText
-                    width: parent.width
-                    text: parent.headerLine(parent.cols)
-                    color: notes.paletteAccent
+                    id: pinToken
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.pinned ? "pin.on" : "pin.off"
+                    color: root.pinned ? notes.wireCyan : notes.paletteFg
+                    opacity: root.pinned ? 0.85 : 0.5
                     font.family: "monospace"
-                    font.pixelSize: parent.chromePx
-                    font.bold: true
-                    clip: true
+                    font.pixelSize: 10
                 }
-
-                // Click target over the [pin] slot at the right end. Sized to a
-                // few cells; toggles the sticky pin. Sits above panelHover.
                 MouseArea {
-                    width: 4 * parent.cellW
+                    width: pinToken.implicitWidth + 12
                     height: parent.height
                     anchors.right: parent.right
                     cursorShape: Qt.PointingHandCursor
@@ -295,12 +326,13 @@ Item {
                 GadgetFrame {
                     Layout.fillWidth: true
                     notes: root.notes
-                    title: "BATON"
+                    title: "baton.control"
                     floatable: true
                     onFloatRequested: root.shared.floatGadget("BATON")
                     BatonGadget {
                         width: parent.width
                         notes: root.notes
+                        shared: root.shared
                     }
                 }
 
@@ -308,7 +340,7 @@ Item {
                 GadgetFrame {
                     Layout.fillWidth: true
                     notes: root.notes
-                    title: "TERMINALS"
+                    title: "terminals.roster"
                     floatable: true
                     onFloatRequested: root.shared.floatGadget("TERMINALS")
                     TerminalManagerGadget {
@@ -323,7 +355,7 @@ Item {
                 GadgetFrame {
                     Layout.fillWidth: true
                     notes: root.notes
-                    title: "DAG"
+                    title: "dag.trace"
                     floatable: true
                     onFloatRequested: root.shared.floatGadget("DAG")
                     DagGraphGadget {
