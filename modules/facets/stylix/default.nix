@@ -71,13 +71,17 @@ let
     };
   };
 
-  # ── base16 scheme from the v0 palette ─────────────────────────────────────
+  # ── base16 scheme ─────────────────────────────────────────────────────────
+  # Preferred source: the song's full base16 note tier (`aoide.notes.base16`,
+  # all 16 slots, base16-standard semantics) — the real scheme, baked verbatim.
+  # Fallback: synthesise from the 4-anchor palette (v0 behaviour) so songs
+  # that carry no scheme still theme coherently.
+  scheme = if t.base16 != null then lib.mapAttrs (_: stripHash) t.base16 else synthesisedScheme;
+
   # v0 palette is base16-closed (options.nix): bg=base00, fg=base05,
-  # accent=base0D, urgent=base08. We synthesise a full base00..base0F so Stylix
-  # has a complete scheme; the four authored anchors drive the salient slots and
-  # the resolved component tier informs the surface-adjacent slots. (v1's
-  # design-system work replaces this synthesis with a real 16-colour derivation.)
-  scheme = {
+  # accent=base0D, urgent=base08. The four authored anchors drive the salient
+  # slots and the resolved component tier informs the surface-adjacent slots.
+  synthesisedScheme = {
     base00 = stripHash p.bg; # background
     base01 = stripHash resolved.bar.bg; # lighter bg (status surfaces) ← bar.bg
     base02 = stripHash resolved.window.borderInactive; # selection bg ← window.borderInactive

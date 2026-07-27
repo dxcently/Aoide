@@ -20,6 +20,31 @@
       urgent = "#ff7a68"; # sunset ember       (base08)
     };
 
+    # ── Base16 tier — "pantheon bw" (the terminal scheme) ──────────────────
+    # Mainly black & white per khoa: a true grayscale ramp (00–07, faint cool
+    # cast so it sits with the plum surfaces) with the accent set drawn from
+    # the Pantheon reference stills (~/Aoide-Wiki/references/pantheon/):
+    # optic-nerve neon green, wireframe cyan, hologram periwinkle, violet
+    # brain-glow, magenta-pink glitch. Slots follow the base16 standard.
+    aoide.notes.base16 = {
+      base00 = "#0a0a0d"; # near-black field
+      base01 = "#141419"; # lighter bg (status)
+      base02 = "#26262e"; # selection
+      base03 = "#55555f"; # comments
+      base04 = "#9a9aa5"; # dark fg
+      base05 = "#e8e8ec"; # default fg (near-white)
+      base06 = "#f5f5f7"; # light fg
+      base07 = "#ffffff"; # brightest — the window-key white
+      base08 = "#ff5f87"; # red    — magenta-pink glitch
+      base09 = "#d9a066"; # orange — muted amber (kept quiet)
+      base0A = "#d8e07a"; # yellow — pale trace-line chartreuse
+      base0B = "#3fe97f"; # green  — THE optic-nerve neon
+      base0C = "#5fd8e8"; # cyan   — wireframe lines
+      base0D = "#7d9bff"; # blue   — hologram periwinkle
+      base0E = "#c583f2"; # magenta— violet brain-glow
+      base0F = "#9a6b8f"; # brown  — dim mauve (deprecated)
+    };
+
     # ── Component tier (v0) ────────────────────────────────────────────────
     # null → fall back to palette; the key does the work (moonlight's idiom).
     aoide.notes.bar = {

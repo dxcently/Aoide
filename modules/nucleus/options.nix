@@ -80,6 +80,41 @@ let
     };
   };
 
+  # ── Base16 scheme submodule (optional full-scheme tier) ───────────────────
+  # A song MAY carry a complete base16 scheme following the base16 standard's
+  # slot semantics (https://github.com/chriskempson/base16 — 00..07 the
+  # grayscale ramp, 08..0F the accent set). When present, the Stylix facet
+  # bakes it verbatim instead of synthesising a degenerate scheme from the
+  # 4-anchor palette. All 16 slots are required once the tier is given — a
+  # partial scheme would silently fall back per-slot and drift.
+  base16Roles = {
+    base00 = "default background";
+    base01 = "lighter background (status bars, line numbers)";
+    base02 = "selection background";
+    base03 = "comments, invisibles";
+    base04 = "dark foreground (status bars)";
+    base05 = "default foreground";
+    base06 = "light foreground";
+    base07 = "lightest background / bright foreground";
+    base08 = "red — variables, errors, urgent";
+    base09 = "orange — integers, constants";
+    base0A = "yellow — classes, search highlight";
+    base0B = "green — strings, success";
+    base0C = "cyan — support, regex, escapes";
+    base0D = "blue — functions, headings, primary accent";
+    base0E = "magenta — keywords, storage";
+    base0F = "brown — deprecated, embedded punctuation";
+  };
+  base16Type = types.submodule {
+    options = lib.mapAttrs (
+      slot: role:
+      mkOption {
+        type = hexColor;
+        description = "base16 ${slot}: ${role}.";
+      }
+    ) base16Roles;
+  };
+
   # ── Surface-ownership registry entry ──────────────────────────────────────
   surfaceType = types.submodule {
     options = {
@@ -137,6 +172,17 @@ in
             type = paletteType;
             default = { };
             description = "Palette tier (base16-derived): bg / fg / accent / urgent.";
+          };
+          base16 = mkOption {
+            type = types.nullOr base16Type;
+            default = null;
+            description = ''
+              Optional full base16 scheme (all 16 slots, base16-standard
+              semantics). When set, the Stylix facet bakes this scheme for
+              terminals/editors/GTK instead of synthesising one from the
+              4-anchor palette. The palette tier still drives the live
+              (stage/notes.json) side; keep the two in the same key.
+            '';
           };
           bar = mkOption {
             type = barType;
