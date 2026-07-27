@@ -62,6 +62,19 @@ Item {
         border.width: 1
     }
 
+    // Gloss — the Aero sheen (same CSS-trick gradient as the bar strip):
+    // bright top half, hard stop at the midline, faint bloom at the bottom.
+    Rectangle {
+        anchors.fill: parent
+        radius: 4
+        gradient: Gradient {
+            GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.14) }
+            GradientStop { position: 0.42; color: Qt.rgba(1, 1, 1, 0.04) }
+            GradientStop { position: 0.5;  color: Qt.rgba(1, 1, 1, 0.00) }
+            GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.04) }
+        }
+    }
+
     Column {
         id: frameColumn
         anchors.left: parent.left

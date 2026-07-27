@@ -47,8 +47,8 @@ ShellRoot {
     PanelWindow {
         id: barWin
         anchors { top: true; left: true; right: true }
-        implicitHeight: 28
-        exclusiveZone: 28
+        implicitHeight: 36
+        exclusiveZone: 36
         color: "transparent"
         WlrLayershell.layer: WlrLayer.Top
         // Distinct namespace → target of the compositor facet's glass

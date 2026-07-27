@@ -45,7 +45,9 @@ Item {
     required property var notes
     required property var bridge
 
-    implicitHeight: 28
+    // v3 geometry (khoa: "the bar is too small… don't be restricted by the
+    // specifications") — a taller strip, roomier cells, larger type.
+    implicitHeight: 36
 
     // ── Live "now" tick for the clock (1 s) ────────────────────────────────
     property var now: new Date()
@@ -226,32 +228,45 @@ Item {
         openGadget = (openGadget === key) ? "" : key
     }
 
-    // ══ The strip — subtle Aero-glass (translucent barBg over compositor blur) ══
+    // ══ The strip — Aero-glass (translucent barBg over compositor blur) ═════
     Rectangle {
         anchors.fill: parent
         color: root.notes.barBg
         opacity: 0.82           // glass: lets the Hyprland blur read through
+    }
 
-        // Hairline bottom edge.
-        Rectangle {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            height: 1
-            color: root.notes.barAccent
-            opacity: 0.5
+    // Gloss — the Win7 Aero sheen, done the CSS-trick way: a white gradient
+    // laid OVER the glass, bright top half, hard stop at the midline (the
+    // signature Aero "sheen line"), faint bloom at the bottom edge.
+    Rectangle {
+        anchors.fill: parent
+        gradient: Gradient {
+            GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.20) }
+            GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, 0.06) }
+            GradientStop { position: 0.52; color: Qt.rgba(1, 1, 1, 0.00) }
+            GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.05) }
         }
+    }
+
+    // Hairline bottom edge.
+    Rectangle {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: 1
+        color: root.notes.barAccent
+        opacity: 0.5
     }
 
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: 8
-        anchors.rightMargin: 8
-        spacing: 8
+        anchors.leftMargin: 12
+        anchors.rightMargin: 12
+        spacing: 12
 
         // ══ LEFT: power glyph + workspaces + sessions ══════════════════════
         Row {
-            spacing: 8
+            spacing: 12
             Layout.alignment: Qt.AlignVCenter
 
             // Far-left end-cap ornament: compact clef tail (ornament vocab).
@@ -263,7 +278,7 @@ Item {
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
-                font.pixelSize: 13
+                font.pixelSize: 15
             }
 
             Text {
@@ -273,7 +288,7 @@ Item {
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
-                font.pixelSize: 18
+                font.pixelSize: 22
                 font.bold: true
                 MouseArea {
                     anchors.fill: parent
@@ -298,7 +313,7 @@ Item {
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
-                font.pixelSize: 14
+                font.pixelSize: 16
                 font.bold: true
                 MouseArea {
                     anchors.fill: parent
@@ -315,12 +330,14 @@ Item {
                 id: npCell
                 anchors.verticalCenter: parent.verticalCenter
                 text: "♫"
+                width: implicitWidth + 10
+                horizontalAlignment: Text.AlignHCenter
                 color: root.openGadget === "np" ? root.notes.barAccent : root.notes.barFg
                 opacity: root.openGadget === "np" ? 1.0 : 0.75
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
-                font.pixelSize: 14
+                font.pixelSize: 17
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
@@ -331,12 +348,14 @@ Item {
                 id: meterCell
                 anchors.verticalCenter: parent.verticalCenter
                 text: "▦"
+                width: implicitWidth + 10
+                horizontalAlignment: Text.AlignHCenter
                 color: root.openGadget === "meters" ? root.notes.barAccent : root.notes.barFg
                 opacity: root.openGadget === "meters" ? 1.0 : 0.75
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
-                font.pixelSize: 14
+                font.pixelSize: 17
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
@@ -347,12 +366,14 @@ Item {
                 id: pwrCell
                 anchors.verticalCenter: parent.verticalCenter
                 text: "⌁"
+                width: implicitWidth + 10
+                horizontalAlignment: Text.AlignHCenter
                 color: root.openGadget === "power" ? root.notes.barAccent : root.notes.barFg
                 opacity: root.openGadget === "power" ? 1.0 : 0.75
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
-                font.pixelSize: 14
+                font.pixelSize: 17
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
@@ -363,12 +384,14 @@ Item {
                 id: clkCell
                 anchors.verticalCenter: parent.verticalCenter
                 text: "◔"
+                width: implicitWidth + 10
+                horizontalAlignment: Text.AlignHCenter
                 color: root.openGadget === "clock" ? root.notes.barAccent : root.notes.barFg
                 opacity: root.openGadget === "clock" ? 1.0 : 0.75
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
-                font.pixelSize: 14
+                font.pixelSize: 17
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
@@ -392,7 +415,7 @@ Item {
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
-                font.pixelSize: 13
+                font.pixelSize: 15
                 font.bold: true
                 MouseArea {
                     anchors.fill: parent
@@ -407,7 +430,7 @@ Item {
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
-                font.pixelSize: 13
+                font.pixelSize: 15
                 opacity: 0.8
             }
             Text {
@@ -417,7 +440,7 @@ Item {
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
-                font.pixelSize: 13
+                font.pixelSize: 15
                 font.bold: true
                 elide: Text.ElideRight
             }
@@ -428,7 +451,7 @@ Item {
         // ══ RIGHT: volume  battery  network (" / " seps) ═══════════════════
         Row {
             id: rightRow
-            spacing: 6
+            spacing: 10
             Layout.alignment: Qt.AlignVCenter
 
             // Volume — "/ {icon} {pct}% /"  (muted → "/ (° × ° ) /")
@@ -444,7 +467,7 @@ Item {
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
-                font.pixelSize: 13
+                font.pixelSize: 15
                 font.bold: true
                 MouseArea {
                     anchors.fill: parent
@@ -476,7 +499,7 @@ Item {
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
-                font.pixelSize: 13
+                font.pixelSize: 15
                 font.bold: true
                 MouseArea {
                     anchors.fill: parent
@@ -495,7 +518,7 @@ Item {
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
-                font.pixelSize: 13
+                font.pixelSize: 15
             }
 
             // Far-right end-cap ornament: staff run closing on a final
@@ -509,7 +532,7 @@ Item {
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
-                font.pixelSize: 13
+                font.pixelSize: 15
             }
         }
     }

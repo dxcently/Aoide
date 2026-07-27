@@ -21,7 +21,7 @@ Item {
     id: root
     required property var notes
 
-    readonly property int cellSize: 24
+    readonly property int cellSize: 28
     readonly property int cellGap: 4
 
     implicitWidth: cellRow.implicitWidth
@@ -61,24 +61,6 @@ Item {
         id: cellRow
         spacing: root.cellGap
 
-        // ── Sliding active-box overlay (eases between cells) ──────────────
-        Rectangle {
-            id: activeBox
-            visible: root.activeIndex >= 0
-            z: 1
-            width: root.cellSize
-            height: root.cellSize
-            radius: 0
-            color: "transparent"
-            border.color: root.notes.barAccent
-            border.width: 1
-            x: root.activeIndex >= 0
-               ? root.activeIndex * (root.cellSize + root.cellGap) : 0
-            Behavior on x {
-                NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
-            }
-        }
-
         Repeater {
             model: root.wsList
             delegate: Item {
@@ -99,7 +81,7 @@ Item {
                     style: Text.Outline
                     styleColor: "#000000"
                     font.family: "monospace"
-                    font.pixelSize: 15
+                    font.pixelSize: 17
                     font.bold: cell.isActive
 
                     // Urgent pulse (blink_red homage).
@@ -120,6 +102,28 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    // ── Sliding active-box overlay (eases between cells) ──────────────────
+    // A SIBLING of the Row, not a child: a Row positioner assigns x to every
+    // child, so an in-Row overlay gets slotted as item #0 (an empty square
+    // beside the cells — the v2 rendering bug) instead of floating over them.
+    Rectangle {
+        id: activeBox
+        visible: root.activeIndex >= 0
+        z: 1
+        width: root.cellSize
+        height: root.cellSize
+        radius: 0
+        color: "transparent"
+        border.color: root.notes.barAccent
+        border.width: 1
+        x: root.activeIndex >= 0
+           ? root.activeIndex * (root.cellSize + root.cellGap) : 0
+        y: 0
+        Behavior on x {
+            NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
         }
     }
 }
