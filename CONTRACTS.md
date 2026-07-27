@@ -95,6 +95,22 @@ Rules:
 Facets (`modules/facets/`) are the same shape but MAY read `aoide.notes` and
 MAY declare `aoide.surfaces.<name>.owner` — they read no other module.
 
+### Repo shape (the root is closed)
+
+The repo root is **closed**: `modules/`, `hosts/`, `pkgs/`, `lib/`, `docs/`,
+`song/`, plus flake furniture (`flake.nix`, `CONTRACTS.md`, `README.md`, `.git*`)
+and nothing else. New content lands **inside the existing tree at its designated
+place** — never a new root directory:
+
+- covers (wallpapers) → `song/covers/`
+- chimes (sounds) → `song/chimes/`
+- per-song assets → `song/repertoire/<song>/`
+- module assets → next to their module, as a directory dendrite/facet
+
+Content paths are looked up in the Song Map (`concepts/Song-Vocabulary` in the
+wiki). Creating a new root directory is a **contract change**, not a
+convenience: it lands here first, with review — not sprayed into the tree.
+
 ---
 
 ## 3. `aoide schema --json` output — **v0**

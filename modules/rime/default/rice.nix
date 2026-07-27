@@ -61,6 +61,12 @@
     # A literal nix path (copied to the store — not a song/ runtime read), so
     # the facet bakes it as the Stylix base-context image instead of the
     # solid-colour fallback. null here would take that fallback.
-    aoide.notes.wallpaper = ../../../assets/wallpapers/hero.webp;
+    #
+    # The cover lives at song/covers/ — its designated home in the Song Map
+    # (Song-Vocabulary: cover = wallpaper → song/covers/). This is COMMITTED
+    # song content, i.e. versioned score, legitimately read at eval: checks.nix
+    # noSongRead bans only the song/ RUNTIME infixes (stage/ · backstage/ ·
+    # auditions/ · catalog/ · index/), never song/covers/.
+    aoide.notes.wallpaper = ../../../song/covers/hero.webp;
   };
 }
