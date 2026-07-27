@@ -154,6 +154,31 @@ Item {
                 roster.append(rowObj(list[j]))
     }
 
+    // ── Neon-dominance tuning (round 2) — the traced row is THE hot element ─
+    // across BOTH gadgets, so its highlight matches the DAG's traced-node blaze:
+    // 2px border, a soft two-ring halo (the depth-stack trick as a glow).
+    property real haloOpacity1: 0.35 // inner ring (row grown +2)
+    property real haloOpacity2: 0.15 // outer ring (row grown +4)
+
+    // ── State → glyph — baton's theme.rs vocabulary (grammar's state tier) ──
+    // ♪ working · 𝄐 awaiting · 𝄽 idle · 𝄂 done · · unknown. Kept in lockstep
+    // with BatonGadget/DagGraphGadget so every surface reads the same score.
+    // Replaces the old [running]/[awaiting]/[done] word-badges (grammar §3).
+    function stateGlyph(state) {
+        var l = ("" + (state || "")).toLowerCase()
+        if (l === "done" || l === "stop")
+            return "𝄂"
+        if (l.indexOf("await") !== -1 || l.indexOf("block") !== -1 || l === "notification")
+            return "𝄐"
+        if (l.indexOf("running") !== -1 || l.indexOf("pretooluse") !== -1
+            || l.indexOf("posttooluse") !== -1 || l.indexOf("active") !== -1
+            || l.indexOf("tool") !== -1)
+            return "♪"
+        if (l.indexOf("idle") !== -1)
+            return "𝄽"
+        return "·"
+    }
+
     // ── State → colour map (notes only) ─────────────────────────────────────
     function stateColor(state) {
         var s = ("" + (state || "")).toLowerCase()
@@ -252,12 +277,37 @@ Item {
                     root.shared && root.shared.tracedSessionId === sessionId
                                 && sessionId.length > 0
 
+                // ── Neon halo (traced row only) — matches DAG's traced node ──
+                // Two transparent rings, the row grown +4/+2, faint accent
+                // border. Declared first → behind the row fill. Border-only, no
+                // MouseArea (input-inert). The trace link reads as THE hot
+                // element across both gadgets.
+                Rectangle {
+                    visible: rowItem.traced
+                    anchors.fill: parent
+                    anchors.margins: -4
+                    radius: 5
+                    color: "transparent"
+                    border.color: notes.paletteAccent
+                    border.width: 1
+                    opacity: root.haloOpacity2
+                }
+                Rectangle {
+                    visible: rowItem.traced
+                    anchors.fill: parent
+                    anchors.margins: -2
+                    radius: 4
+                    color: "transparent"
+                    border.color: notes.paletteAccent
+                    border.width: 1
+                    opacity: root.haloOpacity1
+                }
                 Rectangle {
                     anchors.fill: parent
                     radius: 3
-                    color: rowHover.hovered ? notes.barBg : "transparent"
+                    color: (rowItem.traced || rowHover.hovered) ? notes.barBg : "transparent"
                     border.color: notes.paletteAccent
-                    border.width: rowItem.traced ? 1 : 0
+                    border.width: rowItem.traced ? 2 : 0
                 }
 
                 Row {
@@ -285,31 +335,32 @@ Item {
                         font.pixelSize: 12
                         font.bold: rowItem.traced
                     }
-                    // State badge
+                    // State GLYPH — baton vocabulary (grammar §2 state tier),
+                    // replacing the old [running]/[awaiting] word-badge.
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "[" + (rowItem.state || "?") + "]"
+                        text: root.stateGlyph(rowItem.state)
                         color: root.stateColor(rowItem.state)
                         opacity: rowItem.done ? 0.5 : 1.0
                         font.family: "monospace"
-                        font.pixelSize: 11
+                        font.pixelSize: 12
                     }
-                    // Short cwd
+                    // Dim lowercase callout line — cwd · elapsed. The refs'
+                    // recessive label pattern; the glyph carries the live state.
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: root.shortCwd(rowItem.cwd)
+                        text: root.shortCwd(rowItem.cwd).toLowerCase()
                         color: notes.paletteFg
-                        opacity: rowItem.done ? 0.5 : 0.75
+                        opacity: rowItem.done ? 0.3 : 0.45
                         font.family: "monospace"
                         font.pixelSize: 11
                         elide: Text.ElideRight
                     }
-                    // Elapsed
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: root.elapsed(rowItem.startedAt, root.nowMs)
                         color: notes.paletteFg
-                        opacity: rowItem.done ? 0.5 : 0.6
+                        opacity: rowItem.done ? 0.3 : 0.4
                         font.family: "monospace"
                         font.pixelSize: 11
                     }
