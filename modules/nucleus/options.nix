@@ -19,8 +19,8 @@ let
     ;
 
   # A base16 hex colour, with or without leading '#'. Kept permissive so v0
-  # note files stay easy to author; the notes package's `rice lint` is the
-  # authoritative validator (see pkgs/notes).
+  # note files stay easy to author; the note engine's `rice lint` is the
+  # authoritative validator (see pkgs/drachma).
   hexColor = types.strMatching "#?[0-9a-fA-F]{6}";
 
   # ── Component override submodules ─────────────────────────────────────────

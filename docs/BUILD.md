@@ -150,14 +150,14 @@ Wave-0 placeholders (trivial `runCommand` derivations that build green). Replace
 the `default.nix` **in place** — keep the file path and the `callPackage`
 signature so `flake.nix` never changes.
 
-### Agent A — notes package (`pkgs/notes/`) — Node / Style Dictionary
+### Agent A — note engine (`pkgs/drachma/`) — Node / Style Dictionary
 
 Provide:
 
-- `pkgs/notes/default.nix` — a `callPackage`-able derivation
-  (`buildNpmPackage { pname = "aoide-notes"; … }`). Add `nodejs` /
+- `pkgs/drachma/default.nix` — a `callPackage`-able derivation
+  (`buildNpmPackage { pname = "aoide-drachma"; … }`). Add `nodejs` /
   `style-dictionary` as build inputs there; do **not** edit `flake.nix`.
-- `pkgs/notes/package.json`, lockfile, and source — the resolver (tiered:
+- `pkgs/drachma/package.json`, lockfile, and source — the resolver (tiered:
   palette → semantic → component), the `rice lint` schema validator, and the
   three live-side emitters:
   - `song/stage/notes.json` (Quickshell; atomic write — see `CONTRACTS.md §4`),
@@ -228,7 +228,7 @@ session records) are contract §4.
   (`song/repertoire/**` is versioned score, legitimately walked).
 - `song-shape` — every walked `song/repertoire/**` path is a `rice.nix`
   (host-agnostic song discipline; CONTRACTS.md §5).
-- `pkg-aoide`, `pkg-aoide-notes` — the two packages build (exercises the
+- `pkg-aoide`, `pkg-drachma` — the two packages build (exercises the
   packaging contract).
 
 Run `nix flake check` before every commit.

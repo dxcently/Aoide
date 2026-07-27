@@ -44,8 +44,8 @@ apply the fallback, not the option system.
 | `window.border`         | `palette.accent`  |
 | `window.borderInactive` | `palette.bg`      |
 
-Hex format: `#?[0-9a-fA-F]{6}` (leading `#` optional). The notes package
-(`pkgs/notes`, Agent A) owns the authoritative `rice lint` validator; the
+Hex format: `#?[0-9a-fA-F]{6}` (leading `#` optional). The note engine
+(`pkgs/drachma`, Agent A) owns the authoritative `rice lint` validator; the
 option type is a permissive gate only.
 
 ### Cover-art tier (v0 — the wallpaper note)

@@ -2,7 +2,7 @@
 # stack.
 #
 # Exercises the walked module tree (same assembly as mkHost), the aoide +
-# aoide-notes packages, greetd wiring, the aoided + shellbridge user services,
+# drachma packages, greetd wiring, the aoided + shellbridge user services,
 # and the graph commands — without real hardware or external network access.
 #
 # Wired in flake.nix as:
@@ -56,14 +56,14 @@ let
   hmModule = optionalModule "home-manager" (inputs.home-manager.nixosModules.home-manager or { });
   stylixModule = optionalModule "stylix" (inputs.stylix.nixosModules.stylix or { });
 
-  # The pkgs overlay injecting aoide + aoide-notes — same as mkHost.
+  # The pkgs overlay injecting aoide + drachma — same as mkHost.
   overlayModule =
     { ... }:
     {
       nixpkgs.overlays = [
         (final: _prev: {
           aoide = final.callPackage ../pkgs/aoide { };
-          aoide-notes = final.callPackage ../pkgs/notes { };
+          drachma = final.callPackage ../pkgs/drachma { };
           melete = final.callPackage ../pkgs/melete { };
           mneme = final.callPackage ../pkgs/mneme { };
         })
@@ -156,7 +156,7 @@ pkgs.testers.runNixOSTest {
               home-manager.users.khoa.home.stateVersion = lib.mkDefault "25.11";
 
               # ── System packages on PATH ───────────────────────────────────
-              # jq only (JSON validation). aoide + aoide-notes come from the
+              # jq only (JSON validation). aoide + drachma come from the
               # nucleus (modules/nucleus/packages.nix) — the test must exercise
               # the REAL install path, not mask its absence (which it did until
               # the first live switch surfaced the gap).
@@ -179,11 +179,12 @@ pkgs.testers.runNixOSTest {
     # ── 1. multi-user.target reached ────────────────────────────────────────
     machine.wait_for_unit("multi-user.target")
 
-    # ── 2. aoide + aoide-notes on PATH ──────────────────────────────────────
+    # ── 2. aoide + drachma on PATH ──────────────────────────────────────────
     machine.succeed("which aoide")
-    machine.succeed("which aoide-notes")
+    machine.succeed("which drachma")
 
-    # `aoide schema --json` must parse and report exactly 27 commands.
+    # `aoide schema --json` must parse and report exactly 28 commands
+    # (27 + baton, added in the conductor's-TUI commit).
     schema_raw = machine.succeed("aoide schema --json")
     schema_doc = json.loads(schema_raw)
     # schema --json emits a JSON Outcome envelope:
@@ -195,8 +196,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 27, (
-        f"expected 27 commands, got {cmd_count}.  "
+    assert cmd_count == 28, (
+        f"expected 28 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// src/cli.js — the `aoide-notes` binary.
+// src/cli.js — the `drachma` binary (the Aoide note engine).
 //
 // Subcommands:
 //   lint    <notes.json>            validate against v0 schema (rice lint uses this)
@@ -11,8 +11,8 @@
 // Exit codes (aligned with the Aoide CLI convention, CONTRACTS.md §3):
 //   0 ok · 2 usage · 1 error (validation failure / bad input)
 //
-// A later `aoide` CLI (Agent B) shells out to this binary; the derivation
-// exposes it as `bin/aoide-notes` and `passthru.mainProgram`.
+// The `aoide` CLI shells out to this binary; the derivation exposes it as
+// `bin/drachma` and `passthru.mainProgram`.
 
 "use strict";
 
@@ -27,7 +27,7 @@ const { emitStage, emitHyprctl, emitOsc } = require("./emitters");
 const EXIT = { OK: 0, USAGE: 2, ERROR: 1 };
 
 function fail(code, msg) {
-  process.stderr.write(`aoide-notes: ${msg}\n`);
+  process.stderr.write(`drachma: ${msg}\n`);
   process.exit(code);
 }
 
@@ -137,14 +137,14 @@ function shellQuote(s) {
 function usage() {
   process.stdout.write(
     [
-      "aoide-notes — Aoide notes engine (v0)",
+      "drachma — Aoide note engine (v0)",
       "",
       "Usage:",
-      "  aoide-notes lint    <notes.json>",
-      "  aoide-notes resolve <notes.json>",
-      "  aoide-notes emit stage   <notes.json> [--out PATH]",
-      "  aoide-notes emit hyprctl <notes.json>",
-      "  aoide-notes emit osc     <notes.json>",
+      "  drachma lint    <notes.json>",
+      "  drachma resolve <notes.json>",
+      "  drachma emit stage   <notes.json> [--out PATH]",
+      "  drachma emit hyprctl <notes.json>",
+      "  drachma emit osc     <notes.json>",
       "",
     ].join("\n")
   );

@@ -1,6 +1,6 @@
 // src/schema.js — the authoritative v0 note schema (CONTRACTS.md §1).
 //
-// This is what `aoide-notes lint` (and, transitively, `rice lint`) validates
+// This is what `drachma lint` (and, transitively, `rice lint`) validates
 // against. The nix option type (modules/nucleus/options.nix) is a permissive
 // gate; THIS is the authoritative validator.
 //

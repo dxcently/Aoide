@@ -3,7 +3,7 @@
 # Wires Hyprland as the NixOS Wayland compositor and applies compositor-side
 # notes live via hyprctl. Note values (gaps, radius, borders, blur)
 # are baked into the Hyprland config at build time so they take effect on
-# session start; the note emitter package (pkgs/notes) can re-dispatch
+# session start; the note emitter package (pkgs/drachma) can re-dispatch
 # them live via hyprctl during a rehearsal (preview) pass.
 #
 # IPC socket: exposes the Hyprland IPC socket path for shellbridge to consume.
@@ -43,11 +43,11 @@ let
   blurSize = 8;
 
   # ── Hyprland config fragment — notes baked in at build time ──────────────
-  # The note emitter (pkgs/notes, Agent A) re-runs hyprctl keyword dispatch
+  # The note emitter (pkgs/drachma, Agent A) re-runs hyprctl keyword dispatch
   # during rehearsal to live-patch these values without a rebuild.
   hyprNoteConfig = ''
     # ── Aoide notes — compositor facet ───────────────────────────────────
-    # Generated from aoide.notes at build time; live-patched by aoide-notes
+    # Generated from aoide.notes at build time; live-patched by the drachma
     # emitter during rice preview (hyprctl keyword).
 
     general {

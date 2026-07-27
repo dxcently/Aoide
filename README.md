@@ -81,7 +81,7 @@ The repo is a **snowflake**: everything lives under `modules/`, walked and self-
 ├── hosts/
 │   ├── common/     cross-machine baseline (which dendrites default ON)
 │   └── <host>/     machine-specific picks (hardware, enabled facets, song)
-├── pkgs/           aoide CLI (Rust) · aoide-notes (Node)
+├── pkgs/           aoide CLI (Rust) · drachma (Node)
 ├── lib/            the walker + mkHost + checks
 ├── song/           the performed half (rices, songbook, runtime stage/)
 └── flake.nix       inputs + outputs (never edited to add a module)
@@ -185,7 +185,7 @@ Ownership follows radial distance from the nucleus (the snowflake's [mutation po
 | `modules/dendrites/<yours>.nix` | you | Grow new branches freely (new files). |
 | `hosts/` | you, entirely | Hardware, enabled facets/dendrites, song pick. |
 | `song/` + rime rice output | you (agent-written) | The songbook is where self-ricing writes back; gated at rebuild. |
-| `pkgs/aoide` + `pkgs/notes` | upstream | Don't edit — merge cleanly. |
+| `pkgs/aoide` + `pkgs/drachma` | upstream | Don't edit — merge cleanly. |
 
 ### Merge hygiene
 
@@ -237,9 +237,9 @@ export AOIDE_STAGE_DIR=$(mktemp -d) AOIDE_AUDIT_LOG=$AOIDE_STAGE_DIR/log
 pkgs/aoide/tests/fixtures/seed.sh "$AOIDE_STAGE_DIR" && aoide baton
 ```
 
-### `aoide-notes` — the note engine
+### `drachma` — the note engine
 
-The Node package (`pkgs/notes`, wrapping Style Dictionary) that owns the authoritative note pipeline: **lint** (validate a rice against the note schema — `rice lint` delegates here), **resolve** (apply component→palette fallbacks), and **emit** (write the resolved `song/stage/notes.json` for Quickshell, plus hyprctl and terminal-OSC targets). Notes are the single immutable seam between the frozen nix layer and the live desktop — facets read `aoide.notes` and nothing else.
+The Node package (`pkgs/drachma`, wrapping Style Dictionary — the token engine takes the Greek coin's name) that owns the authoritative note pipeline: **lint** (validate a rice against the note schema — `rice lint` delegates here), **resolve** (apply component→palette fallbacks), and **emit** (write the resolved `song/stage/notes.json` for Quickshell, plus hyprctl and terminal-OSC targets). Notes are the single immutable seam between the frozen nix layer and the live desktop — facets read `aoide.notes` and nothing else.
 
 ### `aoided` + `shellbridge` — the runtime services
 
@@ -273,7 +273,7 @@ Opt-in: the **`aoide.rebuild`** capability (off by default) grants a dedicated n
 | `aoide guide` | real | Print the four-tier agent onboarding (tier map + house rules). |
 | `aoide schema` | real | Emit the versioned machine-readable schema of every command + state file. |
 | `aoide rice gen` | stub | Generate a rice from a prompt or wallpaper (reads `songbook/` first). |
-| `aoide rice lint` | real | Validate a rice against the note schema (delegates to `aoide-notes`). |
+| `aoide rice lint` | real | Validate a rice against the note schema (delegates to `drachma`). |
 | `aoide rice preview` | stub | Rehearse a rice live (`stage/notes.json` hot-reload); nothing committed. |
 | `aoide rice adopt` | stub · gated | Commit a previewed rice and propose the gated rebuild. |
 | `aoide rice transpose` | stub | Replay a song in another key (palette) from `song/keys/`. |

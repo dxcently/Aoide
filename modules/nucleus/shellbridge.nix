@@ -28,7 +28,12 @@
 #
 # The socket and stage paths below are the stable integration seams; adapters
 # and Quickshell widgets must use these exact paths (CONTRACTS.md §4).
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 lib.mkIf config.aoide.enable {
 
@@ -44,8 +49,11 @@ lib.mkIf config.aoide.enable {
     description = "Aoide shellbridge — desktop ↔ agent bridge (socket in, stage-files out)";
 
     wantedBy = [ "graphical-session.target" ];
-    after    = [ "graphical-session.target" "aoided.service" ];
-    partOf   = [ "graphical-session.target" ];
+    after = [
+      "graphical-session.target"
+      "aoided.service"
+    ];
+    partOf = [ "graphical-session.target" ];
 
     serviceConfig = {
       # shellbridge is a sub-command of the aoide binary (skeleton). Agent B
@@ -53,7 +61,7 @@ lib.mkIf config.aoide.enable {
       # clean independent of whether the binary is realised.
       ExecStart = "${pkgs.aoide}/bin/aoide shellbridge --run";
 
-      Restart    = "on-failure";
+      Restart = "on-failure";
       RestartSec = "3s";
 
       Environment = [
@@ -72,8 +80,8 @@ lib.mkIf config.aoide.enable {
       RuntimeDirectoryMode = "0700";
 
       NoNewPrivileges = true;
-      StandardOutput  = "journal";
-      StandardError   = "journal";
+      StandardOutput = "journal";
+      StandardError = "journal";
     };
   };
 
@@ -86,7 +94,7 @@ lib.mkIf config.aoide.enable {
   # Documented here as comments (not as options) because they are live-side
   # constants, not build-time configuration:
   #
-  #   song/stage/notes.json     — resolved note colours (written by pkgs/notes)
+  #   song/stage/notes.json     — resolved note colours (written by pkgs/drachma)
   #   song/stage/sessions.json  — agent session roster (written by shellbridge)
   #   song/stage/hooks.json     — live Claude Code hook states (written by shellbridge)
   #

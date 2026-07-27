@@ -72,7 +72,7 @@
         in
         {
           aoide = pkgs.callPackage ./pkgs/aoide { };
-          aoide-notes = pkgs.callPackage ./pkgs/notes { };
+          drachma = pkgs.callPackage ./pkgs/drachma { };
           # Melete AI harness + Mneme vault MCP server. Ported from dxflake;
           # both are launcher wrappers over runtime-deployed binaries (their
           # authenticated/out-of-band fetch is lifted to a runtime seam owned by
@@ -102,9 +102,9 @@
           # host by lib/mkHost.nix); song-shape asserts each is a rice.nix only.
           song-shape = checks.songShape (walk ./song/repertoire);
           pkg-aoide = self.packages.${system}.aoide;
-          pkg-aoide-notes = self.packages.${system}.aoide-notes;
+          pkg-drachma = self.packages.${system}.drachma;
           # VM boot test — boots the Aoide desktop config headless and asserts
-          # the stack comes up (multi-user.target, aoide + aoide-notes on PATH,
+          # the stack comes up (multi-user.target, aoide + drachma on PATH,
           # greetd enabled, aoided + shellbridge user services active, graph
           # commands pass).  Requires KVM on the build host.
           vm-boot = import ./lib/vmTest.nix { inherit pkgs inputs lib; };

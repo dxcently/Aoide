@@ -1,11 +1,11 @@
 {
-  "name": "aoide-notes",
+  "name": "aoide-drachma",
   "version": "0.0.0",
-  "description": "Aoide notes engine: Style Dictionary resolver + v0 schema lint + live-side emitters (stage/notes.json, hyprctl, terminal OSC).",
+  "description": "Aoide drachma: the note engine — Style Dictionary resolver + v0 schema lint + live-side emitters (stage/notes.json, hyprctl, terminal OSC).",
   "license": "MIT",
   "type": "commonjs",
   "bin": {
-    "aoide-notes": "src/cli.js"
+    "drachma": "src/cli.js"
   },
   "files": [
     "src"
