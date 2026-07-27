@@ -29,6 +29,31 @@ Item {
     property bool floatable: false
     signal floatRequested()
 
+    // ── Chrome recede on trace (round 3) ────────────────────────────────────
+    // While a session is traced (the one-neon element blazes green somewhere in
+    // the body), the frame's own chrome steps back so nothing competes with the
+    // hot element. When `chromeDim` is true the title line, footer, and the
+    // wireframe depth outlines (the frame's "borders") drop to chromeOpacity;
+    // the glass body and its hairline edge are left alone — only chrome recedes.
+    //
+    // The frame DISCOVERS the trace itself from its body child's existing
+    // `shared` object (the same `shared.tracedSessionId` DAG + TERMINALS already
+    // read): a frame recedes only when ITS OWN gadget is trace-aware AND a trace
+    // is live. DAG + TERMINALS children carry `shared`, so their frames dim; the
+    // dock container, BATON, CLOCK and every other gadget have no such child, so
+    // they are unaffected. The property stays overridable (a host may force it).
+    property bool chromeDim: {
+        var items = body.data
+        for (var i = 0; i < items.length; i++) {
+            var it = items[i]
+            if (it && it.shared && it.shared.tracedSessionId !== undefined
+                    && it.shared.tracedSessionId !== "")
+                return true
+        }
+        return false
+    }
+    readonly property real chromeOpacity: chromeDim ? 0.55 : 1.0
+
     // ── Glass tuning ────────────────────────────────────────────────────────
     property real glassOpacity: 0.72
     readonly property int chromePx: 12      // monospace cell size for the chrome
@@ -85,7 +110,7 @@ Item {
         color: "transparent"
         border.color: notes.paletteAccent
         border.width: 1
-        opacity: root.depthOpacity2
+        opacity: root.depthOpacity2 * root.chromeOpacity
     }
     Rectangle {
         x: root.depthOff1; y: root.depthOff1
@@ -94,7 +119,7 @@ Item {
         color: "transparent"
         border.color: notes.paletteAccent
         border.width: 1
-        opacity: root.depthOpacity1
+        opacity: root.depthOpacity1 * root.chromeOpacity
     }
 
     // ── Glass panel ─────────────────────────────────────────────────────────
@@ -133,6 +158,7 @@ Item {
             width: parent.width
             text: root.titleLine(root.cols)
             color: notes.paletteAccent
+            opacity: root.chromeOpacity
             font.family: "monospace"
             font.pixelSize: root.chromePx
             font.bold: true
@@ -151,7 +177,7 @@ Item {
             width: parent.width
             text: root.footerLine(root.cols)
             color: notes.paletteAccent
-            opacity: 0.7
+            opacity: 0.7 * root.chromeOpacity
             font.family: "monospace"
             font.pixelSize: root.chromePx
             clip: true

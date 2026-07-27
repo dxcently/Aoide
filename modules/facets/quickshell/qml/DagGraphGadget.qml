@@ -42,7 +42,8 @@ Item {
     property real dimHover: 0.6      // a hovered (non-traced) session lifts
     property real dimCallout: 0.35   // lowercase callout label at rest
     property real haloOpacity1: 0.35 // traced glow — inner ring (grown +2)
-    property real haloOpacity2: 0.15 // traced glow — outer ring (grown +4)
+    property real haloOpacity2: 0.15 // traced glow — mid ring (grown +4)
+    property real haloOpacity3: 0.08 // traced glow — outer bloom ring (grown +6)
     property int indentStep: 16      // px per tree depth (leader gutter column)
     property int leaderKink: 4       // 45° elbow run before the horizontal
     property int leaderDot: 2        // terminal-dot radius where leader meets box
@@ -267,8 +268,10 @@ Item {
                                 return
                             var step = root.indentStep
                             var h = height, cy = h / 2
-                            ctx.strokeStyle = notes.paletteAccent
-                            ctx.fillStyle = notes.paletteAccent
+                            // Hot child → green leader + dot; rest → rose accent.
+                            var leaderColor = rowItem.traced ? notes.paletteHot : notes.paletteAccent
+                            ctx.strokeStyle = leaderColor
+                            ctx.fillStyle = leaderColor
                             ctx.lineWidth = root.leaderWidth
                             ctx.globalAlpha = rowItem.traced ? 0.95
                                 : (rowItem.done ? root.dimDone : root.dimIdle + 0.1)
@@ -323,16 +326,29 @@ Item {
 
                         // ── Neon halo (traced node only) ─────────────────
                         // The depth-stack trick used as a GLOW instead of an
-                        // offset: two transparent rings, the box grown +4/+2,
-                        // faint accent border. Declared first → they sit behind
-                        // the outline. Border-only, no MouseArea (input-inert).
+                        // offset: THREE transparent rings, the box grown +6/+4/+2,
+                        // in the HOT neon (green) so the traced node reads as a
+                        // glowing bloom, not just a bordered box. Declared first →
+                        // they sit behind the outline. Border-only, no MouseArea
+                        // (input-inert). The rose accent stays chrome; this is the
+                        // one green element under the pointer.
+                        Rectangle {
+                            visible: rowItem.traced
+                            anchors.fill: parent
+                            anchors.margins: -6
+                            radius: 5
+                            color: "transparent"
+                            border.color: notes.paletteHot
+                            border.width: 1
+                            opacity: root.haloOpacity3
+                        }
                         Rectangle {
                             visible: rowItem.traced
                             anchors.fill: parent
                             anchors.margins: -4
                             radius: 4
                             color: "transparent"
-                            border.color: notes.paletteAccent
+                            border.color: notes.paletteHot
                             border.width: 1
                             opacity: root.haloOpacity2
                         }
@@ -342,18 +358,19 @@ Item {
                             anchors.margins: -2
                             radius: 3
                             color: "transparent"
-                            border.color: notes.paletteAccent
+                            border.color: notes.paletteHot
                             border.width: 1
                             opacity: root.haloOpacity1
                         }
 
-                        // Outer outline. Traced node blazes: 2px accent border,
-                        // full bright, a faint accent fill.
+                        // Outer outline. Traced node blazes: 2px HOT (green)
+                        // border, full bright, a faint fill. Rest nodes keep the
+                        // rose accent — one green element against a rose field.
                         Rectangle {
                             anchors.fill: parent
                             radius: 2
                             color: rowItem.traced ? notes.barBg : "transparent"
-                            border.color: notes.paletteAccent
+                            border.color: rowItem.traced ? notes.paletteHot : notes.paletteAccent
                             border.width: rowItem.traced ? 2 : 1
                             opacity: rowItem.outlineOpacity
                         }
@@ -393,7 +410,7 @@ Item {
                                 text: rowItem.isProject
                                       ? (rowItem.node.name || "")
                                       : (rowItem.isSession ? (rowItem.node.agent || "?") : "")
-                                color: rowItem.traced ? notes.paletteAccent
+                                color: rowItem.traced ? notes.paletteHot
                                        : (rowItem.isSession ? root.stateColor(rowItem.node.state)
                                        : notes.paletteFg)
                                 opacity: rowItem.done ? 0.5 : 1.0

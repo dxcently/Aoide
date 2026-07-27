@@ -36,6 +36,11 @@ QtObject {
     readonly property color paletteFg:     raw.palette ? raw.palette.fg     : "#cdd6f4"
     readonly property color paletteAccent: raw.palette ? raw.palette.accent : "#89b4fa"
     readonly property color paletteUrgent: raw.palette ? raw.palette.urgent : "#f38ba8"
+    // Hot/trace highlight — the one-neon element (optic-nerve green). Optional
+    // in the v0 note schema: falls back to the accent when palette.hot is
+    // absent, so a note file without it renders exactly as before.
+    readonly property color paletteHot:
+        (raw.palette && raw.palette.hot) ? raw.palette.hot : paletteAccent
 
     // ── Bar component shortcuts ────────────────────────────────────────────
     readonly property color barBg:     raw.bar ? raw.bar.bg     : paletteBg

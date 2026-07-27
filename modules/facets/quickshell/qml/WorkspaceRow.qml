@@ -27,20 +27,15 @@ Item {
     implicitWidth: cellRow.implicitWidth
     implicitHeight: cellSize
 
-    // ── Musical format-icons (dxflake waybar) ──────────────────────────────
+    // ── Workspace labels: plain NUMBERS (pantheon redesign — khoa: forget
+    // the music-note delimiters). The two special workspaces keep their
+    // unicode marks: the one seasoning of "song" the row retains.
     function wsIcon(ws) {
         if (!ws) return "?"
         var name = ("" + (ws.name || "")).toLowerCase()
         if (name.indexOf("magic") !== -1) return "♬⋆.˚"
         if (name.indexOf("scratch") !== -1) return "ᝰ.ᐟ"
-        // BMP notes lead (solid monospace coverage — the SMP note clusters
-        // rendered patchily on this rig's font stack); accidentals close.
-        var byId = {
-            "1": "♪", "2": "♫", "3": "♬", "4": "♩", "5": "𝅘𝅥𝅮",
-            "6": "𝅗𝅥", "7": "𝅝", "8": "♯", "9": "♮", "10": "♭"
-        }
-        var g = byId["" + ws.id]
-        return g !== undefined ? g : ("" + ws.id)
+        return "" + ws.id
     }
 
     // Sorted live workspaces (by id) — ObjectModel exposes `.values`.

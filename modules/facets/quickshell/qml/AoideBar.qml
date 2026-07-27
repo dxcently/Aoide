@@ -413,15 +413,8 @@ Item {
             }
         }
 
-        // ══ TASKBAR: Win7 window buttons (fills the left gap) ══════════════
-        TaskbarRow {
-            notes: root.notes
-            Layout.alignment: Qt.AlignVCenter
-        }
-
-        // ══ CENTER: clock (→ calendar popup)  /  window title ══════════════
-        Item { Layout.fillWidth: true; implicitWidth: 1 }
-
+        // ══ CLOCK + TITLE — left-clustered (khoa: non-workspace elements
+        // live LEFT; windows are tracked by the widgets, not the bar) ═══════
         Row {
             spacing: 6
             Layout.alignment: Qt.AlignVCenter
@@ -465,9 +458,10 @@ Item {
             }
         }
 
+        // All slack sits between the left cluster and the status callouts.
         Item { Layout.fillWidth: true; implicitWidth: 1 }
 
-        // ══ RIGHT: volume  battery  network (" / " seps) ═══════════════════
+        // ══ RIGHT: status callouts (pantheon lowercase, · separated) ═══════
         Row {
             id: rightRow
             spacing: 10
@@ -479,9 +473,7 @@ Item {
                 id: volText
                 anchors.verticalCenter: parent.verticalCenter
                 visible: root.volAvail
-                text: root.volMuted
-                      ? "/ (° × ° ) /"
-                      : ("/ " + root.volIcon(root.volPct) + " " + root.volPct + "% /")
+                text: root.volMuted ? "vol.muted" : ("vol." + root.volPct)
                 color: root.notes.barFg
                 style: Text.Outline
                 styleColor: "#000000"
@@ -509,8 +501,8 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: root.battAvail
                 text: root.battFull
-                      ? "𝆑 /"
-                      : (root.battIcon() + " " + root.battPct + "% /")
+                      ? "bat.full"
+                      : ("bat." + root.battPct + (root.battCharging ? "+" : ""))
                 color: (root.battCrit || root.battWarn) ? root.notes.paletteUrgent
                                                         : root.notes.barFg
                 opacity: (root.battWarn && !root.blinkOn) ? 0.3 : 1.0
@@ -531,7 +523,7 @@ Item {
             // Network glyph — "{glyph} /"
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.netGlyph(root.netKind) + " /"
+                text: "link." + root.netKind
                 color: root.notes.barFg
                 opacity: root.netKind === "down" ? 0.55 : 1.0
                 style: Text.Outline

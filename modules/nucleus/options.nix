@@ -77,6 +77,16 @@ let
         default = "#f38ba8";
         description = "Urgent/error colour (base16 base08).";
       };
+      hot = mkOption {
+        type = types.nullOr hexColor;
+        default = null;
+        description = ''
+          Hot/trace highlight — the one-neon element (the Pantheon stills'
+          optic-nerve green, base16 base0B). Optional: falls back to accent
+          when null. NOT part of the stylix base16 synthesis (the base16 tier
+          already carries the real scheme); this is the live-note trace colour.
+        '';
+      };
     };
   };
 

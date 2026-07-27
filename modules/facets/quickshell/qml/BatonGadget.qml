@@ -26,6 +26,18 @@ Item {
     // ── Note dependency (injected by the dock / DesktopGadgets) ────────────
     required property var notes
 
+    // ── Shared session state — the DAG trace link (optional) ────────────────
+    // When wired (a `shared` with `tracedSessionId`, as DAG + TERMINALS get),
+    // the baton row for the traced session lights its glyph + agent in the HOT
+    // neon (green), so the one-neon element carries across every surface that
+    // lists sessions. Dormant when null (the current instantiation sites do not
+    // pass it — see the round-4 seam note); the row then renders exactly as before.
+    property var shared: null
+    function isTraced(sessionId) {
+        return !!(shared && sessionId && sessionId.length > 0
+                  && shared.tracedSessionId === sessionId)
+    }
+
     // ── Parsed stage documents (v0 shapes; see CONTRACTS.md §4) ────────────
     property var sessionsDoc: ({ "schemaVersion": "0", "sessions": [] })
     property var graphDoc: ({ "schemaVersion": "0", "nodes": [], "edges": [] })
@@ -158,13 +170,15 @@ Item {
                 id: sRow
                 required property int index
                 readonly property var s: root.sessions[index]
+                readonly property bool traced: root.isTraced(sRow.s ? sRow.s.sessionId : "")
                 width: content.width
                 spacing: 6
 
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.stateGlyph(sRow.s ? sRow.s.state : "")
-                    color: root.stateColor(sRow.s ? sRow.s.state : "")
+                    // Traced session → HOT (green); else the state colour.
+                    color: sRow.traced ? notes.paletteHot : root.stateColor(sRow.s ? sRow.s.state : "")
                     opacity: root.isDone(sRow.s ? sRow.s.state : "") ? 0.5 : 1.0
                     font.family: "monospace"
                     font.pixelSize: 12
@@ -172,10 +186,11 @@ Item {
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: (sRow.s && sRow.s.agent) ? sRow.s.agent : "?"
-                    color: root.stateColor(sRow.s ? sRow.s.state : "")
+                    color: sRow.traced ? notes.paletteHot : root.stateColor(sRow.s ? sRow.s.state : "")
                     opacity: root.isDone(sRow.s ? sRow.s.state : "") ? 0.5 : 1.0
                     font.family: "monospace"
                     font.pixelSize: 11
+                    font.bold: sRow.traced
                 }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter

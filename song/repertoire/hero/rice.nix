@@ -18,6 +18,10 @@
       fg = "#ecdfda"; # pale rose-cream light (base05)
       accent = "#d98a96"; # dusk rose          (base0D)
       urgent = "#ff7a68"; # sunset ember       (base08)
+      # The one-neon trace colour — the Pantheon stills' optic-nerve green
+      # (matches base0B below). Rose stays the chrome accent; THIS blazes on the
+      # single hot/traced element (the DAG/TERMINALS traced row). null → accent.
+      hot = "#3fe97f"; # optic-nerve neon      (base0B)
     };
 
     # ── Base16 tier — "pantheon bw" (the terminal scheme) ──────────────────

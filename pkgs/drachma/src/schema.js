@@ -19,6 +19,13 @@ const HEX = /^#?[0-9a-fA-F]{6}$/;
 // fallback map (CONTRACTS.md §1). Component values may also be null.
 const PALETTE_KEYS = ["bg", "fg", "accent", "urgent"];
 
+// Optional palette keys — present or absent, but when present must be a hex
+// colour (never null). `hot` is the one-neon trace/highlight colour (the
+// reference stills' optic-nerve green): notes WITHOUT it stay valid, and a
+// facet falls the surface back to `accent` when it is absent. Keeping it
+// optional preserves the v0 contract for every existing note file.
+const PALETTE_OPTIONAL_KEYS = ["hot"];
+
 const COMPONENT_FALLBACK = {
   bar: { bg: "bg", fg: "fg", accent: "accent" },
   notif: { bg: "bg", fg: "fg", urgent: "urgent" },
@@ -79,8 +86,14 @@ function validate(container) {
         checkColor(v, `palette.${k}`, errors, { allowNull: false });
       }
     }
+    // Optional keys — validated only when present (never null when given).
+    for (const k of PALETTE_OPTIONAL_KEYS) {
+      if (palette[k] === undefined) continue;
+      const v = noteValue(palette[k]);
+      checkColor(v, `palette.${k}`, errors, { allowNull: false });
+    }
     for (const k of Object.keys(palette)) {
-      if (!PALETTE_KEYS.includes(k)) {
+      if (!PALETTE_KEYS.includes(k) && !PALETTE_OPTIONAL_KEYS.includes(k)) {
         errors.push(`palette.${k}: unknown key (v0 palette is closed)`);
       }
     }
@@ -111,6 +124,7 @@ module.exports = {
   SCHEMA_VERSION: "0",
   HEX,
   PALETTE_KEYS,
+  PALETTE_OPTIONAL_KEYS,
   COMPONENT_FALLBACK,
   noteValue,
   isRef,

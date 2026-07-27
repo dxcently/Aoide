@@ -4,7 +4,8 @@
     "bg":     "#1a1322",
     "fg":     "#ecdfda",
     "accent": "#d98a96",
-    "urgent": "#ff7a68"
+    "urgent": "#ff7a68",
+    "hot":    "#3fe97f"
   },
   "bar": {
     "bg":     "#1a1322",

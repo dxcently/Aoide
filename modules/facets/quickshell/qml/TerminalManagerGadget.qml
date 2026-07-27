@@ -158,7 +158,8 @@ Item {
     // across BOTH gadgets, so its highlight matches the DAG's traced-node blaze:
     // 2px border, a soft two-ring halo (the depth-stack trick as a glow).
     property real haloOpacity1: 0.35 // inner ring (row grown +2)
-    property real haloOpacity2: 0.15 // outer ring (row grown +4)
+    property real haloOpacity2: 0.15 // mid ring (row grown +4)
+    property real haloOpacity3: 0.08 // outer bloom ring (row grown +6)
 
     // ── State → glyph — baton's theme.rs vocabulary (grammar's state tier) ──
     // ♪ working · 𝄐 awaiting · 𝄽 idle · 𝄂 done · · unknown. Kept in lockstep
@@ -278,17 +279,28 @@ Item {
                                 && sessionId.length > 0
 
                 // ── Neon halo (traced row only) — matches DAG's traced node ──
-                // Two transparent rings, the row grown +4/+2, faint accent
-                // border. Declared first → behind the row fill. Border-only, no
-                // MouseArea (input-inert). The trace link reads as THE hot
-                // element across both gadgets.
+                // THREE transparent rings, the row grown +6/+4/+2, in the HOT
+                // neon (green) so the traced row glows as a bloom. Declared first
+                // → behind the row fill. Border-only, no MouseArea (input-inert).
+                // The trace link reads as THE one green element across both
+                // gadgets; the rose accent stays chrome.
+                Rectangle {
+                    visible: rowItem.traced
+                    anchors.fill: parent
+                    anchors.margins: -6
+                    radius: 6
+                    color: "transparent"
+                    border.color: notes.paletteHot
+                    border.width: 1
+                    opacity: root.haloOpacity3
+                }
                 Rectangle {
                     visible: rowItem.traced
                     anchors.fill: parent
                     anchors.margins: -4
                     radius: 5
                     color: "transparent"
-                    border.color: notes.paletteAccent
+                    border.color: notes.paletteHot
                     border.width: 1
                     opacity: root.haloOpacity2
                 }
@@ -298,7 +310,7 @@ Item {
                     anchors.margins: -2
                     radius: 4
                     color: "transparent"
-                    border.color: notes.paletteAccent
+                    border.color: notes.paletteHot
                     border.width: 1
                     opacity: root.haloOpacity1
                 }
@@ -306,7 +318,8 @@ Item {
                     anchors.fill: parent
                     radius: 3
                     color: (rowItem.traced || rowHover.hovered) ? notes.barBg : "transparent"
-                    border.color: notes.paletteAccent
+                    // Traced row blazes HOT (green); a plain hover shows no border.
+                    border.color: rowItem.traced ? notes.paletteHot : notes.paletteAccent
                     border.width: rowItem.traced ? 2 : 0
                 }
 
