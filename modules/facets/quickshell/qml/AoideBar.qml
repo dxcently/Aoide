@@ -206,7 +206,19 @@ Item {
     }
 
     // ── Window title (Hyprland active toplevel) with kaomoji empty-rewrite ──
-    readonly property string kaomoji: "/ᐠ - ˕ -マ Ⳋ ⋆｡°✩♬ ♪"
+    // A small songbook of music kaomoji combos (emojicombos.com/music vocab);
+    // the empty-title rewrite rotates hourly so the bar hums a different bar
+    // of the tune through the day. The dxflake cat leads — it is the identity.
+    readonly property var kaomojiSet: [
+        "/ᐠ - ˕ -マ Ⳋ ⋆｡°✩♬ ♪",
+        "♪(´▽｀) ⋆｡°✩",
+        "•¨•.¸¸♪ ヾ(´〇`)ﾉ ♬",
+        "(￣▽￣)/♫ •*¨*•.¸¸♪",
+        "✧*。٩(ˊᗜˋ*)و ♪ ✧*。",
+        "₊˚⊹ ♡ ♬ ⋆｡°✩"
+    ]
+    readonly property string kaomoji:
+        kaomojiSet[now.getHours() % kaomojiSet.length]
     function winTitle() {
         var t = (Hyprland.activeToplevel && Hyprland.activeToplevel.title)
                 ? ("" + Hyprland.activeToplevel.title) : ""

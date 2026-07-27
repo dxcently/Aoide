@@ -33,8 +33,10 @@ Item {
         var name = ("" + (ws.name || "")).toLowerCase()
         if (name.indexOf("magic") !== -1) return "♬⋆.˚"
         if (name.indexOf("scratch") !== -1) return "ᝰ.ᐟ"
+        // BMP notes lead (solid monospace coverage — the SMP note clusters
+        // rendered patchily on this rig's font stack); accidentals close.
         var byId = {
-            "1": "𝅘𝅥", "2": "♫", "3": "𝅘𝅥𝅯", "4": "♬", "5": "𝅘𝅥𝅱",
+            "1": "♪", "2": "♫", "3": "♬", "4": "♩", "5": "𝅘𝅥𝅮",
             "6": "𝅗𝅥", "7": "𝅝", "8": "♯", "9": "♮", "10": "♭"
         }
         var g = byId["" + ws.id]

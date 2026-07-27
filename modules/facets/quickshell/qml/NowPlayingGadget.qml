@@ -77,7 +77,7 @@ Item {
         Text {
             visible: !root.hasPlayer
             width: parent.width
-            text: "no media"
+            text: "no media ♪(´ε｀ )"
             color: root.notes.paletteFg
             opacity: 0.6
             font.family: "monospace"
