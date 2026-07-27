@@ -16,6 +16,7 @@
 // fills `parent` (the window content), so the files stay swappable Items.
 
 import QtQuick
+import QtQml.Models
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -24,6 +25,38 @@ ShellRoot {
     // ── Shared singletons (one instance for the whole session) ─────────────
     NoteState { id: notes }
     ShellBridge { id: bridge }
+
+    // ── Shared session state (floating gadgets + DAG trace link) ───────────
+    // A plain QtObject passed by property, exactly like notes/bridge — the
+    // cleanest quickshell idiom for cross-widget state that needs no file
+    // watch of its own. Holds: (a) `floatingModel`, the ListModel of gadgets
+    // torn off onto DesktopGadgets ({ kind, gx, gy }); and (b) `tracedSessionId`,
+    // the hover-trace link — TerminalManagerGadget writes it on row hover,
+    // DagGraphGadget highlights the node whose id matches. Session-scoped, no
+    // persistence (v1). QtObject has no default property, so the ListModel is a
+    // named property (the NoteState.noteFile idiom).
+    QtObject {
+        id: shared
+
+        property ListModel floatingModel: ListModel {}
+        property string tracedSessionId: ""
+
+        // Cascading seed position so successive tear-offs don't stack exactly.
+        function floatGadget(kind) {
+            var base = 360
+            var step = 34
+            var n = floatingModel.count
+            floatingModel.append({
+                "kind": kind,
+                "gx": base + (n % 4) * step,
+                "gy": 80 + (n % 4) * step
+            })
+        }
+        function unfloatGadget(index) {
+            if (index >= 0 && index < floatingModel.count)
+                floatingModel.remove(index)
+        }
+    }
 
     // ── Wallpaper (background layer, full screen, click-through) ───────────
     // Solid palette-bg fallback until a cover is staged; sits beneath every
@@ -95,7 +128,19 @@ ShellRoot {
             anchors.fill: parent
             notes: notes
             bridge: bridge
+            shared: shared
         }
+    }
+
+    // ── Desktop gadget layer (Win7 tear-off) ───────────────────────────────
+    // Floating copies of dock gadgets, dragged out onto the desktop. Full-
+    // screen non-exclusive Top layer; its input mask is the union of the
+    // floating gadgets' rects (see DesktopGadgets.qml) so bare desktop stays
+    // click-through. Namespace "aoide-gadgets" — verify with `hyprctl layers`.
+    DesktopGadgets {
+        notes: notes
+        bridge: bridge
+        shared: shared
     }
 
     // ── Overlay skeletons (load clean; each gains its own PanelWindow wrapper

@@ -67,6 +67,10 @@ Item {
     // ── Note + bridge dependencies (injected by shell.qml) ─────────────────
     required property var notes
     required property var bridge
+    // Shared session state (floating gadgets + DAG trace link). Each frame's
+    // [↗] tear-off calls shared.floatGadget(kind); the trace link rides through
+    // to the terminal/DAG gadgets below.
+    required property var shared
 
     // ── Dock geometry (v0 local defaults; note reads in v1) ────────────────
     readonly property int dockWidth: 300
@@ -261,27 +265,46 @@ Item {
                 Layout.fillHeight: true
                 spacing: 10
 
-                // ── Gadget 1: TERMINALS (Terminal-Commander roster) ──────
+                // ── Gadget 1: BATON (mini conductor / roster mini-view) ──
+                GadgetFrame {
+                    Layout.fillWidth: true
+                    notes: root.notes
+                    title: "BATON"
+                    floatable: true
+                    onFloatRequested: root.shared.floatGadget("BATON")
+                    BatonGadget {
+                        width: parent.width
+                        notes: root.notes
+                    }
+                }
+
+                // ── Gadget 2: TERMINALS (Terminal-Commander roster) ──────
                 GadgetFrame {
                     Layout.fillWidth: true
                     notes: root.notes
                     title: "TERMINALS"
+                    floatable: true
+                    onFloatRequested: root.shared.floatGadget("TERMINALS")
                     TerminalManagerGadget {
                         width: parent.width
                         notes: root.notes
                         bridge: root.bridge
+                        shared: root.shared
                     }
                 }
 
-                // ── Gadget 2: DAG (compact always-on session graph) ──────
+                // ── Gadget 3: DAG (compact always-on session graph) ──────
                 GadgetFrame {
                     Layout.fillWidth: true
                     notes: root.notes
                     title: "DAG"
+                    floatable: true
+                    onFloatRequested: root.shared.floatGadget("DAG")
                     DagGraphGadget {
                         width: parent.width
                         notes: root.notes
                         bridge: root.bridge
+                        shared: root.shared
                     }
                 }
 

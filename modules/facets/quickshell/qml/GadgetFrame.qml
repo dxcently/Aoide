@@ -20,6 +20,15 @@ Item {
     required property var notes
     property string title: ""
 
+    // ── Tear-off affordance (Win7 "drag gadget to the desktop") ─────────────
+    // When `floatable`, a small [↗] token is folded into the title line's tail
+    // (exactly the pin idiom from AoideAgentWidgets — an in-chrome glyph, not a
+    // free-floating button, so the computed ═ fill stays alignment-exact) and a
+    // transparent MouseArea over the right end emits floatRequested(). The dock
+    // wires this to DesktopGadgets; BarPopout leaves it false (no tear-off).
+    property bool floatable: false
+    signal floatRequested()
+
     // ── Glass tuning ────────────────────────────────────────────────────────
     property real glassOpacity: 0.72
     readonly property int chromePx: 12      // monospace cell size for the chrome
@@ -35,7 +44,7 @@ Item {
     // title longer than the available run (fill clamps to >= 0).
     function titleLine(cols) {
         var head = "╔═[ " + root.title + " ]"
-        var tail = "╗"
+        var tail = root.floatable ? "[↗]╗" : "╗"
         var fillCount = cols - head.length - tail.length
         if (fillCount < 0) fillCount = 0
         var fill = ""
@@ -126,5 +135,21 @@ Item {
             font.pixelSize: root.chromePx
             clip: true
         }
+    }
+
+    // ── Tear-off click target ─────────────────────────────────────────────
+    // Sits over the [↗] token at the right end of the title line. Declared
+    // AFTER frameColumn so it stacks above the title Text and takes the click.
+    MouseArea {
+        visible: root.floatable
+        enabled: root.floatable
+        width: 4 * root.cellW
+        height: root.chromePx + 8
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.rightMargin: 4
+        anchors.topMargin: 4
+        cursorShape: Qt.PointingHandCursor
+        onClicked: root.floatRequested()
     }
 }

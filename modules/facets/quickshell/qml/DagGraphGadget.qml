@@ -23,8 +23,26 @@ Item {
 
     required property var notes
     required property var bridge
+    // Shared session state — the DAG trace link (optional). When
+    // shared.tracedSessionId is set (by a TerminalManagerGadget row hover), the
+    // session node whose id is `session:<that id>` is highlighted (accent border
+    // + bold agent). Read-only: this gadget never writes the trace.
+    property var shared: null
 
     property var graph: ({ "schemaVersion": "0", "nodes": [], "edges": [] })
+
+    // ── Trace match: does this node correspond to the hovered session? ──────
+    // Graph session ids are `session:<sessionId>` (graph.rs); tolerate a bare
+    // id too. Empty trace → never matches.
+    function isTraced(node) {
+        if (!shared || !node)
+            return false
+        var t = shared.tracedSessionId || ""
+        if (t.length === 0)
+            return false
+        var id = "" + (node.id || "")
+        return id === "session:" + t || id === t
+    }
 
     readonly property string graphPath:
         Quickshell.env("HOME") + "/Aoide/song/stage/graph.json"
@@ -127,11 +145,16 @@ Item {
                 readonly property bool isSession: node && node.kind === "session"
                 readonly property bool isSynthetic: !!(modelData && modelData.synthetic)
                 readonly property string limb: root.limbFor(root.rows, index)
+                readonly property bool traced: root.isTraced(rowItem.node)
 
                 Rectangle {
                     anchors.fill: parent
                     radius: 3
-                    color: rowHover.hovered && rowItem.isSession ? notes.barBg : "transparent"
+                    color: rowItem.traced
+                           ? notes.barBg
+                           : (rowHover.hovered && rowItem.isSession ? notes.barBg : "transparent")
+                    border.color: notes.paletteAccent
+                    border.width: rowItem.traced ? 1 : 0
                 }
 
                 Row {
@@ -192,6 +215,7 @@ Item {
                         opacity: root.isDone(rowItem.node) ? 0.5 : 1.0
                         font.family: "monospace"
                         font.pixelSize: 12
+                        font.bold: rowItem.traced
                     }
                     // ── Session: short cwd ───────────────────────────────
                     Text {
