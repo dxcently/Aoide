@@ -213,10 +213,18 @@ Item {
         return t
     }
 
-    // ── Popout visibility state (mutually exclusive-ish; each hover-gated) ──
+    // ── Popout visibility state ─────────────────────────────────────────────
     property bool calShown: false      // clock → calendar (click-toggled)
     property bool volShown: false      // volume hover slider
     property bool battShown: false     // battery hover popout
+
+    // Gadget tray (v2 restructure): every non-agent gadget is its own widget
+    // spawned from a bar cell. One key open at a time (click-toggled,
+    // mutually exclusive); "" = all closed.
+    property string openGadget: ""
+    function toggleGadget(key) {
+        openGadget = (openGadget === key) ? "" : key
+    }
 
     // ══ The strip — subtle Aero-glass (translucent barBg over compositor blur) ══
     Rectangle {
@@ -296,6 +304,75 @@ Item {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.bridge.sendCommand({ cmd: "dock", action: "toggle" })
+                }
+            }
+
+            // ── Gadget tray: one cell per bar-spawned widget ────────────────
+            // ♫ now-playing · ▦ meters · ⌁ power · ◔ clock. Click toggles the
+            // cell's BarPopout (mutually exclusive via openGadget). Accent
+            // color while open — same active treatment as the clock cell.
+            Text {
+                id: npCell
+                anchors.verticalCenter: parent.verticalCenter
+                text: "♫"
+                color: root.openGadget === "np" ? root.notes.barAccent : root.notes.barFg
+                opacity: root.openGadget === "np" ? 1.0 : 0.75
+                style: Text.Outline
+                styleColor: "#000000"
+                font.family: "monospace"
+                font.pixelSize: 14
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.toggleGadget("np")
+                }
+            }
+            Text {
+                id: meterCell
+                anchors.verticalCenter: parent.verticalCenter
+                text: "▦"
+                color: root.openGadget === "meters" ? root.notes.barAccent : root.notes.barFg
+                opacity: root.openGadget === "meters" ? 1.0 : 0.75
+                style: Text.Outline
+                styleColor: "#000000"
+                font.family: "monospace"
+                font.pixelSize: 14
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.toggleGadget("meters")
+                }
+            }
+            Text {
+                id: pwrCell
+                anchors.verticalCenter: parent.verticalCenter
+                text: "⌁"
+                color: root.openGadget === "power" ? root.notes.barAccent : root.notes.barFg
+                opacity: root.openGadget === "power" ? 1.0 : 0.75
+                style: Text.Outline
+                styleColor: "#000000"
+                font.family: "monospace"
+                font.pixelSize: 14
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.toggleGadget("power")
+                }
+            }
+            Text {
+                id: clkCell
+                anchors.verticalCenter: parent.verticalCenter
+                text: "◔"
+                color: root.openGadget === "clock" ? root.notes.barAccent : root.notes.barFg
+                opacity: root.openGadget === "clock" ? 1.0 : 0.75
+                style: Text.Outline
+                styleColor: "#000000"
+                font.family: "monospace"
+                font.pixelSize: 14
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.toggleGadget("clock")
                 }
             }
         }
@@ -437,77 +514,47 @@ Item {
         }
     }
 
-    // ══ POPOUTS (anchored under the bar; glass panels, notes-only) ═════════
+    // ══ POPOUTS — real PopupWindows under their bar cells (BarPopout) ══════
+    // The v1 in-Item Rectangles drew at y > 28 inside the 28px bar surface —
+    // clipped by the layer surface, never rendered. Each popout is now its
+    // own xdg_popup with GadgetFrame chrome (glass via blur_popups rule).
 
-    // Volume hover slider — anchored under the volume cell.
-    Rectangle {
-        visible: root.volShown && root.volAvail
-        x: Math.min(root.width - width - 8,
-                    Math.max(8, volText.mapToItem(root, 0, 0).x - 8))
-        y: root.height + 2
-        width: volCol.implicitWidth + 16
-        height: volCol.implicitHeight + 12
-        radius: 4
-        color: root.notes.barBg
-        opacity: 0.92
-        border.color: root.notes.barAccent
-        border.width: 1
-        Column {
-            id: volCol
-            anchors.centerIn: parent
-            spacing: 2
-            // Popout top rule: short staff-run divider (ornament vocab).
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "𝄂𝄚𝅦𝄚"
-                color: root.notes.barAccent
-                opacity: 0.5
-                font.family: "monospace"
-                font.pixelSize: 11
-            }
-            Text {
-                id: volSliderText
-                text: root.volMuted ? "muted" : (root.volSlider(root.volPct) + " " + root.volPct + "%")
-                color: root.notes.barFg
-                font.family: "monospace"
-                font.pixelSize: 12
-            }
+    // Volume hover slider.
+    BarPopout {
+        notes: root.notes
+        cell: volText
+        title: "VOLUME"
+        popoutWidth: 180
+        shown: root.volShown && root.volAvail
+        Text {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            text: root.volMuted ? "muted" : (root.volSlider(root.volPct) + " " + root.volPct + "%")
+            color: root.notes.barFg
+            font.family: "monospace"
+            font.pixelSize: 12
         }
     }
 
     // Battery hover popout — time-remaining + charge bar.
-    Rectangle {
-        visible: root.battShown && root.battAvail
-        x: Math.min(root.width - width - 8,
-                    Math.max(8, battText.mapToItem(root, 0, 0).x - 8))
-        y: root.height + 2
-        width: battCol.implicitWidth + 16
-        height: battCol.implicitHeight + 12
-        radius: 4
-        color: root.notes.barBg
-        opacity: 0.92
-        border.color: root.notes.barAccent
-        border.width: 1
+    BarPopout {
+        notes: root.notes
+        cell: battText
+        title: "BATTERY"
+        popoutWidth: 180
+        shown: root.battShown && root.battAvail
         Column {
-            id: battCol
-            anchors.centerIn: parent
+            width: parent.width
             spacing: 2
-            // Popout top rule: short staff-run divider (ornament vocab).
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: "𝄂𝄚𝅦𝄚"
-                color: root.notes.barAccent
-                opacity: 0.5
-                font.family: "monospace"
-                font.pixelSize: 11
-            }
-            Text {
                 text: root.battBar(root.battPct) + " " + root.battPct + "%"
                 color: root.battWarn ? root.notes.paletteUrgent : root.notes.barFg
                 font.family: "monospace"
                 font.pixelSize: 12
             }
             Text {
+                anchors.horizontalCenter: parent.horizontalCenter
                 visible: root.battTime().length > 0
                 text: root.battTime()
                 color: root.notes.barFg
@@ -518,23 +565,57 @@ Item {
         }
     }
 
-    // Clock → Calendar popup (the ASCII month grid dropped under the bar —
-    // the Quickshell-native upgrade of waybar's calendar tooltip).
-    Rectangle {
-        visible: root.calShown
-        x: Math.min(root.width - width - 8,
-                    Math.max(8, clockText.mapToItem(root, 0, 0).x - 8))
-        y: root.height + 2
-        width: calGadget.implicitWidth + 16
-        height: calGadget.implicitHeight + 12
-        radius: 4
-        color: root.notes.barBg
-        opacity: 0.92
-        border.color: root.notes.barAccent
-        border.width: 1
+    // Clock → Calendar (the Quickshell-native upgrade of waybar's tooltip).
+    BarPopout {
+        notes: root.notes
+        cell: clockText
+        title: "CALENDAR"
+        popoutWidth: 220
+        shown: root.calShown
         CalendarGadget {
-            id: calGadget
-            anchors.centerIn: parent
+            width: parent.width
+            notes: root.notes
+        }
+    }
+
+    // ── Gadget tray popouts (v2): each gadget is its own widget ────────────
+    BarPopout {
+        notes: root.notes
+        cell: npCell
+        title: "NOW PLAYING"
+        shown: root.openGadget === "np"
+        NowPlayingGadget {
+            width: parent.width
+            notes: root.notes
+        }
+    }
+    BarPopout {
+        notes: root.notes
+        cell: meterCell
+        title: "METERS"
+        shown: root.openGadget === "meters"
+        MeterGadget {
+            width: parent.width
+            notes: root.notes
+        }
+    }
+    BarPopout {
+        notes: root.notes
+        cell: pwrCell
+        title: "POWER"
+        shown: root.openGadget === "power"
+        PowerGadget {
+            width: parent.width
+            notes: root.notes
+        }
+    }
+    BarPopout {
+        notes: root.notes
+        cell: clkCell
+        title: "CLOCK"
+        shown: root.openGadget === "clock"
+        ClockGadget {
+            width: parent.width
             notes: root.notes
         }
     }

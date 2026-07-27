@@ -221,7 +221,11 @@ Item {
                 }
             }
 
-            // ══ Gadget stack (UNCHANGED — frames + gadgets as-is) ══════════
+            // ══ Gadget stack — the AGENT pair only (v2 restructure) ════════
+            // The dock is a container for the two agent-facing gadgets:
+            // TERMINALS (session roster) and DAG (session graph). Every other
+            // gadget (now-playing, power, calendar, clock, meters) is its own
+            // widget spawned from a bar cell (BarPopout.qml via AoideBar).
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -248,61 +252,6 @@ Item {
                         width: parent.width
                         notes: root.notes
                         bridge: root.bridge
-                    }
-                }
-
-                // ── Gadget 3: NOW PLAYING (mpris, ASCII) ─────────────────
-                GadgetFrame {
-                    Layout.fillWidth: true
-                    notes: root.notes
-                    title: "NOW PLAYING"
-                    NowPlayingGadget {
-                        width: parent.width
-                        notes: root.notes
-                    }
-                }
-
-                // ── Gadget 4: POWER (battery rests + network glyph) ──────
-                GadgetFrame {
-                    Layout.fillWidth: true
-                    notes: root.notes
-                    title: "POWER"
-                    PowerGadget {
-                        width: parent.width
-                        notes: root.notes
-                    }
-                }
-
-                // ── Gadget 5: CALENDAR (ASCII month grid) ────────────────
-                GadgetFrame {
-                    Layout.fillWidth: true
-                    notes: root.notes
-                    title: "CALENDAR"
-                    CalendarGadget {
-                        width: parent.width
-                        notes: root.notes
-                    }
-                }
-
-                // ── Gadget 6: CLOCK (Win7-clock homage) ──────────────────
-                GadgetFrame {
-                    Layout.fillWidth: true
-                    notes: root.notes
-                    title: "CLOCK"
-                    ClockGadget {
-                        width: parent.width
-                        notes: root.notes
-                    }
-                }
-
-                // ── Gadget 7: METERS (CPU/RAM ASCII gauges) ──────────────
-                GadgetFrame {
-                    Layout.fillWidth: true
-                    notes: root.notes
-                    title: "METERS"
-                    MeterGadget {
-                        width: parent.width
-                        notes: root.notes
                     }
                 }
 
