@@ -111,6 +111,35 @@ Content paths are looked up in the Song Map (`concepts/Song-Vocabulary` in the
 wiki). Creating a new root directory is a **contract change**, not a
 convenience: it lands here first, with review — not sprayed into the tree.
 
+### Package shape (`pkgs/` is walked too)
+
+`pkgs/` self-registers exactly like `modules/` and `song/repertoire/`. Drop
+`pkgs/<name>/default.nix` — a `callPackage`-able derivation taking standard
+nixpkgs args — and `lib/pkgs.nix` (the packages walker) discovers it into **all
+four** consumers from one source:
+
+- the flake `packages.<system>.<name>` output,
+- the host overlay (`lib/mkHost.nix` → `pkgs.<name>` inside every module),
+- the vm overlay (`lib/vmTest.nix` — literally the same import), and
+- a `pkg-<name>` flake check that builds it.
+
+Rules:
+
+- **Shelving opt-out**: prefix the dir with `_` (`pkgs/_wip/`) to hide it from
+  the walker without deleting it (same `_` convention as `modules/`).
+- **Names must not shadow nixpkgs**: because the overlay injects the name into
+  `pkgs`, a collision would silently mask a stock attribute. The overlay's
+  collision guard `throw`s a legible error on an accidental clash. A
+  **deliberate** shadow of an unrelated attribute (Aoide's `melete` harness vs
+  nixpkgs' `melete` font) is a reviewed exemption listed in
+  `lib/pkgs.nix`'s `intentionalShadows`.
+- **Special args**: `callPackage` auto-fills standard nixpkgs args. A package
+  needing a non-standard arg overrides it with an explicit `//` after the call
+  in `lib/pkgs.nix`'s documented escape hatch — kept there (not in `flake.nix`)
+  so the flake output and both overlays still read the one set.
+
+Adding a package is **one new folder** — never an edit to `flake.nix` or `lib/`.
+
 ---
 
 ## 3. `aoide schema --json` output — **v0**

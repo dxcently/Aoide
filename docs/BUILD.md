@@ -145,10 +145,22 @@ repertoire path is a `rice.nix`.
 
 ## Package handoffs — exactly what each agent drops in
 
-Both packages are `callPackage ./pkgs/<name> { }` in `flake.nix`. They are
-Wave-0 placeholders (trivial `runCommand` derivations that build green). Replace
-the `default.nix` **in place** — keep the file path and the `callPackage`
-signature so `flake.nix` never changes.
+`pkgs/` is walked, exactly like `modules/` and `song/repertoire/`. Drop
+`pkgs/<name>/default.nix` (a `callPackage`-able derivation, standard nixpkgs
+args) and `lib/pkgs.nix` self-registers it into the flake `packages` output, the
+host + vm overlays, and a `pkg-<name>` check — all from one source. **Adding a
+package is one file; the "only Wave 0 edits `flake.nix` and `lib/`" promise now
+HOLDS for packages too** (it did not before — the four packages used to be
+hand-listed in `flake.nix` and duplicated in both `lib/` overlays).
+
+`_`-prefix a package dir to shelve it (same as the module walker); a name must
+not shadow a nixpkgs attribute (the overlay guard `throw`s on an accidental
+clash — a deliberate shadow is an `intentionalShadows` exemption in
+`lib/pkgs.nix`); a non-standard build arg goes through `lib/pkgs.nix`'s
+documented `//` escape hatch. See `CONTRACTS.md §2`.
+
+The four current packages replace their `default.nix` **in place** — keep the
+file path and the `callPackage` signature; the walker never needs the file list.
 
 ### Agent A — note engine (`pkgs/drachma/`) — Node / Style Dictionary
 
@@ -228,7 +240,8 @@ session records) are contract §4.
   (`song/repertoire/**` is versioned score, legitimately walked).
 - `song-shape` — every walked `song/repertoire/**` path is a `rice.nix`
   (host-agnostic song discipline; CONTRACTS.md §5).
-- `pkg-aoide`, `pkg-drachma` — the two packages build (exercises the
-  packaging contract).
+- `pkg-<name>` — one auto-generated check per discovered package builds it
+  (currently `pkg-aoide`, `pkg-drachma`, `pkg-melete`, `pkg-mneme`). Generated
+  by `lib/pkgs.nix`, so a new `pkgs/<name>/` gains its check with no edit here.
 
 Run `nix flake check` before every commit.

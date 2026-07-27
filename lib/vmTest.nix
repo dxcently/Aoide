@@ -56,17 +56,14 @@ let
   hmModule = optionalModule "home-manager" (inputs.home-manager.nixosModules.home-manager or { });
   stylixModule = optionalModule "stylix" (inputs.stylix.nixosModules.stylix or { });
 
-  # The pkgs overlay injecting aoide + drachma — same as mkHost.
+  # The pkgs overlay injecting the discovered packages — now literally the SAME
+  # source as mkHost: both import lib/pkgs.nix's overlay, which auto-discovers
+  # pkgs/<name> and guards each name against shadowing a nixpkgs attribute.
   overlayModule =
     { ... }:
     {
       nixpkgs.overlays = [
-        (final: _prev: {
-          aoide = final.callPackage ../pkgs/aoide { };
-          drachma = final.callPackage ../pkgs/drachma { };
-          melete = final.callPackage ../pkgs/melete { };
-          mneme = final.callPackage ../pkgs/mneme { };
-        })
+        (import ./pkgs.nix { inherit lib; }).overlay
       ];
     };
 

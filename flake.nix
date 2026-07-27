@@ -54,6 +54,11 @@
 
       # The walker, for checks that reason over the module tree.
       walk = import ./lib/walk.nix { inherit lib; };
+
+      # The packages walker — auto-discovers pkgs/<name>/default.nix. One source
+      # feeds the `packages` output, the auto-generated `pkg-<name>` checks, and
+      # the host + vm overlays (lib/mkHost.nix, lib/vmTest.nix).
+      pkgsWalk = import ./lib/pkgs.nix { inherit lib; };
     in
     {
       # ── NixOS configurations ───────────────────────────────────────────────
@@ -62,47 +67,44 @@
       };
 
       # ── Packages ───────────────────────────────────────────────────────────
-      # `callPackage ./pkgs/<name>` — both are Wave-0 placeholders that build
-      # green today; Agents A & B replace their default.nix in place, so this
-      # file never changes. See docs/BUILD.md.
+      # Auto-discovered by lib/pkgs.nix: every `pkgs/<name>/default.nix` (not
+      # `_`-shelved) self-registers here as `callPackage ./pkgs/<name>`. Adding a
+      # package is one new folder — this file never changes. `default` = aoide.
+      # See docs/BUILD.md and CONTRACTS.md §2.
       packages = forAllSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          discovered = pkgsWalk.discover pkgs;
         in
-        {
-          aoide = pkgs.callPackage ./pkgs/aoide { };
-          drachma = pkgs.callPackage ./pkgs/drachma { };
-          # Melete AI harness + Mneme vault MCP server. Ported from dxflake;
-          # both are launcher wrappers over runtime-deployed binaries (their
-          # authenticated/out-of-band fetch is lifted to a runtime seam owned by
-          # modules/dendrites/{melete,mneme}.nix). See pkgs/{melete,mneme}.
-          melete = pkgs.callPackage ./pkgs/melete { };
-          mneme = pkgs.callPackage ./pkgs/mneme { };
-          default = self.packages.${system}.aoide;
-        }
+        discovered // { default = discovered.aoide; }
       );
 
       # ── Checks ─────────────────────────────────────────────────────────────
       # The contractual coupling discipline (lib/checks.nix). They pass
       # trivially now (no facets declare surface owners yet) and become real as
-      # Wave-1 facets populate `aoide.surfaces`. Also builds the placeholder
-      # packages so `nix flake check` exercises the packaging contract.
+      # Wave-1 facets populate `aoide.surfaces`. Also builds EVERY discovered
+      # package as `pkg-<name>` (auto-generated from lib/pkgs.nix — pkg-aoide,
+      # pkg-drachma, pkg-melete, pkg-mneme) so `nix flake check` exercises the
+      # packaging contract for the whole set with no coverage gap.
       checks = forAllSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
           checks = import ./lib/checks.nix { inherit lib pkgs; };
           hostCfg = self.nixosConfigurations.yomi-strix.config;
+          # pkg-<name> per DISCOVERED package: the check IS the built package.
+          # Reads pkgsWalk.discover directly (not self.packages) so the alias
+          # `default` yields no redundant `pkg-default`.
+          pkgChecks = lib.mapAttrs' (name: drv: lib.nameValuePair "pkg-${name}" drv) (pkgsWalk.discover pkgs);
         in
-        {
+        pkgChecks
+        // {
           surface-ownership = checks.surfaceOwnership (hostCfg.aoide.surfaces or { });
           no-song-read = checks.noSongRead (walk ./modules);
           # Committed songs self-register from song/repertoire (walked into each
           # host by lib/mkHost.nix); song-shape asserts each is a rice.nix only.
           song-shape = checks.songShape (walk ./song/repertoire);
-          pkg-aoide = self.packages.${system}.aoide;
-          pkg-drachma = self.packages.${system}.drachma;
           # VM boot test — boots the Aoide desktop config headless and asserts
           # the stack comes up (multi-user.target, aoide + drachma on PATH,
           # greetd enabled, aoided + shellbridge user services active, graph

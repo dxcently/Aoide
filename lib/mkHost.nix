@@ -55,18 +55,15 @@ inputs.nixpkgs.lib.nixosSystem {
     ++ [
       ../hosts/${name}
       # Inject the flake's own packages into pkgs so nucleus/facet modules can
-      # reference `pkgs.aoide` / `pkgs.drachma` — the SAME callPackage
-      # paths the flake's `packages` output uses, so there is one source.
+      # reference `pkgs.aoide` / `pkgs.drachma` / … — auto-discovered by
+      # lib/pkgs.nix from the SAME pkgs/<name> dirs the flake's `packages`
+      # output uses, so there is one source. The overlay form also guards each
+      # name against shadowing a stock nixpkgs attribute.
       (
         { ... }:
         {
           nixpkgs.overlays = [
-            (final: _prev: {
-              aoide = final.callPackage ../pkgs/aoide { };
-              drachma = final.callPackage ../pkgs/drachma { };
-              melete = final.callPackage ../pkgs/melete { };
-              mneme = final.callPackage ../pkgs/mneme { };
-            })
+            (import ./pkgs.nix { inherit lib; }).overlay
           ];
         }
       )
