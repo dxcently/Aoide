@@ -80,6 +80,9 @@ let
     layerrule = blur on, match:namespace aoide-dock
     layerrule = ignore_alpha 0.05, match:namespace aoide-bar
     layerrule = ignore_alpha 0.05, match:namespace aoide-dock
+    # blur_popups extends the glass to the bar's PopupWindow children (the
+    # gadget popouts) — same 0.5x snake_case rework spelling as ignore_alpha.
+    layerrule = blur_popups on, match:namespace aoide-bar
   '';
 
   # ── Hyprland keybinds for Aoide workflows ─────────────────────────────────
@@ -107,8 +110,10 @@ let
     # ── Window management (ported from dxflake hyprland dendrite) ────────
     # Normalized to SUPER, matching the Aoide binds above. dxflake exec
     # binds for tools Aoide doesn't ship (rofi, thunar, cliphist,
-    # hyprshot/satty, vesktop/discord, gpu-screen-recorder) are dropped —
-    # the launcher and the bar's power cell cover those seams. dxflake's
+    # vesktop/discord, gpu-screen-recorder) are dropped — the launcher and
+    # the bar's power cell cover those seams. The hyprshot/satty binds
+    # (SUPER+S / SUPER SHIFT+S) live in the screenshot dendrite, shipped
+    # WITH the tools (modules/dendrites/screenshot.nix). dxflake's
     # media/brightness XF86 keys are also deliberately NOT bound (strict
     # window-management scope; the bar's volume cell owns audio by mouse) —
     # a known seam if hardware keys are wanted later.
