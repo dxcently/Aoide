@@ -178,6 +178,32 @@ Item {
             onContainsMouseChanged: root.overPanel = containsMouse
         }
 
+        // ── Pantheon wireframe-depth stack (container body) ────────────────
+        // Same recipe as GadgetFrame: two hollow offset outline copies behind
+        // the container glass. Declared first → render behind the panel; the
+        // 10px panelCol margin absorbs the +6 offset so nothing clips. Border-
+        // only + no MouseArea → never intercept input.
+        readonly property int depthOff1: 3
+        readonly property int depthOff2: 6
+        Rectangle {
+            x: parent.depthOff2; y: parent.depthOff2
+            width: parent.width; height: parent.height
+            radius: 6
+            color: "transparent"
+            border.color: root.notes.paletteAccent
+            border.width: 1
+            opacity: 0.18
+        }
+        Rectangle {
+            x: parent.depthOff1; y: parent.depthOff1
+            width: parent.width; height: parent.height
+            radius: 6
+            color: "transparent"
+            border.color: root.notes.paletteAccent
+            border.width: 1
+            opacity: 0.35
+        }
+
         // ── The container body (khoa: the drawer IS a container) ───────────
         // One Aero-glass panel the two agent gadgets sit INSIDE — the Win7
         // sidebar reading. Glass + gloss + accent border, same language as

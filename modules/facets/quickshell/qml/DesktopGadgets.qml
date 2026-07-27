@@ -90,8 +90,11 @@ PanelWindow {
                 required property real gx
                 required property real gy
 
-                width: root.gadgetWidth
-                height: frame.implicitHeight
+                // +depthExtent headroom so the frame's back outline copies
+                // (offset down-right) aren't clipped by the delegate bounds;
+                // the input-mask region tracks this rect, so it grows to match.
+                width: root.gadgetWidth + frame.depthExtent
+                height: frame.implicitHeight + frame.depthExtent
 
                 // Seed the position WITHOUT a binding (a binding would fight the
                 // drag). After this the delegate owns its own x/y; the mask
@@ -102,8 +105,8 @@ PanelWindow {
                 GadgetFrame {
                     id: frame
                     anchors.left: parent.left
-                    anchors.right: parent.right
                     anchors.top: parent.top
+                    width: root.gadgetWidth
                     notes: root.notes
                     title: fd.kind
                     Loader {

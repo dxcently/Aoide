@@ -40,15 +40,19 @@ PopupWindow {
     visible: shown
     color: "transparent"
 
-    implicitWidth: popoutWidth
-    implicitHeight: frame.implicitHeight + 4   // +4 → breathing gap under the bar
+    // Depth headroom: the frame's back outline copies offset +depthExtent
+    // down-right; the popup surface clips, so the window is that much wider /
+    // taller than the frame and the frame is pinned top-left (NOT stretched to
+    // the right edge — that would grow the box-math width).
+    implicitWidth: popoutWidth + frame.depthExtent
+    implicitHeight: frame.implicitHeight + frame.depthExtent + 4  // +4 gap under bar
 
     GadgetFrame {
         id: frame
         anchors.left: parent.left
-        anchors.right: parent.right
         anchors.top: parent.top
         anchors.topMargin: 4
+        width: root.popoutWidth
         height: implicitHeight
         notes: root.notes
         title: root.title

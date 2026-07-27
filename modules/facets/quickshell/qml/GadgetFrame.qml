@@ -34,6 +34,19 @@ Item {
     readonly property int chromePx: 12      // monospace cell size for the chrome
     readonly property real cellW: chromePx * 0.6  // approx monospace advance
 
+    // ── Pantheon wireframe-depth seam (tunable constants) ───────────────────
+    // Two hollow OUTLINE copies of the panel, offset down-right behind the
+    // glass, at decreasing opacity — the "stacked offset volume" read from the
+    // reference stills, laid OVER the Aero glass. Transparent fill + border
+    // only (no MouseArea) so they never intercept input. Containers that clip
+    // (BarPopout window, DesktopGadgets delegate) must add `depthExtent` of
+    // right/bottom headroom or the back copy is cut off.
+    property int depthOff1: 3        // near copy offset (px)
+    property int depthOff2: 6        // far copy offset (px)
+    property real depthOpacity1: 0.35
+    property real depthOpacity2: 0.18
+    readonly property int depthExtent: depthOff2   // headroom a clipper must add
+
     // ── Body content sink (children nest here) ──────────────────────────────
     default property alias content: body.data
 
@@ -60,6 +73,29 @@ Item {
     }
     // How many monospace cells fit across the panel interior.
     readonly property int cols: Math.max(8, Math.floor(width / cellW))
+
+    // ── Wireframe depth stack (declared first → renders behind the glass) ───
+    // Far copy (dimmer, +6) then near copy (+3): only the offset sliver past
+    // the panel's bottom-right edge shows as a clean outline; the rest reads as
+    // a faint double-rule ghost through the translucent glass.
+    Rectangle {
+        x: root.depthOff2; y: root.depthOff2
+        width: root.width; height: root.height
+        radius: 4
+        color: "transparent"
+        border.color: notes.paletteAccent
+        border.width: 1
+        opacity: root.depthOpacity2
+    }
+    Rectangle {
+        x: root.depthOff1; y: root.depthOff1
+        width: root.width; height: root.height
+        radius: 4
+        color: "transparent"
+        border.color: notes.paletteAccent
+        border.width: 1
+        opacity: root.depthOpacity1
+    }
 
     // ── Glass panel ─────────────────────────────────────────────────────────
     Rectangle {
@@ -108,21 +144,6 @@ Item {
             id: body
             width: parent.width
             implicitHeight: childrenRect.height
-        }
-
-        // ── Footer ornament: clef-tail end-cap (ornament vocabulary) ─────
-        // Placed INSIDE the frame, right-aligned above the footer rule: the
-        // staff/clef glyphs are wide SMP characters whose cell width doesn't
-        // match the ═ fill math, so they decorate the interior rather than
-        // the computed box border (which must stay alignment-exact).
-        Text {
-            anchors.right: parent.right
-            anchors.rightMargin: Math.round(root.cellW)
-            text: "ৎ𝄢"
-            color: notes.paletteAccent
-            opacity: 0.55
-            font.family: "monospace"
-            font.pixelSize: root.chromePx
         }
 
         // ── ASCII footer ─────────────────────────────────────────────────

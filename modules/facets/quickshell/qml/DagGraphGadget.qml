@@ -112,6 +112,33 @@ Item {
         return "…/" + parts.slice(-2).join("/")
     }
 
+    // ── State → glyph — baton's theme.rs vocabulary (grammar's state tier) ──
+    // ♪ working · 𝄐 awaiting · 𝄽 idle · 𝄂 done · · unknown. Kept in lockstep
+    // with BatonGadget/TerminalManager so every surface reads the same score.
+    function stateGlyph(state) {
+        var l = ("" + (state || "")).toLowerCase()
+        if (l === "done" || l === "stop")
+            return "𝄂"
+        if (l.indexOf("await") !== -1 || l.indexOf("block") !== -1 || l === "notification")
+            return "𝄐"
+        if (l.indexOf("running") !== -1 || l.indexOf("active") !== -1
+            || l.indexOf("tool") !== -1)
+            return "♪"
+        if (l.indexOf("idle") !== -1)
+            return "𝄽"
+        return "·"
+    }
+
+    // ── Lowercase callout token — the reference's `optic nerve.LE.dk.002`
+    // pattern, built from the REAL node id: `session:9f3a…` → `session.9f3a…`,
+    // `project:aoide` → `project.aoide`. The leader line points at this.
+    function calloutId(node) {
+        if (!node)
+            return ""
+        var id = ("" + (node.id || "")).replace(":", ".").toLowerCase()
+        return id
+    }
+
     implicitHeight: content.implicitHeight
 
     Column {
@@ -130,13 +157,20 @@ Item {
             font.pixelSize: 12
         }
 
-        // ── Tree rows ────────────────────────────────────────────────────
+        // ── Node rows (Pantheon wireframe) ───────────────────────────────
+        // Each node is a small HOLLOW OUTLINE box — double-ruled for projects,
+        // single for sessions — reached by a box-drawing leader line (the tree
+        // limb) and tagged with a dim lowercase callout id. Exactly ONE node
+        // carries the neon accent at a time: the traced/live node (bright
+        // accent border + bold label + faint fill); every other outline is
+        // dimmer. The trace is driven by shared.tracedSessionId (row hover in
+        // TerminalManager), unchanged.
         Repeater {
             model: root.rows
             delegate: Item {
                 id: rowItem
                 width: content.width
-                implicitHeight: 18
+                implicitHeight: 20
                 required property int index
                 required property var modelData
 
@@ -146,84 +180,116 @@ Item {
                 readonly property bool isSynthetic: !!(modelData && modelData.synthetic)
                 readonly property string limb: root.limbFor(root.rows, index)
                 readonly property bool traced: root.isTraced(rowItem.node)
-
-                Rectangle {
-                    anchors.fill: parent
-                    radius: 3
-                    color: rowItem.traced
-                           ? notes.barBg
-                           : (rowHover.hovered && rowItem.isSession ? notes.barBg : "transparent")
-                    border.color: notes.paletteAccent
-                    border.width: rowItem.traced ? 1 : 0
-                }
+                readonly property bool done: root.isDone(rowItem.node)
+                // Border/label emphasis: the traced node is the ONE neon; a
+                // hovered session lifts slightly; projects read a touch stronger
+                // than idle sessions; done nodes recede.
+                readonly property real outlineOpacity:
+                    rowItem.traced ? 1.0
+                    : (rowHover.hovered && rowItem.isSession ? 0.7
+                    : (rowItem.done ? 0.22
+                    : (rowItem.isProject ? 0.55 : 0.4)))
 
                 Row {
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: 4
+                    spacing: 3
 
-                    // ── ASCII limb ───────────────────────────────────────
+                    // ── Box-drawing leader line (tree limb) ──────────────
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: rowItem.limb
                         color: notes.paletteAccent
-                        opacity: 0.6
+                        opacity: rowItem.traced ? 0.9 : 0.4
                         font.family: "monospace"
                         font.pixelSize: 12
                         visible: rowItem.limb.length > 0
                     }
-                    // ── Glyph ────────────────────────────────────────────
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: rowItem.isProject ? "◆" : (rowItem.isSession ? "●" : "")
-                        color: rowItem.isProject
-                               ? notes.paletteAccent
-                               : (rowItem.isSession ? root.stateColor(rowItem.node.state) : notes.paletteFg)
-                        opacity: root.isDone(rowItem.node) ? 0.5 : 1.0
-                        font.family: "monospace"
-                        font.pixelSize: 11
-                        visible: !rowItem.isSynthetic
-                    }
-                    // ── Project name ─────────────────────────────────────
-                    Text {
-                        visible: rowItem.isProject
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: rowItem.isProject ? rowItem.node.name : ""
-                        color: notes.paletteFg
-                        font.family: "monospace"
-                        font.pixelSize: 12
-                        font.bold: true
-                    }
-                    // ── Synthetic label ──────────────────────────────────
+
+                    // ── Synthetic label (no volume — a bare dim note) ────
                     Text {
                         visible: rowItem.isSynthetic
                         anchors.verticalCenter: parent.verticalCenter
                         text: rowItem.isSynthetic ? rowItem.modelData.synthetic : ""
                         color: notes.paletteFg
-                        opacity: 0.6
+                        opacity: 0.55
                         font.family: "monospace"
                         font.italic: true
                         font.pixelSize: 12
                     }
-                    // ── Session: agent ───────────────────────────────────
-                    Text {
-                        visible: rowItem.isSession
+
+                    // ── Hollow node box (the wireframe volume) ───────────
+                    Item {
+                        id: nodeBox
+                        visible: !rowItem.isSynthetic && rowItem.node !== null
                         anchors.verticalCenter: parent.verticalCenter
-                        text: rowItem.isSession ? (rowItem.node.agent || "") : ""
-                        color: rowItem.isSession ? root.stateColor(rowItem.node.state) : notes.paletteFg
-                        opacity: root.isDone(rowItem.node) ? 0.5 : 1.0
-                        font.family: "monospace"
-                        font.pixelSize: 12
-                        font.bold: rowItem.traced
+                        implicitWidth: boxRow.implicitWidth + 12
+                        implicitHeight: 16
+
+                        // Outer outline. Traced node gets a faint accent fill.
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 2
+                            color: rowItem.traced ? notes.barBg : "transparent"
+                            border.color: notes.paletteAccent
+                            border.width: 1
+                            opacity: rowItem.outlineOpacity
+                        }
+                        // Inner rule → double-line volume for PROJECT nodes.
+                        Rectangle {
+                            visible: rowItem.isProject
+                            anchors.fill: parent
+                            anchors.margins: 2
+                            radius: 1
+                            color: "transparent"
+                            border.color: notes.paletteAccent
+                            border.width: 1
+                            opacity: rowItem.outlineOpacity * 0.7
+                        }
+
+                        Row {
+                            id: boxRow
+                            anchors.left: parent.left
+                            anchors.leftMargin: 6
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 4
+
+                            // Session STATE glyph (baton vocab). Projects skip
+                            // it — the double rule already says "project".
+                            Text {
+                                visible: rowItem.isSession
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: rowItem.isSession ? root.stateGlyph(rowItem.node.state) : ""
+                                color: rowItem.isSession ? root.stateColor(rowItem.node.state) : notes.paletteFg
+                                opacity: rowItem.done ? 0.5 : 1.0
+                                font.family: "monospace"
+                                font.pixelSize: 11
+                            }
+                            // Label: project name / session agent.
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: rowItem.isProject
+                                      ? (rowItem.node.name || "")
+                                      : (rowItem.isSession ? (rowItem.node.agent || "?") : "")
+                                color: rowItem.traced ? notes.paletteAccent
+                                       : (rowItem.isSession ? root.stateColor(rowItem.node.state)
+                                       : notes.paletteFg)
+                                opacity: rowItem.done ? 0.5 : 1.0
+                                font.family: "monospace"
+                                font.pixelSize: 12
+                                font.bold: rowItem.traced || rowItem.isProject
+                            }
+                        }
                     }
-                    // ── Session: short cwd ───────────────────────────────
+
+                    // ── Dim lowercase callout id (the leader's target tag) ─
                     Text {
-                        visible: rowItem.isSession
+                        visible: !rowItem.isSynthetic && rowItem.node !== null
                         anchors.verticalCenter: parent.verticalCenter
-                        text: rowItem.isSession ? root.shortCwd(rowItem.node.cwd) : ""
+                        text: root.calloutId(rowItem.node)
                         color: notes.paletteFg
-                        opacity: root.isDone(rowItem.node) ? 0.5 : 0.7
+                        opacity: rowItem.traced ? 0.7 : (rowItem.done ? 0.3 : 0.45)
                         font.family: "monospace"
                         font.pixelSize: 10
                         elide: Text.ElideRight

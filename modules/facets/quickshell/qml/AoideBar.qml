@@ -270,6 +270,19 @@ Item {
         opacity: 0.5
     }
 
+    // Pantheon depth echo: a second, dimmer hairline 2px above the edge rule.
+    // Two parallel lines read as a stacked slab (the bar's "offset volume"),
+    // the subtle bar-scale cousin of the gadgets' wireframe depth stack.
+    Rectangle {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 2
+        height: 1
+        color: root.notes.barAccent
+        opacity: 0.2
+    }
+
     RowLayout {
         anchors.fill: parent
         anchors.leftMargin: 12
@@ -280,18 +293,6 @@ Item {
         Row {
             spacing: 12
             Layout.alignment: Qt.AlignVCenter
-
-            // Far-left end-cap ornament: compact clef tail (ornament vocab).
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "ৎ𝄢"
-                color: root.notes.barFg
-                opacity: 0.5
-                style: Text.Outline
-                styleColor: "#000000"
-                font.family: "monospace"
-                font.pixelSize: 15
-            }
 
             Text {
                 anchors.verticalCenter: parent.verticalCenter
@@ -533,20 +534,6 @@ Item {
                 text: root.netGlyph(root.netKind) + " /"
                 color: root.notes.barFg
                 opacity: root.netKind === "down" ? 0.55 : 1.0
-                style: Text.Outline
-                styleColor: "#000000"
-                font.family: "monospace"
-                font.pixelSize: 15
-            }
-
-            // Far-right end-cap ornament: staff run closing on a final
-            // barline (composed from the ornament alphabet — mirrors the
-            // left clef-tail cap; " / " functional seps stay untouched).
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "𝄚𝅦𝄚𝄂"
-                color: root.notes.barFg
-                opacity: 0.5
                 style: Text.Outline
                 styleColor: "#000000"
                 font.family: "monospace"
