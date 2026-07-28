@@ -102,6 +102,16 @@ let
     # Liquid Glass on the quickshell surfaces, ON TOP of the blur+gloss —
     # refraction/fresnel the flat gradient can't fake. Same namespaces as
     # the layerrules; the wallpaper surface stays untouched.
+    #
+    # hyprglass targets LAYER surfaces by namespace (layers { namespaces = … }).
+    # For WINDOWS it exposes only a single GLOBAL `manage_window_blur` toggle —
+    # there is NO per-class/per-window targeting in v0.7.0 (verified against the
+    # built plugin's config keys). We deliberately do NOT flip manage_window_blur
+    # (it would glass EVERY window, not just the terminal), so the Aero-glass
+    # TERMINAL is done the compositor-native way instead: kitty renders a
+    # translucent background (programs.kitty background_opacity, kitty dendrite)
+    # and Hyprland's own blur (decoration:blur above, enabled globally) frosts
+    # behind it — pinned to the kitty class by the windowrule below.
     plugin:hyprglass {
         layers {
             enabled = 1
@@ -109,6 +119,16 @@ let
             preset = glass
         }
     }
+
+    # ── Aero-glass terminal — the kitty window rides the compositor blur ──────
+    # kitty's background_opacity (0.82) makes only the cell BACKGROUND
+    # translucent (glyphs stay opaque/crisp); Hyprland then blurs behind that
+    # translucent surface, giving the frosted Win7 read. The whole-window opacity
+    # rule keeps the FOCUSED terminal fully crisp (active 1.0) and adds a gentle
+    # Aero fade when it loses focus (inactive 0.90). `windowrule` (v2 semantics,
+    # the unified form on Hyprland 0.56) matches by regex class.
+    windowrule = opacity 1.0 0.90, class:^(kitty)$
+    windowrule = rounding 8, class:^(kitty)$
   '';
 
   # ── Hyprland keybinds for Aoide workflows ─────────────────────────────────

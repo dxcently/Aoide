@@ -71,8 +71,10 @@
     };
 
     # ── Cover-art note ─────────────────────────────────────────────────────
-    # The wallpaper this song IS the palette of. Committed score content
-    # (song/covers/ — never a runtime infix), same as the default rice.
-    aoide.notes.wallpaper = ../../covers/hero.webp;
+    # The main wallpaper: Alma-Tadema's "Unconscious Rivals" — a warm classical
+    # academic painting (terracotta vault, marble, azalea, sage). NOTE: the
+    # base16 palette above is still hero's dusk-plum, keyed to the OLD cover —
+    # re-derive it from this painting for colour coherence (open thread).
+    aoide.notes.wallpaper = ../../covers/Alma-Tadema_Unconscious_Rivals.jpg;
   };
 }

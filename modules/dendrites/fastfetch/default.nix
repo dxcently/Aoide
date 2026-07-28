@@ -1,8 +1,9 @@
 # modules/dendrites/fastfetch/default.nix — the fastfetch greeting.
 #
 # A DIRECTORY dendrite because it carries an asset (./ascii-fetch, the logo:
-# Aoide's lyre, drawn in the Pantheon wireframe — five strings, one per letter
-# of A·O·I·D·E, the crossbar their tuning, the soundbox their common ground).
+# Aoide's lyre in compact form — three strings, curved arms, a soundbox, the
+# A·O·I·D·E ground and a "the song" tag). Redrawn small (13×7) so the info
+# column sits flush beside it and never wraps in a tiled/narrow terminal.
 # The walker registers every .nix under modules/dendrites/, so this default.nix
 # self-registers exactly like a flat dendrite (CONTRACTS.md §2).
 #
@@ -12,16 +13,13 @@
 #     module.
 #   - Enable with one line in hosts/ (see hosts/common/default.nix).
 #
-# What this dendrite does (ported from dxflake modules/dendrites/fastfetch/):
-#   - programs.fastfetch with the musical-notation module layout and the bundled
-#     ascii logo. The bash dendrite calls `fastfetch` on every interactive
-#     shell (initExtra), so enabling both gives the login greeting.
-#
-# Adapted vs dxflake: dxflake gated this on `dx.aggregations.desktop`; Aoide has
-# no aggregation flags, so it gates on its own aoide.fastfetch.enable per §2.
+# Design: a clean, system-fitting greeting — a compact lyre, aligned key
+# columns, and two subtly music-marked section rules (hardware / software).
+# The bash dendrite calls `fastfetch` on every interactive shell (initExtra),
+# so enabling both gives the login greeting.
 { config, lib, ... }:
 {
-  options.aoide.fastfetch.enable = lib.mkEnableOption "the fastfetch greeting (bundled musical ascii logo)";
+  options.aoide.fastfetch.enable = lib.mkEnableOption "the fastfetch greeting (compact Aoide lyre)";
 
   config = lib.mkIf config.aoide.fastfetch.enable {
     home-manager.users.${config.aoide.user} =
@@ -32,94 +30,91 @@
           package = pkgs.fastfetch;
           settings = {
             logo = {
-              type = "auto";
+              type = "file";
               source = ./ascii-fetch;
-              width = 30;
-              height = 11;
+              width = 14;
+              height = 7;
+              padding = {
+                top = 1;
+                left = 2;
+                right = 3;
+              };
             };
             display = {
-              separator = "";
+              separator = "  ";
             };
             modules = [
               {
-                type = "custom";
-                # Staff-run frame rule (ornament vocabulary): opening clef,
-                # stave fragments with barlines + notes, 𓏲𝄢 kept centered,
-                # closing on a final barline.
-                format = "𝄞𝄚𝄚𝅦𝄚𝄀𝄚𝅘𝅥𝄚𝄚♪𝄚𝄁𝄚𝅦𝄚𝄚  𓏲𝄢  𝄚𝄚𝅦𝄚𝄁𝄚♪𝄚𝄚𝅘𝅥𝄚𝄀𝄚𝅦𝄚𝄚𝄂";
+                type = "title";
+                key = "♪ ";
+                format = "{user-name}@{host-name}";
               }
               {
-                type = "title";
-                key = "  𝅝 user: ";
-                format = "{1}@{2}";
+                type = "custom";
+                format = "╶─────────────────────────╴";
               }
               {
                 type = "os";
-                key = "  𝄞 os: ";
+                key = "os    ";
+              }
+              {
+                type = "kernel";
+                key = "kernel";
+              }
+              {
+                type = "uptime";
+                key = "uptime";
               }
               { type = "break"; }
               {
                 type = "custom";
-                # Section rule with a short staff-run prefix (ornament vocab).
-                format = "  𝄂𝄚𝅦𝄚 hardware ---------------------------------------";
-              }
-              {
-                type = "gpu";
-                key = "  𝅘𝅥𝅯 gpu: ";
+                # Section rule with a subtle music mark (kept short so it never
+                # runs past a tiled terminal's edge).
+                format = "♪ hardware ╶──────────────╴";
               }
               {
                 type = "host";
-                key = "  ♬ host: ";
+                key = "host  ";
               }
               {
                 type = "cpu";
-                key = "  ♭ cpu: ";
+                key = "cpu   ";
+                format = "{name}";
+              }
+              {
+                type = "gpu";
+                key = "gpu   ";
+                format = "{name}";
               }
               {
                 type = "memory";
-                key = "  𝄌 ram: ";
+                key = "ram   ";
               }
               { type = "break"; }
               {
                 type = "custom";
-                # Section rule with a short staff-run prefix (ornament vocab).
-                format = "  𝄂𝄚𝅦𝄚 software ---------------------------------------";
+                format = "♪ software ╶──────────────╴";
               }
               {
                 type = "wm";
-                key = "  𝄡 window manager:  ";
-              }
-              {
-                type = "terminalfont";
-                key = "  𝆑 font: ";
-              }
-              {
-                type = "editor";
-                key = "  ♯ editor: ";
-              }
-              {
-                type = "terminal";
-                key = "  𝅘𝅥 terminal: ";
+                key = "wm    ";
               }
               {
                 type = "shell";
-                key = "  𝅗𝅥 shell: ";
+                key = "shell ";
+              }
+              {
+                type = "terminal";
+                key = "term  ";
               }
               {
                 type = "theme";
-                key = "  𝄇 color scheme: ";
+                key = "theme ";
               }
+              { type = "break"; }
               {
                 type = "colors";
-                symbol = "square";
-                paddingLeft = 21;
-              }
-              {
-                type = "custom";
-                # Staff-run frame rule (ornament vocabulary): opening clef,
-                # stave fragments with barlines + notes, 𓏲𝄢 kept centered,
-                # closing on a final barline.
-                format = "𝄞𝄚𝄚𝅦𝄚𝄀𝄚𝅘𝅥𝄚𝄚♪𝄚𝄁𝄚𝅦𝄚𝄚  𓏲𝄢  𝄚𝄚𝅦𝄚𝄁𝄚♪𝄚𝄚𝅘𝅥𝄚𝄀𝄚𝅦𝄚𝄚𝄂";
+                symbol = "circle";
               }
             ];
           };
