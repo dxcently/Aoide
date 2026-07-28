@@ -22,6 +22,13 @@ drachma is where the frozen nix layer and the live desktop meet: values
 frozen into the crystal, sounded at runtime. The container stays W3C
 design-tokens format; drachma is Aoide's name for what fills it.
 
+**Why a coin.** Because it is a **token** layer, and a token is a coin. The
+industry term for this layer is *design tokens* and the container is the W3C
+design-tokens format; a token is a minted thing standing for value, and the
+Muses are Greek, so the coin is the drachma. The mint follows from it: values
+and engine share one name because a currency is inseparable from the authority
+that stamps it. See [[Lexicon#Why the seam is a coin]].
+
 Every facet consumes drachma and nothing else. No module reads another
 module. The coupling discipline is contractual, not polite.
 

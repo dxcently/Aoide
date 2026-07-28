@@ -69,9 +69,31 @@ A few terms name the connective tissue rather than either half:
 
 - **door** — an entry point into the one dispatch layer: `cli`, `mcp`, `daemon` (and the TUI rides the cli door). Every operation enters through a door and exits into the one audit log. One body, several doors.
 - **gate** — the rebuild gate ([[Rebuild-Gate]]): agents propose, the human admits. The single point where the performed half is allowed to re-freeze the crystal.
-- **drachma** — the design tokens AND the engine that mints them ([[drachma]], `pkgs/drachma`): the Greek coin, one name for the whole token layer. Values and engine are one thing (not a values-vs-engine split): the tokens are drachma, resolved/validated/emitted by drachma (`stage/drachma.json`, hyprctl, OSC).
+- **drachma** — the design tokens AND the engine that mints them ([[drachma]], `pkgs/drachma`): the Greek coin, one name for the whole token layer. Values and engine are one thing (not a values-vs-engine split): the tokens are drachma, resolved/validated/emitted by drachma (`stage/drachma.json`, hyprctl, OSC). Why a coin and not a musical word: the section below.
 - **baton** — the conductor's tool: `aoide baton`, the TUI that watches the ensemble of running agent terminals and cues between them, with Hyprland as the multiplexer (real windows, not panes). The wider **conductor-class** covers every surface with that duty — the Terminal Commander widget, the DAG gadget, the baton. See [[Terminal-Commander]], [[Session-Graph]]. (Prior art for the behavior: the herdr multiplexer — an external tool, not part of this vocabulary.)
 - **wiki / vault** — Mneme's memory surfaces: this wiki for design context, the vault for content.
+
+## Why the seam is a coin
+
+Because it is a **token** layer — and a token is a coin.
+
+The industry term for this layer is *design tokens*, and the container is the W3C design-tokens format (`CONTRACTS.md` §1). A token is a minted thing that stands for value; the Muses are Greek, so the coin is the Greek one: **drachma**.
+
+Which is why the seam needs no musical word — it was never on the music axis:
+
+- **The Greek axis** names *who acts* and *what is exchanged* — Aoide, Melete, Mneme, drachma.
+- **The music axis** names *what is made and performed* — score, song, key, melody, arrangement, instruments, venue, rehearsal, recording.
+
+drachma sits *with* the Muses rather than beside them — one axis, not a third.
+
+The coin keeps reading true past the name:
+
+| The coin | The layer |
+|---|---|
+| A coin is what both parties accept | Stylix bakes it, [[Quickshell]] reads it, hyprctl and the terminal OSC spend it — one unit of account across the seam. This is the zero-drift guarantee stated in economic terms. |
+| A mint stamps a standard | `pkgs/drachma` validates, resolves, emits; `drachma lint` assays the coin before it circulates. Values and mint share one name because a currency is inseparable from the authority guaranteeing it — exactly the values-vs-engine split the name abolishes. |
+| Denomination is tiering | palette → semantic → component: the low tier closed and concrete, the higher tiers referencing it. |
+| Currency travels | a song replays at another venue and the drachma still spends. Value that holds across contexts is the point of both coins and [[Self-Ricing]] replay. |
 
 ## How it all flows
 
