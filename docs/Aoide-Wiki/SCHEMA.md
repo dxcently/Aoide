@@ -57,7 +57,7 @@ snapshot: 2026-07-28
 
 ### Tags
 
-agent · aoide · architecture · auto-discovery · base16 · baton · bridge · cli · coding-agent · compositor · conductor · content · daemon · dag · declarative · deployment · design · desktop · dxflake · extensibility · features · flake · gadget · glyph · governance · graph · harness · hyprland · integration · ipc · knowledge · mcp · melete · meta · mneme · naming · nix · node · notes · onboarding · orchestration · orchestrator · pantheon · pipeline · policy · protocol · pty · qml · quickshell · rebuild · rice · rust · security · session · shell · song · stylix · terminal · theming · tui · ui · vault · wayland · widget · wiki
+agent · aoide · architecture · auto-discovery · base16 · baton · bridge · cli · coding-agent · compositor · conductor · content · daemon · dag · declarative · deployment · design · desktop · drachma · dxflake · extensibility · features · flake · gadget · glyph · governance · graph · harness · hyprland · integration · ipc · knowledge · mcp · melete · meta · mneme · naming · nix · node · onboarding · orchestration · orchestrator · pantheon · pipeline · policy · protocol · pty · qml · quickshell · rebuild · rice · rust · security · session · shell · song · stylix · terminal · theming · tui · ui · vault · wayland · widget · wiki
 
 ### Notes
 
@@ -67,7 +67,6 @@ SCHEMA.md
 concepts/Agent-Interface.md
 concepts/Codebase.md
 concepts/Content-Pipeline.md
-concepts/Notes.md
 concepts/Desktop-Architecture.md
 concepts/Feature-Set.md
 concepts/Fork-and-Run.md

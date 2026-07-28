@@ -57,7 +57,7 @@ document instead. A sample render:
 
 `graph emit` writes the same resolved document atomically to
 `song/stage/graph.json` — the identical write-temp-then-rename pattern as the
-notes emitter — so [[Quickshell]] can hot-reload it.
+drachma emitter — so [[Quickshell]] can hot-reload it.
 
 **The desktop surfaces are built** (commits 1fedd58 and 41be90f). The graph
 now renders in two places besides the terminal, both hot-reloading

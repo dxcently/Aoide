@@ -129,7 +129,7 @@ preview* — no `hyprctl`, no invented IPC, both surfaces just read shared state
   `shared.hoveredWorkspace` (a `property int` on shell.qml's shared QtObject,
   the same object that carries `tracedSessionId` for the DAG trace). It threads
   shell → dock → gadget for the *writer* and shell → bar → WorkspaceRow for the
-  *reader* — mirroring how `notes`/`bridge` are passed. Hover and click coexist
+  *reader* — mirroring how `drachma`/`bridge` are passed. Hover and click coexist
   (the HoverHandler never steals the click-to-jump `MouseArea`; the dock's
   panel-wide hover union keeps the drawer open through it). On hover-exit the
   value clears to the sentinel `-1`.
@@ -163,7 +163,7 @@ Two ways to reach a terminal, both one hop:
 
 It is built the way every integration is ([[Widget-Maker]]): a **dendrite**
 (watcher + shellbridge wiring), a **Quickshell widget** (the roster), and a
-**compositor keybind** — reproducible, note-themed, and removable by one flag.
+**compositor keybind** — reproducible, drachma-themed, and removable by one flag.
 The agent can extend it (add columns, filters, per-agent actions) on request.
 
 ## Related

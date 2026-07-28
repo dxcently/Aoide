@@ -27,14 +27,14 @@ MCP/HTTP/shell-exec from QML. `shell.qml` (a `ShellRoot`) instantiates the two
 singletons and the surface widgets (`AoideBar` with the `SessionChip`/
 `WorkspaceRow` session-jump widget, `AoideNotifications` + `NotificationCard`,
 `AoideLauncher`, `AoideOsd`, `AoideLockscreen`, `AoideGreeter`, `AoideWallpaper`)
-— each a stub reading colours from `notes`, kept in a separate file so [[Melete]]
+— each a stub reading colours from `drachma`, kept in a separate file so [[Melete]]
 can swap them independently. The facet installs the tree to `~/Aoide/qml` via
 home-manager activation. Now that the host runs Aoide live, that deploy target
 sits **untracked at the repo root** of the user's fork — the relationship
 between the source tree (`modules/facets/quickshell/qml/`) and the deployed
 copy needs a decision (open thread). Crucially, `hyprland.conf` is
 owned by home-manager's `wayland.windowManager.hyprland`: the compositor facet
-writes note + keybind fragments with `mkBefore`, and the Quickshell facet appends
+writes drachma + keybind fragments with `mkBefore`, and the Quickshell facet appends
 its `exec-once` autostart with `mkAfter`, so the two facets compose the one config
 file without collision.
 
@@ -71,7 +71,7 @@ enumerates apps from Quickshell's built-in `DesktopEntries`, filters on a
 prefix-ranked case-insensitive substring as you type, navigates with
 Up/Down + Ctrl+J/K, launches on Enter/click, dismisses on Escape / scrim-click.
 It is a Pantheon pane (`GadgetFrame`, cream Aero glass, `♪` prompt, lowercase
-`launcher.summon` callout), colours strictly from `notes`.
+`launcher.summon` callout), colours strictly from `drachma`.
 
 Two design decisions worth carrying forward:
 
@@ -144,6 +144,6 @@ and let the baked unit stand. See [[references/AOIDE-DEV-HANDOFF]] §7.
 - [[Gadget-Dock]]
 - [[shellbridge]]
 - [[Self-Ricing]]
-- [[Notes]]
+- [[drachma]]
 - [[Codebase]]
 - [[Hyprland]]

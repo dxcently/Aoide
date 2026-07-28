@@ -200,7 +200,7 @@ Live-side state, all gitignored, none load-bearing for the build:
 - **Socket:** `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` — the one outbound
   channel from QML; adapters and widgets bind exactly this path, never compute
   it.
-- **Stage files** under `song/stage/`: `drachma.json` (resolved note colours,
+- **Stage files** under `song/stage/`: `drachma.json` (resolved drachma colours,
   written by [[drachma]]), `sessions.json` (agent session roster, written by
   [[shellbridge]]; records may carry an additive optional `parentSessionId`),
   `hooks.json` (live Claude Code hook phases), `projects.json` (the project
@@ -257,7 +257,7 @@ build; `aoide guide`, `aoide schema --json`, `mcp serve --stdio`, and the audit
 log; `rice lint` (delegates to [[drachma]]); the daemon skeleton (audit
 append, user gate, default-deny event bus); shellbridge (atomic writer, seeded
 stage files, and a live socket accept loop — `focuswindow`); the melete-adapter skeleton (env-driven
-subscription, metadata-only notification boundary); all three note emitters; the
+subscription, metadata-only notification boundary); all three drachma emitters; the
 QML shell skeleton; the baked Stylix and compositor fan-outs; and the whole
 `aoide graph` group — 15 subcommands (`view`, `project add/remove/list`,
 `link`, `session start/phase/end/hook`, `wrap`, `send`, `focus`, `prune`,
@@ -279,7 +279,7 @@ launcher, osd, lockscreen, greeter, wallpaper, agentWidgets, sessionGraph; see
 starship, mcfly, btop, yazi, fastfetch, devtools, fonts, obsidian, melete,
 mneme, firefox, screenshot, and vision — ported from [[dxflake]]'s prior rig
 into Aoide shape. The `nvf` flake input threads to home-manager via
-`extraSpecialArgs`; the cover-art note (`aoide.drachma.wallpaper` → per-song
+`extraSpecialArgs`; the cover-art token (`aoide.drachma.wallpaper` → per-song
 `assets/`) backs the shipped wallpapers; Lekton Nerd Font Mono is the stylix
 face; the [[Gadget-Dock]] carries the waybar-homage bar rework plus
 NowPlaying/Power/Calendar gadgets. Baseline dendrites default on in
@@ -304,7 +304,6 @@ itself.)
 - [[aoided]]
 - [[shellbridge]]
 - [[dxflake]]
-- [[Notes]]
 - [[Governance]]
 - [[Gadget-Dock]]
 - [[Rebuild-Gate]]

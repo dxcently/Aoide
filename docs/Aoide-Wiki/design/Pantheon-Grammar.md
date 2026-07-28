@@ -166,7 +166,7 @@ The Pantheon effect at full strength:
 
 ## Round 4 — the multicolor field + the bar joins (2026-07-27)
 
-- **base16 through the note seam**: the stage notes carry an optional
+- **base16 through the drachma seam**: the stage drachma carries an optional
   all-or-nothing `base16` block (drachma-validated). DrachmaState maps four
   semantic roles from it — `wireCyan` (base0C, structural outlines/leaders),
   `holoBlue` (base0D, depth-stack back copies + link callouts), `violet`
@@ -277,5 +277,5 @@ subtly music-marked section rules (`♪ hardware`, `♪ software`).
 - [[Song-Anatomy]] — the songbook under `song/` where this design memory
   belongs; the destination of the pending migration.
 - [[Self-Ricing]] — the songbook write-back loop (the "self" in self-ricing).
-- [[Notes]] — the `aoide.drachma` seam every surface here reads its roles from.
+- [[drachma]] — the `aoide.drachma` seam every surface here reads its roles from.
 - [[Gadget-Dock]] · [[Terminal-Commander]] — the surfaces that wear the grammar.

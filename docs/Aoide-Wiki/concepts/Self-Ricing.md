@@ -69,20 +69,20 @@ aoide.song = "sonata";
 
 Songs self-register via the `song/songbook/` walk in `lib/mkHost.nix`; each song's `rice.nix` guards itself with `lib.mkIf (config.aoide.song == "<name>")`. No explicit import list: committing a song makes it available to all hosts. (This walker/registration mechanism is real and shipped — only the CLI verbs that generate/commit songs are stubbed.)
 
-**Replay** is performing an adopted song at a different host. The song carries only notes (palette + component tiers); the host supplies its own specifics (hardware, monitors) and its own enabled instruments (facets, dendrites). A host lacking an instrument does not sound that part — coverage degrades gracefully through the tiers above.
+**Replay** is performing an adopted song at a different host. The song carries only drachma (palette + component tiers); the host supplies its own specifics (hardware, monitors) and its own enabled instruments (facets, dendrites). A host lacking an instrument does not sound that part — coverage degrades gracefully through the tiers above.
 
 **Transpose** vs **replay**: transpose = same venue, new key (new palette). Replay = same score, new venue (different host). Both are one-line operations on an adopted song (`rice transpose` itself is planned; the replay declaration — `aoide.song = "<name>";` — is real).
 
 ## Keys and Transposition
 
-Each song's `songbook/<song>/palette/` holds its transpose keys — the palette variants that song can swap among. Wallpaper extraction emits new keys as standalone artifacts. `rice transpose <song> <key>` (planned) replays a song in another key. This is only possible because the semantic and component note tiers never touch raw color values directly.
+Each song's `songbook/<song>/palette/` holds its transpose keys — the palette variants that song can swap among. Wallpaper extraction emits new keys as standalone artifacts. `rice transpose <song> <key>` (planned) replays a song in another key. This is only possible because the semantic and component tiers never touch raw color values directly.
 
 ## Per-Song Structure
 
 ```
 song/songbook/<song>/
-├── rice.nix      pure nix: notes import + config swaps
-├── drachma.json  note values
+├── rice.nix      pure nix: drachma import + config swaps
+├── drachma.json  drachma values
 ├── assets/       wallpaper + cover art
 ├── palette/      transpose keys
 ├── sounds/       chimes / notification audio
@@ -96,7 +96,7 @@ song/songbook/<song>/
 ## Related
 
 - [[Song-Vocabulary]]
-- [[Notes]]
+- [[drachma]]
 - [[Content-Pipeline]]
 - [[Snowflake-Anatomy]]
 - [[Stylix]]

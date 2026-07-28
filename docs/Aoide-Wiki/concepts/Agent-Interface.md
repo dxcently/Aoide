@@ -43,7 +43,7 @@ Every `aoide` command is designed as an API that happens to be typeable:
 
 - `--json` flag on every command for structured input and output
 - Structured errors with meaningful exit codes
-- Published schemas for all state files (`stage/`, notes, manifests)
+- Published schemas for all state files (`stage/`, drachma, manifests)
 - All operations idempotent; output reports exactly what changed
 
 ## Primary agent: claude CLI

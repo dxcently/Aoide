@@ -18,7 +18,7 @@ façade]]). Many capabilities below are Melete's, *surfaced* through AoideOS —
 see the "Provided by" column.
 
 Every integration is a dendrite ([[Snowflake-Anatomy]]): opt-in, flag-toggled,
-themed by [[Notes|notes]], and — where it touches the outside world —
+themed by [[drachma]], and — where it touches the outside world —
 `enable = false` by default and behind the [[Governance|gate]].
 
 **More than a catalog.** This list is what ships — but the *point* of Aoide is
@@ -87,7 +87,7 @@ Aoide surfaces **both** agent schedules and system timers in one place.
 - **System timers:** systemd timers surfaced read-only alongside.
 - **Widget:** a Quickshell **agenda / timers widget** reads a `song/stage/*.json`
   state file and shows pending one-shots, recurring cadences, chained jobs
-  ("waiting on `<id>`"), and system timers — live, themed by notes.
+  ("waiting on `<id>`"), and system timers — live, themed by drachma.
 - **Governance:** scheduled *coding* runs still route their result through the
   rebuild gate; **no background self-updaters** ([[Governance]]).
 - **Surfaced as:** a planned `aoide sched …` verb (list / create / cancel, not

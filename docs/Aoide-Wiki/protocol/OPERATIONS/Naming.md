@@ -12,7 +12,7 @@ Create kind folders lazily — only when the first note of that kind is minted.
 
 ## File names
 
-Use readable title case with hyphens for multi-word names: `Notes.md`, `Self-Ricing.md`, `Song-Vocabulary.md`.
+Use readable title case with hyphens for multi-word names: `Self-Ricing.md`, `Song-Vocabulary.md`, `Song-Anatomy.md`.
 
 **Source capitalization wins** for proper nouns and code identifiers, even when they are lowercase or unconventional: `aoided.md`, `shellbridge.md`.
 
@@ -23,7 +23,7 @@ Files always present at a wiki root: `SCHEMA.md` (all-caps) and `Overview.md` (t
 The H1 of each page may be richer than the filename — a subtitle, parenthetical, or fuller description is fine. The filename is the stable identifier; the H1 is the human-readable title.
 
 Examples:
-- File: `Notes.md` → H1: `# Notes — the Seam Between Score and Performance`
+- File: `Song-Vocabulary.md` → H1: `# Song Vocabulary — the Performed Half`
 - File: `aoided.md` → H1: `# aoided`
 
 ## Summary table
@@ -33,7 +33,7 @@ Examples:
 | Kind folder | lowercase, no prefix | `concepts/` |
 | Wiki directory | source capitalization | `Aoide-Wiki/` |
 | Protocol rule folder | ALL-CAPS | `OPERATIONS/` |
-| Generic file | title case, hyphens | `Notes.md` |
+| Generic file | title case, hyphens | `Song-Vocabulary.md` |
 | Code identifier file | source capitalization | `aoided.md` |
 | Wiki root files | as specified | `SCHEMA.md`, `Overview.md` |
 

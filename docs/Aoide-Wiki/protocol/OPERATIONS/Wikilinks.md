@@ -2,14 +2,14 @@
 
 ## Rule: all internal references are wikilinks
 
-Every reference to another page in this wiki must use `[[wikilink]]` syntax. Plain filesystem paths (`concepts/Notes.md`) are forbidden in note bodies.
+Every reference to another page in this wiki must use `[[wikilink]]` syntax. Plain filesystem paths (`concepts/Self-Ricing.md`) are forbidden in note bodies.
 
 ## Bare names vs. full paths
 
 A wiki is standalone, so every page name is unique within it — prefer the bare name:
 
 ```
-[[Notes]]
+[[drachma]]
 [[aoided]]
 [[Overview]]
 ```

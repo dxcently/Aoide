@@ -2,24 +2,63 @@
 type: entity
 created: 2026-07-26
 updated: 2026-07-28
-aliases: [aoide-drachma, notes package, note engine]
+aliases: [aoide-drachma, aoide-notes, Notes, notes package, note engine]
 tags: [aoide, drachma, theming, base16, node]
 ---
 
-# drachma (the design tokens — and the engine that mints them)
+# drachma — the design tokens, and the engine that mints them
 
 `drachma` is Aoide's **design-token layer** — one name for the whole thing:
 the values and the mint are one thing, named for the Greek coin. The same
 word names the standalone Node package that validates, resolves, and emits
 the tokens. A song authors `aoide.drachma.*`; facets read `aoide.drachma` and
 nothing else; the runtime seam is `stage/drachma.json`. "Notes" survives only
-as the musical image ([[Notes]], [[Lexicon]]) — the package, the schema, and
+as the musical image ([[Lexicon]]) — the option, the package, the schema, and
 every shipped artifact are `drachma`.
 
-The package is the concrete implementation of the token schema described in
-[[Notes]]: it wraps Style Dictionary rather than reimplementing a resolver,
-and it owns the authoritative v0 schema validator that `aoide rice lint`
-delegates to.
+## The seam between score and performance
+
+drachma is where the frozen nix layer and the live desktop meet: values
+frozen into the crystal, sounded at runtime. The container stays W3C
+design-tokens format; drachma is Aoide's name for what fills it.
+
+Every facet consumes drachma and nothing else. No module reads another
+module. The coupling discipline is contractual, not polite.
+
+## Two fan-outs, one source
+
+```
+drachma (single source)
+    ├── stage/drachma.json  →  Quickshell + hyprctl + terminal OSC  (rehearsal / live)
+    └── rice.nix → Stylix   →  every nix-manageable app             (recording / adopted)
+```
+
+[[Stylix]] is the baked fan-out. `rice.nix` feeds one base16 scheme into
+Stylix (plus fonts, cursor, wallpaper) and Stylix themes every nix-manageable
+target — GTK/Qt, terminal, editors, browser, boot. The drachma package keeps
+only the live side.
+
+Because both fan-outs derive from the same drachma values, preview state and
+adopted state cannot diverge. This is the "zero drift" guarantee.
+
+## Tier structure
+
+| Tier | Status | Detail |
+|---|---|---|
+| Palette (base16) | Settled | [[Stylix]] consumes natively; no open questions |
+| Semantic tier | Open (v1 design-system work) | Names meanings, survives transposition |
+| Component tier | Open (v1 design-system work) | Maps semantics to specific surfaces |
+
+The open schema question is scoped to the semantic and component tiers only.
+The palette tier is closed.
+
+## Prior art — wrap, don't rewrite
+
+Style Dictionary and the W3C design-tokens format already provide tiered
+reference resolution and multi-format emission. The package wraps these
+rather than reimplementing a resolver; it owns the authoritative v0 schema
+validator that `aoide rice lint` delegates to. The genuinely missing pieces
+are the Aoide-specific emitters (QML/stage, hyprctl, OSC).
 
 *It lives at `pkgs/drachma/`, packages as `buildNpmPackage` (pname
 `aoide-drachma`) with a single runtime dependency (`style-dictionary@4.3.0`),
@@ -80,9 +119,24 @@ design-tokens container: palette is base16-closed; the component tier is the
 smoke-tests all four operations (`lint`, `resolve`, `emit stage`, `emit hyprctl`,
 `emit osc`) against a v0 fixture during `doInstallCheck`.
 
+The provisional v0 stands until the design-system v1 lands: palette (`bg`,
+`fg`, `accent`, `urgent`) plus component overrides (`bar.*`, `notif.*`,
+`window.*`). The update playbook migrates songbook modules from v0 to v1 when
+v1 supersedes. Building against no schema at all was rejected.
+
+## Stylix overlap resolution
+
+The [[Quickshell]] facet declares the surfaces it owns; [[Stylix]] disables
+derivation for those surfaces from that declaration. The flake's `checks`
+assert that no surface has two owners. They fail eval if any module reads
+`song/` runtime paths at build time — `stage/` can never become load-bearing
+for the nix build.
+
 ## Related
 
-- [[Notes]]
+- [[Self-Ricing]]
+- [[Song-Vocabulary]]
+- [[Snowflake-Anatomy]]
 - [[aoide-cli]]
 - [[Quickshell]]
 - [[Stylix]]

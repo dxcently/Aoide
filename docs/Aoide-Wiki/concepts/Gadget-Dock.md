@@ -109,7 +109,7 @@ the same visual language:
   same files-not-processes rule as `MeterGadget`); shows an honest
   "AC (no battery)" on desktops.
 - **`CalendarGadget`** — an ASCII box-drawing month grid, today highlighted
-  from the note accent; it doubles as the bar clock's anchored drop-popup
+  from the drachma accent; it doubles as the bar clock's anchored drop-popup
   (the waybar calendar-tooltip's descendant).
 
 The bar itself is now the dxflake waybar homage — slim glass strip, 𝄞 power

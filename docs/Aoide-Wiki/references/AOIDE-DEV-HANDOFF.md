@@ -243,8 +243,11 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   the mint are one thing, not a values-vs-engine split. Shipped as `aoide.drachma`,
   `stage/drachma.json`, `DrachmaState.qml`, and the `drachma` package (commit
   0117a79, "the note engine takes the coin"). "Notes" survives only as the
-  musical image, never the primary name/filename. Pages reconciled ([[Notes]],
-  [[drachma]], [[Lexicon]]). Residual: a few Quickshell facet bodies still carry
+  musical image, never the primary name/filename. Pages reconciled ([[drachma]],
+  [[Lexicon]]); the `Notes` concept page was **retired 2026-07-28** and merged
+  into [[drachma]], so the wiki now has one page for the token layer (`Notes`
+  survives as a drachma alias so dated log history still resolves).
+  Residual: a few Quickshell facet bodies still carry
   the `notes.` property-id mid-rename to `drachma.` — cosmetic follow-up, not a
   contract question.
 - **[restructure · khoa — RESOLVED 2026-07-28; wiki + code both landed]

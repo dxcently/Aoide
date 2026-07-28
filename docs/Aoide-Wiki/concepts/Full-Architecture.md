@@ -2,7 +2,7 @@
 type: concept
 created: 2026-07-26
 updated: 2026-07-28
-tags: [aoide, architecture, desktop, notes, pipeline]
+tags: [aoide, architecture, desktop, drachma, pipeline]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
 
@@ -16,7 +16,7 @@ detail.
 
 The organizing thesis (see [[Song-Vocabulary]]): architecture is frozen music.
 The **frozen half** is the nix layer — the score. The **performed half** is the
-running desktop — the performance. **Notes** are the one seam where they meet.
+running desktop — the performance. **Drachma** is the one seam where they meet.
 
 *Everything verifies green (flake check + the vm-boot check) — and the stack
 **runs live** on yomi-strix.*
@@ -34,14 +34,14 @@ stays in the systemd-boot menu as the rollback. Every subsystem below is
 marked on one of three rungs:
 
 - **Implemented** — real code paths: the flake/walker/checks layer, the option
-  contract, the note plumbing, the CLI trunk + MCP façade, the daemon and
+  contract, the drachma plumbing, the CLI trunk + MCP façade, the daemon and
   bridge skeletons, the three facets, song replay, the launcher, the gadget
   dock.
 - **Stubbed** — the mutating CLI verbs (`rice gen/adopt/transpose`,
   `content *`, `make`, `update`, `onboard`) parse, audit, and exit 64 with a
   structured not-implemented payload; only the live action is deferred.
   (`rice lint` and `rice preview` are real — see [[Self-Ricing]].)
-- **Future** — v1 note tiers, the functional rice loop (`gen`/`adopt`/
+- **Future** — v1 drachma tiers, the functional rice loop (`gen`/`adopt`/
   `transpose`), the network-exposed Aoide connector.
 
 The repo is deliberately **local-only** for now: no git remote, so [[Melete]]
@@ -59,13 +59,13 @@ detail lives in [[Codebase]]; this page stays at the map altitude.
    │  hosts    song/songbook       │        │  notifications  widgets           │
    └──────────────┬───────────────┘        └───────────────┬──────────────────┘
                   │                                         │
-                  └──────────────►    NOTES    ◄──────────────┘
+                  └──────────────►   DRACHMA   ◄──────────────┘
                                    the only seam
                         values frozen into the crystal,
                              sounded at runtime
 ```
 
-Everything below is one of these two halves, or the note seam, or the agent
+Everything below is one of these two halves, or the drachma seam, or the agent
 control plane that drives them.
 
 ## Master map — how the subsystems connect
@@ -100,8 +100,8 @@ trail but exit 64 today.
   song/songbook/<song>     place, never copies)          │
   rice.nix + drachma.json                                  ▼
   songbook/ (write-back)                          ┌─────────────┐
-       │                                          │    NOTES    │  aoide.drachma — one source
-       └───────────────────────────────────────► └──────┬──────┘  [[Notes]]
+       │                                          │   DRACHMA   │  aoide.drachma — one source
+       └───────────────────────────────────────► └──────┬──────┘  [[drachma]]
                                     two fan-outs         │
                        ┌─────────────────────────────────┴───────────────┐
                        ▼ (rehearsal / live)                (recording / baked) ▼
@@ -135,20 +135,20 @@ draws.
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`~/Aoide/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped default | `song/songbook/<song>/`; songbook append; preview   | stubbed (`rice lint`/`preview` real)        |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all verbs exit 64)                |
-| [[Notes]]            | `aoide.drachma` (palette + component tiers)      | `song/stage/drachma.json`; baked facet + Stylix values | implemented (v0)                           |
+| [[drachma]]          | `aoide.drachma` (palette + component tiers)      | `song/stage/drachma.json`; baked facet + Stylix values | implemented (v0)                           |
 | [[shellbridge]]      | unix-socket commands; Hyprland IPC             | atomic JSON in `song/stage/`; `hyprctl` dispatch    | implemented (accept loop live: `focuswindow`) |
 | [[Quickshell]]       | `song/stage/*.json` (incl. drachma)            | widget socket commands; rendered surfaces           | implemented (9 real surfaces)              |
 | [[Hyprland]]         | baked config + `hyprctl` keywords              | IPC event/state socket                              | implemented (greetd stubbed)               |
 | [[Stylix]]           | base16 synthesized from the v0 palette         | themed config for every nix app                     | implemented (stands down on owned surfaces) |
 
-## The note seam in detail — one source, two fan-outs, zero drift
+## The drachma seam in detail — one source, two fan-outs, zero drift
 
 Why preview and adopted state can never diverge: both derive from the same
 `aoide.drachma` values. The drachma schema v0 (palette `bg/fg/accent/urgent` + component
 tiers `bar`/`notif`/`window`, each field `null` → palette, with the fallback
 applied **in the facets**) rides the external W3C design-tokens container
 format; [[drachma]] (Node, wrapping Style Dictionary; bins `lint` /
-`resolve` / `emit {stage,hyprctl,osc}`) is the engine. See [[Notes]].
+`resolve` / `emit {stage,hyprctl,osc}`) is the engine. See [[drachma]].
 
 ```
                      aoide.drachma  (palette → component, v0)
@@ -181,11 +181,11 @@ The baked side is carried by the three facets, all real:
   spike still pending); agentWidgets is the [[Gadget-Dock]] — the
   Win7-sidebar-homage gadgets (terminal roster, compact DAG, clock, CPU/RAM
   meters, NowPlaying/Power/Calendar), a left-edge pinnable popup on hot-edge
-  hover or `SUPER+G`, all notes-coloured; sessionGraph is the
+  hover or `SUPER+G`, all drachma-themed; sessionGraph is the
   [[Session-Graph]] DAG overlay, built but dormant (bridge-only, no keybind);
   osd, lockscreen, greeter, and wallpaper round out the set.
 - **compositor** — [[Hyprland]]; the system layer holds session/portal wiring,
-  the home-manager layer owns `hyprland.conf` with notes baked at build and
+  the home-manager layer owns `hyprland.conf` with drachma baked at build and
   live-patched via `hyprctl` during rehearsal; greetd is stubbed.
 - **stylix** — [[Stylix]]; a base16 scheme synthesized from the v0 palette,
   with colliding targets stood down on **both** the NixOS and home-manager
@@ -196,7 +196,7 @@ real flake checks, not conventions.
 
 ## The rice loop — where the agent writes
 
-The self-ricing lifecycle overlays the map above: it produces notes, previews
+The self-ricing lifecycle overlays the map above: it produces drachma, previews
 through the live fan-out, and only commits through the gate. See
 [[Self-Ricing]]. Today `gen`, `adopt`, and `transpose` are exit-64 stubs;
 `rice lint` (delegates to [[drachma]]) and `rice preview` (stages
@@ -229,7 +229,7 @@ through the live fan-out, and only commits through the gate. See
 `song/songbook/` exactly as it walks `modules/`, so a committed song
 self-registers and self-gates on `config.aoide.song == "<name>"` — the same
 discipline as a dendrite. The shipped standard is song `"default"` at
-`song/songbook/default/` (the songbook's one upstream-owned, merge-only song). The song carries **notes only**; the host is the
+`song/songbook/default/` (the songbook's one upstream-owned, merge-only song). The song carries **drachma only**; the host is the
 venue — its specifics and which instruments (facets, dendrites) are enabled.
 Replay = same song, new venue (one line in `hosts/<host>/default.nix`);
 transpose = new key, same venue. The `song-shape` check asserts every walked
@@ -331,7 +331,7 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 │   ├── dendrites/   18 opt-in features (bash, nh, git, kitty, neovim, starship,
 │   │                mcfly, btop, yazi, fastfetch, devtools, fonts, obsidian,
 │   │                melete, mneme, firefox, screenshot, vision) ← additive growth
-│   └── facets/      quickshell · compositor · stylix          ← render surfaces (notes-only)
+│   └── facets/      quickshell · compositor · stylix          ← render surfaces (drachma-only)
 ├── hosts/           common/ + yomi-strix/ (flags + the aoide.song selector; a real
 │                    hardware profile, switched live and running as the daily desktop)
 ├── pkgs/            aoide/ (Rust: aoide + aoided) · drachma/ (Node: drachma)
@@ -339,7 +339,7 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 │                    palette/ · sounds/ · icons/ · widgets/ · design/ (per song);
 │                    stage/ + auditions/ runtime (gitignored)
 ├── docs/BUILD.md    module-authoring conventions
-├── CONTRACTS.md     versioned contracts (notes · dendrite · schema · stage · song shape)
+├── CONTRACTS.md     versioned contracts (drachma · dendrite · schema · stage · song shape)
 ├── AGENTS.md        tier-0 agent guide (aoide guide prints the same map)
 └── log              single audit log — runtime, gitignored
 ```
@@ -360,7 +360,7 @@ headless boot of the assembled stack) fail eval on violation, not polite.
 - [[Codebase]]
 - [[Snowflake-Anatomy]]
 - [[Desktop-Architecture]]
-- [[Notes]]
+- [[drachma]]
 - [[Self-Ricing]]
 - [[Content-Pipeline]]
 - [[Agent-Interface]]

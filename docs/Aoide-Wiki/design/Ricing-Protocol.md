@@ -75,7 +75,7 @@ job ends up hard-coding colours in six different files that drift apart.
 The point of the split: creation is where taste and vision-checking live
 (this section, below); application is mechanical and should never need
 re-deriving per surface. When a rice looks wrong, ask which concern broke —
-usually it is application (a surface reading a note it shouldn't, or hosting
+usually it is application (a surface reading a drachma role it shouldn't, or hosting
 a stray literal) rather than creation (the sixteen slots themselves).
 
 ## 2. The mandatory vision-check
@@ -135,7 +135,7 @@ facet reading another module, a surface with two owners); it cannot catch
 - [[Pantheon-Grammar]] — the visual grammar (glyphs, depth recipe, roles) this
   protocol keeps coherent across surfaces; likewise song-agent design memory.
 - [[Stylix]] — the application half: one base16 scheme, baked fan-out.
-- [[Notes]] — the drachma seam creation writes into and application reads from.
+- [[drachma]] — the drachma seam creation writes into and application reads from.
 - [[Song-Vocabulary]] — key/song/cover vocabulary this protocol operates on.
 - [[Song-Anatomy]] — where the songbook and per-song design memory live under
   `song/`.

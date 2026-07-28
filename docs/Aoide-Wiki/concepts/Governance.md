@@ -35,7 +35,7 @@ Provenance — not directory fences — governs ownership. Merge-base divergence
 
 ## No background self-updaters
 
-Neither Aoide nor Melete run background self-update processes. All updates — framework merges, flake.lock bumps, note-schema migrations — are proposed by the agent and applied only through the gated rebuild. This is house policy, not a configuration option.
+Neither Aoide nor Melete run background self-update processes. All updates — framework merges, flake.lock bumps, drachma-schema migrations — are proposed by the agent and applied only through the gated rebuild. This is house policy, not a configuration option.
 
 ## Related
 

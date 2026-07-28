@@ -53,7 +53,7 @@ song fleet-available with no import list to edit ([[Self-Ricing]],
 | Subfolder/file | Holds |
 |---|---|
 | `rice.nix` | pure nix: sets `aoide.drachma.*` (palette + base16 + component tiers + wallpaper) under the `aoide.song` guard. **Only** `aoide.drachma` — no host options, no facet toggles — so one score replays at any venue (`CONTRACTS.md §5`, [[Song-Vocabulary#Replay — any song, any host]]). |
-| `drachma.json` | the song's resolved note values — the [[drachma]] schema: `palette`, `base16`, `bar`/`notif`/`window`. |
+| `drachma.json` | the song's resolved drachma values — the [[drachma]] schema: `palette`, `base16`, `bar`/`notif`/`window`. |
 | `assets/` | wallpaper + cover art |
 | `palette/` | this song's transpose keys — the palette variants `rice transpose <song> <key>` swaps among |
 | `sounds/` | notification + system sounds (the chimes dimension) |
@@ -83,7 +83,7 @@ sees a torn file (`CONTRACTS.md §4`). The files:
 
 | File | Holds | Written by |
 |---|---|---|
-| `drachma.json` | the fully-resolved note values (colours concrete, no `null`) | [[drachma]] `emit stage` / `aoide rice preview` |
+| `drachma.json` | the fully-resolved drachma values (colours concrete, no `null`) | [[drachma]] `emit stage` / `aoide rice preview` |
 | `sessions.json` | the agent-session roster (`sessionId, agent, windowAddress, workspace, cwd, state, startedAt`, optional `parentSessionId`) | [[shellbridge]] + `aoide graph session` |
 | `hooks.json` | live Claude Code hook phases | shellbridge + `aoide graph session` |
 | `projects.json` | the project-anchor registry | `aoide graph project` |
@@ -127,8 +127,7 @@ top-level `song/` dir. The lookup is the Song Map
 - [[Song-Vocabulary]] — the vocabulary these roles are named in
 - [[Snowflake-Anatomy]] — the frozen sibling (`modules/`)
 - [[Self-Ricing]] — the rice loop, songbook discipline, and coverage tiers
-- [[Notes]] — the `aoide.drachma` seam `drachma.json` carries
-- [[drachma]] — the mint that resolves/lints/emits the stage file
+- [[drachma]] — the mint that resolves/lints/emits the stage file, the `aoide.drachma` seam `drachma.json` carries
 - [[shellbridge]] · [[Session-Graph]] — the writers of the runtime stage files
 - [[design/Ricing-Protocol]] · [[design/Pantheon-Grammar]] — the design memory
   bound for `songbook/`

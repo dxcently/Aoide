@@ -49,7 +49,7 @@ The composition engine is an in-house dendritic walker: every file placed under 
 ├── hosts/
 │   ├── common/     cross-machine baseline
 │   └── <host>/     machine-specific picks
-├── pkgs/           aoide CLI · note package
+├── pkgs/           aoide CLI · drachma package
 ├── lib/            dendritic walker + helpers (checks ride as a flake output)
 ├── docs/
 └── song/           the performed half (see [[Song-Vocabulary]])
@@ -63,6 +63,6 @@ The repo surface is only the subsystem (`modules/`) plus standard flake furnitur
 
 - [[dxflake]]
 - [[Fork-and-Run]]
-- [[Notes]]
+- [[drachma]]
 - [[Self-Ricing]]
 - [[Codebase]]

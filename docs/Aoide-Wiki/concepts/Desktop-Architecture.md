@@ -27,7 +27,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 | Greeter | Login greeter |
 | Wallpaper layer | Managed wallpaper display |
 
-No mako, swaync, rofi, or hyprlock — Quickshell holds the entire role. Styling comes exclusively from notes; structural patterns draw from unixporn canon (quickshell/ags bars, swaync-style centers, anyrun launchers) but are never copied directly.
+No mako, swaync, rofi, or hyprlock — Quickshell holds the entire role. Styling comes exclusively from drachma; structural patterns draw from unixporn canon (quickshell/ags bars, swaync-style centers, anyrun launchers) but are never copied directly.
 
 A spike of the `NotificationServer` (actions + inline reply) is planned for the yomi-strix session (§6.2/§8). Whether it passes decides if Quickshell keeps the daemon role.
 

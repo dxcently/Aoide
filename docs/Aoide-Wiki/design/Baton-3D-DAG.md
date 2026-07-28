@@ -41,7 +41,7 @@ A terminal has no GPU pipeline — but ratatui's `canvas::Canvas` with `Marker::
 
 Constraint: quickshell 0.3.0 ships no terminal-emulator QML component, and the widget discipline is files-not-processes. Three paths:
 
-- **A (recommended, the embedded gadget):** baton gains `--panel dag --mini` (compact, no idle drift, labels decluttered) and a `--watch --out <file>` frame-writer mode: on graph.json/trace change it renders ONE frame as ANSI text into `song/stage/dagframe.ans` (atomic write). The quickshell DAG gadget FileView-watches that file and renders it through a small `AnsiText` QML component (SGR 16/256-color subset mapped onto notes colors). The widget stays passive (no process spawning); the frame-writer runs as a tiny user service or under aoided.
+- **A (recommended, the embedded gadget):** baton gains `--panel dag --mini` (compact, no idle drift, labels decluttered) and a `--watch --out <file>` frame-writer mode: on graph.json/trace change it renders ONE frame as ANSI text into `song/stage/dagframe.ans` (atomic write). The quickshell DAG gadget FileView-watches that file and renders it through a small `AnsiText` QML component (SGR 16/256-color subset mapped onto drachma colors). The widget stays passive (no process spawning); the frame-writer runs as a tiny user service or under aoided.
 - **B (the full view, exists today as click-through):** the gadget's click spawns kitty running `aoide baton` (full TUI, real pty). A `--panel dag` start flag lands the user directly in the 3D view. Optionally a positioned floating kitty (`--class aoide-dagpane` + hyprland windowrule) as a pseudo-embed.
 - **C (future):** if quickshell ships a terminal widget, embed the pty directly and delete the ANSI parser.
 
@@ -51,7 +51,7 @@ Ship A + B; C replaces A's parser if it ever lands.
 
 1. `spatial.rs` + unit tests (pure math, no UI).
 2. Canvas braille renderer: boxes/lines/labels/depth-dim, behind a `v` view toggle alongside the current 2D graphview.
-3. Layout + interaction + color roles from stage notes (base16 tier).
+3. Layout + interaction + color roles from stage drachma (base16 tier).
 4. `--mini`, `--once`/`--watch --out` frame modes + the quickshell AnsiText gadget path.
 5. Polish: idle drift, declutter tuning, TestBackend snapshots hardened.
 
