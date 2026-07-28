@@ -1,41 +1,81 @@
-# song/repertoire/moonlight/rice.nix — the "moonlight" song (a committed rice).
+# song/repertoire/hero/rice.nix — the "moonlight" song (the cover's own key).
 #
-# The replay fixture. A committed song is host-agnostic: ANY host in the fleet
-# performs it by naming it — `aoide.song = "moonlight";` — one line, no other
-# edits. This module is walked in by lib/mkHost.nix (like a dendrite) and
-# self-gates on `aoide.song == "moonlight"`, so adding a song never touches an
-# import list.
+# The palette is drawn from the hero cover itself (song/covers/hero.webp —
+# Alma-Tadema's "Unconscious Rivals"): a LIGHT warm classical academic key —
+# cream/parchment for the base, deep umber ink for text, dusty cornflower for
+# the accent, muted rose for urgent. The song that matches its wallpaper.
 #
-# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.notes
-# (palette + component tiers) — and, later, cover/chime references inside
-# song/. It MUST NEVER set host options (monitors, hardware, services) or
-# enable facets/dendrites. The VENUE (host) decides its instruments; the SONG
-# carries only the notes. The venue's enabled facet/dendrite set renders these
-# notes on its own specifics — that is what makes one score replay anywhere.
-#
-# All note values are literal nix expressions (no song/ runtime reads), same as
-# the shipped standard.
+# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.notes.
+# All note values are literal nix expressions (no song/ runtime reads).
 { lib, config, ... }:
 {
-  # Guard: apply only when this host performs "moonlight". Named this in a host
-  # and the standard stands down, this song's palette fans out instead.
+  # Guard: apply only when this host performs "hero".
   config = lib.mkIf (config.aoide.song == "moonlight") {
 
-    # ── Palette tier (base16 — a cool nocturne, distinct from the standard) ──
-    # A deliberately different key from Catppuccin Mocha so the replay swap is
-    # visible at a glance: deeper indigo base, moonlit silver text, cyan accent.
+    # ── Palette tier (base16 mapping — the painting's warm cream light) ────
     aoide.notes.palette = {
-      bg     = "#0b1021";   # deep midnight indigo (base00)
-      fg     = "#c8d3f5";   # moonlit silver text (base05)
-      accent = "#82aaff";   # cool moon-cyan accent (base0D)
-      urgent = "#ff757f";   # muted rose alarm     (base08)
+      bg = "#f4ecdc"; # cream parchment       (base00)
+      fg = "#423420"; # deep umber ink        (base05)
+      accent = "#4f74a0"; # dusty cornflower   (base0D)
+      urgent = "#b0475f"; # muted rose        (base08)
+      # The one-hot trace colour — the painting's sage-green accent
+      # (matches base0B below). Cornflower stays the chrome accent; THIS
+      # blazes on the single hot/traced element (the DAG/TERMINALS traced
+      # row). null → accent.
+      hot = "#6f8a4f"; # sage green            (base0B)
     };
 
-    # ── Component tier (v0 overrides) ──────────────────────────────────────
-    # null means "fall back to palette" — facets apply the fallback. moonlight
-    # keeps the arrangement clean (palette everywhere) so the key does the work.
-    aoide.notes.bar    = { bg = null; fg = null; accent = null; };
-    aoide.notes.notif  = { bg = null; fg = null; urgent = null; };
-    aoide.notes.window = { border = null; borderInactive = null; };
+    # ── Base16 tier — the LIGHT warm painting palette ───────────────────────
+    # Keyed from Alma-Tadema's "Unconscious Rivals": a warm cream ramp
+    # (00–07, lightest to darkest umber) with an accent set drawn from the
+    # painting's terracotta vault, marble, azalea, and sage: muted rose,
+    # burnt terracotta, ochre gold, sage green, teal, cornflower blue,
+    # dusty plum, and warm brown. Slots follow the base16 standard.
+    aoide.notes.base16 = {
+      base00 = "#f4ecdc"; # lightest bg — cream parchment
+      base01 = "#eaddc6"; # lighter bg (status)
+      base02 = "#ddcaa6"; # selection
+      base03 = "#b0997a"; # comments
+      base04 = "#8a6f50"; # dark fg
+      base05 = "#423420"; # default fg — deep umber ink
+      base06 = "#2f2416"; # light fg (deeper ink)
+      base07 = "#1d160d"; # brightest — the darkest ink
+      base08 = "#b0475f"; # red    — muted rose
+      base09 = "#c96038"; # orange — burnt terracotta
+      base0A = "#b98a34"; # yellow — ochre gold
+      base0B = "#6f8a4f"; # green  — sage
+      base0C = "#40897a"; # cyan   — teal
+      base0D = "#4f74a0"; # blue   — dusty cornflower
+      base0E = "#8f5578"; # magenta— dusty plum
+      base0F = "#8a5730"; # brown  — warm brown
+    };
+
+    # ── Component tier (v0) ────────────────────────────────────────────────
+    # null → fall back to palette; the key does the work (moonlight's idiom).
+    aoide.notes.bar = {
+      bg = null;
+      fg = null;
+      accent = null;
+    };
+    aoide.notes.notif = {
+      bg = null;
+      fg = null;
+      urgent = null;
+    };
+    # Window frames join the Pantheon: the active hairline is base0C teal —
+    # the same wireframe rule the bar's panes wear — and the inactive frame
+    # recedes to base01, the light ground. The window key stays a
+    # component-tier note the song owns.
+    aoide.notes.window = {
+      border = "#40897a"; # base0C teal — active
+      borderInactive = "#8a6f50"; # base04 dark taupe — inactive (the darker frame)
+    };
+
+    # ── Cover-art note ─────────────────────────────────────────────────────
+    # The main wallpaper: Alma-Tadema's "Unconscious Rivals" — a warm classical
+    # academic painting (terracotta vault, marble, azalea, sage). The base16
+    # palette above is keyed from this painting's LIGHT warm register, for
+    # colour coherence with the desktop's Stylix light polarity.
+    aoide.notes.wallpaper = ../../covers/Alma-Tadema_Unconscious_Rivals.jpg;
   };
 }
