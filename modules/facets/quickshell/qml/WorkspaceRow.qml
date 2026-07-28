@@ -1,21 +1,25 @@
-// WorkspaceRow.qml — the melody: workspaces as NOTE-HEADS on the staff.
+// WorkspaceRow.qml — the melody: workspaces as SOLID NOTE GLYPHS on the staff.
 //
 // Clean-slate redesign in the SONG vein (the entablature colonnade is gone). The
 // bar is one measure of music; the workspaces are the notes written on it. Each
-// live Hyprland workspace is a note-head — a tilted oval sitting at its own pitch
-// on the shared staff line that runs through the whole bar. The workspace id is
-// the note's degree: id 1 sits low, ascending ids climb the staff, so the row of
-// open workspaces reads as a little rising figure. The FOCUSED workspace is the
-// note being played — a filled note-head with a stem, and a PLAYHEAD (the DAW
-// cursor) eases across the staff to sit under it. Urgent workspaces PULSE
-// (the blink_red homage, glitchPink). Clicking a note-head activates it.
+// live Hyprland workspace is now a SOLID (filled) musical note — not the old hand-
+// drawn oval that rested hollow. Every workspace number maps 1:1 to a DISTINCT
+// filled note glyph, so the row reads as recognisable notation and each number is
+// identifiable by its shape + its pitch on the staff:
 //
-// Binds to live Hyprland workspaces via Quickshell.Hyprland (same real-service
-// idiom as before — no shell-out, no invented IPC). Degrade: off Hyprland → an
-// empty staff. Colour follows the WHITE-SHEET re-theme: the note-heads, stems and
-// playhead are BLACK ink (#000000 / #14141a) with a white legibility outline; the
-// one state accent is the ACTIVE note-head, filled with the song's paletteAccent,
-// and urgent workspaces keep glitchPink. The glyphs are content.
+//     ws 1 → ♩   ws 2 → ♪   ws 3 → ♫   ws 4 → ♬   ws 5 → 𝅘𝅥𝅮   ws 6 → 𝅘𝅥𝅯
+//     (ids past the set repeat the run; magic → 𝅘𝅥𝅱, scratch → ᝰ ride the ledger)
+//
+// Pitch (staff degree) still rises with id so the open workspaces spell an
+// ascending run. The SELECTED workspace is HIGHLIGHTED: its note swells, fills
+// with the song's paletteAccent, and rests on a soft accent highlight-pill (the
+// old black playhead re-cast as a glow behind the played note). Resting notes are
+// SOLID umber ink (notes.paletteFg). Urgent workspaces PULSE in glitchPink.
+// Clicking a note activates its workspace (Hyprland activate() — same real-service
+// idiom, no shell-out, no invented IPC). Degrade: off Hyprland → an empty staff.
+//
+// Colour comes ONLY from the notes singleton; the lone sanctioned literal is a
+// faint light outline on the accent-filled active glyph, for separation.
 
 import QtQuick
 import Quickshell.Hyprland
@@ -24,27 +28,27 @@ Item {
     id: root
     required property var notes
 
-    // ── Geometry: note-heads on a five-line staff ──────────────────────────
-    readonly property int cellW: 24        // horizontal slot per note
+    // ── Geometry: solid notes on a five-line staff ─────────────────────────
+    readonly property int cellW: 22        // horizontal slot per note
     readonly property int cellGap: 3
-    readonly property real halfStep: 1.75  // line→space; a full staff line is 2×
-    readonly property int headW: 17
-    readonly property int headH: 12
+    readonly property real halfStep: 1.6   // line→space; a full staff line is 2×
+    readonly property int restSize: 15     // resting note glyph
+    readonly property int activeSize: 19   // the played note swells
 
     implicitWidth: cellRow.implicitWidth
     implicitHeight: 30
 
-    // ── Note label + pitch ─────────────────────────────────────────────────
-    // Regular workspaces carry their id; the two special workspaces keep a
-    // single musical mark that still fits inside a note-head. Pitch (staff
-    // degree) rises with id so the open workspaces spell an ascending run;
-    // specials perch above the staff as a ledger note.
-    function wsLabel(ws) {
-        if (!ws) return "?"
+    // ── The solid-note vocabulary — DISTINCT filled glyph per workspace id ──
+    // All heads are SOLID (filled); the run repeats past its length. Specials
+    // keep their own marks and perch above the staff on a ledger.
+    readonly property var noteGlyphs: ["♩", "♪", "♫", "♬", "𝅘𝅥𝅮", "𝅘𝅥𝅯"]
+    function wsGlyph(ws) {
+        if (!ws) return "♩"
         var name = ("" + (ws.name || "")).toLowerCase()
-        if (name.indexOf("magic") !== -1) return "♬"
+        if (name.indexOf("magic") !== -1) return "𝅘𝅥𝅱"
         if (name.indexOf("scratch") !== -1) return "ᝰ"
-        return "" + ws.id
+        var id = ws.id || 1
+        return root.noteGlyphs[(id - 1) % root.noteGlyphs.length]
     }
     function wsSpecial(ws) {
         var name = ws ? ("" + (ws.name || "")).toLowerCase() : ""
@@ -67,7 +71,7 @@ Item {
         return vs
     }
 
-    // Index of the focused note (drives the playhead); -1 when none.
+    // Index of the focused note (drives the highlight-pill); -1 when none.
     readonly property int activeIndex: {
         var vs = root.wsList
         for (var i = 0; i < vs.length; i++)
@@ -75,20 +79,21 @@ Item {
         return -1
     }
 
-    // ── The playhead — a soft cursor that eases to the note being played ────
-    // Declared before the notes so the heads sit ON it. Spans the staff band.
+    // ── The highlight-pill — a soft accent glow that eases under the played
+    // note (the old playhead re-cast). Declared before the notes so it sits
+    // behind them, reinforcing which workspace is selected.
     Rectangle {
-        id: playhead
+        id: highlight
         visible: root.activeIndex >= 0
         z: 0
-        width: 2
+        width: root.cellW - 2
         height: 22
-        radius: 1
-        color: "#000000"
-        opacity: 0.3
+        radius: height / 2
+        color: root.notes.paletteAccent
+        opacity: 0.20
         anchors.verticalCenter: parent.verticalCenter
         x: root.activeIndex >= 0
-           ? root.activeIndex * (root.cellW + root.cellGap) + root.cellW / 2 - width / 2
+           ? root.activeIndex * (root.cellW + root.cellGap) + (root.cellW - width) / 2
            : 0
         Behavior on x {
             NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
@@ -113,55 +118,26 @@ Item {
                 width: root.cellW
                 height: root.height
 
-                // The note-head group: a tilted oval + its upright number,
-                // parked at this note's pitch on the staff.
-                Item {
-                    id: noteGroup
-                    width: root.headW
-                    height: root.headH
-                    x: (cell.width - width) / 2
+                // The SOLID note glyph, parked at this note's pitch on the staff.
+                // Resting → solid umber ink; the played note swells + fills with
+                // the song's accent; urgent → glitchPink. A faint light outline
+                // rides only the accent-filled active glyph, for separation.
+                Text {
+                    id: noteGlyph
+                    anchors.horizontalCenter: parent.horizontalCenter
                     y: (cell.height - height) / 2 + root.pitchOffset(cell.modelData)
-
-                    // Stem — the quarter-note upstroke, only on the played note.
-                    Rectangle {
-                        id: stem
-                        visible: cell.isActive
-                        width: 1.5
-                        height: 13
-                        radius: 0.5
-                        color: "#000000"
-                        x: parent.width - 1.5
-                        y: -12
-                    }
-
-                    // Note-head — the ACTIVE note fills with the song's accent
-                    // (the one played note); resting heads are hollow black ovals;
-                    // an urgent workspace outlines in glitchPink. The tilt is the
-                    // engraver's slanted oval.
-                    Rectangle {
-                        id: head
-                        anchors.fill: parent
-                        radius: height / 2
-                        rotation: -20
-                        color: cell.isActive ? root.notes.paletteAccent : "transparent"
-                        border.width: cell.isActive ? 0 : 1.5
-                        border.color: cell.isUrgent ? root.notes.glitchPink
-                                                    : "#000000"
-                        Behavior on color { ColorAnimation { duration: 150 } }
-                    }
-
-                    // The degree number / special mark, upright over the head.
-                    // Black ink at rest; white on the accent-filled played note.
-                    Text {
-                        anchors.centerIn: parent
-                        text: root.wsLabel(cell.modelData)
-                        color: cell.isActive ? "#ffffff"
-                              : (cell.isUrgent ? root.notes.glitchPink : "#14141a")
-                        style: Text.Outline
-                        styleColor: cell.isActive ? root.notes.paletteAccent : "#ffffff"
-                        font.family: "monospace"
-                        font.pixelSize: 11
-                        font.bold: cell.isActive
+                    text: root.wsGlyph(cell.modelData)
+                    color: cell.isActive ? root.notes.paletteAccent
+                          : (cell.isUrgent ? root.notes.glitchPink
+                                           : root.notes.paletteFg)
+                    style: cell.isActive ? Text.Outline : Text.Normal
+                    styleColor: Qt.rgba(1, 1, 1, 0.5)
+                    font.family: "monospace"
+                    font.pixelSize: cell.isActive ? root.activeSize : root.restSize
+                    font.bold: true
+                    Behavior on color { ColorAnimation { duration: 150 } }
+                    Behavior on font.pixelSize {
+                        NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
                     }
                 }
 

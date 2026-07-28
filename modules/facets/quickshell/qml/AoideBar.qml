@@ -33,10 +33,11 @@
 // Colour: the WHITE MUSIC SHEET — a Win7 Aero taskbar rendered as manuscript
 // paper. The page is an OPAQUE white sheet (Qt.rgba(1,1,1,0.92)) with the white
 // gloss gradient riding on top (the Aero highlight); the hyprglass blur behind
-// it gives faint depth but the strip reads solid. The ink is BLACK: the staff
-// lines, barlines, clef 𝄞, playhead, resting note-heads, clock/date, title, and
-// the volume/battery/network callouts are all black (#000000 lines, #14141a
-// text) with a WHITE outline (styleColor #ffffff) for legibility on the sheet.
+// it gives faint depth but the strip reads solid. The structural ink stays BLACK
+// (#000000 staff lines, barlines, playhead), but the TEXT ink is now the song's
+// umber (notes.paletteFg #423420) drawn CLEAN — the old white legibility outline
+// is dropped, since dark text on the cream sheet needs no halo (that outline was
+// a relic of the old dark bar and only muddied the type on cream).
 // One restrained STATE accent survives from the song (NoteState): the ACTIVE
 // workspace note-head fills with paletteAccent, the BLOCKED ✎ pulse + low battery
 // go glitchPink, and open/hover toggles (clock→calendar, volume, tray) flash
@@ -324,10 +325,8 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         width: implicitWidth + 9
         horizontalAlignment: Text.AlignHCenter
-        color: root.openGadget === gkey ? root.notes.paletteAccent : "#14141a"
-        opacity: root.openGadget === gkey ? 1.0 : 0.82
-        style: Text.Outline
-        styleColor: "#ffffff"
+        color: root.openGadget === gkey ? root.notes.paletteAccent : root.notes.paletteFg
+        opacity: root.openGadget === gkey ? 1.0 : 0.92
         font.family: "monospace"
         font.pixelSize: 14
         MouseArea {
@@ -402,9 +401,7 @@ Item {
         anchors.leftMargin: root.edgePad
         anchors.verticalCenter: parent.verticalCenter
         text: "𝄞"
-        color: "#14141a"
-        style: Text.Outline
-        styleColor: "#ffffff"
+        color: root.notes.paletteFg
         font.family: "monospace"
         font.pixelSize: 18
         font.bold: true
@@ -435,9 +432,7 @@ Item {
             text: "✎" + root.sessionCount
             // Black ink at rest; when ANY session is blocked it switches to the
             // urgent role (glitchPink) and pulses — a summons from across the bar.
-            color: root.anyBlocked ? root.notes.glitchPink : "#14141a"
-            style: Text.Outline
-            styleColor: "#ffffff"
+            color: root.anyBlocked ? root.notes.glitchPink : root.notes.paletteFg
             font.family: "monospace"
             font.pixelSize: 13
             font.bold: true
@@ -469,9 +464,7 @@ Item {
             id: clockText
             anchors.verticalCenter: parent.verticalCenter
             text: Qt.formatDateTime(root.now, "hh:mm AP  dddd MMM dd")
-            color: root.calShown ? root.notes.paletteAccent : "#14141a"
-            style: Text.Outline
-            styleColor: "#ffffff"
+            color: root.calShown ? root.notes.paletteAccent : root.notes.paletteFg
             font.family: "monospace"
             font.pixelSize: 12
             font.bold: true
@@ -485,20 +478,16 @@ Item {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: "/"
-            color: "#14141a"
-            style: Text.Outline
-            styleColor: "#ffffff"
+            color: root.notes.paletteFg
             font.family: "monospace"
             font.pixelSize: 12
-            opacity: 0.6
+            opacity: 0.55
         }
         // Active-window title (music kaomoji when empty).
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: root.winTitle()
-            color: "#14141a"
-            style: Text.Outline
-            styleColor: "#ffffff"
+            color: root.notes.paletteFg
             font.family: "monospace"
             font.pixelSize: 12
             font.bold: true
@@ -538,9 +527,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             visible: root.volAvail
             text: root.volMuted ? "𝄽 vol" : (root.volIcon(root.volPct) + " " + root.volPct)
-            color: root.volShown ? root.notes.paletteAccent : "#14141a"
-            style: Text.Outline
-            styleColor: "#ffffff"
+            color: root.volShown ? root.notes.paletteAccent : root.notes.paletteFg
             font.family: "monospace"
             font.pixelSize: 12
             font.bold: true
@@ -567,11 +554,9 @@ Item {
                   ? (root.battIcon() + " full")
                   : (root.battIcon() + " " + root.battPct + (root.battCharging ? "+" : ""))
             color: (root.battCrit || root.battWarn) ? root.notes.glitchPink
-                                                    : "#14141a"
+                                                    : root.notes.paletteFg
             opacity: (root.battWarn && !root.blinkOn) ? 0.3 : 1.0
             Behavior on opacity { NumberAnimation { duration: 400 } }
-            style: Text.Outline
-            styleColor: "#ffffff"
             font.family: "monospace"
             font.pixelSize: 12
             font.bold: true
@@ -588,10 +573,8 @@ Item {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: root.netGlyph(root.netKind) + " " + root.netLabel(root.netKind)
-            color: "#14141a"
+            color: root.notes.paletteFg
             opacity: root.netKind === "down" ? 0.5 : 1.0
-            style: Text.Outline
-            styleColor: "#ffffff"
             font.family: "monospace"
             font.pixelSize: 12
         }
