@@ -126,6 +126,13 @@ in
           # treats the argument as a config NAME and fails on a path in
           # quickshell 0.3.0.
           ExecStart = "${quickshellPkg}/bin/quickshell -p ${shellQmlEntry}";
+          # Export the song's baked wallpaper (immutable store path) so
+          # AoideWallpaper always has the right cover on boot/rebuild — the live
+          # stage/cover.json overrides it, but nothing re-seeded it from the
+          # song before, so a rebuild lost the background. Null → no env.
+          Environment = lib.optionals (config.aoide.notes.wallpaper != null) [
+            "AOIDE_WALLPAPER=${config.aoide.notes.wallpaper}"
+          ];
           Restart = "on-failure";
           RestartSec = 3;
         };
