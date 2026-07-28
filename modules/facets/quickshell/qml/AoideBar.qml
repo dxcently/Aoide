@@ -323,7 +323,7 @@ Item {
         style: Text.Outline
         styleColor: "#000000"
         font.family: "monospace"
-        font.pixelSize: 16
+        font.pixelSize: 14
         MouseArea {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
@@ -394,7 +394,7 @@ Item {
         style: Text.Outline
         styleColor: "#000000"
         font.family: "monospace"
-        font.pixelSize: 20
+        font.pixelSize: 18
         font.bold: true
         MouseArea {
             anchors.fill: parent
@@ -427,7 +427,7 @@ Item {
             style: Text.Outline
             styleColor: "#000000"
             font.family: "monospace"
-            font.pixelSize: 15
+            font.pixelSize: 13
             font.bold: true
 
             SequentialAnimation on opacity {
@@ -461,7 +461,7 @@ Item {
             style: Text.Outline
             styleColor: "#000000"
             font.family: "monospace"
-            font.pixelSize: 14
+            font.pixelSize: 12
             font.bold: true
             MouseArea {
                 anchors.fill: parent
@@ -477,7 +477,7 @@ Item {
             style: Text.Outline
             styleColor: "#000000"
             font.family: "monospace"
-            font.pixelSize: 14
+            font.pixelSize: 12
             opacity: 0.75
         }
         // Active-window title (music kaomoji when empty).
@@ -488,7 +488,7 @@ Item {
             style: Text.Outline
             styleColor: "#000000"
             font.family: "monospace"
-            font.pixelSize: 14
+            font.pixelSize: 12
             font.bold: true
             elide: Text.ElideRight
         }
@@ -530,7 +530,7 @@ Item {
             style: Text.Outline
             styleColor: "#000000"
             font.family: "monospace"
-            font.pixelSize: 14
+            font.pixelSize: 12
             font.bold: true
             MouseArea {
                 anchors.fill: parent
@@ -561,7 +561,7 @@ Item {
             style: Text.Outline
             styleColor: "#000000"
             font.family: "monospace"
-            font.pixelSize: 14
+            font.pixelSize: 12
             font.bold: true
             MouseArea {
                 anchors.fill: parent
@@ -581,7 +581,7 @@ Item {
             style: Text.Outline
             styleColor: "#000000"
             font.family: "monospace"
-            font.pixelSize: 14
+            font.pixelSize: 12
         }
 
         // The final barline — thin + thick, closing the measure (𝄂).
