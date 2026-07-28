@@ -363,7 +363,7 @@ Item {
         // and opacity (kitty 0.72), so bar and terminals read as one glass.
         color: Qt.rgba(Qt.color(root.notes.paletteBg).r,
                        Qt.color(root.notes.paletteBg).g,
-                       Qt.color(root.notes.paletteBg).b, 0.72)
+                       Qt.color(root.notes.paletteBg).b, 0.58)
         opacity: 1.0
     }
     // Aero gloss — the sanctioned white sheen (bright top, hard midline stop),
@@ -462,12 +462,7 @@ Item {
             }
         }
 
-        // ── Gadget tray: ♫ now-playing (sole bar-spawned gadget) ───────────
-        Row {
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 0
-            TrayCell { id: npCell; gkey: "np"; text: "♫" }
-        }
+        // (now-playing ♫ moved to the RIGHT stave, beside volume.)
 
         // ── Clock + date (click → calendar popout). Lives on the bar, not the
         // dock — the ambient face belongs beside the measure, not in the case.
@@ -531,6 +526,10 @@ Item {
         anchors.rightMargin: root.edgePad
         anchors.verticalCenter: parent.verticalCenter
         spacing: 10
+
+        // Now-playing ♫ — the click-toggled score popout (moved here from the
+        // left tray, so it sits with the other expression marks on the right).
+        TrayCell { id: npCell; gkey: "np"; text: "♫"; anchors.verticalCenter: parent.verticalCenter }
 
         // Volume — scroll = adjust, click = mute, hover = ASCII slider popout.
         Text {
