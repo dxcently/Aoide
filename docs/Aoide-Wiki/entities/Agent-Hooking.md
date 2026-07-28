@@ -32,7 +32,7 @@ Event → phase map (the door is a silent no-op for everything else, and NEVER e
 | `Notification`, message contains "waiting for your input" | `blocked` only if currently `running` (an unseen mid-turn question); no-op otherwise |
 | `SessionEnd` | `done` |
 
-The blocked design is herdr's lesson inverted: hooks give you edges and there is no "unblocked" event, so every path OUT of a permission prompt must land on a mapped event. Approve → the tool runs → `PostToolUse` clears it. Deny with feedback → the model continues → next `PreToolUse`/`Stop`. Reply or interrupt → `UserPromptSubmit`/`Stop`. The set is closed; a blocked flag cannot stick.
+Hooks give you edges and there is no "unblocked" event, so every path OUT of a permission prompt must land on a mapped event. Approve → the tool runs → `PostToolUse` clears it. Deny with feedback → the model continues → next `PreToolUse`/`Stop`. Reply or interrupt → `UserPromptSubmit`/`Stop`. The set is closed; a blocked flag cannot stick.
 
 The hook door also **discovers the session's window**: at `SessionStart` (and
 backfilled on any later hook while still empty) it walks pid-ancestry against
@@ -146,4 +146,4 @@ Pass `--parent "$AOIDE_SESSION_ID"` (or the `--parent` flag on `session start`) 
 - `aoide guide` — the terse in-CLI version of this page.
 - [[aoide-cli]] — the full command tree, including `conduct` and the interactive `baton` TUI that renders every door's sessions.
 - [[Terminal-Commander]] — the graph concept (projects anchor sessions by cwd).
-- [[shellbridge]] — its socket accept loop is live now for the window-jump verb (`focuswindow`), but session *registration* (start/phase/end) still has no socket verb; the CLI doors above remain the writers (and the permanent fallback even once one lands).
+- [[shellbridge]] — its socket accept loop is live for the window-jump verb (`focuswindow`), but session *registration* (start/phase/end) still has no socket verb; the CLI doors above remain the writers — and the permanent fallback.

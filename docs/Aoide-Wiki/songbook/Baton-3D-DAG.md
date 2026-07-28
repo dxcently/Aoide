@@ -32,9 +32,9 @@ A terminal has no GPU pipeline — but ratatui's `canvas::Canvas` with `Marker::
 ## Architecture (pkgs/aoide, new module `src/baton/spatial.rs` + rework of `graphview.rs`)
 
 1. **Math core (`spatial.rs`, hand-rolled, zero new crates)** — `Vec3`, a 4×4 (or 3×4) transform, orbit camera (yaw/pitch/distance around scene centroid), perspective projection with the vanishing point at canvas center (matches the rice's vanishing-point rule). ~120 lines + unit tests that project known cube corners to known coords.
-2. **Scene layout** — deterministic DAG→3D placement from `graph::build_graph` (never re-derived): projects on a deep back plane (z = far), their sessions mid-field, spawned children forward; x spread by sibling index, y by lane/группировка. Node = 12-edge hollow box sized by kind; label anchored at the box's top-left projected corner (declutter rule below).
+2. **Scene layout** — deterministic DAG→3D placement from `graph::build_graph` (never re-derived): projects on a deep back plane (z = far), their sessions mid-field, spawned children forward; x spread by sibling index, y by lane/grouping. Node = 12-edge hollow box sized by kind; label anchored at the box's top-left projected corner (declutter rule below).
 3. **Renderer** — painter's sort by centroid depth (far first), each box's edges drawn as `canvas::Line`s with a per-depth color tier (far → base03 gray, near → full role color); edges between nodes are 3D polylines with one elbow (the Pantheon arc read); the traced node's box + its full edge run to root render palette.hot LAST (on top, full-bright). Labels via `ctx.print` — at mini sizes only the selected/traced + project labels print (declutter).
-4. **Camera & interaction** — default ¾ orbit view; `h/l` yaw, `j/k` pitch (shift of existing j/k selection keys → selection moves to `n/p`, TBD in implementation), `+/-` zoom, `r` reset, slow idle drift (~0.5°/tick) that pauses on input and is disabled in `--mini`. Existing selection/Enter-to-cue/prune/emit contracts unchanged.
+4. **Camera & interaction** — default ¾ orbit view; `h/l` yaw, `j/k` pitch (shifting the existing j/k selection keys to `n/p`), `+/-` zoom, `r` reset, slow idle drift (~0.5°/tick) that pauses on input and is disabled in `--mini`. Existing selection/Enter-to-cue/prune/emit contracts unchanged.
 5. **Tests** — `spatial` unit tests (projection math) + `TestBackend` buffer snapshots (a 2-project/3-session fixture from seed.sh renders: N box-edge braille cells present, hot node's green cells present, label text at expected cells). The 2D view stays as a toggle (`v`) and its tests stay green.
 
 ## The widget embed ("a small version in a terminal")
@@ -43,9 +43,9 @@ Constraint: quickshell 0.3.0 ships no terminal-emulator QML component, and the w
 
 - **A (recommended, the embedded gadget):** baton gains `--panel dag --mini` (compact, no idle drift, labels decluttered) and a `--watch --out <file>` frame-writer mode: on graph.json/trace change it renders ONE frame as ANSI text into `song/stage/dagframe.ans` (atomic write). The quickshell DAG gadget FileView-watches that file and renders it through a small `AnsiText` QML component (SGR 16/256-color subset mapped onto drachma colors). The widget stays passive (no process spawning); the frame-writer runs as a tiny user service or under aoided.
 - **B (the full view, exists today as click-through):** the gadget's click spawns kitty running `aoide baton` (full TUI, real pty). A `--panel dag` start flag lands the user directly in the 3D view. Optionally a positioned floating kitty (`--class aoide-dagpane` + hyprland windowrule) as a pseudo-embed.
-- **C (future):** if quickshell ships a terminal widget, embed the pty directly and delete the ANSI parser.
+- **C (blocked):** the DAG embeds the pty directly and the ANSI parser is deleted. **Status:** blocked on a terminal-emulator QML component in Quickshell — absent as of 0.3.0 (the constraint above).
 
-Ship A + B; C replaces A's parser if it ever lands.
+Ship A + B. C supersedes A's parser and depends on nothing but that upstream component.
 
 ## Phases
 

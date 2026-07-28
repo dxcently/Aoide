@@ -14,7 +14,7 @@ Quickshell reads `stage/drachma.json` at runtime, so nearly the full arrangement
 
 Communication discipline: Quickshell reads state files from shellbridge and issues commands via the unix socket. It never speaks an agent protocol or MCP directly.
 
-A Quickshell NotificationServer spike (actions + inline reply) is planned for the yomi-strix session. If it lands, Quickshell keeps the full notification daemon role with no interim mako/swaync.
+**Status:** specified; no actions/inline-reply support in the NotificationServer today. The NotificationServer spike (actions + inline reply) is scoped for the yomi-strix session.
 
 ## Implementation
 
@@ -29,42 +29,38 @@ singletons and the surface widgets (`AoideBar` with the `SessionChip`/
 `AoideLauncher`, `AoideOsd`, `AoideLockscreen`, `AoideGreeter`, `AoideWallpaper`)
 — each a stub reading colours from `drachma`, kept in a separate file so [[Melete]]
 can swap them independently. The facet installs the tree to `~/Aoide/qml` via
-home-manager activation. Now that the host runs Aoide live, that deploy target
-sits **untracked at the repo root** of the user's fork — the relationship
-between the source tree (`modules/facets/quickshell/qml/`) and the deployed
-copy needs a decision (open thread). Crucially, `hyprland.conf` is
-owned by home-manager's `wayland.windowManager.hyprland`: the compositor facet
+home-manager activation. The host runs Aoide live, so that deploy target sits
+**untracked at the repo root** of the user's fork. Crucially, `hyprland.conf`
+is owned by home-manager's `wayland.windowManager.hyprland`: the compositor facet
 writes drachma + keybind fragments with `mkBefore`, and the Quickshell facet appends
 its `exec-once` autostart with `mkAfter`, so the two facets compose the one config
 file without collision.
 
 ## Nine surfaces
 
-Two registered surfaces have grown real bodies, bringing the registry to
+Two registered surfaces carry real bodies, bringing the registry to
 **nine**:
 
 - **`sessionGraph`** (surface #9, `AoideSessionGraph.qml` + `GraphRow.qml`) —
   an overlay hot-reloading `song/stage/graph.json` on the same
   `FileView` pattern as `DrachmaState`, rendering the [[Session-Graph]] DAG as an
-  indented tree. Since 8f4034e it is **dormant** — no keybind, bridge-only —
-  kept for a future full-screen DAG view.
-- **`agentWidgets`** — no longer empty: it is the [[Gadget-Dock]], a
-  **left-edge pinnable popup** of Win7-sidebar-homage gadgets
-  (`AoideAgentWidgets.qml`, `GadgetFrame.qml`, and the terminal-manager /
-  DAG / clock / meter gadget files). Hidden by default; it slides in on a
-  5 px hot-edge hover (pure QML) or on `SUPER+G` (open-and-pin via the
-  bridge), and since it holds the DAG gadget it is the primary DAG
-  affordance on the desktop.
+  indented tree. It is **dormant** — no keybind, bridge-only — kept for a
+  future full-screen DAG view.
+- **`agentWidgets`** — the [[Gadget-Dock]], a **left-edge pinnable popup**
+  of Win7-sidebar-homage gadgets (`AoideAgentWidgets.qml`, `GadgetFrame.qml`,
+  and the terminal-manager / DAG / clock / meter gadget files). Hidden by
+  default; it slides in on a 5 px hot-edge hover (pure QML) or on `SUPER+G`
+  (open-and-pin via the bridge), and since it holds the DAG gadget it is the
+  primary DAG affordance on the desktop.
 
-**`GraphModel.qml`** is the canonical QML graph model (its `buildRows()` was
-extracted from the overlay); both the overlay and the dock's `DagGraphGadget`
-instantiate it, and any future graph consumer must too — the tree derivation
-lives in exactly one place.
+**`GraphModel.qml`** is the canonical QML graph model; both the overlay and
+the dock's `DagGraphGadget` instantiate it, and any future graph consumer
+must too — the tree derivation lives in exactly one place.
 
 ## Launcher (surface #3, built out 2026-07-28)
 
-`AoideLauncher.qml` graduated from stub to a working, keyboard-driven app
-launcher (the rofi replacement). It is a summoned `PanelWindow` on
+`AoideLauncher.qml` is a working, keyboard-driven app launcher (the rofi
+replacement). It is a summoned `PanelWindow` on
 `WlrLayer.Overlay` (namespace `aoide-launcher`) that takes an **exclusive
 keyboard grab** only while shown and is an inert zero-cost layer at rest. It
 enumerates apps from Quickshell's built-in `DesktopEntries`, filters on a
@@ -77,16 +73,14 @@ Two design decisions worth carrying forward:
 
 - **Trigger is a Hyprland `GlobalShortcut` (`aoide:launcher`), registered
   in-process** — the compositor binds `SUPER+SPACE` to it via `bind = …,
-  global, aoide:launcher`. This *replaced* the old `bind = …, exec, aoide shell
-  launcher toggle`, which called an **unimplemented CLI stub** (`aoide shell *`
-  is not in the command schema). `ShellBridge` is outbound-only, so an in-process
+  global, aoide:launcher`. `ShellBridge` is outbound-only, so an in-process
   global shortcut is the cleanest inbound trigger — no new `aoided` verb, no
   inbound socket.
 - **Launch is `DesktopEntry.execute()`** — the same Quickshell-native side-effect
   idiom the shell already uses (`WorkspaceRow.activate()`, `BatonGadget` →
-  `execDetached`), *not* a shell-out invented in QML. Routing app-launch through
-  `aoided` per house rule #6 remains an open contract question (no such verb
-  exists today); flagged, not silently baked. See [[references/AOIDE-DEV-HANDOFF]] §7.
+  `execDetached`). Routing app-launch through `aoided` per house rule #6 has
+  no such verb today; flagged, not silently baked. See
+  [[references/AOIDE-DEV-HANDOFF]] §7.
 
 The compositor facet also adds `aoide-launcher` to the blur / `ignore_alpha` /
 hyprglass namespaces so the pane frosts like the bar and dock. Both the keybind
@@ -97,12 +91,11 @@ same way).
 ## Session service & resilience
 
 The shell surface is started by the **`aoide-quickshell`** systemd *user*
-service (not a Hyprland `exec-once`), defined in
-`modules/facets/quickshell/default.nix`. The service is the session-assembly
-seam: it orders after `graphical-session.target` (so Quickshell inherits a valid
-Wayland env), logs to journald (`journalctl --user -u aoide-quickshell`), and
-respawns on crash. Three layers keep one bad load from bringing the desktop down
-for good:
+service, defined in `modules/facets/quickshell/default.nix`. The service is
+the session-assembly seam: it orders after `graphical-session.target` (so
+Quickshell inherits a valid Wayland env), logs to journald (`journalctl
+--user -u aoide-quickshell`), and respawns on crash. Three layers keep one
+bad load from bringing the desktop down for good:
 
 - `ConditionPathExists = <shellQmlEntry>` — if the QML entry hasn't landed, the
   unit *declines to start* rather than crash-looping. **But this checks
@@ -130,12 +123,11 @@ hard cut — no crossfade.
 
 **Operating rule — never override `ExecStart` to a worktree.** For live QML
 iteration run a *separate* foreground instance (`qs -p <worktree>/shell.qml`);
-do **not** hijack the service's `ExecStart` with a systemd drop-in. On
-2026-07-28 a leftover drop-in pinned `ExecStart` to a `.claude/worktrees/…`
-path that was later deleted, defeating `ConditionPathExists` (which still
-watched the valid baked path) and crash-looping the shell 77× — no bar, no
-dock, no wallpaper. The drop-in was the anti-pattern; the fix was to delete it
-and let the baked unit stand. See [[references/AOIDE-DEV-HANDOFF]] §7.
+do **not** hijack the service's `ExecStart` with a systemd drop-in. A drop-in
+that pins `ExecStart` to a worktree path defeats `ConditionPathExists` (which
+watches only the baked path) once the worktree path is gone, crash-looping
+the shell — no bar, no dock, no wallpaper. See
+[[references/AOIDE-DEV-HANDOFF]] §7.
 
 ## Related
 

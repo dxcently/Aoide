@@ -15,8 +15,8 @@ repo ships only the launcher `modules/dendrites/melete.nix` + the
 executes shell commands, drives a headless `claude` CLI, and reaches out to
 GitHub and a rented fleet. It is the engine that makes AoideOS a declarative
 [[Widget-Maker|widget maker]]: because Melete writes code, new integrations are
-*generated*, not selected from a plugin menu. The relationship runs both ways —
-`melete aoide …` routes into Aoide's CLI trunk, so Melete can also drive Aoide.
+*generated*. The relationship runs both ways — `melete aoide …` routes into
+Aoide's CLI trunk, so Melete can also drive Aoide.
 
 **The muse.** Melete, Mneme, and **Aoide** are the three Boeotian (pre-Olympian)
 Muses: **Melete** = practice/rehearsal, **Mneme** = memory, **Aoide** = song.
@@ -27,7 +27,7 @@ missing.
 
 ## What it is
 
-- **A harness, not a shell.** There is no REPL to drop into. The command surface
+- **A fixed verb surface.** There is no REPL to drop into. The command surface
   is a fixed set of verbs (`code`, `maintain`, `store`, `gh`, `runs`, `recur`,
   `self-update`, `skill`, …), each a one-shot call over a long-lived `serve`
   daemon (`melete.service`) that holds the scheduler, the run registry, and the

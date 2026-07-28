@@ -10,8 +10,8 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 **Status: SHIPPING (khoa, 2026-07-28). Phases ①–② landed, plus conduct-by-default.**
 Core channel (`conduct` + `graph send` + the PTY multiplexer + the aoided gate),
-window-address discovery, and — the headline — **conduct-by-default**: every kitty
-window now runs its login shell under `aoide conduct`, so EVERY terminal is a
+window-address discovery, and — the headline — **conduct-by-default**: every
+kitty window runs its login shell under `aoide conduct`, so EVERY terminal is a
 tracked, conductable session out of the box (no opt-in). The parent-autogate rule
 is live: an orchestrator freely commands the children it spawned. Phase ③ (the
 interactive baton console) is the remaining work. See the "Conduct-by-default"
@@ -22,7 +22,7 @@ The graph today *observes* agents (running · waiting · blocked · done) and ca
 ## Why this layer is new (substrate facts)
 
 - `graph wrap`'s `session_wrap` spawns with **inherited stdio** and only `wait()`s — it holds the `Child` but captures no stdin, so there is no channel to type into the agent (`graph.rs`).
-- **shellbridge's socket is a separate, narrower channel** (`aoide shellbridge --run`): a `{cmd:"focuswindow",address}` line drives `hyprctl dispatch focuswindow`, so the dock/roster row-click jumps end to end through the daemon socket — window-jump only, not injection. Conduct's per-session PTY sockets stay the injection path, built standalone rather than layered onto shellbridge's — see [[shellbridge]].
+- **shellbridge's socket is a separate, narrower channel** (`aoide shellbridge --run`): a `{cmd:"focuswindow",address}` line drives `hyprctl dispatch focuswindow`, so the dock/roster row-click jumps end to end through the daemon socket — window-jump only, not injection. Conduct's per-session PTY sockets stay the injection path, built standalone — see [[shellbridge]].
 - **`libc` 0.2.189 is already vendored** (via crossterm's tree) — `openpty`/`forkpty` are ungated, so a PTY is a one-line dep addition of an already-locked crate. No new vendored crate.
 - The baton already has per-panel key arms, an inline text-input mode with dispatch-on-Enter (the `L` link handler, `app.rs:652-664,724-786`), and one audited `Door::Cli` dispatch seam (`app.rs:522-534`).
 - `session_wrap`/`session_conduct` pass `windowAddress: None` at spawn time (`graph.rs`) — the cue path only gets an address later, from the event listener or hook backfill (see [[Terminal-Commander]]); discovery closes this gap in the same step that reads chat titles.
@@ -58,10 +58,9 @@ The wrap process is the natural owner: it already holds the `Child`, already thr
 
 ## Conduct-by-default — every terminal is a conducted session (SHIPPED)
 
-The core-identity behaviour: Aoide is the orchestration core, and "every terminal
-conductable + tracked by default" is not an opt-in feature but the default state
-of the box. It is delivered entirely in the terminal dendrite — no daemon, no
-background process.
+The core-identity behaviour: Aoide is the orchestration core, and "every
+terminal conductable + tracked by default" is the default state of the box. It is
+delivered entirely in the terminal dendrite — no daemon, no background process.
 
 - **The kitty wrapper.** `modules/dendrites/kitty.nix` defines an `aoide-shell`
   wrapper (`pkgs.writeShellScriptBin`) and points kitty's `shell` setting at it,
@@ -97,11 +96,13 @@ Injecting keystrokes into an agent is privileged, so **`graph send` is gated thr
 - **Autogate policy.** Trusted flows auto-approve without a human. Two rules ship today, both still **audited**:
   - **Parent-of-target (SHIPPED).** A send DELIVERS without a prompt when the sender's own `AOIDE_SESSION_ID` equals the target session's `parentSessionId` — i.e. an orchestrator freely commanding a child it spawned. Cross-tree or unrelated sends stay pending. This is what makes conduct-by-default a real orchestration mesh: the parent of a subtree can drive it, strangers cannot. (Decision is a pure, unit-tested predicate: `sender_is_parent(sender, target_parent)`.)
   - **Global switch (SHIPPED).** `AOIDE_CONDUCT_AUTOGATE` in {1,true,yes,all} declares a box-wide orchestration-mode where every send delivers.
-  - Gate priority: `--yes` ▸ global switch ▸ parent-of-target ▸ else pending. Richer per-agent rules are later work.
+  - Gate priority: `--yes` ▸ global switch ▸ parent-of-target ▸ else pending. No richer per-agent rules exist beyond parent-of-target and the global switch.
 - **Audit.** Every send (pending, approved, denied, autogated) writes an aoided audit line — the flow of commands through the graph is fully recorded (`~/Aoide/log`).
 - Socket is **user-scoped** (`$XDG_RUNTIME_DIR`, no network). Forwarded/echoed agent text is untrusted data and never re-interpreted as a command (existing house rule).
 
 ## The baton becomes the console
+
+**Status:** planned — Phase ③, not yet in `app.rs`; no `InputKind::Send` today.
 
 - New `InputKind::Send { session_id }` (mirrors the working `Link` template): select a node → key (`c` = conduct) → inline prompt → Enter dispatches `graph send`. One new key arm + one `InputKind` + the existing dispatch seam.
 - **Nodes label by `title`, not id** — the DAG reads as who-is-doing-what.

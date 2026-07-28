@@ -1,6 +1,6 @@
 # Assertion
 
-How a page states things. Every content page — `concepts/`, `entities/`, `design/`, `Overview.md` — asserts the system **as it is at HEAD**, in the present indicative. One tense, one mood.
+How a page states things. Every content page — `concepts/`, `entities/`, `songbook/`, `Overview.md` — asserts the system **as it is at HEAD**, in the present indicative. One tense, one mood.
 
 The rule exists because these pages are read as a specification. A reader cannot tell, from prose alone, whether "the wrapper is no longer spawned" describes today's code or yesterday's; whether "this would grant a scoped path" describes a shipped mechanism or a wish. Mixing state, history, and speculation in one voice makes every sentence require external verification, which defeats the point of writing it down.
 
@@ -32,7 +32,7 @@ Rationale for a decision is legitimate content, but it is *stated*, not *litigat
 
 ### 3. Speculation is routed, not written
 
-Unbuilt designs, open questions, and conditionals do not appear as page prose. They are routed to the surface that tracks them:
+Open questions and conditionals do not appear as page prose. They are routed to the surface that tracks them:
 
 | Kind | Destination |
 |---|---|
@@ -43,6 +43,8 @@ Unbuilt designs, open questions, and conditionals do not appear as page prose. T
 Prohibited in page prose: `would`, `could`, `might`, `eventually`, `someday`, `TBD`, `probably`, `open question`, `what if`, `we may want to`.
 
 An agent that discovers a what-if while editing does not resolve it silently in either direction — it neither writes the speculation into the page nor deletes the underlying question. It routes it.
+
+A **specified design** is not an open question, and this clause does not evict it: a design that has been decided but not yet built stays on the page under a status label. See "Documenting the unbuilt" below. The distinction is whether the answer is known — a decided design is documented, an undecided one is routed.
 
 ## What stays: invariants
 

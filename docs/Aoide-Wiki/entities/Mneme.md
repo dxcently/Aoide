@@ -29,8 +29,9 @@ agent** (Claude on an MCP connector) has no other reach, so Mneme is *its* only
 entrance. That asymmetry is the whole reason Mneme is a **separate daemon** rather
 than a Melete module:
 
-- The vault has a **second reader** — folding memory into the harness would
-  collapse *read-my-notes* and *run-code-on-my-repos* into one over-powered key.
+- The vault has a **second reader** — keeping it apart from the harness keeps
+  *read-my-notes* and *run-code-on-my-repos* two separate keys, not one
+  over-powered key.
 - The **doer is volatile** (self-updates, spawns agents, long-running jobs);
   **memory must not share its fate** — kept apart, the harness can thrash while
   the vault holds steady.

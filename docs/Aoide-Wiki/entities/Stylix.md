@@ -14,7 +14,9 @@ Stylix is the recording side of the two-fan-out model. `stage/drachma.json` is t
 
 Surface ownership is enforced: the Quickshell facet declares which surfaces it owns, and Stylix's options disable derive from that declaration. The flake's `checks` assert that no surface has two owners, catching overlap at eval time rather than at runtime.
 
-GTK/Qt live preview is accepted as adopt-only (app restarts required). A `rice preview --gallery` mode (sample apps restarted under a preview env) is deferred to after v1.
+GTK/Qt live preview is accepted as adopt-only (app restarts required).
+
+**Status:** `rice preview --gallery` — sample apps restarted under a preview env — is specified; not built.
 
 ## Implementation
 
@@ -32,11 +34,15 @@ while the Quickshell wallpaper layer paints over it live.
 
 The base16 scheme is **synthesised** from the v0 palette (bg→base00, fg→base05,
 accent→base0D, urgent→base08, with the resolved component tier informing
-surface-adjacent slots) — a provisional derivation. v1's design-system work
-replaces this synthesis with a real 16-colour derivation. That said, songs
-may also supply the full sixteen slots directly as `aoide.drachma.base16`
-(bypassing synthesis) — the `sonata` and `hero` songs both do, keyed by hand
-from their wallpapers; see [[design/Ricing-Protocol|the Ricing Protocol]].
+surface-adjacent slots) — a provisional derivation.
+
+**Status:** specified; not built. v1's design-system work replaces this
+synthesis with a real 16-colour derivation.
+
+That said, songs may also supply the full sixteen slots directly as
+`aoide.drachma.base16` (bypassing synthesis) — the `sonata` and `hero` songs
+both do, keyed by hand from their wallpapers; see
+[[songbook/Ricing-Protocol|the Ricing Protocol]].
 
 ## Polarity — light or dark, one switch
 
@@ -45,11 +51,11 @@ ramp reads as, and every Stylix-managed target honours it. The desktop's
 current key is `polarity = "light"` (set `mkDefault` on the Stylix facet):
 the `sonata` song's cream/parchment base00 with deep-umber base05 text is a LIGHT
 scheme, keyed off the Alma-Tadema *Unconscious Rivals* wallpaper (see
-[[design/Pantheon-Grammar|Pantheon Grammar round 5]]). (`hero` is the alternate
+[[songbook/Pantheon-Grammar|Pantheon Grammar §6]]). (`hero` is the alternate
 dusk-plum key.) Because polarity is a single fan-out switch,
 flipping it is cheap — the discipline that makes it *look* right everywhere
 (terminal, bar, every widget agreeing) is the vision-check in
-[[design/Ricing-Protocol|the Ricing Protocol]], not the switch itself.
+[[songbook/Ricing-Protocol|the Ricing Protocol]], not the switch itself.
 
 ## Related
 
@@ -57,5 +63,5 @@ flipping it is cheap — the discipline that makes it *look* right everywhere
 - [[Quickshell]]
 - [[Codebase]]
 - [[drachma]]
-- [[design/Ricing-Protocol|Ricing Protocol]]
-- [[design/Pantheon-Grammar|Pantheon Grammar]]
+- [[songbook/Ricing-Protocol|Ricing Protocol]]
+- [[songbook/Pantheon-Grammar|Pantheon Grammar]]

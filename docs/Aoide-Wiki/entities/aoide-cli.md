@@ -51,9 +51,9 @@ user's action ([[Rebuild-Gate]], [[Governance]]).
 ### The `graph` group — session/project DAG + the conductor mesh
 
 `view`, `project add`/`remove`/`list`, `link`, `session start`/`phase`/`end`/
-`hook`, `focus`, `prune`, `emit` are the original [[Session-Graph]] viewer +
+`hook`, `focus`, `prune`, `emit` are the [[Session-Graph]] viewer +
 manager feeding the [[Terminal-Commander]] roster (see [[Agent-Hooking]] for
-the session-registration doors). Three later additions turn the graph into a
+the session-registration doors). Three commands turn the graph into a
 live conductor mesh:
 
 - **`graph wrap`** — spawn any agent command as a registered session
@@ -91,9 +91,9 @@ command.
 
 The compositor keybinds `SUPER+ESCAPE` (lock) and `SUPER+G` (dock toggle)
 still invoke `aoide shell lock` / `aoide shell dock toggle` — a verb group not
-among the 36 leaves, future CLI work. The third former member of that group,
-the launcher, is fixed: `SUPER+SPACE` now triggers an in-process Hyprland
-global shortcut, not a CLI verb (see [[Quickshell]]).
+among the 36 leaves (open thread). The launcher keybind is not part of this
+gap: `SUPER+SPACE` triggers an in-process Hyprland global shortcut, not a CLI
+verb (see [[Quickshell]]).
 
 ## Contract-level conventions
 

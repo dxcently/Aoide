@@ -30,32 +30,30 @@ session-jump) and `song/stage/hooks.json` (live Claude Code hook phases —
 seeds both files with their v0 shapes and keeps them current as sessions come
 and go.
 
-**The socket accept loop is now live.** `aoide shellbridge --run` binds the
+**The socket accept loop is live.** `aoide shellbridge --run` binds the
 contract socket and accepts newline-JSON commands: a `{cmd:"focuswindow",
 address}` line drives `hyprctl dispatch focuswindow address:…`, the same
 session-jump primitive `graph focus` uses from the CLI door. This is the verb
 the [[Gadget-Dock]]'s terminal-manager gadget and the [[Terminal-Commander]]
-roster now call on a row click — QML issues the socket command, never shells
-out, never speaks an agent protocol. The verb set is still narrow (jump only;
-prune remains an open thread, see below) but it is a real accept loop, not a
-stub.
+roster call on a row click — QML issues the socket command, never shells
+out, never speaks an agent protocol. The verb set is narrow (jump only;
+prune remains an open thread, see below).
 
 **`hyprctl` must be on the service PATH — a subtle, total failure otherwise.**
 Both the socket handler's `focus_window` and the window→session event listener
 shell out to `hyprctl`. A systemd **user** unit's default PATH is minimal
 (coreutils/findutils/grep/sed/systemd) and does **not** include the compositor,
-so before this was fixed every widget click failed silently with
-`hyprctl unavailable: No such file or directory` (audited as `focus-failed`, not
-logged to the journal) and the click never jumped — even though the address was
-correct and the CLI `graph focus` worked (it inherited the caller's richer
-PATH). The fix is a unit-level `path = [ pkgs.hyprland ]` on both the
-`shellbridge` and `aoide-graph-reap` services (`modules/nucleus/shellbridge.nix`)
-— note it is a *unit* option, a sibling of `serviceConfig`, NOT a `serviceConfig`
-key (nesting it there emits an inert raw `path=` line and PATH stays broken). The
-lesson: a user service that shells out to desktop tools needs them put on PATH
-explicitly; a missing binary is invisible until you check the daemon's own env.
+so a unit-level `path = [ pkgs.hyprland ]` on both the `shellbridge` and
+`aoide-graph-reap` services (`modules/nucleus/shellbridge.nix`) puts `hyprctl`
+on PATH explicitly — it is a *unit* option, a sibling of `serviceConfig`, NOT a
+`serviceConfig` key (nesting it there emits an inert raw `path=` line and PATH
+stays broken). Without it, every widget click fails silently with `hyprctl
+unavailable: No such file or directory` (audited as `focus-failed`, not logged
+to the journal): the click never jumps even though the address is correct,
+because the CLI `graph focus` inherits the caller's richer PATH and keeps
+working while the daemon's minimal PATH breaks silently.
 
-Reads and jumps go through the socket now; the **write door for session state
+Reads and jumps go through the socket; the **write door for session state
 remains the CLI**: the `aoide graph session` verb family upserts those same
 stage files atomically (each mutation
 re-stages `graph.json`, so the read path lights up immediately). `session start
@@ -71,17 +69,16 @@ never exiting non-zero so it is safe to wire into interactive-session hooks.
 `startedAt` is stamped ISO-8601 UTC (hand-rolled, round-tripping the baton
 reader — no chrono in the offline lock).
 
-Since [[Session-Graph]] landed, the stage carries two more
-files: `song/stage/projects.json` (the project registry, v0 `{schemaVersion,
-projects: [{name, path}]}`) and `song/stage/graph.json` (the resolved DAG, v0
-`{schemaVersion, nodes, edges: [{from, to, kind}]}`, emitted by `aoide graph
-emit` with the same atomic write). A `sessions.json` record may additionally
-carry the optional `parentSessionId` (additive, still v0) — the spawned-by
-edge. `aoide graph link` and `aoide graph session start --parent` both write
-that field (shellbridge stamping it at spawn time over the socket is still the
-open thread). The graph stage rewriters
-round-trip unknown fields, so they never clobber what shellbridge (or any
-other writer) adds to a record.
+The stage also carries two more files: `song/stage/projects.json` (the
+project registry, v0 `{schemaVersion, projects: [{name, path}]}`) and
+`song/stage/graph.json` (the resolved DAG, v0 `{schemaVersion, nodes, edges:
+[{from, to, kind}]}`, emitted by `aoide graph emit` with the same atomic
+write). A `sessions.json` record may additionally carry the optional
+`parentSessionId` (additive, still v0) — the spawned-by edge. `aoide graph
+link` and `aoide graph session start --parent` both write that field
+(shellbridge stamping it at spawn time over the socket is still the open
+thread). The graph stage rewriters round-trip unknown fields, so they never
+clobber what shellbridge (or any other writer) adds to a record.
 
 The env-var seam is a **documented contract** ("Stage-dir resolution" in
 `CONTRACTS.md §4` — the CLI ↔ unit seam): the Rust
@@ -89,10 +86,10 @@ The env-var seam is a **documented contract** ("Stage-dir resolution" in
 path (the unit sets `%h/Aoide/song/stage`; empty or relative values are
 ignored so runtime paths never resolve against an arbitrary cwd), else it
 falls back to the `aoide_home()` derivation. A serialized test pins the
-precedence. The companion `AOIDE_AUDIT_LOG` seam was audited in the same pass
-and was already correct. One hazard noted for later: the env-var test mutex
-in `shellbridge.rs` is module-local — fine while only this module's tests
-touch env vars, a conflict risk if others grow them (open thread).
+precedence. The companion `AOIDE_AUDIT_LOG` seam is correct under the same
+contract. The env-var test mutex in `shellbridge.rs` is module-local — fine
+while only this module's tests touch env vars, a conflict risk if others grow
+them (open thread).
 
 The [[Gadget-Dock]]'s terminal-manager gadget renders its per-row prune `[x]`
 disabled precisely because no prune verb exists on the socket yet — QML never
@@ -100,7 +97,7 @@ invents IPC. Growing the verb set (prune next) is an open thread, as is
 stamping `parentSessionId` at spawn time.
 
 **Authoritative window capture (the Hyprland event listener).** Alongside the
-socket accept loop, `aoide shellbridge --run` now spawns a background thread that
+socket accept loop, `aoide shellbridge --run` spawns a background thread that
 reads Hyprland's `socket2` event stream
 (`$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`). On each
 window lifecycle event it keeps `sessions.json` authoritative: an `openwindow`
@@ -109,22 +106,21 @@ tracked session still missing its `windowAddress` — walking that session's
 recorded `pid` up the `/proc` ppid chain and matching an ancestor against
 `hyprctl clients -j`, then stamping the client's canonical `0x…` address via the
 atomic graph writer — and a `closewindow` clears that address off whatever
-session held it. **Why:** the address was previously only backfilled *lazily* on
-the next Claude Code hook, so at click time it was frequently empty and the
-[[Terminal-Commander]] jump failed; capturing it at window-creation time makes
-the jump reliable. The listener reuses the same pid-ancestry ↔ clients helpers as
-launch-time discovery (which stays as a fallback), runs concurrently with — and
-never blocks or kills — the accept loop, and degrades to a logged no-op when
-there is no `HYPRLAND_INSTANCE_SIGNATURE` (headless/non-Hypr aoide is unaffected).
+session held it. **Why:** the lazy hook-time backfill alone leaves the address
+frequently empty at click time, so the [[Terminal-Commander]] jump misses;
+capturing it at window-creation time keeps the jump reliable. The listener
+reuses the same pid-ancestry ↔ clients helpers as launch-time
+discovery (which stays as a fallback), runs concurrently with — and never
+blocks or kills — the accept loop, and degrades to a logged no-op when there
+is no `HYPRLAND_INSTANCE_SIGNATURE` (headless/non-Hypr aoide is unaffected).
 
-Also since [[Session-Graph]] landed: a terminal killed uncatchably (SIGKILL,
-SUPER+Q) cannot run its own `graph session end`, so its `sessions.json` record
-would otherwise strand `running` forever. The **liveness reaper**
-(`aoide graph reap`, on a systemd user timer every ~12s after an initial 15s
-delay) sweeps the roster shellbridge publishes and marks a session dead when
-its window is gone (per `hyprctl clients -j`) OR its pid's `/proc` entry is
-gone — never both required, never a false reap of a live, signal-less
-session. See [[Session-Graph]] ("Liveness reaping") for the predicate.
+A terminal killed uncatchably (SIGKILL, SUPER+Q) cannot run its own `graph
+session end`. The **liveness reaper** (`aoide graph reap`, on a systemd user
+timer every ~12s after an initial 15s delay) sweeps the roster shellbridge
+publishes and marks such a session dead when its window is gone (per `hyprctl
+clients -j`) OR its pid's `/proc` entry is gone — never both required, never
+a false reap of a live, signal-less session. See [[Session-Graph]] ("Liveness
+reaping") for the predicate.
 
 ## Related
 

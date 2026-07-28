@@ -119,7 +119,7 @@ Rules of thumb:
   preview` hot-reload the shell without a rebuild.
 - **Always look.** Screenshot, read it back, and judge coherence yourself
   (light/dark polarity, bar↔terminal↔gadget agreement) *before* showing the
-  user — that is the [[design/Ricing-Protocol|Ricing Protocol]] vision check,
+  user — that is the [[songbook/Ricing-Protocol|Ricing Protocol]] vision check,
   and it applies to any visual change, not just rices.
 
 ---
@@ -187,7 +187,7 @@ The wiki is part of the deliverable, not documentation-after-the-fact. After any
 behavior/design change:
 
 - Update the page that owns the concept — e.g. a ricing/glass/opacity change →
-  [[design/Ricing-Protocol|Ricing Protocol]]; a conductor change →
+  [[songbook/Ricing-Protocol|Ricing Protocol]]; a conductor change →
   [[Conductor-Channel]]; a graph/session change → [[Session-Graph]]; a new
   gadget → [[Widget-Maker]] / [[Gadget-Dock]].
 - Follow [[Wiki-Protocol]] / `SCHEMA.md`: `[[Wikilinks]]`, frontmatter, house
@@ -285,7 +285,7 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   sonata` resolves from songbook. **Residuals still open:** (a)
   `song/songbook/default/rice.nix` borrows hero's wallpaper via
   `../hero/assets/hero.webp` — `TODO(song agent)`: give `default` its own cover;
-  (b) thin the design pages to protocol + pointers once the per-song `design/`
+  (b) thin the wiki's `songbook/` pages to protocol + pointers once the per-song `design/`
   folders hold the memory, and refresh `songbook/sonata/design/intent.md` (still
   describes an indigo nocturne, not the cream key); (c) `lib/checks.nix` carries
   pre-existing nixfmt-1.4.0 drift (unrelated to this change) — a formatting-only
@@ -355,7 +355,7 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   the light `sonata` key, to be added later (khoa: "after merge and rebuild").
 - **[planned · future] Default song with Pantheon thematics** — the shipped
   `default` baseline to be composed with the Pantheon grammar. See
-  [[design/Pantheon-Grammar]].
+  [[songbook/Pantheon-Grammar]].
 
 ---
 
@@ -377,7 +377,7 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
 
 - [[AOIDE-HANDOFF]] — the original design contract (what Aoide *is*)
 - [[Agent-Interface]] — the CLI/MCP action layer
-- [[design/Ricing-Protocol]] — the vision-check discipline
+- [[songbook/Ricing-Protocol]] — the vision-check discipline
 - [[Rebuild-Gate]] — why the switch is user-gated
 - [[Conductor-Channel]] · [[Session-Graph]] · [[Terminal-Commander]] — the
   orchestration surfaces you both use and test

@@ -62,10 +62,10 @@ The palette tier is closed.
 ## Prior art — wrap, don't rewrite
 
 Style Dictionary and the W3C design-tokens format already provide tiered
-reference resolution and multi-format emission. The package wraps these
-rather than reimplementing a resolver; it owns the authoritative v0 schema
-validator that `aoide rice lint` delegates to. The genuinely missing pieces
-are the Aoide-specific emitters (QML/stage, hyprctl, OSC).
+reference resolution and multi-format emission. The package wraps these; it
+owns the authoritative v0 schema validator that `aoide rice lint` delegates
+to. The genuinely missing pieces are the Aoide-specific emitters (QML/stage,
+hyprctl, OSC).
 
 *It lives at `pkgs/drachma/`, packages as `buildNpmPackage` (pname
 `aoide-drachma`) with a single runtime dependency (`style-dictionary@4.3.0`),
@@ -129,7 +129,7 @@ smoke-tests all four operations (`lint`, `resolve`, `emit stage`, `emit hyprctl`
 The provisional v0 stands until the design-system v1 lands: palette (`bg`,
 `fg`, `accent`, `urgent`) plus component overrides (`bar.*`, `notif.*`,
 `window.*`). The update playbook migrates songbook modules from v0 to v1 when
-v1 supersedes. Building against no schema at all was rejected.
+v1 supersedes.
 
 ## Stylix overlap resolution
 

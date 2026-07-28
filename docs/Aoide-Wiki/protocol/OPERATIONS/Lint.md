@@ -31,7 +31,7 @@ Run checks in this order. List findings under the headings below.
 The first-pass sweep is grep-able:
 
 ```
-grep -rniE '\b(used to|no longer|formerly|previously|originally|was (renamed|removed|rejected)|rather than|chosen over|would|could|might|eventually|someday|TBD|probably|what if)\b' concepts/ entities/ design/ Overview.md
+grep -rniE '\b(used to|no longer|formerly|previously|originally|was (renamed|removed|rejected)|rather than|chosen over|would|could|might|eventually|someday|TBD|probably|what if)\b' concepts/ entities/ songbook/ Overview.md
 ```
 
 Matches are candidates, not findings — `never` and other exclusions are invariants and pass ([[Assertion]] "What stays"). Confirm each against the clause it appears to break before listing it.

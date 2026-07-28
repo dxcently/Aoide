@@ -14,8 +14,7 @@ source:
 
 # The Ricing Protocol — how a song gets made and kept honest
 
-A first-class house rule, promoted out of the light-theme rework
-([[Pantheon-Grammar]] round 5): ricing is not "pick some hex codes and hope."
+A first-class house rule: ricing is not "pick some hex codes and hope."
 It is a small protocol with a separation of concerns, and one mandatory
 check whenever a rice or song changes.
 
@@ -23,7 +22,7 @@ check whenever a rice or song changes.
 > **protocol**: the dev wiki's job is architecture and rules, so it documents
 > *how* a rice is made and kept honest — the creation/application split and the
 > mandatory vision-check. It is **not** the store of any one song's design
-> decisions. Those — a palette's rationale, the exact opacity that read right
+> decisions. Those — a palette's rationale, the exact opacity that reads right
 > for a given key, the round-by-round iteration log — are **per-song design
 > memory**, and they belong to the **song agent** in a **songbook under
 > `song/`**, not in the dev wiki:
@@ -60,22 +59,22 @@ job ends up hard-coding colours in six different files that drift apart.
   base08/urgent). The **`hero`** song is the same discipline in a different
   register — its sixteen slots are keyed by hand from its own cover
   (`song/songbook/hero/assets/hero.webp`, the pianist over dusk mirror-water:
-  deep plum base, rose accent). `aoide rice gen` is the eventual automated form
-  of this same step (still a stub — see [[aoide-cli]]); until it lands,
-  creation is a human/agent reading the source image and writing the sixteen
-  slots by hand, once, in one file.
+  deep plum base, rose accent). **Status:** `aoide rice gen` — the automated
+  form of this step (see [[aoide-cli]]) — is a stub; no automated derivation
+  exists in code. Creation is a human/agent reading the source image and
+  writing the sixteen slots by hand, once, in one file.
 - **Application** is [[Stylix]]'s job, and only Stylix's: one `base16Scheme`
   feeds every nix-manageable target (terminal, GTK/Qt, icons, cursor,
   editors, browser, boot) automatically. On the Quickshell side, the same
   drachma values fan out through `stage/drachma.json` — one runtime read,
-  every QML surface. **No other file should ever hard-code a colour that could
-  instead be read from drachma.** A dendrite or facet that wants a colour reads
+  every QML surface. **No other file hard-codes a colour available from
+  drachma.** A dendrite or facet that wants a colour reads
   `aoide.drachma.*`; it never writes its own hex.
 
 The point of the split: creation is where taste and vision-checking live
-(this section, below); application is mechanical and should never need
-re-deriving per surface. When a rice looks wrong, ask which concern broke —
-usually it is application (a surface reading a drachma role it shouldn't, or hosting
+(this section, below); application is mechanical and never needs re-deriving
+per surface. When a rice looks wrong, ask which concern broke — usually it is
+application (a surface reading a drachma role it does not own, or hosting
 a stray literal) rather than creation (the sixteen slots themselves).
 
 ## 2. The mandatory vision-check
@@ -86,29 +85,22 @@ Two things to look at, side by side, on the live desktop:
 
 1. **Terminals and the shell UI agree on light/dark.** A rice keys
    `stylix.polarity` (`"light"` or `"dark"`) once; every surface must read as
-   the *same* polarity. The light key shipped this way: a bright cream
-   Aero-glass terminal (kitty `background_opacity`) next to a cream
-   frosted-glass bar and its popouts at a *close* opacity — checked by eye
-   every time, because opacity + blur + gloss gradients can each independently
-   push a surface's apparent brightness away from its declared polarity.
-   "Close" beats "identical-on-paper but wrong on screen." The opacity has been
-   re-tuned against the live desktop more than once: first *down* together from
-   0.72 to kitty 0.60 / bar 0.58 (too transparent — the warm painting bled
-   through and the surfaces read beige, not light). The instinct after that was
-   to lighten the *colour* (whiten `base00`), but khoa's correction drew the
-   real distinction: **keep the cream-and-ink look, just make the surface read
-   brighter.** Brightness is not colour — it is how much of the dim wallpaper is
-   allowed to show through. So the cream `base00` stayed `#f4ecdc`, and the
-   terminal was brightened by *opacity* instead (kitty `background_opacity`
-   0.86): the same cream, now dominant over the painting rather than muddied
-   dim by it. The lesson: reach for opacity/glass before you reach for a whiter
-   hex — a surface can read "too dark" and still be exactly the right colour.
-   hyprglass now glasses the **windows** too — `manage_window_blur = 1` in the
-   compositor facet extends the Liquid-Glass refraction/fresnel from the
-   quickshell layer surfaces onto the translucent terminal, so terminal and
-   shell wear one glass (the shader only paints visible translucent content, so
-   opaque windows are untouched). A `light { glass_opacity }` preset override
-   brightens that glass under the light polarity.
+   the *same* polarity — checked by eye every time, because opacity + blur +
+   gloss gradients can each independently push a surface's apparent brightness
+   away from its declared polarity. "Close" beats "identical-on-paper but
+   wrong on screen." The light key holds a bright cream Aero-glass terminal
+   (kitty `background_opacity` 0.86) next to a cream frosted-glass bar and its
+   popouts at a *close* opacity (0.58 / 0.60); the cream `base00` is
+   `#f4ecdc`. **Brightness is opacity, not colour**: how much of the dim
+   wallpaper is allowed to show through, not the hex value — a surface can
+   read "too dark" and still be exactly the right colour, so the fix for a
+   muddy surface is opacity/glass, not a whiter hex. hyprglass glasses the
+   **windows** too — `manage_window_blur = 1` in the compositor facet extends
+   the Liquid-Glass refraction/fresnel from the quickshell layer surfaces onto
+   the translucent terminal, so terminal and shell wear one glass (the shader
+   only paints visible translucent content, so opaque windows are untouched).
+   A `light { glass_opacity }` preset override brightens that glass under the
+   light polarity.
 
    **Everything is edged.** Hard square corners are the house style — the global
    Hyprland decoration `rounding` is 0, the kitty windowrule pins `rounding 0`
@@ -139,5 +131,5 @@ facet reading another module, a surface with two owners); it cannot catch
 - [[Song-Vocabulary]] — key/song/cover vocabulary this protocol operates on.
 - [[Song-Anatomy]] — where the songbook and per-song design memory live under
   `song/`.
-- [[Self-Ricing]] — the songbook write-back loop and the automated future of the
-  creation step (`rice gen`).
+- [[Self-Ricing]] — the songbook write-back loop and the creation step's
+  automation (`rice gen`).
