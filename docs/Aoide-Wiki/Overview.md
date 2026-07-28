@@ -7,9 +7,9 @@ created: 2026-07-25
 
 **Aoide (the core) vs AoideOS (the distribution) — don't conflate the two.** Aoide is the **orchestration core**: the bridges and APIs between the terminal, the shell, the system, and the OS — one interface through which any agent is freely orchestrated for any task, no MCP required. It runs anywhere there is a shell — portable, headless-capable, agent-first — and as of the [[Conductor-Channel|conductor channel]], **every terminal is a conductable, tracked session by default**. AoideOS is the **distribution built on that core**: this repo, the NixOS flake that ADDITIONALLY ships the [[Quickshell]] widget-making toolkit (bar, dock, gadgets, the DAG/baton surfaces) and the specialized ricer (the song/notes theming engine, see [[Self-Ricing]] and [[design/Ricing-Protocol|Ricing Protocol]]). A capability that works with only a shell is "Aoide"; one that needs the desktop/Quickshell/rice is "AoideOS". This wiki documents AoideOS end to end, since the flake is the concrete running instance of the core.
 
-Aoide is an agent-agnostic NixOS desktop framework — Hyprland compositor, Quickshell shell, an orchestrator daemon, a content pipeline, and a self-ricing engine — that you fork and run. Upstream ships the shape-making machinery (the rice engine, contracts, walker, and management tools) but never the shapes; your fork is your instance, self-updating from upstream and self-configuring to your preferences. The naming thesis: architecture is frozen music — the nix layer is the score, the running desktop is the performance, and a rice is a song the system sings.
+**AoideOS** is the agent-agnostic NixOS desktop distribution built on that core — Hyprland compositor, Quickshell shell, an orchestrator daemon, a content pipeline, and a self-ricing engine — that you fork and run. Upstream ships the shape-making machinery (the rice engine, contracts, walker, and management tools) but never the shapes; your fork is your instance, self-updating from upstream and self-configuring to your preferences. The naming thesis: architecture is frozen music — the nix layer is the score, the running desktop is the performance, and a rice is a song the system sings.
 
-Deeper than the desktop, Aoide is a **specialized widget maker**: it ships with the [[Melete]] coding agent and the [[Mneme]] knowledge server, and because the agent writes code, you extend the system by having it generate new **declarative** integrations — widgets, adapters, dendrites — rather than hunting for plugins. See [[Widget-Maker]] and [[Feature-Set]].
+Beyond the desktop, **AoideOS is a specialized widget maker**: it **integrates and launches** (it does not vendor) the independently-owned [[Melete]] coding harness and [[Mneme]] knowledge server, and because that agent writes code, you extend the system by having it generate new **declarative** integrations — widgets, adapters, dendrites — rather than hunting for plugins. The Aoide·Melete·Mneme (three-Muses) naming is a *theme*, not a claim they are one program; the primary agent is the claude CLI, with Melete as the coding harness you can also drive it with. See [[Widget-Maker]] and [[Feature-Set]].
 
 As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switched onto the flake (from [[dxflake]]) through the [[Rebuild-Gate]] — see [[Full-Architecture]] for the status and [[Codebase]] for the switch detail.
 
@@ -37,16 +37,16 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 
 ## Entities
 
-- [[aoide-cli]] — the `aoide` binary: the CLI trunk (27-command tree incl. the `graph` group), `schema --json` as single source of truth, the stdio MCP façade, structured exit codes, and the `aoided` daemon binary
-- [[drachma]] — the note engine: the Node package (wrapping Style Dictionary) that lints/resolves/emits notes — stage/drachma.json, hyprctl, and terminal OSC
+- [[aoide-cli]] — the `aoide` binary: the CLI trunk (28-command tree incl. the `graph` group, `conduct`, and `baton`), `schema --json` as single source of truth, the stdio MCP façade, structured exit codes, and the `aoided` daemon binary
+- [[drachma]] — the design-token mint: the Node package (wrapping Style Dictionary) that lints/resolves/emits the drachma tokens — stage/drachma.json, hyprctl, and terminal OSC
 - [[aoided]] — the orchestrator daemon: neutral event stream, policy, lint, audit log, and the gated rebuild pipeline
 - [[shellbridge]] — the daemon-to-desktop bridge: atomic JSON state files out, unix-socket commands in, Hyprland IPC consumed
 - [[Quickshell]] — the QML shell runtime (nine surfaces): bar, notification daemon, gadget dock, launcher, OSD, lockscreen, greeter, wallpaper layer, session-graph overlay
 - [[Hyprland]] — the Wayland compositor; Aoide's only multiplexer, driven live via hyprctl
 - [[Stylix]] — base16 whole-system theming; the baked fan-out from `rice.nix` to every nix-manageable target
 - [[dxflake]] — the dendritic auto-discovery flake that is Aoide's prior art and adoption target for the nucleus + dendrite walker
-- [[Melete]] — the bundled agent + coding harness (the "doer"): autonomous coding runs, shell, GitHub, fleet, scheduling — the engine behind Aoide's widget-making
-- [[Mneme]] — the bundled knowledge server (the "door"): the vault's MCP API behind the content pipeline and the wiki protocol
+- [[Melete]] — the integrated (not vendored) coding harness (the "doer"): autonomous coding runs, shell, GitHub, fleet, scheduling — an independent agent AoideOS launches and can be driven by; the engine behind AoideOS's widget-making
+- [[Mneme]] — the integrated (not vendored) knowledge server (the "door"): the vault's MCP API behind the content pipeline and the wiki protocol
 
 ## Sources
 

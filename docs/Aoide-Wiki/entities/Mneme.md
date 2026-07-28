@@ -7,11 +7,13 @@ tags: [aoide, mneme, knowledge, vault, mcp, content]
 
 # Mneme
 
-The knowledge server Aoide ships with — the **door**. Mneme is the vault's API
-for the client that has no shell. It serves a folder of text notes over MCP:
-read, write, snapshot, search, and serve conventions and skills — CRUD over a
-directory, with version history and trash. In Aoide it is the substrate behind
-the [[Content-Pipeline]] and the [[Wiki-Protocol]].
+The knowledge server AoideOS **integrates** — the **door**. Mneme is an
+independently-owned vault API for the client that has no shell (the repo ships
+the launcher `modules/dendrites/mneme.nix`, not Mneme's source). It serves a
+folder of text notes over MCP: read, write, snapshot, search, and serve
+conventions and skills — CRUD over a directory, with version history and trash.
+In AoideOS it is the substrate behind the [[Content-Pipeline]] and the
+[[Wiki-Protocol]].
 
 **The muse.** Mneme = **memory**, the counterpart to [[Melete]] = practice and
 **Aoide** = song (the three Boeotian Muses). Practice *acts*; memory *persists

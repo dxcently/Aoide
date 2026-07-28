@@ -1,3 +1,10 @@
+---
+type: design
+created: 2026-07-27
+tags: [aoide, design, baton, dag, tui, pantheon]
+source: "[[references/AOIDE-HANDOFF]]"
+---
+
 # Baton 3D DAG — the daemon-net view (plan)
 
 **Status: PLANNED (khoa, 2026-07-27). Not yet implemented — this is the build plan.**

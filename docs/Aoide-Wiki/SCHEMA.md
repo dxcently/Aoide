@@ -8,7 +8,7 @@ The standalone wiki for the Aoide project — the agent-agnostic Hyprland/Quicks
 
 ## Read the whole thing
 
-Working entry cost, in order: `Overview.md` → every page under `concepts/` and `entities/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; `AOIDE-DEV-HANDOFF.md` — the development agent's operating manual). The wiki is deliberately small enough to read end to end.
+Working entry cost, in order: `Overview.md` → every page under `concepts/`, `entities/`, and `design/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; `AOIDE-DEV-HANDOFF.md` — the development agent's operating manual; `pantheon/` — the design reference stills). The wiki is deliberately small enough to read end to end. Note: `design/` pages mirror **song-agent design memory** that is bound to migrate into a songbook under `song/` ([[Song-Anatomy]]).
 
 ## The shape
 
@@ -18,10 +18,11 @@ Aoide-Wiki/
   Overview.md      ← the Aoide overview / hub
   concepts/        ← ideas, mechanisms, frameworks
   entities/        ← named things (components, tools, hosts)
+  design/          ← design language + build specs (song-agent design memory mirrored here; bound for song/)
   ingest/
     index.md       ← content catalog
     log.md         ← append-only history + Open Threads
-  references/      ← raw sources (AOIDE-HANDOFF.md, AOIDE-DEV-HANDOFF.md)
+  references/      ← raw sources (AOIDE-HANDOFF.md, AOIDE-DEV-HANDOFF.md, pantheon/ stills)
   protocol/        ← the wiki protocol (Mneme/Melete-owned), staged here; not Aoide content
 ```
 
@@ -52,11 +53,11 @@ This file and every `protocol/OPERATIONS/` page obey the rules they describe. Ch
 
 Snapshot of this wiki's files, diffed on each lint pass and rewritten at the end. The wiki is meant to be read whole; this manifest exists for the lint self-description check, not to spare you the reading.
 
-snapshot: 2026-07-26
+snapshot: 2026-07-28
 
 ### Tags
 
-agent · aoide · architecture · auto-discovery · base16 · bridge · cli · coding-agent · compositor · content · daemon · declarative · deployment · desktop · dxflake · extensibility · features · flake · gadget · governance · graph · harness · hyprland · integration · ipc · knowledge · mcp · melete · meta · mneme · naming · nix · node · notes · onboarding · orchestrator · pipeline · policy · qml · quickshell · rebuild · rice · rust · security · session · shell · stylix · terminal · theming · ui · vault · wayland · widget · wiki
+agent · aoide · architecture · auto-discovery · base16 · baton · bridge · cli · coding-agent · compositor · conductor · content · daemon · dag · declarative · deployment · design · desktop · dxflake · extensibility · features · flake · gadget · glyph · governance · graph · harness · hyprland · integration · ipc · knowledge · mcp · melete · meta · mneme · naming · nix · node · notes · onboarding · orchestration · orchestrator · pantheon · pipeline · policy · protocol · pty · qml · quickshell · rebuild · rice · rust · security · session · shell · song · stylix · terminal · theming · tui · ui · vault · wayland · widget · wiki
 
 ### Notes
 
@@ -78,10 +79,12 @@ concepts/Rebuild-Gate.md
 concepts/Self-Ricing.md
 concepts/Session-Graph.md
 concepts/Snowflake-Anatomy.md
+concepts/Song-Anatomy.md
 concepts/Song-Vocabulary.md
 concepts/Terminal-Commander.md
 concepts/Widget-Maker.md
 concepts/Wiki-Protocol.md
+entities/Agent-Hooking.md
 entities/Hyprland.md
 entities/Melete.md
 entities/Mneme.md
@@ -92,6 +95,10 @@ entities/drachma.md
 entities/aoided.md
 entities/dxflake.md
 entities/shellbridge.md
+design/Baton-3D-DAG.md
+design/Conductor-Channel.md
+design/Pantheon-Grammar.md
+design/Ricing-Protocol.md
 ingest/index.md
 ingest/log.md
 protocol/OPERATIONS/Frontmatter.md

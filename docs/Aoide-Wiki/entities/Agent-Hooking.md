@@ -1,3 +1,9 @@
+---
+type: entity
+created: 2026-07-27
+tags: [aoide, agent, session, baton, orchestration, graph]
+---
+
 # Agent Hooking — putting ANY agent on the baton
 
 *Authored 2026-07-27 against schema v0 phases (running · waiting · blocked · done). The stage files `song/stage/{sessions,hooks,graph}.json` are the single truth; the baton TUI, the Quickshell widgets (dock roster, DAG trace, bar ✎ cell), and the orchestration daemons all render from them. Anything that writes these files through the doors below becomes a full citizen of the graph.*

@@ -59,7 +59,7 @@ A song is a score, not a room. The same committed song can be performed at any v
 Replaying a committed song on another host is a single declaration in that host's `hosts/<host>/default.nix`:
 
 ```nix
-aoide.song = "moonlight";
+aoide.song = "sonata";
 ```
 
 Songs self-register like dendrites: `lib/mkHost.nix` walks `song/repertoire/` alongside `modules/`. Each song's `rice.nix` guards itself with `lib.mkIf (config.aoide.song == "<name>")`, so only one song activates per host. Committing a song to the fork makes it fleet-available — every host that pulls can perform it.

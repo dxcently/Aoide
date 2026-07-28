@@ -64,6 +64,11 @@ Item {
     // ── Note + bridge dependencies (injected by shell.qml) ────────────────
     required property var notes
     required property var bridge
+    // Shared session state (shell.qml's QtObject). Threaded through so the
+    // centre WorkspaceRow can read `shared.hoveredWorkspace` — the gadget-dock
+    // hover-preview bridge (concepts/Terminal-Commander). Optional/null-safe so
+    // a standalone bar load never errors.
+    property var shared: null
 
     // The strip is 36px; the PanelWindow reserves exactly this. Everything is
     // painted within it — the clef included — so no apron is needed and the
@@ -523,6 +528,7 @@ Item {
             id: centeredWorkspaces
             anchors.verticalCenter: parent.verticalCenter
             notes: root.notes
+            shared: root.shared
         }
         Barline {}
     }

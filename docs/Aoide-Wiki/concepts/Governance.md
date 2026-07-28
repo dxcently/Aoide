@@ -22,7 +22,7 @@ Core interfaces are versioned contracts, not conventions:
 
 | Interface | Stability guarantee |
 |---|---|
-| Note schema | Versioned in `CONTRACTS.md` |
+| drachma schema | Versioned in `CONTRACTS.md` |
 | Dendrite shape | Versioned in `CONTRACTS.md` |
 | `aoide schema --json` output | Versioned in `CONTRACTS.md` |
 | Stage file formats | Versioned in `CONTRACTS.md` |

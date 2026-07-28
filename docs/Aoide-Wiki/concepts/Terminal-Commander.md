@@ -53,9 +53,17 @@ The plumbing already exists ([[Desktop-Architecture]], [[shellbridge]]):
   session still missing its `windowAddress`: it walks each session's recorded
   lifecycle **pid** up the `/proc` ppid chain and matches an ancestor against
   `hyprctl clients -j`, stamping the client's canonical `0x…` address into
-  `sessions.json` via the atomic graph writer. On `closewindow` it clears that
-  address off whatever session stored it (the [[Session-Graph|reaper]] then
-  removes the record via its pid signal). **Why this exists:** the address used
+  `sessions.json` via the atomic graph writer. The same pass also reads the
+  client's `workspace.id` and stamps it onto the session's additive **`workspace`**
+  field — and, because a resolved window can be *dragged* to another workspace,
+  the pass re-stamps every already-resolved session's `workspace` on each window
+  event (the `movewindow` / `movewindowv2` re-check), so the id stays current. It
+  only ever writes a *present* workspace id (a window momentarily absent from the
+  clients list keeps its last-known one — never cleared to a wrong value), and
+  degrades gracefully off-Hyprland (no id → the field stays absent, never a
+  panic). On `closewindow` it clears the address off whatever session stored it
+  (the [[Session-Graph|reaper]] then removes the record via its pid signal).
+  **Why this exists:** the address used
   to be filled only *lazily* on the next hook fire, so at click time it was
   frequently empty and the jump failed. Capturing it at window-creation time
   (and re-checking on every window event) makes "which window is which agent"
@@ -107,6 +115,33 @@ roster state exactly as the Rust graph module does — agent, coloured state,
 shortened cwd, elapsed; click a row to jump. Its per-row prune `[x]` is
 rendered disabled until the shellbridge socket grows a prune verb (open
 thread) — the dock never invents IPC.
+
+### Hover-preview → the bar's workspace glyph
+
+Hovering a roster row now also **previews which workspace that terminal lives
+on**, on the bar's [[Gadget-Dock|WorkspaceRow]] (the musical-note-glyph
+workspaces). The bridge is deliberately **pure data, not a compositor action**:
+the roster already carries each session's `workspace` id (stamped by the event
+listener above), so the widget need only *tell the bar which workspace to
+preview* — no `hyprctl`, no invented IPC, both surfaces just read shared state.
+
+- The dock row's `HoverHandler` writes the hovered session's `workspace` id to
+  `shared.hoveredWorkspace` (a `property int` on shell.qml's shared QtObject,
+  the same object that carries `tracedSessionId` for the DAG trace). It threads
+  shell → dock → gadget for the *writer* and shell → bar → WorkspaceRow for the
+  *reader* — mirroring how `notes`/`bridge` are passed. Hover and click coexist
+  (the HoverHandler never steals the click-to-jump `MouseArea`; the dock's
+  panel-wide hover union keeps the drawer open through it). On hover-exit the
+  value clears to the sentinel `-1`.
+- `WorkspaceRow` reads `shared.hoveredWorkspace` and paints a **distinct preview
+  highlight** on the matching glyph — a hollow **holoBlue ring** (plus a holoBlue
+  tint on the note), deliberately a *different kind* of mark from the true active
+  workspace's warm-accent swell + filled pill. Both can show at once: if the
+  hovered terminal is on the active workspace, the ring simply frames the accent
+  pill. All colour comes from [[Notes|notes]] (`aoide.drachma` roles) — no
+  hardcoded hex.
+- If a session's window/workspace is not yet resolved (or it is off-screen), its
+  `workspace` is `-1` and hovering the row simply highlights nothing — no error.
 
 ## Jump — click or keybind
 
