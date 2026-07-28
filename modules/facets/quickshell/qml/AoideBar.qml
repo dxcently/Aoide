@@ -7,14 +7,15 @@
 // five-line staff runs the full width of the screen, and every functional cell
 // is written onto that staff as notation.
 //
-//     ╭─ 𝄞 ── ✎ ♫▦⌁◔  hh:mm / title ─┃─ ●─●─┼─●─● ─┃─ ♫vol 𝄾bat 𝆹link ─ 𝄂 ─╮
+//     ╭─ 𝄞 ── ✎ ♫  title ─┃─ ●─●─┼─●─● ─┃─ ♫vol 𝄾bat 𝆹link ─ 𝄂 ─╮
 //
 //   HEAD      : 𝄞 treble clef — the key of the piece AND the powermenu key
 //               (click → powermenu). It opens the staff.
 //   LEFT      : ✎N agent-sessions (blocks → glitchPink pulse, a shipped tell),
-//               the gadget tray (♫ now-playing · ▦ meters · ⌁ power · ◔ clock,
-//               each a click-toggled BarPopout), the clock/date, the "/" and
-//               the active-window title (music-kaomoji when empty).
+//               the gadget tray (♫ now-playing, a click-toggled BarPopout —
+//               meters/power/clock moved to the AoideAgentWidgets dock, seated
+//               at its bottom below the agent pair), and the active-window
+//               title (music-kaomoji when empty).
 //   CENTRE    : the workspaces, written as NOTE-HEADS on the staff line
 //               (WorkspaceRow) — the melody of the measure, flanked by barlines.
 //   RIGHT     : the expression marks — ♫ volume, 𝄾 battery (rests: the battery
@@ -63,7 +64,7 @@ Item {
     readonly property int stripHeight: 36
     implicitHeight: stripHeight
 
-    // ── Live "now" tick for the clock (1 s) ────────────────────────────────
+    // ── Live "now" tick (1 s) — drives the hourly kaomoji rotation below ────
     property var now: new Date()
     Timer {
         interval: 1000
@@ -278,12 +279,11 @@ Item {
     }
 
     // ── Popout visibility state ─────────────────────────────────────────────
-    property bool calShown: false      // clock → calendar (click-toggled)
     property bool volShown: false      // volume hover slider
     property bool battShown: false     // battery hover popout
 
-    // Gadget tray: every non-agent gadget is its own widget spawned from a bar
-    // cell. One key open at a time (click-toggled, mutually exclusive).
+    // Gadget tray: now-playing is the sole bar-spawned gadget (meters/power/
+    // clock live in the AoideAgentWidgets dock instead). Click-toggled.
     property string openGadget: ""
     function toggleGadget(key) {
         openGadget = (openGadget === key) ? "" : key
@@ -441,44 +441,13 @@ Item {
             }
         }
 
-        // ── Gadget tray: ♫ now-playing · ▦ meters · ⌁ power · ◔ clock ──────
+        // ── Gadget tray: ♫ now-playing (sole bar-spawned gadget) ───────────
         Row {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 0
-            TrayCell { id: npCell;    gkey: "np";     text: "♫" }
-            TrayCell { id: meterCell; gkey: "meters"; text: "▦" }
-            TrayCell { id: pwrCell;   gkey: "power";  text: "⌁" }
-            TrayCell { id: clkCell;   gkey: "clock";  text: "◔" }
+            TrayCell { id: npCell; gkey: "np"; text: "♫" }
         }
 
-        // ── Clock + date (click → calendar popout).
-        Text {
-            id: clockText
-            anchors.verticalCenter: parent.verticalCenter
-            text: Qt.formatDateTime(root.now, "hh:mm AP  dddd MMM dd")
-            color: root.calShown ? root.notes.wireCyan : root.notes.barFg
-            style: Text.Outline
-            styleColor: "#000000"
-            font.family: "monospace"
-            font.pixelSize: 14
-            font.bold: true
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.calShown = !root.calShown
-            }
-        }
-        // The " / " separator — a slur between clock and title.
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: "/"
-            color: root.notes.barFg
-            style: Text.Outline
-            styleColor: "#000000"
-            font.family: "monospace"
-            font.pixelSize: 14
-            opacity: 0.75
-        }
         // Active-window title (music kaomoji when empty).
         Text {
             anchors.verticalCenter: parent.verticalCenter
@@ -602,8 +571,8 @@ Item {
 
     // ══ POPOUTS — real PopupWindows under their bar cells (BarPopout) ══════
     // Each is its own xdg_popup with GadgetFrame chrome (glass via blur_popups).
-    // The cell ids above (volText/battText/clockText/np/meter/pwr/clk) anchor
-    // them — every popout the entablature shipped survives, rewired unchanged.
+    // The cell ids above (volText/battText/npCell) anchor them. Meters/power/
+    // clock popouts moved to the AoideAgentWidgets dock (bottom-seated frames).
 
     // Volume hover slider.
     BarPopout {
@@ -651,56 +620,13 @@ Item {
         }
     }
 
-    // Clock → Calendar.
-    BarPopout {
-        notes: root.notes
-        cell: clockText
-        title: "calendar.sheet"
-        popoutWidth: 220
-        shown: root.calShown
-        CalendarGadget {
-            width: parent.width
-            notes: root.notes
-        }
-    }
-
-    // ── Gadget tray popouts: each gadget is its own widget ─────────────────
+    // ── Gadget tray popout: now-playing is the sole bar-spawned gadget ──────
     BarPopout {
         notes: root.notes
         cell: npCell
         title: "nowplaying.score"
         shown: root.openGadget === "np"
         NowPlayingGadget {
-            width: parent.width
-            notes: root.notes
-        }
-    }
-    BarPopout {
-        notes: root.notes
-        cell: meterCell
-        title: "meters.pulse"
-        shown: root.openGadget === "meters"
-        MeterGadget {
-            width: parent.width
-            notes: root.notes
-        }
-    }
-    BarPopout {
-        notes: root.notes
-        cell: pwrCell
-        title: "power.reserve"
-        shown: root.openGadget === "power"
-        PowerGadget {
-            width: parent.width
-            notes: root.notes
-        }
-    }
-    BarPopout {
-        notes: root.notes
-        cell: clkCell
-        title: "clock.face"
-        shown: root.openGadget === "clock"
-        ClockGadget {
             width: parent.width
             notes: root.notes
         }
