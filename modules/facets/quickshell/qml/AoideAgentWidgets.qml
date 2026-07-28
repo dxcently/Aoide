@@ -153,6 +153,11 @@ Item {
         // ambient gadgets (meters/power/clock) are bottom-seated, so the slab
         // now spans the full screen (minus edge margins) instead of wrapping.
         height: parent.height - 2 * root.edgeMargin
+        // CLIP the container: the DAG gadget's node labels / leader arcs can
+        // overflow the panel's right edge; when the panel is parked off-screen
+        // left that overflow bled back onto the wallpaper (12h25m, session ids,
+        // a stray leader). Confine every child to the panel bounds.
+        clip: true
 
         // Slide reveal: off-screen when closed, edgeMargin when open.
         x: root.shown ? root.edgeMargin
