@@ -97,7 +97,7 @@ Item {
     Rectangle {
         x: root.depthOff2 * root.depthDx; y: root.depthOff2 * root.depthDy
         width: root.width; height: root.height
-        radius: 4
+        radius: 0
         color: "transparent"
         border.color: root.depthColor
         border.width: 1
@@ -106,7 +106,7 @@ Item {
     Rectangle {
         x: root.depthOff1 * root.depthDx; y: root.depthOff1 * root.depthDy
         width: root.width; height: root.height
-        radius: 4
+        radius: 0
         color: "transparent"
         border.color: root.depthColor
         border.width: 1
@@ -116,7 +116,7 @@ Item {
     // ── Glass panel (unchanged — blur/frost/translucency stays) ─────────────
     Rectangle {
         anchors.fill: parent
-        radius: 4
+        radius: 0
         color: root.glassColor
         opacity: root.glassOpacity      // translucency → glass over blur
     }
@@ -124,7 +124,7 @@ Item {
     // Gloss — the Aero sheen (bright top half, hard midline stop, faint bloom).
     Rectangle {
         anchors.fill: parent
-        radius: 4
+        radius: 0
         gradient: Gradient {
             GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.14) }
             GradientStop { position: 0.42; color: Qt.rgba(1, 1, 1, 0.04) }
@@ -136,7 +136,7 @@ Item {
     // ── Wireframe outline (the front face — crisp hollow rule over the glass) ─
     Rectangle {
         anchors.fill: parent
-        radius: 4
+        radius: 0
         color: "transparent"
         border.color: root.outlineColor
         border.width: 1

@@ -1,15 +1,15 @@
 {
   "schemaVersion": "0",
   "palette": {
-    "bg":     "#faf5ec",
+    "bg":     "#f4ecdc",
     "fg":     "#423420",
     "accent": "#4f74a0",
     "urgent": "#b0475f",
     "hot":    "#6f8a4f"
   },
   "base16": {
-    "base00": "#faf5ec",
-    "base01": "#f0e7d5",
+    "base00": "#f4ecdc",
+    "base01": "#eaddc6",
     "base02": "#ddcaa6",
     "base03": "#b0997a",
     "base04": "#8a6f50",
@@ -26,12 +26,12 @@
     "base0F": "#8a5730"
   },
   "bar": {
-    "bg":     "#faf5ec",
+    "bg":     "#f4ecdc",
     "fg":     "#423420",
     "accent": "#4f74a0"
   },
   "notif": {
-    "bg":     "#faf5ec",
+    "bg":     "#f4ecdc",
     "fg":     "#423420",
     "urgent": "#b0475f"
   },

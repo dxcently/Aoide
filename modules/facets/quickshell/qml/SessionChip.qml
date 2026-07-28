@@ -19,7 +19,7 @@ Rectangle {
 
     implicitWidth: label.implicitWidth + 16
     implicitHeight: 22
-    radius: 4
+    radius: 0
     color: sessionData && sessionData.state === "active"
            ? notes.paletteAccent
            : notes.paletteBg

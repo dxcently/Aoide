@@ -57,20 +57,30 @@ Two things to look at, side by side, on the live desktop:
    frosted-glass bar and its popouts at a *close* opacity — checked by eye
    every time, because opacity + blur + gloss gradients can each independently
    push a surface's apparent brightness away from its declared polarity.
-   "Close" beats "identical-on-paper but wrong on screen." The pair has been
-   re-tuned twice against the live desktop: first *down* together from 0.72 to
-   kitty 0.60 / bar 0.58 (too transparent — the warm painting bled through and
-   the surfaces read beige, not light), then back *up* to kitty 0.78 / bar 0.70
-   with the song's `base00` lifted `#f4ecdc → #faf5ec` and the bar frost lerped
-   ~42 % toward white — a *whiter* read, so the light surfaces sit clearly
-   above the wallpaper instead of taking its warm cast. The lesson is the same
-   either direction: the numbers alone never tell you; the eye tunes them.
+   "Close" beats "identical-on-paper but wrong on screen." The opacity has been
+   re-tuned against the live desktop more than once: first *down* together from
+   0.72 to kitty 0.60 / bar 0.58 (too transparent — the warm painting bled
+   through and the surfaces read beige, not light). The instinct after that was
+   to lighten the *colour* (whiten `base00`), but khoa's correction drew the
+   real distinction: **keep the cream-and-ink look, just make the surface read
+   brighter.** Brightness is not colour — it is how much of the dim wallpaper is
+   allowed to show through. So the cream `base00` stayed `#f4ecdc`, and the
+   terminal was brightened by *opacity* instead (kitty `background_opacity`
+   0.86): the same cream, now dominant over the painting rather than muddied
+   dim by it. The lesson: reach for opacity/glass before you reach for a whiter
+   hex — a surface can read "too dark" and still be exactly the right colour.
    hyprglass now glasses the **windows** too — `manage_window_blur = 1` in the
    compositor facet extends the Liquid-Glass refraction/fresnel from the
    quickshell layer surfaces onto the translucent terminal, so terminal and
    shell wear one glass (the shader only paints visible translucent content, so
    opaque windows are untouched). A `light { glass_opacity }` preset override
    brightens that glass under the light polarity.
+
+   **Everything is edged.** Hard square corners are the house style — the global
+   Hyprland decoration `rounding` is 0, the kitty windowrule pins `rounding 0`
+   too, and every quickshell surface (bar, dock panes, gadget frames, popouts,
+   notification/OSD cards, workspace highlight) sets `radius: 0`. No surface
+   rounds; a stray rounded corner reads as a surface that missed the grammar.
 2. **Widget colours match the bar.** Every gadget, popout, and dock surface
    pulls from the same `aoide.notes.*` roles the bar uses
    ([[Pantheon-Grammar]]'s glyph/role grammar: `wireCyan`, `holoBlue`,

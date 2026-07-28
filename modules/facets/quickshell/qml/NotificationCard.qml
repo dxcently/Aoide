@@ -16,7 +16,7 @@ Rectangle {
         notification && notification.urgency === 2  // urgency: critical
 
     color: notes.notifBg
-    radius: 6
+    radius: 0
     border.color: isUrgent ? notes.notifUrgent : notes.windowBorder
     border.width: isUrgent ? 2 : 1
     implicitHeight: content.implicitHeight + 20

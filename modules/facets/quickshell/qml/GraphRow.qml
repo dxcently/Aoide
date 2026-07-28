@@ -76,7 +76,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: 4
+        radius: 0
         color: hover.hovered && root.isSession ? notes.barBg : "transparent"
 
         Row {

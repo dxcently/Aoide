@@ -73,7 +73,7 @@ Item {
         anchors.centerIn: parent
         width: 560
         height: 460
-        radius: 12
+        radius: 0
         color: notes.paletteBg
         border.color: notes.paletteAccent
         border.width: 1

@@ -127,7 +127,7 @@ let
     }
 
     # ── Aero-glass terminal — the kitty window rides the compositor blur ──────
-    # kitty's background_opacity (0.78) makes only the cell BACKGROUND
+    # kitty's background_opacity (0.86) makes only the cell BACKGROUND
     # translucent (glyphs stay opaque/crisp); Hyprland then blurs behind that
     # translucent surface, giving the frosted Win7 read. The whole-window opacity
     # rule keeps the FOCUSED terminal fully crisp (active 1.0) and adds a gentle
@@ -135,7 +135,10 @@ let
     # the `match:<prop> <value>` form (same as the layerrules above); the old
     # `class:^(kitty)$` form is rejected ("invalid field ... missing a value").
     windowrule = opacity 1.0 0.90, match:class kitty
-    windowrule = rounding 3, match:class kitty
+    # Edged everywhere (khoa): hard square corners on the terminal too — the
+    # global decoration rounding is already 0, so this pins kitty to match
+    # (the earlier `rounding 3` softened only the terminal; now nothing rounds).
+    windowrule = rounding 0, match:class kitty
   '';
 
   # ── Hyprland keybinds for Aoide workflows ─────────────────────────────────
