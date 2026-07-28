@@ -348,30 +348,30 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         height: root.stripHeight
-        radius: 8
-        color: Qt.rgba(1, 1, 1, 0.92)   // opaque white manuscript sheet
+        radius: 0                        // EDGED — hard square corners, no round
+        color: Qt.rgba(1, 1, 1, 0.25)    // TRANSPARENT frosted glass (hyprglass blur frosts behind)
         opacity: 1.0
     }
     // Aero gloss — the sanctioned white sheen (bright top, hard midline stop),
     // the glossy Win7 highlight riding on top of the white sheet.
     Rectangle {
         anchors.fill: page
-        radius: 8
+        radius: 0
         gradient: Gradient {
-            GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.55) }
-            GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, 0.16) }
+            GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.26) }
+            GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, 0.08) }
             GradientStop { position: 0.52; color: Qt.rgba(1, 1, 1, 0.00) }
-            GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.10) }
+            GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.05) }
         }
     }
-    // The page rail — a faint black hairline framing the sheet's edge.
+    // The page rail — a DEFINED black edge framing the transparent strip.
     Rectangle {
         anchors.fill: page
-        radius: 8
+        radius: 0
         color: "transparent"
         border.color: "#000000"
         border.width: 1
-        opacity: 0.14
+        opacity: 0.5
     }
 
     // ── THE STAFF — five lines ruled the full width, at the strip midline.
