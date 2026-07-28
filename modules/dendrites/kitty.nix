@@ -89,8 +89,17 @@
             confirm_os_window_close = 0;
             window_padding_width = 5;
             window_border_width = 1.5;
-            background_opacity = 1;
-            background_blur = 1;
+            # Aero-glass terminal: a translucent background so the compositor's
+            # blur reads through as frosted glass (the Win7-style sheen), while
+            # the TEXT stays fully opaque and crisp (background_opacity fades only
+            # the cell background, not the glyphs). Hyprland owns the blur pass —
+            # it blurs behind any translucent surface when decoration:blur is on
+            # (compositor facet, global) — so kitty's own background_blur (a
+            # macOS/KDE-only path, inert under Hyprland) is turned off here and
+            # the compositor does the frosting instead. The kitty window class is
+            # additionally pinned in the compositor's Aero window rules.
+            background_opacity = "0.82";
+            background_blur = 0;
             enable_audio_bell = false;
             tab_bar_style = "powerline";
             tab_powerline_style = "slanted";
