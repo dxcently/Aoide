@@ -40,6 +40,21 @@ out, never speaks an agent protocol. The verb set is still narrow (jump only;
 prune remains an open thread, see below) but it is a real accept loop, not a
 stub.
 
+**`hyprctl` must be on the service PATH — a subtle, total failure otherwise.**
+Both the socket handler's `focus_window` and the window→session event listener
+shell out to `hyprctl`. A systemd **user** unit's default PATH is minimal
+(coreutils/findutils/grep/sed/systemd) and does **not** include the compositor,
+so before this was fixed every widget click failed silently with
+`hyprctl unavailable: No such file or directory` (audited as `focus-failed`, not
+logged to the journal) and the click never jumped — even though the address was
+correct and the CLI `graph focus` worked (it inherited the caller's richer
+PATH). The fix is a unit-level `path = [ pkgs.hyprland ]` on both the
+`shellbridge` and `aoide-graph-reap` services (`modules/nucleus/shellbridge.nix`)
+— note it is a *unit* option, a sibling of `serviceConfig`, NOT a `serviceConfig`
+key (nesting it there emits an inert raw `path=` line and PATH stays broken). The
+lesson: a user service that shells out to desktop tools needs them put on PATH
+explicitly; a missing binary is invisible until you check the daemon's own env.
+
 Reads and jumps go through the socket now; the **write door for session state
 remains the CLI**: the `aoide graph session` verb family upserts those same
 stage files atomically (each mutation
