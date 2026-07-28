@@ -26,6 +26,16 @@ Run checks in this order. List findings under the headings below.
 
 **8. Manifest parity** — the wiki's `SCHEMA.md` Notes manifest must match the files on disk (both directions), and the tag set must reflect the tags in use. Flag any drift.
 
+**9. Assertion violations** — content pages carrying history, definition-by-contrast, or speculation, per [[Assertion]]. Report the offending line and which clause it breaks. Two sub-cases are reported, never auto-fixed: prose that must be *routed* (a what-if with no Open Thread covering it) and a specified-but-unbuilt section with no status label.
+
+The first-pass sweep is grep-able:
+
+```
+grep -rniE '\b(used to|no longer|formerly|previously|originally|was (renamed|removed|rejected)|rather than|chosen over|would|could|might|eventually|someday|TBD|probably|what if)\b' concepts/ entities/ design/ Overview.md
+```
+
+Matches are candidates, not findings — `never` and other exclusions are invariants and pass ([[Assertion]] "What stays"). Confirm each against the clause it appears to break before listing it.
+
 ## Report Format
 
 ```
@@ -53,6 +63,9 @@ Run checks in this order. List findings under the headings below.
 - …
 
 ### Manifest parity (N)
+- …
+
+### Assertion violations (N)
 - …
 ```
 

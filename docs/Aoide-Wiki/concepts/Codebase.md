@@ -94,24 +94,20 @@ replica. It asserts: `multi-user.target` reached; `aoide` + `drachma` on
 PATH with `schema --json` reporting exactly 28 commands and `guide` exiting
 0; greetd enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
 linger active with the `aoided` and `shellbridge` user units finishing
-`Result=success` (the skeleton binaries seed state and exit 0 — a future
-long-running daemon passes the same assertion naturally); stage files seeded
-at `schemaVersion` 0; and a `graph project add → view → emit` round-trip
+`Result=success` (the skeleton binaries seed state and exit 0); stage files
+seeded at `schemaVersion` 0; and a `graph project add → view → emit` round-trip
 landing `graph.json`. The test node trims the stylix and quickshell facets
 (headless closure cost; the compositor stays for greetd). The script runs in
 about 16 s of wall clock: `nix build .#checks.x86_64-linux.vm-boot -L`. It
 also confirmed in-VM that the unit's `AOIDE_STAGE_DIR` and the binary's
 fallback agree on the same stage path.
 
-**Test-masking lesson.** The test node used to add `aoide` +
-`drachma` to its own `systemPackages` — which is exactly why the vm-boot
-check never caught that the nucleus installed neither: the test was
-self-providing what it claimed to verify. It now keeps only `jq` and relies
-on the real install path (`nucleus/packages.nix`), and the first live switch
-is what finally surfaced the gap. The discipline to generalize: **eval green
-+ build green + VM green ≠ complete** — a VM test proves only what it does
-not provide for itself. (vm-boot re-ran green after the fix; the second live
-switch verified the same assertions on real hardware.)
+**Test scope.** The test node's `systemPackages` carries only `jq`; the real
+install path (`nucleus/packages.nix`) is what puts `aoide` and `drachma` on
+the box, so the vm-boot PATH assertion (above) verifies the nucleus install
+rather than the test's own scaffolding. **eval green + build green + VM
+green ≠ complete** — a VM test proves only what it does not provide for
+itself.
 
 ## The option contract (`modules/nucleus/options.nix`)
 
@@ -132,35 +128,32 @@ no behaviour, so an empty config evaluates. The surface:
 - `aoide.mcp.enable` (default false — house policy), `aoide.auditLog` (default
   `/home/<user>/Aoide/log`).
 
-## The host profile — yomi-strix is real now
+## The host profile — yomi-strix is real
 
-`hosts/yomi-strix/` graduated from an eval-only placeholder to a
-**bootable first-iteration profile**, ported from [[dxflake]] (the template)
+`hosts/yomi-strix/` is a **bootable first-iteration profile**, ported from
+[[dxflake]] (the template)
 and trimmed to essentials:
 
 - **UUID-pinned `fileSystems`** matching the layout disko created on the box
   (1 G vfat ESP + ext4 root on the single NVMe). Aoide does **not** manage
-  disks, so the live layout is pinned by UUID rather than carried as a disko
-  declaration.
+  disks, so the live layout is pinned by UUID.
 - systemd-boot UEFI; the Strix Halo scan-module set with early-KMS `amdgpu`;
   `linuxPackages_latest` with `amdgpu.gttsize=24576` /
   `ttm.pages_limit` kernel params (the RDNA 3.5 iGPU maps 24 GiB of the
   unified 32 GB pool); amdgpu userspace graphics for the Hyprland facet;
   NetworkManager; zramSwap.
-- Dropped from the template: disko, inference/ROCm, the Melete role,
+- Not present on this host: disko, inference/ROCm, the Melete role,
   bluetooth, wireguard.
 
-**Switched live.** The user opened the [[Rebuild-Gate]] and yomi-strix moved
-from [[dxflake]] to Aoide — two switches (the second carrying the nucleus
-baseline fixes below), each activating in about 8 s, run as detached
-`systemd-run` units (`nix-env --profile` set + `switch-to-configuration
-switch`). The prior dxflake generation stays in the systemd-boot menu, so
-rollback is one boot-menu pick away. Verified live: greetd active, the
-Hyprland session entry present, NetworkManager, zram, and the Strix Halo
-amdgpu params all in effect; `aoide` + `drachma` + git on PATH and flakes
-enabled. The graphical session (greetd → Hyprland → Quickshell) has since
-been logged into and runs as the daily desktop — bar, dock, gadgets,
-launcher, notifications, and wallpaper all live in one process.
+**Runs live.** A [[Rebuild-Gate]] switch runs as a detached `systemd-run`
+unit (`nix-env --profile` set + `switch-to-configuration switch`) and
+activates in about 8 s. The prior dxflake generation stays in the
+systemd-boot menu, so rollback is one boot-menu pick away. Live: greetd
+active, the Hyprland session entry present, NetworkManager, zram, and the
+Strix Halo amdgpu params all in effect; `aoide` + `drachma` + git on PATH
+and flakes enabled. The graphical session (greetd → Hyprland → Quickshell)
+runs as the daily desktop — bar, dock, gadgets, launcher, notifications, and
+wallpaper all live in one process.
 
 ## The systemd user-unit map (nucleus + a dendrite)
 
@@ -179,19 +172,16 @@ All nucleus services are user services gated on `aoide.enable`, keyed into
 `~/Aoide/song/stage` (0755) at runtime; systemd-tmpfiles deduplicates the shared
 rule declared in both aoided and shellbridge.
 
-Two **non-service nucleus modules** close baseline gaps the first live switch
-surfaced, both gated on `aoide.enable`:
+Two **non-service nucleus modules** close baseline gaps, both gated on
+`aoide.enable`:
 
 - **`nucleus/packages.nix`** puts `pkgs.aoide` and `pkgs.drachma` on the
   **system profile**. The units never needed this (their `ExecStart` lines are
   absolute store paths), but keybinds and interactive sessions invoke by
-  name — and until this module, nothing installed the binaries. It also
-  installs **git**, which is load-bearing rather than dev comfort: nix flake
-  operations on the user's own fork require it; [[dxflake]]'s nucleus had
-  carried it, and the essentials-only host port cut it, leaving the live box
-  git-less.
+  name. It also installs **git**, which is load-bearing rather than dev
+  comfort: nix flake operations on the user's own fork require it.
 - **`nucleus/nix.nix`** enables the `nix-command` + `flakes` experimental
-  features — before it, a flake-native system could not evaluate itself.
+  features, required for the flake-native system to evaluate itself.
 
 ## Runtime contracts (socket + stage files)
 
@@ -248,7 +238,7 @@ unknown-field round-trip, a serialized stage-dir precedence test, and the pure
 focus-liveness helpers `normalize_addr`/`window_present`) — 63 unit tests
 across the crate at last count. One noted hazard: the env-var test mutex in
 `shellbridge.rs` is module-local — fine while it is the only module with
-env-touching tests (open thread).
+env-touching tests.
 
 ## Walking-skeleton status — real vs stubbed
 
@@ -292,8 +282,8 @@ dendrites that need it (devtools, fonts).
 **Structured not-implemented stubs (exit 64, 11 total):** the mutating CLI
 verbs — `rice gen/adopt/transpose`, the five-verb `content` pipeline, `make`,
 `update`, `onboard`. Their arg-parsing, schema, gate flag, and audit trail are
-real; only the live-system action is deferred. (`rice preview` was reclassified
-to **real** — it stages `song/stage/drachma.json` for Quickshell hot-reload
+real; only the live-system action is deferred. (`rice preview` is **real** —
+it stages `song/stage/drachma.json` for Quickshell hot-reload
 today; only the hyprctl/OSC dispatch fan-out remains unwired into `preview`
 itself.)
 

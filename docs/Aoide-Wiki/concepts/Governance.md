@@ -10,7 +10,7 @@ updated: 2026-07-28
 
 ## Rebuild gate
 
-Every NixOS rebuild is **user-gated**. The pattern follows sakaki's agent-sudo design (polkit pipeline): the agent proposes, the user admits, git records the result. No rebuild happens in the background or without explicit user approval. By default the agent builds and `test`-rebuilds freely, then prompts the human to `switch` under their own `sudo`; a planned, opt-in `aoide.rebuild` capability would grant a passwordless, narrowly-scoped path instead, without loosening the approval gate — not yet declared in the option contract. See [[Rebuild-Gate]] for the full mechanism.
+Every NixOS rebuild is **user-gated**. The pattern follows sakaki's agent-sudo design (polkit pipeline): the agent proposes, the user admits, git records the result. No rebuild happens in the background or without explicit user approval. By default the agent builds and `test`-rebuilds freely, then prompts the human to `switch` under their own `sudo`. **Status:** a specified, opt-in `aoide.rebuild` capability grants a passwordless, narrowly-scoped path without loosening the approval gate; it is not yet declared in the option contract. See [[Rebuild-Gate]] for the full mechanism.
 
 ## Single policy surface
 
@@ -27,11 +27,11 @@ Core interfaces are versioned contracts, not conventions:
 | `aoide schema --json` output | Versioned in `CONTRACTS.md` |
 | Stage file formats | Versioned in `CONTRACTS.md` |
 
-The flake's `checks` fail a merge that breaks any of these. `aoide update` is designed to detect contract bumps during upstream merge and route them through the update playbook before the rebuild discovers them — today the verb is a schema-real, exit-64 stub (arg-parsing and audit trail exist; the merge/detection logic does not yet run).
+The flake's `checks` fail a merge that breaks any of these. `aoide update` detects contract bumps during upstream merge and routes them through the update playbook before the rebuild discovers them — today the verb is a schema-real, exit-64 stub (arg-parsing and audit trail exist; the merge/detection logic does not yet run).
 
 ## Merge hygiene
 
-Provenance — not directory fences — governs ownership. Merge-base divergence lint inside `aoide update` is planned to detect when a personal branch has edited inherited upstream files, backed by a commit-hook warning at write time; neither is implemented yet (no such hook is installed in `.git/hooks/`, and `update` itself is the stub above). Path guards (directory-level access controls) are explicitly ruled out; they create false security without solving the problem.
+Provenance governs ownership. Merge-base divergence lint inside `aoide update` detects when a personal branch has edited inherited upstream files, backed by a commit-hook warning at write time; neither is implemented yet (no such hook is installed in `.git/hooks/`, and `update` itself is the stub above). Path guards (directory-level access controls) are not used: they create false security without solving the problem.
 
 ## No background self-updaters
 

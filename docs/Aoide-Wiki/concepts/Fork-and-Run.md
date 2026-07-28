@@ -44,7 +44,9 @@ That is the complete install, by design — no dotfile manager, no separate boot
 
 ## Self-Update
 
-`aoide update` (planned — stub, exit `64`) is designed to fetch upstream, merge framework paths, run the flake's `checks`, then propose the gated rebuild — the fork updates itself, but the gate still decides. No background updaters, by house policy.
+**Status:** `aoide update` is a schema-real, exit-64 stub; arg-parsing and the audit trail exist, the merge/detection logic does not yet run.
+
+`aoide update` fetches upstream, merges framework paths, runs the flake's `checks`, then proposes the gated rebuild — the fork updates itself, but the gate still decides. No background updaters, by house policy.
 
 Merge hygiene is enforced by a merge-base divergence lint inside `aoide update` plus a commit-hook warning on edits to inherited files. Path guards are not used; provenance is the mechanism.
 

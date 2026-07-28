@@ -7,14 +7,13 @@ tags: [aoide, graph, session, terminal, agent, cli]
 
 # Session Graph — the Project/Session DAG
 
-[[Terminal-Commander]] began as a flat roster: one row per agent session. The
-session graph grows that roster into a **DAG of projects and sessions** — who
-spawned whom, and which project each session belongs to — with a terminal
-viewer and a management layer behind one CLI group, `aoide graph` (real, every
-subcommand implemented — `view`/`project`/`link`/`session`/`wrap`/`send`/
-`focus`/`prune`/`reap`/`emit`, per `aoide schema --json`). Like every command
-it lives in the single `schema.rs` table, so the CLI door and the MCP door
-gained the group together ([[Agent-Interface]]).
+[[Terminal-Commander]]'s roster of agent sessions is a **DAG of projects and
+sessions** — who spawned whom, and which project each session belongs to —
+with a terminal viewer and a management layer behind one CLI group, `aoide
+graph` (real, every subcommand implemented — `view`/`project`/`link`/
+`session`/`wrap`/`send`/`focus`/`prune`/`reap`/`emit`, per `aoide schema
+--json`). Like every command it lives in the single `schema.rs` table, so the
+CLI door and the MCP door share the group ([[Agent-Interface]]).
 
 *Verified green (`nix flake check` + the vm-boot check). Implementation:
 `pkgs/aoide/src/graph.rs` — see [[Codebase]].*
@@ -59,19 +58,18 @@ document instead. A sample render:
 `song/stage/graph.json` — the identical write-temp-then-rename pattern as the
 drachma emitter — so [[Quickshell]] can hot-reload it.
 
-**The desktop surfaces are built** (commits 1fedd58 and 41be90f). The graph
-now renders in two places besides the terminal, both hot-reloading
+The graph renders in two places besides the terminal, both hot-reloading
 `graph.json`:
 
 - **`DagGraphGadget`** — the compact view inside the [[Gadget-Dock]], the
   **primary DAG affordance** on the desktop: `SUPER+G` summons the dock popup
   (bridge path `aoide shell dock toggle`, open-and-pin — still a stub verb;
-  the `aoide shell` group otherwise remains future CLI work, open thread), and
-  the dock contains the DAG gadget.
+  the `aoide shell` group otherwise has no other verbs in the command
+  schema), and the dock contains the DAG gadget.
 - **`AoideSessionGraph`** — the standalone overlay (surface #9,
-  `aoide.surfaces.sessionGraph`), now **dormant**: it has no keybind and is
-  reachable only via the bridge, kept intact as the seam for a future
-  dedicated full-screen DAG view. It draws the DAG as an indented tree:
+  `aoide.surfaces.sessionGraph`), **dormant**: it has no keybind and is
+  reachable only via the bridge, held as the seam for a dedicated
+  full-screen DAG view (unbuilt). It draws the DAG as an indented tree:
   projects `◆`, sessions `●` with agent/state/short-cwd, spawned children
   nested, incoming-edge-free sessions under the synthetic `(unanchored)`
   root. The traversal is cycle-guarded (a visited set), dangling edges are
@@ -81,9 +79,8 @@ now renders in two places besides the terminal, both hot-reloading
   `bridge.focusSession` — the [[shellbridge]] session-jump gate; QML never
   shells out.
 
-Both instantiate the shared **`GraphModel.qml`** (`buildRows()` extracted from
-the overlay) — the canonical QML graph model; any future graph consumer must
-use it too.
+Both instantiate the shared **`GraphModel.qml`**, which holds `buildRows()` —
+the canonical QML graph model; every graph consumer must use it too.
 
 ## The management layer
 
@@ -115,7 +112,7 @@ writers add to the same records.
 ## Liveness reaping — the SIGKILL problem
 
 `graph prune` only drops sessions whose raw state is already `done` — an
-*orderly* exit. Conduct-by-default made an *disorderly* exit common: a
+*orderly* exit. Conduct-by-default makes a *disorderly* exit common: a
 terminal closed with `SUPER+Q` or killed outright tears down the `conduct`/
 `wrap` process uncatchably, so it can never run its own `graph session end`.
 Left alone, the record strands `running` in the roster forever (observed:
@@ -166,21 +163,20 @@ seeing a stale "haunting" session.
 - `projects.json` v0: `{schemaVersion, projects: [{name, path}]}`.
 - `graph.json` v0: `{schemaVersion, nodes: […], edges: [{from, to, kind}]}` —
   fully resolved, so Quickshell never recomputes anchoring.
-- `sessions.json` records gained the **additive** optional `parentSessionId`
+- `sessions.json` records carry the **additive** optional `parentSessionId`
   (no version bump).
 
 ## Open seams
 
-Three original seams have closed: the `stage_dir()` / `AOIDE_STAGE_DIR`
-mismatch is fixed and documented as a contract seam ("Stage-dir resolution",
-`CONTRACTS.md §4` — see [[shellbridge]]); the `focuswindow` exit-0 ambiguity is
-resolved by the liveness check above; and the Quickshell DAG surface exists
-(overlay + dock gadget). A fourth has since closed too: conduct-by-default now
-stamps `parentSessionId` at spawn time for the common case — the kitty
-wrapper passes `--parent "$AOIDE_SESSION_ID"` into every nested `aoide conduct`
-([[Conductor-Channel]]) — so `graph link` is the manual/override path for
-edges outside that nesting, not the only source. Still open: the `aoide shell`
-verbs the keybinds reference are not yet in the command schema.
+The `stage_dir()` / `AOIDE_STAGE_DIR` mismatch is fixed and documented as a
+contract seam ("Stage-dir resolution", `CONTRACTS.md §4` — see
+[[shellbridge]]). The `focuswindow` exit-0 ambiguity is resolved by the
+liveness check above. The Quickshell DAG surface exists (overlay + dock
+gadget). `conduct-by-default` stamps `parentSessionId` at spawn time for the
+common case — the kitty wrapper passes `--parent "$AOIDE_SESSION_ID"` into
+every nested `aoide conduct` ([[Conductor-Channel]]) — so `graph link` is the
+manual/override path for edges outside that nesting, not the only source. The
+`aoide shell` verbs the keybinds reference are not yet in the command schema.
 
 ## Related
 

@@ -7,12 +7,11 @@ tags: [aoide, widget, qml, desktop, gadget, theming]
 
 # Gadget Dock — the Win7-Sidebar Homage
 
-The `agentWidgets` surface — registered since the walking skeleton but empty —
-is now the **gadget dock**: desktop gadgets that realize the user's declared
-aesthetic for Aoide, **Windows-7-sidebar-inspired chrome with
-ASCII/box-drawing note theming**. It is the desktop's ambient at-a-glance
-layer, distinct from the full overlays — and since its v1 redesign it is a
-**left-edge pinnable popup**, summoned on demand rather than always visible.
+The `agentWidgets` surface is the **gadget dock**: desktop gadgets that
+realize the user's declared aesthetic for Aoide, **Windows-7-sidebar-inspired
+chrome with ASCII/box-drawing note theming**. It is the desktop's ambient
+at-a-glance layer, distinct from the full overlays: a **left-edge pinnable
+popup**, summoned on demand.
 
 *Verified via flake check + vm-boot. Implementation:
 `modules/facets/quickshell/qml/AoideAgentWidgets.qml` plus the gadget files —
@@ -27,8 +26,8 @@ The dock is a **drawer**: it rests off-screen past the LEFT edge and slides in
   QML, so it works live today even with the stubbed bridge.
 - **SUPER+G** — the compositor keybind, whose bridge path is the stub verb
   `aoide shell dock toggle` (see [[aoide-cli]]). The keybind path is defined as
-  **open-and-pin**: a keybind that merely peeked would auto-hide the instant
-  the pointer settled, which would make it useless.
+  **open-and-pin**: it opens the dock and pins it, so it stays open regardless
+  of pointer position.
 
 **Pinning.** The header chrome — `╔═[ GADGETS ]══[pin]═╗`, a new idiom beyond
 `GadgetFrame`'s title-only bar — carries the pin affordance: `[+]` unpinned,
@@ -38,8 +37,7 @@ The dock is a **drawer**: it rests off-screen past the LEFT edge and slides in
 **400 ms grace timer**: the panel's x-position binds to a timer-gated `shown`
 property, so leaving the hover union arms the timer and re-entering cancels it
 — crossing the small gap between strip and panel can never flap the drawer.
-(This was a review fix: the first cut had a decorative timer that gated
-nothing.) The hot strip and the panel form **one hover union** via `NoButton`
+The hot strip and the panel form **one hover union** via `NoButton`
 hover catchers, so hovering rows and clicking gadgets never count as leaving —
 clicks fall through to the gadgets.
 
@@ -52,12 +50,13 @@ The state machine is explicit — three states drive the slide:
 | pinned | pinned via keybind/bridge or the `[pin]` click | shown (sticky) |
 
 The dock remains **non-exclusive** — it reserves no screen space, sitting over
-the wallpaper like the other skeleton surfaces. The v1 note sharpened with the
-redesign: when layer-shell typing lands, the dock should claim a
-**non-exclusive top/overlay layer** so the hot edge still works above tiled
-windows.
+the wallpaper like the other skeleton surfaces.
 
-One consequence for the graph story: the dock popup is now the **primary DAG
+**Status:** specified; no layer-shell typing implemented yet. The design
+claims a **non-exclusive top/overlay layer**, so the hot edge works above
+tiled windows.
+
+One consequence for the graph story: the dock popup is the **primary DAG
 affordance**. The standalone `AoideSessionGraph` overlay keeps **no keybind**
 — it is dormant, bridge-only, retained as the seam for a future full-screen
 DAG view ([[Session-Graph]]).
@@ -84,21 +83,21 @@ dock, so the gadgets re-skin with every rice like any other surface.
   `[x]` affordance is rendered **disabled**: the shellbridge socket protocol
   has no prune verb yet, and QML never invents IPC (open thread).
 - **`DagGraphGadget`** — a compact [[Session-Graph]] view — the desktop's
-  primary DAG affordance now that the overlay is dormant — with
-  `├─ └─ │` tree limbs matching the CLI render. It instantiates the shared
-  `GraphModel.qml` rather than re-deriving the tree.
+  primary DAG affordance — with `├─ └─ │` tree limbs matching the CLI render.
+  It instantiates the shared
+  `GraphModel.qml` as the single source of tree state.
 - **`ClockGadget`** — a large monospace `HH:MM` in a box frame plus the date,
   on a one-second timer.
 - **`MeterGadget`** — CPU and RAM gauges rendered as `[▓▓▓░░░]` bars, fed by
   `/proc/stat` (busy-time delta) and `/proc/meminfo` through `FileView` on a
   two-second reload. Reading files — not spawning processes — keeps it inside
-  the no-shell-out-from-QML rule; it is the documented interim until a
-  system-telemetry stage file exists (open thread).
+  the no-shell-out-from-QML rule; it is the documented interim: no
+  system-telemetry stage file exists yet (open thread).
 
 ## The waybar-homage wave — three more gadgets, and the bar joins the style
 
-The dxflake-parity work grew the roster to seven and pulled `AoideBar` into
-the same visual language:
+The roster holds seven gadgets, and `AoideBar` shares the same dxflake-parity
+visual language:
 
 - **`NowPlayingGadget`** — Mpris as ASCII: `♪ « artist – title »` marquee,
   `▮▯` progress bar, glyph transport controls gated on the player's `can*`
@@ -112,7 +111,7 @@ the same visual language:
   from the drachma accent; it doubles as the bar clock's anchored drop-popup
   (the waybar calendar-tooltip's descendant).
 
-The bar itself is now the dxflake waybar homage — slim glass strip, 𝄞 power
+The bar itself is the dxflake waybar homage — slim glass strip, 𝄞 power
 cell, musical-notation workspaces with a sliding active box, kaomoji title
 rewrite, slash-separated note-glyph cells — enhanced with Quickshell-native
 interactivity (scroll/click/hover popouts, mpris marquee + progress, urgent
@@ -133,8 +132,8 @@ songbook discipline ([[Self-Ricing]]).
 The dock is a working proof of the [[Widget-Maker]] thesis at surface scale:
 seven independent gadgets sharing one frame component and one graph model, all
 declaratively themed, all added without touching any other surface. Future
-gadgets follow the same recipe — a `GadgetFrame`, drachma-only colour, stage
-files (or, until then, documented read-only interims) for data.
+gadgets follow the same recipe — a `GadgetFrame`, drachma-only colour, and
+stage files (or a documented read-only interim) for data.
 
 ## Related
 

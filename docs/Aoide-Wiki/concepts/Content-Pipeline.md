@@ -21,7 +21,7 @@ discover → propose → approve → ingest → lint → query
                                           quarantine
 ```
 
-On lint failure, content is quarantined rather than rejected or silently retained. Drift re-lints and quarantines — it never poisons the live index.
+On lint failure, content is quarantined, not discarded. Drift re-lints and quarantines — it never poisons the live index.
 
 ## Folder contract
 

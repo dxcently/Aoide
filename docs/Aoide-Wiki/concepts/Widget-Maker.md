@@ -49,6 +49,9 @@ scripts:
 
 ## The make-a-widget loop
 
+**Status:** specified; `aoide make` not implemented (`aoide schema --json` marks
+it `not-implemented`, exit 64).
+
 Extending the system reuses the rice loop's shape ([[Self-Ricing]]):
 
 ```
@@ -64,14 +67,12 @@ Extending the system reuses the rice loop's shape ([[Self-Ricing]]):
   adopt  ◄─── User gates     committed as a dendrite; gated rebuild makes it permanent
 ```
 
-**`aoide make` itself is planned, not shipped** (`aoide schema --json` marks it
-`not-implemented`, exit 64) — this is the target shape, not a running command
-today. Until it lands, a development agent builds the same dendrite + widget +
-adapter by hand, previews it live, and adopts it exactly as described below;
-[[Gadget-Dock]]'s seven gadgets and [[Terminal-Commander]] are the shipped
-proof the pattern works. Preview is the sketch; adopt is the truth — identical
-discipline to ricing. A bad generation can never reach the running system
-without the [[Governance|gate]], and every step lands in the single audit log.
+A development agent builds the same dendrite + widget + adapter by hand,
+previews it live, and adopts it exactly as described below; [[Gadget-Dock]]'s
+seven gadgets and [[Terminal-Commander]] are the shipped proof the pattern
+works. Preview is the sketch; adopt is the truth — identical discipline to
+ricing. A bad generation can never reach the running system without the
+[[Governance|gate]], and every step lands in the single audit log.
 
 ## What this makes Aoide
 

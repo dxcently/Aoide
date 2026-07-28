@@ -17,19 +17,18 @@ declarative and themed by [[drachma]].
 
 The herdr multiplexer is the prior-art pattern (an external tool — agent-terminal
 herding; not part of the Aoide vocabulary, whose word for this duty is
-conductor-class — see [[Lexicon]]); Aoide ships this as a first-class widget
-rather than a bolt-on, and the agent can regenerate or extend it like any other
-integration. The TUI sibling is [[Lexicon|the baton]] (`aoide baton`).
+conductor-class — see [[Lexicon]]); Aoide ships this as a first-class widget,
+and the agent can regenerate or extend it like any other integration. The TUI
+sibling is [[Lexicon|the baton]] (`aoide baton`).
 
 ## What it watches
 
-**Every terminal, by default — plus** any agent from any source. As of the
-conduct-by-default landing ([[Conductor-Channel]]), the spawn wrapper is no longer
-an opt-in first-class path for a few agents: **kitty points its shell at the
-`aoide-shell` wrapper, so EVERY window runs its login shell under `aoide conduct`
-and self-registers as a tracked, conductable session.** The roster is therefore
-the whole desktop's terminals, not just the ones someone remembered to wrap. On
-top of that baseline:
+**Every terminal, by default — plus** any agent from any source. The spawn
+wrapper is mandatory, not opt-in ([[Conductor-Channel]]): **kitty points its
+shell at the `aoide-shell` wrapper, so EVERY window runs its login shell under
+`aoide conduct` and self-registers as a tracked, conductable session.** The
+roster is therefore the whole desktop's terminals, not just the ones someone
+remembered to wrap. On top of that baseline:
 
 - **[[Melete]]-spawned** sessions — the sandboxed agent a `code` run drops into a
   repo checkout, when it surfaces as a local terminal.
@@ -63,11 +62,9 @@ The plumbing already exists ([[Desktop-Architecture]], [[shellbridge]]):
   degrades gracefully off-Hyprland (no id → the field stays absent, never a
   panic). On `closewindow` it clears the address off whatever session stored it
   (the [[Session-Graph|reaper]] then removes the record via its pid signal).
-  **Why this exists:** the address used
-  to be filled only *lazily* on the next hook fire, so at click time it was
-  frequently empty and the jump failed. Capturing it at window-creation time
-  (and re-checking on every window event) makes "which window is which agent"
-  reliable — a click always has a live address to jump to. The listener is
+  Capturing it at window-creation time (and re-checking on every window event)
+  makes "which window is which agent" reliable — a click always has a live
+  address to jump to. The listener is
   best-effort and off-Hyprland-safe: with no instance signature it logs once and
   disables itself; the shellbridge socket keeps serving regardless.
 - **Discovery + hook backfill (fallback).** The older, in-process paths remain as
@@ -103,7 +100,7 @@ so it can never mark itself `done`. The [[Session-Graph]]'s **liveness
 reaper** (`aoide graph reap`, a ~12s systemd timer) sweeps these out-of-band
 by window-gone-or-pid-gone, so the roster never accumulates dead rows.
 
-The flat roster now has a **graph layer** on top: the [[Session-Graph]] — a
+The flat roster has a **graph layer** on top: the [[Session-Graph]] — a
 DAG of projects and sessions (which project anchors each session, which
 session spawned which), viewed and managed through the `aoide graph` command
 group. The roster is the rows; the graph is the tree they hang from.
@@ -113,12 +110,12 @@ The roster also has its **desktop gadget**: the
 `sessions.json` + `hooks.json`, merging the latest hook phase over the raw
 roster state exactly as the Rust graph module does — agent, coloured state,
 shortened cwd, elapsed; click a row to jump. Its per-row prune `[x]` is
-rendered disabled until the shellbridge socket grows a prune verb (open
+rendered disabled: the shellbridge socket has no prune verb yet (open
 thread) — the dock never invents IPC.
 
 ### Hover-preview → the bar's workspace glyph
 
-Hovering a roster row now also **previews which workspace that terminal lives
+Hovering a roster row also **previews which workspace that terminal lives
 on**, on the bar's [[Gadget-Dock|WorkspaceRow]] (the musical-note-glyph
 workspaces). The bridge is deliberately **pure data, not a compositor action**:
 the roster already carries each session's `workspace` id (stamped by the event

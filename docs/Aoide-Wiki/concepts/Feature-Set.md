@@ -7,8 +7,8 @@ tags: [aoide, features, integration, melete, mneme]
 
 # Feature Set — Batteries Included
 
-What a fresh **AoideOS** fork comes with. AoideOS is not just a compositor +
-shell: it wires the whole personal-computing stack together — the desktop
+What a fresh **AoideOS** fork comes with. AoideOS wires the whole
+personal-computing stack together — the desktop
 ([[Desktop-Architecture]]) and orchestrator ([[aoided]]) it **owns**, plus the
 independently-owned coding harness **[[Melete]]** and knowledge server
 **[[Mneme]]** it **integrates and launches** (adapters + launchers, not vendored
@@ -21,11 +21,11 @@ Every integration is a dendrite ([[Snowflake-Anatomy]]): opt-in, flag-toggled,
 themed by [[drachma]], and — where it touches the outside world —
 `enable = false` by default and behind the [[Governance|gate]].
 
-**More than a catalog.** This list is what ships — but the *point* of Aoide is
-that it is a **specialized widget maker**: because its agent ([[Melete]]) is a
-coding agent, new integrations are **generated declaratively, on demand**, not
-picked from a fixed menu. See [[Widget-Maker]]. Everything below is an exemplar of
-that capability, not the ceiling.
+**A specialized widget maker.** This list is what ships. The *point* of Aoide
+is that it is a **specialized widget maker**: because its agent ([[Melete]])
+is a coding agent, new integrations are **generated declaratively, on
+demand**. See [[Widget-Maker]]. Everything below is an exemplar of
+that capability.
 
 **Provenance.** The desktop, agent, pipeline, and governance items are grounded
 in [[references/AOIDE-HANDOFF]]. The messaging bridge, Cloudflare/Tailscale fleet
@@ -46,6 +46,9 @@ today; they extend the handoff rather than describe shipped commands.
 
 ### 1. Notifications → messaging bridge
 
+**Status:** planned; no `notify-bridge` dendrite or `aoide notify` verb in
+`aoide schema --json` yet.
+
 The [[Quickshell]] notification daemon (`org.freedesktop.Notifications`) is the
 single source of desktop events. A **notification-bridge dendrite** mirrors
 chosen event classes to a messaging app — **Telegram first**, pluggable (Signal /
@@ -63,7 +66,11 @@ Matrix / Discord / …).
 
 ### 2. Fleet & networking — Tailscale + Cloudflare
 
-Remote access and controlled exposure ship as first-class, user-gated features.
+**Status:** Tailscale's network MCP and Melete's fleet tools are shipped; the
+`aoide fleet` verb, the fleet widget, and Cloudflare public exposure are
+planned, not present in `aoide schema --json`.
+
+Remote access and controlled exposure are first-class, user-gated features.
 
 - **Tailscale:** tailnet membership; **network MCP served over the tailnet**
   (user-only, never agent-enabled — [[Agent-Interface]]); `ssh_exec` across fleet
@@ -79,7 +86,12 @@ Remote access and controlled exposure ship as first-class, user-gated features.
 
 ### 3. Scheduled jobs & timers (with a widget)
 
-Aoide surfaces **both** agent schedules and system timers in one place.
+**Status:** Melete's schedule tools (`schedule_code_task`,
+`schedule_code_batch`, `schedule_recurring`, `schedule_rune_script`) are
+shipped; the `aoide sched` verb and the agenda/timers widget are planned, not
+present in `aoide schema --json`.
+
+The design surfaces **both** agent schedules and system timers in one place.
 
 - **Agent schedules (Melete):** `schedule_code_task` / `schedule_code_batch`
   (delayed), `schedule_recurring` (fixed cadence), job chaining (`after` + `on`),

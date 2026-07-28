@@ -31,7 +31,7 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 - [[Desktop-Architecture]] — how aoided, shellbridge, Quickshell, and the compositor compose into a single agent-ready desktop body
 - [[Content-Pipeline]] — the discover → propose → approve → ingest → lint → query pipeline; the approve gate, quarantine branch, and Mneme integration
 - [[Governance]] — the rebuild gate (polkit pattern), the single audit log, and the mutation policy encoded in radial distance from the nucleus
-- [[Rebuild-Gate]] — how agents rebuild: the default propose-then-human-`switch` path, and the opt-in `aoide.rebuild` passwordless-narrow polkit capability (chosen over a sudo password)
+- [[Rebuild-Gate]] — how agents rebuild: the default propose-then-human-`switch` path, and the opt-in `aoide.rebuild` passwordless-narrow polkit capability
 - [[Wiki-Protocol]] — the shipped protocol (Mneme/Melete-owned) that gives each project a standalone wiki in a shared shape; Aoide's own wiki is the self-managed exception; default location is the project's repo
 
 ## Entities

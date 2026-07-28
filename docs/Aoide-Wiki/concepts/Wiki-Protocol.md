@@ -8,7 +8,7 @@ tags: [aoide, wiki, meta]
 
 ## Decision (2026-07-25)
 
-The wiki capability is **a protocol**, not a service or a per-wiki bundle: a shipped shape + rule set that any project's wiki conforms to. Wikis are **not** congregated into a central registry — each project keeps its own **standalone** wiki, and the protocol is what makes every one the same shape.
+The wiki capability is **a protocol**: a shipped shape + rule set that any project's wiki conforms to. Each project keeps its own **standalone** wiki, and the protocol is what makes every one the same shape.
 
 ## Ownership
 
@@ -21,7 +21,7 @@ A wiki lives **in its project's own repo**, wherever a wiki is needed — defaul
 
 ## The protocol bundle
 
-Staged here under `protocol/` until it relocates to Mneme/Melete:
+Staged here under `protocol/`; Mneme/Melete own it, and the relocation to them is an Open Thread in `ingest/log.md`:
 
 - `protocol/SHAPE.md` — the canonical wiki shape.
 - `protocol/OPERATIONS/` — the rules a conformant wiki is kept by (ingest, lint, indexing, self-update, frontmatter, naming, wikilinks).
@@ -33,11 +33,11 @@ Staged here under `protocol/` until it relocates to Mneme/Melete:
 - **Mint** — create a new wiki already in the shape: stamp `_template/`, seed the `ingest/` pair, write `SCHEMA.md` + `Overview.md`, log the mint.
 - **Convert** — reshape an existing directory of notes into the shape (sort into `concepts/`/`entities/`, add the `ingest/` pair, backfill frontmatter, write `SCHEMA.md`).
 
-Both are hand-run for now; the future `aoide` subcommand and the Mneme/Melete integration automate them.
+**Status:** both are hand-run — an `aoide` subcommand and the Mneme/Melete integration are specified to automate them; neither exists.
 
 ## This wiki
 
-`Aoide-Wiki` is the reference case: the standalone wiki for Aoide itself, self-managed in the Aoide repo (at `~/Aoide-Wiki` until that repo exists). Because it is small and self-contained, the working rule is to **read the whole wiki** when working on Aoide — see [[SCHEMA]].
+`Aoide-Wiki` is the reference case: the standalone wiki for Aoide itself, self-managed in the Aoide repo at `docs/Aoide-Wiki/`. Because it is small and self-contained, the working rule is to **read the whole wiki** when working on Aoide — see [[SCHEMA]].
 
 ## Dogfooding
 

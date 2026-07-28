@@ -23,8 +23,8 @@ running desktop — the performance. **Drachma** is the one seam where they meet
 
 ## Status — running live on yomi-strix
 
-Aoide is a **built, switched, and logged-into walking skeleton**, not a paper
-design: `nix flake check` is green, both packages build, the stack boots
+Aoide is a **built, switched, and logged-into walking skeleton**:
+`nix flake check` is green, both packages build, the stack boots
 headless in the `vm-boot` QEMU check — and yomi-strix runs it as its daily
 graphical session. Live now: greetd → Hyprland → Quickshell (bar, dock,
 gadgets, launcher, notifications, wallpaper — all one process, see
@@ -167,7 +167,7 @@ format; [[drachma]] (Node, wrapping Style Dictionary; bins `lint` /
 
 Rehearsal is the sketch (hot-reloads, no rebuild); recording is the truth
 (durable, requires the gated rebuild). GTK/Qt surfaces need an app restart and
-are adopt-only — accepted by design.
+are adopt-only.
 
 The baked side is carried by the three facets, all real:
 
@@ -192,7 +192,7 @@ The baked side is carried by the three facets, all real:
   layers for every Quickshell-owned surface.
 
 The `surface-ownership` and `no-song-read` checks that police this seam are
-real flake checks, not conventions.
+real flake checks.
 
 ## The rice loop — where the agent writes
 
@@ -274,7 +274,7 @@ cannot drift, funnelled through a single policy/audit surface. See
    agent ──► MCP façade ───┘         (generated from the same schema)
 ```
 
-This is now shipped code: the Rust crate ([[aoide-cli]]) installs two binaries,
+This is shipped code: the Rust crate ([[aoide-cli]]) installs two binaries,
 `aoide` and `aoided`. `aoide schema --json` is the machine-readable source of
 truth; the stdio MCP façade (`aoide mcp serve --stdio`) generates its tool list
 from it, one-to-one. The tree holds **36 commands** — real (25): `guide`,
@@ -301,11 +301,11 @@ flake build one binary, not two.
   **Aoide connector** is a dedicated MCP connector specifically for managing
   Aoide and its components — tier 3 of the four-tier agent interface, the same
   command schema behind a network door. Aoide is **not** reached through the
-  Mneme or Melete connectors. The Aoide connector is future work; today agents
-  spawn `aoide mcp serve --stdio` per session. See [[Agent-Interface]].
+  Mneme or Melete connectors. **Status:** specified, not built. Agents spawn
+  `aoide mcp serve --stdio` per session today. See [[Agent-Interface]].
 - Every rebuild is user-gated (polkit pattern): agent proposes, user admits,
   git records. `aoided` is propose-only; no background self-updaters — house
-  policy, now concrete in the unit definitions.
+  policy, concrete in the unit definitions.
 - One audit surface: both doors append to the single audit log file
   (`~/Aoide/log`, the `aoide.auditLog` option) — there is no per-door log.
 - Trust boundary: forwarded notification text is untrusted data. The melete
@@ -352,7 +352,7 @@ versioned score, legitimately walked at eval.
 `aoide.drachma` (and declare `aoide.surfaces`); no module reads another module.
 The coupling discipline is contractual — the flake's checks (`surface-ownership`,
 `no-song-read`, `song-shape`, plus building both packages, plus the `vm-boot`
-headless boot of the assembled stack) fail eval on violation, not polite.
+headless boot of the assembled stack) fail eval on violation.
 
 ## Related
 

@@ -67,11 +67,12 @@ Alongside the per-song folders, the songbook root holds the memory that
 crosses every song: `learnings.md`, `preferences.md`, `update-playbook.md`
 (the schema-migration playbook). The agent reads these before every `rice gen`
 and appends after every adopt/reject — the write-back that is the "self" in
-[[Self-Ricing]]. **This is where the design grammar and ricing memory that
-currently sit in the dev wiki ([[design/Pantheon-Grammar|Pantheon Grammar]],
-the [[design/Ricing-Protocol|Ricing Protocol]]'s worked examples) properly
-belong** — a pending migration into the song agent's domain, flagged in the
-handoff.
+[[Self-Ricing]]. The songbook root is also the home of the design grammar and
+ricing memory — [[design/Pantheon-Grammar|Pantheon Grammar]] and the
+[[design/Ricing-Protocol|Ricing Protocol]]'s worked examples.
+
+**Status:** both pages sit in the dev wiki; the migration into the songbook is
+tracked in `references/AOIDE-DEV-HANDOFF.md` §7.
 
 ## Runtime state — the gitignored half
 
@@ -130,4 +131,3 @@ top-level `song/` dir. The lookup is the Song Map
 - [[drachma]] — the mint that resolves/lints/emits the stage file, the `aoide.drachma` seam `drachma.json` carries
 - [[shellbridge]] · [[Session-Graph]] — the writers of the runtime stage files
 - [[design/Ricing-Protocol]] · [[design/Pantheon-Grammar]] — the design memory
-  bound for `songbook/`

@@ -15,13 +15,13 @@ Before the familiar nine, Greek tradition (Pausanias, describing the cult at Mou
 
 | Muse | Greek | Domain | In this system |
 |---|---|---|---|
-| **Aoide** | Ἀοιδή | song, voice | the running, performing system — the orchestration core singing, whether headless or as the full AoideOS desktop (not "the desktop" as such: the core runs shell-only too) |
+| **Aoide** | Ἀοιδή | song, voice | the running, performing system — the orchestration core singing, whether headless or as the full AoideOS desktop; the core runs shell-only too |
 | **Melete** | Μελέτη | practice, exercise | [[Melete]] — the integrated (not vendored) coding agent, the **doer**: it practices, writes, builds, rehearses |
 | **Mneme** | Μνήμη | memory | [[Mneme]] — the integrated (not vendored) knowledge server, the **rememberer**: the vault, the wiki, what was learned |
 
 The selection is the thesis: **song is what happens when practice and memory perform together.** A desktop that rices itself needs an actor that does (Melete), a store that remembers (Mneme), and a body that sings what they make (Aoide). The three original Muses are reunited as one system — the software wears the oldest names for the three faculties it actually has.
 
-The naming is a **theme**, though — not an architectural claim. Melete and Mneme are **independently-owned systems** Aoide integrates and launches (the nucleus carries a melete-adapter; `pkgs/{melete,mneme}` are launchers for their self-updating runtimes; the wiki you are reading is served through Mneme). They are the other two thirds of the *name*; they are not sub-components of the Aoide program, and the arrow can run the other way — `melete aoide …` means Melete drives Aoide. The three-Muses trio is why the words fit, not proof the software is one binary.
+The naming is a **theme**: Melete and Mneme are **independently-owned systems** Aoide integrates and launches (the nucleus carries a melete-adapter; `pkgs/{melete,mneme}` are launchers for their self-updating runtimes; the wiki you are reading is served through Mneme). They are the other two thirds of the *name*; they are not sub-components of the Aoide program, and the arrow can run the other way — `melete aoide …` means Melete drives Aoide. The three-Muses trio is why the words fit.
 
 ## Architecture is frozen music
 
@@ -49,7 +49,7 @@ Radial distance from the nucleus encodes the mutation policy ([[Governance]]): t
 
 ## The performed family — song vocabulary
 
-The full map lives in [[Song-Vocabulary]]; the logic of the family here. A **rice is a song**: not a static config but a thing the system *performs*, differently at each venue. Once that identification is made, the rest of the vocabulary falls out mechanically — which is the reason it was selected: **one metaphor, extended consistently, is a namespace.** Nobody has to invent or memorize arbitrary names; if you know what a liner or a cover is for an album, you know what it is here.
+The full map lives in [[Song-Vocabulary]]; the logic of the family here. A **rice is a song**: a thing the system *performs*, differently at each venue. Once that identification is made, the rest of the vocabulary falls out mechanically — which is the reason it was selected: **one metaphor, extended consistently, is a namespace.** Nobody has to invent or memorize arbitrary names; if you know what a liner or a cover is for an album, you know what it is here.
 
 | Term | Is | Term | Is |
 |---|---|---|---|
@@ -69,8 +69,8 @@ A few terms name the connective tissue rather than either half:
 
 - **door** — an entry point into the one dispatch layer: `cli`, `mcp`, `daemon` (and the TUI rides the cli door). Every operation enters through a door and exits into the one audit log. One body, several doors.
 - **gate** — the rebuild gate ([[Rebuild-Gate]]): agents propose, the human admits. The single point where the performed half is allowed to re-freeze the crystal.
-- **drachma** — the design tokens AND the engine that mints them ([[drachma]], `pkgs/drachma`): the Greek coin, one name for the whole token layer. Values and engine are one thing (not a values-vs-engine split): the tokens are drachma, resolved/validated/emitted by drachma (`stage/drachma.json`, hyprctl, OSC). Why a coin and not a musical word: the section below.
-- **baton** — the conductor's tool: `aoide baton`, the TUI that watches the ensemble of running agent terminals and cues between them, with Hyprland as the multiplexer (real windows, not panes). The wider **conductor-class** covers every surface with that duty — the Terminal Commander widget, the DAG gadget, the baton. See [[Terminal-Commander]], [[Session-Graph]]. (Prior art for the behavior: the herdr multiplexer — an external tool, not part of this vocabulary.)
+- **drachma** — the design tokens AND the engine that mints them ([[drachma]], `pkgs/drachma`): the Greek coin, one name for the whole token layer. Values and engine are one thing: the tokens are drachma, resolved/validated/emitted by drachma (`stage/drachma.json`, hyprctl, OSC).
+- **baton** — the conductor's tool: `aoide baton`, the TUI that watches the ensemble of running agent terminals and cues between them, with Hyprland as the multiplexer (real windows). The wider **conductor-class** covers every surface with that duty — the Terminal Commander widget, the DAG gadget, the baton. See [[Terminal-Commander]], [[Session-Graph]].
 - **wiki / vault** — Mneme's memory surfaces: this wiki for design context, the vault for content.
 
 ## Why the seam is a coin
@@ -79,19 +79,19 @@ Because it is a **token** layer — and a token is a coin.
 
 The industry term for this layer is *design tokens*, and the container is the W3C design-tokens format (`CONTRACTS.md` §1). A token is a minted thing that stands for value; the Muses are Greek, so the coin is the Greek one: **drachma**.
 
-Which is why the seam needs no musical word — it was never on the music axis:
+Which is why the seam needs no musical word — it is not on the music axis:
 
 - **The Greek axis** names *who acts* and *what is exchanged* — Aoide, Melete, Mneme, drachma.
 - **The music axis** names *what is made and performed* — score, song, key, melody, arrangement, instruments, venue, rehearsal, recording.
 
-drachma sits *with* the Muses rather than beside them — one axis, not a third.
+drachma sits *with* the Muses — one axis, not a third.
 
 The coin keeps reading true past the name:
 
 | The coin | The layer |
 |---|---|
 | A coin is what both parties accept | Stylix bakes it, [[Quickshell]] reads it, hyprctl and the terminal OSC spend it — one unit of account across the seam. This is the zero-drift guarantee stated in economic terms. |
-| A mint stamps a standard | `pkgs/drachma` validates, resolves, emits; `drachma lint` assays the coin before it circulates. Values and mint share one name because a currency is inseparable from the authority guaranteeing it — exactly the values-vs-engine split the name abolishes. |
+| A mint stamps a standard | `pkgs/drachma` validates, resolves, emits; `drachma lint` assays the coin before it circulates. Values and mint share one name because a currency is inseparable from the authority guaranteeing it. |
 | Denomination is tiering | palette → semantic → component: the low tier closed and concrete, the higher tiers referencing it. |
 | Currency travels | a song replays at another venue and the drachma still spends. Value that holds across contexts is the point of both coins and [[Self-Ricing]] replay. |
 
@@ -109,7 +109,7 @@ One loop, told in the vocabulary:
 <!-- narrative -->
 ## Why a vocabulary at all
 
-Because agents read this system as much as humans do. A consistent metaphor is compression: "transpose the standard and rehearse it at this venue" is a full, precise instruction in seven words, and every one of those words resolves to a literal path or command. The verbiage was not selected to be pretty — it was selected so that the pretty sentence *is* the technical sentence.
+Because agents read this system as much as humans do. A consistent metaphor is compression: "transpose the standard and rehearse it at this venue" is a full, precise instruction in seven words, and every one of those words resolves to a literal path or command. The verbiage exists so that the pretty sentence *is* the technical sentence.
 
 ## Related
 

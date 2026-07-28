@@ -16,7 +16,7 @@ The gate has two orthogonal jobs; keeping them separate is what makes the design
 1. **Authentication** — *may this process invoke a privileged rebuild at all?*
 2. **Approval** — *should this specific rebuild happen now?*
 
-By default the two collapse into one act: the human typing their sudo password is simultaneously the authentication *and* the approval. The `aoide.rebuild` capability (below) splits them, so authentication can become passwordless without weakening approval.
+By default the two collapse into one act: the human typing their sudo password is simultaneously the authentication *and* the approval. The `aoide.rebuild` capability (below) splits them, so authentication becomes passwordless without weakening approval.
 
 ## Default behaviour (capability disabled)
 
@@ -27,18 +27,20 @@ Until `aoide.rebuild` is enabled, rebuilds are handled the ordinary way, matchin
 
 This is the safe default precisely because it is human-in-the-loop. It is also the *only* mode until the capability is deliberately turned on.
 
-The gate has now been exercised for real: on 2026-07-26 the user admitted the first switches onto the Aoide flake, and yomi-strix runs it live — with the prior [[dxflake]] generation retained in systemd-boot as the rollback (see [[Codebase]], [[Full-Architecture]]).
+yomi-strix runs the Aoide flake live, with the prior [[dxflake]] generation retained in systemd-boot as the rollback (see [[Codebase]], [[Full-Architecture]]).
 
-## The `aoide.rebuild` capability (planned, not yet built)
+## The `aoide.rebuild` capability
 
-Designed but not implemented: `modules/nucleus/options.nix` declares no `aoide.rebuild` surface today, and the compositor facet marks the polkit prompt explicit future work. The design, once built, would grant the agent a **passwordless but narrowly-scoped** path to the gated verbs — chosen deliberately over storing a sudo password:
+**Status:** specified; `modules/nucleus/options.nix` declares no `aoide.rebuild` surface today, and the compositor facet marks the polkit prompt explicit future work.
+
+The design grants the agent a **passwordless but narrowly-scoped** path to the gated verbs:
 
 - A **dedicated no-login agent user** with no general `sudo` rights.
 - The rebuild running as a fixed **systemd oneshot unit** (`aoide-rebuild-{test,switch}.service`) whose flake path, host, and verb are baked into the unit — the agent chooses *which unit to start*, never the command line.
 - A **polkit rule** letting that user `systemctl start` **those units and nothing else**, no password — the same polkit pipeline [[Governance]] records as sakaki's agent-sudo design.
 - Every invocation streaming through journald into the single [[aoided]] audit log (`~/Aoide/log`).
 
-Crucially, enabling the capability would change only **authentication** — it would not create background rebuilds. The **approval** gate persists as policy: `test` (reboot-recoverable) could be auto-admitted, but `switch` would still route through the admit door, keeping the *no background rebuilds, no self-updaters* house rule intact ([[Governance]]). Until built, all rebuilds use the default behaviour above.
+The capability changes only **authentication**; it does not create background rebuilds. The **approval** gate persists as policy: the design auto-admits `test` (reboot-recoverable); `switch` still routes through the admit door, keeping the *no background rebuilds, no self-updaters* house rule intact ([[Governance]]). Until built, all rebuilds use the default behaviour above.
 
 ## Why passwordless-narrow beats a sudo password
 

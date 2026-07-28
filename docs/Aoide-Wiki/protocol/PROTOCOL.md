@@ -1,6 +1,6 @@
 # Wiki Protocol — Procedures
 
-The protocol for giving a project a standalone wiki in the shape defined by [[SHAPE]]. It is **shipped and managed by Mneme/Melete**: they apply it to create and keep project wikis. **Aoide's own wiki is the exception** — it lives in the Aoide repo and Aoide manages it itself. Hand-run for now; a future `aoide` subcommand and the Mneme/Melete integration automate it. Concept and rationale: [[Wiki-Protocol]].
+The protocol for giving a project a standalone wiki in the shape defined by [[SHAPE]]. It is **shipped and managed by Mneme/Melete**: they apply it to create and keep project wikis. **Aoide's own wiki is the exception** — it lives in the Aoide repo and Aoide manages it itself. **Status:** hand-run — no `aoide` subcommand and no Mneme/Melete integration implement it. Concept and rationale: [[Wiki-Protocol]].
 
 ## Default location
 

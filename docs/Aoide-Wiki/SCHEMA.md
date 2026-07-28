@@ -8,7 +8,7 @@ The standalone wiki for the Aoide project — the agent-agnostic Hyprland/Quicks
 
 ## Read the whole thing
 
-Working entry cost, in order: `Overview.md` → every page under `concepts/`, `entities/`, and `design/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; `AOIDE-DEV-HANDOFF.md` — the development agent's operating manual; `pantheon/` — the design reference stills). The wiki is deliberately small enough to read end to end. Note: `design/` pages mirror **song-agent design memory** that is bound to migrate into a songbook under `song/` ([[Song-Anatomy]]).
+Working entry cost, in order: `Overview.md` → every page under `concepts/`, `entities/`, and `design/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; `AOIDE-DEV-HANDOFF.md` — the development agent's operating manual; `pantheon/` — the design reference stills). The wiki is deliberately small enough to read end to end. Note: `design/` pages mirror **song-agent design memory** whose home is a songbook under `song/` ([[Song-Anatomy]]); the migration is an Open Thread in `ingest/log.md`.
 
 ## The shape
 
@@ -18,7 +18,7 @@ Aoide-Wiki/
   Overview.md      ← the Aoide overview / hub
   concepts/        ← ideas, mechanisms, frameworks
   entities/        ← named things (components, tools, hosts)
-  design/          ← design language + build specs (song-agent design memory mirrored here; bound for song/)
+  design/          ← design language + build specs (song-agent design memory mirrored here; home is song/)
   ingest/
     index.md       ← content catalog
     log.md         ← append-only history + Open Threads
@@ -28,7 +28,7 @@ Aoide-Wiki/
 
 ## The wiki protocol
 
-This shape is not bespoke — it comes from the **wiki protocol**, a shipped shape + rule set that Mneme/Melete use to mint and keep project wikis. Aoide's own wiki is the self-managed exception: it lives in the Aoide repo. The protocol is staged under `protocol/`, bound to relocate to Mneme/Melete. See [[Wiki-Protocol]] for the concept and `protocol/PROTOCOL.md` for the mint/convert procedure. The rules this wiki is kept by live in `protocol/OPERATIONS/`: [[Ingest]], [[Indexing]], [[Lint]], [[Self-Update]], [[Frontmatter]], [[Naming]], [[Wikilinks]].
+This shape is not bespoke — it comes from the **wiki protocol**, a shipped shape + rule set that Mneme/Melete use to mint and keep project wikis. Aoide's own wiki is the self-managed exception: it lives in the Aoide repo. Mneme/Melete own the protocol; it is staged under `protocol/` and the relocation to them is an Open Thread in `ingest/log.md`. See [[Wiki-Protocol]] for the concept and `protocol/PROTOCOL.md` for the mint/convert procedure. The rules this wiki is kept by live in `protocol/OPERATIONS/`: [[Ingest]], [[Indexing]], [[Lint]], [[Self-Update]], [[Frontmatter]], [[Naming]], [[Wikilinks]], [[Assertion]].
 
 ## Two ways you act
 
@@ -43,6 +43,7 @@ This shape is not bespoke — it comes from the **wiki protocol**, a shipped sha
 - Rewrite prose wrapped in sentinel comments (`<!-- BEGIN SENTINEL … -->` … `<!-- END SENTINEL -->`); see [[Ingest]].
 - Mint a stub page just to clear a red wikilink — a red link is a breadcrumb, not an error.
 - Let the Notes manifest below drift from the files on disk.
+- Write history, a rejected alternative, or a what-if into a content page. Pages state the system at HEAD in the present indicative; history goes to `ingest/log.md`, open questions to its `## Open Threads`, actionable work to the dev handoff ledger. See [[Assertion]].
 - Invent a new top-level directory — in this wiki OR in the Aoide repo. Both roots are closed. New content lands inside the existing tree at its designated place; look the place up (repo content paths in [[Song-Vocabulary#The Song Map]], repo shape in `CONTRACTS.md` §2). A new root directory is a contract change, not a convenience.
 
 ## You maintain yourself
@@ -100,6 +101,7 @@ design/Pantheon-Grammar.md
 design/Ricing-Protocol.md
 ingest/index.md
 ingest/log.md
+protocol/OPERATIONS/Assertion.md
 protocol/OPERATIONS/Frontmatter.md
 protocol/OPERATIONS/Indexing.md
 protocol/OPERATIONS/Ingest.md

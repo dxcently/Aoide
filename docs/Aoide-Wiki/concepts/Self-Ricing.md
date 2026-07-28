@@ -26,7 +26,7 @@ aoide rice adopt <name>             (planned — User gates this step)
     ↓  gated rebuild
 ```
 
-Preview is the sketch; adopt is the truth. GTK/Qt surfaces require app restarts and are adopt-only (not a v1 gap — accepted by design).
+Preview is the sketch; adopt is the truth. GTK/Qt surfaces require app restarts and are adopt-only, accepted by design.
 
 ## Shipped Defaults Are Immutable
 
