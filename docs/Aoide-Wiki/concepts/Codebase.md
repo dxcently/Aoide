@@ -1,0 +1,308 @@
+---
+type: concept
+created: 2026-07-26
+updated: 2026-07-26
+tags: [aoide, architecture, nix, flake, rust, node]
+---
+
+# Codebase — How the Built Repo Works
+
+The implementation of Aoide at `~/Aoide`, as of the walking-skeleton milestone
+(commit f3ceadf: scaffold → wave0 foundation → wave1 subsystems → wave2
+integration → notes rename). This page describes how the repo actually
+composes: the flake, the walker, the option contract, the systemd/service map,
+the runtime contracts, and what is real versus stubbed. It is the map from the
+design concepts ([[Snowflake-Anatomy]], [[Full-Architecture]]) to the files on
+disk.
+
+*Grounded in the repo at commit f3ceadf; extended at commit 0b3a3fd (the
+`aoide graph` group), through 41be90f (real host profile, seam fixes,
+graph surfaces, vm-boot check, gadget dock), and through 9404250 (dock popup
+redesign; nucleus baseline gaps found — and fixed — on the first live
+switch). Everything verifies green (cargo tests, flake check, vm-boot), and
+the profile now **runs live** on yomi-strix.*
+
+## The flake
+
+`flake.nix` is the fixed skeleton — later waves ADD files in their own dirs and
+never touch it. Inputs: `nixpkgs` (unstable), `home-manager`, `stylix`,
+`quickshell`, `hyprland` (the last four all `follows` nixpkgs where they can).
+Outputs, all tolerant of empty layers so eval stays robust:
+
+- `nixosConfigurations.yomi-strix` — assembled by `lib/mkHost.nix`.
+- `packages` — **auto-discovered** by `lib/pkgs.nix` from `pkgs/<name>/default.nix`
+  (`callPackage`, `_`-shelving); currently `{aoide, drachma, melete, mneme}` plus
+  `default` (= aoide). Adding a package is one folder — this file never changes.
+- `checks` — the three coupling assertions, one auto-generated `pkg-<name>` per
+  discovered package (`pkg-aoide`/`pkg-drachma`/`pkg-melete`/`pkg-mneme`), plus
+  the `vm-boot` headless boot test (below).
+- `devShells.default` — Rust (cargo/rustc/clippy/rust-analyzer) + `nodejs` + nix
+  tooling (nixfmt/nil/deadnix/statix).
+- `formatter` — nixfmt.
+
+## The walker and host assembly (`lib/`)
+
+**`lib/walk.nix`** is the dendritic walker: `lib.filesystem.listFilesRecursive`
+over a directory, filtered to `.nix` files whose path does not contain `/_`.
+That single infix rule is the **shelving opt-out** — prefix a file or directory
+with `_` (`_example.nix`, `_scratch/`) to hide it from discovery without
+deleting it. There is no import list; a file placed under a walked directory
+self-registers. This is [[dxflake]]'s pattern, now implemented in-house.
+
+**`lib/pkgs.nix`** is the same idea for `pkgs/`: it reads `../pkgs`, keeps each
+directory without a `_` prefix that holds a `default.nix`, and maps it to
+`callPackage`. One source feeds the flake `packages` output, the host + vm
+overlays, and the `pkg-<name>` checks — so a package self-registers everywhere
+from a single new folder. Its `overlay` form guards each name against
+accidentally masking a nixpkgs attribute; a deliberate shadow is listed in
+`intentionalShadows`, and a non-standard build arg goes through a documented
+`//` escape hatch (kept in this file to preserve the single source).
+
+**`lib/mkHost.nix`** assembles one host's `nixosSystem`: it walks `../modules`
+(the whole snowflake — nucleus + dendrites + facets + rime) **and** `song/repertoire/`
+— so songs self-register exactly like dendrites. It then appends the host's own
+dir, home-manager and stylix (each added only when its input is present, so a
+minimal eval still works), and the **discovered-packages overlay** from
+`lib/pkgs.nix` — the *same* source the flake's `packages` output and the
+`pkg-<name>` checks read, so nucleus/facet modules reference `pkgs.aoide` /
+`pkgs.drachma` / … without drift. The overlay guards each name against
+accidentally masking a nixpkgs attribute (a deliberate shadow — Aoide's `melete`
+harness vs the nixpkgs `melete` font — is an `intentionalShadows` exemption). It passes `host`, `inputs`, `username`, `system` as
+`specialArgs`. Each song's `rice.nix` guards itself with
+`lib.mkIf (config.aoide.song == "<name>")`, so committing a song makes it
+fleet-available and a single `aoide.song` declaration in `hosts/<host>/default.nix`
+selects which one a host performs (see [[Song-Vocabulary#Replay — any song, any host]]).
+
+**`lib/checks.nix`** rides as flake `checks` — the contractual coupling
+discipline, written to throw legibly at eval time on a violation:
+
+- **`surface-ownership`** — every declared `aoide.surfaces.<name>` names a
+  non-empty owner (a facet asserting it is the sole owner of a render surface).
+- **`no-song-read`** — no walked module path lives under a `song/` runtime dir
+  (`stage/`, `backstage/`, `auditions/`, `catalog/`, `index/`), so the nix build
+  can never come to depend on ephemeral runtime state. `stage/` stays non-load-
+  bearing structurally. This boundary is about runtime dirs only; committed
+  `song/repertoire/**` is versioned score and is legitimately read at eval.
+- **`song-shape`** — every walked `song/repertoire/**` path is a `rice.nix`
+  (the host-agnostic song discipline, `CONTRACTS.md §5`).
+
+Alongside these, `flake.nix` auto-generates a `pkg-<name>` check per discovered
+package (from `lib/pkgs.nix`) so every package builds under `nix flake check`.
+
+**`lib/vmTest.nix`** (commit c4843b2) wires `checks.<system>.vm-boot` — a
+headless QEMU boot of the whole stack via `pkgs.testers.runNixOSTest`
+(4 GiB / 4 vCPU, KVM). Its node is assembled from the **same** parts
+`mkHost.nix` uses — the walked module tree, the repertoire walk, the
+home-manager/stylix modules, the pkgs overlay, and mirrored `specialArgs`
+(`host = "vm-test"`, inputs, username, system; `node.pkgsReadOnly = false`
+so the overlay applies) — so the test boots the real assembly, not a
+replica. It asserts: `multi-user.target` reached; `aoide` + `drachma` on
+PATH with `schema --json` reporting exactly 27 commands and `guide` exiting
+0; greetd enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
+linger active with the `aoided` and `shellbridge` user units finishing
+`Result=success` (the skeleton binaries seed state and exit 0 — a future
+long-running daemon passes the same assertion naturally); stage files seeded
+at `schemaVersion` 0; and a `graph project add → view → emit` round-trip
+landing `graph.json`. The test node trims the stylix and quickshell facets
+(headless closure cost; the compositor stays for greetd). The script runs in
+about 16 s of wall clock: `nix build .#checks.x86_64-linux.vm-boot -L`. It
+also confirmed in-VM that the unit's `AOIDE_STAGE_DIR` and the binary's
+fallback agree on the same stage path.
+
+**Test-masking lesson (9404250).** The test node used to add `aoide` +
+`drachma` to its own `systemPackages` — which is exactly why the vm-boot
+check never caught that the nucleus installed neither: the test was
+self-providing what it claimed to verify. It now keeps only `jq` and relies
+on the real install path (`nucleus/packages.nix`), and the first live switch
+is what finally surfaced the gap. The discipline to generalize: **eval green
++ build green + VM green ≠ complete** — a VM test proves only what it does
+not provide for itself. (vm-boot re-ran green after the fix; the second live
+switch verified the same assertions on real hardware.)
+
+## The option contract (`modules/nucleus/options.nix`)
+
+The versioned seam every other module builds against (note schema v0,
+`CONTRACTS.md §1`). It declares options and eval-clean defaults only — it wires
+no behaviour, so an empty config evaluates. The surface:
+
+- `aoide.enable` (master switch), `aoide.user` (default `"khoa"`, owner of the
+  `~/Aoide` fork).
+- `aoide.song` (str, default `"default"`) — which song this host performs.
+  Set once in `hosts/<host>/default.nix`; each song's `rice.nix` guards itself
+  with `lib.mkIf (config.aoide.song == "<name>")`. See [[Song-Vocabulary#Replay — any song, any host]].
+- `aoide.notes` — the v0 note schema: closed `palette.{bg,fg,accent,urgent}`
+  (base16, permissive hex type) + optional component tiers `bar.*` / `notif.*` /
+  `window.*` (each `nullOr` hex, `null` → palette). This is the **only** thing
+  facets read.
+- `aoide.surfaces.<name>.owner` — the surface-ownership registry.
+- `aoide.mcp.enable` (default false — house policy), `aoide.auditLog` (default
+  `/home/<user>/Aoide/log`).
+
+## The host profile — yomi-strix is real now
+
+At ad3b21a `hosts/yomi-strix/` graduated from an eval-only placeholder to a
+**bootable first-iteration profile**, ported from [[dxflake]] (the template)
+and trimmed to essentials:
+
+- **UUID-pinned `fileSystems`** matching the layout disko created on the box
+  (1 G vfat ESP + ext4 root on the single NVMe). Aoide does **not** manage
+  disks, so the live layout is pinned by UUID rather than carried as a disko
+  declaration.
+- systemd-boot UEFI; the Strix Halo scan-module set with early-KMS `amdgpu`;
+  `linuxPackages_latest` with `amdgpu.gttsize=24576` /
+  `ttm.pages_limit` kernel params (the RDNA 3.5 iGPU maps 24 GiB of the
+  unified 32 GB pool); amdgpu userspace graphics for the Hyprland facet;
+  NetworkManager; zramSwap.
+- Dropped from the template: disko, inference/ROCm, the Melete role,
+  bluetooth, wireguard.
+
+**Switched live (2026-07-26).** The user opened the [[Rebuild-Gate]] and
+yomi-strix moved from [[dxflake]] to Aoide the same night — two switches
+(the second carrying the 9404250 baseline fixes), each activating in about
+8 s, run as detached `systemd-run` units (`nix-env --profile` set +
+`switch-to-configuration switch`). The prior dxflake generation stays in the
+systemd-boot menu, so rollback is one boot-menu pick away. Verified live:
+greetd active, the Hyprland session entry present, NetworkManager, zram, and
+the Strix Halo amdgpu params all in effect; after the second switch, `aoide`
++ `drachma` + git on PATH and flakes enabled. The graphical session
+itself (greetd → Hyprland → Quickshell) has not yet been logged into in this
+state — first-boot desktop verification is an open thread.
+
+## The systemd user-unit map (nucleus + a dendrite)
+
+All nucleus services are user services gated on `aoide.enable`, keyed into
+`graphical-session.target`:
+
+| Unit | From | Notes |
+|---|---|---|
+| `aoided` | `nucleus/aoided.nix` | runs `${pkgs.aoide}/bin/aoided`; env `AOIDE_AUDIT_LOG`, `AOIDE_USER` |
+| `shellbridge` | `nucleus/shellbridge.nix` | runs `aoide shellbridge --run`; `RuntimeDirectory=aoide` for the socket |
+| `aoide-melete-adapter` | `nucleus/melete-adapter.nix` | runs `aoide adapter melete --run`; `AOIDE_ADAPTER_SUBSCRIBE` allow-list |
+| `aoide-mcp` | `nucleus/aoided.nix` | **gated on `aoide.mcp.enable`**; `bindsTo` aoided |
+| `aoide-obsidian-register` | `dendrites/obsidian.nix` | oneshot; registers a window class with shellbridge |
+
+`systemd.user.tmpfiles.rules` create `~/Aoide/log` (0700) and
+`~/Aoide/song/stage` (0755) at runtime; systemd-tmpfiles deduplicates the shared
+rule declared in both aoided and shellbridge.
+
+Two **non-service nucleus modules** joined at 9404250, both gated on
+`aoide.enable`, both closing baseline gaps the first live switch surfaced:
+
+- **`nucleus/packages.nix`** puts `pkgs.aoide` and `pkgs.drachma` on the
+  **system profile**. The units never needed this (their `ExecStart` lines are
+  absolute store paths), but keybinds and interactive sessions invoke by
+  name — and until this module, nothing installed the binaries. It also
+  installs **git**, which is load-bearing rather than dev comfort: nix flake
+  operations on the user's own fork require it; [[dxflake]]'s nucleus had
+  carried it, and the essentials-only host port cut it, leaving the live box
+  git-less.
+- **`nucleus/nix.nix`** enables the `nix-command` + `flakes` experimental
+  features — before it, a flake-native system could not evaluate itself.
+
+## Runtime contracts (socket + stage files)
+
+Live-side state, all gitignored, none load-bearing for the build:
+
+- **Socket:** `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` — the one outbound
+  channel from QML; adapters and widgets bind exactly this path, never compute
+  it.
+- **Stage files** under `song/stage/`: `notes.json` (resolved note colours,
+  written by [[drachma]]), `sessions.json` (agent session roster, written by
+  [[shellbridge]]; records may carry an additive optional `parentSessionId`),
+  `hooks.json` (live Claude Code hook phases), `projects.json` (the project
+  registry, kept by `aoide graph project`), and `graph.json` (the resolved
+  project/session DAG, written by `aoide graph emit` for Quickshell — see
+  [[Session-Graph]]). Each has a v0 shape in `CONTRACTS.md §4`; writes are
+  atomic (write-temp-then-rename), and the graph rewriters round-trip unknown
+  fields so concurrent writers never lose data.
+- **Stage-dir resolution** (`CONTRACTS.md §4`, added at d03dcf2): every stage
+  reader/writer resolves the stage directory as `$AOIDE_STAGE_DIR` when set
+  to an absolute path (the unit sets it; empty/relative ignored), else the
+  `aoide_home()` fallback — the documented CLI ↔ unit seam, pinned by a
+  serialized precedence test.
+
+## Repo-file roles
+
+- **`CONTRACTS.md`** — the five versioned contracts: note schema v0, dendrite
+  shape v0, `aoide schema --json` output v0, stage-file formats v0, song shape
+  v0 (§5). The `checks` fail a merge that breaks one; bumping a version needs a
+  playbook migration.
+- **`AGENTS.md`** — the tier-0 four-tier agent guide (onboarding → CLI → stdio
+  MCP → network MCP) plus the six non-negotiable house rules. `aoide guide`
+  prints the same map at runtime.
+- **`docs/BUILD.md`** — module-authoring conventions: how the walker discovers,
+  the option table, how to author a dendrite/facet, the checks to keep green.
+
+## Build and verify
+
+```
+cd ~/Aoide
+nix flake check                                       # both assertions + both packages build
+nix build .#aoide .#drachma                        # the two packages
+nix eval .#nixosConfigurations.yomi-strix.config.system.build.toplevel.drvPath
+cargo test                                             # schema / dispatch / mcp unit tests
+nix build .#checks.x86_64-linux.vm-boot -L             # headless QEMU boot test
+```
+
+The Rust crate carries unit tests for the schema (valid JSON, stable top-level
+keys, every command carries `--json` + exit codes, unique paths), the MCP
+door (tool list is one-to-one with the schema; `tools/call` dispatches into the
+same handlers), and the graph module (`pkgs/aoide/src/graph.rs` — pure cores +
+8 handlers + 6 unit tests: cycle rejection, anchoring, a deterministic render
+snapshot, edge shape, prune orphan-clearing, unknown-field round-trip) — 11
+tests in all at 0b3a3fd. d03dcf2 added more: a serialized stage-dir precedence
+test and unit tests for the pure focus-liveness helpers
+(`normalize_addr` / `window_present`). One noted hazard: the env-var test
+mutex in `shellbridge.rs` is module-local — fine while it is the only module
+with env-touching tests (open thread).
+
+## Walking-skeleton status — real vs stubbed
+
+**Real code paths:** the whole flake/walker/option/checks layer; both packages
+build; `aoide guide`, `aoide schema --json`, `mcp serve --stdio`, and the audit
+log; `rice lint` (delegates to [[drachma]]); the daemon skeleton (audit
+append, user gate, default-deny event bus); shellbridge (atomic writer, seeded
+stage files, and a live socket accept loop — `focuswindow`); the melete-adapter skeleton (env-driven
+subscription, metadata-only notification boundary); all three note emitters; the
+QML shell skeleton; the baked Stylix and compositor fan-outs; and the whole
+`aoide graph` group (view/emit/project/link/focus/prune — 19 → 27 commands,
+none of the eight a stub; see [[Session-Graph]]). No new crates for the graph
+work; `Cargo.lock` is untouched. The QML tree has since grown its first
+non-stub surfaces: `AoideSessionGraph.qml` + `GraphRow.qml` (the DAG overlay),
+the shared `GraphModel.qml`, and the [[Gadget-Dock]] files
+(`AoideAgentWidgets.qml`, `GadgetFrame.qml`, `TerminalManagerGadget.qml`,
+`DagGraphGadget.qml`, `ClockGadget.qml`, `MeterGadget.qml`) — nine registered
+surfaces in the quickshell facet. The bootable yomi-strix profile and the
+vm-boot check (above) are likewise real.
+
+**The dxflake-parity wave (branch `worktree-devtools-dendrites`, pending
+merge):** five commits (`9e2eb61`…`a808c33`, full flake check + vm-boot green)
+port the prior rig's substance into Aoide shape — twelve new dendrites (bash
+with the `ad*` nh alias family replacing `dx*`, nh, git, kitty, neovim-via-nvf,
+starship, mcfly, btop, yazi, fastfetch, devtools, fonts), the `nvf` flake input
+threaded to home-manager via `extraSpecialArgs`, the cover-art note
+(`aoide.notes.wallpaper` → shipped `song/covers/hero.webp`, CONTRACTS §1
+extended), Lekton Nerd Font Mono as the stylix face, and the [[Gadget-Dock]]
+waybar-homage wave (bar rework + NowPlaying/Power/Calendar gadgets). Baseline
+dendrites default on in `hosts/common` via `mkDefault`; `allowUnfree` is
+carried mkIf-scoped by the two dendrites that need it (devtools, fonts).
+
+**Structured not-implemented stubs (exit 64):** the mutating CLI verbs — `rice
+gen/preview/adopt/transpose`, the `content` pipeline, `make`, `update`,
+`onboard`. Their arg-parsing, schema, gate flag, and audit trail are real; only
+the live-system action is deferred.
+
+## Related
+
+- [[Snowflake-Anatomy]]
+- [[Full-Architecture]]
+- [[Session-Graph]]
+- [[aoide-cli]]
+- [[drachma]]
+- [[aoided]]
+- [[shellbridge]]
+- [[dxflake]]
+- [[Notes]]
+- [[Governance]]
+- [[Gadget-Dock]]
+- [[Rebuild-Gate]]

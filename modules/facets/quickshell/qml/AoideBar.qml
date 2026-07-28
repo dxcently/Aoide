@@ -33,10 +33,11 @@
 // Colour: the WHITE MUSIC SHEET — a Win7 Aero taskbar rendered as manuscript
 // paper. The page is an OPAQUE white sheet (Qt.rgba(1,1,1,0.92)) with the white
 // gloss gradient riding on top (the Aero highlight); the hyprglass blur behind
-// it gives faint depth but the strip reads solid. The ink is BLACK: the staff
-// lines, barlines, clef 𝄞, playhead, resting note-heads, clock/date, title, and
-// the volume/battery/network callouts are all black (#000000 lines, #14141a
-// text) with a WHITE outline (styleColor #ffffff) for legibility on the sheet.
+// it gives faint depth but the strip reads solid. The structural ink stays BLACK
+// (#000000 staff lines, barlines, playhead), but the TEXT ink is now the song's
+// umber (notes.paletteFg #423420) drawn CLEAN — the old white legibility outline
+// is dropped, since dark text on the cream sheet needs no halo (that outline was
+// a relic of the old dark bar and only muddied the type on cream).
 // One restrained STATE accent survives from the song (NoteState): the ACTIVE
 // workspace note-head fills with paletteAccent, the BLOCKED ✎ pulse + low battery
 // go glitchPink, and open/hover toggles (clock→calendar, volume, tray) flash
@@ -264,8 +265,9 @@ Item {
     }
 
     // ── Window title (Hyprland active toplevel) with kaomoji empty-rewrite ──
-    // A small songbook of music kaomoji combos; the empty-title rewrite rotates
-    // hourly so the bar hums a different bar of the tune through the day.
+    // A small songbook of music kaomoji combos; the empty-title rewrite picks
+    // one at RANDOM, re-rolled each time the active window changes, so an empty
+    // workspace hums a fresh little face instead of the same hourly one.
     readonly property var kaomojiSet: [
         "/ᐠ - ˕ -マ Ⳋ ⋆｡°✩♬ ♪",
         "♪(´▽｀) ⋆｡°✩",
@@ -274,8 +276,18 @@ Item {
         "✧*。٩(ˊᗜˋ*)و ♪ ✧*。",
         "₊˚⊹ ♡ ♬ ⋆｡°✩"
     ]
-    readonly property string kaomoji:
-        kaomojiSet[now.getHours() % kaomojiSet.length]
+    property int kaomojiIdx: 0
+    function rollKaomoji() {
+        root.kaomojiIdx = Math.floor(Math.random() * root.kaomojiSet.length)
+    }
+    Component.onCompleted: rollKaomoji()
+    // Re-roll on every active-window change — so landing on an empty workspace
+    // shows a freshly-random face (it's only displayed when the title is empty).
+    Connections {
+        target: Hyprland
+        function onActiveToplevelChanged() { root.rollKaomoji() }
+    }
+    readonly property string kaomoji: kaomojiSet[kaomojiIdx]
     function winTitle() {
         var t = (Hyprland.activeToplevel && Hyprland.activeToplevel.title)
                 ? ("" + Hyprland.activeToplevel.title) : ""
@@ -324,10 +336,8 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         width: implicitWidth + 9
         horizontalAlignment: Text.AlignHCenter
-        color: root.openGadget === gkey ? root.notes.paletteAccent : "#14141a"
-        opacity: root.openGadget === gkey ? 1.0 : 0.82
-        style: Text.Outline
-        styleColor: "#ffffff"
+        color: root.openGadget === gkey ? root.notes.paletteAccent : root.notes.paletteFg
+        opacity: root.openGadget === gkey ? 1.0 : 0.92
         font.family: "monospace"
         font.pixelSize: 14
         MouseArea {
@@ -349,7 +359,11 @@ Item {
         anchors.top: parent.top
         height: root.stripHeight
         radius: 0                        // EDGED — hard square corners, no round
-        color: Qt.rgba(1, 1, 1, 0.55)    // LIGHT frosted glass — brighter white sheet (hyprglass blur behind)
+        // Cream frosted glass at 0.72 — MATCHES the terminal's paletteBg tint
+        // and opacity (kitty 0.72), so bar and terminals read as one glass.
+        color: Qt.rgba(Qt.color(root.notes.paletteBg).r,
+                       Qt.color(root.notes.paletteBg).g,
+                       Qt.color(root.notes.paletteBg).b, 0.58)
         opacity: 1.0
     }
     // Aero gloss — the sanctioned white sheen (bright top, hard midline stop),
@@ -358,10 +372,10 @@ Item {
         anchors.fill: page
         radius: 0
         gradient: Gradient {
-            GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.42) }
-            GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, 0.14) }
-            GradientStop { position: 0.52; color: Qt.rgba(1, 1, 1, 0.06) }
-            GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.12) }
+            GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.20) }
+            GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, 0.06) }
+            GradientStop { position: 0.52; color: Qt.rgba(1, 1, 1, 0.00) }
+            GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.05) }
         }
     }
     // The page rail — a DEFINED black edge framing the transparent strip.
@@ -398,11 +412,15 @@ Item {
         anchors.leftMargin: root.edgePad
         anchors.verticalCenter: parent.verticalCenter
         text: "𝄞"
-        color: "#14141a"
-        style: Text.Outline
-        styleColor: "#ffffff"
+        color: root.notes.paletteFg
         font.family: "monospace"
-        font.pixelSize: 18
+        // The treble clef glyph is TALL (big loop + descender tail); at 20px it
+        // clipped against the 36px strip's top/bottom. 16px + vertical-fit keeps
+        // the whole clef inside the bar without an apron/overhang.
+        font.pixelSize: 16
+        verticalAlignment: Text.AlignVCenter
+        fontSizeMode: Text.VerticalFit
+        height: root.stripHeight
         font.bold: true
         MouseArea {
             anchors.fill: parent
@@ -431,9 +449,7 @@ Item {
             text: "✎" + root.sessionCount
             // Black ink at rest; when ANY session is blocked it switches to the
             // urgent role (glitchPink) and pulses — a summons from across the bar.
-            color: root.anyBlocked ? root.notes.glitchPink : "#14141a"
-            style: Text.Outline
-            styleColor: "#ffffff"
+            color: root.anyBlocked ? root.notes.glitchPink : root.notes.paletteFg
             font.family: "monospace"
             font.pixelSize: 13
             font.bold: true
@@ -452,12 +468,7 @@ Item {
             }
         }
 
-        // ── Gadget tray: ♫ now-playing (sole bar-spawned gadget) ───────────
-        Row {
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 0
-            TrayCell { id: npCell; gkey: "np"; text: "♫" }
-        }
+        // (now-playing ♫ moved to the RIGHT stave, beside volume.)
 
         // ── Clock + date (click → calendar popout). Lives on the bar, not the
         // dock — the ambient face belongs beside the measure, not in the case.
@@ -465,11 +476,9 @@ Item {
             id: clockText
             anchors.verticalCenter: parent.verticalCenter
             text: Qt.formatDateTime(root.now, "hh:mm AP  dddd MMM dd")
-            color: root.calShown ? root.notes.paletteAccent : "#14141a"
-            style: Text.Outline
-            styleColor: "#ffffff"
+            color: root.calShown ? root.notes.paletteAccent : root.notes.paletteFg
             font.family: "monospace"
-            font.pixelSize: 12
+            font.pixelSize: 14
             font.bold: true
             MouseArea {
                 anchors.fill: parent
@@ -481,22 +490,18 @@ Item {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: "/"
-            color: "#14141a"
-            style: Text.Outline
-            styleColor: "#ffffff"
+            color: root.notes.paletteFg
             font.family: "monospace"
-            font.pixelSize: 12
-            opacity: 0.6
+            font.pixelSize: 14
+            opacity: 0.55
         }
         // Active-window title (music kaomoji when empty).
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: root.winTitle()
-            color: "#14141a"
-            style: Text.Outline
-            styleColor: "#ffffff"
+            color: root.notes.paletteFg
             font.family: "monospace"
-            font.pixelSize: 12
+            font.pixelSize: 14
             font.bold: true
             elide: Text.ElideRight
         }
@@ -528,17 +533,19 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: 10
 
+        // Now-playing ♫ — the click-toggled score popout (moved here from the
+        // left tray, so it sits with the other expression marks on the right).
+        TrayCell { id: npCell; gkey: "np"; text: "♫"; anchors.verticalCenter: parent.verticalCenter }
+
         // Volume — scroll = adjust, click = mute, hover = ASCII slider popout.
         Text {
             id: volText
             anchors.verticalCenter: parent.verticalCenter
             visible: root.volAvail
             text: root.volMuted ? "𝄽 vol" : (root.volIcon(root.volPct) + " " + root.volPct)
-            color: root.volShown ? root.notes.paletteAccent : "#14141a"
-            style: Text.Outline
-            styleColor: "#ffffff"
+            color: root.volShown ? root.notes.paletteAccent : root.notes.paletteFg
             font.family: "monospace"
-            font.pixelSize: 12
+            font.pixelSize: 14
             font.bold: true
             MouseArea {
                 anchors.fill: parent
@@ -563,13 +570,11 @@ Item {
                   ? (root.battIcon() + " full")
                   : (root.battIcon() + " " + root.battPct + (root.battCharging ? "+" : ""))
             color: (root.battCrit || root.battWarn) ? root.notes.glitchPink
-                                                    : "#14141a"
+                                                    : root.notes.paletteFg
             opacity: (root.battWarn && !root.blinkOn) ? 0.3 : 1.0
             Behavior on opacity { NumberAnimation { duration: 400 } }
-            style: Text.Outline
-            styleColor: "#ffffff"
             font.family: "monospace"
-            font.pixelSize: 12
+            font.pixelSize: 14
             font.bold: true
             MouseArea {
                 anchors.fill: parent
@@ -584,12 +589,10 @@ Item {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: root.netGlyph(root.netKind) + " " + root.netLabel(root.netKind)
-            color: "#14141a"
+            color: root.notes.paletteFg
             opacity: root.netKind === "down" ? 0.5 : 1.0
-            style: Text.Outline
-            styleColor: "#ffffff"
             font.family: "monospace"
-            font.pixelSize: 12
+            font.pixelSize: 14
         }
 
         // The final barline — thin + thick black rules, closing the measure (𝄂).
@@ -627,7 +630,7 @@ Item {
             text: root.volMuted ? "muted" : (root.volSlider(root.volPct) + " " + root.volPct + "%")
             color: "#14141a"
             font.family: "monospace"
-            font.pixelSize: 12
+            font.pixelSize: 14
         }
     }
 
@@ -646,7 +649,7 @@ Item {
                 text: root.battBar(root.battPct) + " " + root.battPct + "%"
                 color: root.battWarn ? root.notes.paletteUrgent : "#14141a"
                 font.family: "monospace"
-                font.pixelSize: 12
+                font.pixelSize: 14
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter

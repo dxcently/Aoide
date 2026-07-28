@@ -56,9 +56,12 @@ lib.mkIf config.aoide.enable {
     partOf = [ "graphical-session.target" ];
 
     serviceConfig = {
-      # shellbridge is a sub-command of the aoide binary (skeleton). Agent B
-      # supplies the real implementation; referencing pkgs.aoide keeps eval
-      # clean independent of whether the binary is realised.
+      # shellbridge is a sub-command of the aoide binary. `--run` seeds the
+      # stage files, then binds the unix socket and serves commands on a
+      # blocking accept loop — a long-running foreground process, so the default
+      # Type=simple is correct (declared explicitly here) and keeps the unit
+      # active on the loop rather than treating an immediate return as done.
+      Type = "simple";
       ExecStart = "${pkgs.aoide}/bin/aoide shellbridge --run";
 
       Restart = "on-failure";

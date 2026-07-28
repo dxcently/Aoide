@@ -1,6 +1,6 @@
-# moonlight — Design Intent
+# sonata — Design Intent
 
-**Song:** moonlight (committed rice; the replay fixture)
+**Song:** sonata (committed rice; the replay fixture)
 **Palette:** a cool nocturne — deep indigo base, moonlit silver text, cyan accent
 **Cover:** none yet (v0)
 
@@ -8,8 +8,8 @@
 
 ## Why this song exists
 
-moonlight is the second committed song, added to prove replayability: any host
-in the fleet performs it with one line — `aoide.song = "moonlight";` — and the
+sonata is the second committed song, added to prove replayability: any host
+in the fleet performs it with one line — `aoide.song = "sonata";` — and the
 whole `aoide.notes` fan-out swaps with zero other edits. It is deliberately a
 distinct key from the shipped standard (Catppuccin Mocha) so the swap is
 obvious at a glance.
@@ -18,7 +18,7 @@ obvious at a glance.
 
 This song sets ONLY `aoide.notes`. It names no host, enables no facet or
 dendrite, touches no hardware or service. The venue (host) decides its
-instruments; moonlight carries only the notes. That is exactly what lets one
+instruments; sonata carries only the notes. That is exactly what lets one
 score be performed on any host with its own specifics and its own enabled
 facet/dendrite set (CONTRACTS.md §5).
 

@@ -42,18 +42,40 @@ QtObject {
     }
 
     // ── Generic command sender ─────────────────────────────────────────────
+    // Writes one newline-delimited JSON line to the shellbridge socket. If the
+    // socket is up, it goes out immediately; otherwise the line is queued and
+    // the connection is initiated — the queue flushes on connect. This is the
+    // ONLY outbound path from QML (no hyprctl / MCP / shell exec here).
     function sendCommand(obj) {
-        socket.sendTextMessage(JSON.stringify(obj) + "\n")
+        var line = JSON.stringify(obj) + "\n"
+        if (socket.connected) {
+            socket.write(line)
+            socket.flush()
+        } else {
+            socket._queue.push(line)
+            socket.connected = true // initiate connect; _queue flushes on connect
+        }
     }
 
     // ── Socket connection ──────────────────────────────────────────────────
-    // STUB: SockClient is the placeholder type; replace with the correct
-    // Quickshell unix-socket type once the Quickshell API is confirmed.
-    // The structure (send as text, handle onConnected/onDisconnected) is stable.
-    property var socket: QtObject {
-        // Placeholder: wired to a real Quickshell IpcSocket in the full impl.
-        function sendTextMessage(msg) {
-            console.log("[aoide/shellbridge] STUB send:", msg)
+    // Quickshell.Io.Socket (0.3.0): a real unix-domain client. `connected` is
+    // both the state and the trigger — set it true to connect. We connect on
+    // demand and stay connected; on any drop, `connected` goes false and the
+    // next sendCommand reconnects. shellbridge reads newline-delimited JSON and
+    // dispatches (e.g. hyprctl focuswindow) — no IPC is invented in QML.
+    property Socket socket: Socket {
+        path: root.socketPath
+        connected: false
+
+        // Lines queued while disconnected; drained once the link comes up.
+        property var _queue: []
+
+        onConnectedChanged: {
+            if (connected) {
+                while (_queue.length > 0)
+                    write(_queue.shift())
+                flush()
+            }
         }
     }
 }

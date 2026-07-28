@@ -104,13 +104,15 @@ Item {
     // (dockOpen → shown right away); closing is GATED by the timer: when the
     // hover union drops while unpinned, the timer arms and only its firing —
     // with dockOpen still false — retracts the panel. Re-entering the strip or
-    // the popup within the ~400 ms window cancels the hide, so crossing the
+    // the popup within the grace window cancels the hide, so crossing the
     // strip→panel gap (or briefly overshooting an edge) never flaps the dock.
+    // A generous 1.5 s grace so the dock lingers after a hover/selection
+    // instead of snapping shut the instant the pointer drifts off.
     property bool shown: false
 
     Timer {
         id: graceTimer
-        interval: 400
+        interval: 1500
         repeat: false
         onTriggered: {
             if (!root.dockOpen)
@@ -153,6 +155,11 @@ Item {
         // ambient gadgets (meters/power/clock) are bottom-seated, so the slab
         // now spans the full screen (minus edge margins) instead of wrapping.
         height: parent.height - 2 * root.edgeMargin
+        // CLIP the container: the DAG gadget's node labels / leader arcs can
+        // overflow the panel's right edge; when the panel is parked off-screen
+        // left that overflow bled back onto the wallpaper (12h25m, session ids,
+        // a stray leader). Confine every child to the panel bounds.
+        clip: true
 
         // Slide reveal: off-screen when closed, edgeMargin when open.
         x: root.shown ? root.edgeMargin
@@ -169,12 +176,14 @@ Item {
         // the gadgets/rows/pin beneath, but containsMouse still tracks the
         // pointer anywhere over the popup. Placed FIRST (lowest z) so the pin
         // button and gadget MouseAreas sit above it and receive their clicks.
-        MouseArea {
+        // A HoverHandler — NOT a MouseArea — tracks the pointer over the panel.
+        // A pointer handler reports `hovered` even when a child gadget/row
+        // MouseArea is under the cursor (a MouseArea would lose containsMouse to
+        // the child, dropping overPanel and starting the close). So hovering
+        // ANYTHING inside keeps the dock open; only a true exit arms the grace.
+        HoverHandler {
             id: panelHover
-            anchors.fill: parent
-            hoverEnabled: true
-            acceptedButtons: Qt.NoButton
-            onContainsMouseChanged: root.overPanel = containsMouse
+            onHoveredChanged: root.overPanel = hovered
         }
 
         // ── Pantheon wireframe-depth stack (container body) ────────────────

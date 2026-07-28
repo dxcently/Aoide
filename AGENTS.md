@@ -50,6 +50,9 @@ orchestrator may freely command its own spawned children) — then it auto-renam
 the node to the command and audits every outcome. `aoide conduct -- <cmd>` wraps
 any extra agent the same way; `AOIDE_NO_CONDUCT=1` is the per-terminal escape
 hatch. The desktop's terminals are a mesh of sessions a conductor speaks into.
+A killed terminal (`SIGKILL`/`SUPER+Q`) can never mark itself `done`, so a
+liveness reaper (`aoide graph reap`, on a ~12s systemd timer) sweeps dead
+sessions out-of-band — you never need to `graph prune` a stale session by hand.
 
 ## Tier 2 — stdio MCP (per-session, optional)
 

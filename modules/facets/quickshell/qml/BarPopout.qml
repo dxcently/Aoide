@@ -57,14 +57,17 @@ PopupWindow {
         notes: root.notes
         title: root.title
 
-        // WHITE-SHEET popout chrome — matches the sheet-music bar: an opaque
-        // white Aero-glass card with black outline/label ink. (The dock's panes
-        // leave these overrides unset and keep the song's wireframe palette.)
-        glassColor: Qt.rgba(1, 1, 1, 0.92)
+        // Glass popout chrome — matches the bar: a CREAM frosted card at 0.60
+        // (the compositor's blur_popups frosts behind it) with umber ink, so the
+        // now-playing / volume / battery / calendar popouts read as one glass
+        // with the bar and terminals. (The dock's panes leave these unset.)
+        glassColor: Qt.rgba(Qt.color(root.notes.paletteBg).r,
+                            Qt.color(root.notes.paletteBg).g,
+                            Qt.color(root.notes.paletteBg).b, 0.60)
         glassOpacity: 1.0
-        outlineColor: "#000000"
-        depthColor: "#000000"
-        labelColor: "#14141a"
+        outlineColor: root.notes.paletteFg
+        depthColor: root.notes.paletteFg
+        labelColor: root.notes.paletteFg
 
         Item {
             id: slot
