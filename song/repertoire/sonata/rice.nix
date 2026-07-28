@@ -14,7 +14,7 @@
 
     # ── Palette tier (base16 mapping — the painting's warm cream light) ────
     aoide.notes.palette = {
-      bg = "#f4ecdc"; # cream parchment       (base00)
+      bg = "#faf5ec"; # bright cream paper     (base00)
       fg = "#423420"; # deep umber ink        (base05)
       accent = "#4f74a0"; # dusty cornflower   (base0D)
       urgent = "#b0475f"; # muted rose        (base08)
@@ -32,8 +32,8 @@
     # burnt terracotta, ochre gold, sage green, teal, cornflower blue,
     # dusty plum, and warm brown. Slots follow the base16 standard.
     aoide.notes.base16 = {
-      base00 = "#f4ecdc"; # lightest bg — cream parchment
-      base01 = "#eaddc6"; # lighter bg (status)
+      base00 = "#faf5ec"; # lightest bg — bright cream paper (whiter)
+      base01 = "#f0e7d5"; # lighter bg (status)
       base02 = "#ddcaa6"; # selection
       base03 = "#b0997a"; # comments
       base04 = "#8a6f50"; # dark fg

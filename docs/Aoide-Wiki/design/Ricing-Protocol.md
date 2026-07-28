@@ -52,14 +52,25 @@ Two things to look at, side by side, on the live desktop:
 
 1. **Terminals and the shell UI agree on light/dark.** A rice keys
    `stylix.polarity` (`"light"` or `"dark"`) once; every surface must read as
-   the *same* polarity. The light key shipped this way: cream/parchment
+   the *same* polarity. The light key shipped this way: a bright cream
    Aero-glass terminal (kitty `background_opacity`) next to a cream
-   frosted-glass bar and its popouts at a *close* opacity (kitty 0.60, bar
-   0.58 — tuned down together from an initial 0.72 on both once the actual
-   desktop was looked at, not assumed matched from the numbers alone) —
-   checked by eye every time, because opacity + blur + gloss gradients can
-   each independently push a surface's apparent brightness away from its
-   declared polarity. "Close" beats "identical-on-paper but wrong on screen."
+   frosted-glass bar and its popouts at a *close* opacity — checked by eye
+   every time, because opacity + blur + gloss gradients can each independently
+   push a surface's apparent brightness away from its declared polarity.
+   "Close" beats "identical-on-paper but wrong on screen." The pair has been
+   re-tuned twice against the live desktop: first *down* together from 0.72 to
+   kitty 0.60 / bar 0.58 (too transparent — the warm painting bled through and
+   the surfaces read beige, not light), then back *up* to kitty 0.78 / bar 0.70
+   with the song's `base00` lifted `#f4ecdc → #faf5ec` and the bar frost lerped
+   ~42 % toward white — a *whiter* read, so the light surfaces sit clearly
+   above the wallpaper instead of taking its warm cast. The lesson is the same
+   either direction: the numbers alone never tell you; the eye tunes them.
+   hyprglass now glasses the **windows** too — `manage_window_blur = 1` in the
+   compositor facet extends the Liquid-Glass refraction/fresnel from the
+   quickshell layer surfaces onto the translucent terminal, so terminal and
+   shell wear one glass (the shader only paints visible translucent content, so
+   opaque windows are untouched). A `light { glass_opacity }` preset override
+   brightens that glass under the light polarity.
 2. **Widget colours match the bar.** Every gadget, popout, and dock surface
    pulls from the same `aoide.notes.*` roles the bar uses
    ([[Pantheon-Grammar]]'s glyph/role grammar: `wireCyan`, `holoBlue`,
