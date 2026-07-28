@@ -14,13 +14,13 @@ Before the familiar nine, Greek tradition (Pausanias, describing the cult at Mou
 
 | Muse | Greek | Domain | In this system |
 |---|---|---|---|
-| **Aoide** | Ἀοιδή | song, voice | the desktop itself — the running, performing system |
+| **Aoide** | Ἀοιδή | song, voice | the running, performing system — the orchestration core singing, whether headless or as the full AoideOS desktop (not "the desktop" as such: the core runs shell-only too) |
 | **Melete** | Μελέτη | practice, exercise | [[Melete]] — the bundled coding agent, the **doer**: it practices, writes, builds, rehearses |
 | **Mneme** | Μνήμη | memory | [[Mneme]] — the bundled knowledge server, the **rememberer**: the vault, the wiki, what was learned |
 
 The selection is the thesis: **song is what happens when practice and memory perform together.** A desktop that rices itself needs an actor that does (Melete), a store that remembers (Mneme), and a body that sings what they make (Aoide). The three original Muses are reunited as one system — the software wears the oldest names for the three faculties it actually has.
 
-This is why Melete and Mneme are not "integrations" bolted on; they are the other two thirds of the name. [[Feature-Set]] ships them in the box, the nucleus carries a melete-adapter, and the wiki you are reading is Mneme's domain.
+The naming is a **theme**, though — not an architectural claim. Melete and Mneme are **independently-owned systems** Aoide integrates and launches (the nucleus carries a melete-adapter; `pkgs/{melete,mneme}` are launchers for their self-updating runtimes; the wiki you are reading is served through Mneme). They are the other two thirds of the *name*; they are not sub-components of the Aoide program, and the arrow can run the other way — `melete aoide …` means Melete drives Aoide. The three-Muses trio is why the words fit, not proof the software is one binary.
 
 ## Architecture is frozen music
 

@@ -6,11 +6,12 @@ tags: [aoide, extensibility, declarative, widget, agent]
 
 # Widget Maker — Extensible & Declarative by Construction
 
-The truest description of Aoide: a **specialized widget maker for your system** —
-a platform whose whole job is to integrate whatever you see fit and surface it as
-a widget, a command, or a system hook. It ships useful features (see
-[[Feature-Set]]), but those are exemplars. The real product is the **ability to
-make more of them, on demand, declaratively.**
+The headline capability of **AoideOS** (the distribution — not the shell-only
+Aoide core, whose job is orchestration): a **specialized widget maker for your
+system** — a platform whose whole job is to integrate whatever you see fit and
+surface it as a widget, a command, or a system hook. It ships useful features
+(see [[Feature-Set]]), but those are exemplars. The real product is the
+**ability to make more of them, on demand, declaratively.**
 
 ## Why Aoide can do this: the agent is a coding agent
 

@@ -12,6 +12,22 @@ itself — building, testing, orchestrating, and adjusting the framework and its
 desktop. It is the sibling of [[AOIDE-HANDOFF]] (the original design contract)
 and is scoped narrower than it is broad: read it fully before touching the repo.
 
+> **What Aoide is — don't conflate (the canonical framing).** **Aoide** is an
+> agent-**orchestration core**: bridges and APIs across terminal, shell, system,
+> and OS so any shell-capable agent can command any other; it runs anywhere
+> there's a shell, headless included (`conduct`/`graph`/`baton` in the Rust
+> binary). **AoideOS** is the **NixOS distribution** built on that core, adding
+> the Quickshell widget-maker and the drachma/rice theming engine — *that* layer
+> is the "specialized widget maker," not the core. Aoide **integrates and
+> launches** external, independently-owned systems — the claude CLI as the
+> primary agent, and **Melete** (coding harness) + **Mneme** (knowledge server)
+> via adapters/launchers — it does **not** vendor their code, and `melete aoide
+> …` means Melete can drive Aoide (the arrow runs both ways). The three-Muses
+> naming (Aoide·Melete·Mneme) is a *theme*, not a claim they are one program.
+> When you write docs or comments: a shell-only capability is "Aoide"; anything
+> needing Quickshell/rice/desktop is "AoideOS"; Melete/Mneme are "integrated,"
+> never "bundled/vendored."
+
 > **Two different agents, two different domains.** The *rice agent* (`aoide rice
 > gen …`) is constrained to `song/` by house rule #1 in `AGENTS.md`. **You are
 > not that agent.** You are the *development agent*: your domain is the whole

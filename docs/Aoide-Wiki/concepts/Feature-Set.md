@@ -6,12 +6,15 @@ tags: [aoide, features, integration, melete, mneme]
 
 # Feature Set — Batteries Included
 
-What a fresh Aoide fork comes with. Aoide is not just a compositor + shell: it
-ships the whole personal-computing stack wired together — the desktop
-([[Desktop-Architecture]]), the orchestrator ([[aoided]]), the agent + coding
-harness **[[Melete]]**, and the knowledge server **[[Mneme]]** — and it exposes
-every one of their capabilities through the same system hooks (event stream →
-adapters → widgets; [[Agent-Interface|CLI trunk + MCP façade]]).
+What a fresh **AoideOS** fork comes with. AoideOS is not just a compositor +
+shell: it wires the whole personal-computing stack together — the desktop
+([[Desktop-Architecture]]) and orchestrator ([[aoided]]) it **owns**, plus the
+independently-owned coding harness **[[Melete]]** and knowledge server
+**[[Mneme]]** it **integrates and launches** (adapters + launchers, not vendored
+code) — and it exposes every one of their capabilities through the same system
+hooks (event stream → adapters → widgets; [[Agent-Interface|CLI trunk + MCP
+façade]]). Many capabilities below are Melete's, *surfaced* through AoideOS —
+see the "Provided by" column.
 
 Every integration is a dendrite ([[Snowflake-Anatomy]]): opt-in, flag-toggled,
 themed by [[Notes|notes]], and — where it touches the outside world —
