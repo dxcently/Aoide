@@ -414,7 +414,13 @@ Item {
         text: "𝄞"
         color: root.notes.paletteFg
         font.family: "monospace"
-        font.pixelSize: 20
+        // The treble clef glyph is TALL (big loop + descender tail); at 20px it
+        // clipped against the 36px strip's top/bottom. 16px + vertical-fit keeps
+        // the whole clef inside the bar without an apron/overhang.
+        font.pixelSize: 16
+        verticalAlignment: Text.AlignVCenter
+        fontSizeMode: Text.VerticalFit
+        height: root.stripHeight
         font.bold: true
         MouseArea {
             anchors.fill: parent
