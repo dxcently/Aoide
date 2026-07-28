@@ -47,7 +47,7 @@ That is the complete install. No dotfile manager, no separate bootstrap script.
 
 Merge hygiene is enforced by a merge-base divergence lint inside `aoide update` plus a commit-hook warning on edits to inherited files. Path guards are not used; provenance is the mechanism.
 
-Contract-breaking changes (note schema, dendrite shape, stage file formats) are versioned in `CONTRACTS.md`. `aoide update` detects contract bumps and routes them through the update playbook before the rebuild can discover them.
+Contract-breaking changes (drachma schema, dendrite shape, stage file formats) are versioned in `CONTRACTS.md`. `aoide update` detects contract bumps and routes them through the update playbook before the rebuild can discover them.
 
 ## Related
 

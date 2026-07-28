@@ -10,13 +10,13 @@
 
 sonata is the second committed song, added to prove replayability: any host
 in the fleet performs it with one line — `aoide.song = "sonata";` — and the
-whole `aoide.notes` fan-out swaps with zero other edits. It is deliberately a
+whole `aoide.drachma` fan-out swaps with zero other edits. It is deliberately a
 distinct key from the shipped standard (Catppuccin Mocha) so the swap is
 obvious at a glance.
 
 ## Host-agnostic by construction
 
-This song sets ONLY `aoide.notes`. It names no host, enables no facet or
+This song sets ONLY `aoide.drachma`. It names no host, enables no facet or
 dendrite, touches no hardware or service. The venue (host) decides its
 instruments; sonata carries only the notes. That is exactly what lets one
 score be performed on any host with its own specifics and its own enabled

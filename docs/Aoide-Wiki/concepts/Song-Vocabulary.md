@@ -30,7 +30,7 @@ Every term maps to a literal path inside `song/` (which lives at `~/Aoide/song`;
 | backstage | runtime plumbing (gitignored) | `backstage/` |
 | auditions | propose gate (gitignored) | `auditions/` |
 | the standard | shipped default rice | `modules/rime/default/` |
-| rehearsal | preview (`stage/notes.json`, hot-reload) | — |
+| rehearsal | preview (`stage/drachma.json`, hot-reload) | — |
 | recording | adopt — durable, committed, rebuilt | — |
 | venue | host — its own specifics and enabled instruments | `hosts/<host>/` |
 | replay | perform an existing song at a new venue | `aoide.song = "<name>";` in host config |
@@ -50,7 +50,7 @@ A full-orchestration rice addresses all six dimensions:
 | chimes | Notification and system sounds |
 | cover | Wallpaper |
 
-Everything app-side is a [[Stylix]] target — `rice.nix` feeds the scheme once and it fans out to every nix-manageable app. Everything shell-side is a [[Quickshell]] widget — one runtime reading `stage/notes.json` means nearly the full arrangement hot-reloads at rehearsal.
+Everything app-side is a [[Stylix]] target — `rice.nix` feeds the scheme once and it fans out to every nix-manageable app. Everything shell-side is a [[Quickshell]] widget — one runtime reading `stage/drachma.json` means nearly the full arrangement hot-reloads at rehearsal.
 
 ## Replay — any song, any host
 

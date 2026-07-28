@@ -15,9 +15,9 @@ Aoide ships the rice engine as a builtin. The engine provides the loop, the sche
 ```
 aoide rice gen <prompt|wallpaper>
     ↓  reads songbook/ first, always
-rice lint                   (note schema validation)
+rice lint                   (drachma schema validation)
     ↓  fail → reject + songbook note
-rice preview                (ephemeral: stage/notes.json)
+rice preview                (ephemeral: stage/drachma.json)
     ↓  quickshell hot-reload · hyprctl · terminal OSC
 aoide rice adopt <name>     (User gates this step)
     ↓  committed to song/repertoire/<song>/
@@ -80,7 +80,7 @@ Songs self-register via the `song/repertoire/` walk in `lib/mkHost.nix`; each so
 ```
 song/repertoire/<song>/
 ├── rice.nix      pure nix: notes import + config swaps
-├── notes.json    note values
+├── drachma.json    note values
 ├── liner/        design wiki: intent, palette rationale, log
 └── assets/       song-specific art and references
 ```

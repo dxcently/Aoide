@@ -2,7 +2,7 @@
 #
 # Every other module (dendrites, facets, rime) builds against the options
 # declared here. This is versioned in CONTRACTS.md (note schema v0). Facets
-# read ONLY `aoide.notes` and `aoide.surfaces`; no module reads another
+# read ONLY `aoide.drachma` and `aoide.surfaces`; no module reads another
 # module. The coupling discipline is enforced by lib/checks.nix, not by
 # politeness.
 #
@@ -167,13 +167,15 @@ in
       '';
     };
 
-    # ── Note seam (v0 schema) — the ONLY thing facets read ─────────────────
-    notes = mkOption {
+    # ── Drachma seam (v0 schema) — the ONLY thing facets read ──────────────
+    drachma = mkOption {
       description = ''
-        The v0 note schema — the single seam between the frozen nix layer
-        and the live desktop. Facets consume this and nothing else. Notes are
-        Aoide's design-token layer; the container remains the W3C
-        design-tokens format. Versioned as "note schema v0" in CONTRACTS.md.
+        The v0 drachma schema — the single seam between the frozen nix layer
+        and the live desktop. Facets consume this and nothing else. Drachma IS
+        Aoide's design-token layer: the tokens themselves, named for the coin
+        the mint stamps — "notes" and "drachma" are one thing, not a values/
+        engine split. The container remains the W3C design-tokens format.
+        Versioned as "drachma schema v0" in CONTRACTS.md.
       '';
       default = { };
       type = types.submodule {
@@ -191,7 +193,7 @@ in
               semantics). When set, the Stylix facet bakes this scheme for
               terminals/editors/GTK instead of synthesising one from the
               4-anchor palette. The palette tier still drives the live
-              (stage/notes.json) side; keep the two in the same key.
+              (stage/drachma.json) side; keep the two in the same key.
             '';
           };
           bar = mkOption {

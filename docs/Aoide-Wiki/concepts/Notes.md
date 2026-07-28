@@ -5,18 +5,18 @@ tags: [aoide, notes, theming]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
 
-# Notes — the Seam Between Score and Performance
+# Notes — the Seam Between Score and Performance (now: drachma)
 
-Notes are where the frozen nix layer and the live desktop meet: values frozen into the crystal, sounded at runtime. They are Aoide's design-token layer — the container stays W3C design-tokens format, the term is notes. The note package is implemented as a standalone package with no external runtime dependencies.
+This seam is where the frozen nix layer and the live desktop meet: values frozen into the crystal, sounded at runtime. They are Aoide's design-token layer — the container stays W3C design-tokens format. **The canonical name is now `drachma`** (per khoa): "notes" and "drachma" are one thing, not a values-vs-engine split — the tokens ARE drachma, named for the coin the mint stamps, and the same word names the package that resolves/lints/emits them. "Notes" survives only as the musical image (Aoide = song); the option is `aoide.drachma`, the runtime file is `stage/drachma.json`, and the package ([[drachma]]) is a standalone Node package with no external runtime dependencies.
 
 ## Note Package Contents
 
-The note package (`aoide.notes` nix option) contains:
+The note package (`aoide.drachma` nix option) contains:
 
 - **Resolver** — tiered reference resolution (palette → semantic → component).
 - **Schema lint** — validates note files; `rice lint` calls this before any preview.
 - **Live-side emitters** — three targets:
-  - `stage/notes.json` for [[Quickshell]] (QML reads this file; hot-reload at rehearsal).
+  - `stage/drachma.json` for [[Quickshell]] (QML reads this file; hot-reload at rehearsal).
   - `hyprctl` dispatcher for compositor properties.
   - Terminal OSC sequences for color scheme injection.
 
@@ -26,7 +26,7 @@ Every facet consumes notes and nothing else. No module reads another module. The
 
 ```
 notes (single source)
-    ├── stage/notes.json  →  Quickshell + hyprctl + terminal OSC  (rehearsal / live)
+    ├── stage/drachma.json  →  Quickshell + hyprctl + terminal OSC  (rehearsal / live)
     └── rice.nix → Stylix  →  every nix-manageable app             (recording / adopted)
 ```
 
@@ -50,7 +50,7 @@ Style Dictionary and the W3C design-tokens format already provide tiered referen
 
 ## Provisional v0 Schema
 
-Until the design-system v1 lands, the engine builds against a provisional note schema v0 inside the W3C design-tokens container:
+Until the design-system v1 lands, the engine builds against a provisional drachma schema v0 inside the W3C design-tokens container:
 
 - Palette: `bg`, `fg`, `accent`, `urgent` (base16 values).
 - Component overrides: `bar.*`, `notif.*`, `window.*`.

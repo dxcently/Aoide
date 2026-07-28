@@ -9,7 +9,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Base16-driven whole-system theming; Aoide's "baked fan-out" engine. `rice.nix` feeds a single scheme into Stylix — `base16Scheme`, fonts, cursor, and wallpaper — and Stylix propagates it to every nix-manageable target: terminal, GTK/Qt, icons, cursor, editors, browser, and boot.
 
-Stylix is the recording side of the two-fan-out model. `stage/notes.json` is the rehearsal side. Both derive from the same note source, so preview and adopted state cannot diverge.
+Stylix is the recording side of the two-fan-out model. `stage/drachma.json` is the rehearsal side. Both derive from the same note source, so preview and adopted state cannot diverge.
 
 Surface ownership is enforced: the Quickshell facet declares which surfaces it owns, and Stylix's options disable derive from that declaration. The flake's `checks` assert that no surface has two owners, catching overlap at eval time rather than at runtime.
 
@@ -33,7 +33,7 @@ The base16 scheme is **synthesised** from the v0 palette (bg→base00, fg→base
 accent→base0D, urgent→base08, with the resolved component tier informing
 surface-adjacent slots) — a provisional derivation. v1's design-system work
 replaces this synthesis with a real 16-colour derivation. That said, songs
-may also supply the full sixteen slots directly as `aoide.notes.base16`
+may also supply the full sixteen slots directly as `aoide.drachma.base16`
 (bypassing synthesis) — the hero song does, keyed by hand from its wallpaper;
 see [[design/Ricing-Protocol|the Ricing Protocol]].
 

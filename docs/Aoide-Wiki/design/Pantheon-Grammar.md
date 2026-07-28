@@ -146,7 +146,7 @@ The Pantheon effect at full strength:
 ## Round 4 — the multicolor field + the bar joins (2026-07-27)
 
 - **base16 through the note seam**: the stage notes carry an optional
-  all-or-nothing `base16` block (drachma-validated). NoteState maps four
+  all-or-nothing `base16` block (drachma-validated). DrachmaState maps four
   semantic roles from it — `wireCyan` (base0C, structural outlines/leaders),
   `holoBlue` (base0D, depth-stack back copies + link callouts), `violet`
   (base0E, DAG project volumes), `glitchPink` (base08, urgent/glitch) — each
@@ -231,7 +231,7 @@ rotation — a small liveliness fix, same kaomoji set.
 **The wallpaper survives a rebuild.** The wallpaper layer used to lose its
 image after every rebuild because nothing re-seeded the live
 `stage/cover.json` from the song's baked wallpaper. Fixed by exporting
-`AOIDE_WALLPAPER=${config.aoide.notes.wallpaper}` on the Quickshell facet's
+`AOIDE_WALLPAPER=${config.aoide.drachma.wallpaper}` on the Quickshell facet's
 systemd unit (null wallpaper → no env, degrading cleanly) — `AoideWallpaper`
 reads it on boot as the seed, with the live stage file still free to override
 it at rehearsal.

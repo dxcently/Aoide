@@ -12,7 +12,7 @@
 # flow (concepts/Desktop-Architecture).
 #
 # Reading discipline (CONTRACTS.md §1):
-#   - Reads ONLY aoide.notes (palette + component tiers).
+#   - Reads ONLY aoide.drachma (palette + component tiers).
 #   - Component-tier fallback applied locally.
 #   - NEVER reads song/ runtime paths (checks.no-song-read enforced structurally).
 {
@@ -23,7 +23,7 @@
 }:
 let
   cfg = config.aoide.facets.compositor;
-  t = config.aoide.notes;
+  t = config.aoide.drachma;
 
   # ── Component-tier fallback helpers ────────────────────────────────────────
   # No hex lives here by design (CONTRACTS.md §1/§5): the facet is host- and
@@ -61,7 +61,7 @@ let
   # during rehearsal to live-patch these values without a rebuild.
   hyprNoteConfig = ''
     # ── Aoide notes — compositor facet ───────────────────────────────────
-    # Generated from aoide.notes at build time; live-patched by the drachma
+    # Generated from aoide.drachma at build time; live-patched by the drachma
     # emitter during rice preview (hyprctl keyword).
 
     general {

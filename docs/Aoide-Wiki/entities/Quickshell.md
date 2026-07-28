@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 The shell and UI runtime for Aoide, written in QML. It renders the complete shell surface: workspaces bar (with agent sessions and connection state), notification daemon (implementing `org.freedesktop.Notifications` natively), agent widgets, launcher, OSD, lockscreen, greeter, and wallpaper layer. This replaces the swaync / rofi / hyprlock / swww zoo with a single runtime.
 
-Quickshell reads `stage/notes.json` at runtime, so nearly the full arrangement — colors, typography, geometry, shell widgets — hot-reloads during rehearsal (preview) without a rebuild. GTK/Qt targets require app restarts and are adopt-only for preview purposes.
+Quickshell reads `stage/drachma.json` at runtime, so nearly the full arrangement — colors, typography, geometry, shell widgets — hot-reloads during rehearsal (preview) without a rebuild. GTK/Qt targets require app restarts and are adopt-only for preview purposes.
 
 Communication discipline: Quickshell reads state files from shellbridge and issues commands via the unix socket. It never speaks an agent protocol or MCP directly.
 
@@ -19,7 +19,7 @@ A Quickshell NotificationServer spike (actions + inline reply) is planned for th
 ## Implementation (walking skeleton, commit f3ceadf)
 
 The QML skeleton is shipped in `modules/facets/quickshell/qml/`. Two singletons
-carry the shared session state: **`NoteState`** watches `stage/notes.json` via a
+carry the shared session state: **`DrachmaState`** watches `stage/drachma.json` via a
 `FileView` and re-binds every surface's colours in one pass on an atomic
 replace (the hot-reload); **`ShellBridge`** is the unix-socket client — the sole
 outbound channel from QML (`focusSession(address)` → shellbridge → hyprctl), no
@@ -45,7 +45,7 @@ Two registered surfaces have since grown real bodies, bringing the registry to
 
 - **`sessionGraph`** (surface #9, `AoideSessionGraph.qml` + `GraphRow.qml`) —
   an overlay hot-reloading `song/stage/graph.json` on the same
-  `FileView` pattern as `NoteState`, rendering the [[Session-Graph]] DAG as an
+  `FileView` pattern as `DrachmaState`, rendering the [[Session-Graph]] DAG as an
   indented tree. Since 8f4034e it is **dormant** — no keybind, bridge-only —
   kept for a future full-screen DAG view.
 - **`agentWidgets`** — no longer empty: it is the [[Gadget-Dock]], a

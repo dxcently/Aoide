@@ -99,9 +99,9 @@ trail but exit 64 today.
        │                       ▼                         │
        ▼                  index (points in           resolves
   song/repertoire/<song>   place, never copies)          │
-  rice.nix + notes.json                                  ▼
+  rice.nix + drachma.json                                  ▼
   songbook/ (write-back)                          ┌─────────────┐
-       │                                          │    NOTES    │  aoide.notes — one source
+       │                                          │    NOTES    │  aoide.drachma — one source
        └───────────────────────────────────────► └──────┬──────┘  [[Notes]]
                                     two fan-outs         │
                        ┌─────────────────────────────────┴───────────────┐
@@ -109,10 +109,10 @@ trail but exit 64 today.
         drachma emit {stage · hyprctl · osc}       rice.nix → facets + [[Stylix]]
           │              │            │                               │
           ▼              ▼            ▼                               ▼
-  song/stage/notes.json  hyprctl    terminal OSC        hyprland.conf · QML colors ·
+  song/stage/drachma.json  hyprctl    terminal OSC        hyprland.conf · QML colors ·
           │              keywords   (color inject)      base16 for every nix app
           ▼
-   Quickshell — NoteState.qml watches the stage file (hot-reload)
+   Quickshell — DrachmaState.qml watches the stage file (hot-reload)
    [[Quickshell]]
       │  ▲
       │  └── reads song/stage/{sessions,hooks,graph}.json (roster + DAG surfaces)
@@ -136,7 +136,7 @@ draws.
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`~/Aoide/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped default | `song/repertoire/<song>/`; songbook append; preview | stubbed (`rice lint` real)                 |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all verbs exit 64)                |
-| [[Notes]]            | `aoide.notes` (palette + component tiers)      | `song/stage/notes.json`; baked facet + Stylix values | implemented (v0)                           |
+| [[Notes]]            | `aoide.drachma` (palette + component tiers)      | `song/stage/drachma.json`; baked facet + Stylix values | implemented (v0)                           |
 | [[shellbridge]]      | unix-socket commands; Hyprland IPC             | atomic JSON in `song/stage/`; `hyprctl` dispatch    | implemented (accept loop live: `focuswindow`) |
 | [[Quickshell]]       | `song/stage/*.json` (incl. notes)              | widget socket commands; rendered surfaces           | implemented (QML skeleton, 9 surfaces)     |
 | [[Hyprland]]         | baked config + `hyprctl` keywords              | IPC event/state socket                              | implemented (greetd stubbed)               |
@@ -145,25 +145,25 @@ draws.
 ## The note seam in detail — one source, two fan-outs, zero drift
 
 Why preview and adopted state can never diverge: both derive from the same
-`aoide.notes` values. Note schema v0 (palette `bg/fg/accent/urgent` + component
+`aoide.drachma` values. Note schema v0 (palette `bg/fg/accent/urgent` + component
 tiers `bar`/`notif`/`window`, each field `null` → palette, with the fallback
 applied **in the facets**) rides the external W3C design-tokens container
 format; [[drachma]] (Node, wrapping Style Dictionary; bins `lint` /
 `resolve` / `emit {stage,hyprctl,osc}`) is the engine. See [[Notes]].
 
 ```
-                     aoide.notes  (palette → component, v0)
+                     aoide.drachma  (palette → component, v0)
                            │  single source of truth
              ┌─────────────┴──────────────┐
              ▼ REHEARSAL (live, gitignored) ▼ RECORDING (adopted, committed)
    drachma emit                     rice.nix ──► facets + Stylix
-   ├─ stage: song/stage/notes.json           │   (values baked at nix build)
+   ├─ stage: song/stage/drachma.json           │   (values baked at nix build)
    │         (atomic write; fully resolved)  ▼
    ├─ hyprctl: keyword dispatch         every nix-manageable target
    └─ osc: terminal color inject        GTK/Qt · terminal · editors
              │                          · browser · boot  (needs rebuild)
              ▼
-   Quickshell hot-reload (NoteState.qml)
+   Quickshell hot-reload (DrachmaState.qml)
 ```
 
 Rehearsal is the sketch (hot-reloads, no rebuild); recording is the truth
@@ -175,7 +175,7 @@ The baked side is carried by the three facets, all real:
 - **quickshell** — declares nine surfaces with `owner = "quickshell"` (bar,
   notifications, launcher, osd, lockscreen, greeter, wallpaper, agentWidgets,
   sessionGraph); QML installed to `~/Aoide/qml` via home-manager;
-  `NoteState.qml` watches the stage file for the live fan-out. Two surfaces
+  `DrachmaState.qml` watches the stage file for the live fan-out. Two surfaces
   have real bodies: agentWidgets is the [[Gadget-Dock]] — the
   Win7-sidebar-homage gadgets (terminal roster, compact DAG, clock, CPU/RAM
   meters), since 8f4034e a left-edge pinnable popup on hot-edge hover or
@@ -207,7 +207,7 @@ through the live fan-out, and only commits through the gate. See
   rice lint   ──fail──►  reject + songbook note
         │ pass
         ▼
-  rice preview   ──►  song/stage/notes.json  ──►  Quickshell hot-reload · hyprctl · OSC
+  rice preview   ──►  song/stage/drachma.json  ──►  Quickshell hot-reload · hyprctl · OSC
         │                                         (REHEARSAL — nothing committed)
         ▼
   aoide rice adopt <name>   ◄─── User gates this step
@@ -341,7 +341,7 @@ Runtime dirs (`song/{stage,backstage,auditions}`, root `log`, `index/`,
 versioned score, legitimately walked at eval.
 
 `hosts/` knows dendrites; dendrites never know hosts. Facets read only
-`aoide.notes` (and declare `aoide.surfaces`); no module reads another module.
+`aoide.drachma` (and declare `aoide.surfaces`); no module reads another module.
 The coupling discipline is contractual — the flake's checks (`surface-ownership`,
 `no-song-read`, `song-shape`, plus building both packages, plus the `vm-boot`
 headless boot of the assembled stack) fail eval on violation, not polite.

@@ -28,7 +28,7 @@ The engraved thesis (after Goethe's *"Architektur ist erstarrte Musik"* — arch
 
 - **The frozen half** — the nix layer. Immutable, crystalline, evaluated. It is the **score**: it determines everything and performs nothing.
 - **The performed half** — the running desktop. Live, hot-reloadable, ephemeral. It is the **performance**: what the score sounds like tonight, at this venue.
-- **The seam** — [[Notes]]. Note values are frozen into the crystal at build time *and* sounded live at runtime (`stage/notes.json`, hyprctl, OSC). Both fan-outs derive from the same `aoide.notes`, so the baked theme and the live preview cannot drift.
+- **The seam** — [[Notes]]. Note values are frozen into the crystal at build time *and* sounded live at runtime (`stage/drachma.json`, hyprctl, OSC). Both fan-outs derive from the same `aoide.drachma`, so the baked theme and the live preview cannot drift.
 
 Each half gets its own word family, so you always know which side of the seam a sentence is standing on.
 
@@ -69,7 +69,7 @@ A few terms name the connective tissue rather than either half:
 
 - **door** — an entry point into the one dispatch layer: `cli`, `mcp`, `daemon` (and the TUI rides the cli door). Every operation enters through a door and exits into the one audit log. One body, several doors.
 - **gate** — the rebuild gate ([[Rebuild-Gate]]): agents propose, the human admits. The single point where the performed half is allowed to re-freeze the crystal.
-- **drachma** — the token engine ([[drachma]], `pkgs/drachma`): the Greek coin, for the design tokens it handles. Notes are the values; drachma mints, validates, and emits them (`stage/notes.json`, hyprctl, OSC).
+- **drachma** — the design tokens AND the engine that mints them ([[drachma]], `pkgs/drachma`): the Greek coin, one name for the whole token layer. "Notes" and "drachma" are one thing (not a values-vs-engine split): the tokens are drachma, resolved/validated/emitted by drachma (`stage/drachma.json`, hyprctl, OSC).
 - **baton** — the conductor's tool: `aoide baton`, the TUI that watches the ensemble of running agent terminals and cues between them, with Hyprland as the multiplexer (real windows, not panes). The wider **conductor-class** covers every surface with that duty — the Terminal Commander widget, the DAG gadget, the baton. See [[Terminal-Commander]], [[Session-Graph]]. (Prior art for the behavior: the herdr multiplexer — an external tool, not part of this vocabulary.)
 - **wiki / vault** — Mneme's memory surfaces: this wiki for design context, the vault for content.
 
@@ -79,7 +79,7 @@ One loop, told in the vocabulary:
 
 1. **Melete practices.** The agent writes — a new song in `song/repertoire/`, a new dendrite branch, a new widget. Everything it does enters through a door and lands in the audit log.
 2. **The walker freezes.** The nix layer picks up what was written by accretion — dendrites and songs self-register, no import lists — and the score now contains it.
-3. **Rehearsal sounds it.** Before any rebuild, the live side performs the notes from `stage/notes.json` — quickshell surfaces and hyprctl repaint in place. The frozen side is untouched; this is the performance testing the score.
+3. **Rehearsal sounds it.** Before any rebuild, the live side performs the notes from `stage/drachma.json` — quickshell surfaces and hyprctl repaint in place. The frozen side is untouched; this is the performance testing the score.
 4. **The gate records it.** If the human admits the rebuild, the rehearsed state is recorded — baked through the stylix facet and the compositor, committed to the fork. Rehearsal and recording derive from the same notes, so they cannot disagree.
 5. **Mneme remembers.** The liner and songbook take the design decisions; the wiki takes the architecture; the next practice session starts from memory instead of from zero.
 6. **Aoide sings.** The desktop is the sum of frozen score and live performance — and the loop starts again, one radial layer at a time.

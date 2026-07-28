@@ -7,7 +7,7 @@
 //
 // Reading discipline (CONTRACTS.md §1 / entities/Quickshell):
 //   - Hot-reloads from song/stage/graph.json via a FileView, exactly like
-//     NoteState watches notes.json (atomic write-temp-then-rename → onTextChanged
+//     DrachmaState watches drachma.json (atomic write-temp-then-rename → onTextChanged
 //     fires → bindings recompute in one pass). Tolerant of the file being
 //     absent: empty state prompts `aoide graph emit`.
 //   - Colors come ENTIRELY from notes (no hardcoded hex). State → color map:
@@ -139,7 +139,7 @@ Item {
         }
     }
 
-    // ── File watcher — atomic hot-reload (mirrors NoteState) ───────────────
+    // ── File watcher — atomic hot-reload (mirrors DrachmaState) ───────────────
     // Tolerant of graph.json being absent: reload() on a missing path leaves
     // `graph` at its empty default, so the overlay shows the empty prompt.
     FileView {

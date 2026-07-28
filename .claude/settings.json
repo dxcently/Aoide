@@ -1,0 +1,44 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "a=/home/khoa/Aoide/.claude/worktrees/devtools-dendrites/result-aoide/bin/aoide; [ -x \"$a\" ] || a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "a=/home/khoa/Aoide/.claude/worktrees/devtools-dendrites/result-aoide/bin/aoide; [ -x \"$a\" ] || a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "a=/home/khoa/Aoide/.claude/worktrees/devtools-dendrites/result-aoide/bin/aoide; [ -x \"$a\" ] || a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "a=/home/khoa/Aoide/.claude/worktrees/devtools-dendrites/result-aoide/bin/aoide; [ -x \"$a\" ] || a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}

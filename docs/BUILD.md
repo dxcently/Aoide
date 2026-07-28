@@ -22,7 +22,7 @@ no import list. To add a module, drop a file in the right layer:
 
 - `modules/nucleus/` — core, applies unconditionally (no `mkIf`).
 - `modules/dendrites/` — opt-in features, guarded on a flag.
-- `modules/facets/` — render surfaces, read `aoide.notes` only.
+- `modules/facets/` — render surfaces, read `aoide.drachma` only.
 - `modules/rime/` — rice engine + shipped default rices.
 
 **Shelving opt-out:** any path containing `/_` is skipped. Prefix a
@@ -40,10 +40,10 @@ none of them except your own dendrite/facet flags.
 | `aoide.enable`                 | bool                         | framework master switch |
 | `aoide.song`                   | str (default `"default"`)    | the song this host performs; names a `song/repertoire/<name>/` (or the shipped standard) |
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` fork |
-| `aoide.notes.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
-| `aoide.notes.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
-| `aoide.notes.notif.{bg,fg,urgent}` | nullOr hex              | component override; null → palette |
-| `aoide.notes.window.{border,borderInactive}` | nullOr hex     | component override; null → palette |
+| `aoide.drachma.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
+| `aoide.drachma.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
+| `aoide.drachma.notif.{bg,fg,urgent}` | nullOr hex              | component override; null → palette |
+| `aoide.drachma.window.{border,borderInactive}` | nullOr hex     | component override; null → palette |
 | `aoide.surfaces.<name>.owner`  | str                          | surface-ownership registry |
 | `aoide.mcp.enable`             | bool (default false)         | MCP façade toggle |
 | `aoide.auditLog`               | str (default `/home/<user>/Aoide/log`) | single audit log |
@@ -76,14 +76,14 @@ hosts.
 
 ## Authoring a facet (Wave 1 — render surfaces)
 
-A facet renders appearance. It reads **only** `aoide.notes`, and if it owns a
+A facet renders appearance. It reads **only** `aoide.drachma`, and if it owns a
 surface it declares that in `aoide.surfaces`. Apply component fallbacks yourself.
 
 ```nix
 # modules/facets/quickshell/default.nix
 { config, lib, ... }:
 let
-  t = config.aoide.notes;
+  t = config.aoide.drachma;
   # component-tier fallback: null → palette (see CONTRACTS.md §1)
   barBg = if t.bar.bg != null then t.bar.bg else t.palette.bg;
 in
@@ -123,7 +123,7 @@ self-gates on `aoide.song`:
 { lib, config, ... }:
 {
   config = lib.mkIf (config.aoide.song == "moonlight") {
-    aoide.notes.palette = { bg = "#0b1021"; fg = "#c8d3f5"; accent = "#82aaff"; urgent = "#ff757f"; };
+    aoide.drachma.palette = { bg = "#0b1021"; fg = "#c8d3f5"; accent = "#82aaff"; urgent = "#ff757f"; };
     # component tier (bar/notif/window) — null falls back to palette
   };
 }
@@ -133,7 +133,7 @@ Replay it on any host with **one line** in `hosts/<host>/default.nix`:
 `aoide.song = "moonlight";`. Naming no song performs song `"default"` — the
 shipped standard (`modules/rime/default/rice.nix`).
 
-**Host-agnostic rules (CONTRACTS.md §5):** a song sets ONLY `aoide.notes` (and,
+**Host-agnostic rules (CONTRACTS.md §5):** a song sets ONLY `aoide.drachma` (and,
 later, cover/chime refs inside `song/`). It NEVER sets host options (monitors,
 hardware, services) and NEVER enables facets/dendrites — those are the venue's.
 Note values are literal nix; a song never reads `song/` runtime paths. The
@@ -172,7 +172,7 @@ Provide:
 - `pkgs/drachma/package.json`, lockfile, and source — the resolver (tiered:
   palette → semantic → component), the `rice lint` schema validator, and the
   three live-side emitters:
-  - `song/stage/notes.json` (Quickshell; atomic write — see `CONTRACTS.md §4`),
+  - `song/stage/drachma.json` (Quickshell; atomic write — see `CONTRACTS.md §4`),
   - `hyprctl` dispatcher (compositor properties),
   - terminal OSC sequences (color injection).
 - Wrap Style Dictionary and the W3C design-tokens format; do not reimplement a

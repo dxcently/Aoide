@@ -1,7 +1,7 @@
 // TerminalManagerGadget.qml — the Terminal-Commander roster as a dock gadget.
 //
 // One row per live agent session, read from song/stage/sessions.json and
-// song/stage/hooks.json — BOTH watched via the NoteState FileView pattern
+// song/stage/hooks.json — BOTH watched via the DrachmaState FileView pattern
 // (atomic write-temp-then-rename → onTextChanged → recompute). The latest hook
 // phase (by updatedAt; ties → later record wins) overrides the roster state,
 // mirroring `aoide graph`'s merged_sessions() EXACTLY (see pkgs/aoide/src/
@@ -458,7 +458,7 @@ Item {
         }
     }
 
-    // ── sessions.json watcher (NoteState pattern) ──────────────────────────
+    // ── sessions.json watcher (DrachmaState pattern) ──────────────────────────
     FileView {
         id: sessionsFile
         path: root.sessionsPath
@@ -474,7 +474,7 @@ Item {
         Component.onCompleted: sessionsFile.reload()
     }
 
-    // ── hooks.json watcher (NoteState pattern) ─────────────────────────────
+    // ── hooks.json watcher (DrachmaState pattern) ─────────────────────────────
     FileView {
         id: hooksFile
         path: root.hooksPath

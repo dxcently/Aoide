@@ -38,7 +38,7 @@
 // umber (notes.paletteFg #423420) drawn CLEAN — the old white legibility outline
 // is dropped, since dark text on the cream sheet needs no halo (that outline was
 // a relic of the old dark bar and only muddied the type on cream).
-// One restrained STATE accent survives from the song (NoteState): the ACTIVE
+// One restrained STATE accent survives from the song (DrachmaState): the ACTIVE
 // workspace note-head fills with paletteAccent, the BLOCKED ✎ pulse + low battery
 // go glitchPink, and open/hover toggles (clock→calendar, volume, tray) flash
 // paletteAccent. Everything at rest is black.

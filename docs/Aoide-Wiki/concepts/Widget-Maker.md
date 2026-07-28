@@ -53,7 +53,7 @@ Extending the system reuses the rice loop's shape ([[Self-Ricing]]):
   aoide make <intent>        e.g. "show my scheduled jobs" · "bridge notifs to Telegram"
         │  agent writes: dendrite (nix) + widget (QML) + adapter
         ▼
-  lint / checks              contracts + note schema + no cross-module reads
+  lint / checks              contracts + drachma schema + no cross-module reads
         │ pass
         ▼
   preview                    widget renders live from song/stage/*.json (no rebuild)
