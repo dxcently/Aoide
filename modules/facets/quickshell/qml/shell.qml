@@ -41,6 +41,13 @@ ShellRoot {
         property ListModel floatingModel: ListModel {}
         property string tracedSessionId: ""
 
+        // Hover-preview bridge (concepts/Terminal-Commander): TerminalManagerGadget
+        // writes the hovered terminal row's Hyprland workspace id here; the bar's
+        // WorkspaceRow reads it and paints a distinct PREVIEW highlight on that
+        // workspace glyph. -1 is the sentinel for "nothing hovered" (no real
+        // workspace carries id -1). Pure QML data link — no hyprctl dispatch.
+        property int hoveredWorkspace: -1
+
         // Cascading seed position so successive tear-offs don't stack exactly.
         function floatGadget(kind) {
             var base = 360
@@ -98,6 +105,7 @@ ShellRoot {
             anchors.fill: parent
             notes: notes
             bridge: bridge
+            shared: shared
         }
     }
 

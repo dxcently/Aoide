@@ -124,7 +124,10 @@ Item {
             "state": s.state || "",
             "cwd": s.cwd || "",
             "startedAt": s.startedAt || "",
-            "windowAddress": s.windowAddress || ""
+            "windowAddress": s.windowAddress || "",
+            // Hyprland workspace id (stamped by the shellbridge window-event
+            // listener); -1 = unknown/unresolved → hovering highlights nothing.
+            "workspace": (s.workspace !== undefined && s.workspace !== null) ? s.workspace : -1
         }
     }
     function syncRoster() {
@@ -279,6 +282,7 @@ Item {
                 required property string cwd
                 required property string startedAt
                 required property string windowAddress
+                required property int workspace
 
                 readonly property bool done: root.isDoneState(state)
                 readonly property bool blocked: root.isBlocked(state)
@@ -409,16 +413,28 @@ Item {
                     font.pixelSize: 11
                 }
 
-                // ── Row hover → session jump + DAG trace publish ──────────
+                // ── Row hover → DAG trace + workspace-preview publish ─────
+                // Publishes TWO shared-state links on hover (coexists with the
+                // click-to-jump MouseArea below — a HoverHandler never steals the
+                // click, and the dock's panel-wide hover union keeps the drawer
+                // open): (1) tracedSessionId → DagGraphGadget highlights the node;
+                // (2) hoveredWorkspace → the bar's WorkspaceRow preview-highlights
+                // the workspace this terminal lives on. Both clear on exit, guarded
+                // by the (unique) sessionId so crossing between rows never wipes the
+                // newly-hovered row's state. Unknown workspace (-1) highlights
+                // nothing — no error. Sentinel clear: -1.
                 HoverHandler {
                     id: rowHover
                     onHoveredChanged: {
                         if (!root.shared)
                             return
-                        if (hovered)
+                        if (hovered) {
                             root.shared.tracedSessionId = rowItem.sessionId
-                        else if (root.shared.tracedSessionId === rowItem.sessionId)
+                            root.shared.hoveredWorkspace = rowItem.workspace
+                        } else if (root.shared.tracedSessionId === rowItem.sessionId) {
                             root.shared.tracedSessionId = ""
+                            root.shared.hoveredWorkspace = -1
+                        }
                     }
                 }
                 MouseArea {
