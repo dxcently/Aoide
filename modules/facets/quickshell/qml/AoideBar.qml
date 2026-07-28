@@ -349,7 +349,11 @@ Item {
         anchors.top: parent.top
         height: root.stripHeight
         radius: 0                        // EDGED — hard square corners, no round
-        color: Qt.rgba(1, 1, 1, 0.55)    // LIGHT frosted glass — brighter white sheet (hyprglass blur behind)
+        // Cream frosted glass at 0.72 — MATCHES the terminal's paletteBg tint
+        // and opacity (kitty 0.72), so bar and terminals read as one glass.
+        color: Qt.rgba(Qt.color(root.notes.paletteBg).r,
+                       Qt.color(root.notes.paletteBg).g,
+                       Qt.color(root.notes.paletteBg).b, 0.72)
         opacity: 1.0
     }
     // Aero gloss — the sanctioned white sheen (bright top, hard midline stop),
@@ -358,10 +362,10 @@ Item {
         anchors.fill: page
         radius: 0
         gradient: Gradient {
-            GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.42) }
-            GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, 0.14) }
-            GradientStop { position: 0.52; color: Qt.rgba(1, 1, 1, 0.06) }
-            GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.12) }
+            GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.20) }
+            GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, 0.06) }
+            GradientStop { position: 0.52; color: Qt.rgba(1, 1, 1, 0.00) }
+            GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.05) }
         }
     }
     // The page rail — a DEFINED black edge framing the transparent strip.

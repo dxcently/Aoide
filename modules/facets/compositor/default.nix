@@ -129,7 +129,7 @@ let
     # the `match:<prop> <value>` form (same as the layerrules above); the old
     # `class:^(kitty)$` form is rejected ("invalid field ... missing a value").
     windowrule = opacity 1.0 0.90, match:class kitty
-    windowrule = rounding 8, match:class kitty
+    windowrule = rounding 3, match:class kitty
   '';
 
   # ── Hyprland keybinds for Aoide workflows ─────────────────────────────────

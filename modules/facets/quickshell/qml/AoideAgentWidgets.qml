@@ -104,13 +104,15 @@ Item {
     // (dockOpen → shown right away); closing is GATED by the timer: when the
     // hover union drops while unpinned, the timer arms and only its firing —
     // with dockOpen still false — retracts the panel. Re-entering the strip or
-    // the popup within the ~400 ms window cancels the hide, so crossing the
+    // the popup within the grace window cancels the hide, so crossing the
     // strip→panel gap (or briefly overshooting an edge) never flaps the dock.
+    // A generous 1.5 s grace so the dock lingers after a hover/selection
+    // instead of snapping shut the instant the pointer drifts off.
     property bool shown: false
 
     Timer {
         id: graceTimer
-        interval: 400
+        interval: 1500
         repeat: false
         onTriggered: {
             if (!root.dockOpen)

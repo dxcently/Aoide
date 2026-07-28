@@ -68,7 +68,7 @@
     # component-tier note the song owns.
     aoide.notes.window = {
       border = "#40897a"; # base0C teal — active
-      borderInactive = "#eaddc6"; # base01 light ground — inactive
+      borderInactive = "#8a6f50"; # base04 dark taupe — inactive (the darker frame)
     };
 
     # ── Cover-art note ─────────────────────────────────────────────────────

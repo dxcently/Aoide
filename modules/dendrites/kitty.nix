@@ -98,7 +98,7 @@
             # macOS/KDE-only path, inert under Hyprland) is turned off here and
             # the compositor does the frosting instead. The kitty window class is
             # additionally pinned in the compositor's Aero window rules.
-            background_opacity = "0.82";
+            background_opacity = "0.72";
             background_blur = 0;
             enable_audio_bell = false;
             tab_bar_style = "powerline";
