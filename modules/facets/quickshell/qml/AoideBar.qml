@@ -282,12 +282,15 @@ Item {
     property bool volShown: false      // volume hover slider
     property bool battShown: false     // battery hover popout
 
-    // Gadget tray: now-playing is the sole bar-spawned gadget (meters/power/
-    // clock live in the AoideAgentWidgets dock instead). Click-toggled.
+    // Gadget tray: now-playing is the sole bar-spawned gadget (meters/power
+    // live in the AoideAgentWidgets dock instead; the clock/date stay on the
+    // bar as a plain readout). Click-toggled.
     property string openGadget: ""
     function toggleGadget(key) {
         openGadget = (openGadget === key) ? "" : key
     }
+    // Clock → calendar sheet (click-toggled, its own popout below).
+    property bool calShown: false
 
     // ══ MUSICAL GEOMETRY ═══════════════════════════════════════════════════
     // The staff sits at the strip's vertical midline; five lines a staffGap
@@ -448,6 +451,35 @@ Item {
             TrayCell { id: npCell; gkey: "np"; text: "♫" }
         }
 
+        // ── Clock + date (click → calendar popout). Lives on the bar, not the
+        // dock — the ambient face belongs beside the measure, not in the case.
+        Text {
+            id: clockText
+            anchors.verticalCenter: parent.verticalCenter
+            text: Qt.formatDateTime(root.now, "hh:mm AP  dddd MMM dd")
+            color: root.calShown ? root.notes.wireCyan : root.notes.barFg
+            style: Text.Outline
+            styleColor: "#000000"
+            font.family: "monospace"
+            font.pixelSize: 14
+            font.bold: true
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.calShown = !root.calShown
+            }
+        }
+        // The " / " separator — a slur between clock and title.
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: "/"
+            color: root.notes.barFg
+            style: Text.Outline
+            styleColor: "#000000"
+            font.family: "monospace"
+            font.pixelSize: 14
+            opacity: 0.75
+        }
         // Active-window title (music kaomoji when empty).
         Text {
             anchors.verticalCenter: parent.verticalCenter
@@ -627,6 +659,18 @@ Item {
         title: "nowplaying.score"
         shown: root.openGadget === "np"
         NowPlayingGadget {
+            width: parent.width
+            notes: root.notes
+        }
+    }
+
+    // ── Clock → Calendar sheet (bound to the bar's clock/date readout) ──────
+    BarPopout {
+        notes: root.notes
+        cell: clockText
+        title: "calendar.sheet"
+        shown: root.calShown
+        CalendarGadget {
             width: parent.width
             notes: root.notes
         }

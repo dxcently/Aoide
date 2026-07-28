@@ -396,16 +396,8 @@ Item {
                     }
                 }
 
-                // ── Gadget 6: CLOCK (face) — ambient, bottom-seated ──────
-                GadgetFrame {
-                    Layout.fillWidth: true
-                    notes: root.notes
-                    title: "clock.face"
-                    ClockGadget {
-                        width: parent.width
-                        notes: root.notes
-                    }
-                }
+                // (The clock/date live on the BAR, not the dock — no clock.face
+                //  gadget here; meters + power are the dock's ambient pair.)
 
                 // ── Dock footer rule: staff run with clef (ornament vocab,
                 // verbatim — trailing U+3164 hangul filler included). The
