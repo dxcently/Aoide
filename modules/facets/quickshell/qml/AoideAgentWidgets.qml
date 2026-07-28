@@ -176,12 +176,14 @@ Item {
         // the gadgets/rows/pin beneath, but containsMouse still tracks the
         // pointer anywhere over the popup. Placed FIRST (lowest z) so the pin
         // button and gadget MouseAreas sit above it and receive their clicks.
-        MouseArea {
+        // A HoverHandler — NOT a MouseArea — tracks the pointer over the panel.
+        // A pointer handler reports `hovered` even when a child gadget/row
+        // MouseArea is under the cursor (a MouseArea would lose containsMouse to
+        // the child, dropping overPanel and starting the close). So hovering
+        // ANYTHING inside keeps the dock open; only a true exit arms the grace.
+        HoverHandler {
             id: panelHover
-            anchors.fill: parent
-            hoverEnabled: true
-            acceptedButtons: Qt.NoButton
-            onContainsMouseChanged: root.overPanel = containsMouse
+            onHoveredChanged: root.overPanel = hovered
         }
 
         // ── Pantheon wireframe-depth stack (container body) ────────────────
