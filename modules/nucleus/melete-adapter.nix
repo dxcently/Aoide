@@ -12,10 +12,11 @@
 #
 # Subscription model (default-deny per class):
 #   Aoided enforces default-deny subscriptions. This adapter opts into the
-#   minimal set: rebuild-proposed, rice-preview-ready, notification-action.
-#   It deliberately does NOT subscribe to raw notification text events — only
-#   to structured, aoided-sanitised action payloads where aoided has already
-#   stripped the app-title/body from the dispatch path.
+#   minimal set of event classes: gate (rebuild proposals through the gate),
+#   rice (rice-preview lifecycle), and notification (structured notification
+#   actions). It deliberately does NOT subscribe to raw notification text —
+#   only to aoided-sanitised action payloads where aoided has already stripped
+#   the app-title/body from the dispatch path.
 #
 # Integration seam:
 #   The adapter is a daemon that reads aoided's event socket and emits Melete
@@ -30,7 +31,12 @@
 # environment variable AOIDE_ADAPTER_MELETE_ENABLE=0 or by masking the service;
 # it does not need a separate dendrite flag for what is essentially a bus
 # participant.
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 lib.mkIf config.aoide.enable {
 
@@ -38,8 +44,8 @@ lib.mkIf config.aoide.enable {
     description = "Aoide → Melete adapter — neutral events to Melete job dispatches";
 
     wantedBy = [ "aoided.service" ];
-    after    = [ "aoided.service" ];
-    bindsTo  = [ "aoided.service" ];
+    after = [ "aoided.service" ];
+    bindsTo = [ "aoided.service" ];
 
     serviceConfig = {
       # Skeleton: `aoide adapter melete --run` is the planned sub-command.
@@ -48,7 +54,7 @@ lib.mkIf config.aoide.enable {
       # integration testing as soon as the binary lands.
       ExecStart = "${pkgs.aoide}/bin/aoide adapter melete --run";
 
-      Restart    = "on-failure";
+      Restart = "on-failure";
       RestartSec = "5s";
 
       Environment = [
@@ -56,9 +62,14 @@ lib.mkIf config.aoide.enable {
         # separate file. Single audit log, both doors (concepts/Governance).
         "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
         # Subscription manifest: only these event classes reach the adapter.
-        # Values are comma-separated event class names; aoided enforces the
-        # allow-list, the adapter never sees classes it has not subscribed to.
-        "AOIDE_ADAPTER_SUBSCRIBE=rebuild-proposed,rice-preview-ready,notification-action"
+        # Values are comma-separated event class names that `adapter.rs`'s
+        # `parse_class` recognizes (audit|gate|rice|content|notification) —
+        # anything else is silently dropped, so the names must match exactly.
+        # Melete subscribes to: gate (rebuild proposals through the gate), rice
+        # (rice-preview lifecycle), notification (structured notification
+        # actions). aoided enforces the allow-list; the adapter never sees a
+        # class it has not subscribed to.
+        "AOIDE_ADAPTER_SUBSCRIBE=gate,rice,notification"
         # Security: forwarded notification body is NEVER in the subscription
         # list. The adapter receives structured action records only.
         # (This env var is documentation-as-configuration at skeleton stage;
@@ -68,21 +79,21 @@ lib.mkIf config.aoide.enable {
       ];
 
       NoNewPrivileges = true;
-      StandardOutput  = "journal";
-      StandardError   = "journal";
+      StandardOutput = "journal";
+      StandardError = "journal";
     };
 
     # ── Structured event → Melete dispatch mapping (skeleton) ───────────────
     # Documented here; implemented in pkgs/aoide/src/bin/aoide.rs (Agent B).
     #
-    # | aoided event class    | Melete action                               |
-    # |-----------------------|---------------------------------------------|
-    # | rebuild-proposed      | Post a Melete job: "user admitted rebuild"   |
-    # | rice-preview-ready    | Notify Melete: preview is live, await adopt  |
-    # | notification-action   | Forward structured action to Melete task     |
+    # | aoided event class | Melete action                                  |
+    # |--------------------|------------------------------------------------|
+    # | gate               | Post a Melete job: "user admitted rebuild"     |
+    # | rice               | Notify Melete: preview is live, await adopt    |
+    # | notification       | Forward structured action to Melete task       |
     #
     # Security invariant (hard rule):
-    #   notification-action payloads carry { actionId, appName } — never the
+    #   notification payloads carry { actionId, appName } — never the
     #   raw notification body or title. aoided strips the body before emitting
     #   this class. The adapter maps actionId → Melete intent; it NEVER passes
     #   app-sourced strings as Melete job prompts or instructions.
