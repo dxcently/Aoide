@@ -1,51 +1,46 @@
-// AoideBar.qml — the dxflake-waybar homage, ENHANCED for Quickshell, then
-// rebuilt in the Pantheon grammar (round 5) as an ENTABLATURE, not a slab.
+// AoideBar.qml — THE MEASURE. A clean-slate redesign in the SONG vein.
 //
-// The old shape: one flat 36px full-width glass strip. The new shape: three
-// separated floating wireframe volumes hung from the top edge — an entablature
-// standing over the workspace colonnade. The KEYSTONE is the workspace pane at
-// true screen-centre (the tallest block, dropping lowest, double-ruled and
-// brightest) sitting exactly on the wallpaper's vanishing point. It is flanked
-// by two shorter COLONNADE WINGS — the left cluster and the right callouts —
-// each a bordered pane that recedes from the keystone. Every pane throws a
-// holoBlue depth echo TOWARD screen-centre, its magnitude scaled to distance
-// (wings lean hard in, keystone barely at all), so the bar inflects like a
-// colonnade seen head-on — the same vanishing law WorkspaceRow's cells obey.
-// The GAPS between panes let the wallpaper's convergence show through on
-// purpose, framed by a faint full-width architrave lintel along the top edge
-// and a converging tick-comb dropped into each gap. It all lives inside the
-// 36px reserved band (a stepped silhouette by pane-HEIGHT, not by growing the
-// window) so windows never jump and no transparent apron can bleed (round-4's
-// scar). The reference: references/pantheon/67dd262c — a keystone cluster at
-// top-centre, wing-panes flanking, all converging on the centre axis.
+// Aoide is the muse of song, so the bar is one bar of music. The old
+// architectural grammar (the Pantheon entablature — keystone, colonnade wings,
+// architrave lintel, floating BarPane volumes) is DISCARDED wholesale. Nothing
+// of that metaphor survives. In its place: a single manuscript strip on which a
+// five-line staff runs the full width of the screen, and every functional cell
+// is written onto that staff as notation.
 //
-// Baseline identity kept (dxflake): white/near-white monospace glyphs with a
-// black text-outline (Text.Outline / styleColor #000000 — the legibility
-// literal; the glyph FILL is notes.barFg). Musical-notation workspaces,
-// " / " separators, kaomoji empty-title, volume/battery/network note-glyphs.
+//     ╭─ 𝄞 ── ✎ ♫▦⌁◔  hh:mm / title ─┃─ ●─●─┼─●─● ─┃─ ♫vol 𝄾bat 𝆹link ─ 𝄂 ─╮
 //
-//   LEFT WING : 𝄞 power glyph + ✎ sessions + gadget tray + clock/title.
-//   KEYSTONE  : musical workspace cells (WorkspaceRow), dead screen-centre.
-//   RIGHT WING: vol. · bat. · link. callouts (hover popouts, warn blink).
+//   HEAD      : 𝄞 treble clef — the key of the piece AND the powermenu key
+//               (click → powermenu). It opens the staff.
+//   LEFT      : ✎N agent-sessions (blocks → glitchPink pulse, a shipped tell),
+//               the gadget tray (♫ now-playing · ▦ meters · ⌁ power · ◔ clock,
+//               each a click-toggled BarPopout), the clock/date, the "/" and
+//               the active-window title (music-kaomoji when empty).
+//   CENTRE    : the workspaces, written as NOTE-HEADS on the staff line
+//               (WorkspaceRow) — the melody of the measure, flanked by barlines.
+//   RIGHT     : the expression marks — ♫ volume, 𝄾 battery (rests: the battery
+//               empties into silence), 𝆹 network link — each hover/scroll/click
+//               live, with popouts. Closed by a final barline 𝄂.
 //
-// Quickshell-native enhancements over static waybar (identity kept as baseline):
-//   1. Interactivity waybar faked with tooltips → real popups: clock→calendar,
-//      volume hover-slider + scroll/click, battery hover-popout.
-//   2. Live animation: active-workspace box eases between cells (in WorkspaceRow),
-//      urgent pulse, mpris/volume value changes are live-bound.
-//   3. Aoide-native cell: live agent-sessions count (sessions.json via FileView,
-//      the TerminalManagerGadget seam) → click opens the gadget dock.
-//   4. Chrome: subtle Aero-glass (translucent barBg over the compositor's blur —
-//      same posture as the gadget dock's frames).
+// Drawn structure (staff lines, barlines, playhead) carries the geometry; glyphs
+// (clef, rests, note-marks) carry the ornament. It should read as sheet music.
 //
-// Data sources (real Quickshell service modules — the AoideNotifications idiom):
+// Geometry seam preserved: stripHeight stays 36 and the window's exclusiveZone
+// stays 36 (shell.qml untouched), so windows never move. Everything is drawn
+// INSIDE the 36px strip — no apron, no taller transparent surface (that scar,
+// the wallpaper-bleed under a hairline, stays closed); the clef is sized to fit.
+//
+// Colours ONLY from the song (NoteState): wireCyan (base0C) rules the staff,
+// clef, played note & playhead; holoBlue (base0D) the resting note-heads; violet
+// (base0E) the barlines; glitchPink (base08) urgency; paletteHot the sessions
+// count; barFg the text. The only sanctioned literals: the black text outline
+// (#000000, legibility) and the white Aero gloss gradient (Qt.rgba(1,1,1,α)).
+//
+// Data sources (unchanged real Quickshell services — the plumbing survives):
 //   - Hyprland   → workspaces (WorkspaceRow) + active window title.
-//   - Pipewire   → default sink volume / muted (degrade: hide when not ready).
-//   - UPower     → display-device battery (degrade: hide on desktop / no battery).
-//   - Network    → /proc/net/route via FileView (no NM service at this quickshell
-//                  rev; files-not-processes → within the no-shell rule).
-//   - Sessions   → song/stage/sessions.json via FileView (already-plumbed data).
-// Zero hardcoded palette hex; the notation/kaomoji STRINGS are content.
+//   - Pipewire   → default sink volume / muted.
+//   - UPower     → display-device battery.
+//   - Network    → /proc/net/route via FileView (files-not-processes rule).
+//   - Sessions   → song/stage/sessions.json + hooks.json via FileView.
 
 import QtQuick
 import QtQuick.Layouts
@@ -62,11 +57,9 @@ Item {
     required property var notes
     required property var bridge
 
-    // v3 geometry (khoa: "the bar is too small… don't be restricted by the
-    // specifications") — a taller strip, roomier cells, larger type.
-    // v5: khoa — the clef is sized to FIT the strip (the pop-out apron was
-    // tried and rolled back; a taller transparent surface let the wallpaper
-    // bleed through under the hairline).
+    // The strip is 36px; the PanelWindow reserves exactly this. Everything is
+    // painted within it — the clef included — so no apron is needed and the
+    // exclusiveZone stays 36 (windows do not jump).
     readonly property int stripHeight: 36
     implicitHeight: stripHeight
 
@@ -91,10 +84,10 @@ Item {
     readonly property int volPct: sinkAudio ? Math.round(sinkAudio.volume * 100) : 0
     function volIcon(pct) {
         if (pct <= 0) return "𝅗𝅥"
-        if (pct < 34) return "♩~"
-        if (pct < 67) return "♪~"
-        if (pct < 90) return "♫~"
-        return "♬~"
+        if (pct < 34) return "♩"
+        if (pct < 67) return "♪"
+        if (pct < 90) return "♫"
+        return "♬"
     }
     function volAdjust(deltaPct) {
         if (!sinkAudio) return
@@ -125,7 +118,8 @@ Item {
     readonly property int battPct: battDev ? Math.round(battDev.percentage) : 0
     readonly property bool battCharging: battDev && battDev.state === UPowerDeviceState.Charging
     readonly property bool battFull: battDev && battDev.state === UPowerDeviceState.FullyCharged
-    // Rest-notation icons by charge (𝄽 𝄾 𝄿 𝅀 𝅁 𝅂), full 𝆑, charging 𝄮.
+    // Rest-notation icons by charge (𝄽 𝄾 𝄿 𝅀 𝅁 𝅂) — the battery drains toward
+    // silence; full 𝆑, charging 𝄮.
     function battIcon() {
         if (battFull) return "𝆑"
         if (battCharging) return "𝄮"
@@ -222,10 +216,8 @@ Item {
     // ── Network (procfs FileView — no NM service at this rev) ───────────────
     // /proc/net/route lists every iface that has a route; the default route is
     // the row whose Destination field is "00000000". Reading a kernel file (not
-    // spawning a process) keeps us inside the no-shell-out rule (MeterGadget's
-    // precedent). Real iface names — no hardcoded wlan0/eth0 — classified wifi vs
-    // ethernet by the iface-name prefix (wl* → wifi). No essid/ipaddr from procfs
-    // without shelling out → glyph only (waybar had essid only in a tooltip).
+    // spawning a process) keeps us inside the no-shell-out rule. Real iface
+    // names — classified wifi vs ethernet by prefix (wl* → wifi).
     property string netKind: "down"   // "wifi" | "eth" | "down"
     function parseRoute(text) {
         if (!text) return "down"
@@ -256,13 +248,17 @@ Item {
     function netGlyph(kind) {
         if (kind === "wifi") return "𝆹𝅥𝅮"
         if (kind === "eth")  return "𝆺𝅥𝅯"
-        return "Disconnected :c"
+        return "𝄽"   // a rest — the line has gone silent
+    }
+    function netLabel(kind) {
+        if (kind === "wifi") return "wifi"
+        if (kind === "eth")  return "eth"
+        return "off"
     }
 
     // ── Window title (Hyprland active toplevel) with kaomoji empty-rewrite ──
-    // A small songbook of music kaomoji combos (emojicombos.com/music vocab);
-    // the empty-title rewrite rotates hourly so the bar hums a different bar
-    // of the tune through the day. The dxflake cat leads — it is the identity.
+    // A small songbook of music kaomoji combos; the empty-title rewrite rotates
+    // hourly so the bar hums a different bar of the tune through the day.
     readonly property var kaomojiSet: [
         "/ᐠ - ˕ -マ Ⳋ ⋆｡°✩♬ ♪",
         "♪(´▽｀) ⋆｡°✩",
@@ -286,464 +282,328 @@ Item {
     property bool volShown: false      // volume hover slider
     property bool battShown: false     // battery hover popout
 
-    // Gadget tray (v2 restructure): every non-agent gadget is its own widget
-    // spawned from a bar cell. One key open at a time (click-toggled,
-    // mutually exclusive); "" = all closed.
+    // Gadget tray: every non-agent gadget is its own widget spawned from a bar
+    // cell. One key open at a time (click-toggled, mutually exclusive).
     property string openGadget: ""
     function toggleGadget(key) {
         openGadget = (openGadget === key) ? "" : key
     }
 
-    // ══ THE ENTABLATURE ════════════════════════════════════════════════════
-    // Three floating volumes, no continuous slab. Geometry lives inside the
-    // 36px reserved band; the stepped silhouette is by pane HEIGHT, not window
-    // height — so exclusiveZone stays 36 and windows never jump. Screen-centre
-    // is root.width/2 (the bar spans the screen); the keystone sits on it, the
-    // wings recede from it, every echo leans toward it.
-    readonly property real screenCenter: width / 2
-    readonly property int keystoneH: 34   // the emphasised central block (deepest)
-    readonly property int wingH: 28       // the flanking wings (raised, shorter)
+    // ══ MUSICAL GEOMETRY ═══════════════════════════════════════════════════
+    // The staff sits at the strip's vertical midline; five lines a staffGap
+    // apart. Content is written on the staff, so every cell centres on it.
+    readonly property real staffMid: stripHeight / 2
+    readonly property real staffGap: 3.5
+    readonly property real staffSpan: staffGap * 4   // top line → bottom line
+    readonly property int edgePad: 8
 
-    // ── BarPane: one floating wireframe volume ─────────────────────────────
-    // Aero-glass body + a Win7 sheen, wrapped in a wireCyan wireframe border
-    // (the pantheon "hollow volume" read), with a holoBlue depth back-copy
-    // thrown TOWARD screen-centre — the offset volume of the depth recipe, at
-    // bar scale. `keystone: true` double-rules the border and brightens it, so
-    // the centre block reads as the emphasised wedge. `echoDx` is the lean
-    // toward centre (sign + magnitude computed by each instance from its own
-    // distance off the axis); the body Item is the default slot.
-    component BarPane: Item {
-        id: pane
-        property real echoDx: 0
-        property real echoDy: 2
-        property bool keystone: false
-        default property alias body: bodySlot.data
+    // ── Inline notation vocabulary ─────────────────────────────────────────
 
-        // Depth echo — the holoBlue back-copy, offset toward the vanishing
-        // point. Declared FIRST so it renders behind the glass; only the sliver
-        // past the pane's edge shows as a clean outline (the depth recipe).
-        Rectangle {
-            x: pane.echoDx
-            y: pane.echoDy
-            width: pane.width
-            height: pane.height
-            radius: 3
-            color: "transparent"
-            border.color: root.notes.holoBlue
-            border.width: 1
-            opacity: pane.keystone ? 0.30 : 0.24
-        }
-
-        // Aero-glass body (translucent barBg over the compositor's blur).
-        Rectangle {
-            anchors.fill: parent
-            radius: 3
-            color: root.notes.barBg
-            opacity: 0.82
-        }
-
-        // Gloss — the Win7 sheen, the CSS-trick way: bright top half, a hard
-        // stop at the midline (the signature Aero "sheen line"), a faint bloom
-        // at the foot. The whites are the one literal, matching the rig.
-        Rectangle {
-            anchors.fill: parent
-            radius: 3
-            gradient: Gradient {
-                GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.20) }
-                GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, 0.06) }
-                GradientStop { position: 0.52; color: Qt.rgba(1, 1, 1, 0.00) }
-                GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.05) }
-            }
-        }
-
-        // Wireframe front border — the hollow-volume outline (wireCyan, base0C).
-        // The keystone blazes brighter than the wings (neon dominance: one
-        // block leads the field).
-        Rectangle {
-            anchors.fill: parent
-            radius: 3
-            color: "transparent"
-            border.color: root.notes.wireCyan
-            border.width: 1
-            opacity: pane.keystone ? 0.7 : 0.5
-        }
-        // Keystone double-rule — a second inset border, the "emphasised wedge"
-        // tell borrowed from the DAG's project volumes.
-        Rectangle {
-            visible: pane.keystone
-            anchors.fill: parent
-            anchors.margins: 3
-            radius: 2
-            color: "transparent"
-            border.color: root.notes.wireCyan
-            border.width: 1
-            opacity: 0.3
-        }
-
-        Item { id: bodySlot; anchors.fill: parent }
+    // A barline drawn across the staff — the violet section divider (the ┃/┼).
+    component Barline: Rectangle {
+        width: 1.5
+        height: root.staffSpan + 4
+        radius: 0.5
+        color: root.notes.violet
+        opacity: 0.6
+        anchors.verticalCenter: parent.verticalCenter
     }
 
-    // ── The architrave lintel — a faint full-width rail along the top edge.
-    // It is the entablature's top member: it ties the three blocks into one
-    // structure WITHOUT re-becoming a slab, and it turns the between-pane gaps
-    // into framed openings rather than a torn strip (round-4's lesson: exposed
-    // wallpaper must read as intended). wireCyan, low opacity.
+    // A tray glyph-button (♫ ▦ ⌁ ◔): active → wireCyan, else dim barFg.
+    component TrayCell: Text {
+        property string gkey: ""
+        anchors.verticalCenter: parent.verticalCenter
+        width: implicitWidth + 9
+        horizontalAlignment: Text.AlignHCenter
+        color: root.openGadget === gkey ? root.notes.wireCyan : root.notes.barFg
+        opacity: root.openGadget === gkey ? 1.0 : 0.72
+        style: Text.Outline
+        styleColor: "#000000"
+        font.family: "monospace"
+        font.pixelSize: 16
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.toggleGadget(parent.gkey)
+        }
+    }
+
+    // ══ THE MANUSCRIPT STRIP ═══════════════════════════════════════════════
+    // A single translucent page over the compositor blur — the sheet the staff
+    // is printed on. Rounded ends give the ╭─ … ─╮ read of the sketch. NOT the
+    // old three-volume entablature: one continuous manuscript, no floating panes.
     Rectangle {
+        id: page
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: 1
-        color: root.notes.wireCyan
+        height: root.stripHeight
+        radius: 8
+        color: root.notes.barBg
+        opacity: 0.8
+    }
+    // Aero gloss — the one sanctioned white gradient (bright top, sheen line).
+    Rectangle {
+        anchors.fill: page
+        radius: 8
+        gradient: Gradient {
+            GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.16) }
+            GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, 0.05) }
+            GradientStop { position: 0.52; color: Qt.rgba(1, 1, 1, 0.00) }
+            GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.04) }
+        }
+    }
+    // The page rail — a faint wireCyan hairline framing the sheet.
+    Rectangle {
+        anchors.fill: page
+        radius: 8
+        color: "transparent"
+        border.color: root.notes.wireCyan
+        border.width: 1
         opacity: 0.22
-        z: 3
     }
 
-    // ── GapMark: a tiny converging tick-comb dropped from the lintel into a
-    // gap — the reference's leader-tick vocabulary, framing the wallpaper
-    // reveal as a grille. Centre tick tallest; the pair lean toward it.
-    component GapMark: Row {
-        spacing: 3
-        z: 3
-        Repeater {
-            model: 3
-            Rectangle {
-                required property int index
-                width: 1
-                height: index === 1 ? 9 : 5
-                color: root.notes.wireCyan
-                opacity: index === 1 ? 0.4 : 0.22
-            }
-        }
-    }
-
-    // ══ LEFT WING — the port-side colonnade block ══════════════════════════
-    // 𝄞 power · ✎N sessions · gadget tray · clock/title. Hugs its content and
-    // hangs from the top-left; its echo leans RIGHT toward the keystone.
-    BarPane {
-        id: leftWing
-        anchors.left: parent.left
-        anchors.leftMargin: 6
-        anchors.top: parent.top
-        height: root.wingH
-        width: leftContent.implicitWidth + 20
-        // Lean toward screen-centre, magnitude by distance (clamped like the
-        // colonnade cells). Left of centre → positive (rightward) lean.
-        echoDx: Math.max(0, Math.min(4, (root.screenCenter - (x + width / 2)) * 0.02))
-        echoDy: 3
-        z: 2
-
-        Row {
-            id: leftContent
-            anchors.verticalCenter: parent.verticalCenter
+    // ── THE STAFF — five lines ruled the full width, at the strip midline.
+    // They pass behind every cell; the note-heads (WorkspaceRow) land on them.
+    Repeater {
+        model: 5
+        Rectangle {
+            required property int index
             anchors.left: parent.left
-            anchors.leftMargin: 10
-            spacing: 10
-
-            // The clef power glyph — 𝄞 IS the power-menu button (it has a job).
-            // 16px: the glyph paints ~1.8× its em box, so this is the largest
-            // size that clears the wing's height.
-            Text {
-                id: clefText
-                anchors.verticalCenter: parent.verticalCenter
-                text: "𝄞"
-                color: root.notes.barFg
-                style: Text.Outline
-                styleColor: "#000000"
-                font.family: "monospace"
-                font.pixelSize: 16
-                font.bold: true
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    // Generic command object through the existing bridge sender
-                    // (no new QML IPC machinery invented — shellbridge routes it).
-                    onClicked: root.bridge.sendCommand({ cmd: "powermenu" })
-                }
-            }
-
-            // Aoide-native: live agent-sessions cell → click opens the dock.
-            Text {
-                id: sessionsCell
-                anchors.verticalCenter: parent.verticalCenter
-                visible: root.sessionCount > 0
-                text: "✎" + root.sessionCount
-                // Blazes paletteHot at rest; when ANY session is blocked the cell
-                // switches to the urgent role (glitchPink) and pulses — a human
-                // summons the eye can't miss from across the bar.
-                color: root.anyBlocked ? root.notes.glitchPink : root.notes.paletteHot
-                style: Text.Outline
-                styleColor: "#000000"
-                font.family: "monospace"
-                font.pixelSize: 16
-                font.bold: true
-
-                // Urgent pulse (blink_red homage from WorkspaceRow): 600ms
-                // InOutQuad breath to 0.35 and back, forever, only while blocked.
-                SequentialAnimation on opacity {
-                    running: root.anyBlocked
-                    loops: Animation.Infinite
-                    NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
-                    NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.bridge.sendCommand({ cmd: "dock", action: "toggle" })
-                }
-            }
-
-            // ── Gadget tray: one cell per bar-spawned widget ────────────────
-            // ♫ now-playing · ▦ meters · ⌁ power · ◔ clock. Click toggles the
-            // cell's BarPopout (mutually exclusive via openGadget). Accent
-            // color while open — same active treatment as the clock cell.
-            Row {
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 0
-                Text {
-                    id: npCell
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "♫"
-                    width: implicitWidth + 10
-                    horizontalAlignment: Text.AlignHCenter
-                    color: root.openGadget === "np" ? root.notes.wireCyan : root.notes.barFg
-                    opacity: root.openGadget === "np" ? 1.0 : 0.75
-                    style: Text.Outline
-                    styleColor: "#000000"
-                    font.family: "monospace"
-                    font.pixelSize: 17
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.toggleGadget("np")
-                    }
-                }
-                Text {
-                    id: meterCell
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "▦"
-                    width: implicitWidth + 10
-                    horizontalAlignment: Text.AlignHCenter
-                    color: root.openGadget === "meters" ? root.notes.wireCyan : root.notes.barFg
-                    opacity: root.openGadget === "meters" ? 1.0 : 0.75
-                    style: Text.Outline
-                    styleColor: "#000000"
-                    font.family: "monospace"
-                    font.pixelSize: 17
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.toggleGadget("meters")
-                    }
-                }
-                Text {
-                    id: pwrCell
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "⌁"
-                    width: implicitWidth + 10
-                    horizontalAlignment: Text.AlignHCenter
-                    color: root.openGadget === "power" ? root.notes.wireCyan : root.notes.barFg
-                    opacity: root.openGadget === "power" ? 1.0 : 0.75
-                    style: Text.Outline
-                    styleColor: "#000000"
-                    font.family: "monospace"
-                    font.pixelSize: 17
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.toggleGadget("power")
-                    }
-                }
-                Text {
-                    id: clkCell
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "◔"
-                    width: implicitWidth + 10
-                    horizontalAlignment: Text.AlignHCenter
-                    color: root.openGadget === "clock" ? root.notes.wireCyan : root.notes.barFg
-                    opacity: root.openGadget === "clock" ? 1.0 : 0.75
-                    style: Text.Outline
-                    styleColor: "#000000"
-                    font.family: "monospace"
-                    font.pixelSize: 17
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.toggleGadget("clock")
-                    }
-                }
-            }
-
-            // ── Clock + title (khoa: non-workspace elements live LEFT;
-            // windows are tracked by the widgets, not the bar).
-            Text {
-                id: clockText
-                anchors.verticalCenter: parent.verticalCenter
-                text: Qt.formatDateTime(root.now, "hh:mm AP  dddd MMM dd")
-                color: root.calShown ? root.notes.wireCyan : root.notes.barFg
-                style: Text.Outline
-                styleColor: "#000000"
-                font.family: "monospace"
-                font.pixelSize: 15
-                font.bold: true
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.calShown = !root.calShown
-                }
-            }
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "/"
-                color: root.notes.barFg
-                style: Text.Outline
-                styleColor: "#000000"
-                font.family: "monospace"
-                font.pixelSize: 15
-                opacity: 0.8
-            }
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.winTitle()
-                color: root.notes.barFg
-                style: Text.Outline
-                styleColor: "#000000"
-                font.family: "monospace"
-                font.pixelSize: 15
-                font.bold: true
-                elide: Text.ElideRight
-            }
+            anchors.right: parent.right
+            anchors.leftMargin: root.edgePad + 26   // clear of the clef
+            anchors.rightMargin: root.edgePad + 10
+            height: 1
+            y: root.staffMid + (index - 2) * root.staffGap
+            color: root.notes.wireCyan
+            opacity: 0.16
         }
     }
 
-    // ══ KEYSTONE — the workspace pane at true screen-centre ════════════════
-    // The tallest block, dropping lowest, double-ruled and brightest — the
-    // wedge on the vanishing point. Its own echo leans barely at all (it IS the
-    // centre), so the row of echoes converges here. WorkspaceRow's cells throw
-    // their own holoBlue echoes onto this same axis (the colonnade beneath the
-    // entablature) — the languages meet.
-    BarPane {
-        id: keystone
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.top: parent.top
-        height: root.keystoneH
-        width: centeredWorkspaces.implicitWidth + 18
-        keystone: true
-        echoDx: 0
-        echoDy: 2
-        z: 2
+    // ══ HEAD — the treble clef, the key of the piece AND the powermenu key ══
+    Text {
+        id: clefText
+        anchors.left: parent.left
+        anchors.leftMargin: root.edgePad
+        anchors.verticalCenter: parent.verticalCenter
+        text: "𝄞"
+        color: root.notes.wireCyan
+        style: Text.Outline
+        styleColor: "#000000"
+        font.family: "monospace"
+        font.pixelSize: 20
+        font.bold: true
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            // Generic command through the existing bridge sender (shellbridge
+            // routes it) — no new IPC machinery invented.
+            onClicked: root.bridge.sendCommand({ cmd: "powermenu" })
+        }
+    }
 
+    // ══ LEFT STAVE — sessions · gadget tray · clock / title ════════════════
+    // Written just after the clef, reading left to right like the opening of
+    // the measure. Everything centres on the staff.
+    Row {
+        id: leftContent
+        anchors.left: clefText.right
+        anchors.leftMargin: 12
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 9
+
+        // Aoide-native: live agent-sessions cell → click opens the dock.
+        Text {
+            id: sessionsCell
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.sessionCount > 0
+            text: "✎" + root.sessionCount
+            // paletteHot at rest; when ANY session is blocked it switches to the
+            // urgent role (glitchPink) and pulses — a summons from across the bar.
+            color: root.anyBlocked ? root.notes.glitchPink : root.notes.paletteHot
+            style: Text.Outline
+            styleColor: "#000000"
+            font.family: "monospace"
+            font.pixelSize: 15
+            font.bold: true
+
+            SequentialAnimation on opacity {
+                running: root.anyBlocked
+                loops: Animation.Infinite
+                NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
+                NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.bridge.sendCommand({ cmd: "dock", action: "toggle" })
+            }
+        }
+
+        // ── Gadget tray: ♫ now-playing · ▦ meters · ⌁ power · ◔ clock ──────
+        Row {
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 0
+            TrayCell { id: npCell;    gkey: "np";     text: "♫" }
+            TrayCell { id: meterCell; gkey: "meters"; text: "▦" }
+            TrayCell { id: pwrCell;   gkey: "power";  text: "⌁" }
+            TrayCell { id: clkCell;   gkey: "clock";  text: "◔" }
+        }
+
+        // ── Clock + date (click → calendar popout).
+        Text {
+            id: clockText
+            anchors.verticalCenter: parent.verticalCenter
+            text: Qt.formatDateTime(root.now, "hh:mm AP  dddd MMM dd")
+            color: root.calShown ? root.notes.wireCyan : root.notes.barFg
+            style: Text.Outline
+            styleColor: "#000000"
+            font.family: "monospace"
+            font.pixelSize: 14
+            font.bold: true
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.calShown = !root.calShown
+            }
+        }
+        // The " / " separator — a slur between clock and title.
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: "/"
+            color: root.notes.barFg
+            style: Text.Outline
+            styleColor: "#000000"
+            font.family: "monospace"
+            font.pixelSize: 14
+            opacity: 0.75
+        }
+        // Active-window title (music kaomoji when empty).
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.winTitle()
+            color: root.notes.barFg
+            style: Text.Outline
+            styleColor: "#000000"
+            font.family: "monospace"
+            font.pixelSize: 14
+            font.bold: true
+            elide: Text.ElideRight
+        }
+    }
+
+    // ══ CENTRE — the melody: workspaces as note-heads, flanked by barlines ══
+    // Held at true screen-centre (khoa's keep), so the bar's motif sits on the
+    // wallpaper's axis. WorkspaceRow draws the note-heads + the playhead.
+    Row {
+        id: centreStave
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 8
+
+        Barline {}
         WorkspaceRow {
             id: centeredWorkspaces
-            anchors.centerIn: parent
+            anchors.verticalCenter: parent.verticalCenter
             notes: root.notes
         }
+        Barline {}
     }
 
-    // ══ RIGHT WING — the starboard callout block ═══════════════════════════
-    // vol. · bat. · link. Hugs content, hangs from the top-right; its echo
-    // leans LEFT toward the keystone (mirror of the left wing).
-    BarPane {
-        id: rightWing
+    // ══ RIGHT STAVE — the expression marks, closed by a final barline ══════
+    Row {
+        id: rightContent
         anchors.right: parent.right
-        anchors.rightMargin: 6
-        anchors.top: parent.top
-        height: root.wingH
-        width: rightContent.implicitWidth + 20
-        echoDx: Math.max(-4, Math.min(0, (root.screenCenter - (x + width / 2)) * 0.02))
-        echoDy: 3
-        z: 2
+        anchors.rightMargin: root.edgePad
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 10
 
-        Row {
-            id: rightContent
+        // Volume — scroll = adjust, click = mute, hover = ASCII slider popout.
+        Text {
+            id: volText
             anchors.verticalCenter: parent.verticalCenter
-            anchors.right: parent.right
-            anchors.rightMargin: 10
-            spacing: 10
-
-            // Volume — scroll = adjust, click = mute, hover = ASCII slider popout.
-            Text {
-                id: volText
-                anchors.verticalCenter: parent.verticalCenter
-                visible: root.volAvail
-                text: root.volMuted ? "vol.muted" : ("vol." + root.volPct)
-                color: root.notes.barFg
-                style: Text.Outline
-                styleColor: "#000000"
-                font.family: "monospace"
-                font.pixelSize: 15
-                font.bold: true
-                MouseArea {
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onEntered: root.volShown = true
-                    onExited: root.volShown = false
-                    onClicked: root.volToggleMute()
-                    onWheel: {
-                        root.volAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
-                        wheel.accepted = true
-                    }
+            visible: root.volAvail
+            text: root.volMuted ? "𝄽 vol" : (root.volIcon(root.volPct) + " " + root.volPct)
+            color: root.volShown ? root.notes.wireCyan : root.notes.barFg
+            style: Text.Outline
+            styleColor: "#000000"
+            font.family: "monospace"
+            font.pixelSize: 14
+            font.bold: true
+            MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onEntered: root.volShown = true
+                onExited: root.volShown = false
+                onClicked: root.volToggleMute()
+                onWheel: {
+                    root.volAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
+                    wheel.accepted = true
                 }
-            }
-
-            // Battery — hover = time-remaining + ASCII charge-bar popout.
-            Text {
-                id: battText
-                anchors.verticalCenter: parent.verticalCenter
-                visible: root.battAvail
-                text: root.battFull
-                      ? "bat.full"
-                      : ("bat." + root.battPct + (root.battCharging ? "+" : ""))
-                color: (root.battCrit || root.battWarn) ? root.notes.glitchPink
-                                                        : root.notes.barFg
-                opacity: (root.battWarn && !root.blinkOn) ? 0.3 : 1.0
-                Behavior on opacity { NumberAnimation { duration: 400 } }
-                style: Text.Outline
-                styleColor: "#000000"
-                font.family: "monospace"
-                font.pixelSize: 15
-                font.bold: true
-                MouseArea {
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    onEntered: root.battShown = true
-                    onExited: root.battShown = false
-                }
-            }
-
-            // Network callout — a live link reads in the cool wireframe field
-            // (holoBlue, base0D); a dead link recedes to dim barFg. vol./bat.
-            // stay barFg so their changing digits keep maximum legibility.
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "link." + root.netKind
-                color: root.netKind === "down" ? root.notes.barFg : root.notes.holoBlue
-                opacity: root.netKind === "down" ? 0.55 : 1.0
-                style: Text.Outline
-                styleColor: "#000000"
-                font.family: "monospace"
-                font.pixelSize: 15
             }
         }
-    }
 
-    // ── The framed gaps — a tick-comb hung from the lintel at each opening
-    // between the wings and the keystone. Positioned at the gap midpoints so
-    // the wallpaper's convergence reads through a deliberate grille, not a tear.
-    GapMark {
-        y: 1
-        x: Math.round(((leftWing.x + leftWing.width) + keystone.x) / 2) - 4
-    }
-    GapMark {
-        y: 1
-        x: Math.round(((keystone.x + keystone.width) + rightWing.x) / 2) - 4
+        // Battery — a rest that deepens as charge drains; hover = time + bar.
+        Text {
+            id: battText
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.battAvail
+            text: root.battFull
+                  ? (root.battIcon() + " full")
+                  : (root.battIcon() + " " + root.battPct + (root.battCharging ? "+" : ""))
+            color: (root.battCrit || root.battWarn) ? root.notes.glitchPink
+                                                    : root.notes.barFg
+            opacity: (root.battWarn && !root.blinkOn) ? 0.3 : 1.0
+            Behavior on opacity { NumberAnimation { duration: 400 } }
+            style: Text.Outline
+            styleColor: "#000000"
+            font.family: "monospace"
+            font.pixelSize: 14
+            font.bold: true
+            MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                onEntered: root.battShown = true
+                onExited: root.battShown = false
+            }
+        }
+
+        // Network — a live link glows in the cool holoBlue field; a dead link
+        // falls to a dim rest (𝄽) in barFg.
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.netGlyph(root.netKind) + " " + root.netLabel(root.netKind)
+            color: root.netKind === "down" ? root.notes.barFg : root.notes.holoBlue
+            opacity: root.netKind === "down" ? 0.55 : 1.0
+            style: Text.Outline
+            styleColor: "#000000"
+            font.family: "monospace"
+            font.pixelSize: 14
+        }
+
+        // The final barline — thin + thick, closing the measure (𝄂).
+        Row {
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 2
+            Rectangle {
+                width: 1.5; height: root.staffSpan + 4; radius: 0.5
+                color: root.notes.violet; opacity: 0.6
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            Rectangle {
+                width: 3; height: root.staffSpan + 4; radius: 0.5
+                color: root.notes.violet; opacity: 0.85
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
     }
 
     // ══ POPOUTS — real PopupWindows under their bar cells (BarPopout) ══════
-    // The v1 in-Item Rectangles drew at y > 28 inside the 28px bar surface —
-    // clipped by the layer surface, never rendered. Each popout is now its
-    // own xdg_popup with GadgetFrame chrome (glass via blur_popups rule).
+    // Each is its own xdg_popup with GadgetFrame chrome (glass via blur_popups).
+    // The cell ids above (volText/battText/clockText/np/meter/pwr/clk) anchor
+    // them — every popout the entablature shipped survives, rewired unchanged.
 
     // Volume hover slider.
     BarPopout {
@@ -791,7 +651,7 @@ Item {
         }
     }
 
-    // Clock → Calendar (the Quickshell-native upgrade of waybar's tooltip).
+    // Clock → Calendar.
     BarPopout {
         notes: root.notes
         cell: clockText
@@ -804,7 +664,7 @@ Item {
         }
     }
 
-    // ── Gadget tray popouts (v2): each gadget is its own widget ────────────
+    // ── Gadget tray popouts: each gadget is its own widget ─────────────────
     BarPopout {
         notes: root.notes
         cell: npCell
