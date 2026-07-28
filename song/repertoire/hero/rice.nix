@@ -1,9 +1,9 @@
 # song/repertoire/hero/rice.nix — the "hero" song (the cover's own key).
 #
 # The palette is drawn from the hero cover itself (song/covers/hero.webp —
-# the pianist over mirror water at dusk): deep plum sky for the base, pale
-# rose-cream cloudlight for text, dusk rose for the accent, sunset ember for
-# urgent. The song that matches its wallpaper.
+# Alma-Tadema's "Unconscious Rivals"): a LIGHT warm classical academic key —
+# cream/parchment for the base, deep umber ink for text, dusty cornflower for
+# the accent, muted rose for urgent. The song that matches its wallpaper.
 #
 # HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.notes.
 # All note values are literal nix expressions (no song/ runtime reads).
@@ -12,41 +12,42 @@
   # Guard: apply only when this host performs "hero".
   config = lib.mkIf (config.aoide.song == "hero") {
 
-    # ── Palette tier (base16 mapping — the cover's dusk) ───────────────────
+    # ── Palette tier (base16 mapping — the painting's warm cream light) ────
     aoide.notes.palette = {
-      bg = "#1a1322"; # deep dusk plum        (base00)
-      fg = "#ecdfda"; # pale rose-cream light (base05)
-      accent = "#d98a96"; # dusk rose          (base0D)
-      urgent = "#ff7a68"; # sunset ember       (base08)
-      # The one-neon trace colour — the Pantheon stills' optic-nerve green
-      # (matches base0B below). Rose stays the chrome accent; THIS blazes on the
-      # single hot/traced element (the DAG/TERMINALS traced row). null → accent.
-      hot = "#3fe97f"; # optic-nerve neon      (base0B)
+      bg = "#f4ecdc"; # cream parchment       (base00)
+      fg = "#423420"; # deep umber ink        (base05)
+      accent = "#4f74a0"; # dusty cornflower   (base0D)
+      urgent = "#b0475f"; # muted rose        (base08)
+      # The one-hot trace colour — the painting's sage-green accent
+      # (matches base0B below). Cornflower stays the chrome accent; THIS
+      # blazes on the single hot/traced element (the DAG/TERMINALS traced
+      # row). null → accent.
+      hot = "#6f8a4f"; # sage green            (base0B)
     };
 
-    # ── Base16 tier — "pantheon bw" (the terminal scheme) ──────────────────
-    # Mainly black & white per khoa: a true grayscale ramp (00–07, faint cool
-    # cast so it sits with the plum surfaces) with the accent set drawn from
-    # the Pantheon reference stills (~/Aoide-Wiki/references/pantheon/):
-    # optic-nerve neon green, wireframe cyan, hologram periwinkle, violet
-    # brain-glow, magenta-pink glitch. Slots follow the base16 standard.
+    # ── Base16 tier — the LIGHT warm painting palette ───────────────────────
+    # Keyed from Alma-Tadema's "Unconscious Rivals": a warm cream ramp
+    # (00–07, lightest to darkest umber) with an accent set drawn from the
+    # painting's terracotta vault, marble, azalea, and sage: muted rose,
+    # burnt terracotta, ochre gold, sage green, teal, cornflower blue,
+    # dusty plum, and warm brown. Slots follow the base16 standard.
     aoide.notes.base16 = {
-      base00 = "#0a0a0d"; # near-black field
-      base01 = "#141419"; # lighter bg (status)
-      base02 = "#26262e"; # selection
-      base03 = "#55555f"; # comments
-      base04 = "#9a9aa5"; # dark fg
-      base05 = "#e8e8ec"; # default fg (near-white)
-      base06 = "#f5f5f7"; # light fg
-      base07 = "#ffffff"; # brightest — the window-key white
-      base08 = "#ff5f87"; # red    — magenta-pink glitch
-      base09 = "#d9a066"; # orange — muted amber (kept quiet)
-      base0A = "#d8e07a"; # yellow — pale trace-line chartreuse
-      base0B = "#3fe97f"; # green  — THE optic-nerve neon
-      base0C = "#5fd8e8"; # cyan   — wireframe lines
-      base0D = "#7d9bff"; # blue   — hologram periwinkle
-      base0E = "#c583f2"; # magenta— violet brain-glow
-      base0F = "#9a6b8f"; # brown  — dim mauve (deprecated)
+      base00 = "#f4ecdc"; # lightest bg — cream parchment
+      base01 = "#eaddc6"; # lighter bg (status)
+      base02 = "#ddcaa6"; # selection
+      base03 = "#b0997a"; # comments
+      base04 = "#8a6f50"; # dark fg
+      base05 = "#423420"; # default fg — deep umber ink
+      base06 = "#2f2416"; # light fg (deeper ink)
+      base07 = "#1d160d"; # brightest — the darkest ink
+      base08 = "#b0475f"; # red    — muted rose
+      base09 = "#c96038"; # orange — burnt terracotta
+      base0A = "#b98a34"; # yellow — ochre gold
+      base0B = "#6f8a4f"; # green  — sage
+      base0C = "#40897a"; # cyan   — teal
+      base0D = "#4f74a0"; # blue   — dusty cornflower
+      base0E = "#8f5578"; # magenta— dusty plum
+      base0F = "#8a5730"; # brown  — warm brown
     };
 
     # ── Component tier (v0) ────────────────────────────────────────────────
@@ -61,20 +62,20 @@
       fg = null;
       urgent = null;
     };
-    # Window frames join the Pantheon (khoa, round 5): the active hairline is
-    # base0C wireCyan — the same wireframe rule the bar's panes wear — and the
-    # inactive frame recedes to base01, the dark ground. The dxflake BW pair
-    # retires; the window key stays a component-tier note the song owns.
+    # Window frames join the Pantheon: the active hairline is base0C teal —
+    # the same wireframe rule the bar's panes wear — and the inactive frame
+    # recedes to base01, the light ground. The window key stays a
+    # component-tier note the song owns.
     aoide.notes.window = {
-      border = "#5fd8e8"; # base0C wireCyan — active
-      borderInactive = "#141419"; # base01 dark ground — inactive
+      border = "#40897a"; # base0C teal — active
+      borderInactive = "#eaddc6"; # base01 light ground — inactive
     };
 
     # ── Cover-art note ─────────────────────────────────────────────────────
     # The main wallpaper: Alma-Tadema's "Unconscious Rivals" — a warm classical
-    # academic painting (terracotta vault, marble, azalea, sage). NOTE: the
-    # base16 palette above is still hero's dusk-plum, keyed to the OLD cover —
-    # re-derive it from this painting for colour coherence (open thread).
+    # academic painting (terracotta vault, marble, azalea, sage). The base16
+    # palette above is keyed from this painting's LIGHT warm register, for
+    # colour coherence with the desktop's Stylix light polarity.
     aoide.notes.wallpaper = ../../covers/Alma-Tadema_Unconscious_Rivals.jpg;
   };
 }
