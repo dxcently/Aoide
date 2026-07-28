@@ -403,7 +403,7 @@ Item {
         text: "𝄞"
         color: root.notes.paletteFg
         font.family: "monospace"
-        font.pixelSize: 18
+        font.pixelSize: 20
         font.bold: true
         MouseArea {
             anchors.fill: parent
@@ -466,7 +466,7 @@ Item {
             text: Qt.formatDateTime(root.now, "hh:mm AP  dddd MMM dd")
             color: root.calShown ? root.notes.paletteAccent : root.notes.paletteFg
             font.family: "monospace"
-            font.pixelSize: 12
+            font.pixelSize: 14
             font.bold: true
             MouseArea {
                 anchors.fill: parent
@@ -480,7 +480,7 @@ Item {
             text: "/"
             color: root.notes.paletteFg
             font.family: "monospace"
-            font.pixelSize: 12
+            font.pixelSize: 14
             opacity: 0.55
         }
         // Active-window title (music kaomoji when empty).
@@ -489,7 +489,7 @@ Item {
             text: root.winTitle()
             color: root.notes.paletteFg
             font.family: "monospace"
-            font.pixelSize: 12
+            font.pixelSize: 14
             font.bold: true
             elide: Text.ElideRight
         }
@@ -529,7 +529,7 @@ Item {
             text: root.volMuted ? "𝄽 vol" : (root.volIcon(root.volPct) + " " + root.volPct)
             color: root.volShown ? root.notes.paletteAccent : root.notes.paletteFg
             font.family: "monospace"
-            font.pixelSize: 12
+            font.pixelSize: 14
             font.bold: true
             MouseArea {
                 anchors.fill: parent
@@ -558,7 +558,7 @@ Item {
             opacity: (root.battWarn && !root.blinkOn) ? 0.3 : 1.0
             Behavior on opacity { NumberAnimation { duration: 400 } }
             font.family: "monospace"
-            font.pixelSize: 12
+            font.pixelSize: 14
             font.bold: true
             MouseArea {
                 anchors.fill: parent
@@ -576,7 +576,7 @@ Item {
             color: root.notes.paletteFg
             opacity: root.netKind === "down" ? 0.5 : 1.0
             font.family: "monospace"
-            font.pixelSize: 12
+            font.pixelSize: 14
         }
 
         // The final barline — thin + thick black rules, closing the measure (𝄂).
@@ -614,7 +614,7 @@ Item {
             text: root.volMuted ? "muted" : (root.volSlider(root.volPct) + " " + root.volPct + "%")
             color: "#14141a"
             font.family: "monospace"
-            font.pixelSize: 12
+            font.pixelSize: 14
         }
     }
 
@@ -633,7 +633,7 @@ Item {
                 text: root.battBar(root.battPct) + " " + root.battPct + "%"
                 color: root.battWarn ? root.notes.paletteUrgent : "#14141a"
                 font.family: "monospace"
-                font.pixelSize: 12
+                font.pixelSize: 14
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
