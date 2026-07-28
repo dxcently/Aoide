@@ -265,8 +265,9 @@ Item {
     }
 
     // ── Window title (Hyprland active toplevel) with kaomoji empty-rewrite ──
-    // A small songbook of music kaomoji combos; the empty-title rewrite rotates
-    // hourly so the bar hums a different bar of the tune through the day.
+    // A small songbook of music kaomoji combos; the empty-title rewrite picks
+    // one at RANDOM, re-rolled each time the active window changes, so an empty
+    // workspace hums a fresh little face instead of the same hourly one.
     readonly property var kaomojiSet: [
         "/ᐠ - ˕ -マ Ⳋ ⋆｡°✩♬ ♪",
         "♪(´▽｀) ⋆｡°✩",
@@ -275,8 +276,18 @@ Item {
         "✧*。٩(ˊᗜˋ*)و ♪ ✧*。",
         "₊˚⊹ ♡ ♬ ⋆｡°✩"
     ]
-    readonly property string kaomoji:
-        kaomojiSet[now.getHours() % kaomojiSet.length]
+    property int kaomojiIdx: 0
+    function rollKaomoji() {
+        root.kaomojiIdx = Math.floor(Math.random() * root.kaomojiSet.length)
+    }
+    Component.onCompleted: rollKaomoji()
+    // Re-roll on every active-window change — so landing on an empty workspace
+    // shows a freshly-random face (it's only displayed when the title is empty).
+    Connections {
+        target: Hyprland
+        function onActiveToplevelChanged() { root.rollKaomoji() }
+    }
+    readonly property string kaomoji: kaomojiSet[kaomojiIdx]
     function winTitle() {
         var t = (Hyprland.activeToplevel && Hyprland.activeToplevel.title)
                 ? ("" + Hyprland.activeToplevel.title) : ""
