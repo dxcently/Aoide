@@ -1,5 +1,7 @@
 # Aoide
 
+**Aoide (the core) vs AoideOS (the distribution) — don't conflate the two.** *Aoide* is the **orchestration core**: the bridges and APIs between the terminal, the shell, the system, and the OS — one interface through which agents are freely orchestrated for any task. Any agent with a shell is fully capable, no MCP required; **every terminal is a conductable, tracked session by default**, so a central agent can speak into any other running session (see [Conducting](#conducting--every-terminal-is-a-tracked-session)). The core runs anywhere there is a shell — portable, headless-capable, agent-first. *AoideOS* is the **distribution built on that core**: the NixOS flake that ADDITIONALLY ships the Quickshell widget-making toolkit (bar, dock, gadgets, the DAG/baton surfaces) and the specialized ricer (the song/notes theming engine). Aoide is the engine; AoideOS is the desktop around it — a capability that works with only a shell is "Aoide", one that is desktop/Quickshell/rice is "AoideOS". This README documents AoideOS (you're reading the flake), with the core's `aoide` verbs throughout.
+
 Aoide is an agent-wearable NixOS desktop framework — Hyprland compositor, Quickshell shell, an orchestrator daemon (`aoided`), a content pipeline, and a self-ricing engine — that you **fork and run**, not install. Its naming thesis in one line: architecture is frozen music — the nix layer is the score, the running desktop is the performance, a rice is a song the system sings.
 
 This README is a use guide: how to drive the box day to day, how to edit the flake, and what the `aoide` tools do. For the deeper why, see the wiki at [`../Aoide-Wiki`](../Aoide-Wiki/Overview.md) (start with `Overview.md`; the [[Wiki-Protocol]] note explains the shape).
@@ -204,7 +206,8 @@ The 28 commands, grouped (`real` = implemented; `stub` = exit `64`, not-implemen
 - **Orientation** — `guide`, `schema`, `mcp serve` — all `real`.
 - **`rice` group** (the self-ricing loop): `rice lint` `real`; `rice gen`, `rice preview`, `rice adopt` (gated), `rice transpose` — `stub`.
 - **`content` group** (the discover→approve→ingest pipeline): `content register`, `content propose`, `content approve` (gated), `content ingest`, `content query` — all `stub`.
-- **`graph` group** (the session/project DAG — 8 commands, all `real`): `graph view`, `graph project add/remove/list`, `graph link`, `graph focus`, `graph prune`, `graph emit`.
+- **`graph` group** (the session/project DAG, all `real`): `graph view`, `graph project add/remove/list`, `graph link`, `graph focus`, `graph prune`, `graph emit`, the session write-verbs (`graph session start/phase/end/hook`), and the wrappers `graph wrap` (observe-only) + `graph send` (the gated injection door).
+- **`conduct`** (`real`): run a command on its own PTY as a **conductable** session (a control socket `graph send` can type into). Conduct-by-default makes this every terminal's login shell (see [Conducting](#conducting--every-terminal-is-a-tracked-session)).
 - **`baton`** (the conductor's terminal UI): `real` — an interactive, ASCII-art terminal UI over the same trunk (see below).
 - **Daemon runners** — `daemon` (aoided), `shellbridge`, `adapter melete` — all `real` skeletons.
 - **Lifecycle** — `make` (widget-maker), `update` (gated self-update), `onboard` (first-boot) — all `stub`.
@@ -236,6 +239,18 @@ desktop in one line:
 export AOIDE_STAGE_DIR=$(mktemp -d) AOIDE_AUDIT_LOG=$AOIDE_STAGE_DIR/log
 pkgs/aoide/tests/fixtures/seed.sh "$AOIDE_STAGE_DIR" && aoide baton
 ```
+
+### Conducting — every terminal is a tracked session
+
+Conduct-by-default is the Aoide **core** behaviour (works with only a shell; `concepts/Conductor-Channel`). **Every kitty window runs its login shell under `aoide conduct`**, so each terminal is its own tracked, conductable session: it registers in the session DAG AND holds a per-session control socket (`$XDG_RUNTIME_DIR/aoide/session-<id>.sock`) that a central controller can type into. The wiring is one line in the `kitty` dendrite — kitty's `shell` points at an `aoide-shell` wrapper — and it is written to be **unbreakable**: if `aoide` is missing from PATH, or `AOIDE_NO_CONDUCT=1` is set (the escape hatch), or the conduct fails to exec, the wrapper falls straight through to the plain login shell. Nested terminals spawned from a conducted shell parent themselves into the DAG via the inherited `AOIDE_SESSION_ID`.
+
+To command another session:
+
+```
+aoide graph send --id <id> [--submit] [--yes] -- <text>
+```
+
+It injects `<text>` into that session's stdin (`--submit` appends Enter). This is the **one gated injection door**: held **pending** approval by default; it **delivers** on `--yes`, on the global `AOIDE_CONDUCT_AUTOGATE` switch, or when the **sender is the target's parent** (an orchestrator freely commanding a child it spawned — the "freely orchestrated" default). A delivered send auto-renames the node to a one-line form of the text, and **every outcome is audited** (`~/Aoide/log`). `aoide conduct -- <cmd>` wraps any extra agent the same way; `aoide graph wrap -- <cmd>` is the lighter observe-only wrapper (no control socket). The desktop's terminals become a mesh of sessions a conductor speaks into.
 
 ### `drachma` — the note engine
 
@@ -296,6 +311,9 @@ Opt-in: the **`aoide.rebuild`** capability (off by default) grants a dedicated n
 | `aoide graph focus` | real | Jump to a session's window via `hyprctl focuswindow`. |
 | `aoide graph prune` | real | Drop `done` sessions + hook records; clear orphaned links. |
 | `aoide graph emit` | real | Stage the resolved DAG to `song/stage/graph.json` (atomic). |
+| `aoide graph wrap` | real | Run any agent command as a registered session (inherited stdio, observe-only); exports `AOIDE_SESSION_ID`, exit mirrors the child. |
+| `aoide graph send` | real | Inject text into a conducted session's control socket — the one gated injection door (pending by default; `--yes`/autogate/parent-of-target delivers; every outcome audited). |
+| `aoide conduct` | real | Run a command on its own PTY as a **conductable** session (control socket + best-effort `windowAddress`). Every kitty terminal runs its shell under this by default. |
 | `aoide baton` | real | Raise the baton: the interactive terminal UI to conduct the agent sessions — session DAG, projects, audit log, stage status (every action routes through the same dispatcher). |
 | `aoide adapter melete` | real | Run the melete-adapter: consume the neutral event stream (default-deny). |
 

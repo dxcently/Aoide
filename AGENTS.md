@@ -1,7 +1,18 @@
 # AGENTS.md — how to drive Aoide
 
-Aoide is an agent-wearable NixOS desktop. Any agent with a shell is fully
-capable — no MCP required. Orient through four tiers, in order.
+**Aoide (core) vs AoideOS (distribution) — don't conflate the two.** *Aoide* is
+the **orchestration core**: the bridges and APIs between the terminal, shell,
+system, and OS — one interface through which agents are freely orchestrated for
+any task. Any agent with a shell is fully capable, no MCP required, and **every
+terminal is a conductable, tracked session by default** (see Conducting under
+Tier 1). It runs anywhere there is a shell — portable, headless-capable,
+agent-first. *AoideOS* is the **distribution built on that core**: the NixOS
+flake that ADDITIONALLY ships the Quickshell widget-making toolkit (bar, dock,
+gadgets, the DAG/baton surfaces) and the specialized ricer (song/notes theming).
+Aoide is the engine; AoideOS is the desktop around it. A capability that works
+with only a shell is "Aoide"; one that is desktop/Quickshell/rice is "AoideOS".
+
+Orient through four tiers, in order.
 
 ## Tier 0 — onboarding (this file + `aoide guide`)
 
@@ -22,6 +33,23 @@ passthrough routes through the same trunk.
 Rice loop (the headline): `aoide rice gen <prompt|wallpaper>` → `rice lint` →
 `rice preview` (rehearsal, nothing committed) → `rice adopt <name>` (**user
 gates this**) → commit + gated rebuild (recording).
+
+**Conducting — commanding other sessions (the core default).** Every terminal
+runs its shell under `aoide conduct`, so it is a conductable, tracked session: it
+registers in the graph AND holds a control socket a central controller can type
+into. To command another session:
+
+```
+aoide graph send --id <id> [--submit] [--yes] -- <text>
+```
+
+It injects `<text>` into that session's stdin (`--submit` appends Enter). The one
+gated door: held **pending** by default; it **delivers** on `--yes`, on the global
+`AOIDE_CONDUCT_AUTOGATE` switch, or when the **sender is the target's parent** (an
+orchestrator may freely command its own spawned children) — then it auto-renames
+the node to the command and audits every outcome. `aoide conduct -- <cmd>` wraps
+any extra agent the same way; `AOIDE_NO_CONDUCT=1` is the per-terminal escape
+hatch. The desktop's terminals are a mesh of sessions a conductor speaks into.
 
 ## Tier 2 — stdio MCP (per-session, optional)
 
