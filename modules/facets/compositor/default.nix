@@ -30,7 +30,7 @@ let
   # song-agnostic, so border colour is ALWAYS a note read, never a literal.
   # This IS the substitution seam — window.border/window.borderInactive (or
   # their palette.accent/palette.bg fallback) are set per-song in that song's
-  # rice.nix (e.g. song/repertoire/hero/rice.nix), which maps its own base16
+  # rice.nix (e.g. song/songbook/hero/rice.nix), which maps its own base16
   # roles onto the component tier. For the Pantheon hero song, the intended
   # mapping is base0C wireCyan (#5fd8e8) → window.border (active) and a dark
   # muted ground, base01 (#141419) or base02 (#26262e) → window.borderInactive
@@ -92,8 +92,14 @@ let
     # rejected by hyprctl on 0.56 — verified live.)
     layerrule = blur on, match:namespace aoide-bar
     layerrule = blur on, match:namespace aoide-dock
+    # aoide-launcher: the summoned launcher pane rides the same frosted glass as
+    # the dock (it is a Pantheon pane too). Blur + ignore_alpha so its cream
+    # glass frosts over whatever window it covers and its transparent scrim/edges
+    # don't render as a grey blur stripe.
+    layerrule = blur on, match:namespace aoide-launcher
     layerrule = ignore_alpha 0.05, match:namespace aoide-bar
     layerrule = ignore_alpha 0.05, match:namespace aoide-dock
+    layerrule = ignore_alpha 0.05, match:namespace aoide-launcher
     # blur_popups extends the glass to the bar's PopupWindow children (the
     # gadget popouts) — same 0.5x snake_case rework spelling as ignore_alpha.
     layerrule = blur_popups on, match:namespace aoide-bar
@@ -121,7 +127,7 @@ let
         }
         layers {
             enabled = 1
-            namespaces = aoide-bar, aoide-dock
+            namespaces = aoide-bar, aoide-dock, aoide-launcher
             preset = glass
         }
     }
@@ -146,8 +152,12 @@ let
   # compositor facet owns all hyprctl-level wiring.
   hyprBindConfig = ''
     # ── Aoide keybinds ────────────────────────────────────────────────────
-    # Launcher (shellbridge → AoideLauncher toggle)
-    bind = SUPER, SPACE, exec, aoide shell launcher toggle
+    # Launcher (Hyprland global shortcut → AoideLauncher.GlobalShortcut toggle).
+    # The launcher registers `aoide:launcher` in-process (hyprland-global-
+    # shortcuts-v1), so the keypress reaches the running surface directly — no
+    # `aoide shell launcher` CLI verb (that verb is an unimplemented stub) and no
+    # inbound socket. `global, <appid>:<name>` is Hyprland's dispatcher for it.
+    bind = SUPER, SPACE, global, aoide:launcher
 
     # Lock screen
     bind = SUPER, ESCAPE, exec, aoide shell lock

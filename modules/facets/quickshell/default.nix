@@ -112,7 +112,14 @@ in
       #     graphical-session.target, WAYLAND_DISPLAY/HYPRLAND_INSTANCE_SIGNATURE
       #     imported) has fired, so Quickshell inherits a valid Wayland env.
       # ConditionPathExists guards the shell entry so the unit fails cleanly
-      # (not crash-loops) if the QML tree hasn't landed in the fork yet.
+      # (not crash-loops) if the QML tree hasn't landed in the fork yet. That
+      # guard only checks *existence*, though — a shell.qml that exists but
+      # fails to load (a QML parse/load error, or an ExecStart pointed elsewhere
+      # by a stray drop-in) still exits 255 and, under Restart=on-failure, would
+      # respawn every RestartSec forever. StartLimit* is the backstop: after 5
+      # failures inside 60s systemd stops trying and parks the unit `failed`
+      # instead of thrashing the desktop (and journald) indefinitely. Five tries
+      # still absorbs a genuinely transient failure (e.g. Wayland not ready yet).
       systemd.user.services.aoide-quickshell = {
         Unit = {
           Description = "Aoide Quickshell — shell surface (bar/dock/wallpaper/notifications)";
@@ -120,6 +127,8 @@ in
           After = [ "graphical-session.target" ];
           ConditionEnvironment = "WAYLAND_DISPLAY";
           ConditionPathExists = shellQmlEntry;
+          StartLimitIntervalSec = 60;
+          StartLimitBurst = 5;
         };
         Service = {
           # `-p <path>` loads a config by PATH; `-c <name>` (used previously)
