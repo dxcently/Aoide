@@ -64,7 +64,11 @@ ShellRoot {
     PanelWindow {
         id: wallpaperWin
         anchors { top: true; bottom: true; left: true; right: true }
-        exclusiveZone: 0
+        // -1 = ignore other surfaces' exclusive zones, so the Background layer
+        // spans the WHOLE output (0,0 → full) and reaches UNDER the bar's 36px
+        // reservation. With 0 the bar's exclusiveZone evicts the wallpaper to
+        // y=36 and the cover never renders behind the translucent strip.
+        exclusiveZone: -1
         color: "transparent"
         WlrLayershell.layer: WlrLayer.Background
         WlrLayershell.namespace: "aoide-wallpaper"

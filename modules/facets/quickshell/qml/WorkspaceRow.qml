@@ -1,18 +1,19 @@
-// WorkspaceRow.qml — musical-notation workspace switcher (dxflake homage).
+// WorkspaceRow.qml — the melody: workspaces as NOTE-HEADS on the staff.
 //
-// Binds to live Hyprland workspaces via Quickshell.Hyprland (the same
-// real-service idiom AoideNotifications uses for NotificationServer — no
-// shell-out, no invented IPC). Each workspace renders as a small square cell
-// with a musical-notation glyph (the dxflake waybar's format-icons map).
+// Clean-slate redesign in the SONG vein (the entablature colonnade is gone). The
+// bar is one measure of music; the workspaces are the notes written on it. Each
+// live Hyprland workspace is a note-head — a tilted oval sitting at its own pitch
+// on the shared staff line that runs through the whole bar. The workspace id is
+// the note's degree: id 1 sits low, ascending ids climb the staff, so the row of
+// open workspaces reads as a little rising figure. The FOCUSED workspace is the
+// note being played — a filled note-head with a stem, and a PLAYHEAD (the DAW
+// cursor) eases across the staff to sit under it. Urgent workspaces PULSE
+// (the blink_red homage, glitchPink). Clicking a note-head activates it.
 //
-// Quickshell-native enhancement over static waybar: the ACTIVE-cell box is a
-// SINGLE overlay Rectangle that EASES (Behavior on x/width) between cells as the
-// focus moves, instead of a hard per-cell border toggle. Urgent workspaces PULSE
-// (opacity animation — the CSS blink_red homage). Clicking a cell activates it.
-//
-// All colours from notes (zero hardcoded hex). The glyph STRINGS are content
-// (musical notation), not palette. The black text-outline is the one legibility
-// literal, matching the rig.  Degrade: off Hyprland (no workspaces) → empty row.
+// Binds to live Hyprland workspaces via Quickshell.Hyprland (same real-service
+// idiom as before — no shell-out, no invented IPC). Degrade: off Hyprland → an
+// empty staff. All colours from notes (zero hardcoded hex); the black text
+// outline is the one sanctioned legibility literal. The glyphs are content.
 
 import QtQuick
 import Quickshell.Hyprland
@@ -21,21 +22,39 @@ Item {
     id: root
     required property var notes
 
-    readonly property int cellSize: 28
-    readonly property int cellGap: 4
+    // ── Geometry: note-heads on a five-line staff ──────────────────────────
+    readonly property int cellW: 24        // horizontal slot per note
+    readonly property int cellGap: 3
+    readonly property real halfStep: 1.75  // line→space; a full staff line is 2×
+    readonly property int headW: 17
+    readonly property int headH: 12
 
     implicitWidth: cellRow.implicitWidth
-    implicitHeight: cellSize
+    implicitHeight: 30
 
-    // ── Workspace labels: plain NUMBERS (pantheon redesign — khoa: forget
-    // the music-note delimiters). The two special workspaces keep their
-    // unicode marks: the one seasoning of "song" the row retains.
-    function wsIcon(ws) {
+    // ── Note label + pitch ─────────────────────────────────────────────────
+    // Regular workspaces carry their id; the two special workspaces keep a
+    // single musical mark that still fits inside a note-head. Pitch (staff
+    // degree) rises with id so the open workspaces spell an ascending run;
+    // specials perch above the staff as a ledger note.
+    function wsLabel(ws) {
         if (!ws) return "?"
         var name = ("" + (ws.name || "")).toLowerCase()
-        if (name.indexOf("magic") !== -1) return "♬⋆.˚"
-        if (name.indexOf("scratch") !== -1) return "ᝰ.ᐟ"
+        if (name.indexOf("magic") !== -1) return "♬"
+        if (name.indexOf("scratch") !== -1) return "ᝰ"
         return "" + ws.id
+    }
+    function wsSpecial(ws) {
+        var name = ws ? ("" + (ws.name || "")).toLowerCase() : ""
+        return name.indexOf("magic") !== -1 || name.indexOf("scratch") !== -1
+    }
+    // Staff degree → vertical offset (up is negative y). Specials ride high on
+    // a ledger; regular ids wrap through a 7-degree scale centred on the staff.
+    function pitchOffset(ws) {
+        if (wsSpecial(ws)) return -5 * root.halfStep          // above the top line
+        var id = ws ? (ws.id || 1) : 1
+        var deg = ((id - 1) % 7) - 3                          // -3 … +3
+        return -deg * root.halfStep
     }
 
     // Sorted live workspaces (by id) — ObjectModel exposes `.values`.
@@ -46,7 +65,7 @@ Item {
         return vs
     }
 
-    // Index of the active cell (for the sliding box); -1 when none.
+    // Index of the focused note (drives the playhead); -1 when none.
     readonly property int activeIndex: {
         var vs = root.wsList
         for (var i = 0; i < vs.length; i++)
@@ -54,9 +73,31 @@ Item {
         return -1
     }
 
+    // ── The playhead — a soft cursor that eases to the note being played ────
+    // Declared before the notes so the heads sit ON it. Spans the staff band.
+    Rectangle {
+        id: playhead
+        visible: root.activeIndex >= 0
+        z: 0
+        width: 2
+        height: 22
+        radius: 1
+        color: root.notes.wireCyan
+        opacity: 0.4
+        anchors.verticalCenter: parent.verticalCenter
+        x: root.activeIndex >= 0
+           ? root.activeIndex * (root.cellW + root.cellGap) + root.cellW / 2 - width / 2
+           : 0
+        Behavior on x {
+            NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+        }
+    }
+
     Row {
         id: cellRow
+        z: 1
         spacing: root.cellGap
+        anchors.verticalCenter: parent.verticalCenter
 
         Repeater {
             model: root.wsList
@@ -67,62 +108,64 @@ Item {
                 readonly property bool isActive: root.activeIndex === cell.index
                 readonly property bool isUrgent: cell.modelData && cell.modelData.urgent
 
-                width: root.cellSize
-                height: root.cellSize
+                width: root.cellW
+                height: root.height
 
-                // ── Pantheon layering: every cell is a wireframe pane thrown
-                // over a depth echo — the echo cast toward the ROW'S CENTER,
-                // the vanishing point. Left cells cast right, right cells cast
-                // left, the inflection at dead center; the throw grows with
-                // distance so the whole row converges like a colonnade seen
-                // head-on. Downward y: the bar hangs from the top edge, so
-                // "toward screen center" is down.
-                readonly property real vanishDx: {
-                    var cellCenter = cell.x + root.cellSize / 2
-                    var rowCenter = cellRow.width / 2
-                    var d = (rowCenter - cellCenter) * 0.08
-                    return Math.max(-4, Math.min(4, d))
-                }
+                // The note-head group: a tilted oval + its upright number,
+                // parked at this note's pitch on the staff.
+                Item {
+                    id: noteGroup
+                    width: root.headW
+                    height: root.headH
+                    x: (cell.width - width) / 2
+                    y: (cell.height - height) / 2 + root.pitchOffset(cell.modelData)
 
-                Rectangle { // back copy (depth stack)
-                    x: Math.round(cell.vanishDx)
-                    y: 3
-                    width: root.cellSize
-                    height: root.cellSize
-                    color: "transparent"
-                    border.color: root.notes.holoBlue
-                    border.width: 1
-                    opacity: 0.35
-                }
-
-                Rectangle { // front pane (the active cell wears the sliding
-                            // wireCyan activeBox instead — no double border)
-                    width: root.cellSize
-                    height: root.cellSize
-                    color: "transparent"
-                    border.color: root.notes.holoBlue
-                    border.width: 1
-                    opacity: cell.isActive ? 0 : 0.55
-                }
-
-                Text {
-                    anchors.centerIn: parent
-                    text: root.wsIcon(cell.modelData)
-                    color: cell.isActive ? root.notes.wireCyan
-                          : (cell.isUrgent ? root.notes.glitchPink : root.notes.barFg)
-                    style: Text.Outline
-                    styleColor: "#000000"
-                    font.family: "monospace"
-                    font.pixelSize: 17
-                    font.bold: cell.isActive
-
-                    // Urgent pulse (blink_red homage).
-                    SequentialAnimation on opacity {
-                        running: cell.isUrgent
-                        loops: Animation.Infinite
-                        NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
-                        NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
+                    // Stem — the quarter-note upstroke, only on the played note.
+                    Rectangle {
+                        id: stem
+                        visible: cell.isActive
+                        width: 1.5
+                        height: 13
+                        radius: 0.5
+                        color: root.notes.wireCyan
+                        x: parent.width - 1.5
+                        y: -12
                     }
+
+                    // Note-head — filled when played, hollow otherwise; the
+                    // tilt is the engraver's slanted oval.
+                    Rectangle {
+                        id: head
+                        anchors.fill: parent
+                        radius: height / 2
+                        rotation: -20
+                        color: cell.isActive ? root.notes.wireCyan : "transparent"
+                        border.width: cell.isActive ? 0 : 1.5
+                        border.color: cell.isUrgent ? root.notes.glitchPink
+                                                    : root.notes.holoBlue
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                    }
+
+                    // The degree number / special mark, upright over the head.
+                    Text {
+                        anchors.centerIn: parent
+                        text: root.wsLabel(cell.modelData)
+                        color: cell.isActive ? root.notes.paletteBg
+                              : (cell.isUrgent ? root.notes.glitchPink : root.notes.barFg)
+                        style: Text.Outline
+                        styleColor: "#000000"
+                        font.family: "monospace"
+                        font.pixelSize: 11
+                        font.bold: cell.isActive
+                    }
+                }
+
+                // Urgent pulse (blink_red homage) — breathes the whole note.
+                SequentialAnimation on opacity {
+                    running: cell.isUrgent
+                    loops: Animation.Infinite
+                    NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
+                    NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
                 }
 
                 MouseArea {
@@ -134,47 +177,6 @@ Item {
                     }
                 }
             }
-        }
-    }
-
-    // ── Sliding active-box overlay (eases between cells) ──────────────────
-    // A SIBLING of the Row, not a child: a Row positioner assigns x to every
-    // child, so an in-Row overlay gets slotted as item #0 (an empty square
-    // beside the cells — the v2 rendering bug) instead of floating over them.
-    Rectangle { // the active box's own depth echo — rides the eased x below,
-                // converging on the same vanishing point as the cell echoes.
-        visible: root.activeIndex >= 0
-        z: 1
-        width: root.cellSize
-        height: root.cellSize
-        color: "transparent"
-        border.color: root.notes.holoBlue
-        border.width: 1
-        opacity: 0.5
-        y: 3
-        x: {
-            var boxCenter = activeBox.x + root.cellSize / 2
-            var rowCenter = cellRow.width / 2
-            var d = (rowCenter - boxCenter) * 0.08
-            return activeBox.x + Math.round(Math.max(-4, Math.min(4, d)))
-        }
-    }
-
-    Rectangle {
-        id: activeBox
-        visible: root.activeIndex >= 0
-        z: 1
-        width: root.cellSize
-        height: root.cellSize
-        radius: 0
-        color: "transparent"
-        border.color: root.notes.wireCyan
-        border.width: 1
-        x: root.activeIndex >= 0
-           ? root.activeIndex * (root.cellSize + root.cellGap) : 0
-        y: 0
-        Behavior on x {
-            NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
         }
     }
 }

@@ -149,11 +149,10 @@ Item {
         id: panel
         y: root.edgeMargin
         width: root.dockWidth
-        // Content-sized container: with only the agent pair inside, a
-        // full-height slab reads as empty glass — the container wraps its
-        // two widgets instead (clamped to the screen when content grows).
-        height: Math.min(parent.height - 2 * root.edgeMargin,
-                         panelCol.implicitHeight + 20)
+        // Full-height container: the agent pair fills the upper space and the
+        // ambient gadgets (meters/power/clock) are bottom-seated, so the slab
+        // now spans the full screen (minus edge margins) instead of wrapping.
+        height: parent.height - 2 * root.edgeMargin
 
         // Slide reveal: off-screen when closed, edgeMargin when open.
         x: root.shown ? root.edgeMargin
@@ -312,11 +311,16 @@ Item {
                 }
             }
 
-            // ══ Gadget stack — the AGENT pair only (v2 restructure) ════════
-            // The dock is a container for the two agent-facing gadgets:
-            // TERMINALS (session roster) and DAG (session graph). Every other
-            // gadget (now-playing, power, calendar, clock, meters) is its own
-            // widget spawned from a bar cell (BarPopout.qml via AoideBar).
+            // ══ Gadget stack — agents on top, ambient widgets at the bottom
+            // (v3 restructure) ══════════════════════════════════════════════
+            // The dock now spans the full screen height. The top holds the
+            // agent-facing gadgets — BATON (mini conductor), TERMINALS
+            // (session roster) and DAG (session graph) — filling the upper
+            // space via the slack spacer below them. The bottom holds the
+            // ambient, non-agent gadgets — meters (cpu/gpu), power, clock —
+            // in the same GadgetFrame chrome, seated flush at the container's
+            // bottom edge. now-playing stays its own bar-spawned widget
+            // (BarPopout.qml via AoideBar) — it did not move here.
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -366,8 +370,34 @@ Item {
                     }
                 }
 
-                // Absorb slack so the stack tops out cleanly.
+                // Absorb slack so the agent pair tops out and the ambient
+                // group below is pushed flush to the container's bottom.
                 Item { Layout.fillWidth: true; Layout.fillHeight: true }
+
+                // ── Gadget 4: METERS (cpu/gpu) — ambient, bottom-seated ──
+                GadgetFrame {
+                    Layout.fillWidth: true
+                    notes: root.notes
+                    title: "meters.pulse"
+                    MeterGadget {
+                        width: parent.width
+                        notes: root.notes
+                    }
+                }
+
+                // ── Gadget 5: POWER (reserve) — ambient, bottom-seated ───
+                GadgetFrame {
+                    Layout.fillWidth: true
+                    notes: root.notes
+                    title: "power.reserve"
+                    PowerGadget {
+                        width: parent.width
+                        notes: root.notes
+                    }
+                }
+
+                // (The clock/date live on the BAR, not the dock — no clock.face
+                //  gadget here; meters + power are the dock's ambient pair.)
 
                 // ── Dock footer rule: staff run with clef (ornament vocab,
                 // verbatim — trailing U+3164 hangul filler included). The

@@ -234,22 +234,24 @@ in
         };
 
         # Fonts: v0 notes carry no font field yet — sane default, host/rice
-        # overridable. Lekton Nerd Font Mono is Aoide's primary face (dxflake's
-        # exact choice); the fonts dendrite installs it plus the glyph-coverage
-        # set (symbola/noto) that backs the musical-notation UI. Stylix's `emoji`
-        # font is left at its own default (noto-fonts-color-emoji).
+        # overridable. Tinos Nerd Font is Aoide's primary face — a Times-metric
+        # serif (patched with the nerd glyph set); the mono role takes the
+        # single-width "Tinos Nerd Font Mono" variant for terminal/QML columns,
+        # the UI roles take the proportional "Tinos Nerd Font". The fonts
+        # dendrite installs it plus the glyph-coverage set (symbola/noto) that
+        # backs the musical-notation UI. `emoji` is left at its own default.
         fonts = lib.mkDefault {
           monospace = {
-            package = pkgs.nerd-fonts.lekton;
-            name = "Lekton Nerd Font Mono";
+            package = pkgs.nerd-fonts.tinos;
+            name = "Tinos Nerd Font Mono";
           };
           sansSerif = {
-            package = pkgs.nerd-fonts.lekton;
-            name = "Lekton Nerd Font Mono";
+            package = pkgs.nerd-fonts.tinos;
+            name = "Tinos Nerd Font";
           };
           serif = {
-            package = pkgs.nerd-fonts.lekton;
-            name = "Lekton Nerd Font Mono";
+            package = pkgs.nerd-fonts.tinos;
+            name = "Tinos Nerd Font";
           };
           sizes = {
             applications = 14;
