@@ -17,8 +17,16 @@ Item {
 
     required property var notes
 
-    // ── Cover path from stage (hot-reloading) ──────────────────────────────
-    property string wallpaperPath: ""
+    // ── Cover path ─────────────────────────────────────────────────────────
+    // The BAKED song wallpaper — the quickshell facet exports its immutable
+    // store path as AOIDE_WALLPAPER, so the song's wallpaper is RELIABLY set on
+    // every rebuild/boot (this was the "background gone after rebuild" bug: the
+    // live stage/cover.json is runtime state nothing re-seeds from the song).
+    readonly property string bakedWallpaper: Quickshell.env("AOIDE_WALLPAPER") || ""
+
+    // The live stage cover (rice preview/adopt or a manual write) OVERRIDES the
+    // baked default; falls back to the baked path when the stage is absent/empty.
+    property string wallpaperPath: bakedWallpaper
 
     readonly property string coverJsonPath:
         Quickshell.env("HOME") + "/Aoide/song/stage/cover.json"
@@ -30,8 +38,8 @@ Item {
         onTextChanged: {
             try {
                 var d = JSON.parse(coverFile.text())
-                root.wallpaperPath = (d && d.path) ? ("" + d.path) : ""
-            } catch (e) { /* absent/garbage → keep current (fallback shows) */ }
+                root.wallpaperPath = (d && d.path) ? ("" + d.path) : root.bakedWallpaper
+            } catch (e) { root.wallpaperPath = root.bakedWallpaper /* absent/garbage → baked song wallpaper */ }
         }
         onFileChanged: coverFile.reload()
         Component.onCompleted: coverFile.reload()

@@ -349,7 +349,7 @@ Item {
         anchors.top: parent.top
         height: root.stripHeight
         radius: 0                        // EDGED — hard square corners, no round
-        color: Qt.rgba(1, 1, 1, 0.25)    // TRANSPARENT frosted glass (hyprglass blur frosts behind)
+        color: Qt.rgba(1, 1, 1, 0.55)    // LIGHT frosted glass — brighter white sheet (hyprglass blur behind)
         opacity: 1.0
     }
     // Aero gloss — the sanctioned white sheen (bright top, hard midline stop),
@@ -358,10 +358,10 @@ Item {
         anchors.fill: page
         radius: 0
         gradient: Gradient {
-            GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.26) }
-            GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, 0.08) }
-            GradientStop { position: 0.52; color: Qt.rgba(1, 1, 1, 0.00) }
-            GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.05) }
+            GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.42) }
+            GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, 0.14) }
+            GradientStop { position: 0.52; color: Qt.rgba(1, 1, 1, 0.06) }
+            GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.12) }
         }
     }
     // The page rail — a DEFINED black edge framing the transparent strip.
