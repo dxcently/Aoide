@@ -1,6 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
+updated: 2026-07-28
 tags: [aoide, daemon, orchestrator, policy]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -15,7 +16,7 @@ The gated rebuild pipeline resides here. Rebuilds are User-gated (polkit pipelin
 
 Security boundary: forwarded notification text is treated as untrusted input. Adapters wrap it as data; an app title must never reach the agent as an instruction.
 
-## Implementation (walking skeleton, commit f3ceadf)
+## Implementation
 
 `aoided` ships as the second binary of the [[aoide-cli]] crate — `aoide daemon`
 and the standalone `aoided` reach the same code path. It runs as the `aoided`
@@ -24,10 +25,10 @@ through two environment seams: `AOIDE_AUDIT_LOG` (the single audit-log path, fro
 `aoide.auditLog`) and `AOIDE_USER`. The daemon resolves the log in order:
 `$AOIDE_AUDIT_LOG` → `/home/$AOIDE_USER/Aoide/log` → `$HOME`-derived.
 
-The skeleton wires the real policy-surface code paths: the audit log is
-**JSON-lines** (one record per append, tagged with door / event class / status),
-appended for every dispatch through either door. The neutral event stream is a
-real default-deny-per-class type (classes: audit, gate, rice, content,
+The real policy-surface code paths: the audit log is **JSON-lines** (one
+record per append, tagged with door / event class / status), appended for
+every dispatch through either door. The neutral event stream is a real
+default-deny-per-class type (classes: audit, gate, rice, content,
 notification) — a forwarded notification is denied unless `Notification` is
 explicitly subscribed, and even then it is carried as opaque `untrusted_data`,
 never executed. The user rebuild gate is **propose-only**: `propose()` records

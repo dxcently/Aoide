@@ -13,7 +13,7 @@ agents, so you always know what is running where — and can **jump to any of th
 by click or keybind**. Agents spawn terminals faster than a human tracks them;
 the terminal commander is the single pane that herds them. It is also the cleanest
 exemplar of the [[Widget-Maker]] thesis — a watcher + a widget + a keybind, all
-declarative and themed by [[Notes|notes]].
+declarative and themed by [[drachma]].
 
 The herdr multiplexer is the prior-art pattern (an external tool — agent-terminal
 herding; not part of the Aoide vocabulary, whose word for this duty is
@@ -108,7 +108,7 @@ DAG of projects and sessions (which project anchors each session, which
 session spawned which), viewed and managed through the `aoide graph` command
 group. The roster is the rows; the graph is the tree they hang from.
 
-The roster also has its **desktop gadget** now (commit 41be90f): the
+The roster also has its **desktop gadget**: the
 `TerminalManagerGadget` in the [[Gadget-Dock]] renders it live from
 `sessions.json` + `hooks.json`, merging the latest hook phase over the raw
 roster state exactly as the Rust graph module does — agent, coloured state,
@@ -138,7 +138,7 @@ preview* — no `hyprctl`, no invented IPC, both surfaces just read shared state
   tint on the note), deliberately a *different kind* of mark from the true active
   workspace's warm-accent swell + filled pill. Both can show at once: if the
   hovered terminal is on the active workspace, the ring simply frames the accent
-  pill. All colour comes from [[Notes|notes]] (`aoide.drachma` roles) — no
+  pill. All colour comes from [[drachma]] (`aoide.drachma` roles) — no
   hardcoded hex.
 - If a session's window/workspace is not yet resolved (or it is off-screen), its
   `workspace` is `-1` and hovering the row simply highlights nothing — no error.
@@ -177,3 +177,4 @@ The agent can extend it (add columns, filters, per-agent actions) on request.
 - [[Hyprland]]
 - [[Melete]]
 - [[Feature-Set]]
+- [[drachma]]

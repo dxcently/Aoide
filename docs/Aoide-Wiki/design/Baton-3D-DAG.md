@@ -1,6 +1,7 @@
 ---
 type: design
 created: 2026-07-27
+updated: 2026-07-28
 tags: [aoide, design, baton, dag, tui, pantheon]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -13,7 +14,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 The baton DAG panel renders the session graph the way Pantheon renders its daemon net (refs: `references/pantheon/art-direction/`, especially the wireframe-cube field still — `3ab9463d-*.png`): **hollow 3D wireframe boxes floating in perspective space**, labels beside their boxes, **lines connecting entities through 3D**, color carrying meaning. Terminal-native, in ratatui.
 
-Color roles (same notes/base16 contract as the rice):
+Color roles (same drachma/base16 contract as the rice):
 
 | element | color | base16 |
 |---|---|---|

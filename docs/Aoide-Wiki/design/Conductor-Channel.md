@@ -1,6 +1,7 @@
 ---
 type: design
 created: 2026-07-28
+updated: 2026-07-28
 tags: [aoide, agent, orchestration, conductor, pty, ipc, baton]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -20,11 +21,11 @@ The graph today *observes* agents (running · waiting · blocked · done) and ca
 
 ## Why this layer is new (substrate facts)
 
-- `session_wrap` spawns with **inherited stdio** and only `wait()`s — it holds the `Child` but captures no stdin, so there is no channel to type into the agent (`graph.rs:1274-1291`).
-- **shellbridge's socket started as a pure stub** — no accept loop existed (`shellbridge.rs:9-10`); its wire format lived only as a QML convention (newline JSON, a `cmd` field, `ShellBridge.qml:8-10`). So conducting was NOT forced to build that first — the per-session conduct socket shipped standalone. **The accept loop has since landed** (`aoide shellbridge --run`): a `{cmd:"focuswindow",address}` line drives `hyprctl dispatch focuswindow`, so the dock/roster row-click now jumps end to end through the daemon socket. It is a separate, narrower channel (window-jump only) from conduct's per-session PTY sockets, which stay the injection path — see [[shellbridge]].
+- `graph wrap`'s `session_wrap` spawns with **inherited stdio** and only `wait()`s — it holds the `Child` but captures no stdin, so there is no channel to type into the agent (`graph.rs`).
+- **shellbridge's socket is a separate, narrower channel** (`aoide shellbridge --run`): a `{cmd:"focuswindow",address}` line drives `hyprctl dispatch focuswindow`, so the dock/roster row-click jumps end to end through the daemon socket — window-jump only, not injection. Conduct's per-session PTY sockets stay the injection path, built standalone rather than layered onto shellbridge's — see [[shellbridge]].
 - **`libc` 0.2.189 is already vendored** (via crossterm's tree) — `openpty`/`forkpty` are ungated, so a PTY is a one-line dep addition of an already-locked crate. No new vendored crate.
 - The baton already has per-panel key arms, an inline text-input mode with dispatch-on-Enter (the `L` link handler, `app.rs:652-664,724-786`), and one audited `Door::Cli` dispatch seam (`app.rs:522-534`).
-- **`windowAddress` is essentially never populated** (`session_wrap` passes `None`, `graph.rs:1283-1289`) — so the existing cue path is starved; discovery fixes this in the same step that reads chat titles.
+- `session_wrap`/`session_conduct` pass `windowAddress: None` at spawn time (`graph.rs`) — the cue path only gets an address later, from the event listener or hook backfill (see [[Terminal-Commander]]); discovery closes this gap in the same step that reads chat titles.
 
 ## Architecture — the PTY lives in the wrap process
 

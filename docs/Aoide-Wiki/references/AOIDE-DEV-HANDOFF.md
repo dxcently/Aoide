@@ -9,7 +9,7 @@ tags: [aoide, handoff, development, agent, operating-manual]
 Status: **Aoide/AoideOS is in active development, running live on yomi-strix.**
 This is the operating manual for a **development agent** working *on* Aoide
 itself — building, testing, orchestrating, and adjusting the framework and its
-desktop. It is the sibling of [[AOIDE-HANDOFF]] (the original design contract)
+desktop. It is the sibling of [[AOIDE-HANDOFF]] (the original design contract - does not need to be read)
 and is scoped narrower than it is broad: read it fully before touching the repo.
 
 > **What Aoide is — don't conflate (the canonical framing).** **Aoide** is an
@@ -204,6 +204,40 @@ Per §4, flags raised but not yet closed live HERE so the next agent inherits
 them (not in one agent's head). Close a flag by resolving it AND editing this
 list; add one the moment you raise it. Current open flags (2026-07-28):
 
+- **[decision · khoa] App-launch exec discipline — `execute()` vs.
+  `aoided`.** The new [[Quickshell]] launcher (surface #3, built 2026-07-28)
+  launches apps with `DesktopEntry.execute()` — the Quickshell-native
+  side-effect idiom already used across the shell (`WorkspaceRow.activate()`,
+  `BatonGadget` → `execDetached`), **not** a shell-out invented in QML. House
+  rule #6 ("everything flows through `aoided`") would instead route an
+  app-launch verb through the bridge, but **no such verb exists** and adding one
+  buys nothing over `execute()` while re-introducing a shell-exec in the daemon.
+  Chosen: `execute()`. **Open only as a contract question** — if khoa wants *all*
+  side effects funnelled through `aoided`, that's a deliberate ruling to make;
+  otherwise this closes as-is. Also fixed in passing: `SUPER+SPACE` was bound to
+  the unimplemented `aoide shell launcher toggle` CLI stub → now `bind = …,
+  global, aoide:launcher` (in-process Hyprland global shortcut). (Note the
+  sibling `SUPER+ESCAPE → aoide shell lock` is still an unimplemented `aoide
+  shell *` stub — untouched, worth its own pass.) Lands on the next gated
+  `switch`. See [[Quickshell]].
+- **[incident · RESOLVED 2026-07-28] Shell crash-loop from a leftover
+  `ExecStart` drop-in.** A hand-written systemd drop-in
+  (`~/.config/systemd/user/aoide-quickshell.service.d/override.conf`), left by a
+  live `-c`→`-p` verification on the `worktree-devtools-dendrites` branch,
+  pinned the shell's `ExecStart` to that worktree's `shell.qml`. The worktree
+  was later deleted, so quickshell crash-looped 77× ("Could not open config
+  file") — no bar, dock, gadgets, or wallpaper (the wallpaper *is* the shell:
+  one `wlr-layer-shell` process, see [[Quickshell]]). The `-c`→`-p` fix it was
+  verifying is already baked into the live unit, so the drop-in was redundant
+  *and* broken. **Fixed** by deleting the drop-in and restarting; the baked unit
+  points at `~/Aoide/qml/shell.qml` and stands correctly. **Rule that now
+  binds all agents:** never override the shell service's `ExecStart` to a
+  worktree/volatile path — iterate live with a *separate* foreground `qs -p
+  <worktree>/shell.qml` instead. **Hardening (built, awaiting a gated switch):**
+  added `StartLimitIntervalSec=60`/`StartLimitBurst=5` to the unit so a
+  persistent bad load parks `failed` after 5 tries instead of thrashing forever
+  — the `ConditionPathExists` guard only checks existence, not validity. Lands
+  on the next `switch` (toplevel built, not yet activated per [[Rebuild-Gate]]).
 - **[decision · khoa — RESOLVED 2026-07-28] `notes` vs `drachma` naming.**
   Settled: **`drachma` is the single canonical name** — the token *values* and
   the mint are one thing, not a values-vs-engine split. Shipped as `aoide.drachma`,
@@ -213,25 +247,59 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   [[drachma]], [[Lexicon]]). Residual: a few Quickshell facet bodies still carry
   the `notes.` property-id mid-rename to `drachma.` — cosmetic follow-up, not a
   contract question.
-- **[refactor · khoa] Design/songbook content should live in `song/`, not the
-  dev wiki.** The design pages ([[design/Ricing-Protocol]],
-  [[design/Pantheon-Grammar]]) hold per-song and cross-cutting *design memory* —
-  palette rationales, the opacity numbers that read right, the visual grammar —
-  which is the **song agent's** domain, not the dev wiki's. It belongs in a
-  **songbook maintained under `song/`**: cross-cutting memory in `song/songbook/`,
-  per-song notes in `song/repertoire/<name>/liner/` (see [[Song-Anatomy]],
-  [[Self-Ricing]]). The design protocol has now been **reworded to point there**
-  (the dev wiki documents architecture/protocol; `song/` is the store of design
-  decisions), but the actual **content migration is pending** — `song/songbook/`
-  is still a placeholder, and `song/repertoire/sonata/liner/intent.md` is stale
-  (describes an indigo nocturne, not the shipped cream key). When the song agent
-  picks it up: move the grammar/ricing memory into `song/`, then thin these
-  pages to protocol + pointers. **Open.**
+- **[restructure · khoa — DECIDED 2026-07-28; wiki done, code migration OPEN]
+  Songbook consolidation.** The single per-song home is now
+  `song/songbook/<song>/`, self-contained: `rice.nix`, `drachma.json`, `assets/`
+  (wallpaper + cover — was flat `song/covers/`), `palette/` (was `song/keys/`),
+  `sounds/` (was `song/chimes/`), `icons/`, `widgets/`, `design/` (per-song
+  intent + design memory — was `repertoire/<n>/liner/`). Cross-cutting memory
+  (`learnings.md`, `preferences.md`, `update-playbook.md`) sits at `songbook/`
+  root. `repertoire/` is subsumed; the allegorical subfolder names are dropped
+  for sensible ones. **`backstage/` is CUT** — it never existed on disk and held
+  nothing; runtime dirs are exactly `stage/` (live) + `auditions/` (propose gate).
+  The **whole wiki was swept to describe this as canonical** (2026-07-28,
+  multi-agent), so the **wiki is deliberately AHEAD of the code**. Taxonomy
+  (khoa 2026-07-28): **nucleus** is the core every host inherits; **dendrites**
+  are opt-in per host; **facets** + **rime** are ricing *machinery* (surfaces +
+  engine) that hold no content — all song content lives in `song/songbook/`.
+  So the shipped default rice `modules/rime/default/` also moves to
+  `song/songbook/default/` (the songbook's one merge-only, upstream-owned song),
+  leaving `modules/rime/` as engine-only. Physical migration still owed: move
+  `song/repertoire/<n>/` + flat `covers/`/`keys/`/`chimes/` into
+  `songbook/<n>/{...}` AND `modules/rime/default/` → `song/songbook/default/`;
+  update `pkgs/aoide/src/shellbridge.rs` (`repertoire_notes`/`covers_dir`) +
+  `dispatch.rs` (`resolve_rice_notes`/`derive_cover`), per-song `rice.nix`
+  wallpaper paths, `lib/mkHost.nix` (walks `song/repertoire/`), `lib/checks.nix`
+  `noSongRead` infixes (drop `backstage`), `.gitignore` (drop `song/backstage/`),
+  `CONTRACTS.md`. Then thin the design pages to protocol + pointers once the
+  per-song `design/` folders hold the memory, and refresh the stale `sonata`
+  design/intent (was `liner/intent.md` — still describes an indigo nocturne, not
+  the shipped cream key). **Open (code side).**
 - **[bug · follow-up] `aoide rice preview <name>` derives the cover by
-  song-name convention** (`covers/<name>.*`) instead of reading
-  `aoide.drachma.wallpaper`. Mitigated live by the `AOIDE_WALLPAPER` env baked
-  into the quickshell service, so the wallpaper survives rebuilds; a proper fix
-  (preview reads the song's wallpaper note) is still owed. See [[Self-Ricing]].
+  song-name convention** (`covers/<name>.*`; post-migration `songbook/<name>/
+  assets/`) instead of reading `aoide.drachma.wallpaper`. Mitigated live by the
+  `AOIDE_WALLPAPER` env baked into the quickshell service, so the wallpaper
+  survives rebuilds; a proper fix (preview reads the song's wallpaper note) is
+  still owed. See [[Self-Ricing]].
+- **[bug · found 2026-07-28 wiki sweep] Melete adapter subscribes to nothing.**
+  `modules/nucleus/melete-adapter.nix` sets
+  `AOIDE_ADAPTER_SUBSCRIBE=rebuild-proposed,rice-preview-ready,notification-action`,
+  but `pkgs/aoide/src/adapter.rs::parse_class()` only accepts
+  `audit/gate/rice/content/notification` — every configured name is silently
+  dropped, so the default-deny allow-list is effectively empty and the adapter
+  forwards nothing. Fix: reconcile the env values to the parser's class
+  vocabulary (or widen the parser). See [[Melete]]. **Open.**
+- **[bug · found 2026-07-28 wiki sweep] `lib/vmTest.nix` command-count assertion
+  is stale.** It asserts `cmd_count == 28`; the CLI now exposes **36** commands
+  (`aoide schema --json`), so the vm-boot check can fail against its own tree.
+  Bump the assertion or make it non-brittle. See [[Codebase]]. **Open.**
+- **[docs · found 2026-07-28] `README.md` (repo root, not in the wiki) lags the
+  swept wiki** on several points the wiki now has right: shipped song is `sonata`
+  not `hero`; launcher trigger is the `aoide:launcher` global shortcut not
+  `aoide shell launcher toggle`; command count is 36 (three gated) not 28; `rice
+  preview` is real; the `aoide.rebuild` capability is described as shippable but
+  has no `options.nix` option (it is planned). Reconcile when the song migration
+  lands — the README needs the repertoire→songbook + backstage edits anyway.
 - **[limitation · known] The window→session listener can't resolve a hook-only
   session that has no recorded pid** — it walks the session's pid, and a
   Claude session registered purely via hooks (never conducted) has none. The

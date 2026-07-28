@@ -1,6 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
+updated: 2026-07-28
 tags: [aoide, features, integration, melete, mneme]
 ---
 
@@ -28,8 +29,9 @@ that capability, not the ceiling.
 
 **Provenance.** The desktop, agent, pipeline, and governance items are grounded
 in [[references/AOIDE-HANDOFF]]. The messaging bridge, Cloudflare/Tailscale fleet
-exposure, and the scheduled-jobs widget are specified here as intended shipped
-features — they extend the handoff.
+exposure, and the scheduled-jobs widget are **planned** — specified here as
+intended features, not present in `aoide schema --json`'s 36-command surface
+today; they extend the handoff rather than describe shipped commands.
 
 ## The bundle
 
@@ -55,7 +57,7 @@ Matrix / Discord / …).
 - **Inbound:** replies from the messaging app become agent actions — **as
   untrusted data, never executed as commands** (the hard trust boundary from
   [[Desktop-Architecture]]).
-- **Surfaced as:** a bar connection/notification widget; `aoide notify …`.
+- **Surfaced as:** a bar connection/notification widget; a planned `aoide notify …` verb (not yet in the command schema).
 - **Default:** `enable = false` (an external surface); target app + token are
   user-provided.
 
@@ -70,8 +72,8 @@ Remote access and controlled exposure ship as first-class, user-gated features.
   the alternative network-MCP door.
 - **Fleet management:** inventory, drift check, backups, per-host command
   dispatch (Melete `fleet_inventory` · `ssh_exec` · `check_drift` · backups).
-- **Surfaced as:** `aoide fleet …`; a panel fleet widget (host list +
-  reachability).
+- **Surfaced as:** a planned `aoide fleet …` verb (not yet in the command
+  schema); a panel fleet widget (host list + reachability).
 - **Default:** exposure toggles are `enable = false`; every enable is a
   [[Governance|gated]] action.
 
@@ -88,7 +90,8 @@ Aoide surfaces **both** agent schedules and system timers in one place.
   ("waiting on `<id>`"), and system timers — live, themed by notes.
 - **Governance:** scheduled *coding* runs still route their result through the
   rebuild gate; **no background self-updaters** ([[Governance]]).
-- **Surfaced as:** `aoide sched …` (list / create / cancel) + the widget.
+- **Surfaced as:** a planned `aoide sched …` verb (list / create / cancel, not
+  yet in the command schema) + the widget.
 
 ### 4. Knowledge & content (Mneme)
 
@@ -122,7 +125,8 @@ agent — with **jump by click or keybind**. Full page: [[Terminal-Commander]].
   bridge.
 - **Jump:** click → `hyprctl dispatch focuswindow address:…` (one hop); or a
   [[Hyprland]] keybind to cycle agent terminals / pop the roster.
-- **Surfaced as:** the terminal-commander widget + `aoide sessions …`.
+- **Surfaced as:** the terminal-commander widget + the real `aoide graph
+  session …` command group.
 
 ## How every feature hooks into the system
 
@@ -146,21 +150,23 @@ One spine, so a new integration is always the same shape:
 
 ## Feature matrix
 
-Shipped exemplars — the [[Widget-Maker|agent generates more]] on demand.
+Shipped exemplars plus planned extensions — the [[Widget-Maker|agent generates
+more]] on demand. Rows marked *(planned)* have no command yet in `aoide schema
+--json`'s 36-command surface.
 
 | Capability | Provided by | Surfaced as | Default | Gate |
 |---|---|---|---|---|
-| Notification → messaging | notify-bridge + Melete | widget · `aoide notify` | off | policy + user token |
+| Notification → messaging *(planned)* | notify-bridge + Melete | widget · `aoide notify` | off | policy + user token |
 | Network MCP (tailnet) | Tailscale + Melete | — | off | user-only |
-| Public exposure (funnel/tunnel) | Cloudflare | `aoide fleet` | off | gated |
-| Fleet SSH / inventory / drift | Melete | fleet widget · `aoide fleet` | off | gated |
-| Scheduled coding jobs | Melete | agenda widget · `aoide sched` | — | rebuild gate on result |
-| Recurring jobs / chains | Melete | agenda widget | — | gated |
-| System timers view | systemd | agenda widget | on (read-only) | — |
+| Public exposure (funnel/tunnel) *(planned)* | Cloudflare | `aoide fleet` | off | gated |
+| Fleet SSH / inventory / drift *(planned)* | Melete | fleet widget · `aoide fleet` | off | gated |
+| Scheduled coding jobs *(planned)* | Melete | agenda widget · `aoide sched` | — | rebuild gate on result |
+| Recurring jobs / chains *(planned)* | Melete | agenda widget | — | gated |
+| System timers view *(planned)* | systemd | agenda widget | on (read-only) | — |
 | Vault knowledge | Mneme | pipeline · `aoide …` | via approve gate | approve gate |
 | Autonomous code tasks | Melete | messaging stream · PR | — | rebuild gate |
-| Self-ricing | rime engine | `aoide rice` | on | adopt gate |
-| Agent-session terminal commander | shellbridge + aoided watcher | widget · `aoide sessions` · click/keybind jump | on | — |
+| Self-ricing | rime engine | `aoide rice` (`lint`/`preview` real; `gen`/`adopt`/`transpose` exit-64 stubs) | on | adopt gate |
+| Agent-session terminal commander | shellbridge + aoided watcher | widget · `aoide graph session` · click/keybind jump | on | — |
 
 ## Related
 

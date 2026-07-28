@@ -1,32 +1,33 @@
 ---
 type: entity
 created: 2026-07-26
-aliases: [aoide-notes, notes package, note engine]
-tags: [aoide, notes, theming, base16, node]
+updated: 2026-07-28
+aliases: [aoide-drachma, notes package, note engine]
+tags: [aoide, drachma, theming, base16, node]
 ---
 
 # drachma (the design tokens — and the engine that mints them)
 
-`drachma` is Aoide's **design-token layer** — one name for the whole thing.
-"Notes" and "drachma" are **not** separate (a values-vs-engine split we once
-drew and have since collapsed, per khoa): the tokens ARE drachma, named for the
-Greek coin, and the same word names the standalone Node package that validates,
-resolves, and emits them. A song authors `aoide.drachma.*`; facets read
-`aoide.drachma` and nothing else; the runtime seam is `stage/drachma.json`.
+`drachma` is Aoide's **design-token layer** — one name for the whole thing:
+the values and the mint are one thing, named for the Greek coin. The same
+word names the standalone Node package that validates, resolves, and emits
+the tokens. A song authors `aoide.drachma.*`; facets read `aoide.drachma` and
+nothing else; the runtime seam is `stage/drachma.json`. "Notes" survives only
+as the musical image ([[Notes]], [[Lexicon]]) — the package, the schema, and
+every shipped artifact are `drachma`.
 
-As the package (formerly `aoide-notes`) it is the concrete implementation of
-the token schema described in [[Notes]]: it wraps Style Dictionary rather than
-reimplementing a resolver, and it owns the authoritative v0 schema validator
-that `aoide rice lint` delegates to. See [[Lexicon]] for the coin naming.
+The package is the concrete implementation of the token schema described in
+[[Notes]]: it wraps Style Dictionary rather than reimplementing a resolver,
+and it owns the authoritative v0 schema validator that `aoide rice lint`
+delegates to.
 
-*Grounded in the repo at commit f3ceadf (renamed since). It lives at
-`pkgs/drachma/`, packages as `buildNpmPackage` (pname `aoide-drachma`) with a
-single runtime dependency (`style-dictionary@4.3.0`), and is exposed as the
-flake output `packages.drachma` and — via the overlay `lib/mkHost.nix` injects —
-as the nixpkgs attr `pkgs.drachma`, the same `callPackage` path the flake uses,
-so there is one source. The derivation installs the package under `libexec/` and
-wraps a `drachma` launcher on PATH, pinning the exact `nodejs` so
-`node_modules` resolves from any cwd.*
+*It lives at `pkgs/drachma/`, packages as `buildNpmPackage` (pname
+`aoide-drachma`) with a single runtime dependency (`style-dictionary@4.3.0`),
+and is exposed as the flake output `packages.drachma` and — via the overlay
+`lib/mkHost.nix` injects — as the nixpkgs attr `pkgs.drachma`, the same
+`callPackage` path the flake uses, so there is one source. The derivation
+installs the package under `libexec/` and wraps a `drachma` launcher on PATH,
+pinning the exact `nodejs` so `node_modules` resolves from any cwd.*
 
 ## Subcommands
 

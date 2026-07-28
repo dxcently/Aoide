@@ -1,26 +1,20 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-28
 tags: [aoide, architecture, nix, flake, rust, node]
 ---
 
 # Codebase — How the Built Repo Works
 
-The implementation of Aoide at `~/Aoide`, as of the walking-skeleton milestone
-(commit f3ceadf: scaffold → wave0 foundation → wave1 subsystems → wave2
-integration → notes rename). This page describes how the repo actually
-composes: the flake, the walker, the option contract, the systemd/service map,
-the runtime contracts, and what is real versus stubbed. It is the map from the
-design concepts ([[Snowflake-Anatomy]], [[Full-Architecture]]) to the files on
-disk.
+The implementation of Aoide at `~/Aoide`, the walking-skeleton milestone: the
+flake, the walker, the option contract, the systemd/service map, the runtime
+contracts, and what is real versus stubbed. It is the map from the design
+concepts ([[Snowflake-Anatomy]], [[Full-Architecture]]) to the files on disk.
 
-*Grounded in the repo at commit f3ceadf; extended at commit 0b3a3fd (the
-`aoide graph` group), through 41be90f (real host profile, seam fixes,
-graph surfaces, vm-boot check, gadget dock), and through 9404250 (dock popup
-redesign; nucleus baseline gaps found — and fixed — on the first live
-switch). Everything verifies green (cargo tests, flake check, vm-boot), and
-the profile now **runs live** on yomi-strix.*
+*Everything verifies green (cargo tests, flake check, vm-boot), and the
+profile **runs live** on yomi-strix — the graphical session (greetd →
+Hyprland → Quickshell) included.*
 
 ## The flake
 
@@ -59,7 +53,7 @@ accidentally masking a nixpkgs attribute; a deliberate shadow is listed in
 `//` escape hatch (kept in this file to preserve the single source).
 
 **`lib/mkHost.nix`** assembles one host's `nixosSystem`: it walks `../modules`
-(the whole snowflake — nucleus + dendrites + facets + rime) **and** `song/repertoire/`
+(the whole snowflake — nucleus + dendrites + facets + rime) **and** `song/songbook/`
 — so songs self-register exactly like dendrites. It then appends the host's own
 dir, home-manager and stylix (each added only when its input is present, so a
 minimal eval still works), and the **discovered-packages overlay** from
@@ -79,20 +73,20 @@ discipline, written to throw legibly at eval time on a violation:
 - **`surface-ownership`** — every declared `aoide.surfaces.<name>` names a
   non-empty owner (a facet asserting it is the sole owner of a render surface).
 - **`no-song-read`** — no walked module path lives under a `song/` runtime dir
-  (`stage/`, `backstage/`, `auditions/`, `catalog/`, `index/`), so the nix build
+  (`stage/`, `auditions/`, `catalog/`, `index/`), so the nix build
   can never come to depend on ephemeral runtime state. `stage/` stays non-load-
   bearing structurally. This boundary is about runtime dirs only; committed
-  `song/repertoire/**` is versioned score and is legitimately read at eval.
-- **`song-shape`** — every walked `song/repertoire/**` path is a `rice.nix`
+  `song/songbook/**` is versioned score and is legitimately read at eval.
+- **`song-shape`** — every walked `song/songbook/**` path is a `rice.nix`
   (the host-agnostic song discipline, `CONTRACTS.md §5`).
 
 Alongside these, `flake.nix` auto-generates a `pkg-<name>` check per discovered
 package (from `lib/pkgs.nix`) so every package builds under `nix flake check`.
 
-**`lib/vmTest.nix`** (commit c4843b2) wires `checks.<system>.vm-boot` — a
+**`lib/vmTest.nix`** wires `checks.<system>.vm-boot` — a
 headless QEMU boot of the whole stack via `pkgs.testers.runNixOSTest`
 (4 GiB / 4 vCPU, KVM). Its node is assembled from the **same** parts
-`mkHost.nix` uses — the walked module tree, the repertoire walk, the
+`mkHost.nix` uses — the walked module tree, the songbook walk, the
 home-manager/stylix modules, the pkgs overlay, and mirrored `specialArgs`
 (`host = "vm-test"`, inputs, username, system; `node.pkgsReadOnly = false`
 so the overlay applies) — so the test boots the real assembly, not a
@@ -109,7 +103,7 @@ about 16 s of wall clock: `nix build .#checks.x86_64-linux.vm-boot -L`. It
 also confirmed in-VM that the unit's `AOIDE_STAGE_DIR` and the binary's
 fallback agree on the same stage path.
 
-**Test-masking lesson (9404250).** The test node used to add `aoide` +
+**Test-masking lesson.** The test node used to add `aoide` +
 `drachma` to its own `systemPackages` — which is exactly why the vm-boot
 check never caught that the nucleus installed neither: the test was
 self-providing what it claimed to verify. It now keeps only `jq` and relies
@@ -140,7 +134,7 @@ no behaviour, so an empty config evaluates. The surface:
 
 ## The host profile — yomi-strix is real now
 
-At ad3b21a `hosts/yomi-strix/` graduated from an eval-only placeholder to a
+`hosts/yomi-strix/` graduated from an eval-only placeholder to a
 **bootable first-iteration profile**, ported from [[dxflake]] (the template)
 and trimmed to essentials:
 
@@ -156,17 +150,17 @@ and trimmed to essentials:
 - Dropped from the template: disko, inference/ROCm, the Melete role,
   bluetooth, wireguard.
 
-**Switched live (2026-07-26).** The user opened the [[Rebuild-Gate]] and
-yomi-strix moved from [[dxflake]] to Aoide the same night — two switches
-(the second carrying the 9404250 baseline fixes), each activating in about
-8 s, run as detached `systemd-run` units (`nix-env --profile` set +
-`switch-to-configuration switch`). The prior dxflake generation stays in the
-systemd-boot menu, so rollback is one boot-menu pick away. Verified live:
-greetd active, the Hyprland session entry present, NetworkManager, zram, and
-the Strix Halo amdgpu params all in effect; after the second switch, `aoide`
-+ `drachma` + git on PATH and flakes enabled. The graphical session
-itself (greetd → Hyprland → Quickshell) has not yet been logged into in this
-state — first-boot desktop verification is an open thread.
+**Switched live.** The user opened the [[Rebuild-Gate]] and yomi-strix moved
+from [[dxflake]] to Aoide — two switches (the second carrying the nucleus
+baseline fixes below), each activating in about 8 s, run as detached
+`systemd-run` units (`nix-env --profile` set + `switch-to-configuration
+switch`). The prior dxflake generation stays in the systemd-boot menu, so
+rollback is one boot-menu pick away. Verified live: greetd active, the
+Hyprland session entry present, NetworkManager, zram, and the Strix Halo
+amdgpu params all in effect; `aoide` + `drachma` + git on PATH and flakes
+enabled. The graphical session (greetd → Hyprland → Quickshell) has since
+been logged into and runs as the daily desktop — bar, dock, gadgets,
+launcher, notifications, and wallpaper all live in one process.
 
 ## The systemd user-unit map (nucleus + a dendrite)
 
@@ -185,8 +179,8 @@ All nucleus services are user services gated on `aoide.enable`, keyed into
 `~/Aoide/song/stage` (0755) at runtime; systemd-tmpfiles deduplicates the shared
 rule declared in both aoided and shellbridge.
 
-Two **non-service nucleus modules** joined at 9404250, both gated on
-`aoide.enable`, both closing baseline gaps the first live switch surfaced:
+Two **non-service nucleus modules** close baseline gaps the first live switch
+surfaced, both gated on `aoide.enable`:
 
 - **`nucleus/packages.nix`** puts `pkgs.aoide` and `pkgs.drachma` on the
   **system profile**. The units never needed this (their `ExecStart` lines are
@@ -215,7 +209,7 @@ Live-side state, all gitignored, none load-bearing for the build:
   [[Session-Graph]]). Each has a v0 shape in `CONTRACTS.md §4`; writes are
   atomic (write-temp-then-rename), and the graph rewriters round-trip unknown
   fields so concurrent writers never lose data.
-- **Stage-dir resolution** (`CONTRACTS.md §4`, added at d03dcf2): every stage
+- **Stage-dir resolution** (`CONTRACTS.md §4`): every stage
   reader/writer resolves the stage directory as `$AOIDE_STAGE_DIR` when set
   to an absolute path (the unit sets it; empty/relative ignored), else the
   `aoide_home()` fallback — the documented CLI ↔ unit seam, pinned by a
@@ -247,14 +241,14 @@ nix build .#checks.x86_64-linux.vm-boot -L             # headless QEMU boot test
 The Rust crate carries unit tests for the schema (valid JSON, stable top-level
 keys, every command carries `--json` + exit codes, unique paths), the MCP
 door (tool list is one-to-one with the schema; `tools/call` dispatches into the
-same handlers), and the graph module (`pkgs/aoide/src/graph.rs` — pure cores +
-8 handlers + 6 unit tests: cycle rejection, anchoring, a deterministic render
-snapshot, edge shape, prune orphan-clearing, unknown-field round-trip) — 11
-tests in all at 0b3a3fd. d03dcf2 added more: a serialized stage-dir precedence
-test and unit tests for the pure focus-liveness helpers
-(`normalize_addr` / `window_present`). One noted hazard: the env-var test
-mutex in `shellbridge.rs` is module-local — fine while it is the only module
-with env-touching tests (open thread).
+same handlers), and the graph module (`pkgs/aoide/src/graph.rs` — pure cores
+plus handlers for all 15 `graph` subcommands: cycle rejection, anchoring, a
+deterministic render snapshot, edge shape, prune orphan-clearing,
+unknown-field round-trip, a serialized stage-dir precedence test, and the pure
+focus-liveness helpers `normalize_addr`/`window_present`) — 63 unit tests
+across the crate at last count. One noted hazard: the env-var test mutex in
+`shellbridge.rs` is module-local — fine while it is the only module with
+env-touching tests (open thread).
 
 ## Walking-skeleton status — real vs stubbed
 
@@ -265,33 +259,40 @@ append, user gate, default-deny event bus); shellbridge (atomic writer, seeded
 stage files, and a live socket accept loop — `focuswindow`); the melete-adapter skeleton (env-driven
 subscription, metadata-only notification boundary); all three note emitters; the
 QML shell skeleton; the baked Stylix and compositor fan-outs; and the whole
-`aoide graph` group (view/emit/project/link/focus/prune — 19 → 27 commands,
-later 28 with `aoide baton` —
-none of the eight a stub; see [[Session-Graph]]). No new crates for the graph
-work; `Cargo.lock` is untouched. The QML tree has since grown its first
-non-stub surfaces: `AoideSessionGraph.qml` + `GraphRow.qml` (the DAG overlay),
-the shared `GraphModel.qml`, and the [[Gadget-Dock]] files
-(`AoideAgentWidgets.qml`, `GadgetFrame.qml`, `TerminalManagerGadget.qml`,
-`DagGraphGadget.qml`, `ClockGadget.qml`, `MeterGadget.qml`) — nine registered
-surfaces in the quickshell facet. The bootable yomi-strix profile and the
-vm-boot check (above) are likewise real.
+`aoide graph` group — 15 subcommands (`view`, `project add/remove/list`,
+`link`, `session start/phase/end/hook`, `wrap`, `send`, `focus`, `prune`,
+`reap`, `emit`), none a stub (see [[Session-Graph]]) — plus the separate
+`aoide baton` command (also real). `pkgs.aoide` carries 63 unit tests in all
+(above). The QML tree's non-stub surfaces: `AoideSessionGraph.qml` +
+`GraphRow.qml` (the DAG overlay), the shared `GraphModel.qml`, the
+[[Gadget-Dock]] files (`AoideAgentWidgets.qml`, `GadgetFrame.qml`,
+`TerminalManagerGadget.qml`, `DagGraphGadget.qml`, `ClockGadget.qml`,
+`MeterGadget.qml`), `AoideLauncher.qml` (the launcher), and
+`AoideNotifications.qml`/`NotificationCard.qml` (the notification daemon) —
+across the facet's nine `owner = "quickshell"` surfaces (bar, notifications,
+launcher, osd, lockscreen, greeter, wallpaper, agentWidgets, sessionGraph; see
+[[Full-Architecture]]). The bootable yomi-strix profile and the vm-boot check
+(above) are likewise real.
 
-**The dxflake-parity wave (branch `worktree-devtools-dendrites`, pending
-merge):** five commits (`9e2eb61`…`a808c33`, full flake check + vm-boot green)
-port the prior rig's substance into Aoide shape — twelve new dendrites (bash
-with the `ad*` nh alias family replacing `dx*`, nh, git, kitty, neovim-via-nvf,
-starship, mcfly, btop, yazi, fastfetch, devtools, fonts), the `nvf` flake input
-threaded to home-manager via `extraSpecialArgs`, the cover-art note
-(`aoide.drachma.wallpaper` → shipped `song/covers/hero.webp`, CONTRACTS §1
-extended), Lekton Nerd Font Mono as the stylix face, and the [[Gadget-Dock]]
-waybar-homage wave (bar rework + NowPlaying/Power/Calendar gadgets). Baseline
-dendrites default on in `hosts/common` via `mkDefault`; `allowUnfree` is
-carried mkIf-scoped by the two dendrites that need it (devtools, fonts).
+**The dendrite set** now spans eighteen entries in `modules/dendrites/`: bash
+(the `ad*` nh alias family replacing `dx*`), nh, git, kitty, neovim-via-nvf,
+starship, mcfly, btop, yazi, fastfetch, devtools, fonts, obsidian, melete,
+mneme, firefox, screenshot, and vision — ported from [[dxflake]]'s prior rig
+into Aoide shape. The `nvf` flake input threads to home-manager via
+`extraSpecialArgs`; the cover-art note (`aoide.drachma.wallpaper` → per-song
+`assets/`) backs the shipped wallpapers; Lekton Nerd Font Mono is the stylix
+face; the [[Gadget-Dock]] carries the waybar-homage bar rework plus
+NowPlaying/Power/Calendar gadgets. Baseline dendrites default on in
+`hosts/common` via `mkDefault`; `allowUnfree` is carried mkIf-scoped by the two
+dendrites that need it (devtools, fonts).
 
-**Structured not-implemented stubs (exit 64):** the mutating CLI verbs — `rice
-gen/preview/adopt/transpose`, the `content` pipeline, `make`, `update`,
-`onboard`. Their arg-parsing, schema, gate flag, and audit trail are real; only
-the live-system action is deferred.
+**Structured not-implemented stubs (exit 64, 11 total):** the mutating CLI
+verbs — `rice gen/adopt/transpose`, the five-verb `content` pipeline, `make`,
+`update`, `onboard`. Their arg-parsing, schema, gate flag, and audit trail are
+real; only the live-system action is deferred. (`rice preview` was reclassified
+to **real** — it stages `song/stage/drachma.json` for Quickshell hot-reload
+today; only the hyprctl/OSC dispatch fan-out remains unwired into `preview`
+itself.)
 
 ## Related
 

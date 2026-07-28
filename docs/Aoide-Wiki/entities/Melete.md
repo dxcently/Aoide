@@ -1,6 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
+updated: 2026-07-28
 aliases: [Melete daemon, melete.service]
 tags: [aoide, melete, agent, coding-agent, harness, integration]
 ---
@@ -75,13 +76,14 @@ missing.
   integration and Melete writes the dendrite (nix) + widget (QML) + adapter, then
   previews and — on your approval — adopts it. Same gated loop as [[Self-Ricing]].
 - **On the event spine.** A `melete-adapter` consumes [[aoided]]'s neutral event
-  stream and translates events into job dispatch ([[Desktop-Architecture]]). In
-  the build (commit f3ceadf) it runs as the `aoide-melete-adapter` systemd user
-  unit via `aoide adapter melete --run`; its allow-list arrives through the
-  `AOIDE_ADAPTER_SUBSCRIBE` env var (default-deny, only
-  `rebuild-proposed,rice-preview-ready,notification-action`), and forwarded
-  notifications reach it as metadata only (`{ actionId, appName }`), never the
-  raw body — the security boundary as a real code path ([[Codebase]]).
+  stream and translates events into job dispatch ([[Desktop-Architecture]]). It
+  runs as the `aoide-melete-adapter` systemd user unit via `aoide adapter melete
+  --run`; its allow-list arrives through the `AOIDE_ADAPTER_SUBSCRIBE` env var —
+  default-deny, comma-separated event *classes* (`audit`/`gate`/`rice`/
+  `content`/`notification`; unrecognized names are silently dropped, allowing
+  nothing) — and forwarded notifications reach it as metadata only
+  (`{ actionId, appName }`), never the raw body — the security boundary as a
+  real code path ([[Codebase]]).
 - **Behind the exemplar features** ([[Feature-Set]]): its Telegram streaming backs
   the notification → messaging bridge; `schedule_*` + `recur` back the
   scheduled-jobs/timers widget; `ssh_exec` + `fleet_inventory` back fleet

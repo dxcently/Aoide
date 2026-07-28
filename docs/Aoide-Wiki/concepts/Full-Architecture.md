@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-28
 tags: [aoide, architecture, desktop, notes, pipeline]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -18,32 +18,31 @@ The organizing thesis (see [[Song-Vocabulary]]): architecture is frozen music.
 The **frozen half** is the nix layer — the score. The **performed half** is the
 running desktop — the performance. **Notes** are the one seam where they meet.
 
-*Grounded in the repo at commit 9404250; everything verifies green (flake
-check + the vm-boot check) — and the stack now **runs live** on yomi-strix.*
+*Everything verifies green (flake check + the vm-boot check) — and the stack
+**runs live** on yomi-strix.*
 
 ## Status — running live on yomi-strix
 
-Aoide is a **built and switched walking skeleton**, not a paper design:
-`nix flake check` is green, both packages build, the stack boots headless in
-the `vm-boot` QEMU check — and on 2026-07-26 the user opened the
-[[Rebuild-Gate]] and **yomi-strix switched from [[dxflake]] to Aoide**. Two
-switches (the second carrying the 9404250 nucleus fixes), ~8 s activation
-each, run as detached `systemd-run` units; the previous dxflake generation
-stays in the systemd-boot menu as the rollback. Live now: greetd, the
-Hyprland session entry, NetworkManager, zram, the Strix Halo amdgpu params,
-the aoide binaries + git on PATH, flakes enabled. Not yet proven: the
-graphical session itself — nobody has logged into greetd → Hyprland →
-Quickshell in this state (open thread). Every subsystem below is marked on
-one of three rungs:
+Aoide is a **built, switched, and logged-into walking skeleton**, not a paper
+design: `nix flake check` is green, both packages build, the stack boots
+headless in the `vm-boot` QEMU check — and yomi-strix runs it as its daily
+graphical session. Live now: greetd → Hyprland → Quickshell (bar, dock,
+gadgets, launcher, notifications, wallpaper — all one process, see
+[[Quickshell]]), NetworkManager, zram, the Strix Halo amdgpu params, the aoide
+binaries + git on PATH, flakes enabled; the previous [[dxflake]] generation
+stays in the systemd-boot menu as the rollback. Every subsystem below is
+marked on one of three rungs:
 
 - **Implemented** — real code paths: the flake/walker/checks layer, the option
   contract, the note plumbing, the CLI trunk + MCP façade, the daemon and
-  bridge skeletons, the three facets, song replay.
-- **Stubbed** — the mutating CLI verbs (`rice gen/preview/adopt/transpose`,
+  bridge skeletons, the three facets, song replay, the launcher, the gadget
+  dock.
+- **Stubbed** — the mutating CLI verbs (`rice gen/adopt/transpose`,
   `content *`, `make`, `update`, `onboard`) parse, audit, and exit 64 with a
   structured not-implemented payload; only the live action is deferred.
-- **Future** — v1 note tiers, the functional rice loop, the network-exposed
-  Aoide connector, greetd via the Quickshell greeter.
+  (`rice lint` and `rice preview` are real — see [[Self-Ricing]].)
+- **Future** — v1 note tiers, the functional rice loop (`gen`/`adopt`/
+  `transpose`), the network-exposed Aoide connector.
 
 The repo is deliberately **local-only** for now: no git remote, so [[Melete]]
 fleet registration and its code-task flow wait until one exists. File-level
@@ -57,7 +56,7 @@ detail lives in [[Codebase]]; this page stays at the map altitude.
    ┌──────────────────────────────┐        ┌──────────────────────────────────┐
    │  nucleus  dendrites           │        │  Quickshell   Hyprland            │
    │  facets   rime                │        │  shellbridge  terminals           │
-   │  hosts    song/repertoire     │        │  notifications  widgets           │
+   │  hosts    song/songbook       │        │  notifications  widgets           │
    └──────────────┬───────────────┘        └───────────────┬──────────────────┘
                   │                                         │
                   └──────────────►    NOTES    ◄──────────────┘
@@ -83,7 +82,7 @@ trail but exit 64 today.
                                         ▼            │
    ┌─────────────────────────────────────────────────────────────┐
    │  AGENT INTERFACE            aoide <cmd>   ·   aoide mcp serve │   [[Agent-Interface]]
-   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   28 commands · exit 0/1/2/64
+   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   36 commands · exit 0/1/2/64
    └───────────────────────────────┬─────────────────────────────┘
                                     ▼
    ┌─────────────────────────────────────────────────────────────┐
@@ -95,10 +94,10 @@ trail but exit 64 today.
   RICE ENGINE (stub)     CONTENT PIPELINE (stub)   NIX EVAL + REBUILD
   [[Self-Ricing]]        [[Content-Pipeline]]      [[Snowflake-Anatomy]]
    rime/ + song/          discover→…→query          walker: modules/ +
-   (rice lint is real)         │                    song/repertoire/
+   (lint/preview real)         │                    song/songbook/
        │                       ▼                         │
        ▼                  index (points in           resolves
-  song/repertoire/<song>   place, never copies)          │
+  song/songbook/<song>     place, never copies)          │
   rice.nix + drachma.json                                  ▼
   songbook/ (write-back)                          ┌─────────────┐
        │                                          │    NOTES    │  aoide.drachma — one source
@@ -132,13 +131,13 @@ draws.
 
 | Subsystem            | Inputs                                         | Outputs                                             | Status                                     |
 | -------------------- | ---------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
-| [[Agent-Interface]]  | agent commands; `aoide schema --json`          | dispatched operations; structured `--json` results  | implemented (15 real verbs, rest exit 64)  |
+| [[Agent-Interface]]  | agent commands; `aoide schema --json`          | dispatched operations; structured `--json` results  | implemented (25 real verbs, 11 exit 64)    |
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`~/Aoide/log`); default-deny event bus   | implemented (skeleton)                     |
-| [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped default | `song/repertoire/<song>/`; songbook append; preview | stubbed (`rice lint` real)                 |
+| [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped default | `song/songbook/<song>/`; songbook append; preview   | stubbed (`rice lint`/`preview` real)        |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all verbs exit 64)                |
 | [[Notes]]            | `aoide.drachma` (palette + component tiers)      | `song/stage/drachma.json`; baked facet + Stylix values | implemented (v0)                           |
 | [[shellbridge]]      | unix-socket commands; Hyprland IPC             | atomic JSON in `song/stage/`; `hyprctl` dispatch    | implemented (accept loop live: `focuswindow`) |
-| [[Quickshell]]       | `song/stage/*.json` (incl. notes)              | widget socket commands; rendered surfaces           | implemented (QML skeleton, 9 surfaces)     |
+| [[Quickshell]]       | `song/stage/*.json` (incl. drachma)            | widget socket commands; rendered surfaces           | implemented (9 real surfaces)              |
 | [[Hyprland]]         | baked config + `hyprctl` keywords              | IPC event/state socket                              | implemented (greetd stubbed)               |
 | [[Stylix]]           | base16 synthesized from the v0 palette         | themed config for every nix app                     | implemented (stands down on owned surfaces) |
 
@@ -175,13 +174,16 @@ The baked side is carried by the three facets, all real:
 - **quickshell** — declares nine surfaces with `owner = "quickshell"` (bar,
   notifications, launcher, osd, lockscreen, greeter, wallpaper, agentWidgets,
   sessionGraph); QML installed to `~/Aoide/qml` via home-manager;
-  `DrachmaState.qml` watches the stage file for the live fan-out. Two surfaces
-  have real bodies: agentWidgets is the [[Gadget-Dock]] — the
+  `DrachmaState.qml` watches the stage file for the live fan-out. All nine now
+  have real bodies: `AoideBar.qml` is the bar; `AoideLauncher.qml` is the
+  keyboard-driven launcher (`SUPER+SPACE`); `AoideNotifications.qml` +
+  `NotificationCard.qml` are the notification daemon (actions/inline-reply
+  spike still pending); agentWidgets is the [[Gadget-Dock]] — the
   Win7-sidebar-homage gadgets (terminal roster, compact DAG, clock, CPU/RAM
-  meters), since 8f4034e a left-edge pinnable popup on hot-edge hover or
-  SUPER+G, all notes-coloured and the primary DAG affordance — and
-  sessionGraph is the [[Session-Graph]] DAG overlay, now dormant
-  (bridge-only, no keybind).
+  meters, NowPlaying/Power/Calendar), a left-edge pinnable popup on hot-edge
+  hover or `SUPER+G`, all notes-coloured; sessionGraph is the
+  [[Session-Graph]] DAG overlay, built but dormant (bridge-only, no keybind);
+  osd, lockscreen, greeter, and wallpaper round out the set.
 - **compositor** — [[Hyprland]]; the system layer holds session/portal wiring,
   the home-manager layer owns `hyprland.conf` with notes baked at build and
   live-patched via `hyprctl` during rehearsal; greetd is stubbed.
@@ -196,24 +198,25 @@ real flake checks, not conventions.
 
 The self-ricing lifecycle overlays the map above: it produces notes, previews
 through the live fan-out, and only commits through the gate. See
-[[Self-Ricing]]. Today the loop's mutating verbs (`gen`, `preview`, `adopt`,
-`transpose`) are exit-64 stubs; `rice lint` is real and delegates to
-[[drachma]].
+[[Self-Ricing]]. Today `gen`, `adopt`, and `transpose` are exit-64 stubs;
+`rice lint` (delegates to [[drachma]]) and `rice preview` (stages
+`song/stage/drachma.json` for Quickshell hot-reload) are real.
 
 ```
   aoide rice gen <prompt|wallpaper>
-        │   reads songbook/ + liner/ FIRST, always
+        │   reads song/songbook/ (cross-cutting + the song's own design/) FIRST
         ▼
   rice lint   ──fail──►  reject + songbook note
         │ pass
         ▼
-  rice preview   ──►  song/stage/drachma.json  ──►  Quickshell hot-reload · hyprctl · OSC
+  rice preview   ──►  song/stage/drachma.json  ──►  Quickshell hot-reload
+        │              (hyprctl/OSC dispatch not yet wired into preview)
         │                                         (REHEARSAL — nothing committed)
         ▼
   aoide rice adopt <name>   ◄─── User gates this step
         │
         ▼
-  commit to song/repertoire/<song>/   ──►  gated rebuild   ──►  RECORDING
+  commit to song/songbook/<song>/   ──►  gated rebuild   ──►  RECORDING
         │                                     ↓ fleet-available: any host sets
         └──►  append songbook/ (learnings, preferences)      aoide.song = "<name>"
               ← the "self" in self-ricing
@@ -223,15 +226,15 @@ through the live fan-out, and only commits through the gate. See
 
 **Song replay is implemented.** `aoide.song` (nucleus option, default
 `"default"`) selects the song a host performs; `lib/mkHost.nix` walks
-`song/repertoire/` exactly as it walks `modules/`, so a committed song
+`song/songbook/` exactly as it walks `modules/`, so a committed song
 self-registers and self-gates on `config.aoide.song == "<name>"` — the same
-discipline as a dendrite. The shipped standard in `modules/rime/default/` is
-formally song `"default"`. The song carries **notes only**; the host is the
+discipline as a dendrite. The shipped standard is song `"default"` at
+`song/songbook/default/` (the songbook's one upstream-owned, merge-only song). The song carries **notes only**; the host is the
 venue — its specifics and which instruments (facets, dendrites) are enabled.
 Replay = same song, new venue (one line in `hosts/<host>/default.nix`);
 transpose = new key, same venue. The `song-shape` check asserts every walked
-repertoire file is a `rice.nix`; song shape v0 is `CONTRACTS.md §5`. The
-example is `song/repertoire/sonata` (the selected light key): flip yomi-strix's
+songbook file is a `rice.nix`; song shape v0 is `CONTRACTS.md §5`. The
+example is `song/songbook/sonata` (the selected light key): flip yomi-strix's
 one line to another song and the whole drachma fan-out swaps (e.g. the shipped
 `default` Mocha bg `#1e1e2e` → sonata cream `#f4ecdc`). Full replay treatment:
 [[Song-Vocabulary#Replay — any song, any host]].
@@ -254,7 +257,7 @@ stubs today.
                                                         (never poisons the live index)
 ```
 
-The index points at content in place — it never copies. `song/repertoire/*/liner/`
+The index points at content in place — it never copies. `song/songbook/<song>/design/`
 notes are dogfooded back through this same pipeline (pre-approved, system-owned),
 so the agent can query its own past rice reasoning. Mneme is read only via its
 API; the vault declares exports, Aoide admits through the same gate.
@@ -274,12 +277,12 @@ cannot drift, funnelled through a single policy/audit surface. See
 This is now shipped code: the Rust crate ([[aoide-cli]]) installs two binaries,
 `aoide` and `aoided`. `aoide schema --json` is the machine-readable source of
 truth; the stdio MCP façade (`aoide mcp serve --stdio`) generates its tool list
-from it, one-to-one. The tree holds **28 commands** — real: `guide`, `schema`,
-`rice lint`, `mcp serve`, `daemon`, `shellbridge`, `conduct`, `baton`,
-`adapter melete`, and the `graph` group (the [[Session-Graph]] DAG viewer +
-management layer over projects and sessions, incl. `graph send`/`wrap`, all
-real); stubs:
-`rice gen/preview/adopt/transpose`, the `content` group, `make`, `update`,
+from it, one-to-one. The tree holds **36 commands** — real (25): `guide`,
+`schema`, `rice lint`, `rice preview`, `mcp serve`, `daemon`, `shellbridge`,
+`conduct`, `baton`, `adapter melete`, and the 15-verb `graph` group (the
+[[Session-Graph]] DAG viewer + management layer over projects and sessions,
+incl. `graph send`/`wrap`/`reap`, all real); stubs (11, exit 64):
+`rice gen/adopt/transpose`, the 5-verb `content` group, `make`, `update`,
 `onboard`. Exit codes are contractual: 0 ok, 1 error, 2 usage, 64
 not-implemented.
 
@@ -287,7 +290,7 @@ On the host, the plane runs as systemd user units, all from the nucleus:
 `aoided`, `shellbridge` (socket `$XDG_RUNTIME_DIR/aoide/shellbridge.sock`),
 `aoide-melete-adapter`, and `aoide-mcp` (gated on `aoide.mcp.enable`, default
 false) — plus the `aoide-obsidian-register` oneshot from the shipped dendrite.
-Live state lands in `song/stage/{notes,sessions,hooks,projects,graph}.json`
+Live state lands in `song/stage/{drachma,sessions,hooks,projects,graph}.json`
 (the last two from the [[Session-Graph]] layer). `lib/mkHost.nix`
 injects `pkgs.aoide` / `pkgs.drachma` by overlay from the **same**
 `callPackage` paths as the flake's `packages` output, so the units and the
@@ -325,21 +328,25 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 ├── modules/         the snowflake — walker-discovered layers
 │   ├── nucleus/     options.nix (THE contract) · aoided · shellbridge · melete-adapter
 │   │                · packages.nix (aoide + drachma + git on PATH) · nix.nix (flakes on)
-│   ├── dendrites/   opt-in features (obsidian ships)          ← additive growth
+│   ├── dendrites/   18 opt-in features (bash, nh, git, kitty, neovim, starship,
+│   │                mcfly, btop, yazi, fastfetch, devtools, fonts, obsidian,
+│   │                melete, mneme, firefox, screenshot, vision) ← additive growth
 │   ├── facets/      quickshell · compositor · stylix          ← render surfaces (notes-only)
-│   └── rime/        default/ — the shipped standard, formally song "default"
+│   └── rime/        the rice engine (song content lives in song/songbook/)
 ├── hosts/           common/ + yomi-strix/ (flags + the aoide.song selector; a real
-│                    hardware profile since ad3b21a — switched live 2026-07-26)
+│                    hardware profile, switched live and running as the daily desktop)
 ├── pkgs/            aoide/ (Rust: aoide + aoided) · drachma/ (Node: drachma)
-├── song/            repertoire/{sonata,hero} · songbook · keys · covers · chimes
+├── song/            songbook/{sonata,hero}/ — rice.nix · drachma.json · assets/ ·
+│                    palette/ · sounds/ · icons/ · widgets/ · design/ (per song);
+│                    stage/ + auditions/ runtime (gitignored)
 ├── docs/BUILD.md    module-authoring conventions
 ├── CONTRACTS.md     versioned contracts (notes · dendrite · schema · stage · song shape)
 ├── AGENTS.md        tier-0 agent guide (aoide guide prints the same map)
 └── log              single audit log — runtime, gitignored
 ```
 
-Runtime dirs (`song/{stage,backstage,auditions}`, root `log`, `index/`,
-`catalog/`) are gitignored and created at runtime; `song/repertoire/**` is
+Runtime dirs (`song/{stage,auditions}`, root `log`, `index/`,
+`catalog/`) are gitignored and created at runtime; `song/songbook/**` is
 versioned score, legitimately walked at eval.
 
 `hosts/` knows dendrites; dendrites never know hosts. Facets read only

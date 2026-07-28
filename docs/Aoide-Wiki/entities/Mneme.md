@@ -1,6 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
+updated: 2026-07-28
 aliases: [Mneme Vault Server, mneme.service]
 tags: [aoide, mneme, knowledge, vault, mcp, content]
 ---

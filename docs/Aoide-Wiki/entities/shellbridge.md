@@ -16,7 +16,7 @@ Session jump flow: a widget click in Quickshell issues a socket command to shell
 
 Claude Code hook states (Notification / Stop / Pre-PostToolUse) post their state through shellbridge, making the connection-state widget in the bar a live reflection of the agent's execution phase.
 
-## Implementation (commit f3ceadf skeleton; socket accept loop shipped since)
+## Implementation
 
 shellbridge runs as the `shellbridge` systemd user service via `aoide
 shellbridge --run` — a sub-command of the [[aoide-cli]] binary. Its socket path
@@ -71,7 +71,7 @@ never exiting non-zero so it is safe to wire into interactive-session hooks.
 `startedAt` is stamped ISO-8601 UTC (hand-rolled, round-tripping the baton
 reader — no chrono in the offline lock).
 
-Since commit 0b3a3fd (the [[Session-Graph]] layer) the stage carries two more
+Since [[Session-Graph]] landed, the stage carries two more
 files: `song/stage/projects.json` (the project registry, v0 `{schemaVersion,
 projects: [{name, path}]}`) and `song/stage/graph.json` (the resolved DAG, v0
 `{schemaVersion, nodes, edges: [{from, to, kind}]}`, emitted by `aoide graph
@@ -83,8 +83,8 @@ open thread). The graph stage rewriters
 round-trip unknown fields, so they never clobber what shellbridge (or any
 other writer) adds to a record.
 
-The env-var seam is now a **documented contract** (fixed at d03dcf2,
-"Stage-dir resolution" in `CONTRACTS.md §4` — the CLI ↔ unit seam): the Rust
+The env-var seam is a **documented contract** ("Stage-dir resolution" in
+`CONTRACTS.md §4` — the CLI ↔ unit seam): the Rust
 `stage_dir()` honours `$AOIDE_STAGE_DIR` when it is set to an **absolute**
 path (the unit sets `%h/Aoide/song/stage`; empty or relative values are
 ignored so runtime paths never resolve against an arbitrary cwd), else it

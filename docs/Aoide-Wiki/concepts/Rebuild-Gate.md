@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-28
 tags: [aoide, governance, policy, rebuild, security]
 ---
 
@@ -29,16 +29,16 @@ This is the safe default precisely because it is human-in-the-loop. It is also t
 
 The gate has now been exercised for real: on 2026-07-26 the user admitted the first switches onto the Aoide flake, and yomi-strix runs it live — with the prior [[dxflake]] generation retained in systemd-boot as the rollback (see [[Codebase]], [[Full-Architecture]]).
 
-## The `aoide.rebuild` capability (opt-in)
+## The `aoide.rebuild` capability (planned, not yet built)
 
-Declared in the nucleus option contract (see [[Snowflake-Anatomy]], [[Governance]]) and **off by default**. When enabled it grants the agent a **passwordless but narrowly-scoped** path to the gated verbs — the design deliberately chosen over storing a sudo password:
+Designed but not implemented: `modules/nucleus/options.nix` declares no `aoide.rebuild` surface today, and the compositor facet marks the polkit prompt explicit future work. The design, once built, would grant the agent a **passwordless but narrowly-scoped** path to the gated verbs — chosen deliberately over storing a sudo password:
 
 - A **dedicated no-login agent user** with no general `sudo` rights.
-- The rebuild runs as a fixed **systemd oneshot unit** (`aoide-rebuild-{test,switch}.service`) whose flake path, host, and verb are baked into the unit — the agent chooses *which unit to start*, never the command line.
-- A **polkit rule** lets that user `systemctl start` **those units and nothing else**, no password — the same polkit pipeline [[Governance]] records as sakaki's agent-sudo design.
-- Every invocation streams through journald into the single [[aoided]] audit log (`~/Aoide/log`).
+- The rebuild running as a fixed **systemd oneshot unit** (`aoide-rebuild-{test,switch}.service`) whose flake path, host, and verb are baked into the unit — the agent chooses *which unit to start*, never the command line.
+- A **polkit rule** letting that user `systemctl start` **those units and nothing else**, no password — the same polkit pipeline [[Governance]] records as sakaki's agent-sudo design.
+- Every invocation streaming through journald into the single [[aoided]] audit log (`~/Aoide/log`).
 
-Crucially, enabling the capability changes only **authentication** — it does *not* create background rebuilds. The **approval** gate persists as policy: `test` (reboot-recoverable) may be auto-admitted, but `switch` still routes through the admit door, keeping the *no background rebuilds, no self-updaters* house rule intact ([[Governance]]).
+Crucially, enabling the capability would change only **authentication** — it would not create background rebuilds. The **approval** gate persists as policy: `test` (reboot-recoverable) could be auto-admitted, but `switch` would still route through the admit door, keeping the *no background rebuilds, no self-updaters* house rule intact ([[Governance]]). Until built, all rebuilds use the default behaviour above.
 
 ## Why passwordless-narrow beats a sudo password
 

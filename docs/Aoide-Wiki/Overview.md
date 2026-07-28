@@ -26,7 +26,7 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 - [[Snowflake-Anatomy]] — the layered structure of the Aoide flake: nucleus, dendrites, facets, and rime; why Nix's snowflake logo maps to the repo's growth model
 - [[Fork-and-Run]] — the install model: fork upstream, clone to `~/Aoide`, run `aoide onboard`; shared history enables clean upstream merges and upstream contributions
 - [[Self-Ricing]] — the headline feature: the agent generates, lints, previews, and adopts rices; songbook write-back is the "self" in self-ricing
-- [[Song-Vocabulary]] — the performed-half naming map: key, melody, arrangement, instruments, liner, songbook, cover, chimes, stage, rehearsal, recording
+- [[Song-Vocabulary]] — the performed-half naming map: key, melody, arrangement, instruments, design, songbook, cover, chimes, stage, rehearsal, recording
 - [[Notes]] — the immutable data seam between nix structure and runtime rendering; the standalone note package, schema tiers, and the two-fan-out model
 - [[Agent-Interface]] — the CLI-first capability surface: `aoide <cmd>`, MCP as a generated façade, guide tiers, and agent-first ergonomics
 - [[Desktop-Architecture]] — how aoided, shellbridge, Quickshell, and the compositor compose into a single agent-ready desktop body

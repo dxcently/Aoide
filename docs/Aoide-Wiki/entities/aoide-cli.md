@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-28
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
@@ -15,74 +15,85 @@ two binaries (`aoide` the CLI, `aoided` the daemon) plus a shared library.
 every command carries meaningful exit codes, and the same handlers back both
 the CLI door and the MCP door so the two can never drift.
 
-*Grounded in the repo at commit f3ceadf (walking-skeleton milestone), extended
-at commits 0b3a3fd (the `graph` group), 41be90f (focus liveness, stage-dir
-seam), and 8f4034e (the `shell dock toggle` keybind path). The crate lives at
-`pkgs/aoide/`; it
-packages via `rustPlatform.buildRustPackage` with `meta.mainProgram = "aoide"`
-and vendored deps (`cargoLock.lockFile`) so the build is offline.*
+*The crate lives at `pkgs/aoide/`; it packages via `rustPlatform.buildRustPackage`
+with `meta.mainProgram = "aoide"` and vendored deps (`cargoLock.lockFile`) so
+the build is offline.*
 
 ## The command tree
 
 `schema.rs` declares every command once, in a single `commands()` table — the
 one source of truth from which the CLI dispatcher, the `schema --json` emitter,
-and the MCP tool list all derive. Twenty-seven leaves — the nineteen
-walking-skeleton commands plus the twelve-command `graph` group:
+and the MCP tool list all derive. **36 leaves** (`aoide schema --json | jq
+'.commands | length'`):
 
-| Path | Real / stub | Gated |
+| Group | Leaves | Real / stub |
 |---|---|---|
-| `guide` | real (prints tier-0 onboarding) | — |
-| `schema` | real (emits the versioned schema doc) | — |
-| `rice gen` | stub | — |
-| `rice lint` | real (delegates to `drachma`) | — |
-| `rice preview` | stub | — |
-| `rice adopt` | stub | gated |
-| `rice transpose` | stub | — |
-| `content register` | stub | — |
-| `content propose` | stub | — |
-| `content approve` | stub | gated |
-| `content ingest` | stub | — |
-| `content query` | stub | — |
-| `make` | stub (the [[Widget-Maker]] entry) | — |
-| `update` | stub | gated |
-| `onboard` | stub | — |
-| `mcp serve` | real (stdio server) | — |
-| `daemon` | real (runs the [[aoided]] skeleton) | — |
-| `shellbridge` | real (runs the [[shellbridge]] process) | — |
-| `adapter melete` | real (runs the [[Melete]] adapter) | — |
-| `graph view` | real (Unicode DAG tree; `--focus`, `--json`) | — |
-| `graph emit` | real (atomic `song/stage/graph.json` write) | — |
-| `graph project add` | real (register a project, idempotent) | — |
-| `graph project remove` | real (absent-ok) | — |
-| `graph project list` | real | — |
-| `graph link` | real (spawned-by edge; rejects self-links/cycles) | — |
-| `graph session start` | real (UPSERT a running session; idempotent, startedAt-preserving, `--parent` cycle-checked) | — |
-| `graph session phase` | real (upsert the one-per-session live hook phase) | — |
-| `graph session end` | real (mark session + hook `done`; absent-ok) | — |
-| `graph session hook` | real (stdin hook door; maps Claude-Code events; never exits non-zero) | — |
-| `graph focus` | real (session jump via `hyprctl`, liveness-checked) | — |
-| `graph prune` | real (drop `done` sessions, un-orphan children) | — |
+| `guide`, `schema` | 2 | real |
+| `rice lint`, `rice preview` | 2 | real (`lint` delegates to [[drachma]]) |
+| `rice gen`, `rice adopt`, `rice transpose` | 3 | stub (`adopt` gated) |
+| `content register/propose/ingest/query` | 4 | stub |
+| `content approve` | 1 | stub, gated |
+| `make` ([[Widget-Maker]] entry), `onboard` | 2 | stub |
+| `update` | 1 | stub, gated |
+| `mcp serve`, `daemon`, `shellbridge`, `adapter melete` | 4 | real |
+| `graph` group (15 leaves — below) | 15 | real |
+| `conduct` | 1 | real |
+| `baton` | 1 | real |
 
-The `graph` group (all real, none gated) is the [[Session-Graph]] viewer +
-management layer — the project/session DAG that grows the
-[[Terminal-Commander]] roster; the `guide` tier-1 blurb and the `docs/BUILD.md`
-command table both carry it. `graph focus` no longer trusts `focuswindow`'s
-always-zero exit: it confirms the window in `hyprctl clients -j` first
-(case- and `0x`-tolerant address matching) and fails structured
-(`window-not-found`, exit 1) for a vanished terminal; its five failure
-reasons are `session-not-found` / `no-window-address` /
-`hyprctl-unavailable` / `hyprctl-failed` / `window-not-found`. One schema gap
-stands as an open thread: the compositor keybinds invoke `aoide shell
-{launcher toggle, lock, dock toggle}`, a group **not** among the 27 leaves —
-future CLI work. (`shell dock toggle` arrived at 8f4034e as the `SUPER+G`
-open-and-pin path to the [[Gadget-Dock]] popup, replacing the earlier
-`shell graph toggle` stub verb.) "Stub" elsewhere means a **structured not-implemented stub**: arg-parsing, the schema
-entry, the audit-log append, and the gate flag are all real code paths; only the
-live-system action is deferred. A stub returns an `Outcome` with status
-`not-implemented` (exit 64), not a crash. The four `gated: true` commands (`rice
-adopt`, `content approve`, `update`) are marked so both doors surface the user
-rebuild gate uniformly — nothing here admits a rebuild, which is structurally the
+A stub returns a structured `Outcome` with status `not-implemented` (exit
+`64`), never a crash — arg-parsing, the schema entry, the audit-log append,
+and the gate flag are all real code paths regardless; only the live-system
+action is deferred. Exactly three commands carry `gated: true` (`rice adopt`,
+`content approve`, `update`), marked so both doors surface the user rebuild
+gate uniformly — nothing here admits a rebuild, which is structurally the
 user's action ([[Rebuild-Gate]], [[Governance]]).
+
+### The `graph` group — session/project DAG + the conductor mesh
+
+`view`, `project add`/`remove`/`list`, `link`, `session start`/`phase`/`end`/
+`hook`, `focus`, `prune`, `emit` are the original [[Session-Graph]] viewer +
+manager feeding the [[Terminal-Commander]] roster (see [[Agent-Hooking]] for
+the session-registration doors). Three later additions turn the graph into a
+live conductor mesh:
+
+- **`graph wrap`** — spawn any agent command as a registered session
+  (inherited stdio, `running`→`done` for free, `AOIDE_SESSION_ID` exported to
+  the child). See [[Agent-Hooking]].
+- **`graph reap`** — the liveness sweeper: marks a session `done` when its
+  window is gone (`hyprctl clients -j`) or its pid's `/proc` entry is gone,
+  run on a systemd user timer (~12s) as the companion to `graph prune`
+  (which only drops sessions already `done`).
+- **`graph send`** — the one gated injection door: types text into a
+  *conducted* session's control socket. Held pending approval by default;
+  `--yes` (or an autogate policy) delivers and renames the node to a
+  one-line form of the text. Every outcome is audited.
+
+`graph focus` distrusts `focuswindow`'s always-zero exit: it confirms the
+window in `hyprctl clients -j` first (case- and `0x`-tolerant address
+matching) and fails structured (`window-not-found`, exit 1) for a vanished
+terminal; its five failure reasons are `session-not-found` /
+`no-window-address` / `hyprctl-unavailable` / `hyprctl-failed` /
+`window-not-found`.
+
+### `conduct` and `baton`
+
+**`conduct`** is `graph wrap`'s PTY-backed sibling — same
+register/wait/end lifecycle, but on a controlling tty plus a per-session
+control socket, so `graph send` can type into the running agent while its own
+TUI runs undisturbed. **`baton`** is the interactive terminal frontend over
+the whole trunk: a ratatui TUI (DAG / sessions / projects / log / status
+panels, ~500ms poll, no watcher/async runtime) that dispatches every action
+through the same `dispatch()` the CLI and MCP doors use — never a second
+implementation, so the one audit log can't tell a baton keypress from a typed
+command.
+
+### Open schema gap
+
+The compositor keybinds `SUPER+ESCAPE` (lock) and `SUPER+G` (dock toggle)
+still invoke `aoide shell lock` / `aoide shell dock toggle` — a verb group not
+among the 36 leaves, future CLI work. The third former member of that group,
+the launcher, is fixed: `SUPER+SPACE` now triggers an in-process Hyprland
+global shortcut, not a CLI verb (see [[Quickshell]]).
 
 ## Contract-level conventions
 

@@ -1,8 +1,15 @@
 ---
 type: design
 created: 2026-07-28
-tags: [aoide, rice, song, stylix, theming, protocol]
-source: "[[references/AOIDE-HANDOFF]]"
+updated: 2026-07-28
+tags:
+  - aoide
+  - rice
+  - song
+  - stylix
+  - theming
+  - protocol
+source:
 ---
 
 # The Ricing Protocol — how a song gets made and kept honest
@@ -22,17 +29,18 @@ check whenever a rice or song changes.
 > `song/`**, not in the dev wiki:
 > - **cross-cutting design memory** → `song/songbook/` (learnings, preferences,
 >   the update playbook — see [[Self-Ricing#Songbook Discipline — the "Self" in Self-Ricing]]);
-> - **per-song notes** → `song/repertoire/<name>/liner/` (intent, palette
+> - **per-song notes** → `song/songbook/<name>/design/` (intent, palette
 >   rationale, iteration log).
 >
 > The worked examples below (the `sonata` opacity numbers, the derivation
 > notes) are shown here to make the *protocol* legible — they are illustrations
 > of what the songbook records, **mirrored** from the song agent's domain, not
-> this page's to own. Today that songbook is **sparse and largely aspirational**
-> — `song/songbook/` holds only a placeholder and the sole liner is
-> `song/repertoire/sonata/liner/intent.md` — so the migration of this content
-> into it is still pending (flagged for the handoff). Treat `song/` as the
-> destination of record; this page points there.
+> this page's to own. Today that songbook is **sparse**: `song/songbook/` holds
+> only a placeholder, and the one per-song design note that exists —
+> `song/songbook/sonata/design/intent.md` — is stale (it still describes an
+> earlier indigo-nocturne take, not the shipped cream key), so migrating this
+> page's content into it is still pending (flagged for the handoff). Treat
+> `song/` as the destination of record; this page points there.
 
 ## 1. Two separated concerns: creating a base16, and applying it
 
@@ -44,24 +52,24 @@ job ends up hard-coding colours in six different files that drift apart.
 - **Creation** happens once, in the song's `rice.nix`, as `aoide.drachma.base16`
   — sixteen literal hex slots (base00–base0F) plus the small `palette`
   convenience block (bg/fg/accent/urgent/hot). The **`sonata`** song
-  (`song/repertoire/sonata/rice.nix`) is the worked example — the cream LIGHT
+  (`song/songbook/sonata/rice.nix`) is the worked example — the cream LIGHT
   key currently performed on yomi-strix: every slot is keyed by eye from the
   wallpaper (Alma-Tadema's *Unconscious Rivals*) with a comment naming which
   region of the painting it reads from (cream parchment → base00, deep umber
   ink → base05, dusty cornflower → base0D, sage green → base0B/hot, muted rose →
   base08/urgent). The **`hero`** song is the same discipline in a different
   register — its sixteen slots are keyed by hand from its own cover
-  (`song/covers/hero.webp`, the pianist over dusk mirror-water: deep plum base,
-  rose accent). `aoide rice gen` is the eventual automated form of this same
-  step (still a stub — see [[aoide-cli]]); until it lands, creation is a
-  human/agent reading the source image and writing the sixteen slots by hand,
-  once, in one file.
+  (`song/songbook/hero/assets/hero.webp`, the pianist over dusk mirror-water:
+  deep plum base, rose accent). `aoide rice gen` is the eventual automated form
+  of this same step (still a stub — see [[aoide-cli]]); until it lands,
+  creation is a human/agent reading the source image and writing the sixteen
+  slots by hand, once, in one file.
 - **Application** is [[Stylix]]'s job, and only Stylix's: one `base16Scheme`
   feeds every nix-manageable target (terminal, GTK/Qt, icons, cursor,
   editors, browser, boot) automatically. On the Quickshell side, the same
-  notes fan out through `stage/drachma.json` — one runtime read, every QML
-  surface. **No other file should ever hard-code a colour that could instead
-  be read from notes.** A dendrite or facet that wants a colour reads
+  drachma values fan out through `stage/drachma.json` — one runtime read,
+  every QML surface. **No other file should ever hard-code a colour that could
+  instead be read from drachma.** A dendrite or facet that wants a colour reads
   `aoide.drachma.*`; it never writes its own hex.
 
 The point of the split: creation is where taste and vision-checking live
@@ -113,7 +121,8 @@ Two things to look at, side by side, on the live desktop:
    `violet`, `glitchPink`, `paletteAccent`/`paletteHot`). A widget that
    *looks* subtly off (a slightly different cream, an accent that reads as a
    different hue) usually means it resolved a fallback instead of the song's
-   actual note — the fix is in the note wiring, not a local hex tweak.
+   actual drachma value — the fix is in the drachma wiring, not a local hex
+   tweak.
 
 This is a **vision check**, not a lint rule: it means actually looking at the
 running desktop (screenshot or live) after a rice change, not just trusting
@@ -128,6 +137,7 @@ facet reading another module, a surface with two owners); it cannot catch
 - [[Stylix]] — the application half: one base16 scheme, baked fan-out.
 - [[Notes]] — the drachma seam creation writes into and application reads from.
 - [[Song-Vocabulary]] — key/song/cover vocabulary this protocol operates on.
-- [[Song-Anatomy]] — where the songbook and per-song liner live under `song/`.
+- [[Song-Anatomy]] — where the songbook and per-song design memory live under
+  `song/`.
 - [[Self-Ricing]] — the songbook write-back loop and the automated future of the
   creation step (`rice gen`).

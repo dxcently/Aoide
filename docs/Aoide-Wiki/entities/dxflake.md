@@ -1,6 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
+updated: 2026-07-28
 tags: [aoide, nix, flake, dxflake, auto-discovery]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -15,7 +16,7 @@ A dendritic auto-discovery NixOS flake at github.com/dxcently/dxflake. It serves
 
 **Host configuration.** A host's `default.nix` imports only its `./hardware.nix` and then flips `dx.*` flags. It never imports module files directly. The separation is strict: hosts know dendrites; dendrites never know hosts.
 
-yomi-strix is a dxflake host. Aoide reuses this same walker pattern; see [[Snowflake-Anatomy]] for how Aoide names the equivalent layers (nucleus, dendrites, facets).
+`yomi-strix` — Aoide's own host — was templated from dxflake's own `yomi-strix`, trimmed to essentials (`hosts/yomi-strix/`); it builds under Aoide's *own* flake (`flake.nix`'s `mkHost`), not dxflake's. Aoide's `lib/mkHost.nix` reuses the same walker pattern; see [[Snowflake-Anatomy]] for how Aoide names the equivalent layers (nucleus, dendrites, facets).
 
 ## Related
 

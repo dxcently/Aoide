@@ -20,7 +20,7 @@ on angled leaders, and ONE neon accent reserved for the live/hot element.
 > the **songbook** is for. Under the model the dev wiki documents architecture
 > and protocol; **per-song and cross-cutting design memory belongs to the song
 > agent in a songbook under `song/`** (`song/songbook/` for cross-cutting
-> grammar like this one, `song/repertoire/<name>/liner/` for one song's notes —
+> grammar like this one, `song/songbook/<name>/design/` for one song's notes —
 > see [[Song-Anatomy]], [[Self-Ricing#Songbook Discipline — the "Self" in Self-Ricing]]).
 > This page is retained as a reference mirror while that songbook is still
 > **sparse and aspirational** (`song/songbook/` currently holds only a
@@ -205,14 +205,13 @@ The Pantheon effect at full strength:
 The desktop flipped its base key from dark to a LIGHT warm classical-academic
 register, keyed off the new main wallpaper: Alma-Tadema's *Unconscious
 Rivals*. `stylix.polarity = "light"` (base facet default); the **`sonata`** song
-(`song/repertoire/sonata/rice.nix`, the light key selected on yomi-strix)
+(`song/songbook/sonata/rice.nix`, the light key selected on yomi-strix)
 supplies the sixteen base16 slots read from the painting — cream/parchment
 `base00`, deep umber ink `base05`/`fg`, dusty cornflower `base0D`/`accent`, sage
 green `base0B`/`hot` (the one-blaze trace colour), muted rose `base08`/`urgent`,
-plus terracotta/ochre/teal/plum filling the rest of the ramp. (The name churned:
-this cream key was briefly `hero`, then `moonlight`, before landing as `sonata`;
-`hero` reverted to its own dusk-plum key, and the retired `moonlight` name is
-reserved for a planned dark `moonlight-sonata`.) This is the worked example for
+plus terracotta/ochre/teal/plum filling the rest of the ramp. `hero` is its own
+separate dusk-plum key; a dark `moonlight-sonata` counterpart to `sonata` is
+planned (khoa, not yet built). This is the worked example for
 [[design/Ricing-Protocol|the Ricing Protocol]]'s creation step — see that page
 for the base16-derivation discipline and the mandatory light/dark vision-check
 this rework introduced as a house rule.
@@ -275,7 +274,7 @@ subtly music-marked section rules (`♪ hardware`, `♪ software`).
 
 - [[design/Ricing-Protocol|Ricing Protocol]] — the creation/application split
   and the vision-check this grammar is kept coherent by.
-- [[Song-Anatomy]] — the songbook/liner under `song/` where this design memory
+- [[Song-Anatomy]] — the songbook under `song/` where this design memory
   belongs; the destination of the pending migration.
 - [[Self-Ricing]] — the songbook write-back loop (the "self" in self-ricing).
 - [[Notes]] — the `aoide.drachma` seam every surface here reads its roles from.

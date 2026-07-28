@@ -1,6 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
+updated: 2026-07-28
 tags: [aoide, theming, base16, stylix, nix]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -15,7 +16,7 @@ Surface ownership is enforced: the Quickshell facet declares which surfaces it o
 
 GTK/Qt live preview is accepted as adopt-only (app restarts required). A `rice preview --gallery` mode (sample apps restarted under a preview env) is deferred to after v1.
 
-## Implementation (walking skeleton, commit f3ceadf)
+## Implementation
 
 The Stylix facet applies the surface stand-down on **both** module layers — the
 NixOS side and the home-manager side — because Stylix splits its targets across

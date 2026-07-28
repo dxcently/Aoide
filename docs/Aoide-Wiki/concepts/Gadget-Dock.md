@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-28
 tags: [aoide, widget, qml, desktop, gadget, theming]
 ---
 
@@ -14,24 +14,21 @@ ASCII/box-drawing note theming**. It is the desktop's ambient at-a-glance
 layer, distinct from the full overlays — and since its v1 redesign it is a
 **left-edge pinnable popup**, summoned on demand rather than always visible.
 
-*Grounded in the repo at commit 41be90f; redesigned as the popup at 8f4034e
-(flake check + vm-boot green). Implementation:
+*Verified via flake check + vm-boot. Implementation:
 `modules/facets/quickshell/qml/AoideAgentWidgets.qml` plus the gadget files —
 see [[Quickshell]] and [[Codebase]].*
 
 ## Posture — a left-edge pinnable popup
 
-The first cut was an always-visible right-edge column. At 8f4034e the dock
-became a **drawer**: it rests off-screen past the LEFT edge and slides in
+The dock is a **drawer**: it rests off-screen past the LEFT edge and slides in
 (150 ms OutCubic — the Win7-vibe reveal) on either of two triggers:
 
 - **Hot edge** — a 5 px full-height hover strip on the left screen edge. Pure
   QML, so it works live today even with the stubbed bridge.
-- **SUPER+G** — the compositor keybind, whose bridge path is the new stub verb
-  `aoide shell dock toggle` (it replaced `aoide shell graph toggle`; see
-  [[aoide-cli]]). The keybind path is defined as **open-and-pin**: a keybind
-  that merely peeked would auto-hide the instant the pointer settled, which
-  would make it useless.
+- **SUPER+G** — the compositor keybind, whose bridge path is the stub verb
+  `aoide shell dock toggle` (see [[aoide-cli]]). The keybind path is defined as
+  **open-and-pin**: a keybind that merely peeked would auto-hide the instant
+  the pointer settled, which would make it useless.
 
 **Pinning.** The header chrome — `╔═[ GADGETS ]══[pin]═╗`, a new idiom beyond
 `GadgetFrame`'s title-only bar — carries the pin affordance: `[+]` unpinned,
@@ -71,10 +68,10 @@ Every gadget wears the same reusable frame, **`GadgetFrame.qml`**:
 
 - Box-drawing chrome — `╔═[ TITLE ]═╗` header, `╚═╝` footer — in a monospace
   face, the ASCII half of the aesthetic.
-- An Aero-glass body: a translucent note-background fill (about 0.72 opacity)
-  sitting over the compositor's Hyprland blur — the Win7 half.
+- An Aero-glass body: a translucent drachma-background fill (about 0.72
+  opacity) sitting over the compositor's Hyprland blur — the Win7 half.
 
-All colour comes from [[Notes|notes]] — zero hardcoded hex anywhere in the
+All colour comes from [[drachma]] — zero hardcoded hex anywhere in the
 dock, so the gadgets re-skin with every rice like any other surface.
 
 ## The four gadgets
@@ -100,9 +97,8 @@ dock, so the gadgets re-skin with every rice like any other surface.
 
 ## The waybar-homage wave — three more gadgets, and the bar joins the style
 
-The dxflake-parity work (branch `worktree-devtools-dendrites`, commit
-`a808c33`, flake check + vm-boot green; pending merge) grew the roster to
-seven and pulled `AoideBar` into the same visual language:
+The dxflake-parity work grew the roster to seven and pulled `AoideBar` into
+the same visual language:
 
 - **`NowPlayingGadget`** — Mpris as ASCII: `♪ « artist – title »` marquee,
   `▮▯` progress bar, glyph transport controls gated on the player's `can*`
@@ -127,16 +123,17 @@ that click-toggles this dock. Visual target preserved at
 ## Design memory
 
 The aesthetic is not just implemented — it is **recorded as a design
-decision** in the default rice's liner (`modules/rime/default/liner/intent.md`,
-Iteration Log), so future rice generations inherit the Win7-plus-ASCII
-intent as accumulated taste per the songbook discipline ([[Self-Ricing]]).
+decision** in the default song's design memory
+(`song/songbook/default/design/intent.md`, Iteration Log), so future rice
+generations inherit the Win7-plus-ASCII intent as accumulated taste per the
+songbook discipline ([[Self-Ricing]]).
 
 ## Why it matters beyond the pixels
 
 The dock is a working proof of the [[Widget-Maker]] thesis at surface scale:
-four independent gadgets sharing one frame component and one graph model, all
+seven independent gadgets sharing one frame component and one graph model, all
 declaratively themed, all added without touching any other surface. Future
-gadgets follow the same recipe — a `GadgetFrame`, notes-only colour, stage
+gadgets follow the same recipe — a `GadgetFrame`, drachma-only colour, stage
 files (or, until then, documented read-only interims) for data.
 
 ## Related
@@ -145,7 +142,7 @@ files (or, until then, documented read-only interims) for data.
 - [[Terminal-Commander]]
 - [[Session-Graph]]
 - [[Widget-Maker]]
-- [[Notes]]
+- [[drachma]]
 - [[Self-Ricing]]
 - [[shellbridge]]
 - [[aoide-cli]]

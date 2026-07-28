@@ -10,14 +10,13 @@ tags: [aoide, graph, session, terminal, agent, cli]
 [[Terminal-Commander]] began as a flat roster: one row per agent session. The
 session graph grows that roster into a **DAG of projects and sessions** — who
 spawned whom, and which project each session belongs to — with a terminal
-viewer and a management layer behind one CLI group, `aoide graph` (8 commands,
-all implemented). Like every command it lives in the single `schema.rs` table,
-so the CLI door and the MCP door gained the group together
-([[Agent-Interface]]).
+viewer and a management layer behind one CLI group, `aoide graph` (real, every
+subcommand implemented — `view`/`project`/`link`/`session`/`wrap`/`send`/
+`focus`/`prune`/`reap`/`emit`, per `aoide schema --json`). Like every command
+it lives in the single `schema.rs` table, so the CLI door and the MCP door
+gained the group together ([[Agent-Interface]]).
 
-*Grounded in the repo at commit 0b3a3fd; extended at 41be90f (focus liveness,
-the desktop surfaces) and 8f4034e (the dock popup as primary DAG affordance).
-Verified green (`nix flake check` + the vm-boot check). Implementation:
+*Verified green (`nix flake check` + the vm-boot check). Implementation:
 `pkgs/aoide/src/graph.rs` — see [[Codebase]].*
 
 ## The graph model
@@ -64,11 +63,11 @@ notes emitter — so [[Quickshell]] can hot-reload it.
 now renders in two places besides the terminal, both hot-reloading
 `graph.json`:
 
-- **`DagGraphGadget`** — the compact view inside the [[Gadget-Dock]], now the
-  **primary DAG affordance** on the desktop: since 8f4034e, `SUPER+G` summons
-  the dock popup (bridge path `aoide shell dock toggle`, open-and-pin — a
-  stub verb like the launcher bind; the `aoide shell` group is still future
-  CLI work, open thread), and the dock contains the DAG gadget.
+- **`DagGraphGadget`** — the compact view inside the [[Gadget-Dock]], the
+  **primary DAG affordance** on the desktop: `SUPER+G` summons the dock popup
+  (bridge path `aoide shell dock toggle`, open-and-pin — still a stub verb;
+  the `aoide shell` group otherwise remains future CLI work, open thread), and
+  the dock contains the DAG gadget.
 - **`AoideSessionGraph`** — the standalone overlay (surface #9,
   `aoide.surfaces.sessionGraph`), now **dormant**: it has no keybind and is
   reachable only via the bridge, kept intact as the seam for a future
@@ -77,7 +76,7 @@ now renders in two places besides the terminal, both hot-reloading
   nested, incoming-edge-free sessions under the synthetic `(unanchored)`
   root. The traversal is cycle-guarded (a visited set), dangling edges are
   filtered, and a safety net surfaces any unvisited session at depth 0.
-  Colours come entirely from notes (accent = running, urgent =
+  Colours come entirely from drachma (accent = running, urgent =
   awaiting/Notification, dimmed fg = done). A row click calls
   `bridge.focusSession` — the [[shellbridge]] session-jump gate; QML never
   shells out.
@@ -96,8 +95,8 @@ use it too.
   rejected (the handler walks the parent chain), exit 1.
 - **`graph focus <session>`** — jump to the session's window via `hyprctl
   dispatch focuswindow address:…` — the existing [[Terminal-Commander]]
-  session-jump flow, now reachable from the CLI. Since d03dcf2 it first
-  **verifies the window is alive** through `hyprctl clients -j` before
+  session-jump flow, reachable from the CLI. It first **verifies the window is
+  alive** through `hyprctl clients -j` before
   dispatching, because `focuswindow` exits 0 even for a vanished window: a
   gone terminal yields a structured `window-not-found` exit 1 with no
   dispatch. Address matching is case- and `0x`-prefix-tolerant (pure,
@@ -172,14 +171,16 @@ seeing a stale "haunting" session.
 
 ## Open seams
 
-Three of the original seams closed at d03dcf2/1fedd58: the `stage_dir()` /
-`AOIDE_STAGE_DIR` mismatch is fixed and documented as a contract seam
-("Stage-dir resolution", `CONTRACTS.md §4` — see [[shellbridge]]); the
-`focuswindow` exit-0 ambiguity is resolved by the liveness check above; and
-the Quickshell DAG surface exists (overlay + dock gadget). Still open (log
-threads): shellbridge does not yet stamp `parentSessionId` at spawn time (so
-`graph link` remains the only source, not the manual override), and the
-`aoide shell` verbs the keybinds reference are not yet in the command schema.
+Three original seams have closed: the `stage_dir()` / `AOIDE_STAGE_DIR`
+mismatch is fixed and documented as a contract seam ("Stage-dir resolution",
+`CONTRACTS.md §4` — see [[shellbridge]]); the `focuswindow` exit-0 ambiguity is
+resolved by the liveness check above; and the Quickshell DAG surface exists
+(overlay + dock gadget). A fourth has since closed too: conduct-by-default now
+stamps `parentSessionId` at spawn time for the common case — the kitty
+wrapper passes `--parent "$AOIDE_SESSION_ID"` into every nested `aoide conduct`
+([[Conductor-Channel]]) — so `graph link` is the manual/override path for
+edges outside that nesting, not the only source. Still open: the `aoide shell`
+verbs the keybinds reference are not yet in the command schema.
 
 ## Related
 

@@ -1,6 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
+updated: 2026-07-28
 tags: [aoide, desktop, compositor]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -20,7 +21,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 | Bar | Workspaces, agent sessions, connection state |
 | Notification daemon | Native `org.freedesktop.Notifications` implementation |
 | Agent widgets | Per-session status and controls |
-| Launcher | App/command launcher |
+| Launcher | Keyboard-driven app launcher (`AoideLauncher.qml`): enumerates apps via Quickshell `DesktopEntries`, fuzzy-filters, launches via `DesktopEntry.execute()`; triggered by `SUPER+SPACE` as an in-process Hyprland global shortcut |
 | OSD | On-screen display |
 | Lockscreen | User-facing lock |
 | Greeter | Login greeter |

@@ -1,13 +1,14 @@
 ---
 type: concept
 created: 2026-07-25
+updated: 2026-07-28
 tags: [aoide, notes, theming]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
 
-# Notes — the Seam Between Score and Performance (now: drachma)
+# Notes — the Seam Between Score and Performance
 
-This seam is where the frozen nix layer and the live desktop meet: values frozen into the crystal, sounded at runtime. They are Aoide's design-token layer — the container stays W3C design-tokens format. **The canonical name is now `drachma`** (per khoa): "notes" and "drachma" are one thing, not a values-vs-engine split — the tokens ARE drachma, named for the coin the mint stamps, and the same word names the package that resolves/lints/emits them. "Notes" survives only as the musical image (Aoide = song); the option is `aoide.drachma`, the runtime file is `stage/drachma.json`, and the package ([[drachma]]) is a standalone Node package with no external runtime dependencies.
+This seam is where the frozen nix layer and the live desktop meet: values frozen into the crystal, sounded at runtime. They are Aoide's design-token layer — the container stays W3C design-tokens format. **`drachma` is the canonical name**: "notes" and "drachma" are one thing, not a values-vs-engine split — the tokens ARE drachma, named for the coin the mint stamps, and the same word names the package that resolves/lints/emits them. "Notes" survives only as the musical image (Aoide = song); the option is `aoide.drachma`, the runtime file is `stage/drachma.json`, and the package ([[drachma]]) is a standalone Node package with no external runtime dependencies.
 
 ## Note Package Contents
 
@@ -55,7 +56,7 @@ Until the design-system v1 lands, the engine builds against a provisional drachm
 - Palette: `bg`, `fg`, `accent`, `urgent` (base16 values).
 - Component overrides: `bar.*`, `notif.*`, `window.*`.
 
-The update playbook migrates repertoire modules from v0 to v1 when v1 supersedes. Building against no schema at all was rejected.
+The update playbook migrates songbook modules from v0 to v1 when v1 supersedes. Building against no schema at all was rejected.
 
 ## Stylix Overlap Resolution
 

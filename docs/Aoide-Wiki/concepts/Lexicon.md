@@ -1,6 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
+updated: 2026-07-28
 tags: [aoide, naming, meta, architecture]
 ---
 
@@ -41,7 +42,7 @@ Chosen because Nix's own logo is a snowflake, because crystals grow by **local a
 | **nucleus** | `modules/nucleus/` — daemon, CLI, policy | the seed crystal everything condenses around |
 | **dendrite** | `modules/dendrites/` — opt-in feature branches | crystal branches grow outward by accretion; adding one never reshapes the core |
 | **facet** | `modules/facets/` — render surfaces (quickshell, stylix, compositor) | the crystal's faces — the only planes that catch light (render appearance), each reading only notes |
-| **rime** | `modules/rime/` — rice engine + shipped default | the deposited aesthetic layer on the crystal's surface; also the pun on **rice** |
+| **rime** | `modules/rime/` — the rice engine (all song content lives in `song/songbook/`) | the machinery that deposits the aesthetic layer; also the pun on **rice** |
 | **walker** | `lib/walk.nix` | walks the tree; every file under a walked dir self-registers, no import lists |
 | **snowflake** | your fork | same physics as upstream, unique instance — the point of [[Fork-and-Run]] |
 
@@ -59,9 +60,9 @@ The full map lives in [[Song-Vocabulary]]; the logic of the family here. A **ric
 | cover | wallpaper | chimes | notification/system sounds |
 | liner | per-song design notes | songbook | cross-cutting design memory |
 | rehearsal | live preview (stage) | recording | adopted, committed, rebuilt |
-| repertoire | committed songs | the standard | the shipped default song |
+| repertoire | committed songs, collectively | the standard | the shipped default song |
 | replay | same song, new venue | transpose | same song, new key |
-| stage | live state (gitignored) | backstage / auditions | runtime plumbing / propose gate |
+| stage | live state (gitignored) | auditions | the propose gate |
 
 ## The machinery words
 
@@ -77,7 +78,7 @@ A few terms name the connective tissue rather than either half:
 
 One loop, told in the vocabulary:
 
-1. **Melete practices.** The agent writes — a new song in `song/repertoire/`, a new dendrite branch, a new widget. Everything it does enters through a door and lands in the audit log.
+1. **Melete practices.** The agent writes — a new song in `song/songbook/`, a new dendrite branch, a new widget. Everything it does enters through a door and lands in the audit log.
 2. **The walker freezes.** The nix layer picks up what was written by accretion — dendrites and songs self-register, no import lists — and the score now contains it.
 3. **Rehearsal sounds it.** Before any rebuild, the live side performs the notes from `stage/drachma.json` — quickshell surfaces and hyprctl repaint in place. The frozen side is untouched; this is the performance testing the score.
 4. **The gate records it.** If the human admits the rebuild, the rehearsed state is recorded — baked through the stylix facet and the compositor, committed to the fork. Rehearsal and recording derive from the same notes, so they cannot disagree.

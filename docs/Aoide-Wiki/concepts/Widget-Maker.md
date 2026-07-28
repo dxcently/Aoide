@@ -1,6 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
+updated: 2026-07-28
 tags: [aoide, extensibility, declarative, widget, agent]
 ---
 
@@ -39,7 +40,7 @@ scripts:
   it (flake output, host + vm overlays, and a `pkg-<name>` check) — again no
   hand-list to edit.
 - Its UI is a **Quickshell widget** ([[Quickshell]]) reading `song/stage/*.json`,
-  themed only by [[Notes|notes]].
+  themed only by [[drachma]].
 - Its wiring is an **adapter** on the [[aoided]] event stream
   ([[Desktop-Architecture]]).
 - The result is reproducible, diffable, and removed by flipping the same flag —
@@ -63,9 +64,14 @@ Extending the system reuses the rice loop's shape ([[Self-Ricing]]):
   adopt  ◄─── User gates     committed as a dendrite; gated rebuild makes it permanent
 ```
 
-Preview is the sketch; adopt is the truth — identical discipline to ricing. A bad
-generation can never reach the running system without the [[Governance|gate]], and
-every step lands in the single audit log.
+**`aoide make` itself is planned, not shipped** (`aoide schema --json` marks it
+`not-implemented`, exit 64) — this is the target shape, not a running command
+today. Until it lands, a development agent builds the same dendrite + widget +
+adapter by hand, previews it live, and adopts it exactly as described below;
+[[Gadget-Dock]]'s seven gadgets and [[Terminal-Commander]] are the shipped
+proof the pattern works. Preview is the sketch; adopt is the truth — identical
+discipline to ricing. A bad generation can never reach the running system
+without the [[Governance|gate]], and every step lands in the single audit log.
 
 ## What this makes Aoide
 

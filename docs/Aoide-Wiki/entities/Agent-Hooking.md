@@ -1,6 +1,7 @@
 ---
 type: entity
 created: 2026-07-27
+updated: 2026-07-28
 tags: [aoide, agent, session, baton, orchestration, graph]
 ---
 
@@ -73,6 +74,26 @@ aoide graph session phase --id "$AOIDE_SESSION_ID" --phase blocked
 
 Everything after `--` passes to the child verbatim (the CLI stops flag-parsing there).
 
+### 4. Conducting — the steerable variant of the wrapper
+
+```sh
+aoide conduct [--agent codex] [--parent "$PARENT_ID"] -- codex --whatever-flags
+```
+
+Same spawn/register/wait/end lifecycle as `graph wrap`, but on a controlling
+tty plus a per-session control socket, so an orchestrator can steer the child
+afterward:
+
+```sh
+aoide graph send --id "$AOIDE_SESSION_ID" [--submit] [--yes] -- some text to type
+```
+
+`graph send` is the one gated injection door — held pending approval by
+default, `--yes` (or an autogate policy) delivers it, and every outcome is
+audited. Use `graph wrap` for pure observe-only registration; use `conduct`
+when something (a human via the `baton` TUI, or another agent) needs to type
+into the session later.
+
 ## Per-agent recipes
 
 ### Claude Code
@@ -123,5 +144,6 @@ Pass `--parent "$AOIDE_SESSION_ID"` (or the `--parent` flag on `session start`) 
 ## Related
 
 - `aoide guide` — the terse in-CLI version of this page.
+- [[aoide-cli]] — the full command tree, including `conduct` and the interactive `baton` TUI that renders every door's sessions.
 - [[Terminal-Commander]] — the graph concept (projects anchor sessions by cwd).
 - [[shellbridge]] — its socket accept loop is live now for the window-jump verb (`focuswindow`), but session *registration* (start/phase/end) still has no socket verb; the CLI doors above remain the writers (and the permanent fallback even once one lands).

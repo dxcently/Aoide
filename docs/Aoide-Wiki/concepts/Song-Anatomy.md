@@ -1,6 +1,7 @@
 ---
 type: concept
 created: 2026-07-28
+updated: 2026-07-28
 tags: [aoide, song, rice, architecture]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -9,11 +10,11 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 The sibling of [[Snowflake-Anatomy]] (which maps the frozen `modules/` tree).
 This page maps the **`song/` tree** — the performed half's home on disk: the
-committed *score* (songs, covers, the songbook) and the gitignored *live state*
-(the stage the desktop reads). It is a **role map**: what each subfolder is for,
-whether it is committed or runtime, and who writes it. The vocabulary those
-roles are named in lives in [[Song-Vocabulary]]; this page grounds the words in
-the actual directories.
+committed *score* (the songbook) and the gitignored *live state* (the stage the
+desktop reads). It is a **role map**: what each subfolder is for, whether it is
+committed or runtime, and who writes it. The vocabulary those roles are named
+in lives in [[Song-Vocabulary]]; this page grounds the words in the actual
+directories.
 
 `song/` lives at `~/Aoide/song` (onboard links `~/song` → `~/Aoide/song`). It is
 the **song agent's writable domain** (house rule #1, `AGENTS.md`): the agent
@@ -24,72 +25,53 @@ gitignored and created on demand.
 
 | Subfolder | Role | Committed? | Written by |
 |---|---|---|---|
-| `repertoire/<name>/` | a committed song (one rice) | **committed** | song agent (`rice gen`/`adopt`) |
-| `songbook/` | cross-cutting design memory | **committed** | song agent (write-back) |
-| `covers/` | wallpaper art | **committed** | song agent |
-| `keys/` | shared palette library | **committed** | song agent |
-| `chimes/` | notification + system sounds | **committed** | song agent |
+| `songbook/` | per-song homes + cross-cutting design memory | **committed** | song agent |
 | `stage/` | live preview/runtime state — the seam the desktop reads | gitignored runtime | [[drachma]] · [[shellbridge]] · `aoide graph` |
-| `backstage/` | runtime plumbing | gitignored runtime | runtime |
 | `auditions/` | the propose gate | gitignored runtime | runtime |
 
-Only `stage/`, `backstage/`, and `auditions/` are gitignored (see the repo
-`.gitignore` and [[Song-Vocabulary#The Song Map]]); everything else is versioned
-score. The committed-but-currently-sparse folders (`songbook/`, `keys/`,
-`chimes/`) hold only a `.gitkeep` today — their contracts exist; their content
-is largely aspirational.
+Only `stage/` and `auditions/` are gitignored — those two are the whole runtime
+surface; everything else under `song/` is versioned score.
 
-> **The shipped default song is *not* here.** `aoide.song`'s default,
-> `"default"`, is the standard rice baked into the **frozen** half at
-> `modules/rime/default/` ([[Snowflake-Anatomy]]), not under `song/`. `song/`
-> holds the *evolved* songs an agent adopts; a bad generation can never
-> overwrite the shipped look.
+> **The shipped default song lives in the songbook like any other.**
+> `aoide.song`'s default, `"default"`, is `song/songbook/default/`. It is the
+> songbook's one **merge-only** song — upstream-owned by git merge-base, not by
+> path ([[Governance]]) — so an agent adopts *new* songs alongside it but never
+> overwrites it, and a bad generation can never replace the shipped look.
 
 ## Committed score — the versioned half
 
-### `repertoire/<name>/` — one song each
+### `songbook/<name>/` — one song each
 
-A song self-registers by living here: `lib/mkHost.nix` walks `song/repertoire/`
+A song self-registers by living here: `lib/mkHost.nix` walks `song/songbook/`
 alongside `modules/`, and each song's `rice.nix` guards itself with
 `lib.mkIf (config.aoide.song == "<name>")`, so committing a folder makes the
 song fleet-available with no import list to edit ([[Self-Ricing]],
 [[Snowflake-Anatomy]]). Songs present today: **`sonata`** (the cream Alma-Tadema
 *Unconscious Rivals* LIGHT key, currently performed on yomi-strix) and
-**`hero`** (its own dusk-plum key, from `covers/hero.webp`). Each folder holds:
+**`hero`** (its own dusk-plum key). Each folder holds:
 
-- **`rice.nix`** — pure nix: sets `aoide.drachma.*` (palette + base16 + component
-  tiers + wallpaper) under the `aoide.song` guard. It sets **only** `aoide.drachma`
-  — no host options, no facet toggles — so one score replays at any venue
-  (`CONTRACTS.md §5`, [[Song-Vocabulary#Replay — any song, any host]]).
-- **`drachma.json`** — the song's note values as a v0 W3C design-tokens
-  container (the [[drachma]] schema: `palette`, `base16`, `bar`/`notif`/`window`).
-- **`liner/`** — the song's **per-song design memory**: `intent.md` (palette
-  rationale, iteration log). This is the song agent's design record, ingested
-  like any content ([[Self-Ricing#Songbook Discipline — the "Self" in Self-Ricing]]).
-  (`sonata/liner/intent.md` exists; note it may lag the song's current palette.)
+| Subfolder/file | Holds |
+|---|---|
+| `rice.nix` | pure nix: sets `aoide.drachma.*` (palette + base16 + component tiers + wallpaper) under the `aoide.song` guard. **Only** `aoide.drachma` — no host options, no facet toggles — so one score replays at any venue (`CONTRACTS.md §5`, [[Song-Vocabulary#Replay — any song, any host]]). |
+| `drachma.json` | the song's resolved note values — the [[drachma]] schema: `palette`, `base16`, `bar`/`notif`/`window`. |
+| `assets/` | wallpaper + cover art |
+| `palette/` | this song's transpose keys — the palette variants `rice transpose <song> <key>` swaps among |
+| `sounds/` | notification + system sounds (the chimes dimension) |
+| `icons/` | per-song icon overrides |
+| `widgets/` | per-song widget bodies |
+| `design/` | the song's design memory — `intent.md` (palette rationale, iteration log), ingested like any content ([[Self-Ricing#Songbook Discipline — the "Self" in Self-Ricing]]) |
 
-### `songbook/` — cross-cutting design memory
+### `songbook/` root — cross-cutting design memory
 
-The **cross-cutting** counterpart to the per-song liner: `learnings.md`,
-`preferences.md`, `update-playbook.md` (the schema-migration playbook). The
-agent reads it before every `rice gen` and appends after every adopt/reject —
-the write-back that is the "self" in [[Self-Ricing]]. **This is where the design
-grammar and ricing memory that currently sit in the dev wiki
-([[design/Pantheon-Grammar|Pantheon Grammar]], the [[design/Ricing-Protocol|
-Ricing Protocol]]'s worked examples) properly belong** — a pending migration
-into the song agent's domain, flagged in the handoff. Today the folder is a
-placeholder.
-
-### `covers/` · `keys/` · `chimes/`
-
-- **`covers/`** — wallpaper art referenced by a song's `aoide.drachma.wallpaper`
-  (committed, never a runtime infix). Holds `Alma-Tadema_Unconscious_Rivals.jpg`
-  (sonata's cover) and `hero.webp`.
-- **`keys/`** — the shared palette library. A key is rice-independent: many
-  songs can name one, and `rice transpose <song> <key>` replays a song in
-  another key. Empty today.
-- **`chimes/`** — notification and system sounds (the `chimes` arrangement
-  dimension). Empty today.
+Alongside the per-song folders, the songbook root holds the memory that
+crosses every song: `learnings.md`, `preferences.md`, `update-playbook.md`
+(the schema-migration playbook). The agent reads these before every `rice gen`
+and appends after every adopt/reject — the write-back that is the "self" in
+[[Self-Ricing]]. **This is where the design grammar and ricing memory that
+currently sit in the dev wiki ([[design/Pantheon-Grammar|Pantheon Grammar]],
+the [[design/Ricing-Protocol|Ricing Protocol]]'s worked examples) properly
+belong** — a pending migration into the song agent's domain, flagged in the
+handoff.
 
 ## Runtime state — the gitignored half
 
@@ -115,31 +97,30 @@ via the `AOIDE_STAGE_DIR` contract seam ([[shellbridge]]); the flake's
 `no-song-read` check forbids any nix module reading `stage/` at build time, so
 runtime state can never become load-bearing for the build.
 
-### `backstage/` · `auditions/`
+### `auditions/`
 
-`backstage/` is runtime plumbing; `auditions/` is the propose gate for
-generated-but-unadopted rices. Both are gitignored and created on demand.
+The propose gate for generated-but-unadopted rices — gitignored, created on
+demand.
 
 ## Repo Layout (the `song/` surface)
 
 ```
 ~/Aoide/song/
-├── repertoire/<name>/   committed songs — rice.nix · drachma.json · liner/
+├── songbook/            committed songs + cross-cutting design memory
 │   ├── sonata/          the cream Alma-Tadema LIGHT key (selected)
-│   └── hero/            the dusk-plum key
-├── songbook/            cross-cutting design memory (write-back)   ← sparse today
-├── covers/              wallpaper art
-├── keys/                shared palette library                      ← empty today
-├── chimes/              notification + system sounds                ← empty today
+│   │   ├── rice.nix · drachma.json
+│   │   ├── assets/ · palette/ · sounds/ · icons/ · widgets/ · design/
+│   ├── hero/             the dusk-plum key (same shape)
+│   ├── learnings.md · preferences.md · update-playbook.md   ← sparse today
 ├── stage/               live runtime state (gitignored)
-├── backstage/           runtime plumbing (gitignored)
 └── auditions/           propose gate (gitignored)
 ```
 
 **The root is closed** ([[Snowflake-Anatomy]]): new content lands at its
-designated place inside this tree — covers → `covers/`, chimes → `chimes/`,
-per-song assets → `repertoire/<name>/` — never a new top-level `song/` dir. The
-lookup is the Song Map ([[Song-Vocabulary#The Song Map]]).
+designated place inside this tree — every per-song asset, key, sound, icon, and
+widget body lands inside that song's `songbook/<name>/` — never a new
+top-level `song/` dir. The lookup is the Song Map
+([[Song-Vocabulary#The Song Map]]).
 
 ## Related
 

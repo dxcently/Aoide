@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-07-26
+updated: 2026-07-28
 tags: [aoide, shell, ui, qml, quickshell]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -16,7 +16,7 @@ Communication discipline: Quickshell reads state files from shellbridge and issu
 
 A Quickshell NotificationServer spike (actions + inline reply) is planned for the yomi-strix session. If it lands, Quickshell keeps the full notification daemon role with no interim mako/swaync.
 
-## Implementation (walking skeleton, commit f3ceadf)
+## Implementation
 
 The QML skeleton is shipped in `modules/facets/quickshell/qml/`. Two singletons
 carry the shared session state: **`DrachmaState`** watches `stage/drachma.json` via a
@@ -38,9 +38,9 @@ writes note + keybind fragments with `mkBefore`, and the Quickshell facet append
 its `exec-once` autostart with `mkAfter`, so the two facets compose the one config
 file without collision.
 
-## Nine surfaces (commits 1fedd58 + 41be90f)
+## Nine surfaces
 
-Two registered surfaces have since grown real bodies, bringing the registry to
+Two registered surfaces have grown real bodies, bringing the registry to
 **nine**:
 
 - **`sessionGraph`** (surface #9, `AoideSessionGraph.qml` + `GraphRow.qml`) —
@@ -60,6 +60,82 @@ Two registered surfaces have since grown real bodies, bringing the registry to
 extracted from the overlay); both the overlay and the dock's `DagGraphGadget`
 instantiate it, and any future graph consumer must too — the tree derivation
 lives in exactly one place.
+
+## Launcher (surface #3, built out 2026-07-28)
+
+`AoideLauncher.qml` graduated from stub to a working, keyboard-driven app
+launcher (the rofi replacement). It is a summoned `PanelWindow` on
+`WlrLayer.Overlay` (namespace `aoide-launcher`) that takes an **exclusive
+keyboard grab** only while shown and is an inert zero-cost layer at rest. It
+enumerates apps from Quickshell's built-in `DesktopEntries`, filters on a
+prefix-ranked case-insensitive substring as you type, navigates with
+Up/Down + Ctrl+J/K, launches on Enter/click, dismisses on Escape / scrim-click.
+It is a Pantheon pane (`GadgetFrame`, cream Aero glass, `♪` prompt, lowercase
+`launcher.summon` callout), colours strictly from `notes`.
+
+Two design decisions worth carrying forward:
+
+- **Trigger is a Hyprland `GlobalShortcut` (`aoide:launcher`), registered
+  in-process** — the compositor binds `SUPER+SPACE` to it via `bind = …,
+  global, aoide:launcher`. This *replaced* the old `bind = …, exec, aoide shell
+  launcher toggle`, which called an **unimplemented CLI stub** (`aoide shell *`
+  is not in the command schema). `ShellBridge` is outbound-only, so an in-process
+  global shortcut is the cleanest inbound trigger — no new `aoided` verb, no
+  inbound socket.
+- **Launch is `DesktopEntry.execute()`** — the same Quickshell-native side-effect
+  idiom the shell already uses (`WorkspaceRow.activate()`, `BatonGadget` →
+  `execDetached`), *not* a shell-out invented in QML. Routing app-launch through
+  `aoided` per house rule #6 remains an open contract question (no such verb
+  exists today); flagged, not silently baked. See [[references/AOIDE-DEV-HANDOFF]] §7.
+
+The compositor facet also adds `aoide-launcher` to the blur / `ignore_alpha` /
+hyprglass namespaces so the pane frosts like the bar and dock. Both the keybind
+and the blur rules are baked into `hyprland.conf`, so the launcher needs a gated
+`switch` to land live (the QML deploys to the read-only `~/Aoide/qml/` tree the
+same way).
+
+## Session service & resilience
+
+The shell surface is started by the **`aoide-quickshell`** systemd *user*
+service (not a Hyprland `exec-once`), defined in
+`modules/facets/quickshell/default.nix`. The service is the session-assembly
+seam: it orders after `graphical-session.target` (so Quickshell inherits a valid
+Wayland env), logs to journald (`journalctl --user -u aoide-quickshell`), and
+respawns on crash. Three layers keep one bad load from bringing the desktop down
+for good:
+
+- `ConditionPathExists = <shellQmlEntry>` — if the QML entry hasn't landed, the
+  unit *declines to start* rather than crash-looping. **But this checks
+  existence, not validity.**
+- `Restart = "on-failure"` / `RestartSec = 3` — a genuine crash respawns the
+  whole shell instead of leaving the desktop bare until next login.
+- `StartLimitIntervalSec = 60` / `StartLimitBurst = 5` (added 2026-07-28) — the
+  backstop for the gap the `ConditionPathExists` guard can't cover: a
+  `shell.qml` that *exists but won't load* (a QML parse error, or an `ExecStart`
+  aimed elsewhere by a stray drop-in) exits 255 every respawn, so without a
+  limit `Restart=on-failure` thrashes forever. After 5 failures inside 60s
+  systemd parks the unit `failed`. Five tries still absorbs a transient failure
+  (e.g. Wayland not ready yet).
+
+**The wallpaper engine *is* this shell** — the wallpaper is a
+`wlr-layer-shell` `Background` surface (`AoideWallpaper.qml` inside `shell.qml`),
+the sole live painter (Stylix's `hyprpaper` is force-disabled via the
+`aoide.surfaces.wallpaper` owner registry; no `swww`/`swaybg`/`mpvpaper`
+elsewhere). So a shell crash takes the wallpaper *and* the bar/dock/gadgets with
+it in one stroke — they are one process, not four. The wallpaper's own
+source-of-truth is the live-watched `stage/cover.json` (written only by `aoide
+rice preview`), falling back to the baked `AOIDE_WALLPAPER` env store path so the
+background survives reboots/rebuilds even though `stage/` is ephemeral. Swap is a
+hard cut — no crossfade.
+
+**Operating rule — never override `ExecStart` to a worktree.** For live QML
+iteration run a *separate* foreground instance (`qs -p <worktree>/shell.qml`);
+do **not** hijack the service's `ExecStart` with a systemd drop-in. On
+2026-07-28 a leftover drop-in pinned `ExecStart` to a `.claude/worktrees/…`
+path that was later deleted, defeating `ConditionPathExists` (which still
+watched the valid baked path) and crash-looping the shell 77× — no bar, no
+dock, no wallpaper. The drop-in was the anti-pattern; the fix was to delete it
+and let the baked unit stand. See [[references/AOIDE-DEV-HANDOFF]] §7.
 
 ## Related
 
