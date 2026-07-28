@@ -363,9 +363,9 @@ Window management (ported from dxflake): `SUPER+RETURN` terminal (kitty) · `SUP
 | Compositor | `aoide.facets.compositor.enable` | The Hyprland compositor + all hyprctl-level keybind wiring. |
 | Stylix | `aoide.facets.stylix.enable` | Base16 baked-theme fan-out from `aoide.drachma` to every nix-manageable target. |
 
-### Dendrites (13) — opt-in features
+### Dendrites (14) — opt-in features
 
-Twelve default **ON** for the whole fleet via `hosts/common/default.nix` (dev-tool baseline); `obsidian` ships **OFF** (opt in per host). Any common-default can be flipped off with a per-host `aoide.<name>.enable = false;`.
+Thirteen default **ON** for the whole fleet via `hosts/common/default.nix` (dev-tool baseline); `obsidian` ships **OFF** (opt in per host). Any common-default can be flipped off with a per-host `aoide.<name>.enable = false;`.
 
 | Dendrite | Enable flag | Default | What it is |
 |---|---|---|---|
@@ -379,7 +379,8 @@ Twelve default **ON** for the whole fleet via `hosts/common/default.nix` (dev-to
 | btop | `aoide.btop.enable` | ON | The btop resource monitor. |
 | yazi | `aoide.yazi.enable` | ON | The yazi terminal file manager. |
 | fastfetch | `aoide.fastfetch.enable` | ON | The fastfetch greeting (bundled musical ASCII logo). |
-| devtools | `aoide.devtools.enable` | ON | CLI dev-tool toolbox (lazygit, claude-code, ripgrep, …). |
+| devtools | `aoide.devtools.enable` | ON | CLI dev-tool toolbox — dev-specific only (neovide, lazygit, claude-code, nix tooling, nodejs, ngrok). |
+| cli | `aoide.cli.enable` | ON | General CLI utilities (fzf, htop, fd, ripgrep, jq, ffmpeg, archives, curl/wget, file, vim, …). |
 | fonts | `aoide.fonts.enable` | ON | System font set (musical notation, CJK, emoji, nerd fonts). |
 | obsidian | `aoide.obsidian.enable` | OFF | Obsidian knowledge-base integration (vault watcher + bar widget). |
 
