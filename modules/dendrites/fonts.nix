@@ -14,9 +14,10 @@
 #       * noto-fonts-cjk-sans covers CJK / kana.
 #       * noto-fonts-color-emoji carries colour emoji.
 #       * material-icons / font-awesome / fira-code-symbols carry UI glyphs.
-#       * nerd-fonts.tinos is the desktop's primary face (stylix facet points
-#         monospace at "Tinos Nerd Font Mono", sans/serif at "Tinos Nerd
-#         Font"); lekton and the other nerd fonts are alternates.
+#       * libertine (Linux Libertine/Biolinum) is the desktop's primary face
+#         (stylix points monospace at "Linux Libertine Mono O", sans at "Linux
+#         Biolinum O", serif at "Linux Libertine O"); lekton/tinos are
+#         glyph-complete nerd alternates.
 #
 # Unfree note: corefonts is unfree. devtools.nix also sets
 # nixpkgs.config.allowUnfree = true inside its own mkIf, but a host could enable
@@ -50,8 +51,9 @@
       nerd-fonts.jetbrains-mono # nerd-patched JetBrains Mono
       nerd-fonts.comic-shanns-mono # nerd-patched Comic Shanns Mono
       nerd-fonts.shure-tech-mono # nerd-patched Share Tech Mono
-      nerd-fonts.tinos # PRIMARY desktop face — Tinos Nerd Font (stylix points here)
-      nerd-fonts.lekton # former primary, kept as an alternate face
+      libertine # PRIMARY desktop face — Linux Libertine/Biolinum (stylix points here)
+      nerd-fonts.lekton # nerd-patched alternate face (glyph-complete)
+      nerd-fonts.tinos # alternate face
     ];
   };
 }
