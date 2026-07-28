@@ -17,6 +17,10 @@
   networking.hostName = "yomi-strix";
   networking.networkmanager.enable = true;
 
+  # Venue clock — the box sat on UTC with no zone set. Pin US Eastern to match
+  # the dxflake reference rig; timesyncd (default-on) keeps it NTP-synced.
+  time.timeZone = "America/New_York";
+
   # ── Venue specifics (dxflake-templated, essentials only) ──────────────────
   # Strix Halo (Ryzen AI Max) is new silicon — ride the latest kernel for the
   # freshest amdgpu. gttsize/ttm let the iGPU borrow a large slice of the
