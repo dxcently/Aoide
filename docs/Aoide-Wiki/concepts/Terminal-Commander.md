@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-28
 tags: [aoide, widget, terminal, agent, session]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -46,19 +46,30 @@ it never polls in QML.
 
 The plumbing already exists ([[Desktop-Architecture]], [[shellbridge]]):
 
-- The conduct wrapper **registers each session together with its Hyprland window
-  address** at launch — now actually populated by **phase ② discovery**: `conduct`
-  walks its own pid up the `/proc` ppid chain and matches an ancestor pid against
-  `hyprctl clients -j`, taking the first matching client's `address` (best-effort;
-  a missing Hyprland or no match just leaves it empty). This is the authoritative
-  "which window is which agent" source `graph focus` jumps by.
+- **Authoritative, event-driven capture (primary).** [[shellbridge]] runs a
+  **Hyprland event listener** on a background thread — it reads the compositor's
+  `socket2` event stream (`$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`)
+  and, the moment a window opens (or moves / retitles), (re)resolves any tracked
+  session still missing its `windowAddress`: it walks each session's recorded
+  lifecycle **pid** up the `/proc` ppid chain and matches an ancestor against
+  `hyprctl clients -j`, stamping the client's canonical `0x…` address into
+  `sessions.json` via the atomic graph writer. On `closewindow` it clears that
+  address off whatever session stored it (the [[Session-Graph|reaper]] then
+  removes the record via its pid signal). **Why this exists:** the address used
+  to be filled only *lazily* on the next hook fire, so at click time it was
+  frequently empty and the jump failed. Capturing it at window-creation time
+  (and re-checking on every window event) makes "which window is which agent"
+  reliable — a click always has a live address to jump to. The listener is
+  best-effort and off-Hyprland-safe: with no instance signature it logs once and
+  disables itself; the shellbridge socket keeps serving regardless.
+- **Discovery + hook backfill (fallback).** The older, in-process paths remain as
+  belt-and-suspenders: `conduct`'s launch-time **phase ② discovery** (it walks its
+  own pid ↔ `hyprctl clients -j`) and the **hook door** — the same pid-ancestry
+  match at `SessionStart`, backfilled on any later hook while still empty. These
+  cover a session whose window the event listener didn't stamp (e.g. a hook-only
+  Claude Code session with no recorded conduct pid for the listener to walk).
 - Claude Code hooks (`Notification` / `Stop` / `Pre-PostToolUse`) post execution
   phase, so each row shows live state (running · awaiting input · idle · done).
-  The **hook door discovers windows too**: the same pid-ancestry ↔ `hyprctl
-  clients -j` match runs at `SessionStart` (and is backfilled on any later hook
-  while still empty), so a hook-registered Claude Code session — not just a
-  `conduct`-wrapped one — becomes focus-jumpable without ever wrapping its
-  process.
 - Unwrapped agents fall back to process-signal / window-title heuristics.
 
 ## The list
