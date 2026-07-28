@@ -4,7 +4,7 @@
 
 Aoide is an agent-wearable NixOS desktop framework — Hyprland compositor, Quickshell shell, an orchestrator daemon (`aoided`), a content pipeline, and a self-ricing engine — that you **fork and run**, not install. Its naming thesis in one line: architecture is frozen music — the nix layer is the score, the running desktop is the performance, a rice is a song the system sings.
 
-This README is a use guide: how to drive the box day to day, how to edit the flake, and what the `aoide` tools do. For the deeper why, see the wiki at [`../Aoide-Wiki`](../Aoide-Wiki/Overview.md) (start with `Overview.md`; the [[Wiki-Protocol]] note explains the shape).
+This README is a use guide: how to drive the box day to day, how to edit the flake, and what the `aoide` tools do. For the deeper why, see the wiki at [`docs/Aoide-Wiki`](docs/Aoide-Wiki/Overview.md) (start with `Overview.md`; the [[Wiki-Protocol]] note explains the shape).
 
 > Status — walking skeleton. The desktop, the flake, the `graph` group, the daemon, and the theming fan-out are **real and running live** (yomi-strix is switched onto this flake). The `rice`, `content`, `make`, `update`, and `onboard` verbs are **structured stubs** that return exit `64` (`not-implemented`) with the right shape — the trunk is wired, the muscle is being grown. Stubs are marked honestly throughout.
 
@@ -56,9 +56,9 @@ Compositor keybinds (`modules/facets/compositor/default.nix`). The `SUPER` key i
 
 > The `aoide shell *` verbs the keybinds call are not yet in the command schema — they are a documented open seam (the bridge path is stubbed). The hot-edge and pure-QML paths work today regardless. dxflake's media/brightness hardware keys are deliberately unbound — the bar's volume cell owns audio by mouse.
 
-**Gadget dock** (`SUPER + G` or hover the left screen edge): a Windows-7-sidebar-homage popup — box-drawing chrome over Aero-glass blur, all colour from notes. Slides in on hot-edge hover, pins via the `[+]/[■]` header affordance. Holds the terminal roster, a compact session DAG, clock, meters, now-playing, power, and calendar gadgets.
+**Gadget dock** (`SUPER + G` or hover the left screen edge): a Windows-7-sidebar-homage popup — box-drawing chrome over Aero-glass blur, all colour from notes. Slides in on hot-edge hover, pins via the `[+]/[■]` header affordance. Holds the terminal roster, a compact session DAG, clock, meters, now-playing, power, and calendar gadgets. A row click in the terminal roster jumps straight to that terminal's window — the click issues a socket command to `shellbridge` (`{cmd:"focuswindow",address}`), which dispatches `hyprctl focuswindow`; QML never shells out.
 
-**Bar cells** (`modules/facets/quickshell/qml/AoideBar.qml`) — a waybar homage with real Quickshell interactivity:
+**Bar cells** (`modules/facets/quickshell/qml/AoideBar.qml`) — the bar is one bar of music: a cream frosted-glass "manuscript sheet" (0.58 opacity, close to the terminal's own glass — see below) with a five-line staff. Workspaces are **solid musical note glyphs** (♩ ♪ ♫ ♬…), one distinct shape per workspace id, rising in pitch with it; the active workspace's note swells and fills with the song's accent colour, urgent ones pulse. The bar's popouts (now-playing, volume, battery, calendar) share the same cream glass. Real Quickshell interactivity throughout:
 
 | Cell | Interaction |
 |---|---|
@@ -66,6 +66,22 @@ Compositor keybinds (`modules/facets/compositor/default.nix`). The `SUPER` key i
 | Volume (right) | Scroll = adjust, click = mute, hover = slider. |
 | Sessions (`✎`, left) | Click → toggle the gadget dock. |
 | Battery / network | Hover popout; note-glyph icons. |
+
+### Look & feel — the current song
+
+The desktop ships keyed to the **`hero`** song (`song/repertoire/hero/`): a
+LIGHT warm classical-academic palette (`stylix.polarity = "light"`) drawn by
+hand from its wallpaper, Alma-Tadema's *Unconscious Rivals* — cream/parchment
+base, deep umber ink, dusty-cornflower accent, sage-green "hot" trace colour,
+muted-rose urgent. The terminal (kitty, Aero-glass over the compositor blur,
+0.60 opacity) and the bar (the cream manuscript sheet above, 0.58 opacity)
+are tuned close together so they read as one continuous surface rather than
+two panes that happen to share a hue — see the wiki's [Pantheon
+Grammar](docs/Aoide-Wiki/design/Pantheon-Grammar.md) for the full visual
+grammar and [the Ricing Protocol](docs/Aoide-Wiki/design/Ricing-Protocol.md)
+for the house rule this rework introduced: one base16 file drives every
+surface via Stylix, and any rice/song change gets a vision-check that
+terminals and widgets still agree on light/dark and colour.
 
 ---
 
@@ -177,7 +193,7 @@ adcheck && adrebuild                             # run the flake's checks, then 
 
 ### Who owns what
 
-Ownership follows radial distance from the nucleus (the snowflake's [mutation policy](../Aoide-Wiki/concepts/Snowflake-Anatomy.md#mutation-policy)) — not directory fences. It is tracked by git merge-base, and divergence from inherited files is warned, not blocked.
+Ownership follows radial distance from the nucleus (the snowflake's [mutation policy](docs/Aoide-Wiki/concepts/Snowflake-Anatomy.md#mutation-policy)) — not directory fences. It is tracked by git merge-base, and divergence from inherited files is warned, not blocked.
 
 | Layer | Owner | You do this |
 |---|---|---|
@@ -261,7 +277,7 @@ The Node package (`pkgs/drachma`, wrapping Style Dictionary — the token engine
 Both run as **user services** on the desktop:
 
 - **`aoided`** — the orchestrator daemon: a neutral event stream, the single policy surface, lint, and one audit log (`~/Aoide/log`). Every operation through either door flows through it.
-- **`shellbridge`** — the daemon-to-desktop bridge: publishes session/hook roster state to `song/stage/{sessions,hooks}.json` atomically, takes unix-socket commands in, consumes Hyprland IPC. This is the seam the terminal-roster gadget and the bar sessions cell read.
+- **`shellbridge`** — the daemon-to-desktop bridge: publishes session/hook roster state to `song/stage/{sessions,hooks}.json` atomically, consumes Hyprland IPC. Its unix-socket accept loop is live (`aoide shellbridge --run`) — a `{cmd:"focuswindow",address}` line drives `hyprctl dispatch focuswindow`, the click-to-jump verb the gadget dock's terminal roster calls. This is the seam the terminal-roster gadget and the bar sessions cell read. A companion systemd timer (`aoide graph reap`, ~12s) sweeps sessions killed uncatchably (SIGKILL/`SUPER+Q`) so the roster never accumulates dead rows.
 
 ### Melete / Mneme integration
 
