@@ -363,9 +363,9 @@ Window management (ported from dxflake): `SUPER+RETURN` terminal (kitty) · `SUP
 | Compositor | `aoide.facets.compositor.enable` | The Hyprland compositor + all hyprctl-level keybind wiring. |
 | Stylix | `aoide.facets.stylix.enable` | Base16 baked-theme fan-out from `aoide.drachma` to every nix-manageable target. |
 
-### Dendrites (14) — opt-in features
+### Dendrites (20) — opt-in features
 
-Thirteen default **ON** for the whole fleet via `hosts/common/default.nix` (dev-tool baseline); `obsidian` ships **OFF** (opt in per host). Any common-default can be flipped off with a per-host `aoide.<name>.enable = false;`.
+Fifteen default **ON** for the whole fleet via `hosts/common/default.nix` (the dev-tool baseline plus Melete/Mneme); the remaining five ship **OFF** and are opted in per host. Any common-default can be flipped off with a per-host `aoide.<name>.enable = false;`.
 
 | Dendrite | Enable flag | Default | What it is |
 |---|---|---|---|
@@ -382,7 +382,13 @@ Thirteen default **ON** for the whole fleet via `hosts/common/default.nix` (dev-
 | devtools | `aoide.devtools.enable` | ON | CLI dev-tool toolbox — dev-specific only (neovide, lazygit, claude-code, nix tooling, nodejs, ngrok). |
 | cli | `aoide.cli.enable` | ON | General CLI utilities (fzf, htop, fd, ripgrep, jq, ffmpeg, archives, curl/wget, file, vim, …). |
 | fonts | `aoide.fonts.enable` | ON | System font set (musical notation, CJK, emoji, nerd fonts). |
+| melete | `aoide.melete.enable` | ON | The Melete AI harness service (inactive until its binary is deployed). |
+| mneme | `aoide.mneme.enable` | ON | The Mneme vault MCP server (inactive until its config is deployed). |
+| hyprland | `aoide.hyprland.enable` | OFF | Host-invariant Hyprland behaviour — keybinds, input devices, tiling layout, misc, behavioural window rules. Pairs with the compositor facet, which owns the look. |
 | obsidian | `aoide.obsidian.enable` | OFF | Obsidian knowledge-base integration (vault watcher + bar widget). |
+| firefox | `aoide.firefox.enable` | OFF | The Firefox browser (colours/theme deferred to the Stylix facet). |
+| screenshot | `aoide.screenshot.enable` | OFF | Human screen capture (hyprshot + satty; ships the SUPER+S binds). |
+| vision | `aoide.vision.enable` | OFF | Agent screen-capture primitives (grim + slurp on PATH). |
 
 `modules/dendrites/_example.nix` is the shelved template (walker-hidden by its `_` prefix).
 

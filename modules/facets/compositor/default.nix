@@ -1,10 +1,16 @@
 # modules/facets/compositor/default.nix — Hyprland compositor facet.
 #
 # Wires Hyprland as the NixOS Wayland compositor and applies compositor-side
-# notes live via hyprctl. Note values (gaps, radius, borders, blur)
+# drachma live via hyprctl. Drachma values (gaps, radius, borders, blur)
 # are baked into the Hyprland config at build time so they take effect on
-# session start; the note emitter package (pkgs/drachma) can re-dispatch
+# session start; the drachma emitter (pkgs/drachma) can re-dispatch
 # them live via hyprctl during a rehearsal (preview) pass.
+#
+# Scope: LOOK + session plumbing only. Everything host-invariant — keybinds,
+# input devices, tiling layout, misc, behavioural window rules — lives in
+# modules/dendrites/hyprland.nix so a re-rice cannot disturb it. The window
+# rules that remain HERE (kitty opacity/rounding) are appearance, hence
+# drachma's business; see that dendrite's header for the full split.
 #
 # IPC socket: exposes the Hyprland IPC socket path for shellbridge to consume.
 # shellbridge uses it to track windows and dispatch focus commands
@@ -147,116 +153,12 @@ let
     windowrule = rounding 0, match:class kitty
   '';
 
-  # ── Hyprland keybinds for Aoide workflows ─────────────────────────────────
-  # These are the binds the Quickshell facet depends on. Placed here so the
-  # compositor facet owns all hyprctl-level wiring.
-  hyprBindConfig = ''
-    # ── Aoide keybinds ────────────────────────────────────────────────────
-    # Launcher (Hyprland global shortcut → AoideLauncher.GlobalShortcut toggle).
-    # The launcher registers `aoide:launcher` in-process (hyprland-global-
-    # shortcuts-v1), so the keypress reaches the running surface directly — no
-    # `aoide shell launcher` CLI verb (that verb is an unimplemented stub) and no
-    # inbound socket. `global, <appid>:<name>` is Hyprland's dispatcher for it.
-    bind = SUPER, SPACE, global, aoide:launcher
-
-    # Lock screen
-    bind = SUPER, ESCAPE, exec, aoide shell lock
-
-    # Gadget dock popup (shellbridge → AoideAgentWidgets open-and-pin).
-    # SUPER+G summons the LEFT-edge pinnable dock popup, which CONTAINS the DAG
-    # gadget (the dock is now the primary DAG affordance). The dock also opens
-    # on mouse hot-edge hover (pure QML). The standalone AoideSessionGraph
-    # overlay keeps NO bind — it is bridge-only/dormant (see its header note).
-    bind = SUPER, G, exec, aoide shell dock toggle
-
-    # Rice preview / adopt shortcuts
-    bind = SUPER SHIFT, P, exec, aoide rice preview
-    bind = SUPER SHIFT, A, exec, aoide rice adopt
-
-    # ── Window management (ported from dxflake hyprland dendrite) ────────
-    # Normalized to SUPER, matching the Aoide binds above. dxflake exec
-    # binds for tools Aoide doesn't ship (rofi, thunar, cliphist,
-    # vesktop/discord, gpu-screen-recorder) are dropped — the launcher and
-    # the bar's power cell cover those seams. The hyprshot/satty binds
-    # (SUPER+S / SUPER SHIFT+S) live in the screenshot dendrite, shipped
-    # WITH the tools (modules/dendrites/screenshot.nix). dxflake's
-    # media/brightness XF86 keys are also deliberately NOT bound (strict
-    # window-management scope; the bar's volume cell owns audio by mouse) —
-    # a known seam if hardware keys are wanted later.
-
-    # Terminal (the kitty dendrite ships kitty)
-    bind = SUPER, RETURN, exec, kitty
-
-    # Window controls
-    bind = SUPER, Q, killactive
-    bind = SUPER, V, togglefloating
-    bind = SUPER, F, fullscreen
-
-    # Focus movement — arrows carry the full left/down/up/right set; H/J/K/L
-    # complete the vim set (left/down/up/right). dxflake's SUPER+L was
-    # blocked here by the Aoide lock bind, so the lock moved to SUPER+ESCAPE
-    # above, freeing L — the full hjkl set is now live, matching arrows.
-    bind = SUPER, left, movefocus, l
-    bind = SUPER, down, movefocus, d
-    bind = SUPER, up, movefocus, u
-    bind = SUPER, right, movefocus, r
-    bind = SUPER, H, movefocus, l
-    bind = SUPER, J, movefocus, d
-    bind = SUPER, K, movefocus, u
-    bind = SUPER, L, movefocus, r
-
-    # Move window (same directional scheme)
-    bind = SUPER SHIFT, left, movewindow, l
-    bind = SUPER SHIFT, down, movewindow, d
-    bind = SUPER SHIFT, up, movewindow, u
-    bind = SUPER SHIFT, right, movewindow, r
-    bind = SUPER SHIFT, H, movewindow, l
-    bind = SUPER SHIFT, J, movewindow, d
-    bind = SUPER SHIFT, K, movewindow, u
-    bind = SUPER SHIFT, L, movewindow, r
-
-    # Resize — binde repeats while held (dxflake's step sizes)
-    binde = SUPER ALT, left, resizeactive, -20 0
-    binde = SUPER ALT, down, resizeactive, 0 40
-    binde = SUPER ALT, up, resizeactive, 0 -40
-    binde = SUPER ALT, right, resizeactive, 20 0
-    binde = SUPER ALT, H, resizeactive, -20 0
-    binde = SUPER ALT, J, resizeactive, 0 40
-    binde = SUPER ALT, K, resizeactive, 0 -40
-
-    # Workspaces 1–10 — pairs with the bar's musical workspace glyphs
-    bind = SUPER, 1, workspace, 1
-    bind = SUPER, 2, workspace, 2
-    bind = SUPER, 3, workspace, 3
-    bind = SUPER, 4, workspace, 4
-    bind = SUPER, 5, workspace, 5
-    bind = SUPER, 6, workspace, 6
-    bind = SUPER, 7, workspace, 7
-    bind = SUPER, 8, workspace, 8
-    bind = SUPER, 9, workspace, 9
-    bind = SUPER, 0, workspace, 10
-    bind = SUPER SHIFT, 1, movetoworkspace, 1
-    bind = SUPER SHIFT, 2, movetoworkspace, 2
-    bind = SUPER SHIFT, 3, movetoworkspace, 3
-    bind = SUPER SHIFT, 4, movetoworkspace, 4
-    bind = SUPER SHIFT, 5, movetoworkspace, 5
-    bind = SUPER SHIFT, 6, movetoworkspace, 6
-    bind = SUPER SHIFT, 7, movetoworkspace, 7
-    bind = SUPER SHIFT, 8, movetoworkspace, 8
-    bind = SUPER SHIFT, 9, movetoworkspace, 9
-    bind = SUPER SHIFT, 0, movetoworkspace, 10
-    bind = ALT, Tab, workspace, previous
-
-    # Special workspaces — the bar's icon map carries magic and scratch
-    bind = SUPER, X, togglespecialworkspace, magic
-    bind = SUPER, Z, togglespecialworkspace, scratch
-    bind = SUPER SHIFT, X, movetoworkspace, special:magic
-    bind = SUPER SHIFT, Z, movetoworkspace, special:scratch
-
-    # Mouse — SUPER+leftdrag move, SUPER+rightdrag resize
-    bindm = SUPER, mouse:272, movewindow
-    bindm = SUPER, mouse:273, resizewindow
-  '';
+  # NOTE: keybinds, input devices, tiling layout, misc, and BEHAVIOURAL window
+  # rules are NOT here — they moved to modules/dendrites/hyprland.nix, which
+  # owns everything that must survive a re-rice untouched. This facet keeps
+  # only the drachma-derived look above plus the session plumbing below. The
+  # appearance rules (kitty opacity/rounding, the aoide-* layerrules) stay
+  # here on purpose: they are drachma's business, not behaviour.
 in
 {
   # ── Option: aoide.facets.compositor.enable ────────────────────────────────
@@ -317,10 +219,13 @@ in
           ];
         };
 
-        # Bake note + keybind config fragments into hyprland.conf.
-        # mkBefore so note defaults land before any per-user overrides
-        # (the quickshell facet appends its autostart with mkAfter).
-        extraConfig = lib.mkBefore (hyprNoteConfig + hyprBindConfig);
+        # Bake the drachma fragment into hyprland.conf. mkBefore (order 500) so
+        # drachma defaults land first; the hyprland dendrite's behaviour block
+        # and the screenshot dendrite's binds follow at the default order
+        # (1000). One `lines` option, several writers. (The quickshell facet
+        # writes nothing here — it autostarts the shell as a systemd user
+        # service, not an exec-once.)
+        extraConfig = lib.mkBefore hyprNoteConfig;
       };
 
       # ── Polkit authentication agent ───────────────────────────────────────

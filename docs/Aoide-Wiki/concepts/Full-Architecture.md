@@ -328,9 +328,9 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 ├── modules/         the snowflake — walker-discovered layers
 │   ├── nucleus/     options.nix (THE contract) · aoided · shellbridge · melete-adapter
 │   │                · packages.nix (aoide + drachma + git on PATH) · nix.nix (flakes on)
-│   ├── dendrites/   18 opt-in features (bash, nh, git, kitty, neovim, starship,
-│   │                mcfly, btop, yazi, fastfetch, devtools, fonts, obsidian,
-│   │                melete, mneme, firefox, screenshot, vision) ← additive growth
+│   ├── dendrites/   20 opt-in features (bash, nh, git, kitty, neovim, starship,
+│   │                mcfly, btop, yazi, fastfetch, devtools, cli, fonts, hyprland,
+│   │                obsidian, melete, mneme, firefox, screenshot, vision) ← additive
 │   └── facets/      quickshell · compositor · stylix          ← render surfaces (drachma-only)
 ├── hosts/           common/ + yomi-strix/ (flags + the aoide.song selector; a real
 │                    hardware profile, switched live and running as the daily desktop)

@@ -315,6 +315,33 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   preview` is real; the `aoide.rebuild` capability is described as shippable but
   has no `options.nix` option (it is planned). Reconcile when the song migration
   lands — the README needs the repertoire→songbook + backstage edits anyway.
+  **Partially closed 2026-07-28**: the dendrite roster is now correct — it had
+  claimed "Dendrites (14)" while 19 were on disk (it omitted `cli`, `firefox`,
+  `melete`, `mneme`, `screenshot`, `vision`); now 20 with `hyprland`, and the
+  wiki's two roster spots ([[Codebase]], [[Full-Architecture]]) were corrected
+  from "eighteen" to twenty at the same time. The remaining points above stand.
+- **[refactor · khoa — LANDED 2026-07-28] Hyprland split: look vs behaviour.**
+  `modules/facets/compositor/default.nix` mixed three jobs in 390 lines. The
+  host-invariant half now lives in the new `modules/dendrites/hyprland.nix`
+  (`aoide.hyprland.enable`, ON for yomi-strix): keybinds, input devices, tiling
+  layout, misc/ecosystem, and the seam for **behavioural** window rules. The
+  facet keeps the drachma-derived look (colours, gaps, rounding, blur, the
+  aoide-* layerrules, hyprglass, the kitty opacity/rounding rules — those two
+  ARE appearance, which is why they did *not* move) plus session plumbing
+  (programs.hyprland, the systemd/Wayland handoff, hyprpolkitagent, portal,
+  greetd). Rationale: a facet reads `aoide.drachma` and renders (CONTRACTS §2);
+  a bind module reads no drachma, so it is a dendrite — the shape these binds
+  had in dxflake before the port. Verified: 59 binds at HEAD → 59 in the
+  dendrite, and the generated `hyprland.conf` diffs against the live
+  generation-35 file as **additions only** (the newly seeded input/layout/misc
+  blocks); every pre-existing line is byte-identical and in place. Ordering in
+  the shared `extraConfig` (a `lines` option): facet `mkBefore` 500 → dendrite
+  1000 → screenshot dendrite 1000. Corrected while here: the old comment
+  claiming "the quickshell facet appends its autostart with mkAfter" was stale
+  — quickshell writes nothing to hyprland.conf (it autostarts via a systemd
+  user service). Residual: `input.accel_profile = flat` / `force_no_accel` are
+  ported dxflake mouse-feel opinions, easy to drop if khoa dislikes them on
+  this box; the behavioural-windowrule section is deliberately empty.
 - **[limitation · known] The window→session listener can't resolve a hook-only
   session that has no recorded pid** — it walks the session's pid, and a
   Claude session registered purely via hooks (never conducted) has none. The

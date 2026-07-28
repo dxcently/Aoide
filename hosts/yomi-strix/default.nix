@@ -57,6 +57,11 @@
   aoide.facets.compositor.enable = true;
   aoide.facets.stylix.enable = true;
 
+  # Host-invariant Hyprland behaviour (keybinds, input, layout, window rules).
+  # Paired with the compositor facet above: that one owns the look, this one
+  # owns everything a re-rice must not touch.
+  aoide.hyprland.enable = true;
+
   # Screen capture — two callers, two dendrites (see each module header):
   # hyprshot+satty for the human (SUPER+S), grim/slurp for agents ("vision").
   aoide.screenshot.enable = true;

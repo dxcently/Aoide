@@ -274,11 +274,14 @@ launcher, osd, lockscreen, greeter, wallpaper, agentWidgets, sessionGraph; see
 [[Full-Architecture]]). The bootable yomi-strix profile and the vm-boot check
 (above) are likewise real.
 
-**The dendrite set** now spans eighteen entries in `modules/dendrites/`: bash
+**The dendrite set** now spans twenty entries in `modules/dendrites/`: bash
 (the `ad*` nh alias family replacing `dx*`), nh, git, kitty, neovim-via-nvf,
-starship, mcfly, btop, yazi, fastfetch, devtools, fonts, obsidian, melete,
-mneme, firefox, screenshot, and vision — ported from [[dxflake]]'s prior rig
-into Aoide shape. The `nvf` flake input threads to home-manager via
+starship, mcfly, btop, yazi, fastfetch, devtools, cli, fonts, hyprland,
+obsidian, melete, mneme, firefox, screenshot, and vision — ported from
+[[dxflake]]'s prior rig into Aoide shape. `hyprland` is the host-invariant
+half of the compositor: keybinds, input devices, tiling layout, misc, and
+behavioural window rules, split out so a re-rice cannot disturb them (the
+compositor facet keeps the drachma-derived look and the session plumbing). The `nvf` flake input threads to home-manager via
 `extraSpecialArgs`; the cover-art token (`aoide.drachma.wallpaper` → per-song
 `assets/`) backs the shipped wallpapers; Lekton Nerd Font Mono is the stylix
 face; the [[Gadget-Dock]] carries the waybar-homage bar rework plus
