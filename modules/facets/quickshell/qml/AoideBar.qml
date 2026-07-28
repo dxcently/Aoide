@@ -359,11 +359,13 @@ Item {
         anchors.top: parent.top
         height: root.stripHeight
         radius: 0                        // EDGED — hard square corners, no round
-        // Cream frosted glass at 0.72 — MATCHES the terminal's paletteBg tint
-        // and opacity (kitty 0.72), so bar and terminals read as one glass.
+        // Cream frosted glass — the song's paletteBg (cream parchment) at 0.62,
+        // matching the terminal's cream Aero-glass so bar and terminals read as
+        // one glass. khoa keeps the cream-and-ink look; the terminal's extra
+        // brightness comes from its own opacity + hyprglass, not a whiter tint.
         color: Qt.rgba(Qt.color(root.notes.paletteBg).r,
                        Qt.color(root.notes.paletteBg).g,
-                       Qt.color(root.notes.paletteBg).b, 0.58)
+                       Qt.color(root.notes.paletteBg).b, 0.62)
         opacity: 1.0
     }
     // Aero gloss — the sanctioned white sheen (bright top, hard midline stop),

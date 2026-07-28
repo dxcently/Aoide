@@ -88,7 +88,7 @@ Item {
         z: 0
         width: root.cellW - 2
         height: 22
-        radius: height / 2
+        radius: 0
         color: root.notes.paletteAccent
         opacity: 0.20
         anchors.verticalCenter: parent.verticalCenter

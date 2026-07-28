@@ -98,7 +98,14 @@
             # macOS/KDE-only path, inert under Hyprland) is turned off here and
             # the compositor does the frosting instead. The kitty window class is
             # additionally pinned in the compositor's Aero window rules.
-            background_opacity = "0.60";
+            #
+            # Brightness (khoa): keep the CREAM cell colour (song base00), just
+            # make the terminal read brighter — a high background_opacity (0.86)
+            # so the bright cream dominates over the warm painting behind it
+            # instead of the wallpaper muddying it dim; hyprglass then glosses
+            # the surface on top (compositor manage_window_blur). The cream +
+            # dark-ink look is unchanged; only the surface got brighter.
+            background_opacity = "0.86";
             background_blur = 0;
             enable_audio_bell = false;
             tab_bar_style = "powerline";

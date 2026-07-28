@@ -306,7 +306,7 @@ Item {
                     visible: rowItem.traced
                     anchors.fill: parent
                     anchors.margins: -6
-                    radius: 6
+                    radius: 0
                     color: "transparent"
                     border.color: notes.paletteHot
                     border.width: 1
@@ -316,7 +316,7 @@ Item {
                     visible: rowItem.traced
                     anchors.fill: parent
                     anchors.margins: -4
-                    radius: 5
+                    radius: 0
                     color: "transparent"
                     border.color: notes.paletteHot
                     border.width: 1
@@ -326,7 +326,7 @@ Item {
                     visible: rowItem.traced
                     anchors.fill: parent
                     anchors.margins: -2
-                    radius: 4
+                    radius: 0
                     color: "transparent"
                     border.color: notes.paletteHot
                     border.width: 1
@@ -334,7 +334,7 @@ Item {
                 }
                 Rectangle {
                     anchors.fill: parent
-                    radius: 3
+                    radius: 0
                     color: (rowItem.traced || rowHover.hovered) ? notes.barBg : "transparent"
                     // Traced row blazes HOT (green); a plain hover shows no border.
                     border.color: rowItem.traced ? notes.paletteHot : notes.paletteAccent

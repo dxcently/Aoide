@@ -106,13 +106,19 @@ let
     # hyprglass targets LAYER surfaces by namespace (layers { namespaces = … }).
     # For WINDOWS it exposes only a single GLOBAL `manage_window_blur` toggle —
     # there is NO per-class/per-window targeting in v0.7.0 (verified against the
-    # built plugin's config keys). We deliberately do NOT flip manage_window_blur
-    # (it would glass EVERY window, not just the terminal), so the Aero-glass
-    # TERMINAL is done the compositor-native way instead: kitty renders a
-    # translucent background (programs.kitty background_opacity, kitty dendrite)
-    # and Hyprland's own blur (decoration:blur above, enabled globally) frosts
-    # behind it — pinned to the kitty class by the windowrule below.
+    # built plugin's config keys). khoa asked for hyprglass on the terminals
+    # (and "any transparent layer") too, so we DO flip manage_window_blur here:
+    # this desktop is terminal-centric and the glass shader only paints visible
+    # TRANSLUCENT content (it discards fully-transparent/opaque-covered
+    # fragments), so opaque windows (Firefox &c.) are untouched while the
+    # frosted kitty gains hyprglass refraction/fresnel ON TOP of Hyprland's own
+    # blur. The `light` preset override brightens the glass under sonata's light
+    # polarity (a whiter frost, per the same directive).
     plugin:hyprglass {
+        manage_window_blur = 1
+        light {
+            glass_opacity = 0.82
+        }
         layers {
             enabled = 1
             namespaces = aoide-bar, aoide-dock
@@ -121,7 +127,7 @@ let
     }
 
     # ── Aero-glass terminal — the kitty window rides the compositor blur ──────
-    # kitty's background_opacity (0.82) makes only the cell BACKGROUND
+    # kitty's background_opacity (0.86) makes only the cell BACKGROUND
     # translucent (glyphs stay opaque/crisp); Hyprland then blurs behind that
     # translucent surface, giving the frosted Win7 read. The whole-window opacity
     # rule keeps the FOCUSED terminal fully crisp (active 1.0) and adds a gentle
@@ -129,7 +135,10 @@ let
     # the `match:<prop> <value>` form (same as the layerrules above); the old
     # `class:^(kitty)$` form is rejected ("invalid field ... missing a value").
     windowrule = opacity 1.0 0.90, match:class kitty
-    windowrule = rounding 3, match:class kitty
+    # Edged everywhere (khoa): hard square corners on the terminal too — the
+    # global decoration rounding is already 0, so this pins kitty to match
+    # (the earlier `rounding 3` softened only the terminal; now nothing rounds).
+    windowrule = rounding 0, match:class kitty
   '';
 
   # ── Hyprland keybinds for Aoide workflows ─────────────────────────────────

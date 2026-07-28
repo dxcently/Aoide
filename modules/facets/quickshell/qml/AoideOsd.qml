@@ -18,7 +18,7 @@ Item {
         anchors.bottomMargin: 48
         width: 200
         height: 48
-        radius: 24
+        radius: 0
         color: notes.paletteBg
         border.color: notes.paletteAccent
         border.width: 1
@@ -31,7 +31,7 @@ Item {
             // Icon stub
             Rectangle {
                 width: 20; height: 20
-                radius: 10
+                radius: 0
                 color: notes.paletteAccent
             }
 

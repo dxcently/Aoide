@@ -354,7 +354,7 @@ Item {
                             visible: rowItem.traced
                             anchors.fill: parent
                             anchors.margins: -6
-                            radius: 5
+                            radius: 0
                             color: "transparent"
                             border.color: notes.paletteHot
                             border.width: 1
@@ -364,7 +364,7 @@ Item {
                             visible: rowItem.traced
                             anchors.fill: parent
                             anchors.margins: -4
-                            radius: 4
+                            radius: 0
                             color: "transparent"
                             border.color: notes.paletteHot
                             border.width: 1
@@ -374,7 +374,7 @@ Item {
                             visible: rowItem.traced
                             anchors.fill: parent
                             anchors.margins: -2
-                            radius: 3
+                            radius: 0
                             color: "transparent"
                             border.color: notes.paletteHot
                             border.width: 1
@@ -388,7 +388,7 @@ Item {
                         // blazing against that multicolor field.
                         Rectangle {
                             anchors.fill: parent
-                            radius: 2
+                            radius: 0
                             color: rowItem.traced ? notes.barBg : "transparent"
                             border.color: rowItem.traced ? notes.paletteHot
                                           : (rowItem.isProject ? notes.violet : notes.wireCyan)
@@ -400,7 +400,7 @@ Item {
                             visible: rowItem.isProject
                             anchors.fill: parent
                             anchors.margins: 2
-                            radius: 1
+                            radius: 0
                             color: "transparent"
                             border.color: notes.violet
                             border.width: 1

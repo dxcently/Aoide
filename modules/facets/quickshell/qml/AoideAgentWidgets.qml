@@ -200,7 +200,7 @@ Item {
         Rectangle {
             x: parent.depthOff2 * parent.depthDx; y: parent.depthOff2 * parent.depthDy
             width: parent.width; height: parent.height
-            radius: 6
+            radius: 0
             color: "transparent"
             border.color: root.notes.holoBlue
             border.width: 1
@@ -209,7 +209,7 @@ Item {
         Rectangle {
             x: parent.depthOff1 * parent.depthDx; y: parent.depthOff1 * parent.depthDy
             width: parent.width; height: parent.height
-            radius: 6
+            radius: 0
             color: "transparent"
             border.color: root.notes.holoBlue
             border.width: 1
@@ -223,14 +223,14 @@ Item {
         // rule reads through the translucent body.
         Rectangle {
             anchors.fill: parent
-            radius: 6
+            radius: 0
             color: root.notes.paletteBg
             opacity: root.glassOpacity
         }
         // Wireframe outline (front face) — crisp wireCyan hollow rule over glass.
         Rectangle {
             anchors.fill: parent
-            radius: 6
+            radius: 0
             color: "transparent"
             border.color: root.notes.wireCyan
             border.width: 1
@@ -238,7 +238,7 @@ Item {
         }
         Rectangle {
             anchors.fill: parent
-            radius: 6
+            radius: 0
             gradient: Gradient {
                 GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.10) }
                 GradientStop { position: 0.42; color: Qt.rgba(1, 1, 1, 0.03) }
