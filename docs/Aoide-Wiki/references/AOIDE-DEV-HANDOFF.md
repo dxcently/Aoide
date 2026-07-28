@@ -182,7 +182,42 @@ behavior/design change:
 
 ---
 
-## 7. Quick reference
+## 7. Open flags — live ledger
+
+Per §4, flags raised but not yet closed live HERE so the next agent inherits
+them (not in one agent's head). Close a flag by resolving it AND editing this
+list; add one the moment you raise it. Current open flags (2026-07-28):
+
+- **[decision · khoa] `notes` vs `drachma` naming.** As built: `notes` = the
+  token *values* (`aoide.notes.*`, what facets read), `drachma` = the *mint*
+  (the engine that resolves/lints/emits them). khoa questioned whether the data
+  should ALSO be called drachma. **Open:** keep the split, or rename the data
+  (`aoide.notes` → `aoide.drachma`, `notes.json` → `drachma.json`, ~39 sites +
+  schema + wiki). Do NOT rename without an explicit go-ahead. See [[Notes]],
+  [[Lexicon]], [[drachma]].
+- **[bug · follow-up] `aoide rice preview <name>` derives the cover by
+  song-name convention** (`covers/<name>.*`) instead of reading
+  `aoide.notes.wallpaper`. Mitigated live by the `AOIDE_WALLPAPER` env baked
+  into the quickshell service, so the wallpaper survives rebuilds; a proper fix
+  (preview reads the song's wallpaper note) is still owed. See [[Self-Ricing]].
+- **[limitation · known] The window→session listener can't resolve a hook-only
+  session that has no recorded pid** — it walks the session's pid, and a
+  Claude session registered purely via hooks (never conducted) has none. The
+  hook-time backfill is retained as the fallback for exactly this case; don't
+  remove it. See [[Terminal-Commander]], [[Session-Graph]].
+- **[decision · khoa] "Conductor" CLI naming scope.** A `conductor`
+  command/alias + brand was proposed (keeping the `aoide` binary/namespace);
+  scope (alias/brand vs hard rename) was never confirmed. **Open** — not
+  implemented. See [[Conductor-Channel]].
+- **[planned · khoa] Dark `moonlight-sonata` song** — the dark counterpart to
+  the light `sonata` key, to be added later (khoa: "after merge and rebuild").
+- **[planned · future] Default song with Pantheon thematics** — the shipped
+  `default` baseline to be composed with the Pantheon grammar. See
+  [[design/Pantheon-Grammar]].
+
+---
+
+## 8. Quick reference
 
 | Need | Do |
 | --- | --- |
