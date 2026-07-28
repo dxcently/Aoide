@@ -8,7 +8,7 @@ The standalone wiki for the Aoide project — the agent-agnostic Hyprland/Quicks
 
 ## Read the whole thing
 
-Working entry cost, in order: `Overview.md` → every page under `concepts/` and `entities/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md`). The wiki is deliberately small enough to read end to end.
+Working entry cost, in order: `Overview.md` → every page under `concepts/` and `entities/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; `AOIDE-DEV-HANDOFF.md` — the development agent's operating manual). The wiki is deliberately small enough to read end to end.
 
 ## The shape
 
@@ -21,7 +21,7 @@ Aoide-Wiki/
   ingest/
     index.md       ← content catalog
     log.md         ← append-only history + Open Threads
-  references/      ← raw sources (AOIDE-HANDOFF.md)
+  references/      ← raw sources (AOIDE-HANDOFF.md, AOIDE-DEV-HANDOFF.md)
   protocol/        ← the wiki protocol (Mneme/Melete-owned), staged here; not Aoide content
 ```
 
@@ -107,4 +107,5 @@ protocol/_template/Overview.md
 protocol/_template/ingest/index.md
 protocol/_template/ingest/log.md
 references/AOIDE-HANDOFF.md
+references/AOIDE-DEV-HANDOFF.md
 ```
