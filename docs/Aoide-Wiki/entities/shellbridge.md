@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-07-26
+updated: 2026-07-28
 tags: [aoide, bridge, ipc, desktop]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -83,6 +83,24 @@ The [[Gadget-Dock]]'s terminal-manager gadget renders its per-row prune `[x]`
 disabled precisely because no prune verb exists on the socket yet — QML never
 invents IPC. Growing the verb set (prune next) is an open thread, as is
 stamping `parentSessionId` at spawn time.
+
+**Authoritative window capture (the Hyprland event listener).** Alongside the
+socket accept loop, `aoide shellbridge --run` now spawns a background thread that
+reads Hyprland's `socket2` event stream
+(`$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`). On each
+window lifecycle event it keeps `sessions.json` authoritative: an `openwindow`
+(re-checked on `movewindow`/`movewindowv2`/`windowtitle`) (re)resolves any
+tracked session still missing its `windowAddress` — walking that session's
+recorded `pid` up the `/proc` ppid chain and matching an ancestor against
+`hyprctl clients -j`, then stamping the client's canonical `0x…` address via the
+atomic graph writer — and a `closewindow` clears that address off whatever
+session held it. **Why:** the address was previously only backfilled *lazily* on
+the next Claude Code hook, so at click time it was frequently empty and the
+[[Terminal-Commander]] jump failed; capturing it at window-creation time makes
+the jump reliable. The listener reuses the same pid-ancestry ↔ clients helpers as
+launch-time discovery (which stays as a fallback), runs concurrently with — and
+never blocks or kills — the accept loop, and degrades to a logged no-op when
+there is no `HYPRLAND_INSTANCE_SIGNATURE` (headless/non-Hypr aoide is unaffected).
 
 Also since [[Session-Graph]] landed: a terminal killed uncatchably (SIGKILL,
 SUPER+Q) cannot run its own `graph session end`, so its `sessions.json` record

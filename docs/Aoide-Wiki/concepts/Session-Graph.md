@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-28
 tags: [aoide, graph, session, terminal, agent, cli]
 ---
 
@@ -144,6 +144,17 @@ Dead sessions are marked `done` (session + hook record) and then run through
 the same `prune_done` path — dropped, orphaned `parentSessionId` links
 cleared, `graph.json` re-staged atomically. `graph reap` never errors on
 "nothing to reap" and never errors on an unreachable compositor.
+
+**Interplay with the window-event listener.** [[shellbridge]]'s Hyprland event
+listener (the authoritative `windowAddress` source — see
+[[Terminal-Commander]]) is the *counterpart* to the reaper: it fills the address
+at window-creation time and **clears it on `closewindow`**. So for a terminal
+closed with `SUPER+Q`, the record's address is usually already blank by the time
+the reaper runs, and it is the **pid-gone** signal (the SIGKILLed `conduct`
+process's `/proc/<pid>` vanishing) that reaps it — the two paths agree either
+way. The window-gone signal remains the reaper's safety net for the case the
+listener never saw (service down, off-Hyprland, or a stamped address whose
+`closewindow` was missed).
 
 It runs on a systemd user timer (`aoide-graph-reap`, next to shellbridge in
 [[shellbridge]]'s unit): first sweep 15s after the graphical session comes up,
