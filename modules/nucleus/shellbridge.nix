@@ -85,6 +85,62 @@ lib.mkIf config.aoide.enable {
     };
   };
 
+  # ── Liveness reaper: timer + oneshot service ─────────────────────────────
+  # A terminal killed with SUPER+Q / SIGKILL is torn down uncatchably, so the
+  # `conduct`/`wrap` process can never run its own `graph session end` — the
+  # session record is stranded `running` in the roster forever (22 dead
+  # `conduct-*` shells piled up in ~8 minutes of use). No QML surface can fix
+  # this: widgets/baton cannot spawn `hyprctl` (no process-spawning in QML).
+  #
+  # So the sweep lives HERE, next to the stage/graph infra it repairs: a cheap
+  # periodic `aoide graph reap` that gathers live `hyprctl clients -j` window
+  # addresses (falling back to pid-only liveness off Hyprland), marks every dead
+  # session `done`, and prunes it — re-staging graph.json atomically only when
+  # something actually changed. One hyprctl call + a stage read/write; it never
+  # exits non-zero on "nothing to reap".
+  #
+  # Seam: this is the OUT-OF-BAND cleanup path for sessions whose IN-BAND
+  # cleanup (do_session_end on normal exit) could not run. It is gated with the
+  # rest of shellbridge on `config.aoide.enable`, ordered into the graphical
+  # session so it inherits HYPRLAND_INSTANCE_SIGNATURE (the compositor imports
+  # its env into the user manager), and shares shellbridge's exact AOIDE_STAGE_DIR.
+  systemd.user.services.aoide-graph-reap = {
+    description = "Aoide graph reaper — resolve KILLED sessions (SUPER+Q/SIGKILL) that could not self-clean";
+
+    after = [ "graphical-session.target" ];
+    partOf = [ "graphical-session.target" ];
+
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.aoide}/bin/aoide graph reap";
+
+      Environment = [
+        # Same stage directory shellbridge writes — the reaper repairs it.
+        "AOIDE_STAGE_DIR=%h/Aoide/song/stage"
+      ];
+
+      NoNewPrivileges = true;
+      StandardOutput = "journal";
+      StandardError = "journal";
+    };
+  };
+
+  systemd.user.timers.aoide-graph-reap = {
+    description = "Aoide graph reaper timer — periodic liveness sweep (~12s)";
+
+    wantedBy = [ "graphical-session.target" ];
+    partOf = [ "graphical-session.target" ];
+
+    timerConfig = {
+      # Cheap and frequent: a killed terminal resolves within ~12s. First sweep
+      # 15s after the session comes up (let shellbridge seed the stage first);
+      # thereafter every 12s since the previous run finished.
+      OnActiveSec = "15s";
+      OnUnitActiveSec = "12s";
+      AccuracySec = "2s";
+    };
+  };
+
   # ── Stage-file paths exposed as options for downstream modules ────────────
   # These are the stable v0 stage paths (CONTRACTS.md §4). Facets and the
   # Quickshell widget must read exactly these paths; never compute them

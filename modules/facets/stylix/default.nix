@@ -211,7 +211,7 @@ in
     lib.optionalAttrs stylixPresent {
       stylix = {
         enable = true;
-        polarity = lib.mkDefault "dark";
+        polarity = lib.mkDefault "light";
 
         # The ONE base16 scheme — the baked fan-out's single source.
         base16Scheme = scheme;

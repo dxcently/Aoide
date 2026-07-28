@@ -25,17 +25,18 @@ QtObject {
     // ── Parsed note object ─────────────────────────────────────────────────
     property var raw: ({
         "schemaVersion": "0",
-        "palette": { "bg": "#1e1e2e", "fg": "#cdd6f4", "accent": "#89b4fa", "urgent": "#f38ba8" },
-        "bar":    { "bg": "#1e1e2e", "fg": "#cdd6f4", "accent": "#89b4fa" },
-        "notif":  { "bg": "#1e1e2e", "fg": "#cdd6f4", "urgent": "#f38ba8" },
-        "window": { "border": "#89b4fa", "borderInactive": "#1e1e2e" }
+        "palette": { "bg": "#f4ecdc", "fg": "#423420", "accent": "#4f74a0", "urgent": "#b0475f", "hot": "#6f8a4f" },
+        "base16": { "base08": "#b0475f", "base0C": "#40897a", "base0D": "#4f74a0", "base0E": "#8f5578" },
+        "bar":    { "bg": "#f4ecdc", "fg": "#423420", "accent": "#4f74a0" },
+        "notif":  { "bg": "#f4ecdc", "fg": "#423420", "urgent": "#b0475f" },
+        "window": { "border": "#40897a", "borderInactive": "#eaddc6" }
     })
 
     // ── Palette shortcuts ──────────────────────────────────────────────────
-    readonly property color paletteBg:     raw.palette ? raw.palette.bg     : "#1e1e2e"
-    readonly property color paletteFg:     raw.palette ? raw.palette.fg     : "#cdd6f4"
-    readonly property color paletteAccent: raw.palette ? raw.palette.accent : "#89b4fa"
-    readonly property color paletteUrgent: raw.palette ? raw.palette.urgent : "#f38ba8"
+    readonly property color paletteBg:     raw.palette ? raw.palette.bg     : "#f4ecdc"
+    readonly property color paletteFg:     raw.palette ? raw.palette.fg     : "#423420"
+    readonly property color paletteAccent: raw.palette ? raw.palette.accent : "#4f74a0"
+    readonly property color paletteUrgent: raw.palette ? raw.palette.urgent : "#b0475f"
     // Hot/trace highlight — the one-neon element (optic-nerve green). Optional
     // in the v0 note schema: falls back to the accent when palette.hot is
     // absent, so a note file without it renders exactly as before.
