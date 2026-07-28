@@ -1,6 +1,6 @@
-# song/repertoire/hero/rice.nix — the "sonata" song (the cover's own key).
+# song/songbook/sonata/rice.nix — the "sonata" song (the cover's own key).
 #
-# The palette is drawn from the hero cover itself (song/covers/hero.webp —
+# The palette is drawn from the cover itself (./assets/Alma-Tadema_Unconscious_Rivals.jpg —
 # Alma-Tadema's "Unconscious Rivals"): a LIGHT warm classical academic key —
 # cream/parchment for the base, deep umber ink for text, dusty cornflower for
 # the accent, muted rose for urgent. The song that matches its wallpaper.
@@ -76,6 +76,6 @@
     # academic painting (terracotta vault, marble, azalea, sage). The base16
     # palette above is keyed from this painting's LIGHT warm register, for
     # colour coherence with the desktop's Stylix light polarity.
-    aoide.drachma.wallpaper = ../../covers/Alma-Tadema_Unconscious_Rivals.jpg;
+    aoide.drachma.wallpaper = ./assets/Alma-Tadema_Unconscious_Rivals.jpg;
   };
 }

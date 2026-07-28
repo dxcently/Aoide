@@ -42,7 +42,6 @@ Chosen because Nix's own logo is a snowflake, because crystals grow by **local a
 | **nucleus** | `modules/nucleus/` — daemon, CLI, policy | the seed crystal everything condenses around |
 | **dendrite** | `modules/dendrites/` — opt-in feature branches | crystal branches grow outward by accretion; adding one never reshapes the core |
 | **facet** | `modules/facets/` — render surfaces (quickshell, stylix, compositor) | the crystal's faces — the only planes that catch light (render appearance), each reading only notes |
-| **rime** | `modules/rime/` — the rice engine (all song content lives in `song/songbook/`) | the machinery that deposits the aesthetic layer; also the pun on **rice** |
 | **walker** | `lib/walk.nix` | walks the tree; every file under a walked dir self-registers, no import lists |
 | **snowflake** | your fork | same physics as upstream, unique instance — the point of [[Fork-and-Run]] |
 

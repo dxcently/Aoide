@@ -10,22 +10,21 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Aoide names its nix layer after snowflake morphology. The metaphor is not decorative: Nix's own logo is a snowflake, crystals grow by local accretion from a nucleus outward (exactly how dendritic self-registration works), and no two crystals are alike — same physics (shared upstream flake), unique host instances.
 
-## The Four Layers
+## The Three Layers
 
 | Layer | Morphology term | What it is |
 |---|---|---|
 | Core shared by every host | **nucleus** | `modules/nucleus/` — aoided, shellbridge, policy, CLI. The one layer every host inherits identically. |
 | Opt-in branches, chosen per host | **dendrites** | `modules/dendrites/` — one tree, all branches (shipped + personal); each host enables the ones it wants. |
 | Render surfaces that sound a rice | **facets** | `modules/facets/` — quickshell, stylix, compositor. The machinery that renders a song, reading its ricing elements from the songbook via `aoide.drachma`. |
-| The rice engine | **rime** | `modules/rime/` — applies the selected song. Holds no ricing content itself; every song, the shipped default included, lives in `song/songbook/`. |
 
-The split the metaphor encodes: **nucleus is the shared core every host inherits; dendrites are the opt-in branches each host chooses.** Facets and rime are the *machinery* of ricing — the surfaces that sound a song and the engine that applies it — but they embed no ricing content: every palette, asset, sound, icon, widget body, and the shipped default rice lives in `song/songbook/` (see [[Song-Anatomy]], [[Song-Vocabulary]]). All four layers live under `modules/` in `~/Aoide` — one walked module tree, the same grouping [[dxflake]] uses. Facets are the only nix that renders appearance, and each reads only the `aoide.drachma` option — no module reads another module.
+The split the metaphor encodes: **nucleus is the shared core every host inherits; dendrites are the opt-in branches each host chooses.** Facets are the *machinery* of ricing — the surfaces that sound a song — but they embed no ricing content: every palette, asset, sound, icon, widget body, and the shipped default rice lives in `song/songbook/` (see [[Song-Anatomy]], [[Song-Vocabulary]]). There is no separate "rice engine" layer: a song is *activated* by the walker (`lib/mkHost.nix` picks up the selected `rice.nix`), *resolved and emitted* by the `drachma` package ([[drachma]] — lint → resolve → `stage/drachma.json`), and *rendered* by the facets. All three layers live under `modules/` in `~/Aoide` — one walked module tree, the same grouping [[dxflake]] uses. Facets are the only nix that renders appearance, and each reads only the `aoide.drachma` option — no module reads another module.
 
 ## Mutation Policy
 
 Radial distance from the nucleus encodes who may change a layer and how often:
 
-- **Inherited machinery** (nucleus, facets, rime) — change via upstream merge only.
+- **Inherited machinery** (nucleus, facets) — change via upstream merge only.
 - **New dendrite branches** — one host line to enable; growth is additive, so upstream merges stay conflict-free by construction.
 - **`song/songbook/`** — the agent's writable domain: all ricing content (every song, its palettes/assets/sounds/icons/widgets, and the shipped `default`), gated by User approval at the rebuild step.
 
@@ -43,11 +42,10 @@ The composition engine is an in-house dendritic walker: every file placed under 
 
 ```
 ~/Aoide/
-├── modules/        the snowflake — four layers, walker-discovered
+├── modules/        the snowflake — three layers, walker-discovered
 │   ├── nucleus/    core daemon, CLI, policy
 │   ├── dendrites/  all branches: shipped + personal
-│   ├── facets/     quickshell · stylix · compositor
-│   └── rime/       rice engine (all song content lives in song/songbook/)
+│   └── facets/     quickshell · stylix · compositor
 ├── hosts/
 │   ├── common/     cross-machine baseline
 │   └── <host>/     machine-specific picks

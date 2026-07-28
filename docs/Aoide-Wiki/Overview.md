@@ -23,7 +23,7 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 - [[Session-Graph]] — the project/session DAG grown from the flat roster: `aoide graph` viewer + management (anchors + spawned edges, prune, liveness-checked focus, atomic graph.json emit) — rendered on the desktop primarily via the dock's DAG gadget (the standalone overlay is dormant)
 - [[Gadget-Dock]] — the agentWidgets surface realized: Win7-sidebar-homage desktop gadgets (terminal roster, compact DAG, clock, meters) in ASCII box-drawing chrome over Aero-glass blur, colours entirely from notes — a left-edge pinnable popup on hot-edge hover or SUPER+G
 - [[Lexicon]] — the whole vocabulary in one place: the three original Muses (Aoide · Melete · Mneme), the frozen/performed split, why each word family was selected, and the loop that ties them together
-- [[Snowflake-Anatomy]] — the layered structure of the Aoide flake: nucleus, dendrites, facets, and rime; why Nix's snowflake logo maps to the repo's growth model
+- [[Snowflake-Anatomy]] — the layered structure of the Aoide flake: nucleus, dendrites, and facets; why Nix's snowflake logo maps to the repo's growth model
 - [[Fork-and-Run]] — the install model: fork upstream, clone to `~/Aoide`, run `aoide onboard`; shared history enables clean upstream merges and upstream contributions
 - [[Self-Ricing]] — the headline feature: the agent generates, lints, previews, and adopts rices; songbook write-back is the "self" in self-ricing
 - [[Song-Vocabulary]] — the performed-half naming map: key, melody, arrangement, instruments, design, songbook, cover, chimes, stage, rehearsal, recording

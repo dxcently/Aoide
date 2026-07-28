@@ -48,7 +48,7 @@
 
   # The song this host performs. Replay any committed song on ANY host with one
   # line — e.g. `aoide.song = "sonata";` swaps the whole notes fan-out with
-  # zero other edits (song/repertoire/moonlight/). Default = the shipped standard.
+  # zero other edits (song/songbook/moonlight/). Default = the shipped standard.
   # "hero": the dusk-plum key drawn from the hero cover itself.
   aoide.song = "sonata";
 

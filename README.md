@@ -69,7 +69,7 @@ Compositor keybinds (`modules/facets/compositor/default.nix`). The `SUPER` key i
 
 ### Look & feel — the current song
 
-The desktop ships keyed to the **`hero`** song (`song/repertoire/hero/`): a
+The desktop ships keyed to the **`sonata`** song (`song/songbook/sonata/`): a
 LIGHT warm classical-academic palette (`stylix.polarity = "light"`) drawn by
 hand from its wallpaper, Alma-Tadema's *Unconscious Rivals* — cream/parchment
 base, deep umber ink, dusty-cornflower accent, sage-green "hot" trace colour,
@@ -94,8 +94,7 @@ The repo is a **snowflake**: everything lives under `modules/`, walked and self-
 ├── modules/
 │   ├── nucleus/    core: aoided daemon, shellbridge, CLI packaging, options, policy
 │   ├── dendrites/  opt-in features — one tree, shipped + personal branches
-│   ├── facets/     render surfaces (read ONLY aoide.drachma): quickshell · compositor · stylix
-│   └── rime/       rice engine + shipped default rice(s)
+│   └── facets/     render surfaces (read ONLY aoide.drachma): quickshell · compositor · stylix
 ├── hosts/
 │   ├── common/     cross-machine baseline (which dendrites default ON)
 │   └── <host>/     machine-specific picks (hardware, enabled facets, song)
@@ -122,7 +121,7 @@ One line in `hosts/<host>/default.nix` — the whole notes fan-out swaps, zero o
 aoide.song = "moonlight";       # default = the shipped standard
 ```
 
-Songs are **host-agnostic score**: any host performs any committed song by naming it. Songs self-register from `song/repertoire/<name>/rice.nix` on the same walker principle.
+Songs are **host-agnostic score**: any host performs any committed song by naming it. Songs self-register from `song/songbook/<name>/rice.nix` on the same walker principle.
 
 ### Add a new host
 
@@ -157,8 +156,7 @@ Then enable it with one host line. Growth is additive — new dendrites are new 
 | `modules/nucleus/` | daemon, CLI packaging, the option contract, policy | upstream merge only |
 | `modules/dendrites/` | opt-in features (yours + shipped) | additive — new files freely |
 | `modules/facets/` | render surfaces (read only `aoide.drachma`) | upstream merge only |
-| `modules/rime/` | rice engine + shipped default rices | upstream merge only |
-| `song/repertoire/` | committed songs (the agent's writable domain) | agent, gated at rebuild |
+| `song/songbook/` | committed songs (the agent's writable domain) | agent, gated at rebuild |
 
 ### The fork-and-run model
 
@@ -182,7 +180,7 @@ This only moves pinned dependency versions; the frozen machinery is untouched. S
 
 ### Framework updates — upstream's shape, merged in
 
-The nucleus, lib, facets, and rime are upstream's to evolve. Fork-and-run keeps shared git history, so a framework update is a real merge, not a package swap:
+The nucleus, lib, and facets are upstream's to evolve. Fork-and-run keeps shared git history, so a framework update is a real merge, not a package swap:
 
 ```
 git fetch upstream && git merge upstream/main    # improvements flow in; additive growth stays conflict-free
@@ -198,16 +196,16 @@ Ownership follows radial distance from the nucleus (the snowflake's [mutation po
 | Layer | Owner | You do this |
 |---|---|---|
 | `modules/nucleus/` + `lib/` + `CONTRACTS.md` | upstream | Don't edit — merge cleanly. |
-| `modules/facets/` + `modules/rime/` | upstream | Toggle per host; render surfaces are upstream's. |
+| `modules/facets/` | upstream | Toggle per host; render surfaces are upstream's. |
 | `modules/dendrites/` (shipped) | upstream ships | Toggle via `enable` flags. |
 | `modules/dendrites/<yours>.nix` | you | Grow new branches freely (new files). |
 | `hosts/` | you, entirely | Hardware, enabled facets/dendrites, song pick. |
-| `song/` + rime rice output | you (agent-written) | The songbook is where self-ricing writes back; gated at rebuild. |
+| `song/songbook/` | you (agent-written) | Where self-ricing writes back its songs; gated at rebuild. |
 | `pkgs/aoide` + `pkgs/drachma` | upstream | Don't edit — merge cleanly. |
 
 ### Merge hygiene
 
-Your edits live in `hosts/`, `song/`, and **new** dendrite files — all additive, so upstream merges stay conflict-free by construction. Editing a nucleus, facet, or rime file is how you earn conflicts on the next merge; when you need a change there, PR it upstream instead of forking the shape.
+Your edits live in `hosts/`, `song/`, and **new** dendrite files — all additive, so upstream merges stay conflict-free by construction. Editing a nucleus, facet, or lib file is how you earn conflicts on the next merge; when you need a change there, PR it upstream instead of forking the shape.
 
 ---
 
@@ -307,7 +305,7 @@ Opt-in: the **`aoide.rebuild`** capability (off by default) grants a dedicated n
 | `aoide rice lint` | real | Validate a rice against the note schema (delegates to `drachma`). |
 | `aoide rice preview` | stub | Rehearse a rice live (`stage/drachma.json` hot-reload); nothing committed. |
 | `aoide rice adopt` | stub · gated | Commit a previewed rice and propose the gated rebuild. |
-| `aoide rice transpose` | stub | Replay a song in another key (palette) from `song/keys/`. |
+| `aoide rice transpose` | stub | Replay a song in another key (palette) from the song's `songbook/<song>/palette/`. |
 | `aoide content register` | stub | Register a content source folder (points in place; never copies). |
 | `aoide content propose` | stub | Propose a discovered source for admission through the approve gate. |
 | `aoide content approve` | stub · gated | Admit a proposed source (the user admits; non-negotiable gate). |

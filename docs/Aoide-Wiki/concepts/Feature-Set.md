@@ -165,7 +165,7 @@ more]] on demand. Rows marked *(planned)* have no command yet in `aoide schema
 | System timers view *(planned)* | systemd | agenda widget | on (read-only) | — |
 | Vault knowledge | Mneme | pipeline · `aoide …` | via approve gate | approve gate |
 | Autonomous code tasks | Melete | messaging stream · PR | — | rebuild gate |
-| Self-ricing | rime engine | `aoide rice` (`lint`/`preview` real; `gen`/`adopt`/`transpose` exit-64 stubs) | on | adopt gate |
+| Self-ricing | drachma + facets | `aoide rice` (`lint`/`preview` real; `gen`/`adopt`/`transpose` exit-64 stubs) | on | adopt gate |
 | Agent-session terminal commander | shellbridge + aoided watcher | widget · `aoide graph session` · click/keybind jump | on | — |
 
 ## Related

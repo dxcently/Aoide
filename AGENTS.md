@@ -76,8 +76,8 @@ only.
 ## House rules (hard constraints)
 
 1. **`song/` is your only writable domain.** You commit to
-   `song/repertoire/<song>/` and nothing else. Inherited structure
-   (`modules/nucleus`, `modules/facets`, `modules/rime`) changes by upstream
+   `song/songbook/<song>/` and nothing else. Inherited structure
+   (`modules/nucleus`, `modules/facets`) changes by upstream
    merge only; new `modules/dendrites/` branches are additive.
 2. **The rebuild is user-gated.** You *propose*; the user *admits*; git
    *records*. No background rebuilds, no self-updaters — house policy.

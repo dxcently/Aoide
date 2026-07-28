@@ -1,4 +1,4 @@
-# modules/rime/default/rice.nix — the shipped default rice (The Standard).
+# song/songbook/default/rice.nix — the shipped default rice (The Standard).
 #
 # This is the immutable baseline rice shipped with Aoide.
 # `rice gen` starts from this unless told otherwise. The baseline is always
@@ -12,7 +12,7 @@
 # This module is discovered by the walker (lib/walk.nix) and applies when
 # `aoide.song == "default"` — i.e. when the host performs the standard. It is
 # song "default": the guaranteed-present baseline any host gets when it names
-# no other song. Committed songs live under song/repertoire/<name>/rice.nix and
+# no other song. Committed songs live under song/songbook/<name>/rice.nix and
 # guard the same way on `aoide.song == "<name>"` (CONTRACTS.md §5); naming one
 # in a host swaps this whole notes fan-out with zero other edits.
 #
@@ -62,11 +62,14 @@
     # the facet bakes it as the Stylix base-context image instead of the
     # solid-colour fallback. null here would take that fallback.
     #
-    # The cover lives at song/covers/ — its designated home in the Song Map
-    # (Song-Vocabulary: cover = wallpaper → song/covers/). This is COMMITTED
+    # Covers live per-song under songbook/<name>/assets/ — the designated home
+    # in the Song Map (Song-Vocabulary: cover = wallpaper). This is COMMITTED
     # song content, i.e. versioned score, legitimately read at eval: checks.nix
-    # noSongRead bans only the song/ RUNTIME infixes (stage/ · backstage/ ·
-    # auditions/ · catalog/ · index/), never song/covers/.
-    aoide.drachma.wallpaper = ../../../song/covers/hero.webp;
+    # noSongRead bans only the song/ RUNTIME infixes (stage/ · auditions/ ·
+    # catalog/ · index/), never a song's assets/.
+    #
+    # TODO(song agent): give default its own cover in ./assets/ — currently
+    # borrows hero's.
+    aoide.drachma.wallpaper = ../hero/assets/hero.webp;
   };
 }

@@ -58,7 +58,7 @@ A literal nix path (copied to the store — never a `song/` runtime read). The
 stylix facet bakes it as the base-context image; `null` bakes the solid-colour
 fallback derived from `palette.bg`.
 
-**Migration to v1:** the update playbook migrates `song/repertoire/*/rice.nix`
+**Migration to v1:** the update playbook migrates `song/songbook/*/rice.nix`
 and `drachma.json` from v0 to v1 when the design-system workstream lands v1.
 
 ---
@@ -102,9 +102,9 @@ The repo root is **closed**: `modules/`, `hosts/`, `pkgs/`, `lib/`, `docs/`,
 and nothing else. New content lands **inside the existing tree at its designated
 place** — never a new root directory:
 
-- covers (wallpapers) → `song/covers/`
-- chimes (sounds) → `song/chimes/`
-- per-song assets → `song/repertoire/<song>/`
+- covers (wallpapers) → `song/songbook/<song>/assets/`
+- chimes (sounds) → `song/songbook/<song>/sounds/`
+- per-song assets → `song/songbook/<song>/`
 - module assets → next to their module, as a directory dendrite/facet
 
 Content paths are looked up in the Song Map (`concepts/Song-Vocabulary` in the
@@ -113,7 +113,7 @@ convenience: it lands here first, with review — not sprayed into the tree.
 
 ### Package shape (`pkgs/` is walked too)
 
-`pkgs/` self-registers exactly like `modules/` and `song/repertoire/`. Drop
+`pkgs/` self-registers exactly like `modules/` and `song/songbook/`. Drop
 `pkgs/<name>/default.nix` — a `callPackage`-able derivation taking standard
 nixpkgs args — and `lib/pkgs.nix` (the packages walker) discovers it into **all
 four** consumers from one source:
@@ -286,19 +286,19 @@ aoide.song = "moonlight";
 ```
 
 Naming no song performs song `"default"` — the shipped standard
-(`modules/rime/default/rice.nix`), the guaranteed-present baseline.
+(`song/songbook/default/rice.nix`), the guaranteed-present baseline.
 
 ### Self-registration (dendrite discipline)
 
-Committed songs live under `song/repertoire/<name>/rice.nix`. `lib/mkHost.nix`
-walks `song/repertoire` (via `lib/walk.nix`, same as `modules/`) into every
+Committed songs live under `song/songbook/<name>/rice.nix`. `lib/mkHost.nix`
+walks `song/songbook` (via `lib/walk.nix`, same as `modules/`) into every
 host, so **adding a song is a new folder — never an edit to an import list**.
-The empty repertoire (just `.gitkeep`) walks to `[]` and is tolerated.
+The empty songbook (just `.gitkeep`) walks to `[]` and is tolerated.
 
 Each song's `rice.nix` **self-gates**, exactly like a dendrite:
 
 ```nix
-# song/repertoire/<name>/rice.nix
+# song/songbook/<name>/rice.nix
 { lib, config, ... }:
 {
   config = lib.mkIf (config.aoide.song == "<name>") {
@@ -315,26 +315,26 @@ Each song's `rice.nix` **self-gates**, exactly like a dendrite:
 - A song **NEVER** sets host options (monitors, hardware, services) and
   **NEVER** enables facets or dendrites. Those are the venue's decision.
 - All note values are **literal nix** — a song never reads `song/` runtime
-  paths (`stage/` · `backstage/` · `auditions/`), same as the standard.
+  paths (`stage/` · `auditions/`), same as the standard.
 - Shelving/subfolders follow the walker rules (a `/_` path is skipped).
 
-### Repertoire is versioned score, not runtime
+### The songbook is versioned score, not runtime
 
 `checks.no-song-read` (§4) bans reading `song/` **runtime** dirs at eval
-(`stage/` · `backstage/` · `auditions/` · `catalog/` · `index/`). It
-deliberately does **not** list `song/repertoire/`: committed songs there are
-versioned score, legitimately walked at eval. Walking repertoire never trips
+(`stage/` · `auditions/` · `catalog/` · `index/`). It
+deliberately does **not** list `song/songbook/`: committed songs there are
+versioned score, legitimately walked at eval. Walking the songbook never trips
 the check.
 
 ### Enforcement
 
-`checks.song-shape` structurally asserts every walked repertoire path is a
+`checks.song-shape` structurally asserts every walked songbook path is a
 `rice.nix` (a song's module entry) — catching a stray `.nix` that could set
 arbitrary host options. The **full** "only defines `aoide.drachma`" invariant is
 a documented convention here (isolated per-module option-diffing is
 disproportionate for v0; see the `TODO(song-shape v1)` in `lib/checks.nix`).
 
-**Migration to v1:** the update playbook migrates `song/repertoire/*/rice.nix`
+**Migration to v1:** the update playbook migrates `song/songbook/*/rice.nix`
 and `drachma.json` from v0 to v1 with the drachma schema (§1).
 
 ---

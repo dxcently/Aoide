@@ -53,7 +53,7 @@ accidentally masking a nixpkgs attribute; a deliberate shadow is listed in
 `//` escape hatch (kept in this file to preserve the single source).
 
 **`lib/mkHost.nix`** assembles one host's `nixosSystem`: it walks `../modules`
-(the whole snowflake — nucleus + dendrites + facets + rime) **and** `song/songbook/`
+(the whole snowflake — nucleus + dendrites + facets) **and** `song/songbook/`
 — so songs self-register exactly like dendrites. It then appends the host's own
 dir, home-manager and stylix (each added only when its input is present, so a
 minimal eval still works), and the **discovered-packages overlay** from

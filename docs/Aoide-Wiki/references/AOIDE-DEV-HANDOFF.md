@@ -247,8 +247,8 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   [[drachma]], [[Lexicon]]). Residual: a few Quickshell facet bodies still carry
   the `notes.` property-id mid-rename to `drachma.` — cosmetic follow-up, not a
   contract question.
-- **[restructure · khoa — DECIDED 2026-07-28; wiki done, code migration OPEN]
-  Songbook consolidation.** The single per-song home is now
+- **[restructure · khoa — RESOLVED 2026-07-28; wiki + code both landed]
+  Songbook consolidation + rime retirement.** The single per-song home is now
   `song/songbook/<song>/`, self-contained: `rice.nix`, `drachma.json`, `assets/`
   (wallpaper + cover — was flat `song/covers/`), `palette/` (was `song/keys/`),
   `sounds/` (was `song/chimes/`), `icons/`, `widgets/`, `design/` (per-song
@@ -271,10 +271,22 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   `dispatch.rs` (`resolve_rice_notes`/`derive_cover`), per-song `rice.nix`
   wallpaper paths, `lib/mkHost.nix` (walks `song/repertoire/`), `lib/checks.nix`
   `noSongRead` infixes (drop `backstage`), `.gitignore` (drop `song/backstage/`),
-  `CONTRACTS.md`. Then thin the design pages to protocol + pointers once the
-  per-song `design/` folders hold the memory, and refresh the stale `sonata`
-  design/intent (was `liner/intent.md` — still describes an indigo nocturne, not
-  the shipped cream key). **Open (code side).**
+  `CONTRACTS.md`. **LANDED 2026-07-28:** `git mv` moved sonata/hero/default →
+  `song/songbook/<song>/{rice.nix, drachma.json, assets/, design/}` (history
+  preserved); `modules/rime/` deleted (it held no engine — the rice engine is
+  `pkgs/drachma` + facets + the walker); Rust resolution rewritten
+  (`repertoire_notes`→`songbook_notes`, `covers_dir` dropped, `derive_cover`
+  reads `songbook/<name>/assets/`); mkHost/vmTest/flake/checks/.gitignore +
+  CONTRACTS/AGENTS/BUILD/README updated; `backstage` gone everywhere. Validated:
+  `nix build .#aoide` (cargo tests pass), toplevel eval, `aoide rice preview
+  sonata` resolves from songbook. **Residuals still open:** (a)
+  `song/songbook/default/rice.nix` borrows hero's wallpaper via
+  `../hero/assets/hero.webp` — `TODO(song agent)`: give `default` its own cover;
+  (b) thin the design pages to protocol + pointers once the per-song `design/`
+  folders hold the memory, and refresh `songbook/sonata/design/intent.md` (still
+  describes an indigo nocturne, not the cream key); (c) `lib/checks.nix` carries
+  pre-existing nixfmt-1.4.0 drift (unrelated to this change) — a formatting-only
+  pass is owed.
 - **[bug · follow-up] `aoide rice preview <name>` derives the cover by
   song-name convention** (`covers/<name>.*`; post-migration `songbook/<name>/
   assets/`) instead of reading `aoide.drachma.wallpaper`. Mitigated live by the

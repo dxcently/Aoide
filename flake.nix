@@ -102,9 +102,9 @@
         // {
           surface-ownership = checks.surfaceOwnership (hostCfg.aoide.surfaces or { });
           no-song-read = checks.noSongRead (walk ./modules);
-          # Committed songs self-register from song/repertoire (walked into each
+          # Committed songs self-register from song/songbook (walked into each
           # host by lib/mkHost.nix); song-shape asserts each is a rice.nix only.
-          song-shape = checks.songShape (walk ./song/repertoire);
+          song-shape = checks.songShape (walk ./song/songbook);
           # VM boot test — boots the Aoide desktop config headless and asserts
           # the stack comes up (multi-user.target, aoide + drachma on PATH,
           # greetd enabled, aoided + shellbridge user services active, graph

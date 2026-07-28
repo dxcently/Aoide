@@ -55,7 +55,7 @@ detail lives in [[Codebase]]; this page stays at the map altitude.
         nix eval · immutable · git             live desktop · ephemeral · running
    ┌──────────────────────────────┐        ┌──────────────────────────────────┐
    │  nucleus  dendrites           │        │  Quickshell   Hyprland            │
-   │  facets   rime                │        │  shellbridge  terminals           │
+   │  facets                       │        │  shellbridge  terminals           │
    │  hosts    song/songbook       │        │  notifications  widgets           │
    └──────────────┬───────────────┘        └───────────────┬──────────────────┘
                   │                                         │
@@ -93,7 +93,7 @@ trail but exit 64 today.
        ▼                       ▼                         ▼
   RICE ENGINE (stub)     CONTENT PIPELINE (stub)   NIX EVAL + REBUILD
   [[Self-Ricing]]        [[Content-Pipeline]]      [[Snowflake-Anatomy]]
-   rime/ + song/          discover→…→query          walker: modules/ +
+   drachma·song/          discover→…→query          walker: modules/ +
    (lint/preview real)         │                    song/songbook/
        │                       ▼                         │
        ▼                  index (points in           resolves
@@ -239,7 +239,7 @@ one line to another song and the whole drachma fan-out swaps (e.g. the shipped
 `default` Mocha bg `#1e1e2e` → sonata cream `#f4ecdc`). Full replay treatment:
 [[Song-Vocabulary#Replay — any song, any host]].
 
-Inherited structure (nucleus, facets, rime) changes by upstream merge only; new
+Inherited structure (nucleus, facets) changes by upstream merge only; new
 dendrite branches are additive. Mutation policy is encoded as radial distance
 from the nucleus — see [[Snowflake-Anatomy]] and [[Governance]].
 
@@ -331,8 +331,7 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 │   ├── dendrites/   18 opt-in features (bash, nh, git, kitty, neovim, starship,
 │   │                mcfly, btop, yazi, fastfetch, devtools, fonts, obsidian,
 │   │                melete, mneme, firefox, screenshot, vision) ← additive growth
-│   ├── facets/      quickshell · compositor · stylix          ← render surfaces (notes-only)
-│   └── rime/        the rice engine (song content lives in song/songbook/)
+│   └── facets/      quickshell · compositor · stylix          ← render surfaces (notes-only)
 ├── hosts/           common/ + yomi-strix/ (flags + the aoide.song selector; a real
 │                    hardware profile, switched live and running as the daily desktop)
 ├── pkgs/            aoide/ (Rust: aoide + aoided) · drachma/ (Node: drachma)

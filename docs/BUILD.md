@@ -23,7 +23,6 @@ no import list. To add a module, drop a file in the right layer:
 - `modules/nucleus/` — core, applies unconditionally (no `mkIf`).
 - `modules/dendrites/` — opt-in features, guarded on a flag.
 - `modules/facets/` — render surfaces, read `aoide.drachma` only.
-- `modules/rime/` — rice engine + shipped default rices.
 
 **Shelving opt-out:** any path containing `/_` is skipped. Prefix a
 work-in-progress file (`_wip.nix`) or dir (`_scratch/`) with `_` to hide it.
@@ -38,7 +37,7 @@ none of them except your own dendrite/facet flags.
 | Option                         | Type                         | Notes |
 | ------------------------------ | ---------------------------- | ----- |
 | `aoide.enable`                 | bool                         | framework master switch |
-| `aoide.song`                   | str (default `"default"`)    | the song this host performs; names a `song/repertoire/<name>/` (or the shipped standard) |
+| `aoide.song`                   | str (default `"default"`)    | the song this host performs; names a `song/songbook/<name>/` (or the shipped standard) |
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` fork |
 | `aoide.drachma.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
 | `aoide.drachma.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
@@ -114,12 +113,12 @@ by naming it — the score adapts to that host's specifics and its enabled
 facet/dendrite set. **The venue (host) decides its instruments; the song
 carries only the notes.**
 
-Drop a folder under `song/repertoire/<name>/` — `lib/mkHost.nix` walks it in
+Drop a folder under `song/songbook/<name>/` — `lib/mkHost.nix` walks it in
 like a dendrite, so there is no import list to edit. The song's `rice.nix`
 self-gates on `aoide.song`:
 
 ```nix
-# song/repertoire/moonlight/rice.nix
+# song/songbook/moonlight/rice.nix
 { lib, config, ... }:
 {
   config = lib.mkIf (config.aoide.song == "moonlight") {
@@ -131,21 +130,21 @@ self-gates on `aoide.song`:
 
 Replay it on any host with **one line** in `hosts/<host>/default.nix`:
 `aoide.song = "moonlight";`. Naming no song performs song `"default"` — the
-shipped standard (`modules/rime/default/rice.nix`).
+shipped standard (`song/songbook/default/rice.nix`).
 
 **Host-agnostic rules (CONTRACTS.md §5):** a song sets ONLY `aoide.drachma` (and,
 later, cover/chime refs inside `song/`). It NEVER sets host options (monitors,
 hardware, services) and NEVER enables facets/dendrites — those are the venue's.
 Note values are literal nix; a song never reads `song/` runtime paths. The
-`song/repertoire/**` tree is versioned score (not a runtime dir), so walking it
+`song/songbook/**` tree is versioned score (not a runtime dir), so walking it
 does not violate `checks.no-song-read`. `checks.song-shape` asserts each walked
-repertoire path is a `rice.nix`.
+songbook path is a `rice.nix`.
 
 ---
 
 ## Package handoffs — exactly what each agent drops in
 
-`pkgs/` is walked, exactly like `modules/` and `song/repertoire/`. Drop
+`pkgs/` is walked, exactly like `modules/` and `song/songbook/`. Drop
 `pkgs/<name>/default.nix` (a `callPackage`-able derivation, standard nixpkgs
 args) and `lib/pkgs.nix` self-registers it into the flake `packages` output, the
 host + vm overlays, and a `pkg-<name>` check — all from one source. **Adding a
@@ -194,8 +193,7 @@ Provide:
 
 ### Wave-1 facet/module agents (C, D)
 
-- Add files only under `modules/facets/` and `modules/dendrites/`
-  (+ `modules/rime/` for the rice engine and shipped default rices).
+- Add files only under `modules/facets/` and `modules/dendrites/`.
 - Flip flags in `hosts/yomi-strix/default.nix` (one line each).
 - Never edit `flake.nix` or `lib/`. If you need a new flake input, that is a
   Wave-0 change — request it; do not add it yourself.
@@ -237,8 +235,8 @@ session records) are contract §4.
 
 - `surface-ownership` — every `aoide.surfaces.<name>` names a non-empty owner.
 - `no-song-read` — no discovered module lives under a `song/` **runtime** dir
-  (`song/repertoire/**` is versioned score, legitimately walked).
-- `song-shape` — every walked `song/repertoire/**` path is a `rice.nix`
+  (`song/songbook/**` is versioned score, legitimately walked).
+- `song-shape` — every walked `song/songbook/**` path is a `rice.nix`
   (host-agnostic song discipline; CONTRACTS.md §5).
 - `pkg-<name>` — one auto-generated check per discovered package builds it
   (currently `pkg-aoide`, `pkg-drachma`, `pkg-melete`, `pkg-mneme`). Generated

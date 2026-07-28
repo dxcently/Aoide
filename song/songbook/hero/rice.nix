@@ -1,6 +1,6 @@
-# song/repertoire/hero/rice.nix — the "hero" song (the cover's own key).
+# song/songbook/hero/rice.nix — the "hero" song (the cover's own key).
 #
-# The palette is drawn from the hero cover itself (song/covers/hero.webp —
+# The palette is drawn from the hero cover itself (./assets/hero.webp —
 # the pianist over mirror water at dusk): deep plum sky for the base, pale
 # rose-cream cloudlight for text, dusk rose for the accent, sunset ember for
 # urgent. The song that matches its wallpaper.
@@ -72,7 +72,7 @@
 
     # ── Cover-art note ─────────────────────────────────────────────────────
     # The wallpaper this song IS the palette of. Committed score content
-    # (song/covers/ — never a runtime infix), same as the default rice.
-    aoide.drachma.wallpaper = ../../covers/hero.webp;
+    # (./assets/ — never a runtime infix), same as the default rice.
+    aoide.drachma.wallpaper = ./assets/hero.webp;
   };
 }

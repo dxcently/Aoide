@@ -49,7 +49,7 @@ let
   discovered = walk ../modules;
 
   # Committed songs (same as mkHost).
-  repertoire = walk ../song/repertoire;
+  songbook = walk ../song/songbook;
 
   # Optional modules — same tolerance guard as mkHost.
   optionalModule = attr: path: lib.optional (inputs ? ${attr}) path;
@@ -107,7 +107,7 @@ pkgs.testers.runNixOSTest {
     {
       imports =
         discovered
-        ++ repertoire
+        ++ songbook
         ++ hmModule
         ++ stylixModule
         ++ [

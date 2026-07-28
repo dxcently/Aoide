@@ -9,7 +9,7 @@
 #      modules claiming the same surface is a build-time error.
 #
 #   2. no-song-read — no module may make the nix build depend on a `song/`
-#      runtime path (`stage/`, `backstage/`, `auditions/`, …). `stage/` can
+#      runtime path (`stage/`, `auditions/`, …). `stage/` can
 #      never become load-bearing for the frozen half. Enforced structurally:
 #      an evaluated nixos config never imports/reads those paths, so we assert
 #      over the module tree's source strings.
@@ -49,18 +49,17 @@ let
 
   # ── Check 2: no song/ RUNTIME read at build time ───────────────────────────
   # Asserts that no walked module path lives under a `song/` RUNTIME dir. The
-  # ban is scoped to ephemeral runtime state (stage/ · backstage/ · auditions/
-  # · catalog/ · index/) — `stage/` can never become load-bearing for the
-  # frozen half. It deliberately does NOT list `song/repertoire/`: committed
-  # songs there are VERSIONED SCORE, legitimately walked at eval by
-  # lib/mkHost.nix (each song's rice.nix self-gates on `aoide.song`). Walking
-  # repertoire therefore never trips this check — only runtime infixes offend.
+  # ban is scoped to ephemeral runtime state (stage/ · auditions/ · catalog/ ·
+  # index/) — `stage/` can never become load-bearing for the frozen half. It
+  # deliberately does NOT list `song/songbook/`: committed songs there are
+  # VERSIONED SCORE, legitimately walked at eval by lib/mkHost.nix (each song's
+  # rice.nix self-gates on `aoide.song`). Walking the songbook therefore never
+  # trips this check — only runtime infixes offend.
   noSongRead =
     modulePaths:
     let
       runtimeInfixes = [
         "/song/stage/"
-        "/song/backstage/"
         "/song/auditions/"
         "/song/catalog/"
         "/song/index/"
@@ -73,14 +72,14 @@ let
       "modules read song/ runtime paths at build time: ${builtins.toString offenders}";
 
   # ── Check 3: song shape (host-agnostic discipline) ─────────────────────────
-  # A committed song under song/repertoire/<name>/ carries ONLY notes: its
+  # A committed song under song/songbook/<name>/ carries ONLY notes: its
   # rice.nix sets aoide.notes (palette + component tiers) and — later —
   # cover/chime references inside song/. It must NEVER set host options
   # (monitors, hardware, services) or enable facets/dendrites: the VENUE (host)
   # decides its instruments, the SONG carries only the notes (CONTRACTS.md §5).
   #
   # A cheap STRUCTURAL slice of that discipline is enforced here: every walked
-  # repertoire path is a file named `rice.nix` (the song's module entry). This
+  # songbook path is a file named `rice.nix` (the song's module entry). This
   # catches stray `.nix` in a song folder that would silently join the module
   # merge and could set arbitrary host options.
   #
@@ -89,14 +88,14 @@ let
   # v0. Until then the invariant is a DOCUMENTED CONVENTION (CONTRACTS.md §5 /
   # docs/BUILD.md), backed by this structural rice.nix-only gate and code review.
   songShape =
-    repertoirePaths:
+    songbookPaths:
     let
       strays = builtins.filter (
         p: let s = toString p; in !lib.hasSuffix "/rice.nix" s
-      ) repertoirePaths;
+      ) songbookPaths;
     in
     assertCheck "song-shape" (strays == [ ])
-      "repertoire holds non-rice.nix modules (a song is rice.nix only): ${builtins.toString strays}";
+      "songbook holds non-rice.nix modules (a song is rice.nix only): ${builtins.toString strays}";
 in
 {
   inherit
