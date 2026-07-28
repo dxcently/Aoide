@@ -34,17 +34,18 @@ accent→base0D, urgent→base08, with the resolved component tier informing
 surface-adjacent slots) — a provisional derivation. v1's design-system work
 replaces this synthesis with a real 16-colour derivation. That said, songs
 may also supply the full sixteen slots directly as `aoide.drachma.base16`
-(bypassing synthesis) — the hero song does, keyed by hand from its wallpaper;
-see [[design/Ricing-Protocol|the Ricing Protocol]].
+(bypassing synthesis) — the `sonata` and `hero` songs both do, keyed by hand
+from their wallpapers; see [[design/Ricing-Protocol|the Ricing Protocol]].
 
 ## Polarity — light or dark, one switch
 
 `stylix.polarity` (`"light"` or `"dark"`) declares which register the base16
 ramp reads as, and every Stylix-managed target honours it. The desktop's
 current key is `polarity = "light"` (set `mkDefault` on the Stylix facet):
-the hero song's cream/parchment base00 with deep-umber base05 text is a LIGHT
-scheme, keyed off the Alma-Tadema wallpaper (see [[design/Pantheon-Grammar|
-Pantheon Grammar round 5]]). Because polarity is a single fan-out switch,
+the `sonata` song's cream/parchment base00 with deep-umber base05 text is a LIGHT
+scheme, keyed off the Alma-Tadema *Unconscious Rivals* wallpaper (see
+[[design/Pantheon-Grammar|Pantheon Grammar round 5]]). (`hero` is the alternate
+dusk-plum key.) Because polarity is a single fan-out switch,
 flipping it is cheap — the discipline that makes it *look* right everywhere
 (terminal, bar, every widget agreeing) is the vision-check in
 [[design/Ricing-Protocol|the Ricing Protocol]], not the switch itself.

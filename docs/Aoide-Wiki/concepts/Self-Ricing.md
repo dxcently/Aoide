@@ -62,7 +62,7 @@ The discipline is already in use: the default rice's liner (`modules/rime/defaul
 **`aoide.song`** is the per-host selector (str, default `"default"`). A single line in `hosts/<host>/default.nix` selects which song the host performs:
 
 ```nix
-aoide.song = "moonlight";
+aoide.song = "sonata";
 ```
 
 Songs self-register via the `song/repertoire/` walk in `lib/mkHost.nix`; each song's `rice.nix` guards itself with `lib.mkIf (config.aoide.song == "<name>")`. No explicit import list: committing a song makes it available to all hosts.

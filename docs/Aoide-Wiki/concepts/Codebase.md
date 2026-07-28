@@ -97,7 +97,7 @@ home-manager/stylix modules, the pkgs overlay, and mirrored `specialArgs`
 (`host = "vm-test"`, inputs, username, system; `node.pkgsReadOnly = false`
 so the overlay applies) — so the test boots the real assembly, not a
 replica. It asserts: `multi-user.target` reached; `aoide` + `drachma` on
-PATH with `schema --json` reporting exactly 27 commands and `guide` exiting
+PATH with `schema --json` reporting exactly 28 commands and `guide` exiting
 0; greetd enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
 linger active with the `aoided` and `shellbridge` user units finishing
 `Result=success` (the skeleton binaries seed state and exit 0 — a future
@@ -266,6 +266,7 @@ stage files, and a live socket accept loop — `focuswindow`); the melete-adapte
 subscription, metadata-only notification boundary); all three note emitters; the
 QML shell skeleton; the baked Stylix and compositor fan-outs; and the whole
 `aoide graph` group (view/emit/project/link/focus/prune — 19 → 27 commands,
+later 28 with `aoide baton` —
 none of the eight a stub; see [[Session-Graph]]). No new crates for the graph
 work; `Cargo.lock` is untouched. The QML tree has since grown its first
 non-stub surfaces: `AoideSessionGraph.qml` + `GraphRow.qml` (the DAG overlay),

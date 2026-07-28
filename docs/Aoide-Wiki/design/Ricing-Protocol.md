@@ -12,6 +12,28 @@ A first-class house rule, promoted out of the light-theme rework
 It is a small protocol with a separation of concerns, and one mandatory
 check whenever a rice or song changes.
 
+> **What this page is — and where the design *memory* lives.** This page is
+> **protocol**: the dev wiki's job is architecture and rules, so it documents
+> *how* a rice is made and kept honest — the creation/application split and the
+> mandatory vision-check. It is **not** the store of any one song's design
+> decisions. Those — a palette's rationale, the exact opacity that read right
+> for a given key, the round-by-round iteration log — are **per-song design
+> memory**, and they belong to the **song agent** in a **songbook under
+> `song/`**, not in the dev wiki:
+> - **cross-cutting design memory** → `song/songbook/` (learnings, preferences,
+>   the update playbook — see [[Self-Ricing#Songbook Discipline — the "Self" in Self-Ricing]]);
+> - **per-song notes** → `song/repertoire/<name>/liner/` (intent, palette
+>   rationale, iteration log).
+>
+> The worked examples below (the `sonata` opacity numbers, the derivation
+> notes) are shown here to make the *protocol* legible — they are illustrations
+> of what the songbook records, **mirrored** from the song agent's domain, not
+> this page's to own. Today that songbook is **sparse and largely aspirational**
+> — `song/songbook/` holds only a placeholder and the sole liner is
+> `song/repertoire/sonata/liner/intent.md` — so the migration of this content
+> into it is still pending (flagged for the handoff). Treat `song/` as the
+> destination of record; this page points there.
+
 ## 1. Two separated concerns: creating a base16, and applying it
 
 **Creation** (deriving a base16 scheme from source material — a wallpaper, a
@@ -21,15 +43,19 @@ job ends up hard-coding colours in six different files that drift apart.
 
 - **Creation** happens once, in the song's `rice.nix`, as `aoide.drachma.base16`
   — sixteen literal hex slots (base00–base0F) plus the small `palette`
-  convenience block (bg/fg/accent/urgent/hot). The hero song
-  (`song/repertoire/hero/rice.nix`) is the worked example: every slot is
-  keyed by eye from the wallpaper (Alma-Tadema's *Unconscious Rivals*) with a
-  comment naming which region of the painting it reads from (cream vault →
-  base00, umber shadow → base05, cornflower sky-glaze → base0D, sage leaf →
-  base0B/hot, muted rose flesh-tone → base08/urgent). `aoide rice gen` is the
-  eventual automated form of this same step (still a stub — see
-  [[aoide-cli]]); until it lands, creation is a human/agent reading the
-  source image and writing the sixteen slots by hand, once, in one file.
+  convenience block (bg/fg/accent/urgent/hot). The **`sonata`** song
+  (`song/repertoire/sonata/rice.nix`) is the worked example — the cream LIGHT
+  key currently performed on yomi-strix: every slot is keyed by eye from the
+  wallpaper (Alma-Tadema's *Unconscious Rivals*) with a comment naming which
+  region of the painting it reads from (cream parchment → base00, deep umber
+  ink → base05, dusty cornflower → base0D, sage green → base0B/hot, muted rose →
+  base08/urgent). The **`hero`** song is the same discipline in a different
+  register — its sixteen slots are keyed by hand from its own cover
+  (`song/covers/hero.webp`, the pianist over dusk mirror-water: deep plum base,
+  rose accent). `aoide rice gen` is the eventual automated form of this same
+  step (still a stub — see [[aoide-cli]]); until it lands, creation is a
+  human/agent reading the source image and writing the sixteen slots by hand,
+  once, in one file.
 - **Application** is [[Stylix]]'s job, and only Stylix's: one `base16Scheme`
   feeds every nix-manageable target (terminal, GTK/Qt, icons, cursor,
   editors, browser, boot) automatically. On the Quickshell side, the same
@@ -98,8 +124,10 @@ facet reading another module, a surface with two owners); it cannot catch
 ## Related
 
 - [[Pantheon-Grammar]] — the visual grammar (glyphs, depth recipe, roles) this
-  protocol keeps coherent across surfaces.
+  protocol keeps coherent across surfaces; likewise song-agent design memory.
 - [[Stylix]] — the application half: one base16 scheme, baked fan-out.
-- [[Notes]] — the note seam creation writes into and application reads from.
+- [[Notes]] — the drachma seam creation writes into and application reads from.
 - [[Song-Vocabulary]] — key/song/cover vocabulary this protocol operates on.
-- [[Self-Ricing]] — the automated future of the creation step (`rice gen`).
+- [[Song-Anatomy]] — where the songbook and per-song liner live under `song/`.
+- [[Self-Ricing]] — the songbook write-back loop and the automated future of the
+  creation step (`rice gen`).

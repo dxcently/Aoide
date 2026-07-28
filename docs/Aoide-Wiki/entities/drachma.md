@@ -70,7 +70,7 @@ This is the same fallback the nix facets apply independently for the baked side
 ([[Stylix]], compositor) — identical rules, so both fan-outs agree and preview
 and adopted state cannot diverge.
 
-## Note schema v0
+## The drachma schema v0
 
 The schema (`src/schema.js`, `SCHEMA_VERSION = "0"`) sits inside the W3C
 design-tokens container: palette is base16-closed; the component tier is the

@@ -83,7 +83,7 @@ trail but exit 64 today.
                                         ▼            │
    ┌─────────────────────────────────────────────────────────────┐
    │  AGENT INTERFACE            aoide <cmd>   ·   aoide mcp serve │   [[Agent-Interface]]
-   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   27 commands · exit 0/1/2/64
+   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   28 commands · exit 0/1/2/64
    └───────────────────────────────┬─────────────────────────────┘
                                     ▼
    ┌─────────────────────────────────────────────────────────────┐
@@ -145,7 +145,7 @@ draws.
 ## The note seam in detail — one source, two fan-outs, zero drift
 
 Why preview and adopted state can never diverge: both derive from the same
-`aoide.drachma` values. Note schema v0 (palette `bg/fg/accent/urgent` + component
+`aoide.drachma` values. The drachma schema v0 (palette `bg/fg/accent/urgent` + component
 tiers `bar`/`notif`/`window`, each field `null` → palette, with the fallback
 applied **in the facets**) rides the external W3C design-tokens container
 format; [[drachma]] (Node, wrapping Style Dictionary; bins `lint` /
@@ -231,8 +231,9 @@ venue — its specifics and which instruments (facets, dendrites) are enabled.
 Replay = same song, new venue (one line in `hosts/<host>/default.nix`);
 transpose = new key, same venue. The `song-shape` check asserts every walked
 repertoire file is a `rice.nix`; song shape v0 is `CONTRACTS.md §5`. The
-fixture is `song/repertoire/moonlight`: flip yomi-strix's one line and the
-whole notes fan-out swaps (bg `#1e1e2e` → `#0b1021`). Full replay treatment:
+example is `song/repertoire/sonata` (the selected light key): flip yomi-strix's
+one line to another song and the whole drachma fan-out swaps (e.g. the shipped
+`default` Mocha bg `#1e1e2e` → sonata cream `#f4ecdc`). Full replay treatment:
 [[Song-Vocabulary#Replay — any song, any host]].
 
 Inherited structure (nucleus, facets, rime) changes by upstream merge only; new
@@ -273,10 +274,11 @@ cannot drift, funnelled through a single policy/audit surface. See
 This is now shipped code: the Rust crate ([[aoide-cli]]) installs two binaries,
 `aoide` and `aoided`. `aoide schema --json` is the machine-readable source of
 truth; the stdio MCP façade (`aoide mcp serve --stdio`) generates its tool list
-from it, one-to-one. The tree holds **27 commands** — real: `guide`, `schema`,
-`rice lint`, `mcp serve`, `daemon`, `shellbridge`, `adapter melete`, and the
-eight-command `graph` group (the [[Session-Graph]] DAG viewer + management
-layer over projects and sessions, all real); stubs:
+from it, one-to-one. The tree holds **28 commands** — real: `guide`, `schema`,
+`rice lint`, `mcp serve`, `daemon`, `shellbridge`, `conduct`, `baton`,
+`adapter melete`, and the `graph` group (the [[Session-Graph]] DAG viewer +
+management layer over projects and sessions, incl. `graph send`/`wrap`, all
+real); stubs:
 `rice gen/preview/adopt/transpose`, the `content` group, `make`, `update`,
 `onboard`. Exit codes are contractual: 0 ok, 1 error, 2 usage, 64
 not-implemented.
@@ -329,7 +331,7 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 ├── hosts/           common/ + yomi-strix/ (flags + the aoide.song selector; a real
 │                    hardware profile since ad3b21a — switched live 2026-07-26)
 ├── pkgs/            aoide/ (Rust: aoide + aoided) · drachma/ (Node: drachma)
-├── song/            repertoire/moonlight · songbook · keys · covers · chimes
+├── song/            repertoire/{sonata,hero} · songbook · keys · covers · chimes
 ├── docs/BUILD.md    module-authoring conventions
 ├── CONTRACTS.md     versioned contracts (notes · dendrite · schema · stage · song shape)
 ├── AGENTS.md        tier-0 agent guide (aoide guide prints the same map)

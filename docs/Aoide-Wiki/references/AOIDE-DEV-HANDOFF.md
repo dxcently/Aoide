@@ -204,13 +204,29 @@ Per §4, flags raised but not yet closed live HERE so the next agent inherits
 them (not in one agent's head). Close a flag by resolving it AND editing this
 list; add one the moment you raise it. Current open flags (2026-07-28):
 
-- **[decision · khoa] `notes` vs `drachma` naming.** As built: `notes` = the
-  token *values* (`aoide.drachma.*`, what facets read), `drachma` = the *mint*
-  (the engine that resolves/lints/emits them). khoa questioned whether the data
-  should ALSO be called drachma. **Open:** keep the split, or rename the data
-  (`aoide.drachma` → `aoide.drachma`, `drachma.json` → `drachma.json`, ~39 sites +
-  schema + wiki). Do NOT rename without an explicit go-ahead. See [[Notes]],
-  [[Lexicon]], [[drachma]].
+- **[decision · khoa — RESOLVED 2026-07-28] `notes` vs `drachma` naming.**
+  Settled: **`drachma` is the single canonical name** — the token *values* and
+  the mint are one thing, not a values-vs-engine split. Shipped as `aoide.drachma`,
+  `stage/drachma.json`, `DrachmaState.qml`, and the `drachma` package (commit
+  0117a79, "the note engine takes the coin"). "Notes" survives only as the
+  musical image, never the primary name/filename. Pages reconciled ([[Notes]],
+  [[drachma]], [[Lexicon]]). Residual: a few Quickshell facet bodies still carry
+  the `notes.` property-id mid-rename to `drachma.` — cosmetic follow-up, not a
+  contract question.
+- **[refactor · khoa] Design/songbook content should live in `song/`, not the
+  dev wiki.** The design pages ([[design/Ricing-Protocol]],
+  [[design/Pantheon-Grammar]]) hold per-song and cross-cutting *design memory* —
+  palette rationales, the opacity numbers that read right, the visual grammar —
+  which is the **song agent's** domain, not the dev wiki's. It belongs in a
+  **songbook maintained under `song/`**: cross-cutting memory in `song/songbook/`,
+  per-song notes in `song/repertoire/<name>/liner/` (see [[Song-Anatomy]],
+  [[Self-Ricing]]). The design protocol has now been **reworded to point there**
+  (the dev wiki documents architecture/protocol; `song/` is the store of design
+  decisions), but the actual **content migration is pending** — `song/songbook/`
+  is still a placeholder, and `song/repertoire/sonata/liner/intent.md` is stale
+  (describes an indigo nocturne, not the shipped cream key). When the song agent
+  picks it up: move the grammar/ricing memory into `song/`, then thin these
+  pages to protocol + pointers. **Open.**
 - **[bug · follow-up] `aoide rice preview <name>` derives the cover by
   song-name convention** (`covers/<name>.*`) instead of reading
   `aoide.drachma.wallpaper`. Mitigated live by the `AOIDE_WALLPAPER` env baked

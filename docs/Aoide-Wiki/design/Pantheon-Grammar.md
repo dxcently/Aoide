@@ -1,3 +1,11 @@
+---
+type: design
+created: 2026-07-27
+updated: 2026-07-28
+tags: [aoide, design, rice, song, qml, glyph, pantheon]
+source: "[[references/AOIDE-HANDOFF]]"
+---
+
 # Pantheon Grammar
 
 The visual language for Aoide's first-song widgets: **hollow wireframe depth**
@@ -6,6 +14,19 @@ music glyph carries meaning. Named for the reference stills at
 `references/pantheon/*.png` — outlined volumes drawn with lines, 3D read from
 stacked offset outline copies, translucent panes with lowercase callout labels
 on angled leaders, and ONE neon accent reserved for the live/hot element.
+
+> **This is song-agent design memory, mirrored here.** A visual grammar is a
+> *cross-cutting design decision* about how songs look — exactly the material
+> the **songbook** is for. Under the model the dev wiki documents architecture
+> and protocol; **per-song and cross-cutting design memory belongs to the song
+> agent in a songbook under `song/`** (`song/songbook/` for cross-cutting
+> grammar like this one, `song/repertoire/<name>/liner/` for one song's notes —
+> see [[Song-Anatomy]], [[Self-Ricing#Songbook Discipline — the "Self" in Self-Ricing]]).
+> This page is retained as a reference mirror while that songbook is still
+> **sparse and aspirational** (`song/songbook/` currently holds only a
+> placeholder); the content's true home is `song/`, and its migration there is
+> pending (flagged for the handoff). The wireframe/QML *constants* below are
+> load-bearing architecture and stay documented in the wiki regardless.
 
 The glass stays. The wireframe depth goes *over and around* it — it does not
 replace the blur/gloss/frost.
@@ -30,7 +51,7 @@ Constants (the tunable seam — all in `GadgetFrame.qml`):
 | `depthOpacity2` | 0.18  | far copy border opacity                  |
 | `depthExtent`   | =off2 | headroom a clipping container must add   |
 
-Border color is always `notes.paletteAccent`; radius matches the panel (4 for
+Border color is always `drachma.paletteAccent`; radius matches the panel (4 for
 gadget frames, 6 for the dock container body).
 
 **Where it lives:**
@@ -183,12 +204,15 @@ The Pantheon effect at full strength:
 
 The desktop flipped its base key from dark to a LIGHT warm classical-academic
 register, keyed off the new main wallpaper: Alma-Tadema's *Unconscious
-Rivals*. `stylix.polarity = "light"` (base facet default); the hero song
-(`song/repertoire/hero/rice.nix`) supplies the sixteen base16 slots read from
-the painting — cream/parchment `base00`, deep umber ink `base05`/`fg`, dusty
-cornflower `base0D`/`accent`, sage green `base0B`/`hot` (the one-blaze trace
-colour), muted rose `base08`/`urgent`, plus terracotta/ochre/teal/plum filling
-the rest of the ramp. This is the worked example for
+Rivals*. `stylix.polarity = "light"` (base facet default); the **`sonata`** song
+(`song/repertoire/sonata/rice.nix`, the light key selected on yomi-strix)
+supplies the sixteen base16 slots read from the painting — cream/parchment
+`base00`, deep umber ink `base05`/`fg`, dusty cornflower `base0D`/`accent`, sage
+green `base0B`/`hot` (the one-blaze trace colour), muted rose `base08`/`urgent`,
+plus terracotta/ochre/teal/plum filling the rest of the ramp. (The name churned:
+this cream key was briefly `hero`, then `moonlight`, before landing as `sonata`;
+`hero` reverted to its own dusk-plum key, and the retired `moonlight` name is
+reserved for a planned dark `moonlight-sonata`.) This is the worked example for
 [[design/Ricing-Protocol|the Ricing Protocol]]'s creation step — see that page
 for the base16-derivation discipline and the mandatory light/dark vision-check
 this rework introduced as a house rule.
@@ -212,10 +236,14 @@ white-sheet chrome for the same cream frosted glass (0.60) with umber ink, so
 every surface (bar, popouts, terminal) reads as one glass rather than a bar
 and a set of un-matched dialogs.
 
-**Kitty rides the compositor blur (Aero-glass terminal).** `background_opacity
-= 0.60` on the kitty dendrite (also tuned down from an initial 0.72, in step
-with the bar) makes the cell background translucent while glyphs stay fully
-opaque/crisp; Hyprland's own blur (global `decoration:blur`) frosts behind it.
+**Kitty rides the compositor blur (Aero-glass terminal).** `background_opacity`
+on the kitty dendrite (first tuned down from an initial 0.72 to 0.60 in step
+with the bar, then **re-tuned up to 0.86** — the later correction recorded in
+[[design/Ricing-Protocol#2. The mandatory vision-check]]: the terminal read too
+transparent/beige, and *brightness is opacity, not colour*, so the cream stayed
+and the surface was made dominant over the painting by opacity) makes the cell
+background translucent while glyphs stay fully opaque/crisp; Hyprland's own blur
+(global `decoration:blur`) frosts behind it.
 Hyprland 0.56 changed its windowrule matcher syntax — the old
 `class:^(kitty)$` form is rejected outright ("invalid field ... missing a
 value"); the compositor facet now uses `match:class kitty` for both the
@@ -242,3 +270,13 @@ asset — a compact 13×7 redraw of Aoide's lyre (three strings, curved arms, a
 soundbox, the A·O·I·D·E ground) sized so the info column sits flush beside it
 without wrapping in a tiled/narrow terminal, plus aligned key columns and two
 subtly music-marked section rules (`♪ hardware`, `♪ software`).
+
+## Related
+
+- [[design/Ricing-Protocol|Ricing Protocol]] — the creation/application split
+  and the vision-check this grammar is kept coherent by.
+- [[Song-Anatomy]] — the songbook/liner under `song/` where this design memory
+  belongs; the destination of the pending migration.
+- [[Self-Ricing]] — the songbook write-back loop (the "self" in self-ricing).
+- [[Notes]] — the `aoide.drachma` seam every surface here reads its roles from.
+- [[Gadget-Dock]] · [[Terminal-Commander]] — the surfaces that wear the grammar.
