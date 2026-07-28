@@ -5,15 +5,19 @@ aliases: [aoide-notes, notes package, note engine]
 tags: [aoide, notes, theming, base16, node]
 ---
 
-# drachma (the note engine)
+# drachma (the design tokens — and the engine that mints them)
 
-`drachma` — the package formerly named `aoide-notes` — is the live-side note
-engine: the standalone Node package that validates, resolves, and emits Aoide's
-[[Notes]]. The token engine takes the Greek coin's name (notes are the values;
-drachma mints, validates, and emits them — see [[Lexicon]]). It is the concrete
-implementation of the note package described in [[Notes]]: it wraps Style
-Dictionary rather than reimplementing a resolver, and it owns the authoritative
-v0 schema validator that `aoide rice lint` delegates to.
+`drachma` is Aoide's **design-token layer** — one name for the whole thing.
+"Notes" and "drachma" are **not** separate (a values-vs-engine split we once
+drew and have since collapsed, per khoa): the tokens ARE drachma, named for the
+Greek coin, and the same word names the standalone Node package that validates,
+resolves, and emits them. A song authors `aoide.drachma.*`; facets read
+`aoide.drachma` and nothing else; the runtime seam is `stage/drachma.json`.
+
+As the package (formerly `aoide-notes`) it is the concrete implementation of
+the token schema described in [[Notes]]: it wraps Style Dictionary rather than
+reimplementing a resolver, and it owns the authoritative v0 schema validator
+that `aoide rice lint` delegates to. See [[Lexicon]] for the coin naming.
 
 *Grounded in the repo at commit f3ceadf (renamed since). It lives at
 `pkgs/drachma/`, packages as `buildNpmPackage` (pname `aoide-drachma`) with a
@@ -29,15 +33,15 @@ wraps a `drachma` launcher on PATH, pinning the exact `nodejs` so
 The `drachma` binary (`src/cli.js`) has three subcommands, all reading a v0
 note container (a W3C design-tokens JSON file):
 
-- **`lint <notes.json>`** — validate against the authoritative v0 schema
+- **`lint <drachma.json>`** — validate against the authoritative v0 schema
   (`src/schema.js`). The nix option type in `modules/nucleus/options.nix` is a
   permissive gate; *this* is the real validator. It enforces the closed palette
   tier (`bg/fg/accent/urgent`, unknown keys rejected) and the optional component
   tier (`bar.*` / `notif.*` / `window.*`, each field `nullOr` hex), accepting
   both bare hex strings and W3C `{ $value, $type }` note objects, and treating
   `{group.name}` alias references as valid pending resolution.
-- **`resolve <notes.json>`** — print the fully-resolved, flattened note set.
-- **`emit <target> <notes.json>`** — run one of the three emitters.
+- **`resolve <drachma.json>`** — print the fully-resolved, flattened note set.
+- **`emit <target> <drachma.json>`** — run one of the three emitters.
 
 Exit codes align with the CLI convention: `0` ok · `2` usage · `1` error.
 
@@ -46,7 +50,7 @@ Exit codes align with the CLI convention: `0` ok · `2` usage · `1` error.
 All three consume the *same* fully-resolved note set (from `src/resolve.js`), so
 the three live targets can never disagree:
 
-1. **`stage`** → `song/stage/notes.json` for [[Quickshell]]. With `--out PATH` it
+1. **`stage`** → `song/stage/drachma.json` for [[Quickshell]]. With `--out PATH` it
    writes atomically (write to a temp file in the same dir, then rename over the
    target) so a Quickshell hot-reload never reads a torn file (the `CONTRACTS.md`
    §4 discipline). Component fallbacks are already applied, so the stage file

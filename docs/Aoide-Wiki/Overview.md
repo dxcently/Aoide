@@ -38,7 +38,7 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 ## Entities
 
 - [[aoide-cli]] — the `aoide` binary: the CLI trunk (27-command tree incl. the `graph` group), `schema --json` as single source of truth, the stdio MCP façade, structured exit codes, and the `aoided` daemon binary
-- [[drachma]] — the note engine: the Node package (wrapping Style Dictionary) that lints/resolves/emits notes — stage/notes.json, hyprctl, and terminal OSC
+- [[drachma]] — the note engine: the Node package (wrapping Style Dictionary) that lints/resolves/emits notes — stage/drachma.json, hyprctl, and terminal OSC
 - [[aoided]] — the orchestrator daemon: neutral event stream, policy, lint, audit log, and the gated rebuild pipeline
 - [[shellbridge]] — the daemon-to-desktop bridge: atomic JSON state files out, unix-socket commands in, Hyprland IPC consumed
 - [[Quickshell]] — the QML shell runtime (nine surfaces): bar, notification daemon, gadget dock, launcher, OSD, lockscreen, greeter, wallpaper layer, session-graph overlay

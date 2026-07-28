@@ -17,7 +17,7 @@ type: index
 - [[Fork-and-Run]] — answers: how do you install Aoide (fork, clone, `aoide onboard`) and how does the shared-history model enable upstream updates and user contributions
 - [[Self-Ricing]] — answers: what is the rice lifecycle (gen → lint → preview → adopt), what is the songbook write-back loop, how are rices versioned, how does `aoide.song` select a performance per host, and what is the transpose vs replay distinction
 - [[Song-Vocabulary]] — answers: what does each "song" term map to in the performed half (key, melody, arrangement, instruments, liner, songbook, cover, chimes, stage, rehearsal, recording, venue, replay) and how replay makes a committed song host-agnostic
-- [[Notes]] — answers: what is the note schema, how does the two-fan-out work (stage/notes.json for rehearsal, Stylix for recording), and what are the schema tiers
+- [[Notes]] — answers: what is the drachma schema, how does the two-fan-out work (stage/drachma.json for rehearsal, Stylix for recording), and what are the schema tiers
 - [[Agent-Interface]] — answers: what commands does the `aoide` CLI expose, how does MCP relate to the CLI, what are the guide tiers, and what ergonomics apply to all commands
 - [[Desktop-Architecture]] — answers: how do aoided, shellbridge, Quickshell, and the compositor compose into the live desktop and what is each component's responsibility
 - [[Content-Pipeline]] — answers: what are the pipeline stages (discover → propose → approve → ingest → lint → query), what is the approve gate, and how does Mneme integrate

@@ -12,7 +12,7 @@ land with a migration note in `song/songbook/update-playbook.md`.
 ## 1. Note schema — **v0**
 
 The single seam between the frozen nix layer and the live desktop. Facets read
-`aoide.notes` and **nothing else**. Declared in `modules/nucleus/options.nix`.
+`aoide.drachma` and **nothing else**. Declared in `modules/nucleus/options.nix`.
 
 Notes are Aoide's design-token layer; the container format remains the W3C
 design-tokens format. v0 lives inside the (future) W3C design-tokens container;
@@ -59,7 +59,7 @@ stylix facet bakes it as the base-context image; `null` bakes the solid-colour
 fallback derived from `palette.bg`.
 
 **Migration to v1:** the update playbook migrates `song/repertoire/*/rice.nix`
-and `notes.json` from v0 to v1 when the design-system workstream lands v1.
+and `drachma.json` from v0 to v1 when the design-system workstream lands v1.
 
 ---
 
@@ -92,7 +92,7 @@ Rules:
 - Subfolders under `modules/dendrites/` are grouping only; the walker registers
   every file regardless.
 
-Facets (`modules/facets/`) are the same shape but MAY read `aoide.notes` and
+Facets (`modules/facets/`) are the same shape but MAY read `aoide.drachma` and
 MAY declare `aoide.surfaces.<name>.owner` — they read no other module.
 
 ### Repo shape (the root is closed)
@@ -195,10 +195,10 @@ independently. Precedence: `$AOIDE_STAGE_DIR` when set to an **absolute** path
 never resolved against an arbitrary cwd). On the default layout both agree; the
 override is what lets the unit — or a test/smoke run — relocate the stage tree.
 
-### `song/stage/notes.json` — **v0**
+### `song/stage/drachma.json` — **v0**
 
 The resolved, flattened note values for Quickshell (QML reads this; hot-reload
-at rehearsal). Derived from the same `aoide.notes` as the baked `rice.nix`
+at rehearsal). Derived from the same `aoide.drachma` as the baked `rice.nix`
 fan-out, so preview and adopted state cannot diverge.
 
 ```json
@@ -302,7 +302,7 @@ Each song's `rice.nix` **self-gates**, exactly like a dendrite:
 { lib, config, ... }:
 {
   config = lib.mkIf (config.aoide.song == "<name>") {
-    aoide.notes.palette = { bg = "…"; fg = "…"; accent = "…"; urgent = "…"; };
+    aoide.drachma.palette = { bg = "…"; fg = "…"; accent = "…"; urgent = "…"; };
     # component tier (bar/notif/window) — null falls back to palette
   };
 }
@@ -310,7 +310,7 @@ Each song's `rice.nix` **self-gates**, exactly like a dendrite:
 
 ### Rules (host-agnostic discipline)
 
-- A song sets **ONLY `aoide.notes`** (palette + component tiers) and — later —
+- A song sets **ONLY `aoide.drachma`** (palette + component tiers) and — later —
   cover/chime references inside `song/`.
 - A song **NEVER** sets host options (monitors, hardware, services) and
   **NEVER** enables facets or dendrites. Those are the venue's decision.
@@ -330,12 +330,12 @@ the check.
 
 `checks.song-shape` structurally asserts every walked repertoire path is a
 `rice.nix` (a song's module entry) — catching a stray `.nix` that could set
-arbitrary host options. The **full** "only defines `aoide.notes`" invariant is
+arbitrary host options. The **full** "only defines `aoide.drachma`" invariant is
 a documented convention here (isolated per-module option-diffing is
 disproportionate for v0; see the `TODO(song-shape v1)` in `lib/checks.nix`).
 
 **Migration to v1:** the update playbook migrates `song/repertoire/*/rice.nix`
-and `notes.json` from v0 to v1 with the note schema (§1).
+and `drachma.json` from v0 to v1 with the drachma schema (§1).
 
 ---
 
@@ -343,7 +343,7 @@ and `notes.json` from v0 to v1 with the note schema (§1).
 
 - A contract version is a single integer, tracked in this file's section
   heading (`— v0`).
-- The note schema version is also surfaced in `stage/notes.json`
+- The drachma schema version is also surfaced in `stage/drachma.json`
   (`schemaVersion`) and in `aoide schema --json` (`schemaVersion`).
 - Bumping any version requires: (1) update this file, (2) add a playbook
   migration, (3) update the corresponding `checks` so the new contract is

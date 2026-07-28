@@ -1,6 +1,6 @@
-// NoteState.qml — shared note state, hot-reloaded from stage/notes.json.
+// DrachmaState.qml — shared note state, hot-reloaded from stage/drachma.json.
 //
-// Singleton: every surface widget binds to properties here. When notes.json
+// Singleton: every surface widget binds to properties here. When drachma.json
 // is atomically replaced (write-temp-then-rename per CONTRACTS.md §4), the
 // FileView fires a change signal and all bindings update in one pass — the
 // full arrangement hot-reloads without a QML restart.
@@ -17,10 +17,10 @@ QtObject {
     id: root
 
     // ── Note file path ─────────────────────────────────────────────────────
-    // Stage path: ~/Aoide/song/stage/notes.json (gitignored runtime; the nix
+    // Stage path: ~/Aoide/song/stage/drachma.json (gitignored runtime; the nix
     // build never depends on this path — checks.no-song-read enforces that).
     readonly property string notePath:
-        Quickshell.env("HOME") + "/Aoide/song/stage/notes.json"
+        Quickshell.env("HOME") + "/Aoide/song/stage/drachma.json"
 
     // ── Parsed note object ─────────────────────────────────────────────────
     property var raw: ({
@@ -86,7 +86,7 @@ QtObject {
                 var parsed = JSON.parse(noteFile.text())
                 root.raw = parsed
             } catch (e) {
-                console.warn("[aoide/notes] Failed to parse notes.json:", e)
+                console.warn("[aoide/notes] Failed to parse drachma.json:", e)
             }
         }
         Component.onCompleted: noteFile.reload()

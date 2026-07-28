@@ -101,7 +101,7 @@ user's action ([[Rebuild-Gate]], [[Governance]]).
   (`rice.gen`), args/flags become the `inputSchema`, and `tools/call` dispatches
   back into the same handlers the CLI uses.
 - **`stageNotesVersion`** is a top-level field of the schema document (v0),
-  pinning the `song/stage/notes.json` format alongside the command tree so an
+  pinning the `song/stage/drachma.json` format alongside the command tree so an
   agent reads one version for the whole contract.
 - **Single audit log, both doors.** Every dispatch — CLI or MCP — appends a
   JSON-lines record to the one audit log (`aoide.auditLog`), tagged with which

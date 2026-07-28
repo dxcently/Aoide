@@ -121,7 +121,7 @@ switch verified the same assertions on real hardware.)
 
 ## The option contract (`modules/nucleus/options.nix`)
 
-The versioned seam every other module builds against (note schema v0,
+The versioned seam every other module builds against (drachma schema v0,
 `CONTRACTS.md §1`). It declares options and eval-clean defaults only — it wires
 no behaviour, so an empty config evaluates. The surface:
 
@@ -130,7 +130,7 @@ no behaviour, so an empty config evaluates. The surface:
 - `aoide.song` (str, default `"default"`) — which song this host performs.
   Set once in `hosts/<host>/default.nix`; each song's `rice.nix` guards itself
   with `lib.mkIf (config.aoide.song == "<name>")`. See [[Song-Vocabulary#Replay — any song, any host]].
-- `aoide.notes` — the v0 note schema: closed `palette.{bg,fg,accent,urgent}`
+- `aoide.drachma` — the v0 drachma schema: closed `palette.{bg,fg,accent,urgent}`
   (base16, permissive hex type) + optional component tiers `bar.*` / `notif.*` /
   `window.*` (each `nullOr` hex, `null` → palette). This is the **only** thing
   facets read.
@@ -206,7 +206,7 @@ Live-side state, all gitignored, none load-bearing for the build:
 - **Socket:** `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` — the one outbound
   channel from QML; adapters and widgets bind exactly this path, never compute
   it.
-- **Stage files** under `song/stage/`: `notes.json` (resolved note colours,
+- **Stage files** under `song/stage/`: `drachma.json` (resolved note colours,
   written by [[drachma]]), `sessions.json` (agent session roster, written by
   [[shellbridge]]; records may carry an additive optional `parentSessionId`),
   `hooks.json` (live Claude Code hook phases), `projects.json` (the project
@@ -223,7 +223,7 @@ Live-side state, all gitignored, none load-bearing for the build:
 
 ## Repo-file roles
 
-- **`CONTRACTS.md`** — the five versioned contracts: note schema v0, dendrite
+- **`CONTRACTS.md`** — the five versioned contracts: drachma schema v0, dendrite
   shape v0, `aoide schema --json` output v0, stage-file formats v0, song shape
   v0 (§5). The `checks` fail a merge that breaks one; bumping a version needs a
   playbook migration.
@@ -281,7 +281,7 @@ port the prior rig's substance into Aoide shape — twelve new dendrites (bash
 with the `ad*` nh alias family replacing `dx*`, nh, git, kitty, neovim-via-nvf,
 starship, mcfly, btop, yazi, fastfetch, devtools, fonts), the `nvf` flake input
 threaded to home-manager via `extraSpecialArgs`, the cover-art note
-(`aoide.notes.wallpaper` → shipped `song/covers/hero.webp`, CONTRACTS §1
+(`aoide.drachma.wallpaper` → shipped `song/covers/hero.webp`, CONTRACTS §1
 extended), Lekton Nerd Font Mono as the stylix face, and the [[Gadget-Dock]]
 waybar-homage wave (bar rework + NowPlaying/Power/Calendar gadgets). Baseline
 dendrites default on in `hosts/common` via `mkDefault`; `allowUnfree` is

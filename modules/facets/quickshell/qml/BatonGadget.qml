@@ -4,7 +4,7 @@
 // SESSIONS mini-view under an echo of baton's tab strip, with a one-line STATUS
 // footer. It reads the SAME stage documents the TUI reads —
 // song/stage/sessions.json (the roster) and song/stage/graph.json (for the
-// project count) — via the NoteState FileView idiom (atomic write-temp-rename →
+// project count) — via the DrachmaState FileView idiom (atomic write-temp-rename →
 // onTextChanged → recompute; FileView.text is a METHOD in quickshell 0.3.0).
 //
 // The state vocabulary is lifted VERBATIM from baton's theme.rs::state_glyph /
@@ -254,7 +254,7 @@ Item {
         onClicked: Quickshell.execDetached(["kitty", "-e", "aoide", "baton"])
     }
 
-    // ── sessions.json watcher (NoteState pattern) ─────────────────────────
+    // ── sessions.json watcher (DrachmaState pattern) ─────────────────────────
     FileView {
         id: sessionsFile
         path: root.sessionsPath

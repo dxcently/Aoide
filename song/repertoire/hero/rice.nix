@@ -5,7 +5,7 @@
 # rose-cream cloudlight for text, dusk rose for the accent, sunset ember for
 # urgent. The song that matches its wallpaper.
 #
-# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.notes.
+# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.drachma.
 # All note values are literal nix expressions (no song/ runtime reads).
 { lib, config, ... }:
 {
@@ -13,7 +13,7 @@
   config = lib.mkIf (config.aoide.song == "hero") {
 
     # ── Palette tier (base16 mapping — the cover's dusk) ───────────────────
-    aoide.notes.palette = {
+    aoide.drachma.palette = {
       bg = "#1a1322"; # deep dusk plum        (base00)
       fg = "#ecdfda"; # pale rose-cream light (base05)
       accent = "#d98a96"; # dusk rose          (base0D)
@@ -30,7 +30,7 @@
     # the Pantheon reference stills (~/Aoide-Wiki/references/pantheon/):
     # optic-nerve neon green, wireframe cyan, hologram periwinkle, violet
     # brain-glow, magenta-pink glitch. Slots follow the base16 standard.
-    aoide.notes.base16 = {
+    aoide.drachma.base16 = {
       base00 = "#0a0a0d"; # near-black field
       base01 = "#141419"; # lighter bg (status)
       base02 = "#26262e"; # selection
@@ -51,12 +51,12 @@
 
     # ── Component tier (v0) ────────────────────────────────────────────────
     # null → fall back to palette; the key does the work (moonlight's idiom).
-    aoide.notes.bar = {
+    aoide.drachma.bar = {
       bg = null;
       fg = null;
       accent = null;
     };
-    aoide.notes.notif = {
+    aoide.drachma.notif = {
       bg = null;
       fg = null;
       urgent = null;
@@ -65,7 +65,7 @@
     # base0C wireCyan — the same wireframe rule the bar's panes wear — and the
     # inactive frame recedes to base01, the dark ground. The dxflake BW pair
     # retires; the window key stays a component-tier note the song owns.
-    aoide.notes.window = {
+    aoide.drachma.window = {
       border = "#5fd8e8"; # base0C wireCyan — active
       borderInactive = "#141419"; # base01 dark ground — inactive
     };
@@ -73,6 +73,6 @@
     # ── Cover-art note ─────────────────────────────────────────────────────
     # The wallpaper this song IS the palette of. Committed score content
     # (song/covers/ — never a runtime infix), same as the default rice.
-    aoide.notes.wallpaper = ../../covers/hero.webp;
+    aoide.drachma.wallpaper = ../../covers/hero.webp;
   };
 }

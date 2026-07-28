@@ -13,7 +13,7 @@
 // on Aero-glass — a semi-transparent paletteBg panel that reads as frosted
 // glass because the compositor facet enables Hyprland blur (blur size 8,
 // passes 3; see modules/facets/compositor + liner intent). ALL colors come
-// from notes (paletteBg/Fg/Accent/Urgent + bar/notif tiers as NoteState
+// from notes (paletteBg/Fg/Accent/Urgent + bar/notif tiers as DrachmaState
 // exposes them); the ASCII chrome is monospace. Zero hardcoded hex.
 //
 // ── Reveal / hide state machine ─────────────────────────────────────────────

@@ -24,14 +24,14 @@
 {
   # Only apply when this host performs song "default". The standard is the
   # guaranteed baseline — a host that names no song performs it. A song sets
-  # ONLY aoide.notes; never host options or facet/dendrite enables.
+  # ONLY aoide.drachma; never host options or facet/dendrite enables.
   config = lib.mkIf (config.aoide.song == "default") {
 
     # ── Palette tier (base16 Catppuccin Mocha) ─────────────────────────────
     # base00 → bg, base05 → fg, base0D → accent, base08 → urgent.
     # These are the defaults declared in options.nix; setting them here makes
     # the intent explicit and gives `rice gen` a concrete starting point.
-    aoide.notes.palette = {
+    aoide.drachma.palette = {
       bg = "#1e1e2e"; # Catppuccin Mocha base (base00)
       fg = "#cdd6f4"; # Catppuccin Mocha text (base05)
       accent = "#89b4fa"; # Catppuccin Mocha blue (base0D)
@@ -42,17 +42,17 @@
     # null means "fall back to palette" — the facets apply the fallback.
     # The default rice uses palette values everywhere (no component overrides),
     # which gives the cleanest baseline for `rice gen` to start from.
-    aoide.notes.bar = {
+    aoide.drachma.bar = {
       bg = null;
       fg = null;
       accent = null;
     };
-    aoide.notes.notif = {
+    aoide.drachma.notif = {
       bg = null;
       fg = null;
       urgent = null;
     };
-    aoide.notes.window = {
+    aoide.drachma.window = {
       border = null;
       borderInactive = null;
     };
@@ -67,6 +67,6 @@
     # song content, i.e. versioned score, legitimately read at eval: checks.nix
     # noSongRead bans only the song/ RUNTIME infixes (stage/ · backstage/ ·
     # auditions/ · catalog/ · index/), never song/covers/.
-    aoide.notes.wallpaper = ../../../song/covers/hero.webp;
+    aoide.drachma.wallpaper = ../../../song/covers/hero.webp;
   };
 }

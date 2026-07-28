@@ -5,7 +5,7 @@
 # cream/parchment for the base, deep umber ink for text, dusty cornflower for
 # the accent, muted rose for urgent. The song that matches its wallpaper.
 #
-# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.notes.
+# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.drachma.
 # All note values are literal nix expressions (no song/ runtime reads).
 { lib, config, ... }:
 {
@@ -13,7 +13,7 @@
   config = lib.mkIf (config.aoide.song == "sonata") {
 
     # ── Palette tier (base16 mapping — the painting's warm cream light) ────
-    aoide.notes.palette = {
+    aoide.drachma.palette = {
       bg = "#f4ecdc"; # cream parchment       (base00)
       fg = "#423420"; # deep umber ink        (base05)
       accent = "#4f74a0"; # dusty cornflower   (base0D)
@@ -31,7 +31,7 @@
     # painting's terracotta vault, marble, azalea, and sage: muted rose,
     # burnt terracotta, ochre gold, sage green, teal, cornflower blue,
     # dusty plum, and warm brown. Slots follow the base16 standard.
-    aoide.notes.base16 = {
+    aoide.drachma.base16 = {
       base00 = "#f4ecdc"; # lightest bg — cream parchment
       base01 = "#eaddc6"; # lighter bg (status)
       base02 = "#ddcaa6"; # selection
@@ -52,12 +52,12 @@
 
     # ── Component tier (v0) ────────────────────────────────────────────────
     # null → fall back to palette; the key does the work (moonlight's idiom).
-    aoide.notes.bar = {
+    aoide.drachma.bar = {
       bg = null;
       fg = null;
       accent = null;
     };
-    aoide.notes.notif = {
+    aoide.drachma.notif = {
       bg = null;
       fg = null;
       urgent = null;
@@ -66,7 +66,7 @@
     # the same wireframe rule the bar's panes wear — and the inactive frame
     # recedes to base01, the light ground. The window key stays a
     # component-tier note the song owns.
-    aoide.notes.window = {
+    aoide.drachma.window = {
       border = "#40897a"; # base0C teal — active
       borderInactive = "#8a6f50"; # base04 dark taupe — inactive (the darker frame)
     };
@@ -76,6 +76,6 @@
     # academic painting (terracotta vault, marble, azalea, sage). The base16
     # palette above is keyed from this painting's LIGHT warm register, for
     # colour coherence with the desktop's Stylix light polarity.
-    aoide.notes.wallpaper = ../../covers/Alma-Tadema_Unconscious_Rivals.jpg;
+    aoide.drachma.wallpaper = ../../covers/Alma-Tadema_Unconscious_Rivals.jpg;
   };
 }

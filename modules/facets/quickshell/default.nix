@@ -5,7 +5,7 @@
 # wallpaper, agentWidgets, sessionGraph.
 #
 # Reading discipline (CONTRACTS.md §1):
-#   - Reads ONLY aoide.notes (palette + component tiers) and aoide.surfaces.
+#   - Reads ONLY aoide.drachma (palette + component tiers) and aoide.surfaces.
 #   - Component-tier fallback (null → palette) applied locally, never pushed
 #     back into the option system.
 #   - NEVER reads song/ runtime paths at build time (checks.no-song-read
@@ -24,7 +24,7 @@
 }:
 let
   cfg = config.aoide.facets.quickshell;
-  t = config.aoide.notes;
+  t = config.aoide.drachma;
 
   # ── Component-tier fallback helpers ────────────────────────────────────────
   # Each is: use the component override when set, else fall back to the palette.
@@ -41,7 +41,7 @@ let
   # ── QML root — the full skeleton config installed into ~/Aoide/qml/ ────────
   # Each surface widget is a stub that reads its colors from notes. The config
   # directory is placed in the user's Aoide tree so Quickshell picks it up at
-  # session start. At runtime Quickshell hot-reloads from song/stage/notes.json
+  # session start. At runtime Quickshell hot-reloads from song/stage/drachma.json
   # via a FileView; the build only installs the structural QML, not the note
   # values themselves.
   quickshellConfig = pkgs.runCommand "aoide-quickshell-config" { } ''
@@ -130,8 +130,8 @@ in
           # AoideWallpaper always has the right cover on boot/rebuild — the live
           # stage/cover.json overrides it, but nothing re-seeded it from the
           # song before, so a rebuild lost the background. Null → no env.
-          Environment = lib.optionals (config.aoide.notes.wallpaper != null) [
-            "AOIDE_WALLPAPER=${config.aoide.notes.wallpaper}"
+          Environment = lib.optionals (config.aoide.drachma.wallpaper != null) [
+            "AOIDE_WALLPAPER=${config.aoide.drachma.wallpaper}"
           ];
           Restart = "on-failure";
           RestartSec = 3;

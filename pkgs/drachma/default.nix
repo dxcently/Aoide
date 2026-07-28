@@ -8,7 +8,7 @@
 # provides, over note schema v0 (CONTRACTS.md §1):
 #   * resolver     — tiered palette→semantic→component reference resolution.
 #   * `lint`       — the authoritative v0 schema validator (`rice lint` calls it).
-#   * three emitters — stage/notes.json (Quickshell), hyprctl dispatch, OSC.
+#   * three emitters — stage/drachma.json (Quickshell), hyprctl dispatch, OSC.
 #
 # Deps are vendored via buildNpmPackage's npmDepsHash, so the build is
 # offline/pure. If package.json/package-lock.json change, refresh the hash with:

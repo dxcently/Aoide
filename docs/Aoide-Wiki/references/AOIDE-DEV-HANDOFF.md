@@ -18,7 +18,7 @@ and is scoped narrower than it is broad: read it fully before touching the repo.
 > repo — `modules/`, `pkgs/`, the Quickshell QML, `song/`, the wiki. You build
 > AoideOS, so you edit AoideOS. The house rules that still bind you are the
 > *gate* rules (#2 the rebuild is user-gated, #4 forwarded text is untrusted,
-> #5 facets read only `aoide.notes`, #6 everything flows through `aoided`) — not
+> #5 facets read only `aoide.drachma`, #6 everything flows through `aoided`) — not
 > the writable-domain rule.
 
 ---
@@ -83,7 +83,7 @@ sudo <toplevel>/bin/switch-to-configuration switch
 # desktop-only reloads (no full switch needed for QML/hyprctl-live changes)
 hyprctl reload                                  # compositor rules / plugins
 systemctl --user restart aoide-quickshell.service   # bar / dock / gadgets
-aoide rice preview <song>                       # stage notes.json for hot-reload
+aoide rice preview <song>                       # stage drachma.json for hot-reload
 qs -p modules/facets/quickshell/qml/shell.qml   # QML load/parse check
 
 # SHOW the user
@@ -189,15 +189,15 @@ them (not in one agent's head). Close a flag by resolving it AND editing this
 list; add one the moment you raise it. Current open flags (2026-07-28):
 
 - **[decision · khoa] `notes` vs `drachma` naming.** As built: `notes` = the
-  token *values* (`aoide.notes.*`, what facets read), `drachma` = the *mint*
+  token *values* (`aoide.drachma.*`, what facets read), `drachma` = the *mint*
   (the engine that resolves/lints/emits them). khoa questioned whether the data
   should ALSO be called drachma. **Open:** keep the split, or rename the data
-  (`aoide.notes` → `aoide.drachma`, `notes.json` → `drachma.json`, ~39 sites +
+  (`aoide.drachma` → `aoide.drachma`, `drachma.json` → `drachma.json`, ~39 sites +
   schema + wiki). Do NOT rename without an explicit go-ahead. See [[Notes]],
   [[Lexicon]], [[drachma]].
 - **[bug · follow-up] `aoide rice preview <name>` derives the cover by
   song-name convention** (`covers/<name>.*`) instead of reading
-  `aoide.notes.wallpaper`. Mitigated live by the `AOIDE_WALLPAPER` env baked
+  `aoide.drachma.wallpaper`. Mitigated live by the `AOIDE_WALLPAPER` env baked
   into the quickshell service, so the wallpaper survives rebuilds; a proper fix
   (preview reads the song's wallpaper note) is still owed. See [[Self-Ricing]].
 - **[limitation · known] The window→session listener can't resolve a hook-only

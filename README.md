@@ -94,7 +94,7 @@ The repo is a **snowflake**: everything lives under `modules/`, walked and self-
 ├── modules/
 │   ├── nucleus/    core: aoided daemon, shellbridge, CLI packaging, options, policy
 │   ├── dendrites/  opt-in features — one tree, shipped + personal branches
-│   ├── facets/     render surfaces (read ONLY aoide.notes): quickshell · compositor · stylix
+│   ├── facets/     render surfaces (read ONLY aoide.drachma): quickshell · compositor · stylix
 │   └── rime/       rice engine + shipped default rice(s)
 ├── hosts/
 │   ├── common/     cross-machine baseline (which dendrites default ON)
@@ -148,7 +148,7 @@ The five-line recipe (from `modules/dendrites/_example.nix`, dendrite shape v0 �
 }
 ```
 
-Then enable it with one host line. Growth is additive — new dendrites are new files, so upstream merges stay conflict-free. Rules: guard on `aoide.<name>.enable`; a dendrite never reads another module; facets are the same shape but MAY read `aoide.notes`.
+Then enable it with one host line. Growth is additive — new dendrites are new files, so upstream merges stay conflict-free. Rules: guard on `aoide.<name>.enable`; a dendrite never reads another module; facets are the same shape but MAY read `aoide.drachma`.
 
 **Where things belong** (the walker discovers all four; subfolders are grouping only):
 
@@ -156,7 +156,7 @@ Then enable it with one host line. Growth is additive — new dendrites are new 
 |---|---|---|
 | `modules/nucleus/` | daemon, CLI packaging, the option contract, policy | upstream merge only |
 | `modules/dendrites/` | opt-in features (yours + shipped) | additive — new files freely |
-| `modules/facets/` | render surfaces (read only `aoide.notes`) | upstream merge only |
+| `modules/facets/` | render surfaces (read only `aoide.drachma`) | upstream merge only |
 | `modules/rime/` | rice engine + shipped default rices | upstream merge only |
 | `song/repertoire/` | committed songs (the agent's writable domain) | agent, gated at rebuild |
 
@@ -270,7 +270,7 @@ It injects `<text>` into that session's stdin (`--submit` appends Enter). This i
 
 ### `drachma` — the note engine
 
-The Node package (`pkgs/drachma`, wrapping Style Dictionary — the token engine takes the Greek coin's name) that owns the authoritative note pipeline: **lint** (validate a rice against the note schema — `rice lint` delegates here), **resolve** (apply component→palette fallbacks), and **emit** (write the resolved `song/stage/notes.json` for Quickshell, plus hyprctl and terminal-OSC targets). Notes are the single immutable seam between the frozen nix layer and the live desktop — facets read `aoide.notes` and nothing else.
+The Node package (`pkgs/drachma`, wrapping Style Dictionary — the token engine takes the Greek coin's name) that owns the authoritative note pipeline: **lint** (validate a rice against the note schema — `rice lint` delegates here), **resolve** (apply component→palette fallbacks), and **emit** (write the resolved `song/stage/drachma.json` for Quickshell, plus hyprctl and terminal-OSC targets). Notes are the single immutable seam between the frozen nix layer and the live desktop — facets read `aoide.drachma` and nothing else.
 
 ### `aoided` + `shellbridge` — the runtime services
 
@@ -305,7 +305,7 @@ Opt-in: the **`aoide.rebuild`** capability (off by default) grants a dedicated n
 | `aoide schema` | real | Emit the versioned machine-readable schema of every command + state file. |
 | `aoide rice gen` | stub | Generate a rice from a prompt or wallpaper (reads `songbook/` first). |
 | `aoide rice lint` | real | Validate a rice against the note schema (delegates to `drachma`). |
-| `aoide rice preview` | stub | Rehearse a rice live (`stage/notes.json` hot-reload); nothing committed. |
+| `aoide rice preview` | stub | Rehearse a rice live (`stage/drachma.json` hot-reload); nothing committed. |
 | `aoide rice adopt` | stub · gated | Commit a previewed rice and propose the gated rebuild. |
 | `aoide rice transpose` | stub | Replay a song in another key (palette) from `song/keys/`. |
 | `aoide content register` | stub | Register a content source folder (points in place; never copies). |
@@ -363,7 +363,7 @@ Window management (ported from dxflake): `SUPER+RETURN` terminal (kitty) · `SUP
 |---|---|---|
 | Quickshell | `aoide.facets.quickshell.enable` | The QML shell surfaces (bar, dock, launcher, OSD, lock, greeter, wallpaper, graph). |
 | Compositor | `aoide.facets.compositor.enable` | The Hyprland compositor + all hyprctl-level keybind wiring. |
-| Stylix | `aoide.facets.stylix.enable` | Base16 baked-theme fan-out from `aoide.notes` to every nix-manageable target. |
+| Stylix | `aoide.facets.stylix.enable` | Base16 baked-theme fan-out from `aoide.drachma` to every nix-manageable target. |
 
 ### Dendrites (13) — opt-in features
 

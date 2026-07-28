@@ -18,7 +18,7 @@ Aoide names its nix layer after snowflake morphology. The metaphor is not decora
 | Render surfaces that read only notes | **facets** | `modules/facets/` — quickshell, stylix, compositor |
 | Deposited aesthetic layer | **rime** | `modules/rime/` — rice engine + shipped default rices |
 
-All four layers live under `modules/` in `~/Aoide` (the fork) — the whole snowflake is one walked module tree, keeping the repo surface to the subsystem (`modules/`) plus standard furniture, the same grouping [[dxflake]] uses. Facets are the only nix that renders appearance, and each reads only the `aoide.notes` option — no module reads another module.
+All four layers live under `modules/` in `~/Aoide` (the fork) — the whole snowflake is one walked module tree, keeping the repo surface to the subsystem (`modules/`) plus standard furniture, the same grouping [[dxflake]] uses. Facets are the only nix that renders appearance, and each reads only the `aoide.drachma` option — no module reads another module.
 
 ## Mutation Policy
 

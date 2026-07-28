@@ -2,11 +2,11 @@
 // src/cli.js — the `drachma` binary (the Aoide note engine).
 //
 // Subcommands:
-//   lint    <notes.json>            validate against v0 schema (rice lint uses this)
-//   resolve <notes.json>            print the fully-resolved flat note set (JSON)
-//   emit stage   <notes.json> [--out PATH]   write/print stage/notes.json (atomic)
-//   emit hyprctl <notes.json>       print hyprctl dispatch commands
-//   emit osc     <notes.json>       print terminal OSC colour sequences
+//   lint    <drachma.json>            validate against v0 schema (rice lint uses this)
+//   resolve <drachma.json>            print the fully-resolved flat note set (JSON)
+//   emit stage   <drachma.json> [--out PATH]   write/print stage/drachma.json (atomic)
+//   emit hyprctl <drachma.json>       print hyprctl dispatch commands
+//   emit osc     <drachma.json>       print terminal OSC colour sequences
 //
 // Exit codes (aligned with the Aoide CLI convention, CONTRACTS.md §3):
 //   0 ok · 2 usage · 1 error (validation failure / bad input)
@@ -32,7 +32,7 @@ function fail(code, msg) {
 }
 
 function readNotes(file) {
-  if (!file) fail(EXIT.USAGE, "missing <notes.json> argument");
+  if (!file) fail(EXIT.USAGE, "missing <drachma.json> argument");
   let text;
   try {
     text = fs.readFileSync(file, "utf8");
@@ -140,11 +140,11 @@ function usage() {
       "drachma — Aoide note engine (v0)",
       "",
       "Usage:",
-      "  drachma lint    <notes.json>",
-      "  drachma resolve <notes.json>",
-      "  drachma emit stage   <notes.json> [--out PATH]",
-      "  drachma emit hyprctl <notes.json>",
-      "  drachma emit osc     <notes.json>",
+      "  drachma lint    <drachma.json>",
+      "  drachma resolve <drachma.json>",
+      "  drachma emit stage   <drachma.json> [--out PATH]",
+      "  drachma emit hyprctl <drachma.json>",
+      "  drachma emit osc     <drachma.json>",
       "",
     ].join("\n")
   );

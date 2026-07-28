@@ -19,7 +19,7 @@ prompt, a mood) is a *different job* from **application** (fanning that
 scheme out to every surface that reads it). Conflating them is how a rice
 job ends up hard-coding colours in six different files that drift apart.
 
-- **Creation** happens once, in the song's `rice.nix`, as `aoide.notes.base16`
+- **Creation** happens once, in the song's `rice.nix`, as `aoide.drachma.base16`
   — sixteen literal hex slots (base00–base0F) plus the small `palette`
   convenience block (bg/fg/accent/urgent/hot). The hero song
   (`song/repertoire/hero/rice.nix`) is the worked example: every slot is
@@ -33,10 +33,10 @@ job ends up hard-coding colours in six different files that drift apart.
 - **Application** is [[Stylix]]'s job, and only Stylix's: one `base16Scheme`
   feeds every nix-manageable target (terminal, GTK/Qt, icons, cursor,
   editors, browser, boot) automatically. On the Quickshell side, the same
-  notes fan out through `stage/notes.json` — one runtime read, every QML
+  notes fan out through `stage/drachma.json` — one runtime read, every QML
   surface. **No other file should ever hard-code a colour that could instead
   be read from notes.** A dendrite or facet that wants a colour reads
-  `aoide.notes.*`; it never writes its own hex.
+  `aoide.drachma.*`; it never writes its own hex.
 
 The point of the split: creation is where taste and vision-checking live
 (this section, below); application is mechanical and should never need
@@ -82,7 +82,7 @@ Two things to look at, side by side, on the live desktop:
    notification/OSD cards, workspace highlight) sets `radius: 0`. No surface
    rounds; a stray rounded corner reads as a surface that missed the grammar.
 2. **Widget colours match the bar.** Every gadget, popout, and dock surface
-   pulls from the same `aoide.notes.*` roles the bar uses
+   pulls from the same `aoide.drachma.*` roles the bar uses
    ([[Pantheon-Grammar]]'s glyph/role grammar: `wireCyan`, `holoBlue`,
    `violet`, `glitchPink`, `paletteAccent`/`paletteHot`). A widget that
    *looks* subtly off (a slightly different cream, an accent that reads as a
