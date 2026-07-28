@@ -125,10 +125,11 @@ let
     # translucent (glyphs stay opaque/crisp); Hyprland then blurs behind that
     # translucent surface, giving the frosted Win7 read. The whole-window opacity
     # rule keeps the FOCUSED terminal fully crisp (active 1.0) and adds a gentle
-    # Aero fade when it loses focus (inactive 0.90). `windowrule` (v2 semantics,
-    # the unified form on Hyprland 0.56) matches by regex class.
-    windowrule = opacity 1.0 0.90, class:^(kitty)$
-    windowrule = rounding 8, class:^(kitty)$
+    # Aero fade when it loses focus (inactive 0.90). Hyprland 0.56 matches with
+    # the `match:<prop> <value>` form (same as the layerrules above); the old
+    # `class:^(kitty)$` form is rejected ("invalid field ... missing a value").
+    windowrule = opacity 1.0 0.90, match:class kitty
+    windowrule = rounding 8, match:class kitty
   '';
 
   # ── Hyprland keybinds for Aoide workflows ─────────────────────────────────
