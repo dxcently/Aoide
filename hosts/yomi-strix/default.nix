@@ -43,10 +43,10 @@
   aoide.user = "khoa";
 
   # The song this host performs. Replay any committed song on ANY host with one
-  # line — e.g. `aoide.song = "moonlight";` swaps the whole notes fan-out with
+  # line — e.g. `aoide.song = "sonata";` swaps the whole notes fan-out with
   # zero other edits (song/repertoire/moonlight/). Default = the shipped standard.
   # "hero": the dusk-plum key drawn from the hero cover itself.
-  aoide.song = "moonlight";
+  aoide.song = "sonata";
 
   # Wave-1 facets — the whole desktop, one line each.
   aoide.facets.quickshell.enable = true;

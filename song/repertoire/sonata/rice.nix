@@ -1,4 +1,4 @@
-# song/repertoire/hero/rice.nix — the "moonlight" song (the cover's own key).
+# song/repertoire/hero/rice.nix — the "sonata" song (the cover's own key).
 #
 # The palette is drawn from the hero cover itself (song/covers/hero.webp —
 # Alma-Tadema's "Unconscious Rivals"): a LIGHT warm classical academic key —
@@ -10,7 +10,7 @@
 { lib, config, ... }:
 {
   # Guard: apply only when this host performs "hero".
-  config = lib.mkIf (config.aoide.song == "moonlight") {
+  config = lib.mkIf (config.aoide.song == "sonata") {
 
     # ── Palette tier (base16 mapping — the painting's warm cream light) ────
     aoide.notes.palette = {
