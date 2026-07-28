@@ -55,6 +55,15 @@ lib.mkIf config.aoide.enable {
     ];
     partOf = [ "graphical-session.target" ];
 
+    # hyprctl MUST be on the service PATH: the socket handler's session-jump
+    # (focus_window) and the window→session event listener both shell out to
+    # `hyprctl`. A systemd user unit's default PATH is minimal (coreutils &c.)
+    # and does NOT include the compositor, so without this every widget click
+    # failed with `hyprctl unavailable: No such file or directory` and the
+    # listener could not read `hyprctl clients` — the click never jumped.
+    # (This is a unit-level option, NOT a serviceConfig key.)
+    path = [ pkgs.hyprland ];
+
     serviceConfig = {
       # shellbridge is a sub-command of the aoide binary. `--run` seeds the
       # stage files, then binds the unix socket and serves commands on a
@@ -112,6 +121,11 @@ lib.mkIf config.aoide.enable {
 
     after = [ "graphical-session.target" ];
     partOf = [ "graphical-session.target" ];
+
+    # The reaper gathers live window addresses via `hyprctl clients -j`; like
+    # shellbridge it needs hyprctl on PATH (else it silently falls back to
+    # pid-only liveness and never sees the window-gone signal). Unit-level option.
+    path = [ pkgs.hyprland ];
 
     serviceConfig = {
       Type = "oneshot";
