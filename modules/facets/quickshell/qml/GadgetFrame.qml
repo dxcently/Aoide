@@ -58,6 +58,16 @@ Item {
     // ── Glass tuning ────────────────────────────────────────────────────────
     property real glassOpacity: 0.72
 
+    // ── Chrome colour overrides (additive; default to the song's note reads) ──
+    // The dock leaves these at their defaults, so its panes render unchanged. The
+    // bar's BarPopout overrides them to the WHITE-SHEET palette (opaque white
+    // glass, black outline/label) so the bar's popouts match the sheet-music bar.
+    property color glassColor: notes.paletteBg
+    property color outlineColor: notes.wireCyan
+    property color depthColor: notes.holoBlue
+    property color labelColor: notes.paletteFg
+    onOutlineColorChanged: leader.requestPaint()
+
     // ── Pantheon wireframe-depth seam (tunable constants) ───────────────────
     // Two hollow OUTLINE copies of the pane, offset toward the vanishing point
     // behind the glass, at decreasing opacity — the "stacked offset volume" read
@@ -89,7 +99,7 @@ Item {
         width: root.width; height: root.height
         radius: 4
         color: "transparent"
-        border.color: notes.holoBlue
+        border.color: root.depthColor
         border.width: 1
         opacity: root.depthOpacity2 * root.chromeOpacity
     }
@@ -98,7 +108,7 @@ Item {
         width: root.width; height: root.height
         radius: 4
         color: "transparent"
-        border.color: notes.holoBlue
+        border.color: root.depthColor
         border.width: 1
         opacity: root.depthOpacity1 * root.chromeOpacity
     }
@@ -107,7 +117,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         radius: 4
-        color: notes.paletteBg
+        color: root.glassColor
         opacity: root.glassOpacity      // translucency → glass over blur
     }
 
@@ -128,7 +138,7 @@ Item {
         anchors.fill: parent
         radius: 4
         color: "transparent"
-        border.color: notes.wireCyan
+        border.color: root.outlineColor
         border.width: 1
         opacity: 0.5 * root.chromeOpacity
     }
@@ -163,8 +173,8 @@ Item {
                         var ctx = getContext("2d")
                         ctx.reset()
                         ctx.clearRect(0, 0, width, height)
-                        ctx.strokeStyle = root.notes.wireCyan
-                        ctx.fillStyle = root.notes.wireCyan
+                        ctx.strokeStyle = root.outlineColor
+                        ctx.fillStyle = root.outlineColor
                         ctx.lineWidth = 1
                         var cy = height / 2
                         // anchor tick at the left, a horizontal rule, a terminal dot
@@ -182,7 +192,7 @@ Item {
                     id: calloutText
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.title
-                    color: notes.paletteFg
+                    color: root.labelColor
                     opacity: 0.55 * root.chromeOpacity
                     font.family: "monospace"
                     font.pixelSize: 11
@@ -197,7 +207,7 @@ Item {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 text: "↗"
-                color: notes.wireCyan
+                color: root.outlineColor
                 opacity: 0.6 * root.chromeOpacity
                 font.family: "monospace"
                 font.pixelSize: 12

@@ -30,11 +30,17 @@
 // INSIDE the 36px strip — no apron, no taller transparent surface (that scar,
 // the wallpaper-bleed under a hairline, stays closed); the clef is sized to fit.
 //
-// Colours ONLY from the song (NoteState): wireCyan (base0C) rules the staff,
-// clef, played note & playhead; holoBlue (base0D) the resting note-heads; violet
-// (base0E) the barlines; glitchPink (base08) urgency; paletteHot the sessions
-// count; barFg the text. The only sanctioned literals: the black text outline
-// (#000000, legibility) and the white Aero gloss gradient (Qt.rgba(1,1,1,α)).
+// Colour: the WHITE MUSIC SHEET — a Win7 Aero taskbar rendered as manuscript
+// paper. The page is an OPAQUE white sheet (Qt.rgba(1,1,1,0.92)) with the white
+// gloss gradient riding on top (the Aero highlight); the hyprglass blur behind
+// it gives faint depth but the strip reads solid. The ink is BLACK: the staff
+// lines, barlines, clef 𝄞, playhead, resting note-heads, clock/date, title, and
+// the volume/battery/network callouts are all black (#000000 lines, #14141a
+// text) with a WHITE outline (styleColor #ffffff) for legibility on the sheet.
+// One restrained STATE accent survives from the song (NoteState): the ACTIVE
+// workspace note-head fills with paletteAccent, the BLOCKED ✎ pulse + low battery
+// go glitchPink, and open/hover toggles (clock→calendar, volume, tray) flash
+// paletteAccent. Everything at rest is black.
 //
 // Data sources (unchanged real Quickshell services — the plumbing survives):
 //   - Hyprland   → workspaces (WorkspaceRow) + active window title.
@@ -302,26 +308,26 @@ Item {
 
     // ── Inline notation vocabulary ─────────────────────────────────────────
 
-    // A barline drawn across the staff — the violet section divider (the ┃/┼).
+    // A barline drawn across the staff — a black engraved section divider (┃/┼).
     component Barline: Rectangle {
         width: 1.5
         height: root.staffSpan + 4
         radius: 0.5
-        color: root.notes.violet
-        opacity: 0.6
+        color: "#000000"
+        opacity: 0.7
         anchors.verticalCenter: parent.verticalCenter
     }
 
-    // A tray glyph-button (♫ ▦ ⌁ ◔): active → wireCyan, else dim barFg.
+    // A tray glyph-button (♫ ▦ ⌁ ◔): active → accent, else resting black ink.
     component TrayCell: Text {
         property string gkey: ""
         anchors.verticalCenter: parent.verticalCenter
         width: implicitWidth + 9
         horizontalAlignment: Text.AlignHCenter
-        color: root.openGadget === gkey ? root.notes.wireCyan : root.notes.barFg
-        opacity: root.openGadget === gkey ? 1.0 : 0.72
+        color: root.openGadget === gkey ? root.notes.paletteAccent : "#14141a"
+        opacity: root.openGadget === gkey ? 1.0 : 0.82
         style: Text.Outline
-        styleColor: "#000000"
+        styleColor: "#ffffff"
         font.family: "monospace"
         font.pixelSize: 14
         MouseArea {
@@ -332,9 +338,10 @@ Item {
     }
 
     // ══ THE MANUSCRIPT STRIP ═══════════════════════════════════════════════
-    // A single translucent page over the compositor blur — the sheet the staff
-    // is printed on. Rounded ends give the ╭─ … ─╮ read of the sketch. NOT the
-    // old three-volume entablature: one continuous manuscript, no floating panes.
+    // A single OPAQUE WHITE Aero-glass page — the Win7 taskbar as a sheet of
+    // manuscript paper. High-opacity white fill (the hyprglass blur still sits
+    // behind it for faint Aero depth, but the sheet reads as a solid glossy
+    // strip, not see-through). Rounded ends give the ╭─ … ─╮ read of the sketch.
     Rectangle {
         id: page
         anchors.left: parent.left
@@ -342,28 +349,29 @@ Item {
         anchors.top: parent.top
         height: root.stripHeight
         radius: 8
-        color: root.notes.barBg
-        opacity: 0.8
+        color: Qt.rgba(1, 1, 1, 0.92)   // opaque white manuscript sheet
+        opacity: 1.0
     }
-    // Aero gloss — the one sanctioned white gradient (bright top, sheen line).
+    // Aero gloss — the sanctioned white sheen (bright top, hard midline stop),
+    // the glossy Win7 highlight riding on top of the white sheet.
     Rectangle {
         anchors.fill: page
         radius: 8
         gradient: Gradient {
-            GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.16) }
-            GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, 0.05) }
+            GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.55) }
+            GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, 0.16) }
             GradientStop { position: 0.52; color: Qt.rgba(1, 1, 1, 0.00) }
-            GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.04) }
+            GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.10) }
         }
     }
-    // The page rail — a faint wireCyan hairline framing the sheet.
+    // The page rail — a faint black hairline framing the sheet's edge.
     Rectangle {
         anchors.fill: page
         radius: 8
         color: "transparent"
-        border.color: root.notes.wireCyan
+        border.color: "#000000"
         border.width: 1
-        opacity: 0.22
+        opacity: 0.14
     }
 
     // ── THE STAFF — five lines ruled the full width, at the strip midline.
@@ -378,8 +386,8 @@ Item {
             anchors.rightMargin: root.edgePad + 10
             height: 1
             y: root.staffMid + (index - 2) * root.staffGap
-            color: root.notes.wireCyan
-            opacity: 0.16
+            color: "#000000"
+            opacity: 0.55
         }
     }
 
@@ -390,9 +398,9 @@ Item {
         anchors.leftMargin: root.edgePad
         anchors.verticalCenter: parent.verticalCenter
         text: "𝄞"
-        color: root.notes.wireCyan
+        color: "#14141a"
         style: Text.Outline
-        styleColor: "#000000"
+        styleColor: "#ffffff"
         font.family: "monospace"
         font.pixelSize: 18
         font.bold: true
@@ -421,11 +429,11 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             visible: root.sessionCount > 0
             text: "✎" + root.sessionCount
-            // paletteHot at rest; when ANY session is blocked it switches to the
+            // Black ink at rest; when ANY session is blocked it switches to the
             // urgent role (glitchPink) and pulses — a summons from across the bar.
-            color: root.anyBlocked ? root.notes.glitchPink : root.notes.paletteHot
+            color: root.anyBlocked ? root.notes.glitchPink : "#14141a"
             style: Text.Outline
-            styleColor: "#000000"
+            styleColor: "#ffffff"
             font.family: "monospace"
             font.pixelSize: 13
             font.bold: true
@@ -457,9 +465,9 @@ Item {
             id: clockText
             anchors.verticalCenter: parent.verticalCenter
             text: Qt.formatDateTime(root.now, "hh:mm AP  dddd MMM dd")
-            color: root.calShown ? root.notes.wireCyan : root.notes.barFg
+            color: root.calShown ? root.notes.paletteAccent : "#14141a"
             style: Text.Outline
-            styleColor: "#000000"
+            styleColor: "#ffffff"
             font.family: "monospace"
             font.pixelSize: 12
             font.bold: true
@@ -473,20 +481,20 @@ Item {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: "/"
-            color: root.notes.barFg
+            color: "#14141a"
             style: Text.Outline
-            styleColor: "#000000"
+            styleColor: "#ffffff"
             font.family: "monospace"
             font.pixelSize: 12
-            opacity: 0.75
+            opacity: 0.6
         }
         // Active-window title (music kaomoji when empty).
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: root.winTitle()
-            color: root.notes.barFg
+            color: "#14141a"
             style: Text.Outline
-            styleColor: "#000000"
+            styleColor: "#ffffff"
             font.family: "monospace"
             font.pixelSize: 12
             font.bold: true
@@ -526,9 +534,9 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             visible: root.volAvail
             text: root.volMuted ? "𝄽 vol" : (root.volIcon(root.volPct) + " " + root.volPct)
-            color: root.volShown ? root.notes.wireCyan : root.notes.barFg
+            color: root.volShown ? root.notes.paletteAccent : "#14141a"
             style: Text.Outline
-            styleColor: "#000000"
+            styleColor: "#ffffff"
             font.family: "monospace"
             font.pixelSize: 12
             font.bold: true
@@ -555,11 +563,11 @@ Item {
                   ? (root.battIcon() + " full")
                   : (root.battIcon() + " " + root.battPct + (root.battCharging ? "+" : ""))
             color: (root.battCrit || root.battWarn) ? root.notes.glitchPink
-                                                    : root.notes.barFg
+                                                    : "#14141a"
             opacity: (root.battWarn && !root.blinkOn) ? 0.3 : 1.0
             Behavior on opacity { NumberAnimation { duration: 400 } }
             style: Text.Outline
-            styleColor: "#000000"
+            styleColor: "#ffffff"
             font.family: "monospace"
             font.pixelSize: 12
             font.bold: true
@@ -571,31 +579,31 @@ Item {
             }
         }
 
-        // Network — a live link glows in the cool holoBlue field; a dead link
-        // falls to a dim rest (𝄽) in barFg.
+        // Network — black ink; a live link is full-strength, a dead link falls
+        // to a dim rest (𝄽) at reduced opacity.
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: root.netGlyph(root.netKind) + " " + root.netLabel(root.netKind)
-            color: root.netKind === "down" ? root.notes.barFg : root.notes.holoBlue
-            opacity: root.netKind === "down" ? 0.55 : 1.0
+            color: "#14141a"
+            opacity: root.netKind === "down" ? 0.5 : 1.0
             style: Text.Outline
-            styleColor: "#000000"
+            styleColor: "#ffffff"
             font.family: "monospace"
             font.pixelSize: 12
         }
 
-        // The final barline — thin + thick, closing the measure (𝄂).
+        // The final barline — thin + thick black rules, closing the measure (𝄂).
         Row {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 2
             Rectangle {
                 width: 1.5; height: root.staffSpan + 4; radius: 0.5
-                color: root.notes.violet; opacity: 0.6
+                color: "#000000"; opacity: 0.7
                 anchors.verticalCenter: parent.verticalCenter
             }
             Rectangle {
                 width: 3; height: root.staffSpan + 4; radius: 0.5
-                color: root.notes.violet; opacity: 0.85
+                color: "#000000"; opacity: 0.9
                 anchors.verticalCenter: parent.verticalCenter
             }
         }
@@ -617,7 +625,7 @@ Item {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             text: root.volMuted ? "muted" : (root.volSlider(root.volPct) + " " + root.volPct + "%")
-            color: root.notes.barFg
+            color: "#14141a"
             font.family: "monospace"
             font.pixelSize: 12
         }
@@ -636,7 +644,7 @@ Item {
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: root.battBar(root.battPct) + " " + root.battPct + "%"
-                color: root.battWarn ? root.notes.paletteUrgent : root.notes.barFg
+                color: root.battWarn ? root.notes.paletteUrgent : "#14141a"
                 font.family: "monospace"
                 font.pixelSize: 12
             }
@@ -644,7 +652,7 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 visible: root.battTime().length > 0
                 text: root.battTime()
-                color: root.notes.barFg
+                color: "#14141a"
                 opacity: 0.75
                 font.family: "monospace"
                 font.pixelSize: 11

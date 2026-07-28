@@ -12,8 +12,10 @@
 //
 // Binds to live Hyprland workspaces via Quickshell.Hyprland (same real-service
 // idiom as before — no shell-out, no invented IPC). Degrade: off Hyprland → an
-// empty staff. All colours from notes (zero hardcoded hex); the black text
-// outline is the one sanctioned legibility literal. The glyphs are content.
+// empty staff. Colour follows the WHITE-SHEET re-theme: the note-heads, stems and
+// playhead are BLACK ink (#000000 / #14141a) with a white legibility outline; the
+// one state accent is the ACTIVE note-head, filled with the song's paletteAccent,
+// and urgent workspaces keep glitchPink. The glyphs are content.
 
 import QtQuick
 import Quickshell.Hyprland
@@ -82,8 +84,8 @@ Item {
         width: 2
         height: 22
         radius: 1
-        color: root.notes.wireCyan
-        opacity: 0.4
+        color: "#000000"
+        opacity: 0.3
         anchors.verticalCenter: parent.verticalCenter
         x: root.activeIndex >= 0
            ? root.activeIndex * (root.cellW + root.cellGap) + root.cellW / 2 - width / 2
@@ -127,33 +129,36 @@ Item {
                         width: 1.5
                         height: 13
                         radius: 0.5
-                        color: root.notes.wireCyan
+                        color: "#000000"
                         x: parent.width - 1.5
                         y: -12
                     }
 
-                    // Note-head — filled when played, hollow otherwise; the
-                    // tilt is the engraver's slanted oval.
+                    // Note-head — the ACTIVE note fills with the song's accent
+                    // (the one played note); resting heads are hollow black ovals;
+                    // an urgent workspace outlines in glitchPink. The tilt is the
+                    // engraver's slanted oval.
                     Rectangle {
                         id: head
                         anchors.fill: parent
                         radius: height / 2
                         rotation: -20
-                        color: cell.isActive ? root.notes.wireCyan : "transparent"
+                        color: cell.isActive ? root.notes.paletteAccent : "transparent"
                         border.width: cell.isActive ? 0 : 1.5
                         border.color: cell.isUrgent ? root.notes.glitchPink
-                                                    : root.notes.holoBlue
+                                                    : "#000000"
                         Behavior on color { ColorAnimation { duration: 150 } }
                     }
 
                     // The degree number / special mark, upright over the head.
+                    // Black ink at rest; white on the accent-filled played note.
                     Text {
                         anchors.centerIn: parent
                         text: root.wsLabel(cell.modelData)
-                        color: cell.isActive ? root.notes.paletteBg
-                              : (cell.isUrgent ? root.notes.glitchPink : root.notes.barFg)
+                        color: cell.isActive ? "#ffffff"
+                              : (cell.isUrgent ? root.notes.glitchPink : "#14141a")
                         style: Text.Outline
-                        styleColor: "#000000"
+                        styleColor: cell.isActive ? root.notes.paletteAccent : "#ffffff"
                         font.family: "monospace"
                         font.pixelSize: 11
                         font.bold: cell.isActive

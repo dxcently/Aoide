@@ -57,6 +57,15 @@ PopupWindow {
         notes: root.notes
         title: root.title
 
+        // WHITE-SHEET popout chrome — matches the sheet-music bar: an opaque
+        // white Aero-glass card with black outline/label ink. (The dock's panes
+        // leave these overrides unset and keep the song's wireframe palette.)
+        glassColor: Qt.rgba(1, 1, 1, 0.92)
+        glassOpacity: 1.0
+        outlineColor: "#000000"
+        depthColor: "#000000"
+        labelColor: "#14141a"
+
         Item {
             id: slot
             width: parent.width
