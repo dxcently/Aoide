@@ -3,7 +3,7 @@
 **Song:** sonata (committed rice; the selected key on yomi-strix)
 **Palette:** a light dusk key — pale peach-cream ground, plum-ink text, dusk
 slate-blue accent, crimson-ember urgent, a horizon-green one-hot blaze
-**Cover:** `song/covers/sonata.webp` — a pianist at a grand piano on
+**Cover:** `song/covers/yuki-sonata.png` — a pianist at a grand piano on
 mirror-still water at dusk
 
 ---
@@ -25,7 +25,7 @@ enabled facet/dendrite set (CONTRACTS.md §5).
 
 ## The key — keyed from the cover, region by region
 
-The palette is derived from `sonata.webp` itself. The image is a high-variance
+The palette is derived from `yuki-sonata.png` itself. The image is a high-variance
 dusk scene: a near-black grand piano and pianist on a mirror-still sheet of
 water that doubles the sky, under a sunset cloudbank that runs from
 peach-cream light on the upper left to plum-mauve dusk on the upper right, with
@@ -94,3 +94,6 @@ WCAG relative-luminance ratios against `base00` (`#f4e9e2`):
   earlier indigo-nocturne intent and the interim warm-parchment (Alma-Tadema
   *Unconscious Rivals*) key are both retired; the light key now reads from the
   cover it actually ships with, region by region, contrast computed above.
+- 2026-07-29: cover swapped to `song/covers/yuki-sonata.png` — the same
+  artwork as `sonata.webp` (identical scene and dimensions, PNG master), so
+  the region-keyed palette carries over unchanged.

@@ -200,7 +200,7 @@ The Pantheon effect at full strength:
 ## 6. The light key — cream
 
 The desktop's base key is a LIGHT dusk register, keyed off the main wallpaper:
-`song/covers/sonata.webp` — a pianist at a grand piano on mirror-still water at
+`song/covers/yuki-sonata.png` — a pianist at a grand piano on mirror-still water at
 dusk. `stylix.polarity = "light"` (base facet default); the **`sonata`** song
 (`song/songbook/sonata/rice.nix`, the light key selected on yomi-strix)
 supplies the sixteen base16 slots read from the cover — pale peach-cream

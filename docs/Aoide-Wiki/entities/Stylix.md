@@ -50,7 +50,7 @@ keyed by hand from its wallpaper; see
 ramp reads as, and every Stylix-managed target honours it. The desktop's
 current key is `polarity = "light"` (set `mkDefault` on the Stylix facet):
 the `sonata` song's pale peach-cream base00 with plum-ink base05 text is a LIGHT
-scheme, keyed off its own cover `song/covers/sonata.webp` — the dusk pianist on
+scheme, keyed off its own cover `song/covers/yuki-sonata.png` — the dusk pianist on
 mirror-water (see [[songbook/Pantheon-Grammar|Pantheon Grammar §6]]). Because polarity is a single fan-out switch,
 flipping it is cheap — the discipline that makes it *look* right everywhere
 (terminal, bar, every widget agreeing) is the vision-check in

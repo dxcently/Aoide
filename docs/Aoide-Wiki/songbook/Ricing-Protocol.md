@@ -38,7 +38,7 @@ check whenever a rice or song changes.
 > only a placeholder for the cross-cutting memory, so migrating this page's
 > content into it is still pending (flagged for the handoff). The one per-song
 > design note that exists — `song/songbook/sonata/design/intent.md` — now states
-> the shipped key (the light dusk key read from `song/covers/sonata.webp`,
+> the shipped key (the light dusk key read from `song/covers/yuki-sonata.png`,
 > region by region, with computed contrast). Treat `song/` as the destination
 > of record; this page points there.
 
@@ -54,7 +54,7 @@ job ends up hard-coding colours in six different files that drift apart.
   convenience block (bg/fg/accent/urgent/hot). The **`sonata`** song
   (`song/songbook/sonata/rice.nix`) is the worked example — the LIGHT dusk
   key currently performed on yomi-strix: every slot is keyed by eye from the
-  wallpaper (`song/covers/sonata.webp` — a pianist at a grand piano on
+  wallpaper (`song/covers/yuki-sonata.png` — a pianist at a grand piano on
   mirror-still water at dusk) with a comment naming which region of the image it
   reads from. The pale peach-cream **sunlit cloudbank** → `base00`; the
   **piano's near-black**, read as a plum ink → `base05`/`fg`; the **dusk

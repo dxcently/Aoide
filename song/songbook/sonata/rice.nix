@@ -1,6 +1,6 @@
 # song/songbook/sonata/rice.nix — the "sonata" song (the cover's own key).
 #
-# The palette is drawn from the cover itself (song/covers/sonata.webp — a
+# The palette is drawn from the cover itself (song/covers/yuki-sonata.png — a
 # pianist at a grand piano on mirror-still water at dusk): a LIGHT dusk key.
 # base00 is the pale peach-cream of the sunlit cloudbank; text is the piano's
 # warm near-black, read as a plum ink; the accent is the dusk slate-blue of
@@ -29,7 +29,7 @@
     };
 
     # ── Base16 tier — the LIGHT dusk cover palette ──────────────────────────
-    # Keyed from sonata.webp, region by region: a warm rose-cream ramp
+    # Keyed from yuki-sonata.png, region by region: a warm rose-cream ramp
     # (00–07, from the sunlit cloudbank down to the piano's black) with an
     # accent set drawn from the dusk sky, the ember horizon, and the piano's
     # crimson cushion: crimson-ember, sunset orange, cloud-gold, horizon green,
@@ -76,10 +76,10 @@
     };
 
     # ── Cover-art note ─────────────────────────────────────────────────────
-    # The main wallpaper: `sonata.webp` — the pianist on mirror water at dusk.
+    # The main wallpaper: `yuki-sonata.png` — the pianist on mirror water at dusk.
     # The base16 palette above is keyed from this image's LIGHT register (the
     # pale peach-cream cloudlight and rose mirror-water), for colour coherence
     # with the desktop's Stylix light polarity.
-    aoide.drachma.wallpaper = ../../covers/sonata.webp;
+    aoide.drachma.wallpaper = ../../covers/yuki-sonata.png;
   };
 }

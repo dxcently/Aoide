@@ -47,7 +47,7 @@ alongside `modules/`, and each song's `rice.nix` guards itself with
 `lib.mkIf (config.aoide.song == "<name>")`, so committing a folder makes the
 song fleet-available with no import list to edit ([[Self-Ricing]],
 [[Snowflake-Anatomy]]). Songs present today: **`sonata`** (a LIGHT dusk key
-keyed from its own cover `song/covers/sonata.webp` — the pianist on
+keyed from its own cover `song/covers/yuki-sonata.png` — the pianist on
 mirror-water at dusk — currently performed on yomi-strix). Each folder
 holds:
 
@@ -109,11 +109,11 @@ demand.
 ~/Aoide/song/
 ├── songbook/            committed songs + cross-cutting design memory
 │   ├── default/          the shipped baseline (merge-only)
-│   ├── sonata/          the LIGHT dusk key, keyed from song/covers/sonata.webp (selected)
+│   ├── sonata/          the LIGHT dusk key, keyed from song/covers/yuki-sonata.png (selected)
 │   │   ├── rice.nix · drachma.json
 │   │   ├── palette/ · sounds/ · icons/ · widgets/ · design/
 │   ├── learnings.md · preferences.md · update-playbook.md   ← sparse today
-├── covers/              shared wallpaper library — sonata.webp · Alma-Tadema_Unconscious_Rivals.jpg
+├── covers/              shared wallpaper library — yuki-sonata.png · sonata.webp · Alma-Tadema_Unconscious_Rivals.jpg
 ├── stage/               live runtime state (gitignored)
 └── auditions/           propose gate (gitignored)
 ```
