@@ -8,7 +8,7 @@
 // identifiable by its shape + its pitch on the staff:
 //
 //     ws 1 → ♩   ws 2 → ♪   ws 3 → ♫   ws 4 → ♬   ws 5 → 𝅘𝅥𝅮   ws 6 → 𝅘𝅥𝅯
-//     (ids past the set repeat the run; magic → 𝅘𝅥𝅱, scratch → ᝰ ride the ledger)
+//     (ids past the set repeat the run; magic → 𝅘𝅥𝅱, scratch → 𝄋 ride the ledger)
 //
 // Pitch (staff degree) still rises with id so the open workspaces spell an
 // ascending run. The SELECTED workspace is HIGHLIGHTED: its note swells, fills
@@ -67,7 +67,7 @@ Item {
         if (!ws) return "♩"
         var name = ("" + (ws.name || "")).toLowerCase()
         if (name.indexOf("magic") !== -1) return "𝅘𝅥𝅱"
-        if (name.indexOf("scratch") !== -1) return "ᝰ"
+        if (name.indexOf("scratch") !== -1) return "𝄋"
         var id = ws.id || 1
         return root.noteGlyphs[(id - 1) % root.noteGlyphs.length]
     }
