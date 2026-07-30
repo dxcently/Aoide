@@ -690,28 +690,33 @@ Item {
                             width: 3; color: notes.paletteHot; visible: row.emph
                         }
 
-                        // ── BEAM: a child note is beamed off its parent — a short
-                        // horizontal accent bar in the indent with a stem rising
-                        // toward the parent stave (the musical register of nesting,
-                        // not a box-drawing tree). Colour from the parent's notes.
+                        // ── TREE LIMB: a child hangs off its parent as a drawn
+                        // elbow — a stem dropping from the parent's row above,
+                        // turning into a limb that runs all the way to the child's
+                        // name. The child carries NO notehead of its own: the limb
+                        // plus the gutter's width is the indent, so the rows read
+                        // as a tree rather than as two floating notes. Coloured
+                        // from the PARENT's identity hue, so a group reads as one.
                         Item {
                             id: beam
                             visible: row.isChild
-                            anchors.left: parent.left; anchors.leftMargin: 14
-                            width: row.indent
-                            anchors.verticalCenter: gutter.verticalCenter
-                            height: 12
+                            anchors.left: parent.left; anchors.leftMargin: 18
+                            anchors.top: parent.top; anchors.topMargin: 6
+                            anchors.bottom: gutter.verticalCenter
+                            anchors.bottomMargin: -2
+                            // runs past the (empty) gutter to just short of the body
+                            width: row.indent + 24
+                            Rectangle {                // the stem, rising to the parent stave
+                                anchors.left: parent.left
+                                anchors.top: parent.top; anchors.bottom: parent.bottom
+                                width: 1.5; radius: 0
+                                color: gadget.withA(row.beamHue, 0.55)
+                            }
                             Rectangle {                // the beam bar (a quaver beam)
                                 anchors.left: parent.left; anchors.right: parent.right
-                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.bottom: parent.bottom
                                 height: 2; radius: 0
                                 color: gadget.withA(row.beamHue, 0.85)
-                            }
-                            Rectangle {                // a short stem into the parent stave above
-                                anchors.left: parent.left
-                                anchors.bottom: parent.verticalCenter
-                                width: 1.5; height: 8; radius: 0
-                                color: gadget.withA(row.beamHue, 0.75)
                             }
                         }
 
@@ -731,6 +736,9 @@ Item {
                             }
                             Text {
                                 id: noteGlyph
+                                // Children wear no note — the tree limb carries
+                                // them, and the gutter it crosses is the indent.
+                                visible: !row.isChild
                                 anchors.centerIn: parent
                                 // Noto Music seats the notehead low in a tall em
                                 // box; lift it to sit between the two text lines.
