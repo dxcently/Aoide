@@ -29,15 +29,28 @@ QtObject {
         return runtimeDir + "/aoide/shellbridge.sock"
     }
 
-    // ── Session-jump stub ──────────────────────────────────────────────────
-    // Backs the Terminal-Commander widget (concepts/Desktop-Architecture).
-    // widget click → focusSession(address) → shellbridge → hyprctl dispatch
+    // ── Session-jump ───────────────────────────────────────────────────────
+    // Backs the Terminal-Commander / Conductor roster (concepts/Desktop-
+    // Architecture). A row click sends the SESSION ID; the daemon resolves it to
+    // the session's windowAddress (focus the exact window) or, if that isn't
+    // resolved yet, to its workspace (switch there). QML never holds or sends an
+    // address here — the bridge is the source of truth for id→window.
     //
-    // Usage:  bridge.focusSession("0x55f1234abc")
-    function focusSession(windowAddress) {
+    // Usage:  bridge.focusSession("conduct-1944-1785384887")
+    function focusSession(sessionId) {
+        sendCommand({
+            cmd: "focussession",
+            sessionId: sessionId
+        })
+    }
+
+    // Focus a bare window by address — for surfaces that already hold a live
+    // Hyprland address and no session id (e.g. a plain, untracked terminal).
+    // Same socket gate; no hyprctl/MCP/shell-exec from QML.
+    function focusWindow(address) {
         sendCommand({
             cmd: "focuswindow",
-            address: windowAddress
+            address: address
         })
     }
 
