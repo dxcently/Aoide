@@ -23,13 +23,14 @@ the build is offline.*
 
 `schema.rs` declares every command once, in a single `commands()` table — the
 one source of truth from which the CLI dispatcher, the `schema --json` emitter,
-and the MCP tool list all derive. **36 leaves** (`aoide schema --json | jq
+and the MCP tool list all derive. **37 leaves** (`aoide schema --json | jq
 '.commands | length'`):
 
 | Group | Leaves | Real / stub |
 |---|---|---|
 | `guide`, `schema` | 2 | real |
 | `rice lint`, `rice preview` | 2 | real (`lint` delegates to [[drachma]]) |
+| `cover set` | 1 | real |
 | `rice gen`, `rice adopt`, `rice transpose` | 3 | stub (`adopt` gated) |
 | `content register/propose/ingest/query` | 4 | stub |
 | `content approve` | 1 | stub, gated |
@@ -47,6 +48,13 @@ action is deferred. Exactly three commands carry `gated: true` (`rice adopt`,
 `content approve`, `update`), marked so both doors surface the user rebuild
 gate uniformly — nothing here admits a rebuild, which is structurally the
 user's action ([[Rebuild-Gate]], [[Governance]]).
+
+**`cover set`** stages `song/stage/cover.json` (the same atomic write-temp-
+then-rename pattern as every other stage file) from either an absolute cover
+path or a bare name resolved against `song/covers/`, hot-swapping the live
+wallpaper. It is the CLI-verb slice of the wallpaper-switcher work; the
+quickshell picker surface and a `list`/`next` verb pair remain unbuilt (open
+item, `references/AOIDE-DEV-HANDOFF.md` §7).
 
 ### The `graph` group — session/project DAG + the conductor mesh
 

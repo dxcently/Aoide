@@ -1,6 +1,7 @@
 ---
 type: concept
 created: 2026-07-30
+updated: 2026-07-30
 tags: [aoide, bridge, desktop, widget, quickshell, session, ipc]
 ---
 
@@ -52,6 +53,16 @@ switches on the string, it does NOT regex-guess:
   `awaiting`, so the anxious state keeps its signal value.
 - `idle` — alive but at rest (a fresh session, a finished turn, a bare prompt).
 - `done` — ended.
+
+**Activity labels are basename-clean.** A shell's `activity` label always
+collapses `argv[0]` to its basename before display, never a raw path — a known
+editor shows as `"<editor> <file>"` (`friendly_editor_command`), and every other
+command runs through the same collapse (`generic_command_label`): many
+NixOS-wrapped binaries re-exec with `argv[0]` set to their full
+`/nix/store/<hash>-<name>/bin/<name>` path (confirmed live: `yazi`), and the
+generic label strips that to the bare command name (`yazi`, `rg pattern file.rs`)
+while leaving every other argument untouched, falling back to `comm` only when
+`argv` is empty.
 
 `hooks.json`/`graph.json` are the audit + derived-DAG mirrors; a widget need not
 read them. Legacy vocabulary (`running`/`waiting`/`blocked`) is folded to the

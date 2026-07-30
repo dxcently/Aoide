@@ -91,7 +91,7 @@ home-manager/stylix modules, the pkgs overlay, and mirrored `specialArgs`
 (`host = "vm-test"`, inputs, username, system; `node.pkgsReadOnly = false`
 so the overlay applies) — so the test boots the real assembly, not a
 replica. It asserts: `multi-user.target` reached; `aoide` + `drachma` on
-PATH with `schema --json` reporting exactly 28 commands and `guide` exiting
+PATH with `schema --json` reporting exactly 36 commands and `guide` exiting
 0; greetd enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
 linger active with the `aoided` and `shellbridge` user units finishing
 `Result=success` (the skeleton binaries seed state and exit 0); stage files
@@ -276,7 +276,11 @@ behavioural window rules, split out so a re-rice cannot disturb them (the
 compositor facet keeps the drachma-derived look and the session plumbing). The `nvf` flake input threads to home-manager via
 `extraSpecialArgs`; the cover-art token (`aoide.drachma.wallpaper` → the shared
 `song/covers/`) backs the shipped wallpapers; Lekton Nerd Font Mono is the stylix
-face; the [[Gadget-Dock]] carries the waybar-homage bar rework plus
+face. `neovim`'s own `vim.extraPackages` (nvf) also carries `pkgs.rustc`/
+`pkgs.cargo`, scoped to nvim's wrapped PATH only — its built-in rust-analyzer
+`root_dir` detection shells out to `rustc` directly and needs it, while the rest
+of the system keeps the rust toolchain devShell-only. The [[Gadget-Dock]]
+carries the waybar-homage bar rework plus
 NowPlaying/Power/Calendar gadgets. Baseline dendrites default on in
 `hosts/common` via `mkDefault`; `allowUnfree` is carried mkIf-scoped by the two
 dendrites that need it (devtools, fonts).

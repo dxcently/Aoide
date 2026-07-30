@@ -26,13 +26,16 @@ Four self-framed gadgets stack in one scrolling column:
   session `title`, coloured/glyphed by the canonical `state`
   (♪ working · 𝄐 awaiting · 𝄽 idle · 𝄂 done), and show each agent's `say`;
   sub-agents beam beneath their parent one indent level
-  ([[Widget-Bridge-Contract]]).
+  ([[Widget-Bridge-Contract]]). Each row also carries a plain arabic-numeral
+  `wsN` tag next to its state label, naming the row's live Hyprland
+  `workspace` — deliberately a bare number, distinct from the bar's own
+  note-glyph workspace vocabulary ([[Terminal-Commander]]).
 - **Terminals** (`TerminalsGadget.qml`) — the [[Terminal-Commander]] roster:
   every live terminal window, tracked or not — the daemon publishes a synthetic
   record for each untracked one, so the widget reads `sessions.json` alone and
   filters/de-dupes by window address. A row's headline is `activity` — the
   foreground command or edited file, or the bare shell/agent process when idle
-  — with `cwd` as subtext.
+  — with `cwd` as subtext, and the same plain `wsN` workspace tag as Conductor.
 - **Meters** (`MetersGadget.qml`) — CPU/RAM read directly from `/proc/stat` /
   `/proc/meminfo` on a ~2s tick; still the documented interim until a
   system-telemetry stage file exists (open thread).
