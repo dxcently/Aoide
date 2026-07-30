@@ -124,7 +124,9 @@ Item {
         z: 0
         width: root.cellW - 2
         height: 22
-        radius: 0
+        // Fully rounded on the short axis — an actual pill, which is what the
+        // name promised and the square-cornered block never read as.
+        radius: width / 2
         color: root.activeColor
         opacity: 0.20
         anchors.verticalCenter: parent.verticalCenter
@@ -148,7 +150,7 @@ Item {
         z: 0
         width: root.cellW
         height: 24
-        radius: 0
+        radius: width / 2      // matches the active pill's curve, one size out
         color: "transparent"
         border.color: root.notes.paletteAccent
         border.width: 2
@@ -196,7 +198,7 @@ Item {
                     anchors.centerIn: parent
                     width: root.cellW - 2
                     height: 22
-                    radius: 0
+                    radius: width / 2   // same pill as the active/preview marks
                     color: root.notes.paletteAccent
                     opacity: 0.18
                 }
