@@ -30,6 +30,7 @@
               user.name = "dxcently";
               user.email = "dxcently@gmail.com";
               init.defaultBranch = "main";
+              core.editor = "nvim";
               safe.directory = [
                 "/etc/nixos"
                 "/home/khoa/Aoide"

@@ -42,6 +42,15 @@
     home-manager.users.${config.aoide.user} = {
       imports = [ inputs.nvf.homeManagerModules.default ];
 
+      # nvf provides the only `nvim` in the profile (header), so the dendrite
+      # that installs the editor also declares it the default — EDITOR/VISUAL
+      # for login shells, TTY, and SSH on this single-user box. Guarded by the
+      # same aoide.neovim.enable, so the editor default never outlives nvim.
+      home.sessionVariables = {
+        EDITOR = "nvim";
+        VISUAL = "nvim";
+      };
+
       programs.nvf = {
         enable = true;
 
