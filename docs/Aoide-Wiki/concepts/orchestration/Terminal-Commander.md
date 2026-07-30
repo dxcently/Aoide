@@ -106,13 +106,16 @@ session spawned which), viewed and managed through the `aoide graph` command
 group. The roster is the rows; the graph is the tree they hang from.
 
 The roster also has its **desktop gadget**: `TerminalsGadget` in the
-[[Gadget-Dock]] renders the PROCESS view live — merging the tracked
-`sessions.json` records with Hyprland's own client list so every terminal
-window shows, tracked or not. A row's headline is its `activity` (the
-foreground command / edited file, or the bare shell/agent process when idle),
-`cwd` as subtext; click a row to jump. The gadget has no prune affordance:
-the shellbridge socket has no prune verb yet (open thread) — the dock never
-invents IPC. See [[Widget-Bridge-Contract]] for the full field contract.
+[[Gadget-Dock]] renders the PROCESS view live — a pure view of `sessions.json`
+alone: the daemon's Hyprland window-event listener publishes a synthetic
+`shell` record (keyed by window address) for every live, untracked terminal
+window, so the widget just filters and de-dupes that single source rather
+than merging it with Hyprland's own client list. A row's headline is its
+`activity` (the foreground command / edited file, or the bare shell/agent
+process when idle), `cwd` as subtext; click a row to jump. The gadget has no
+prune affordance: the shellbridge socket has no prune verb yet (open thread)
+— the dock never invents IPC. See [[Widget-Bridge-Contract]] for the full
+field contract.
 
 ### Hover-preview → the bar's workspace glyph
 

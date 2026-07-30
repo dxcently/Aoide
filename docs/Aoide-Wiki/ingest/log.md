@@ -435,4 +435,17 @@ All other checks clean:
 - Crosslinked [[Widget-Bridge-Contract]] into [[Gadget-Dock]], [[Session-Graph]], [[Agent-Hooking]] Related sections (it already linked back to all three).
 - **Not fixed, deliberately**: `references/AOIDE-DEV-HANDOFF.md`'s own `BatonGadget` mention (§7 open-flags ledger) — that page's dated, attributed history is exempt by design; it is the orchestrator's ledger to close, not this pass's to edit.
 - **Manifest/index/wikilink check**: no pages added or removed (53 = 53, both directions); `ingest/index.md` bullets refreshed for the four touched concept/entity pages, still one-to-one; full-wiki wikilink sweep found no new broken links (the only unresolved forms remain the standing OPERATIONS pedagogical examples and immutable dated-log mentions).
+
+### [2026-07-30] fix: Terminals gadget is a single-source view, not a merge
+Commit 0dd758d moved terminal-window enumeration out of `TerminalsGadget.qml`
+and into the daemon (`graph.rs`'s Hyprland window-event listener,
+`sync_untracked_terminal_windows()`): every live, untracked, terminal-class
+window now gets a synthetic `kind:"shell"` record (keyed `win:<address>`)
+published straight into `sessions.json`, so that file alone is a complete
+terminal roster. Two pages still described the old two-source merge
+("merging `sessions.json` with Hyprland's own client list") — fixed in
+[[Gadget-Dock]]'s Terminals bullet and [[Terminal-Commander]]'s own desktop-
+gadget paragraph to state the daemon does the Hyprland work and the widget
+is a pure filter/de-dupe-by-window-address view, matching
+[[Widget-Bridge-Contract]]. No manifest change (both pages updated in place).
 - **New Open Thread** (`## Open Threads` above): whether the `aoide.surfaces.sessionGraph` owner-registry entry should be dropped now that no QML file backs it, or a body re-added — a code-side question, left for the dev/orchestrator side rather than decided here.

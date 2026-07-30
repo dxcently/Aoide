@@ -28,10 +28,11 @@ Four self-framed gadgets stack in one scrolling column:
   sub-agents beam beneath their parent one indent level
   ([[Widget-Bridge-Contract]]).
 - **Terminals** (`TerminalsGadget.qml`) — the [[Terminal-Commander]] roster:
-  every live terminal window, tracked or not, merging `sessions.json` with
-  Hyprland's own client list. A row's headline is `activity` — the foreground
-  command or edited file, or the bare shell/agent process when idle — with
-  `cwd` as subtext.
+  every live terminal window, tracked or not — the daemon publishes a synthetic
+  record for each untracked one, so the widget reads `sessions.json` alone and
+  filters/de-dupes by window address. A row's headline is `activity` — the
+  foreground command or edited file, or the bare shell/agent process when idle
+  — with `cwd` as subtext.
 - **Meters** (`MetersGadget.qml`) — CPU/RAM read directly from `/proc/stat` /
   `/proc/meminfo` on a ~2s tick; still the documented interim until a
   system-telemetry stage file exists (open thread).
