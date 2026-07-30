@@ -36,44 +36,52 @@ QtObject {
     id: root
 
     // ── WORKING — ten animated sets, one assigned per session ────────────────
+    // Second full redesign: every set now FACES LEFT as its primary direction
+    // — any prop, gesture, or line of travel extends toward the left of the
+    // face, not the right — and parens are the plain ASCII "( )" used by every
+    // resting pose below, so a row doesn't change type-weight when it stops.
     readonly property var working: [
-        { name: "sibilans",  // whistling — a puckered ｏ mouth with a two-note
-          // conveyor streaming away across the bar: each note advances a cell
-          // per frame while a fresh one is born at the lips, so the tune travels
-          // and never stops. The one the desk hums to itself.
-          frames: ["( ･ｏ･)♪　♫", "( ･ｏ･)　♪　", "( ･ｏ･)♫　♪", "( ･ｏ･)　♫　"] },
-        { name: "moderans",  // conducting — TWO independent rates: the arm
-          // sweeps every frame (ノ→ー→＼→ー), while the note only advances on
-          // the ictus, half the arm's rate (frames 1/3), so the beat and the
-          // sound it lands on visibly move at different speeds.
-          frames: ["( ･ω･)ノ♪　", "( ･ω･)ー♪　", "( ｀∀´)＼　♪", "( ･ω･)ー　♪"] },
-        { name: "pulsans",   // the flying fist — wound up, launched across the
-          // gap, contact with the ●, and back for the next punch. Two rates
-          // here too: the fist travels every frame, the face only snaps on
-          // impact (frame 3) and settles on recoil (frame 4).
-          frames: ["( ｀ω´)つ　　●", "( ｀ω´)　つ　●", "( ＾∀＾)　　つ●", "( ･ω･)　つ　●"] },
-        { name: "battuens",  // drumming — TWO independent rates: the sticks
-          // alternate on their own beat (left frame 2, right frame 4 — every
-          // other frame), while a hi-hat ♪ ticks the off-beats (frames 1/3),
-          // twice the stick's rate.
-          frames: ["ノ( ･ω･)ノ♪", "＿( ｀∀´)ノ　", "ノ( ･ω･)ノ♪", "ノ( ｀∀´)＿　"] },
-        { name: "saltans",   // side-step dance — the whole body travels the box,
-          // left → centre → right → centre, arms up on the steps.
-          frames: ["ヽ( ･∀･)ノ　　", "　ｏ( ･ω･)ｏ　", "　　ヽ( ･∀･)ノ", "　ｏ( ･ω･)ｏ　"] },
-        { name: "oscillans", // the metronome — a pendulum ticking ＼ ノ ／ ノ
-          // beside a face that keeps its own counsel. A swing you can count.
-          frames: ["＼　( ･ω･)", "ノ　( ･ω･)", "／　( ･ω･)", "ノ　( ･ω･)"] },
-        { name: "psallens",  // plucking — the hand travels the string
-          frames: ["＝＝つ( ･ω･)", "＝つ＝( ･ω･)", "つ＝＝( ･ω･)", "＝つ＝( ･ω･)"] },
-        { name: "scribens",  // writing the part out — pen sweeping the page
-          // The paper (＿＿) is a fixed track and the pen (φ) travels along it,
-          // so the stroke reads as writing, not as a twitching mouth.
-          frames: ["＿＿φ( ･ω･)", "＿φ＿( ･ω･)", "φ＿＿( ･ω･)", "＿φ＿( ･ω･)"] },
-        { name: "cantans",   // both fists pumping to the beat, note turning over
-          frames: ["♪ｏ( ･∀･)ｏ", "♪ヽ( ･∀･)ノ", "♫ｏ( ｀∀´)ｏ", "♫ヽ( ･∀･)ノ"] },
-        { name: "inclinans", // the curtain call — arms flung up, compose, a deep
-          // bow with hands presented low, rise. A performer taking it forever.
-          frames: ["ヽ( ･∀･)ノ", "　( ･ω･)　", "ｏ( ＿＿)ｏ", "　( ･ω･)　"] }
+        { name: "sibilans",  // whistling — TWO independent motions: a two-note
+          // stream travels left one cell per frame (own the ♪/♫ positions),
+          // while the pucker itself cycles ｏ↔・ on its own beat. Left-facing:
+          // the whole exhaled stream runs off to the left of the mouth.
+          frames: ["　♫　♪( ´ｏ｀)", "♫　♪　( ´・｀)", "　♪　♫( ´ｏ｀)", "♪　♫　( ´・｀)"] },
+        { name: "scribens",  // writing — pen sweeps LEFT, laying an ink line
+          // behind it, lifts, resets. Left-facing: the hand and the line it
+          // draws both extend left of the face.
+          frames: ["　　φ( ´ω｀)", "　φ＿( ´ω｀)", "φ＿＿( ´ω｀)", "　φ　( ´ω｀)"] },
+        { name: "modulans",  // beating time — the baton tip travels left on
+          // the downstroke and again on the upstroke. Left-facing: the baton
+          // lives and sweeps on the left.
+          frames: ["　＼( ｀ω´)", "＼　( ｀ω´)", "　／( ｀ω´)", "／　( ｀ω´)"] },
+        { name: "carpens",   // plucking — hand reaches left to a string, drags
+          // it taut, releases; the string rebounds as the hand returns.
+          // Left-facing: the reaching hand opens left, the string sits far left.
+          frames: ["｜　　⊃( ・ω・)", "｜　⊃　( ・ω・)", "ノ⊃　　( ・ω・)", "／　　⊃( ・ω・)"] },
+        { name: "volvens",   // the stone, pushed — near → mid → far on the
+          // shove, one slip back — an endless uphill loop. Left-facing: the
+          // push, the stone, and the slip all happen on the left.
+          frames: ["　　ｏ⊃( ｀ｏ´)", "　ｏ⊃　( ｀ｏ´)", "ｏ⊃　　( ｀ｏ´)", "　ｏ⊃　( ｀ｏ´)"] },
+        { name: "psallens",  // the lyre — hand walks left across three strings,
+          // covering one at a time, then steps back. Left-facing: the strum
+          // runs toward the left end of the instrument.
+          frames: ["＿＿つ( ＾ω＾)", "＿つ＿( ＾ω＾)", "つ＿＿( ＾ω＾)", "＿つ＿( ＾ω＾)"] },
+        { name: "portans",   // carrying a note — the whole figure, note held
+          // out front, strides left two steps and rocks back one. Left-facing:
+          // the note leads on the left; the direction of travel is left.
+          frames: ["　　♬( ・ー・)", "　♬( ・ー・)　", "♬( ・ー・)　　", "　♬( ・ー・)　"] },
+        { name: "numerans",  // counting beats — a hand carries the near bead
+          // left onto the pile, returns empty, and deals the next one.
+          // Left-facing: beads accumulate at far left; the carry runs left.
+          frames: ["ｏ　　ｏ⊃( ＝ω＝)", "ｏ　ｏ⊃　( ＝ω＝)", "ｏｏ⊃　　( ＝ω＝)", "ｏｏ　　⊃( ＝ω＝)"] },
+        { name: "currens",   // dashing to the next cue — the figure scrolls
+          // left one cell per frame, a speed-line wake trailing off its
+          // right. Left-facing: continuous, unambiguous leftward travel.
+          frames: ["　　　( ｀ー´)＝", "　　( ｀ー´)＝　", "　( ｀ー´)＝　　", "( ｀ー´)＝　　　"] },
+        { name: "saltans",   // dancing — rocks left-and-back between two
+          // slots while the lead (left) arm flips low then thrown high.
+          // Left-facing: the working arm is always on the left side.
+          frames: ["　＼( ＾ｏ＾)", "＼( ＾ｏ＾)　", "　ノ( ＾ｏ＾)", "ノ( ＾ｏ＾)　"] }
     ]
 
     // Which set a session wears, for its whole life. Hashed from the row's key
