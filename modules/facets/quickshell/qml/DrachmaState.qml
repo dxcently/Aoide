@@ -68,14 +68,14 @@ QtObject {
     // per-workspace note glyphs) call noteColor(id) rather than reaching into
     // base16 directly — keeps the cycle order defined in one place.
     readonly property var accentSpread: [
+        base0F,        // base0F rust (reversed-order lead: past-violet brown, now first)
         violet,        // base0E murex
-        glitchPink,    // base08 terracotta
-        base09,        // base09
-        paletteAccent, // base0A gold
-        paletteHot,    // base0B laurel
-        wireCyan,      // base0C teal
         holoBlue,      // base0D aegean
-        base0F         // base0F rust
+        wireCyan,      // base0C teal
+        paletteHot,    // base0B laurel
+        paletteAccent, // base0A gold
+        base09,        // base09
+        glitchPink     // base08 terracotta
     ]
     function noteColor(id) {
         var n = accentSpread.length
