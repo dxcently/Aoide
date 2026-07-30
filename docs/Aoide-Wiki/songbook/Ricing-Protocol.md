@@ -35,11 +35,12 @@ check whenever a rice or song changes.
 > notes) are shown here to make the *protocol* legible — they are illustrations
 > of what the songbook records, **mirrored** from the song agent's domain, not
 > this page's to own. Today that songbook is **sparse**: `song/songbook/` holds
-> only a placeholder, and the one per-song design note that exists —
-> `song/songbook/sonata/design/intent.md` — is stale (it still describes an
-> earlier indigo-nocturne take, not the shipped cream key), so migrating this
-> page's content into it is still pending (flagged for the handoff). Treat
-> `song/` as the destination of record; this page points there.
+> only a placeholder for the cross-cutting memory, so migrating this page's
+> content into it is still pending (flagged for the handoff). The one per-song
+> design note that exists — `song/songbook/sonata/design/intent.md` — now states
+> the shipped key (the light dusk key read from `song/covers/sonata.webp`,
+> region by region, with computed contrast). Treat `song/` as the destination
+> of record; this page points there.
 
 ## 1. Two separated concerns: creating a base16, and applying it
 
@@ -51,15 +52,19 @@ job ends up hard-coding colours in six different files that drift apart.
 - **Creation** happens once, in the song's `rice.nix`, as `aoide.drachma.base16`
   — sixteen literal hex slots (base00–base0F) plus the small `palette`
   convenience block (bg/fg/accent/urgent/hot). The **`sonata`** song
-  (`song/songbook/sonata/rice.nix`) is the worked example — the cream LIGHT
+  (`song/songbook/sonata/rice.nix`) is the worked example — the LIGHT dusk
   key currently performed on yomi-strix: every slot is keyed by eye from the
-  wallpaper (Alma-Tadema's *Unconscious Rivals*) with a comment naming which
-  region of the painting it reads from (cream parchment → base00, deep umber
-  ink → base05, dusty cornflower → base0D, sage green → base0B/hot, muted rose →
-  base08/urgent). The **`hero`** song is the same discipline in a different
-  register — its sixteen slots are keyed by hand from its own cover
-  (`song/songbook/hero/assets/hero.webp`, the pianist over dusk mirror-water:
-  deep plum base, rose accent). **Status:** `aoide rice gen` — the automated
+  wallpaper (`song/covers/sonata.webp` — a pianist at a grand piano on
+  mirror-still water at dusk) with a comment naming which region of the image it
+  reads from. The pale peach-cream **sunlit cloudbank** → `base00`; the
+  **piano's near-black**, read as a plum ink → `base05`/`fg`; the **dusk
+  slate-blue** upper sky → `base0D`/`accent`; the **horizon's green transition
+  band** → `base0B`/`hot` (the one-blaze trace colour); the **crimson
+  piano-stool cushion** → `base08`/`urgent`; and the **ember horizon**, the
+  **cloud-gold** highlight, the **cool-sky cyan-teal**, the **plum-mauve** cloud
+  and the **warm rust** of the deep shadow fill the rest of the ramp. The cover
+  lives in the shared `song/covers/` library any song references by literal
+  path. **Status:** `aoide rice gen` — the automated
   form of this step (see [[aoide-cli]]) — is a stub; no automated derivation
   exists in code. Creation is a human/agent reading the source image and
   writing the sixteen slots by hand, once, in one file.
@@ -91,7 +96,7 @@ Two things to look at, side by side, on the live desktop:
    wrong on screen." The light key holds a bright cream Aero-glass terminal
    (kitty `background_opacity` 0.86) next to a cream frosted-glass bar and its
    popouts at a *close* opacity (0.58 / 0.60); the cream `base00` is
-   `#f4ecdc`. **Brightness is opacity, not colour**: how much of the dim
+   `#f4e9e2` (sonata's peach-cream). **Brightness is opacity, not colour**: how much of the dim
    wallpaper is allowed to show through, not the hex value — a surface can
    read "too dark" and still be exactly the right colour, so the fix for a
    muddy surface is opacity/glass, not a whiter hex. hyprglass glasses the

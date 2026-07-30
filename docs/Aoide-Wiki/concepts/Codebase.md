@@ -272,8 +272,8 @@ obsidian, melete, mneme, firefox, screenshot, and vision — ported from
 half of the compositor: keybinds, input devices, tiling layout, misc, and
 behavioural window rules, split out so a re-rice cannot disturb them (the
 compositor facet keeps the drachma-derived look and the session plumbing). The `nvf` flake input threads to home-manager via
-`extraSpecialArgs`; the cover-art token (`aoide.drachma.wallpaper` → per-song
-`assets/`) backs the shipped wallpapers; Lekton Nerd Font Mono is the stylix
+`extraSpecialArgs`; the cover-art token (`aoide.drachma.wallpaper` → the shared
+`song/covers/`) backs the shipped wallpapers; Lekton Nerd Font Mono is the stylix
 face; the [[Gadget-Dock]] carries the waybar-homage bar rework plus
 NowPlaying/Power/Calendar gadgets. Baseline dendrites default on in
 `hosts/common` via `mkDefault`; `allowUnfree` is carried mkIf-scoped by the two

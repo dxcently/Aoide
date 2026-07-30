@@ -199,15 +199,16 @@ The Pantheon effect at full strength:
 
 ## 6. The light key — cream
 
-The desktop's base key is a LIGHT warm classical-academic register, keyed off
-the main wallpaper: Alma-Tadema's *Unconscious Rivals*.
-`stylix.polarity = "light"` (base facet default); the **`sonata`** song
+The desktop's base key is a LIGHT dusk register, keyed off the main wallpaper:
+`song/covers/sonata.webp` — a pianist at a grand piano on mirror-still water at
+dusk. `stylix.polarity = "light"` (base facet default); the **`sonata`** song
 (`song/songbook/sonata/rice.nix`, the light key selected on yomi-strix)
-supplies the sixteen base16 slots read from the painting — cream/parchment
-`base00`, deep umber ink `base05`/`fg`, dusty cornflower `base0D`/`accent`,
-sage green `base0B`/`hot` (the one-blaze trace colour), muted rose
-`base08`/`urgent`, plus terracotta/ochre/teal/plum filling the rest of the
-ramp. `hero` is its own separate dusk-plum key. This is the worked example for
+supplies the sixteen base16 slots read from the cover — pale peach-cream
+cloudbank `base00`, the piano's plum-ink near-black `base05`/`fg`, dusk
+slate-blue `base0D`/`accent`, horizon green `base0B`/`hot` (the one-blaze trace
+colour), crimson piano-cushion `base08`/`urgent`, plus ember/cloud-gold/
+cyan-teal/plum-mauve/rust filling the rest of the ramp. This is the worked
+example for
 [[songbook/Ricing-Protocol|the Ricing Protocol]]'s creation step — see that page
 for the base16-derivation discipline and the mandatory light/dark
 vision-check, which stands as a house rule.
@@ -217,7 +218,7 @@ note glyphs per workspace id** (♩ ♪ ♫ ♬ 𝅘𝅥𝅮 𝅘𝅥𝅯, repea
 `magic`/`scratch` get their own marks and ride a ledger line above the staff).
 Each note sits at a staff degree that rises with its id, so open workspaces
 read as an ascending run on a real five-line staff. Resting notes are solid
-umber ink; the **active** workspace's note **swells** (15px → 19px) and
+plum ink; the **active** workspace's note **swells** (15px → 19px) and
 **fills with the song's accent colour**, resting on a soft accent glow; urgent
 workspaces pulse `glitchPink`. The whole strip is a **cream frosted-glass
 sheet**: `paletteBg` alpha-blended at **0.58**, close to kitty's own glass
@@ -225,7 +226,7 @@ below (per the vision-check discipline in
 [[songbook/Ricing-Protocol|the Ricing Protocol]]), hard square corners (no
 round), a defined black rail, and the sanctioned Aero gloss gradient on top.
 The bar's popouts (now-playing, volume, battery, calendar) carry the same
-cream frosted glass (0.60) with umber ink, not opaque white-sheet chrome, so
+cream frosted glass (0.60) with plum ink, not opaque white-sheet chrome, so
 every surface (bar, popouts, terminal) reads as one glass rather than a bar
 and a set of un-matched dialogs.
 

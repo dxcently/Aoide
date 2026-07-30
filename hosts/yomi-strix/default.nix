@@ -47,9 +47,9 @@
   aoide.user = "khoa";
 
   # The song this host performs. Replay any committed song on ANY host with one
-  # line — e.g. `aoide.song = "sonata";` swaps the whole notes fan-out with
-  # zero other edits (song/songbook/moonlight/). Default = the shipped standard.
-  # "hero": the dusk-plum key drawn from the hero cover itself.
+  # line — e.g. `aoide.song = "sonata";` swaps the whole drachma fan-out with
+  # zero other edits (song/songbook/<name>/). Default = the shipped standard.
+  # "sonata": the light glass key drawn from its own cover.
   aoide.song = "sonata";
 
   # Wave-1 facets — the whole desktop, one line each.

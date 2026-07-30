@@ -19,7 +19,8 @@
 # The base16 scheme used here is Catppuccin Mocha — chosen as the Aoide
 # default for its wide ecosystem support, legible contrast ratios, and
 # established community tooling (Melete can reason about it by name). The
-# cover-art note points at the shipped hero wallpaper (a literal store path).
+# cover-art note is null: the standard bundles no wallpaper, so the stylix
+# facet bakes its deterministic solid from palette.bg (#1e1e2e).
 { lib, config, ... }:
 {
   # Only apply when this host performs song "default". The standard is the
@@ -62,14 +63,18 @@
     # the facet bakes it as the Stylix base-context image instead of the
     # solid-colour fallback. null here would take that fallback.
     #
-    # Covers live per-song under songbook/<name>/assets/ — the designated home
-    # in the Song Map (Song-Vocabulary: cover = wallpaper). This is COMMITTED
-    # song content, i.e. versioned score, legitimately read at eval: checks.nix
-    # noSongRead bans only the song/ RUNTIME infixes (stage/ · auditions/ ·
-    # catalog/ · index/), never a song's assets/.
+    # Covers live in song/covers/ — the shared wallpaper library any song (or
+    # other consumer) references by literal nix path; a song's rice.nix
+    # points at ../../covers/<file>. This is COMMITTED song content, i.e.
+    # versioned score, legitimately read at eval: checks.nix noSongRead bans
+    # only the song/ RUNTIME infixes (stage/ · auditions/ · catalog/ ·
+    # index/), never song/covers/.
     #
-    # TODO(song agent): give default its own cover in ./assets/ — currently
-    # borrows hero's.
-    aoide.drachma.wallpaper = ../hero/assets/hero.webp;
+    # The standard bundles NO cover — wallpapers are large and user-specific
+    # (./design/cover-ref.txt). null makes the stylix facet bake its
+    # deterministic solid-colour PNG from palette.bg, so the baseline stays
+    # buildable with no binary asset and a fork carries no art it did not
+    # choose. A user sets one with `aoide rice adopt default --cover <path>`.
+    aoide.drachma.wallpaper = null;
   };
 }

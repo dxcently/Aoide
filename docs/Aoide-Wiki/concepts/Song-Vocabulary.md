@@ -25,7 +25,7 @@ Every term maps to a literal path inside `song/` (which lives at `~/Aoide/song`;
 | song | rice | `songbook/<song>/` |
 | design | per-song design wiki | `songbook/<song>/design/` |
 | songbook | per-song homes + cross-cutting memory | `songbook/` |
-| cover | wallpaper | `songbook/<song>/assets/` |
+| cover | wallpaper | `song/covers/` |
 | chimes | notification + system sounds | `songbook/<song>/sounds/` |
 | stage | live preview state (gitignored) | `stage/` |
 | auditions | propose gate (gitignored) | `auditions/` |

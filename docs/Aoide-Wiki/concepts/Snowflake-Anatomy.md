@@ -18,7 +18,7 @@ Aoide names its nix layer after snowflake morphology. The metaphor is not decora
 | Opt-in branches, chosen per host | **dendrites** | `modules/dendrites/` — one tree, all branches (shipped + personal); each host enables the ones it wants. |
 | Render surfaces that sound a rice | **facets** | `modules/facets/` — quickshell, stylix, compositor. The machinery that renders a song, reading its ricing elements from the songbook via `aoide.drachma`. |
 
-The split the metaphor encodes: **nucleus is the shared core every host inherits; dendrites are the opt-in branches each host chooses.** Facets are the *machinery* of ricing — the surfaces that sound a song — but they embed no ricing content: every palette, asset, sound, icon, widget body, and the shipped default rice lives in `song/songbook/` (see [[Song-Anatomy]], [[Song-Vocabulary]]). There is no separate "rice engine" layer: a song is *activated* by the walker (`lib/mkHost.nix` picks up the selected `rice.nix`), *resolved and emitted* by the `drachma` package ([[drachma]] — lint → resolve → `stage/drachma.json`), and *rendered* by the facets. All three layers live under `modules/` in `~/Aoide` — one walked module tree, the same grouping [[dxflake]] uses. Facets are the only nix that renders appearance, and each reads only the `aoide.drachma` option — no module reads another module.
+The split the metaphor encodes: **nucleus is the shared core every host inherits; dendrites are the opt-in branches each host chooses.** Facets are the *machinery* of ricing — the surfaces that sound a song — but they embed no ricing content: every palette, sound, icon, widget body, and the shipped default rice lives in `song/songbook/`; covers (wallpapers) live in the shared `song/covers/` library any song references by path (see [[Song-Anatomy]], [[Song-Vocabulary]]). There is no separate "rice engine" layer: a song is *activated* by the walker (`lib/mkHost.nix` picks up the selected `rice.nix`), *resolved and emitted* by the `drachma` package ([[drachma]] — lint → resolve → `stage/drachma.json`), and *rendered* by the facets. All three layers live under `modules/` in `~/Aoide` — one walked module tree, the same grouping [[dxflake]] uses. Facets are the only nix that renders appearance, and each reads only the `aoide.drachma` option — no module reads another module.
 
 ## Mutation Policy
 
@@ -26,7 +26,7 @@ Radial distance from the nucleus encodes who may change a layer and how often:
 
 - **Inherited machinery** (nucleus, facets) — change via upstream merge only.
 - **New dendrite branches** — one host line to enable; growth is additive, so upstream merges stay conflict-free by construction.
-- **`song/songbook/`** — the agent's writable domain: all ricing content (every song, its palettes/assets/sounds/icons/widgets, and the shipped `default`), gated by User approval at the rebuild step.
+- **`song/songbook/`** — the agent's writable domain: all ricing content (every song, its palettes/sounds/icons/widgets, and the shipped `default`), gated by User approval at the rebuild step. Covers (wallpapers) are the one exception: shared assets in `song/covers/`, not per-song.
 
 This is provenance, not path fences. Personal branches (`flatpak.nix`, `firefox.nix`, `jellyfin.nix`, …) grow in the same `modules/dendrites/` tree as upstream-shipped ones. Ownership is tracked by git merge-base; `aoide update` detects divergence from inherited files and warns.
 
@@ -57,7 +57,7 @@ The composition engine is an in-house dendritic walker: every file placed under 
 
 The repo surface is only the subsystem (`modules/`) plus standard flake furniture (`hosts/`, `pkgs/`, `lib/`, `docs/`) and the `song/` content tree — no scaffolding sprayed across the root. Runtime dirs (`song/{stage,auditions}`, root `log/`, `index/`, `catalog/`) are gitignored and created at runtime, never committed. `hosts/` knows dendrites; dendrites never know hosts — the same separation [[dxflake]] enforces. Subfolders inside `modules/dendrites/` are grouping only; the walker registers every file regardless.
 
-**The root is closed.** The directory list above is the whole surface — never invent a new top-level dir. New content lands inside the existing tree at its designated place: every per-song asset, key, sound, icon, and widget body → `song/songbook/<song>/`, module assets next to their module. The lookup for content paths is the Song Map ([[Song-Vocabulary#The Song Map]]); creating a new root directory is a contract change (`CONTRACTS.md` §2), not a convenience.
+**The root is closed.** The directory list above is the whole surface — never invent a new top-level dir. New content lands inside the existing tree at its designated place: every per-song key, sound, icon, and widget body → `song/songbook/<song>/`; covers → the shared `song/covers/` library; module assets next to their module. The lookup for content paths is the Song Map ([[Song-Vocabulary#The Song Map]]); creating a new root directory is a contract change (`CONTRACTS.md` §2), not a convenience.
 
 ## Related
 

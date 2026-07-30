@@ -1,53 +1,57 @@
 # song/songbook/sonata/rice.nix — the "sonata" song (the cover's own key).
 #
-# The palette is drawn from the cover itself (./assets/Alma-Tadema_Unconscious_Rivals.jpg —
-# Alma-Tadema's "Unconscious Rivals"): a LIGHT warm classical academic key —
-# cream/parchment for the base, deep umber ink for text, dusty cornflower for
-# the accent, muted rose for urgent. The song that matches its wallpaper.
+# The palette is drawn from the cover itself (song/covers/sonata.webp — a
+# pianist at a grand piano on mirror-still water at dusk): a LIGHT dusk key.
+# base00 is the pale peach-cream of the sunlit cloudbank; text is the piano's
+# warm near-black, read as a plum ink; the accent is the dusk slate-blue of
+# the upper sky, urgent is the crimson of the piano-stool cushion, and the
+# one-hot trace blazes the green of the horizon's transition band. The song
+# that matches its wallpaper.
 #
 # HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.drachma.
-# All note values are literal nix expressions (no song/ runtime reads).
+# All drachma values are literal nix expressions (no song/ runtime reads).
 { lib, config, ... }:
 {
-  # Guard: apply only when this host performs "hero".
+  # Guard: apply only when this host performs "sonata".
   config = lib.mkIf (config.aoide.song == "sonata") {
 
-    # ── Palette tier (base16 mapping — the painting's warm cream light) ────
+    # ── Palette tier (base16 mapping — the dusk cover's light register) ─────
     aoide.drachma.palette = {
-      bg = "#f4ecdc"; # cream parchment       (base00)
-      fg = "#423420"; # deep umber ink        (base05)
-      accent = "#4f74a0"; # dusty cornflower   (base0D)
-      urgent = "#b0475f"; # muted rose        (base08)
-      # The one-hot trace colour — the painting's sage-green accent
-      # (matches base0B below). Cornflower stays the chrome accent; THIS
+      bg = "#f4e9e2"; # pale peach-cream cloudbank (base00)
+      fg = "#3b2f3a"; # the piano's near-black, read as plum ink (base05)
+      accent = "#5a6f9c"; # dusk slate-blue sky            (base0D)
+      urgent = "#b34a52"; # crimson piano-stool cushion    (base08)
+      # The one-hot trace colour — the green of the horizon's transition band
+      # (matches base0B below). The slate-blue stays the chrome accent; THIS
       # blazes on the single hot/traced element (the DAG/TERMINALS traced
       # row). null → accent.
-      hot = "#6f8a4f"; # sage green            (base0B)
+      hot = "#5f8a7a"; # dusk horizon green                 (base0B)
     };
 
-    # ── Base16 tier — the LIGHT warm painting palette ───────────────────────
-    # Keyed from Alma-Tadema's "Unconscious Rivals": a warm cream ramp
-    # (00–07, lightest to darkest umber) with an accent set drawn from the
-    # painting's terracotta vault, marble, azalea, and sage: muted rose,
-    # burnt terracotta, ochre gold, sage green, teal, cornflower blue,
-    # dusty plum, and warm brown. Slots follow the base16 standard.
+    # ── Base16 tier — the LIGHT dusk cover palette ──────────────────────────
+    # Keyed from sonata.webp, region by region: a warm rose-cream ramp
+    # (00–07, from the sunlit cloudbank down to the piano's black) with an
+    # accent set drawn from the dusk sky, the ember horizon, and the piano's
+    # crimson cushion: crimson-ember, sunset orange, cloud-gold, horizon green,
+    # cool-sky cyan, dusk slate-blue, plum-mauve cloud, and warm rust.
+    # Slots follow the base16 standard.
     aoide.drachma.base16 = {
-      base00 = "#f4ecdc"; # lightest bg — cream parchment
-      base01 = "#eaddc6"; # lighter bg (status)
-      base02 = "#ddcaa6"; # selection
-      base03 = "#b0997a"; # comments
-      base04 = "#8a6f50"; # dark fg
-      base05 = "#423420"; # default fg — deep umber ink
-      base06 = "#2f2416"; # light fg (deeper ink)
-      base07 = "#1d160d"; # brightest — the darkest ink
-      base08 = "#b0475f"; # red    — muted rose
-      base09 = "#c96038"; # orange — burnt terracotta
-      base0A = "#b98a34"; # yellow — ochre gold
-      base0B = "#6f8a4f"; # green  — sage
-      base0C = "#40897a"; # cyan   — teal
-      base0D = "#4f74a0"; # blue   — dusty cornflower
-      base0E = "#8f5578"; # magenta— dusty plum
-      base0F = "#8a5730"; # brown  — warm brown
+      base00 = "#f4e9e2"; # lightest bg — pale peach-cream sunlit cloudbank
+      base01 = "#ecdcd8"; # lighter bg (status) — rose-cream lit cloud mist
+      base02 = "#dcc7c8"; # selection — lavender-rose cloud / pale mirror-water
+      base03 = "#b49aa6"; # comments — dusk mauve-grey cloud shadow
+      base04 = "#806b7a"; # dark fg — dusk slate-plum midtone
+      base05 = "#3b2f3a"; # default fg — the piano's near-black, read as plum ink
+      base06 = "#2a212a"; # light fg (deeper ink) — the piano's lacquer
+      base07 = "#191319"; # brightest — the piano's darkest black
+      base08 = "#b34a52"; # red    — crimson piano-stool cushion / ember red
+      base09 = "#c96a3c"; # orange — the ember horizon sunset band
+      base0A = "#cc9a52"; # yellow — sunlit cloud-gold highlight
+      base0B = "#5f8a7a"; # green  — dusk horizon green transition band
+      base0C = "#4f8598"; # cyan   — cool upper-sky cyan-teal
+      base0D = "#5a6f9c"; # blue   — dusk slate-blue sky (upper right)
+      base0E = "#8a5f88"; # magenta— dusk plum-mauve cloud (upper right)
+      base0F = "#9a5b4a"; # brown  — warm rust (deep cloud shadow / stool frame)
     };
 
     # ── Component tier (v0) ────────────────────────────────────────────────
@@ -62,20 +66,20 @@
       fg = null;
       urgent = null;
     };
-    # Window frames join the Pantheon: the active hairline is base0C teal —
+    # Window frames join the Pantheon: the active hairline is base0C cyan-teal —
     # the same wireframe rule the bar's panes wear — and the inactive frame
-    # recedes to base01, the light ground. The window key stays a
+    # recedes to base01, the light rose-cream ground. The window key stays a
     # component-tier note the song owns.
     aoide.drachma.window = {
-      border = "#40897a"; # base0C teal — active
-      borderInactive = "#8a6f50"; # base04 dark taupe — inactive (the darker frame)
+      border = "#4f8598"; # base0C cool-sky cyan-teal — active
+      borderInactive = "#ecdcd8"; # base01 rose-cream — inactive (recedes to the ground)
     };
 
     # ── Cover-art note ─────────────────────────────────────────────────────
-    # The main wallpaper: Alma-Tadema's "Unconscious Rivals" — a warm classical
-    # academic painting (terracotta vault, marble, azalea, sage). The base16
-    # palette above is keyed from this painting's LIGHT warm register, for
-    # colour coherence with the desktop's Stylix light polarity.
-    aoide.drachma.wallpaper = ./assets/Alma-Tadema_Unconscious_Rivals.jpg;
+    # The main wallpaper: `sonata.webp` — the pianist on mirror water at dusk.
+    # The base16 palette above is keyed from this image's LIGHT register (the
+    # pale peach-cream cloudlight and rose mirror-water), for colour coherence
+    # with the desktop's Stylix light polarity.
+    aoide.drachma.wallpaper = ../../covers/sonata.webp;
   };
 }

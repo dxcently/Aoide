@@ -81,15 +81,16 @@ Each song's `songbook/<song>/palette/` holds its transpose keys — the palette 
 
 ```
 song/songbook/<song>/
-├── rice.nix      pure nix: drachma import + config swaps
+├── rice.nix      pure nix: drachma import + config swaps (wallpaper note points at song/covers/<file>)
 ├── drachma.json  drachma values
-├── assets/       wallpaper + cover art
 ├── palette/      transpose keys
 ├── sounds/       chimes / notification audio
 ├── icons/        per-song icon overrides
 ├── widgets/      per-song widget bodies
 └── design/       design wiki: intent, palette rationale, log
 ```
+
+Covers themselves live in the shared `song/covers/` library, not per-song — any song's `rice.nix` references a file there by literal path.
 
 `song/` is the agent's writable domain. The agent commits there and nowhere else. Adopt = commit + gated rebuild.
 

@@ -236,7 +236,7 @@ transpose = new key, same venue. The `song-shape` check asserts every walked
 songbook file is a `rice.nix`; song shape v0 is `CONTRACTS.md §5`. The
 example is `song/songbook/sonata` (the selected light key): flip yomi-strix's
 one line to another song and the whole drachma fan-out swaps (e.g. the shipped
-`default` Mocha bg `#1e1e2e` → sonata cream `#f4ecdc`). Full replay treatment:
+`default` Mocha bg `#1e1e2e` → sonata peach-cream `#f4e9e2`). Full replay treatment:
 [[Song-Vocabulary#Replay — any song, any host]].
 
 Inherited structure (nucleus, facets) changes by upstream merge only; new
@@ -335,8 +335,9 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 ├── hosts/           common/ + yomi-strix/ (flags + the aoide.song selector; a real
 │                    hardware profile, switched live and running as the daily desktop)
 ├── pkgs/            aoide/ (Rust: aoide + aoided) · drachma/ (Node: drachma)
-├── song/            songbook/{sonata,hero}/ — rice.nix · drachma.json · assets/ ·
+├── song/            songbook/{default,sonata}/ — rice.nix · drachma.json ·
 │                    palette/ · sounds/ · icons/ · widgets/ · design/ (per song);
+│                    covers/ — shared wallpaper library, referenced by rice.nix;
 │                    stage/ + auditions/ runtime (gitignored)
 ├── docs/BUILD.md    module-authoring conventions
 ├── CONTRACTS.md     versioned contracts (drachma · dendrite · schema · stage · song shape)

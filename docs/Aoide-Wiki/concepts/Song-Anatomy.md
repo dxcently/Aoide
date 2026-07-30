@@ -46,15 +46,15 @@ A song self-registers by living here: `lib/mkHost.nix` walks `song/songbook/`
 alongside `modules/`, and each song's `rice.nix` guards itself with
 `lib.mkIf (config.aoide.song == "<name>")`, so committing a folder makes the
 song fleet-available with no import list to edit ([[Self-Ricing]],
-[[Snowflake-Anatomy]]). Songs present today: **`sonata`** (the cream Alma-Tadema
-*Unconscious Rivals* LIGHT key, currently performed on yomi-strix) and
-**`hero`** (its own dusk-plum key). Each folder holds:
+[[Snowflake-Anatomy]]). Songs present today: **`sonata`** (a LIGHT dusk key
+keyed from its own cover `song/covers/sonata.webp` — the pianist on
+mirror-water at dusk — currently performed on yomi-strix). Each folder
+holds:
 
 | Subfolder/file | Holds |
 |---|---|
-| `rice.nix` | pure nix: sets `aoide.drachma.*` (palette + base16 + component tiers + wallpaper) under the `aoide.song` guard. **Only** `aoide.drachma` — no host options, no facet toggles — so one score replays at any venue (`CONTRACTS.md §5`, [[Song-Vocabulary#Replay — any song, any host]]). |
+| `rice.nix` | pure nix: sets `aoide.drachma.*` (palette + base16 + component tiers + wallpaper) under the `aoide.song` guard. **Only** `aoide.drachma` — no host options, no facet toggles — so one score replays at any venue (`CONTRACTS.md §5`, [[Song-Vocabulary#Replay — any song, any host]]). The wallpaper note points at a file in the shared `song/covers/` library (`../../covers/<file>`), not a per-song `assets/` dir. |
 | `drachma.json` | the song's resolved drachma values — the [[drachma]] schema: `palette`, `base16`, `bar`/`notif`/`window`. |
-| `assets/` | wallpaper + cover art |
 | `palette/` | this song's transpose keys — the palette variants `rice transpose <song> <key>` swaps among |
 | `sounds/` | notification + system sounds (the chimes dimension) |
 | `icons/` | per-song icon overrides |
@@ -108,11 +108,12 @@ demand.
 ```
 ~/Aoide/song/
 ├── songbook/            committed songs + cross-cutting design memory
-│   ├── sonata/          the cream Alma-Tadema LIGHT key (selected)
+│   ├── default/          the shipped baseline (merge-only)
+│   ├── sonata/          the LIGHT dusk key, keyed from song/covers/sonata.webp (selected)
 │   │   ├── rice.nix · drachma.json
-│   │   ├── assets/ · palette/ · sounds/ · icons/ · widgets/ · design/
-│   ├── hero/             the dusk-plum key (same shape)
+│   │   ├── palette/ · sounds/ · icons/ · widgets/ · design/
 │   ├── learnings.md · preferences.md · update-playbook.md   ← sparse today
+├── covers/              shared wallpaper library — sonata.webp · Alma-Tadema_Unconscious_Rivals.jpg
 ├── stage/               live runtime state (gitignored)
 └── auditions/           propose gate (gitignored)
 ```

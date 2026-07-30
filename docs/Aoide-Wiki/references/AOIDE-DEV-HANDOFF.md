@@ -282,20 +282,51 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   reads `songbook/<name>/assets/`); mkHost/vmTest/flake/checks/.gitignore +
   CONTRACTS/AGENTS/BUILD/README updated; `backstage` gone everywhere. Validated:
   `nix build .#aoide` (cargo tests pass), toplevel eval, `aoide rice preview
-  sonata` resolves from songbook. **Residuals still open:** (a)
-  `song/songbook/default/rice.nix` borrows hero's wallpaper via
-  `../hero/assets/hero.webp` — `TODO(song agent)`: give `default` its own cover;
+  sonata` resolves from songbook. **Residuals still open:** (a) — **RESOLVED
+  2026-07-29:** `song/songbook/default/rice.nix`'s wallpaper note is `null`;
+  the stylix facet bakes its deterministic solid from `palette.bg` instead of
+  borrowing another song's cover. Separately, **covers moved back to
+  `song/covers/` 2026-07-29** (a shared wallpaper library any song references
+  by literal path, e.g. `../../covers/sonata.webp`) — the per-song `assets/`
+  described above no longer holds cover art; `pkgs/aoide/src/dispatch.rs`
+  `derive_cover` was repointed the same day at `song/covers/<name>.<ext>` (the
+  `cover.<ext>` probe dropped — ambiguous in a shared dir) and the
+  `shellbridge.rs` doc comment updated; cargo tests pass (78, incl. the
+  rewritten `preview_stages_a_derivable_cover_from_the_covers_library`). The
+  `hero` song is deleted outright — the songbook holds `default` and `sonata`;
   (b) thin the wiki's `songbook/` pages to protocol + pointers once the per-song `design/`
-  folders hold the memory, and refresh `songbook/sonata/design/intent.md` (still
-  describes an indigo nocturne, not the cream key); (c) `lib/checks.nix` carries
+  folders hold the memory — still owed. The `songbook/sonata/design/intent.md`
+  refresh is **RESOLVED 2026-07-29:** intent.md now states the sonata.webp key —
+  the light dusk key read region-by-region from `song/covers/sonata.webp` (the
+  pianist on mirror-water), with the palette+base16 re-keyed off that cover
+  (pale peach-cream `base00`, plum-ink `base05`, dusk slate-blue accent, crimson
+  urgent, horizon-green hot) and computed light-polarity contrast; the stale
+  indigo-nocturne / interim Alma-Tadema takes are both retired. The
+  `Ricing-Protocol`/`Pantheon-Grammar`/`Song-Anatomy`/`Stylix`/`Full-Architecture`
+  pages were reconciled to the new key in the same pass; (c) `lib/checks.nix` carries
   pre-existing nixfmt-1.4.0 drift (unrelated to this change) — a formatting-only
   pass is owed.
 - **[bug · follow-up] `aoide rice preview <name>` derives the cover by
-  song-name convention** (`covers/<name>.*`; post-migration `songbook/<name>/
-  assets/`) instead of reading `aoide.drachma.wallpaper`. Mitigated live by the
+  song-name convention** (`song/covers/<name>.*` as of 2026-07-29) instead of
+  reading `aoide.drachma.wallpaper`. Mitigated live by the
   `AOIDE_WALLPAPER` env baked into the quickshell service, so the wallpaper
   survives rebuilds; a proper fix (preview reads the song's wallpaper note) is
   still owed. See [[Self-Ricing]].
+- **[feature · flagged 2026-07-29 by khoa] A comprehensive wallpaper switcher,
+  quickshell-native.** The seams already exist: `song/covers/` is the shared
+  wallpaper library; `AoideWallpaper.qml` renders whatever `stage/cover.json`
+  names (`{"path": ...}`, FileView-watched, hot-swaps live) and falls back to
+  the baked `AOIDE_WALLPAPER` store path. What's owed on top: a switcher
+  surface (a quickshell picker — thumbnail grid over `song/covers/`, in the
+  launcher's glass idiom or its own popout) that writes `stage/cover.json`
+  via shellbridge; a `aoide cover <set|list|next>` CLI verb driving the same
+  seam; transition treatment (crossfade in AoideWallpaper rather than a hard
+  `source` swap); and per-monitor selection once multi-output lands. Related
+  residual: quickshell's Qt runtime decodes covers only through the
+  imageformats plugins on `QT_PLUGIN_PATH` — the facet exports
+  `qt6.qtimageformats` (webp/tiff/…) since 2026-07-29; a switcher's format
+  support is bounded by that plugin set, so keep the export when touching the
+  service. Open Thread `rice preview --gallery` folds into this. **Open.**
 - **[bug · found 2026-07-28 wiki sweep] Melete adapter subscribes to nothing.**
   `modules/nucleus/melete-adapter.nix` sets
   `AOIDE_ADAPTER_SUBSCRIBE=rebuild-proposed,rice-preview-ready,notification-action`,
