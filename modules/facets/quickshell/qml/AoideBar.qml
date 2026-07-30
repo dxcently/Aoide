@@ -30,14 +30,15 @@
 // INSIDE the 36px strip — no apron, no taller transparent surface (that scar,
 // the wallpaper-bleed under a hairline, stays closed); the clef is sized to fit.
 //
-// Colour: the WHITE MUSIC SHEET — a Win7 Aero taskbar rendered as manuscript
-// paper. The page is an OPAQUE white sheet (Qt.rgba(1,1,1,0.92)) with the white
-// gloss gradient riding on top (the Aero highlight); the hyprglass blur behind
-// it gives faint depth but the strip reads solid. The structural ink stays BLACK
-// (#000000 staff lines, barlines, playhead), but the TEXT ink is now the song's
-// umber (notes.paletteFg #423420) drawn CLEAN — the old white legibility outline
-// is dropped, since dark text on the cream sheet needs no halo (that outline was
-// a relic of the old dark bar and only muddied the type on cream).
+// Colour: the MUSIC SHEET — rendered as a flat, fully OPAQUE strip of
+// manuscript paper, no glass and no gloss. The page fill is notes.paletteBg
+// at full alpha (Qt.rgba(paletteBg.r, .g, .b, 1.0)); there is no blur behind
+// it and no gradient sheen on top — the strip reads as solid paper. The
+// structural ink stays BLACK (#000000 staff lines, barlines, playhead), but
+// the TEXT ink is now the song's umber (notes.paletteFg #423420) drawn CLEAN
+// — the old white legibility outline is dropped, since dark text on the
+// opaque sheet needs no halo (that outline was a relic of the old dark bar
+// and only muddied the type on cream).
 // One restrained STATE accent survives from the song (DrachmaState): the ACTIVE
 // workspace note-head fills with paletteAccent, the BLOCKED ✎ pulse + low battery
 // go glitchPink, and open/hover toggles (clock→calendar, volume, tray) flash
@@ -353,10 +354,9 @@ Item {
     }
 
     // ══ THE MANUSCRIPT STRIP ═══════════════════════════════════════════════
-    // A single OPAQUE WHITE Aero-glass page — the Win7 taskbar as a sheet of
-    // manuscript paper. High-opacity white fill (the hyprglass blur still sits
-    // behind it for faint Aero depth, but the sheet reads as a solid glossy
-    // strip, not see-through). Rounded ends give the ╭─ … ─╮ read of the sketch.
+    // A single OPAQUE sheet of manuscript paper — flat, fully solid
+    // paletteBg, no glass, no gloss. Rounded ends give the ╭─ … ─╮ read of
+    // the sketch.
     Rectangle {
         id: page
         anchors.left: parent.left
@@ -364,29 +364,15 @@ Item {
         anchors.top: parent.top
         height: root.stripHeight
         radius: 0                        // EDGED — hard square corners, no round
-        // Cream frosted glass — the song's paletteBg at 0.45 (khoa steer:
-        // a more transparent strip; the hyprglass blur behind carries
-        // legibility). khoa keeps the cream-and-ink look; brightness is
-        // opacity, not a whiter tint — the popouts carry the same 0.45 so
-        // bar and popouts read as one glass.
+        // Fully opaque paletteBg — no glass, no translucency. The bar reads
+        // as a flat solid strip; the black staff ink sits directly on the
+        // song's page colour with no blur or gradient behind it.
         color: Qt.rgba(Qt.color(root.notes.paletteBg).r,
                        Qt.color(root.notes.paletteBg).g,
-                       Qt.color(root.notes.paletteBg).b, 0.45)
+                       Qt.color(root.notes.paletteBg).b, 1.0)
         opacity: 1.0
     }
-    // Aero gloss — the sanctioned white sheen (bright top, hard midline stop),
-    // the glossy Win7 highlight riding on top of the white sheet.
-    Rectangle {
-        anchors.fill: page
-        radius: 0
-        gradient: Gradient {
-            GradientStop { position: 0.0;  color: Qt.rgba(1, 1, 1, 0.20) }
-            GradientStop { position: 0.48; color: Qt.rgba(1, 1, 1, 0.06) }
-            GradientStop { position: 0.52; color: Qt.rgba(1, 1, 1, 0.00) }
-            GradientStop { position: 1.0;  color: Qt.rgba(1, 1, 1, 0.05) }
-        }
-    }
-    // The page rail — a DEFINED black edge framing the transparent strip.
+    // The page rail — a DEFINED black edge framing the opaque strip.
     Rectangle {
         anchors.fill: page
         radius: 0

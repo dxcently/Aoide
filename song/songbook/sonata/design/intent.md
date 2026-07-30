@@ -1,10 +1,16 @@
 # sonata — Design Intent
 
 **Song:** sonata (committed rice; the selected key on yomi-strix)
-**Palette:** a light dusk key — pale peach-cream ground, plum-ink text, dusk
-slate-blue accent, crimson-ember urgent, a horizon-green one-hot blaze
-**Cover:** `song/covers/yuki-sonata.png` — a pianist at a grand piano on
-mirror-still water at dusk
+**Palette:** a Greek marble key — pale warm-marble ground, plum-charcoal ink,
+deep Attic-gold chrome accent, terracotta urgent, a true laurel leaf-green
+one-hot blaze; aegean blue steps back to a preview/information role
+**Grammar:** `design/greek-grammar.md` — sonata's typographic-Greek house
+grammar (columns, meanders, pediments), a deliberate divergence from the default
+song's Pantheon wireframe grammar
+**Cover:** none — the wallpaper note is `null`, so the stylix facet bakes a
+deterministic **bright-marble field** from `palette.bg` (`#f2ebde`), the same
+mechanism `song/songbook/default/rice.nix` uses. Colours fit the theme, not a
+photo; the wallpaper switcher handles photos live (see the Iteration Log)
 
 ---
 
@@ -23,52 +29,57 @@ dendrite, touches no hardware or service, and does not key `stylix.polarity`
 what lets one score be performed on any host with its own specifics and its own
 enabled facet/dendrite set (CONTRACTS.md §5).
 
-## The key — keyed from the cover, region by region
+## The key — the Greek register, region by region
 
-The palette is derived from `yuki-sonata.png` itself. The image is a high-variance
-dusk scene: a near-black grand piano and pianist on a mirror-still sheet of
-water that doubles the sky, under a sunset cloudbank that runs from
-peach-cream light on the upper left to plum-mauve dusk on the upper right, with
-an ember horizon band low on the right.
+The palette is authored as a self-standing **Greek register**, not read from a
+cover image: a temple in daylight. It is a marble ground under dark ink, with
+chrome drawn from a temple's own materials — aegean sea-blue, terracotta clay,
+Attic gold, laurel green, bronze verdigris, Tyrian purple, deep bronze.
 
-Because the desktop is a **cream frosted-glass** surface — "brightness is
+Because the desktop is a **marble frosted-glass** surface — "brightness is
 opacity, not colour": kitty renders at `background_opacity` 0.86 and the bar
-panes at ~0.45 opacity **over** this ground — `base00` stays in the pale
-cream-glass family. Its temperature is shifted from the previous parchment
-key toward this image's light register: the peach-cream cloudlight and the
-rose mirror-water, rather than a warm classical parchment.
+sheet at ~0.30 opacity **over** this ground — `base00` stays in the pale
+marble-glass family, a warm sunlit stone.
 
 The polarity is **light** (the stylix facet pins it): `base00` is the lightest
 value and `base05`–`base07` are the dark inks.
 
-| Region of the cover | Slot(s) | Colour |
+| Region of the Greek register | Slot(s) | Colour |
 |---|---|---|
-| pale peach-cream sunlit cloudbank (upper left) | `base00` / `bg` | `#f4e9e2` |
-| rose-cream lit cloud mist | `base01` | `#ecdcd8` |
-| lavender-rose cloud / pale mirror-water | `base02` | `#dcc7c8` |
-| dusk mauve-grey cloud shadow | `base03` | `#b49aa6` |
-| dusk slate-plum midtone | `base04` | `#806b7a` |
-| the piano's near-black, read as a plum ink | `base05` / `fg` | `#3b2f3a` |
-| the piano's lacquer (deeper ink) | `base06` | `#2a212a` |
-| the piano's darkest black | `base07` | `#191319` |
-| crimson piano-stool cushion / ember red | `base08` / `urgent` | `#b34a52` |
-| the ember horizon sunset band | `base09` | `#c96a3c` |
-| sunlit cloud-gold highlight | `base0A` | `#cc9a52` |
-| the horizon's green transition band | `base0B` / `hot` | `#5f8a7a` |
-| cool upper-sky cyan-teal | `base0C` | `#4f8598` |
-| dusk slate-blue sky (upper right) | `base0D` / `accent` | `#5a6f9c` |
-| dusk plum-mauve cloud (upper right) | `base0E` | `#8a5f88` |
-| warm rust (deep cloud shadow / stool frame) | `base0F` | `#9a5b4a` |
+| pale sunlit marble (temple stone in daylight) | `base00` / `bg` | `#f2ebde` |
+| marble in soft shade | `base01` | `#e8dfcc` |
+| aged / weathered marble | `base02` | `#dacdb2` |
+| weathered-stone grey-tan | `base03` | `#a99a82` |
+| stone-slate midtone | `base04` | `#6d6250` |
+| plum-charcoal ink | `base05` / `fg` | `#2f2a33` |
+| obsidian-plum (deeper ink) | `base06` | `#211d26` |
+| near-black ink | `base07` | `#14111a` |
+| terracotta (fired clay) | `base08` / `urgent` | `#b0472f` |
+| kiln-fired clay orange | `base09` | `#c06a35` |
+| deep Attic gold (chrome accent) | `base0A` / `accent` | `#a07414` |
+| true laurel leaf-green (one-hot blaze) | `base0B` / `hot` | `#4e8b45` |
+| bronze verdigris | `base0C` | `#3f867e` |
+| aegean deep-blue (preview / info role) | `base0D` | `#345f81` |
+| Tyrian / murex purple | `base0E` | `#6f4373` |
+| deep bronze / clay | `base0F` | `#8a5a34` |
 
-The slate-blue is the chrome **accent**; the crimson cushion is **urgent**; the
-horizon-green is the single one-hot **trace** colour (`palette.hot`, `base0B`) —
-the one blaze the Pantheon grammar reserves for the live/traced element.
+The deep Attic **gold** is the chrome **accent** (`palette.accent` = `base0A`);
+the terracotta is **urgent**; the laurel leaf-green is the single one-hot
+**trace** colour (`palette.hot`, `base0B`) — the one blaze the grammar reserves
+for the live/traced element, kept 71° off the gold hue so the two never muddy.
+The **aegean blue** (`base0D`) steps back from chrome to a **preview /
+information** role — the workspace preview ring, links, cool syntax ("the sea
+between the columns"), never active-state chrome. The roles carry over from the
+previous key by NAME (`wireCyan`=base0C, `holoBlue`=base0D, `violet`=base0E,
+`glitchPink`=base08), each re-hued to its Greek equivalent: bronze-verdigris,
+aegean, Tyrian/murex purple, terracotta.
 
 ## Window frames
 
-Active border is `base0C` cool-sky cyan-teal — the same wireframe hairline the
-bar's panes wear; the inactive border recedes to `base01` rose-cream, the light
-ground, so an unfocused frame melts back into the desktop.
+Active border is `base0A` Attic gold (`#a07414`, = `palette.accent`) — the
+focused window reads as the "live" one, matching the bar's chrome accent. The
+inactive border steps back to `base0C` bronze-verdigris (`#3f867e`), a cool
+blue-teal that recedes without vanishing into the ground.
 
 ## Component tier
 
@@ -78,39 +89,53 @@ song-owned border notes above.
 
 ## Contrast (light polarity, computed — not eyeballed)
 
-WCAG relative-luminance ratios against `base00` (`#f4e9e2`):
+WCAG relative-luminance ratios against `base00` (`#f2ebde`):
 
 | Pair | Ratio | Requirement | Result |
 |---|---|---|---|
-| `base05` on `base00` | 10.64:1 | ≥ 4.5:1 (AA body text) | PASS |
-| `base04` on `base00` | 4.09:1 | ≥ 3:1 (dim fg) | PASS |
-| accent `base0D` on `base00` | 4.20:1 | ≥ 3:1 | PASS |
-| urgent `base08` on `base00` | 4.38:1 | ≥ 3:1 | PASS |
+| `base05` on `base00` | 11.81:1 | ≥ 4.5:1 (AA body text) | PASS |
+| `base04` on `base00` | 5.04:1 | ≥ 3:1 (dim fg) | PASS |
+| accent gold `base0A` on `base00` | 3.54:1 | ≥ 3:1 (fill / line, not body) | PASS |
+| urgent `base08` on `base00` | 4.68:1 | ≥ 3:1 | PASS |
+| hot laurel `base0B` on `base00` | 3.47:1 | ≥ 3:1 (2px border + halo) | PASS |
+
+Every required bar clears. The chrome **accent is now deep Attic gold**
+(`base0A`, 3.54:1) — it replaces the aegean blue as `palette.accent` and unifies
+with the retired `base0A` highlight (`#b98a2e`, which under-contrasted at
+2.63:1). Gold at 3.54:1 is a **fill / line colour, never running body text**
+(< 4.5 AA) — the same standing rule as the verdigris structural cap. The one-hot
+laurel blaze (`base0B` `#4e8b45`, 3.47:1) replaces the previous olive `#6b8b33`:
+Fable found the olive only 41° off the new gold, muddying the one-hot; true
+leaf-green sits 71° off gold and clears ≥ 3:1 for its 2px traced border + halo.
+The aegean blue (`base0D`, 5.71:1) and bronze-verdigris (`base0C`, 3.60:1) are
+now the preview/info and structural chrome tiers respectively — chrome, never
+bare running text.
 
 ## Current surface elements (as performed)
 
-How the key currently reads on yomi-strix — sonata's instantiation of the
-house grammar (`song/songbook/default/design/pantheon.md`). The glass alphas
-are facet/dendrite constants, not drachma notes; they are tuned against THIS
-key and recorded here as its design memory:
+How the key reads on yomi-strix — sonata's instantiation of its house grammar
+(`design/greek-grammar.md`). The glass alphas are facet/dendrite constants, not
+drachma notes; they are tuned against THIS key and recorded here as its design
+memory. The colour values below are the re-keyed Greek notes; the drawn shapes
+update when the greek-grammar reskin lands (the palette re-key ships first, the
+widget reskin follows as its blueprint directs):
 
 | Surface | Element | Value |
 |---|---|---|
-| bar sheet (`AoideBar.qml`) | `paletteBg` glass alpha | 0.45 |
-| bar popouts (`BarPopout.qml`) | same glass as the bar | 0.45 |
-| kitty terminal (kitty dendrite) | `background_opacity` | 0.86 (compositor fades unfocused windows to 0.90) |
+| bar sheet (`AoideBar.qml`) | `paletteBg` alpha | 1.0 — OPAQUE, no glass, no gloss gradient (khoa: flat solid strip) |
+| bar popouts (`BarPopout.qml`) | glass alpha | 0.72 (the popout reads solid against the thinned strip) |
+| kitty terminal (kitty dendrite) | `background_opacity` | 0.86 (compositor fades unfocused windows to 0.80) |
 | launcher (`AoideLauncher.qml`) | glass alpha (over busy windows) | 0.72 |
 | dock + gadget frames (`AoideAgentWidgets`/`GadgetFrame`) | glass alpha | 0.72 |
-| workspace strip | resting notes | solid plum ink (`paletteFg` `#3b2f3a`) |
-| workspace strip | active note | swells 15→19px, fills `accent` `#5a6f9c` on a soft accent glow |
-| workspace strip | urgent | pulses `glitchPink` (`base08` `#b34a52`) |
-| window frames | active / inactive | `#4f8598` cyan-teal hairline / `#ecdcd8` rose-cream (2px, rounding 0) |
-| the one blaze | ✎N live-sessions cell + DAG/TERMINALS trace | `hot` horizon-green `#5f8a7a` |
-| wallpaper | baked cover | `song/covers/yuki-sonata.png` |
+| workspace strip | resting notes | solid plum-charcoal ink (`paletteFg` `#2f2a33`) |
+| workspace strip | active note | swells 15→19px, fills `accent` gold `#a07414` on a soft accent glow |
+| workspace strip | urgent | pulses `glitchPink` (`base08` terracotta `#b0472f`) |
+| window frames | active / inactive | `#a07414` Attic gold hairline / `#3f867e` bronze-verdigris teal (2px, rounding 0) |
+| the one blaze | ✎N live-sessions cell + DAG/TERMINALS trace | `hot` laurel leaf-green `#4e8b45` |
+| wallpaper | baked field | deterministic bright-marble solid from `palette.bg` `#f2ebde` (wallpaper note null) |
 
-Every text element sits on a glass backing (bar sheet, frames, chips) — the
-high-variance cover never carries bare text, so no outline treatment is in
-use.
+Every text element sits on a glass backing (bar sheet, frames, chips) — no bare
+text on the wallpaper, so no outline treatment is in use.
 
 ## Iteration Log
 
@@ -127,3 +152,61 @@ use.
   Current surface elements recorded above; rice design memory now lives
   per-song (this file), with the house grammar in the default rice's
   `design/pantheon.md`.
+- 2026-07-29: **RE-KEYED to the Greek register** (khoa-approved). The light
+  dusk key drawn from `yuki-sonata.png` (pale peach-cream ground `#f4e9e2`,
+  plum-ink `#3b2f3a`, dusk slate-blue accent `#5a6f9c`, crimson-ember urgent
+  `#b34a52`, horizon-green hot `#5f8a7a`) is **RETIRED** — kept here in the log,
+  not deleted. The new key is a Greek marble register: marble ground `#f2ebde`,
+  plum-charcoal ink `#2f2a33`, aegean accent `#345f81`, terracotta urgent
+  `#b0472f`, Attic-gold highlight `#b98a2e`, laurel-green hot `#6b8b33`; all
+  16 base16 slots re-derived region-by-region above, contrast recomputed and
+  clearing every bar. Sonata also gains its OWN house grammar,
+  `design/greek-grammar.md` — a typographic-Greek design language (columns,
+  meanders, pediments; text-and-symbols only) diverging from the default song's
+  Pantheon wireframe grammar, the blueprint for the widget reskin. The cover
+  still points at `yuki-sonata.png` (covers/ is out of this re-key's scope); a
+  Greek cover is a follow-up. The musical state-glyph contract (`♪ 𝄐 𝄽 𝄂 ·`,
+  from `pkgs/aoide/src/baton/theme.rs`) is untouched — the Greek forms frame it,
+  never replace it.
+- 2026-07-29: Fable review GO-WITH-TWEAKS. Applied at palette level: (a) the
+  one-hot laurel `hot`/`base0B` brightened `#5f7a37` → `#6b8b33` so the green
+  blaze out-reads the teal verdigris structural role on warm marble by hue, not
+  opacity alone (new ratio 3.30:1 on `#f2ebde`, clears ≥ 3:1 for a 2px border +
+  halo); (b) Tyrian `base0E` `#7d4a6b` → `#6f4373`, toward true murex purple (it
+  read mauve-rosewood); (c) `greek-grammar.md` §5 gains the verdigris-cap
+  **invariant** — structural `wireCyan`/verdigris chrome renders at ≤ 0.5 alpha
+  at all times, so the structural role can never steal the one-hot blaze.
+- 2026-07-30: **gold-primary re-key + marble default** (Fable-advised, exact
+  values). Chrome **accent → deep Attic gold `#a07414`** (3.54:1), replacing the
+  aegean blue `#345f81` as `palette.accent`; **`base0A` unified to `#a07414`**
+  too (the old `#b98a2e` gold under-contrasted at 2.63:1 — retired). **hot /
+  `base0B` → true laurel leaf-green `#4e8b45`** (3.47:1), replacing the interim
+  olive `#6b8b33` (only 41° off the new gold; leaf-green is 71° off). **Aegean
+  `base0D` keeps its value and `holoBlue` role but its JOB narrows to
+  preview/information** (workspace preview ring, links) — no longer active-state
+  chrome. **Cover retired: `wallpaper` → null**, so the stylix facet bakes a
+  deterministic bright-marble solid from `palette.bg` `#f2ebde` (the default
+  song's mechanism); the `covers/yuki-sonata.png` reference is dropped (khoa:
+  colours fit the theme, not a photo; the wallpaper switcher handles photos
+  live). Facet-tuning memory recorded above: bar sheet glass 0.45 → 0.30, bar
+  popouts → 0.72, unfocused kitty 0.90 → 0.80 (these live in the compositor/
+  quickshell facets — other workers' domain — noted here only as design memory,
+  not edited by this song).
+- 2026-07-30: **bar opaque + window borders swapped** (khoa: theme consistency
+  pass). `AoideBar.qml`'s manuscript-strip sheet is no longer glass: fill is now
+  `paletteBg` at alpha 1.0 (was 0.30) and the Aero-style white gloss gradient
+  overlay on the sheet is REMOVED entirely — the bar reads as a flat opaque
+  strip, no blur-through, no sheen. Everything else (36px `stripHeight`, staff
+  lines, barlines, playhead ink, clef/rests/note-heads, workspaces, clock,
+  interaction) is unchanged. Window border notes swapped: `window.border`
+  (active) is now Attic **gold** `#a07414` (= `palette.accent`, was the
+  bronze-verdigris `#3f867e`); `window.borderInactive` is now bronze-verdigris
+  **teal** `#3f867e` (was marble-shade `#e8dfcc`) — the focused window now
+  matches the bar's gold chrome, the unfocused window recedes to a cool teal
+  instead of near-vanishing into the marble ground. Edited in both
+  `drachma.json` and `rice.nix` (kept in sync). The compositor facet
+  (`modules/facets/compositor/default.nix:42-44,72-73`) already derives
+  `col.active_border`/`col.inactive_border` from `aoide.drachma.window.border`/
+  `.borderInactive` (falling back to `palette.accent`/`palette.bg` when a song
+  leaves them null) — no compositor-side change was needed, the pipeline just
+  picked up the new song-owned notes.

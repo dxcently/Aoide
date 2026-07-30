@@ -1,12 +1,16 @@
-# song/songbook/sonata/rice.nix — the "sonata" song (the cover's own key).
+# song/songbook/sonata/rice.nix — the "sonata" song (the Greek key).
 #
-# The palette is drawn from the cover itself (song/covers/yuki-sonata.png — a
-# pianist at a grand piano on mirror-still water at dusk): a LIGHT dusk key.
-# base00 is the pale peach-cream of the sunlit cloudbank; text is the piano's
-# warm near-black, read as a plum ink; the accent is the dusk slate-blue of
-# the upper sky, urgent is the crimson of the piano-stool cushion, and the
-# one-hot trace blazes the green of the horizon's transition band. The song
-# that matches its wallpaper.
+# sonata is re-keyed to a GREEK register: a light MARBLE ground, plum/charcoal
+# ink kept dark (Stylix pins polarity light — the song cannot flip it), a deep
+# ATTIC-GOLD chrome accent, a TERRACOTTA urgent, and a true LAUREL leaf-green
+# one-hot trace — the single blaze the grammar reserves for the live/traced
+# element. Aegean blue steps back to a preview/info role. The look is a temple
+# in daylight: pale stone, dark ink, gold-and-terracotta chrome. There is no
+# cover — the wallpaper note is null, so the stylix facet bakes a deterministic
+# bright-marble solid from palette.bg (the default song's mechanism). The
+# typographic-Greek house grammar this key wears is in design/greek-grammar.md
+# (sonata's own grammar, a deliberate divergence from the default song's
+# Pantheon wireframe grammar).
 #
 # HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.drachma.
 # All drachma values are literal nix expressions (no song/ runtime reads).
@@ -15,47 +19,49 @@
   # Guard: apply only when this host performs "sonata".
   config = lib.mkIf (config.aoide.song == "sonata") {
 
-    # ── Palette tier (base16 mapping — the dusk cover's light register) ─────
+    # ── Palette tier (base16 mapping — the Greek marble register) ───────────
     aoide.drachma.palette = {
-      bg = "#f4e9e2"; # pale peach-cream cloudbank (base00)
-      fg = "#3b2f3a"; # the piano's near-black, read as plum ink (base05)
-      accent = "#5a6f9c"; # dusk slate-blue sky            (base0D)
-      urgent = "#b34a52"; # crimson piano-stool cushion    (base08)
-      # The one-hot trace colour — the green of the horizon's transition band
-      # (matches base0B below). The slate-blue stays the chrome accent; THIS
-      # blazes on the single hot/traced element (the DAG/TERMINALS traced
-      # row). null → accent.
-      hot = "#5f8a7a"; # dusk horizon green                 (base0B)
+      bg = "#f2ebde"; # pale warm marble ground            (base00)
+      fg = "#2f2a33"; # plum-charcoal ink                  (base05)
+      accent = "#a07414"; # deep Attic GOLD — the chrome accent (base0A)
+      urgent = "#b0472f"; # terracotta                     (base08)
+      # The one-hot trace colour — TRUE laurel leaf-green, the single blaze the
+      # grammar reserves for the hot/traced element (matches base0B below). Gold
+      # is now the chrome accent; THIS green blazes on the one traced row (the
+      # DAG/TERMINALS trace link) — kept 71° off gold so it never muddies. The
+      # aegean blue (base0D) steps back to a PREVIEW/INFO role (workspace preview
+      # ring, links), NOT active-state chrome. null → accent.
+      hot = "#4e8b45"; # true laurel leaf-green            (base0B)
     };
 
-    # ── Base16 tier — the LIGHT dusk cover palette ──────────────────────────
-    # Keyed from yuki-sonata.png, region by region: a warm rose-cream ramp
-    # (00–07, from the sunlit cloudbank down to the piano's black) with an
-    # accent set drawn from the dusk sky, the ember horizon, and the piano's
-    # crimson cushion: crimson-ember, sunset orange, cloud-gold, horizon green,
-    # cool-sky cyan, dusk slate-blue, plum-mauve cloud, and warm rust.
-    # Slots follow the base16 standard.
+    # ── Base16 tier — the Greek marble palette ──────────────────────────────
+    # Keyed region-by-region in the Greek key: a warm marble ramp (00–07, from
+    # pale sunlit stone down to a plum-charcoal ink) with an accent set drawn
+    # from a temple's materials — terracotta clay, clay-orange, Attic gold,
+    # laurel green, bronze-verdigris, aegean blue, Tyrian/amethyst purple, and
+    # a deep bronze. Slots follow the base16 standard.
     aoide.drachma.base16 = {
-      base00 = "#f4e9e2"; # lightest bg — pale peach-cream sunlit cloudbank
-      base01 = "#ecdcd8"; # lighter bg (status) — rose-cream lit cloud mist
-      base02 = "#dcc7c8"; # selection — lavender-rose cloud / pale mirror-water
-      base03 = "#b49aa6"; # comments — dusk mauve-grey cloud shadow
-      base04 = "#806b7a"; # dark fg — dusk slate-plum midtone
-      base05 = "#3b2f3a"; # default fg — the piano's near-black, read as plum ink
-      base06 = "#2a212a"; # light fg (deeper ink) — the piano's lacquer
-      base07 = "#191319"; # brightest — the piano's darkest black
-      base08 = "#b34a52"; # red    — crimson piano-stool cushion / ember red
-      base09 = "#c96a3c"; # orange — the ember horizon sunset band
-      base0A = "#cc9a52"; # yellow — sunlit cloud-gold highlight
-      base0B = "#5f8a7a"; # green  — dusk horizon green transition band
-      base0C = "#4f8598"; # cyan   — cool upper-sky cyan-teal
-      base0D = "#5a6f9c"; # blue   — dusk slate-blue sky (upper right)
-      base0E = "#8a5f88"; # magenta— dusk plum-mauve cloud (upper right)
-      base0F = "#9a5b4a"; # brown  — warm rust (deep cloud shadow / stool frame)
+      base00 = "#f2ebde"; # lightest bg — pale warm marble (sunlit stone)
+      base01 = "#e8dfcc"; # lighter bg (status) — marble in soft shade
+      base02 = "#dacdb2"; # selection — aged/weathered marble
+      base03 = "#a99a82"; # comments — weathered-stone grey-tan (recedes)
+      base04 = "#6d6250"; # dark fg — stone-slate midtone
+      base05 = "#2f2a33"; # default fg — plum-charcoal ink
+      base06 = "#211d26"; # light fg (deeper ink) — obsidian plum
+      base07 = "#14111a"; # brightest — near-black ink
+      base08 = "#b0472f"; # red    — terracotta (urgent)
+      base09 = "#c06a35"; # orange — clay / kiln-fired orange
+      base0A = "#a07414"; # yellow — deep Attic gold (unified with the chrome accent)
+      base0B = "#4e8b45"; # green  — true laurel leaf-green (one-hot trace)
+      base0C = "#3f867e"; # cyan   — bronze verdigris (structural outlines)
+      base0D = "#345f81"; # blue   — aegean deep-blue (preview/info role, not chrome accent)
+      base0E = "#6f4373"; # magenta— Tyrian / murex purple (project volumes)
+      base0F = "#8a5a34"; # brown  — deep bronze / clay
     };
 
     # ── Component tier (v0) ────────────────────────────────────────────────
-    # null → fall back to palette; the key does the work (moonlight's idiom).
+    # null → fall back to palette; the key does the work (no hidden overrides
+    # to undo before a transposition).
     aoide.drachma.bar = {
       bg = null;
       fg = null;
@@ -66,20 +72,25 @@
       fg = null;
       urgent = null;
     };
-    # Window frames join the Pantheon: the active hairline is base0C cyan-teal —
-    # the same wireframe rule the bar's panes wear — and the inactive frame
-    # recedes to base01, the light rose-cream ground. The window key stays a
-    # component-tier note the song owns.
+    # Window frames: the active hairline is base0A Attic gold — the same
+    # chrome accent the bar and gadget wireframe outlines wear — so the
+    # focused window reads as the "live" one. The inactive frame steps back
+    # to base0C bronze-verdigris, a cool blue-teal that recedes without
+    # vanishing into the ground. The window key stays a component-tier note
+    # the song owns.
     aoide.drachma.window = {
-      border = "#4f8598"; # base0C cool-sky cyan-teal — active
-      borderInactive = "#ecdcd8"; # base01 rose-cream — inactive (recedes to the ground)
+      border = "#a07414"; # base0A Attic gold — active (= palette.accent)
+      borderInactive = "#3f867e"; # base0C bronze-verdigris — inactive (cool teal)
     };
 
     # ── Cover-art note ─────────────────────────────────────────────────────
-    # The main wallpaper: `yuki-sonata.png` — the pianist on mirror water at dusk.
-    # The base16 palette above is keyed from this image's LIGHT register (the
-    # pale peach-cream cloudlight and rose mirror-water), for colour coherence
-    # with the desktop's Stylix light polarity.
-    aoide.drachma.wallpaper = ../../covers/yuki-sonata.png;
+    # null → the stylix facet bakes a DETERMINISTIC bright-marble solid from
+    # palette.bg (#f2ebde), exactly the mechanism song/songbook/default/rice.nix
+    # uses (its wallpaper is null → solid from its own base00). The retired
+    # covers/yuki-sonata.png reference is dropped: sonata's colours fit the
+    # Greek theme, not a photograph (khoa). The wallpaper switcher handles photos
+    # live; the song's DEFAULT ground is a clean bright marble field, which keeps
+    # the light-polarity contrast valid under the now-more-transparent bar.
+    aoide.drachma.wallpaper = null;
   };
 }

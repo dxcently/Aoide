@@ -1,42 +1,42 @@
 {
   "schemaVersion": "0",
   "palette": {
-    "bg":     "#f4e9e2",
-    "fg":     "#3b2f3a",
-    "accent": "#5a6f9c",
-    "urgent": "#b34a52",
-    "hot":    "#5f8a7a"
+    "bg":     "#f2ebde",
+    "fg":     "#2f2a33",
+    "accent": "#a07414",
+    "urgent": "#b0472f",
+    "hot":    "#4e8b45"
   },
   "base16": {
-    "base00": "#f4e9e2",
-    "base01": "#ecdcd8",
-    "base02": "#dcc7c8",
-    "base03": "#b49aa6",
-    "base04": "#806b7a",
-    "base05": "#3b2f3a",
-    "base06": "#2a212a",
-    "base07": "#191319",
-    "base08": "#b34a52",
-    "base09": "#c96a3c",
-    "base0A": "#cc9a52",
-    "base0B": "#5f8a7a",
-    "base0C": "#4f8598",
-    "base0D": "#5a6f9c",
-    "base0E": "#8a5f88",
-    "base0F": "#9a5b4a"
+    "base00": "#f2ebde",
+    "base01": "#e8dfcc",
+    "base02": "#dacdb2",
+    "base03": "#a99a82",
+    "base04": "#6d6250",
+    "base05": "#2f2a33",
+    "base06": "#211d26",
+    "base07": "#14111a",
+    "base08": "#b0472f",
+    "base09": "#c06a35",
+    "base0A": "#a07414",
+    "base0B": "#4e8b45",
+    "base0C": "#3f867e",
+    "base0D": "#345f81",
+    "base0E": "#6f4373",
+    "base0F": "#8a5a34"
   },
   "bar": {
-    "bg":     "#f4e9e2",
-    "fg":     "#3b2f3a",
-    "accent": "#5a6f9c"
+    "bg":     "#f2ebde",
+    "fg":     "#2f2a33",
+    "accent": "#a07414"
   },
   "notif": {
-    "bg":     "#f4e9e2",
-    "fg":     "#3b2f3a",
-    "urgent": "#b34a52"
+    "bg":     "#f2ebde",
+    "fg":     "#2f2a33",
+    "urgent": "#b0472f"
   },
   "window": {
-    "border":         "#4f8598",
-    "borderInactive": "#ecdcd8"
+    "border":         "#a07414",
+    "borderInactive": "#3f867e"
   }
 }
