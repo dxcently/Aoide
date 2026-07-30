@@ -72,12 +72,14 @@ get work done and how you test the conductor mesh.
   exercise the conductor while you build with it — dogfooding is testing.
 - **Fan out with sub-agents when it pays — the current tiering** (khoa,
   2026-07-30, superseding the 2026-07-29 shape below): **"Aoide Dev" (the main
-  dev session) orchestrates on Sonnet 5** — it decomposes, dispatches, reviews
-  every diff, and lands. **Coding runs through Melete, on Opus 5** — the
-  orchestrator does not edit code directly; it dispatches the coding task to
-  Melete — the on-box coding agent, run as a **local subagent (`Agent` tool),
-  NOT the Melete MCP connector** (khoa, 2026-07-30 — reiterated: MCP is not
-  needed here) — and reviews what comes back.
+  dev session) orchestrates** — it decomposes, dispatches, reviews every diff,
+  and lands. **The orchestrator's own model is deliberately unspecified here**
+  (khoa, 2026-07-30) — it varies by session and by the harness in use, so this
+  spec names the ROLE, never the model. **Coding runs through Melete, on Opus
+  5** — the orchestrator does not edit code directly; it dispatches the coding
+  task to Melete — the on-box coding agent, run as a **local subagent (`Agent`
+  tool), NOT the Melete MCP connector** (khoa, 2026-07-30 — reiterated: MCP is
+  not needed here) — and reviews what comes back.
   **Design and review are the higher tier** — Fable and Opus are used for
   designing an approach and reviewing worker output (judgement calls), not for
   mechanical execution. **Wiki maintenance is delegated to a Sonnet 5
@@ -86,7 +88,9 @@ get work done and how you test the conductor mesh.
 
   *(Superseded shape, kept for history: 2026-07-29 had the main dev agent
   orchestrating on Opus, with Opus itself coding design-critical work and
-  Sonnet generals doing broad search/mechanical sweeps.)*
+  Sonnet generals doing broad search/mechanical sweeps. A 2026-07-30 revision
+  pinned the orchestrator to Sonnet 5; that pin is withdrawn — the role no
+  longer names a model.)*
 
   Send independent agents in one batch so they run concurrently; keep the
   *conclusion*, not their file dumps.
@@ -97,13 +101,14 @@ get work done and how you test the conductor mesh.
   when a second eye adds value — but review is NOT mandatory, and **khoa
   reviews visual output himself** ("I will just look at it"). Use it by
   judgement — adversarial correctness checks, or when khoa isn't watching a
-  visual change — not as a blanket requirement on every diff. The one fixed
-  exception: **Melete's own coding output always gets an independent Opus
-  review** — a SEPARATE `Agent` dispatch (not the orchestrator reading the
-  diff itself) that re-derives its own view of the change rather than
-  rubber-stamping Melete's summary — before the orchestrator reads that
-  reviewer's verdict and lands (khoa, 2026-07-30). The orchestrator still
-  reviews diffs and lands.
+  visual change — not as a blanket requirement on every diff. **The separate
+  reviewer on Melete's output is no longer mandatory either** (khoa,
+  2026-07-30 — withdrawing the "one fixed exception" set earlier the same
+  day): Melete already runs its own code/test loop, so a second Opus/Fable
+  pass is a judgement call, not a gate. Reach for it when the change is
+  subtle, stateful, concurrency-sensitive, or hard to verify by reading — skip
+  it for small mechanical diffs the orchestrator can check itself. The
+  orchestrator still reviews every diff and lands.
 - **Resume, don't respawn.** An agent that died mid-task on an API error is
   resumed with its context intact (`SendMessage` by id) — a fresh `Agent` call
   starts cold.
