@@ -76,13 +76,14 @@ Item {
     function normState(state) {
         var s = (state || "").toLowerCase();
         switch (s) {
-        case "working": case "awaiting": case "idle": case "done": return s;
+        case "working": case "awaiting": case "stopped": case "idle": case "done": return s;
         // legacy-compat aliases (equality, not regex) — remove once fully migrated
         case "running": case "active": case "run": case "tool": case "busy": case "trace": return "working";
         case "blocked": case "block": case "waiting": case "wait": case "notify":
         case "notif": case "input": case "needs_input": case "needsinput":            return "awaiting";
         case "ready": case "sleep": case "sleeping":                                   return "idle";
-        case "stopped": case "stop": case "exit": case "exited":
+        case "stop":                                                                   return "stopped";
+        case "exit": case "exited":
         case "finished": case "finish": case "complete": case "completed":             return "done";
         default: return "";                                                            // unknown
         }
@@ -92,6 +93,7 @@ Item {
         switch (normState(state)) {
         case "working":  return "♪";
         case "awaiting": return "𝄐";
+        case "stopped":  return "𝄼";   // a whole rest — off the desk, but recently
         case "idle":     return "𝄽";
         case "done":     return "𝄂";
         default:         return "·";
@@ -104,6 +106,7 @@ Item {
         switch (normState(state)) {
         case "awaiting": return notes.paletteUrgent;
         case "working":  return notes.paletteAccent;
+        case "stopped":  return notes.holoBlue;
         case "idle":     return notes.violet;
         case "done":     return notes.wireCyan;
         default:         return withA(notes.paletteFg, 0.45);
@@ -113,14 +116,38 @@ Item {
         var s = normState(state);
         return s.length ? s : "—";
     }
-    // a mood face — the emoticon life ────────────────────────────────────────────
+
+    // ── MOOD FACES — the emoticon life ───────────────────────────────────────────
+    // WORKING is the ONLY animated state: its face cycles frames on a per-row
+    // timer, and that motion is now the widget's whole sense of life (the note
+    // glyph itself holds still). Every other state wears one settled pose.
+    //
+    // Three working sets exist so a roster of busy agents doesn't march in
+    // lockstep; each row picks one by a stable hash of its session id, so a
+    // given session always wears the same face across restarts.
+    //
+    // Every frame within a set is the SAME character count on purpose — the
+    // face is right-aligned in its row, so a frame that changed width would
+    // make the whole face jitter sideways instead of emoting in place.
+    readonly property var workFaces: [
+        ["♪(´ε｀ )", "♫(´ε｀ )", "♬(´ε｀ )", "♫(´ε｀ )"],   // cantando — humming over the work
+        ["φ(･ω･｀)", "φ(･ω･´)", "φ(･ω･＾)", "φ(･ω･´)"],   // scribens — pen down, writing
+        ["(･ω･)ゞ", "(･ｖ･)ゞ", "(･ω･)ゞ", "(･０･)ゞ"]      // salutans — nodding at the desk
+    ]
+    function faceSet(id) {
+        var s = id || "", h = 0;
+        for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) & 0x7fffffff;
+        return workFaces[h % workFaces.length];
+    }
+    // the STILL faces — one pose per resting state.
     function kaomojiFor(state) {
         switch (normState(state)) {
-        case "awaiting": return "(；・∀・)";   // anxious, waiting
-        case "working":  return "♪(´ε｀ )";    // humming along
-        case "idle":     return "(－ω－) zzZ";  // dozing
-        case "done":     return "( ´ ▽ ` )";  // content, retired
-        default:         return "( ・_・)";     // puzzled
+        case "awaiting": return "(；・∀・)?";   // needs input — anxious, asking
+        case "working":  return workFaces[0][0]; // animated in the delegate; frame 0 here
+        case "stopped":  return "( ･ω･)b";     // stopped — hands off, standing by
+        case "idle":     return "(－ω－) zzZ";  // idle — long at rest, or fresh/resumed
+        case "done":     return "( ´ ▽ ` )";   // content, retired
+        default:         return "( ・_・)";      // puzzled
         }
     }
 
@@ -658,32 +685,6 @@ Item {
                                 NumberAnimation { to: 0.0;  duration: 640; easing.type: Easing.InOutSine }
                             }
                         }
-                        // WORKING — a running-shimmer slides along the ledger line:
-                        // "alive / making progress", moving where the pulse throbs.
-                        Rectangle {
-                            id: shimmer
-                            height: 1
-                            width: parent.width * 0.30
-                            anchors.bottom: parent.bottom
-                            color: row.emph ? notes.paletteHot : notes.paletteAccent
-                            opacity: 0.0
-                            visible: row.working
-                            x: -width
-                            ParallelAnimation {
-                                running: row.working
-                                loops: Animation.Infinite; alwaysRunToEnd: true
-                                onRunningChanged: if (!running) { shimmer.opacity = 0.0; shimmer.x = -shimmer.width }
-                                NumberAnimation {
-                                    target: shimmer; property: "x"
-                                    from: -shimmer.width; to: row.width
-                                    duration: 1150; easing.type: Easing.InOutSine
-                                }
-                                SequentialAnimation {
-                                    NumberAnimation { target: shimmer; property: "opacity"; from: 0.0; to: 0.85; duration: 380 }
-                                    NumberAnimation { target: shimmer; property: "opacity"; to: 0.0; duration: 770 }
-                                }
-                            }
-                        }
                         Rectangle {                    // laurel-green spine (the one standout)
                             anchors.left: parent.left; anchors.top: parent.top
                             anchors.bottom: parent.bottom; anchors.bottomMargin: 1
@@ -742,48 +743,15 @@ Item {
                                 anchors.centerIn: parent
                                 // Noto Music seats the notehead low in a tall em
                                 // box; lift it to sit between the two text lines.
-                                // `bob` drives the WORKING bounce off that rest line.
-                                property real bob: 0
-                                anchors.verticalCenterOffset: -4 + bob
+                                anchors.verticalCenterOffset: -4
                                 text: gadget.glyphFor(modelData.state)
                                 font.family: gadget.faceMusic
                                 font.pixelSize: row.isChild ? 20 : 25   // child note ~0.8×
                                 color: row.accent
-
-                                // WORKING — the note bobs & shimmers: lively, alive.
-                                SequentialAnimation {
-                                    id: workBob
-                                    running: row.working
-                                    loops: Animation.Infinite; alwaysRunToEnd: true
-                                    onRunningChanged: if (!running) { noteGlyph.bob = 0; noteGlyph.opacity = 1 }
-                                    ParallelAnimation {
-                                        NumberAnimation { target: noteGlyph; property: "bob"; from: 0; to: 5; duration: 300; easing.type: Easing.OutQuad }
-                                        NumberAnimation { target: noteGlyph; property: "opacity"; to: 0.7; duration: 300 }
-                                    }
-                                    ParallelAnimation {
-                                        NumberAnimation { target: noteGlyph; property: "bob"; from: 5; to: 0; duration: 340; easing.type: Easing.InQuad }
-                                        NumberAnimation { target: noteGlyph; property: "opacity"; to: 1.0; duration: 340 }
-                                    }
-                                    PauseAnimation { duration: 140 }
-                                }
-                                // AWAITING — a deep held pulse: stalled, summoning.
-                                SequentialAnimation {
-                                    id: awaitPulse
-                                    running: row.awaiting
-                                    loops: Animation.Infinite; alwaysRunToEnd: true
-                                    onRunningChanged: if (!running) { noteGlyph.opacity = 1; noteGlyph.bob = 0 }
-                                    NumberAnimation { target: noteGlyph; property: "opacity"; to: 0.2; duration: 560; easing.type: Easing.InOutSine }
-                                    NumberAnimation { target: noteGlyph; property: "opacity"; to: 1.0; duration: 300; easing.type: Easing.OutBack }
-                                }
-                                // IDLE — a slow, gentle breath: at rest, but living.
-                                SequentialAnimation {
-                                    id: idleBreath
-                                    running: row.idle
-                                    loops: Animation.Infinite; alwaysRunToEnd: true
-                                    onRunningChanged: if (!running) { noteGlyph.opacity = 1; noteGlyph.bob = 0 }
-                                    NumberAnimation { target: noteGlyph; property: "opacity"; to: 0.6; duration: 1750; easing.type: Easing.InOutSine }
-                                    NumberAnimation { target: noteGlyph; property: "opacity"; to: 1.0; duration: 1750; easing.type: Easing.InOutSine }
-                                }
+                                // The note holds STILL. Motion moved to the mood
+                                // face (see `kao`), which now carries the row's
+                                // whole sense of life — the note bobbing, pulsing
+                                // and breathing under it read as competing tics.
                             }
                         }
 
@@ -901,9 +869,20 @@ Item {
                                     id: kao                        // the mood face
                                     anchors.right: parent.right
                                     anchors.verticalCenter: cwdText.verticalCenter
-                                    text: gadget.kaomojiFor(modelData.state)
+                                    // WORKING animates: the face cycles its set's
+                                    // frames. Every resting state holds one pose.
+                                    readonly property var frames: gadget.faceSet(modelData.sessionId || "")
+                                    property int frame: 0
+                                    text: row.working ? frames[frame % frames.length]
+                                                      : gadget.kaomojiFor(modelData.state)
                                     font.pixelSize: 10
                                     color: gadget.withA(row.accent, 0.85)
+                                    Timer {
+                                        running: row.working
+                                        repeat: true; interval: 420
+                                        onTriggered: kao.frame++
+                                        onRunningChanged: if (!running) kao.frame = 0
+                                    }
                                 }
                             }
                         }

@@ -82,12 +82,13 @@ Item {
     function normState(state) {
         var s = (state || "").toLowerCase();
         switch (s) {
-        case "working": case "awaiting": case "idle": case "done": return s;
+        case "working": case "awaiting": case "stopped": case "idle": case "done": return s;
         case "running": case "active": case "run": case "tool": case "busy": case "trace": return "working";
         case "blocked": case "block": case "waiting": case "wait": case "notify":
         case "notif": case "input": case "needs_input": case "needsinput":            return "awaiting";
         case "ready": case "sleep": case "sleeping":                                   return "idle";
-        case "stopped": case "stop": case "exit": case "exited":
+        case "stop":                                                                   return "stopped";
+        case "exit": case "exited":
         case "finished": case "finish": case "complete": case "completed":             return "done";
         default: return "";
         }
@@ -97,6 +98,7 @@ Item {
         switch (normState(state)) {
         case "working":  return "♪";
         case "awaiting": return "𝄐";
+        case "stopped":  return "𝄼";   // a whole rest — off the desk, but recently
         case "idle":     return "𝄽";
         case "done":     return "𝄂";
         default:         return "·";
@@ -108,6 +110,7 @@ Item {
         switch (normState(state)) {
         case "awaiting": return notes.paletteUrgent;
         case "working":  return notes.paletteAccent;
+        case "stopped":  return notes.holoBlue;
         case "idle":     return notes.violet;
         case "done":     return notes.wireCyan;
         default:         return withA(notes.paletteFg, 0.45);
@@ -118,13 +121,31 @@ Item {
         return s.length ? s : "—";
     }
     // a mood face — the emoticon life ────────────────────────────────────────────
+    // WORKING is the ONLY animated state: its face cycles frames on a per-row
+    // timer, and that motion is the row's whole sense of life. Three sets exist
+    // so a roster of busy terminals doesn't march in lockstep — each row picks
+    // one by a stable hash of its key. Frames within a set are deliberately the
+    // same character count: the face is right-aligned, so a width change per
+    // frame would jitter it sideways instead of emoting in place.
+    readonly property var workFaces: [
+        ["♪(´ε｀ )", "♫(´ε｀ )", "♬(´ε｀ )", "♫(´ε｀ )"],   // cantando — humming over the work
+        ["φ(･ω･｀)", "φ(･ω･´)", "φ(･ω･＾)", "φ(･ω･´)"],   // scribens — pen down, writing
+        ["(･ω･)ゞ", "(･ｖ･)ゞ", "(･ω･)ゞ", "(･０･)ゞ"]      // salutans — nodding at the desk
+    ]
+    function faceSet(id) {
+        var s = id || "", h = 0;
+        for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) & 0x7fffffff;
+        return workFaces[h % workFaces.length];
+    }
+    // the STILL faces — one pose per resting state.
     function kaomojiFor(state) {
         switch (normState(state)) {
-        case "awaiting": return "(；・∀・)";   // anxious, waiting
-        case "working":  return "♪(´ε｀ )";    // humming along
-        case "idle":     return "(－ω－) zzZ";  // dozing
-        case "done":     return "( ´ ▽ ` )";  // content, retired
-        default:         return "( ・_・)";     // puzzled
+        case "awaiting": return "(；・∀・)?";   // needs input — anxious, asking
+        case "working":  return workFaces[0][0]; // animated in the delegate; frame 0 here
+        case "stopped":  return "( ･ω･)b";     // stopped — hands off, standing by
+        case "idle":     return "(－ω－) zzZ";  // idle — long at rest, or fresh/resumed
+        case "done":     return "( ´ ▽ ` )";   // content, retired
+        default:         return "( ・_・)";      // puzzled
         }
     }
 
@@ -604,6 +625,7 @@ Item {
                         property bool emph: (modelData.sessionId || "") !== ""
                                             && modelData.sessionId === gadget.emphId
                         property bool awaiting: gadget.isAwaiting(modelData.state)
+                        property bool working:  gadget.isWorking(modelData.state)
                         property color accent: emph ? notes.paletteHot
                                                     : gadget.stateColor(modelData.state)
                         readonly property string activityText: modelData.activity || ""
@@ -767,9 +789,20 @@ Item {
                                     id: kao                        // the mood face
                                     anchors.right: parent.right
                                     anchors.verticalCenter: cwdText.verticalCenter
-                                    text: gadget.kaomojiFor(modelData.state)
+                                    // WORKING animates: the face cycles its set's
+                                    // frames. Every resting state holds one pose.
+                                    readonly property var frames: gadget.faceSet(gadget.rowKey(modelData))
+                                    property int frame: 0
+                                    text: row.working ? frames[frame % frames.length]
+                                                      : gadget.kaomojiFor(modelData.state)
                                     font.pixelSize: 10
                                     color: gadget.withA(row.accent, 0.85)
+                                    Timer {
+                                        running: row.working
+                                        repeat: true; interval: 420
+                                        onTriggered: kao.frame++
+                                        onRunningChanged: if (!running) kao.frame = 0
+                                    }
                                 }
                             }
                         }
