@@ -72,13 +72,21 @@ get work done and how you test the conductor mesh.
   exercise the conductor while you build with it — dogfooding is testing.
 - **Fan out with sub-agents when it pays.** The standing orchestration shape
   (khoa, 2026-07-29): **the main dev agent is an Opus agent orchestrating** —
-  it decomposes, dispatches, reviews every diff, and lands the result. Worker
+  it decomposes, dispatches, and lands the result. Worker
   agents: **Opus codes** (design-critical or vision work), **Sonnet generals**
-  (broad search / mechanical sweeps / parallel legwork). **Fable advises**: it
-  is consulted on the *decisions and outputs* of the Sonnet/Opus workers — a
-  judgement tier over the fan-out, not a worker itself. Send independent
+  (broad search / mechanical sweeps / parallel legwork). Send independent
   agents in one batch so they run concurrently; keep the *conclusion*, not
   their file dumps.
+- **A Fable advisor is ALWAYS present when a worker's work is reviewed**
+  (khoa, 2026-07-30). Fable is the standing judgement tier over the fan-out —
+  not a worker itself, and **the orchestrator does not self-review in its
+  place.** Every worker's *decisions and outputs* pass through a Fable review
+  before they land: code changes get a Fable read (correctness, coherence,
+  test adequacy); anything visual gets a Fable **vision pass** (render/screenshot
+  → Fable judges, with legibility as the pass/fail bar) before it is shown to
+  khoa or committed. The orchestrator dispatches the Fable review, folds its
+  verdict back to the worker for fixes, and only then lands. No worker output
+  is accepted on the orchestrator's own say-so.
 - **Resume, don't respawn.** An agent that died mid-task on an API error is
   resumed with its context intact (`SendMessage` by id) — a fresh `Agent` call
   starts cold.
