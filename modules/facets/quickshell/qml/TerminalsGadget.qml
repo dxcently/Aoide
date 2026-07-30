@@ -777,14 +777,13 @@ Item {
                                     width: 96
                                     horizontalAlignment: Text.AlignRight
                                     // WORKING animates; every resting state holds
-                                    // one pose. The SET is fixed for the life of
-                                    // the terminal — hashed from its row key, so it
-                                    // looks arbitrary across the roster but never
-                                    // changes under the row, not even when a roster
-                                    // refresh rebuilds this delegate.
-                                    property int setIdx: gadget.faces.pickFor(gadget.rowKey(modelData))
-                                    property int frame: gadget.faces.phaseFor(gadget.rowKey(modelData),
-                                                                              frames.length)
+                                    // one pose. Terminals have no subagent concept
+                                    // (that's a Conductor-only idea), so every row
+                                    // wears the general `working` pool, re-rolled
+                                    // at random each time this delegate is
+                                    // (re)created — i.e. on every roster refresh.
+                                    property int setIdx: gadget.faces.randomIndex(gadget.faces.working.length)
+                                    property int frame: gadget.faces.randomIndex(frames.length)
                                     readonly property var frames: gadget.faces.workingFrames(setIdx)
                                     text: row.working ? frames[frame % frames.length]
                                                       : gadget.kaomojiFor(modelData.state)

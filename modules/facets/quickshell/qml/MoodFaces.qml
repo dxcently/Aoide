@@ -7,9 +7,9 @@
 // under the row — not on the next lap, and not when the delegate is rebuilt
 // out from under it by a roster refresh. Every resting state holds one pose.
 //
-// The sets are scored, not generic: this is a music desk, so the hands beat
-// time, pluck a string, pump to the beat, or write the part out. Latin present
-// participles, matching the score-hand voice the rest of the dock uses.
+// No unifying theme by design — these are just lively, popular-style
+// kaomoji animations (a cheer, a dance, a table flip, a wave). Plain
+// descriptive names, no forced direction, no forced concept per set.
 //
 // Instantiated per gadget (`MoodFaces { id: faces }`), not wired through
 // shell.qml, because it holds no state: it is a table and four pure lookups.
@@ -36,70 +36,103 @@ QtObject {
     id: root
 
     // ── WORKING — ten animated sets, one assigned per session ────────────────
-    // Second full redesign: every set now FACES LEFT as its primary direction
-    // — any prop, gesture, or line of travel extends toward the left of the
-    // face, not the right — and parens are the plain ASCII "( )" used by every
-    // resting pose below, so a row doesn't change type-weight when it stops.
+    // Third redesign: no unifying theme, no fixed direction — each set is just
+    // a lively web-style kaomoji animation. Motion is POSITIONAL and BIG: the
+    // figure or its prop visibly changes cell position every frame. Every
+    // frame in a set carries the same glyph-width composition (same count of
+    // fullwidth cells and ASCII chars), so the right-aligned box never
+    // stretches. U+3000 ideographic spaces hold the width.
     readonly property var working: [
-        { name: "sibilans",  // whistling — TWO independent motions: a two-note
-          // stream travels left one cell per frame (own the ♪/♫ positions),
-          // while the pucker itself cycles ｏ↔・ on its own beat. Left-facing:
-          // the whole exhaled stream runs off to the left of the mouth.
-          frames: ["　♫　♪( ´ｏ｀)", "♫　♪　( ´・｀)", "　♪　♫( ´ｏ｀)", "♪　♫　( ´・｀)"] },
-        { name: "scribens",  // writing — pen sweeps LEFT, laying an ink line
-          // behind it, lifts, resets. Left-facing: the hand and the line it
-          // draws both extend left of the face.
-          frames: ["　　φ( ´ω｀)", "　φ＿( ´ω｀)", "φ＿＿( ´ω｀)", "　φ　( ´ω｀)"] },
-        { name: "modulans",  // beating time — the baton tip travels left on
-          // the downstroke and again on the upstroke. Left-facing: the baton
-          // lives and sweeps on the left.
-          frames: ["　＼( ｀ω´)", "＼　( ｀ω´)", "　／( ｀ω´)", "／　( ｀ω´)"] },
-        { name: "carpens",   // plucking — hand reaches left to a string, drags
-          // it taut, releases; the string rebounds as the hand returns.
-          // Left-facing: the reaching hand opens left, the string sits far left.
-          frames: ["｜　　⊃( ・ω・)", "｜　⊃　( ・ω・)", "ノ⊃　　( ・ω・)", "／　　⊃( ・ω・)"] },
-        { name: "volvens",   // the stone, pushed — near → mid → far on the
-          // shove, one slip back — an endless uphill loop. Left-facing: the
-          // push, the stone, and the slip all happen on the left.
-          frames: ["　　ｏ⊃( ｀ｏ´)", "　ｏ⊃　( ｀ｏ´)", "ｏ⊃　　( ｀ｏ´)", "　ｏ⊃　( ｀ｏ´)"] },
-        { name: "psallens",  // the lyre — hand walks left across three strings,
-          // covering one at a time, then steps back. Left-facing: the strum
-          // runs toward the left end of the instrument.
-          frames: ["＿＿つ( ＾ω＾)", "＿つ＿( ＾ω＾)", "つ＿＿( ＾ω＾)", "＿つ＿( ＾ω＾)"] },
-        { name: "portans",   // carrying a note — the whole figure, note held
-          // out front, strides left two steps and rocks back one. Left-facing:
-          // the note leads on the left; the direction of travel is left.
-          frames: ["　　♬( ・ー・)", "　♬( ・ー・)　", "♬( ・ー・)　　", "　♬( ・ー・)　"] },
-        { name: "numerans",  // counting beats — a hand carries the near bead
-          // left onto the pile, returns empty, and deals the next one.
-          // Left-facing: beads accumulate at far left; the carry runs left.
-          frames: ["ｏ　　ｏ⊃( ＝ω＝)", "ｏ　ｏ⊃　( ＝ω＝)", "ｏｏ⊃　　( ＝ω＝)", "ｏｏ　　⊃( ＝ω＝)"] },
-        { name: "currens",   // dashing to the next cue — the figure scrolls
-          // left one cell per frame, a speed-line wake trailing off its
-          // right. Left-facing: continuous, unambiguous leftward travel.
-          frames: ["　　　( ｀ー´)＝", "　　( ｀ー´)＝　", "　( ｀ー´)＝　　", "( ｀ー´)＝　　　"] },
-        { name: "saltans",   // dancing — rocks left-and-back between two
-          // slots while the lead (left) arm flips low then thrown high.
-          // Left-facing: the working arm is always on the left side.
-          frames: ["　＼( ＾ｏ＾)", "＼( ＾ｏ＾)　", "　ノ( ＾ｏ＾)", "ノ( ＾ｏ＾)　"] }
+        { name: "whistle",   // notes conveyor left one cell per frame (always
+          // exactly two notes on screen), while the pucker cycles ｏ↔・ and
+          // the brows rock ´｀↔｀´ — mouth, head, and stream all moving.
+          frames: ["　♫　♪( ´ｏ｀)", "♫　♪　( ´・｀)", "　♪　♫( ｀ｏ´)", "♪　♫　( ｀・´)"] },
+        { name: "cheer",     // jumping side to side, arms thrown up ＼／, then
+          // swung down ／＼, then up again ヽノ — a full-body bounce.
+          frames: ["　＼( ＾ｏ＾)／", "／( ＾ｏ＾)＼　", "　ヽ( ＾ｏ＾)ノ", "＼( ＾ｏ＾)／　"] },
+        { name: "wiggle",    // the cat-dance shuffle — the leading arm ～ flips
+          // across the body while the whole figure slides between slots.
+          frames: ["　(～・ω・)～", "～(・ω・～)　", "(～・ω・)～　", "　～(・ω・～)"] },
+        { name: "dash",      // full-box sprint — the runner crosses the entire
+          // frame one cell per beat, double speed-lines ＝＝ trailing, then
+          // wraps hard back to the start.
+          frames: ["　　　( ｀ー´)＝＝", "　　( ｀ー´)＝＝　", "　( ｀ー´)＝＝　　", "( ｀ー´)＝＝　　　"] },
+        { name: "tableflip", // the table ＿＿ is hurled: cartwheels away ／／,
+          // lands upside-down ￣￣, tumbles back ＼＼, resets flat. The
+          // thrower holds the double-ノ hurl pose throughout.
+          frames: ["(ノ｀ｏ´)ノ＿＿　　", "(ノ｀ｏ´)ノ　／／　", "(ノ｀ｏ´)ノ　　￣￣", "(ノ｀ｏ´)ノ　＼＼　"] },
+        { name: "wave",      // the ノシ greeting — the arm blurs into one then
+          // two shake-marks while the body hops between slots.
+          frames: ["( ´ω｀)ノ　　", "　( ´ω｀)ノシ", "( ´ω｀)ノシシ", "　( ´ω｀)ノ　"] },
+        { name: "jab",       // the fist ⊃ fires out three cells to full
+          // extension and snaps back — a straight one-two punch.
+          frames: ["( ｀ω´)⊃　　", "( ｀ω´)　⊃　", "( ｀ω´)　　⊃", "( ｀ω´)　⊃　"] },
+        { name: "spin",      // a full twirl: face front, profile, back of the
+          // head (blank), other profile — while the outstretched arms ＼／
+          // swap sides every frame like a spinning-top blur.
+          frames: ["＼( ・ｏ・)／", "／( ｏ・　)＼", "＼( 　　　)／", "／( 　・ｏ)＼"] },
+        { name: "juggle",    // two balls ping in and out on both sides of the
+          // face, out of phase — near/near, far/far, split, swapped.
+          frames: ["　ｏ( ＾ω＾)ｏ　", "ｏ　( ＾ω＾)　ｏ", "　ｏ( ＾ω＾)　ｏ", "ｏ　( ＾ω＾)ｏ　"] },
+        { name: "boogie",    // arms-up dancer sweeps left→mid→right→mid across
+          // the box while a single ♪ flits from side to side around it.
+          frames: ["♪ヽ( ・ω・)ノ　　", "　ヽ( ・ω・)ノ♪　", "　　ヽ( ・ω・)ノ♪", "　♪ヽ( ・ω・)ノ　"] }
     ]
 
-    // Which set a session wears, for its whole life. Hashed from the row's key
+    // ── PACKAGES — the subagent pool: a courier delivering work back to the
+    // main agent that dispatched it. A subagent always wears one of THESE
+    // sets, never the general pool above — see pickFor()/randomIndex() below
+    // for the policy split. Not locked to any count; add more as they come.
+    // Every set carries the parcel 口 somewhere; same fixed-width/U+3000
+    // rules as the general pool.
+    readonly property var packages: [
+        { name: "haul",     // the delivery run itself — courier marches the
+          // full width of the box, parcel leading in the outstretched arm;
+          // the loop restart reads as the next run.
+          frames: ["( ｀ー´)⊃口　　　", "　( ｀ー´)⊃口　　", "　　( ｀ー´)⊃口　", "　　　( ｀ー´)⊃口"] },
+        { name: "handoff",  // step-and-drop gait: carry → thrust forward →
+          // release (a gap opens between hand つ and 口 as it sits down) →
+          // long reach to re-grab, then carry again.
+          frames: ["( ・ω・)つ口　　", "( ・ω・)　つ口　", "( ・ω・)つ　口　", "( ・ω・)　　つ口"] },
+        { name: "stack",    // shuttle run to a pile at the left edge: arrive
+          // with a box, close in, DROP (the pile grows 口→口口, the hand
+          // empties), step back for the next — "where the main agent picks
+          // it up," made literal.
+          frames: ["口　　( ・ω・)つ口", "口　( ・ω・)つ口　", "口口( ・ω・)つ　　", "口口　( ・ω・)つ　"] },
+        { name: "roll",     // barrel freight — the parcel rolls out ahead and
+          // back, tumbling 口→ｏ→口 as it turns, the arm つ chasing it.
+          frames: ["( ｀ω´)つ口　　", "( ｀ω´)つ　ｏ　", "( ｀ω´)つ　　口", "( ｀ω´)つ　ｏ　"] }
+    ]
+
+    // Which set a SUBAGENT wears, for its whole life. Hashed from the row's key
     // (its sessionId) rather than drawn at random, so it survives the delegate
     // being rebuilt by a roster refresh — a Math.random() pick re-rolled every
-    // time the model churned, which read as the face changing its mind for no
-    // reason. Different ids land on different sets; the same id always lands on
-    // the same one.
-    function pickFor(key) {
-        return Math.abs(_hash(key, 31)) % working.length;
+    // time the model churned read as the face changing its mind for no reason,
+    // and a subagent's courier deserves a consistent identity for its life.
+    // `pool` defaults to the general `working` table; pass `packages` for a
+    // subagent row.
+    function pickFor(key, pool) {
+        pool = pool || working;
+        return Math.abs(_hash(key, 31)) % pool.length;
     }
-    // Where in its set a session STARTS. Two sessions born at the same instant
-    // that happen to hash onto the same set would otherwise march in perfect
-    // lockstep, which reads as one animation drawn twice; a second, independent
-    // hash offsets them so a collision still looks like two separate hands.
+    // Where in its set a subagent STARTS. Two subagents born at the same
+    // instant that happen to hash onto the same set would otherwise march in
+    // perfect lockstep, which reads as one animation drawn twice; a second,
+    // independent hash offsets them so a collision still looks like two
+    // separate couriers.
     function phaseFor(key, len) {
         var n = Math.max(1, len || 1);
         return Math.abs(_hash(key, 131)) % n;
+    }
+    // A genuinely random index into a pool of size `n` — used for everything
+    // that ISN'T a subagent (plain terminals, top-level agents). Deliberately
+    // the opposite policy from pickFor: these rows re-roll their set every
+    // time their delegate is (re)created, i.e. whenever the roster refreshes.
+    // That's a real design choice, not an oversight — subagents get a stable
+    // identity because their courier tells a small continuing story; everyone
+    // else just gets variety.
+    function randomIndex(n) {
+        return Math.floor(Math.random() * Math.max(1, n || 1));
     }
     function _hash(key, mult) {
         var s = "" + (key || "");
@@ -108,15 +141,18 @@ QtObject {
             h = (h * mult + s.charCodeAt(i)) | 0;
         return h;
     }
-    // Frames of set `i`, wrapped so a stale index from a shrinking table (or a
-    // negative one) can never index past the end.
-    function workingFrames(i) {
-        var n = working.length;
-        return working[((i % n) + n) % n].frames;
+    // Frames/name of set `i` in `pool` (defaults to `working`), wrapped so a
+    // stale index from a shrinking table (or a negative one) can never index
+    // past the end.
+    function workingFrames(i, pool) {
+        pool = pool || working;
+        var n = pool.length;
+        return pool[((i % n) + n) % n].frames;
     }
-    function workingName(i) {
-        var n = working.length;
-        return working[((i % n) + n) % n].name;
+    function workingName(i, pool) {
+        pool = pool || working;
+        var n = pool.length;
+        return pool[((i % n) + n) % n].name;
     }
 
     // ── RESTING — one still pose per state ───────────────────────────────────

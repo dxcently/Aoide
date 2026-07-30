@@ -853,15 +853,23 @@ Item {
                                     width: 96
                                     horizontalAlignment: Text.AlignRight
                                     // WORKING animates; every resting state holds
-                                    // one pose. The SET is fixed for the life of
-                                    // the session — hashed from its id, so it looks
-                                    // arbitrary across the roster but never changes
-                                    // under the row, not even when a roster refresh
-                                    // rebuilds this delegate.
-                                    property int setIdx: gadget.faces.pickFor(modelData.sessionId || "")
-                                    property int frame: gadget.faces.phaseFor(modelData.sessionId || "",
-                                                                              frames.length)
-                                    readonly property var frames: gadget.faces.workingFrames(setIdx)
+                                    // one pose. A SUBAGENT wears the `packages`
+                                    // courier pool, hashed from its id so its set
+                                    // is fixed for its whole life (a consistent
+                                    // delivery story). Every other row (top-level
+                                    // agents) wears the general `working` pool,
+                                    // re-rolled at random each time this delegate
+                                    // is (re)created — i.e. on every roster
+                                    // refresh — for variety rather than identity.
+                                    property bool packageRow: row.subagent
+                                    property int setIdx: packageRow
+                                        ? gadget.faces.pickFor(modelData.sessionId || "", gadget.faces.packages)
+                                        : gadget.faces.randomIndex(gadget.faces.working.length)
+                                    property int frame: packageRow
+                                        ? gadget.faces.phaseFor(modelData.sessionId || "", frames.length)
+                                        : gadget.faces.randomIndex(frames.length)
+                                    readonly property var frames: gadget.faces.workingFrames(setIdx,
+                                        packageRow ? gadget.faces.packages : gadget.faces.working)
                                     text: row.working ? frames[frame % frames.length]
                                                       : gadget.kaomojiFor(modelData.state)
                                     font.pixelSize: 10
