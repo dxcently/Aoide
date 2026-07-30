@@ -120,8 +120,9 @@ PanelWindow {
     onShownChanged: if (root.shown) book.forceActiveFocus()   // Esc when focused
     Component.onCompleted: { root.parseStage(); root.evalReveal() }
 
-    // ── Stage watch: recompute `anyAwaiting` off sessions.json, same match the
-    // gadgets use for the 𝄐 awaiting glyph (/(await|block|notif|input|wait)/i). ─
+    // ── Stage watch: recompute `anyAwaiting` off sessions.json, off the CANONICAL
+    // state the rewritten daemon publishes — a session needs the user exactly when
+    // its `state === "awaiting"` (needsInput ⇔ awaiting). No regex derivation.
     FileView {
         id: stage
         path: "/home/khoa/Aoide/song/stage/sessions.json"
@@ -131,6 +132,17 @@ PanelWindow {
         onLoaded: root.parseStage()
         onFileChanged: reload()
     }
+    // A tiny debounce so a heartbeat rewrite of sessions.json that does NOT change
+    // the awaiting-set never re-triggers or flickers the peek: parseStage stages a
+    // raw value and (re)arms this timer; the value only commits to `anyAwaiting`
+    // (which drives the peek edge) once it has held steady for the interval, so a
+    // transient blip between two rewrites can't re-arm the alert.
+    property bool _rawAwaiting: false
+    Timer {
+        id: awaitDebounce
+        interval: 250; repeat: false
+        onTriggered: root.anyAwaiting = root._rawAwaiting
+    }
     function parseStage() {
         var awaiting = false;
         try {
@@ -139,12 +151,13 @@ PanelWindow {
                 var o = JSON.parse(t);
                 var s = (o && o.sessions) ? o.sessions : [];
                 for (var i = 0; i < s.length; i++) {
-                    var st = (s[i].state || "").toLowerCase();
-                    if (/(await|block|notif|input|wait)/.test(st)) { awaiting = true; break; }
+                    if ((s[i].state || "").toLowerCase() === "awaiting") { awaiting = true; break; }
                 }
             }
         } catch (e) { awaiting = false; }
-        root.anyAwaiting = awaiting;
+        root._rawAwaiting = awaiting;
+        if (awaiting === root.anyAwaiting) awaitDebounce.stop();  // no change → cancel any pending flip
+        else awaitDebounce.restart();                            // debounce the transition
     }
 
     // ── Layer-shell surface (Overlay, left-edge, vertically centred) ────────

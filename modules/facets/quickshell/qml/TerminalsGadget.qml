@@ -85,42 +85,57 @@ Item {
         return Qt.rgba(c.r, c.g, c.b, a);
     }
 
+    // ── CANONICAL STATE (from the rewritten daemon) ─────────────────────────────
+    // Switch on the exact canonical string working|awaiting|idle|done — no regex.
+    // normState() only folds a pre-rewrite stage onto the canonical four (equality,
+    // not regex) so a stale file never blanks; a live daemon hits the four directly.
+    function normState(state) {
+        var s = (state || "").toLowerCase();
+        switch (s) {
+        case "working": case "awaiting": case "idle": case "done": return s;
+        case "running": case "active": case "run": case "tool": case "busy": case "trace": return "working";
+        case "blocked": case "block": case "waiting": case "wait": case "notify":
+        case "notif": case "input": case "needs_input": case "needsinput":            return "awaiting";
+        case "ready": case "sleep": case "sleeping":                                   return "idle";
+        case "stopped": case "stop": case "exit": case "exited":
+        case "finished": case "finish": case "complete": case "completed":             return "done";
+        default: return "";
+        }
+    }
     // state → notation glyph (VERBATIM contract, from baton/theme.rs) ────────────
     function glyphFor(state) {
-        var s = (state || "").toLowerCase();
-        if (/(run|active|tool|work|busy|trace)/.test(s)) return "♪";   // working
-        if (/(await|block|notif|input|wait)/.test(s))    return "𝄐";   // awaiting
-        if (/(idle|ready|sleep)/.test(s))                return "𝄽";   // idle
-        if (/(done|stop|exit|finish|complete)/.test(s))  return "𝄂";   // done/stop
-        return "·";                                                     // unknown
+        switch (normState(state)) {
+        case "working":  return "♪";
+        case "awaiting": return "𝄐";
+        case "idle":     return "𝄽";
+        case "done":     return "𝄂";
+        default:         return "·";
+        }
     }
-    function isAwaiting(state) {
-        return /(await|block|notif|input|wait)/.test((state || "").toLowerCase());
-    }
+    function isAwaiting(state) { return normState(state) === "awaiting"; }
+    function isWorking(state)  { return normState(state) === "working"; }
     function stateColor(state) {
-        var s = (state || "").toLowerCase();
-        if (/(await|block|notif|input|wait)/.test(s))    return notes.paletteUrgent;
-        if (/(run|active|tool|work|busy|trace)/.test(s)) return notes.paletteAccent;
-        if (/(idle|ready|sleep)/.test(s))                return notes.violet;
-        if (/(done|stop|exit|finish|complete)/.test(s))  return notes.wireCyan;
-        return withA(notes.paletteFg, 0.45);
+        switch (normState(state)) {
+        case "awaiting": return notes.paletteUrgent;
+        case "working":  return notes.paletteAccent;
+        case "idle":     return notes.violet;
+        case "done":     return notes.wireCyan;
+        default:         return withA(notes.paletteFg, 0.45);
+        }
     }
     function stateLabel(state) {
-        var s = (state || "").toLowerCase();
-        if (/(await|block|notif|input|wait)/.test(s))    return "awaiting";
-        if (/(run|active|tool|work|busy|trace)/.test(s)) return "working";
-        if (/(idle|ready|sleep)/.test(s))                return "idle";
-        if (/(done|stop|exit|finish|complete)/.test(s))  return "done";
-        return "—";
+        var s = normState(state);
+        return s.length ? s : "—";
     }
     // a mood face — the emoticon life ────────────────────────────────────────────
     function kaomojiFor(state) {
-        var s = (state || "").toLowerCase();
-        if (/(await|block|notif|input|wait)/.test(s))    return "(；・∀・)";   // anxious, waiting
-        if (/(run|active|tool|work|busy|trace)/.test(s)) return "♪(´ε｀ )";    // humming along
-        if (/(idle|ready|sleep)/.test(s))                return "(－ω－) zzZ";  // dozing
-        if (/(done|stop|exit|finish|complete)/.test(s))  return "( ´ ▽ ` )";  // content, retired
-        return "( ・_・)";                                                       // puzzled
+        switch (normState(state)) {
+        case "awaiting": return "(；・∀・)";   // anxious, waiting
+        case "working":  return "♪(´ε｀ )";    // humming along
+        case "idle":     return "(－ω－) zzZ";  // dozing
+        case "done":     return "( ´ ▽ ` )";  // content, retired
+        default:         return "( ・_・)";     // puzzled
+        }
     }
 
     // the single emphasized terminal (traced, else first working) ────────────────
@@ -132,7 +147,7 @@ Item {
                     return shared.tracedSessionId;
         }
         for (i = 0; i < list.length; i++)
-            if (/(run|active|tool|work|busy|trace)/.test((list[i].state || "").toLowerCase()))
+            if (isWorking(list[i].state))
                 return list[i].sessionId;
         return "";
     }
@@ -170,10 +185,14 @@ Item {
     // shares the window, its rich state is shown (an AGENT record wins over the
     // bare shell for that window — the terminal reads as what's running in it);
     // otherwise the window shows as a plain "shell" terminal at idle liveness.
-    function isAgentRec(rec) {
+    // classify by `kind` (daemon-published), falling back to agent!="shell".
+    function recKind(rec) {
+        var k = (rec && rec.kind ? rec.kind : "").toLowerCase();
+        if (k) return k;
         var a = (rec && rec.agent ? rec.agent : "").toLowerCase();
-        return a.length > 0 && a !== "shell";
+        return (a.length > 0 && a !== "shell") ? "agent" : "shell";
     }
+    function isAgentRec(rec) { return recKind(rec) !== "shell"; }
     function terminalRows() {
         var out = [];
         var wins = windows || [];
@@ -200,6 +219,8 @@ Item {
                                     : (rec.workspace !== undefined ? rec.workspace : -1)),
                     windowAddress: addr,
                     title:         w.title || "",
+                    sessionTitle:  rec.title || "",       // the human SESSION name
+                    activity:      rec.activity || "",    // the current command/tool
                     wclass:        w.class || "",
                     tracked:       true
                 });
@@ -213,6 +234,8 @@ Item {
                     workspace:     wsId,
                     windowAddress: addr,
                     title:         w.title || "",
+                    sessionTitle:  "",
+                    activity:      "",                    // a plain tty runs no tracked tool
                     wclass:        w.class || "",
                     tracked:       false
                 });
@@ -234,7 +257,8 @@ Item {
         for (var i = 0; i < list.length; i++) {
             var r = list[i];
             parts.push([r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
-                        r.workspace, r.windowAddress, r.title].join(""));
+                        r.workspace, r.windowAddress, r.title,
+                        r.sessionTitle, r.activity].join(""));
         }
         return parts.join("");
     }
@@ -632,7 +656,8 @@ Item {
                     delegate: Item {
                         id: row
                         width: roster.width
-                        height: 52
+                        // grows to fit name · activity · prompt (52 floor).
+                        height: Math.max(52, body.implicitHeight + 16)
 
                         // an emph row must have a real sessionId — plain untracked
                         // terminals ("" id) never claim the traced crown.
@@ -641,6 +666,10 @@ Item {
                         property bool awaiting: gadget.isAwaiting(modelData.state)
                         property color accent: emph ? notes.paletteHot
                                                     : gadget.stateColor(modelData.state)
+                        readonly property bool hasTitle: (modelData.sessionTitle || "").length > 0
+                        readonly property string nameText: hasTitle ? modelData.sessionTitle
+                                                                    : (modelData.agent || "shell")
+                        readonly property string activityText: modelData.activity || ""
 
                         onAwaitingChanged: if (!awaiting) noteGlyph.opacity = 1
 
@@ -702,19 +731,30 @@ Item {
                         }
 
                         Column {
+                            id: body
                             anchors.left: gutter.right; anchors.leftMargin: 10
                             anchors.right: elapsedText.left; anchors.rightMargin: 8
                             anchors.verticalCenter: parent.verticalCenter
-                            spacing: 3
+                            spacing: 2
 
                             Row {
+                                width: parent.width
                                 spacing: 8
-                                Text {
+                                Text {                     // the SESSION name (title, else agent)
                                     id: agentName
-                                    text: (modelData.agent || "shell")
+                                    width: Math.min(implicitWidth, body.width - 78)
+                                    elide: Text.ElideRight
+                                    text: row.nameText
                                     font.family: gadget.faceSerif; font.pixelSize: 15
                                     font.weight: row.emph ? Font.Bold : Font.Medium
                                     color: notes.paletteFg
+                                }
+                                Text {                     // agent, when a title took the name
+                                    anchors.baseline: agentName.baseline
+                                    visible: row.hasTitle
+                                    text: modelData.agent || ""
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: gadget.withA(gadget.sig, 0.9)
                                 }
                                 Text {
                                     anchors.baseline: agentName.baseline
@@ -723,6 +763,15 @@ Item {
                                     font.pixelSize: 11
                                     color: row.accent
                                 }
+                            }
+                            // ACTIVITY — the current foreground command / tool.
+                            Text {
+                                width: parent.width
+                                visible: row.activityText.length > 0
+                                text: "▸ " + row.activityText
+                                elide: Text.ElideRight
+                                font.family: gadget.faceMono; font.pixelSize: 10
+                                color: gadget.withA(row.accent, 0.95)
                             }
                             Item {
                                 width: parent.width; height: cwdText.implicitHeight

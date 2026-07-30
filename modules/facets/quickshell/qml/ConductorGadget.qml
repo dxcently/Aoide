@@ -67,42 +67,61 @@ Item {
         return Qt.rgba(c.r, c.g, c.b, a);
     }
 
+    // ── CANONICAL STATE (from the rewritten daemon) ─────────────────────────────
+    // The daemon now emits exactly one of working|awaiting|idle|done, verbatim, so
+    // we SWITCH on the exact string — no regex derivation. normState() only folds a
+    // pre-rewrite stage (a stale "running"/"blocked"/…) onto the canonical four by
+    // plain equality, so the roster never blanks mid-transition; a live daemon hits
+    // the first four cases directly.
+    function normState(state) {
+        var s = (state || "").toLowerCase();
+        switch (s) {
+        case "working": case "awaiting": case "idle": case "done": return s;
+        // legacy-compat aliases (equality, not regex) — remove once fully migrated
+        case "running": case "active": case "run": case "tool": case "busy": case "trace": return "working";
+        case "blocked": case "block": case "waiting": case "wait": case "notify":
+        case "notif": case "input": case "needs_input": case "needsinput":            return "awaiting";
+        case "ready": case "sleep": case "sleeping":                                   return "idle";
+        case "stopped": case "stop": case "exit": case "exited":
+        case "finished": case "finish": case "complete": case "completed":             return "done";
+        default: return "";                                                            // unknown
+        }
+    }
     // state → notation glyph (VERBATIM contract, from baton/theme.rs) ────────────
     function glyphFor(state) {
-        var s = (state || "").toLowerCase();
-        if (/(run|active|tool|work|busy|trace)/.test(s)) return "♪";   // working
-        if (/(await|block|notif|input|wait)/.test(s))    return "𝄐";   // awaiting
-        if (/(idle|ready|sleep)/.test(s))                return "𝄽";   // idle
-        if (/(done|stop|exit|finish|complete)/.test(s))  return "𝄂";   // done/stop
-        return "·";                                                     // unknown
+        switch (normState(state)) {
+        case "working":  return "♪";
+        case "awaiting": return "𝄐";
+        case "idle":     return "𝄽";
+        case "done":     return "𝄂";
+        default:         return "·";
+        }
     }
-    function isAwaiting(state) {
-        return /(await|block|notif|input|wait)/.test((state || "").toLowerCase());
-    }
+    function isAwaiting(state) { return normState(state) === "awaiting"; }
+    function isWorking(state)  { return normState(state) === "working"; }
+    function isIdle(state)     { return normState(state) === "idle"; }
     function stateColor(state) {
-        var s = (state || "").toLowerCase();
-        if (/(await|block|notif|input|wait)/.test(s))    return notes.paletteUrgent;
-        if (/(run|active|tool|work|busy|trace)/.test(s)) return notes.paletteAccent;
-        if (/(idle|ready|sleep)/.test(s))                return notes.violet;
-        if (/(done|stop|exit|finish|complete)/.test(s))  return notes.wireCyan;
-        return withA(notes.paletteFg, 0.45);
+        switch (normState(state)) {
+        case "awaiting": return notes.paletteUrgent;
+        case "working":  return notes.paletteAccent;
+        case "idle":     return notes.violet;
+        case "done":     return notes.wireCyan;
+        default:         return withA(notes.paletteFg, 0.45);
+        }
     }
     function stateLabel(state) {
-        var s = (state || "").toLowerCase();
-        if (/(await|block|notif|input|wait)/.test(s))    return "awaiting";
-        if (/(run|active|tool|work|busy|trace)/.test(s)) return "working";
-        if (/(idle|ready|sleep)/.test(s))                return "idle";
-        if (/(done|stop|exit|finish|complete)/.test(s))  return "done";
-        return "—";
+        var s = normState(state);
+        return s.length ? s : "—";
     }
     // a mood face — the emoticon life ────────────────────────────────────────────
     function kaomojiFor(state) {
-        var s = (state || "").toLowerCase();
-        if (/(await|block|notif|input|wait)/.test(s))    return "(；・∀・)";   // anxious, waiting
-        if (/(run|active|tool|work|busy|trace)/.test(s)) return "♪(´ε｀ )";    // humming along
-        if (/(idle|ready|sleep)/.test(s))                return "(－ω－) zzZ";  // dozing
-        if (/(done|stop|exit|finish|complete)/.test(s))  return "( ´ ▽ ` )";  // content, retired
-        return "( ・_・)";                                                       // puzzled
+        switch (normState(state)) {
+        case "awaiting": return "(；・∀・)";   // anxious, waiting
+        case "working":  return "♪(´ε｀ )";    // humming along
+        case "idle":     return "(－ω－) zzZ";  // dozing
+        case "done":     return "( ´ ▽ ` )";  // content, retired
+        default:         return "( ・_・)";     // puzzled
+        }
     }
 
     // ── ROSTER FILTER (concepts/Conductor-Channel) ───────────────────────────────
@@ -116,10 +135,18 @@ Item {
     // address IS the connection signal — the SessionRecord.windowAddress written
     // by shellbridge (graph.rs) and mirrored on graph.json nodes; two records that
     // agree on it live in one terminal, so the agent is conducting that shell.
-    function isAgentRec(rec) {
+    // CLASSIFY BY `kind` (published by the daemon), not by the agent name. A record
+    // with kind "agent"|"subagent" is a conductable agent; "shell" is a terminal.
+    // When kind is absent (legacy stage), fall back to agent!="shell".
+    function recKind(rec) {
+        var k = (rec && rec.kind ? rec.kind : "").toLowerCase();
+        if (k) return k;
         var a = (rec && rec.agent ? rec.agent : "").toLowerCase();
-        return a.length > 0 && a !== "shell";
+        return (a.length > 0 && a !== "shell") ? "agent" : "shell";
     }
+    function isShellRec(rec) { return recKind(rec) === "shell"; }
+    function isAgentRec(rec) { return !isShellRec(rec); }   // agent OR subagent
+    function isSubagentRec(rec) { return recKind(rec) === "subagent"; }
     function conductorFor(rec) {            // agent name sharing this shell's window, else ""
         var wa = rec && rec.windowAddress ? rec.windowAddress : "";
         if (!wa) return "";
@@ -130,18 +157,66 @@ Item {
         }
         return "";
     }
-    function computeVisible() {
-        var out = [];
+    // parentSessionId → [child records], built from the FULL roster (no ordering
+    // assumption). A subagent's parent is its spawning session (or a parent sub:
+    // node); a nested claude's parent is the session it launched inside.
+    function childrenIndex() {
+        var idx = ({});
         for (var i = 0; i < sessions.length; i++) {
             var r = sessions[i];
-            if (isAgentRec(r)) { out.push(r); continue; }
-            var by = conductorFor(r);
-            if (by) {                       // an agent-attached shell — clone + annotate
-                var clone = {};
-                for (var k in r) clone[k] = r[k];
-                clone._conductedBy = by;
-                out.push(clone);
+            var p = r.parentSessionId || "";
+            if (!p) continue;
+            if (!idx[p]) idx[p] = [];
+            idx[p].push(r);
+        }
+        return idx;
+    }
+    function shallow(rec) { var c = {}; for (var k in rec) c[k] = rec[k]; return c; }
+    // ── ROSTER as a beamed TREE ──────────────────────────────────────────────────
+    // Roots are agent/subagent records that are NOT nested under another agent in
+    // the roster (top-level, or orphaned by a missing parent). Each root is emitted
+    // at _depth 0, then its agent/subagent descendants are walked and emitted at
+    // _depth 1 — anything deeper than a grandchild is FLATTENED to that same indent
+    // (Math.min(depth+1,1)). Shells never nest: a bare agent-attached shell still
+    // shows as a flat depth-0 row (today's behaviour), and shell children are
+    // skipped from the tree (the Terminals temple owns shells).
+    function computeVisible() {
+        var i, r;
+        var kids = childrenIndex();
+        var byId = ({});
+        for (i = 0; i < sessions.length; i++)
+            if (sessions[i].sessionId) byId[sessions[i].sessionId] = sessions[i];
+
+        var out = [], visited = ({});
+        function cmp(a, b) {
+            var ta = Date.parse(a.startedAt || "") || 0, tb = Date.parse(b.startedAt || "") || 0;
+            return (ta - tb) || ((a.sessionId || "") < (b.sessionId || "") ? -1
+                                 : (a.sessionId || "") > (b.sessionId || "") ? 1 : 0);
+        }
+        function walk(rec, depth, parentEff) {
+            if (rec.sessionId && visited[rec.sessionId]) return;
+            if (rec.sessionId) visited[rec.sessionId] = true;
+            var c = shallow(rec);
+            c._depth = depth;
+            c._parentAgent = parentEff || "";
+            out.push(c);
+            var cs = (kids[rec.sessionId] || []).slice().sort(cmp);
+            var eff = effAgent(rec);
+            for (var j = 0; j < cs.length; j++) {
+                if (isShellRec(cs[j])) continue;         // shells stay out of the tree
+                walk(cs[j], Math.min(depth + 1, 1), eff); // clamp: grandchildren+ → depth 1
             }
+        }
+        for (i = 0; i < sessions.length; i++) {
+            r = sessions[i];
+            if (isShellRec(r)) {                          // a shell — flat, only if conducted
+                var by = conductorFor(r);
+                if (by) { var cl = shallow(r); cl._depth = 0; cl._conductedBy = by; out.push(cl); }
+                continue;
+            }
+            var p = r.parentSessionId || "";
+            if (p && byId[p] && !isShellRec(byId[p])) continue;  // nested → emitted by its parent
+            walk(r, 0, "");
         }
         return out;
     }
@@ -150,12 +225,12 @@ Item {
     }
     // stable per-agent identity hue, from the base16 accent spread (noteColor) —
     // conducted shells borrow their conductor's hue so a pair reads as one voice.
-    function hueFor(rec) {
-        var k = effAgent(rec);
+    function hueForAgent(k) {
         var idx = agentIndex[k];
-        if (k.length === 0 || idx === undefined) return notes.holoBlue;
+        if (!k || k.length === 0 || idx === undefined) return notes.holoBlue;
         return notes.noteColor ? notes.noteColor(idx + 1) : notes.holoBlue;
     }
+    function hueFor(rec) { return hueForAgent(effAgent(rec)); }
 
     // the single emphasized session (traced, else first working) — over VISIBLE ──
     function computeEmph(rows) {
@@ -166,7 +241,7 @@ Item {
                     return shared.tracedSessionId;
         }
         for (i = 0; i < rows.length; i++)
-            if (/(run|active|tool|work|busy|trace)/.test((rows[i].state || "").toLowerCase()))
+            if (isWorking(rows[i].state))
                 return rows[i].sessionId;
         return "";
     }
@@ -179,7 +254,8 @@ Item {
         for (var i = 0; i < rows.length; i++) {
             var r = rows[i];
             parts.push([r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
-                        r.workspace, r._conductedBy].join(""));
+                        r.workspace, r._conductedBy, r.title, r.activity,
+                        r.kind, r.parentSessionId, r._depth, r._parentAgent].join(""));
         }
         return parts.join("");
     }
@@ -506,20 +582,39 @@ Item {
                     delegate: Item {
                         id: row
                         width: roster.width
-                        height: 52
+                        // grows to fit name · activity · cwd; a 52 floor keeps the
+                        // stave rhythm for the flat (no-activity) rows.
+                        height: Math.max(52, body.implicitHeight + 16)
 
                         property bool emph: modelData.sessionId === gadget.emphId
-                        // the three live motion states (glyph contract, by motion)
-                        readonly property string st: (modelData.state || "").toLowerCase()
-                        property bool working:  /(run|active|tool|work|busy|trace)/.test(st)
-                        property bool awaiting:  gadget.isAwaiting(modelData.state)
-                        property bool idle:     /(idle|ready|sleep)/.test(st)
+                        // the three live motion states, off the CANONICAL state
+                        // (exact switch, no regex).
+                        property bool working:  gadget.isWorking(modelData.state)
+                        property bool awaiting: gadget.isAwaiting(modelData.state)
+                        property bool idle:     gadget.isIdle(modelData.state)
                         // per-agent identity hue (base16 spread); conducted shells
                         // borrow their conductor's hue.
                         property color idHue: gadget.hueFor(modelData)
                         property string conductedBy: modelData._conductedBy || ""
                         property color accent: emph ? notes.paletteHot
                                                     : gadget.stateColor(modelData.state)
+
+                        // ── tree/beaming ────────────────────────────────────────
+                        readonly property int depth: modelData._depth || 0
+                        readonly property bool isChild: depth > 0
+                        readonly property int indent: isChild ? 24 : 0
+                        readonly property bool subagent: gadget.isSubagentRec(modelData)
+                        readonly property bool hasTitle: (modelData.title || "").length > 0
+                        // the row's display name: the human session name (title),
+                        // else the agent.
+                        readonly property string nameText: hasTitle ? modelData.title
+                                                                    : (modelData.agent || "session")
+                        readonly property string activityText: modelData.activity || ""
+                        // a beam is coloured from the PARENT's identity hue so the
+                        // group reads as one gesture (falls back to own hue).
+                        readonly property color beamHue: gadget.hueForAgent(
+                            (modelData._parentAgent && modelData._parentAgent.length > 0)
+                                ? modelData._parentAgent : gadget.effAgent(modelData))
 
                         Rectangle {                    // staff ledger line
                             anchors.bottom: parent.bottom
@@ -581,14 +676,40 @@ Item {
                             width: 3; color: notes.paletteHot; visible: row.emph
                         }
 
+                        // ── BEAM: a child note is beamed off its parent — a short
+                        // horizontal accent bar in the indent with a stem rising
+                        // toward the parent stave (the musical register of nesting,
+                        // not a box-drawing tree). Colour from the parent's notes.
+                        Item {
+                            id: beam
+                            visible: row.isChild
+                            anchors.left: parent.left; anchors.leftMargin: 14
+                            width: row.indent
+                            anchors.verticalCenter: gutter.verticalCenter
+                            height: 12
+                            Rectangle {                // the beam bar (a quaver beam)
+                                anchors.left: parent.left; anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                height: 2; radius: 0
+                                color: gadget.withA(row.beamHue, 0.85)
+                            }
+                            Rectangle {                // a short stem into the parent stave above
+                                anchors.left: parent.left
+                                anchors.bottom: parent.verticalCenter
+                                width: 1.5; height: 8; radius: 0
+                                color: gadget.withA(row.beamHue, 0.75)
+                            }
+                        }
+
                         // the note, hung on a monospace column (pilaster + barline)
                         Item {
                             id: gutter
-                            anchors.left: parent.left; anchors.leftMargin: 12
+                            anchors.left: parent.left; anchors.leftMargin: 12 + row.indent
                             anchors.verticalCenter: parent.verticalCenter
                             width: 26; height: parent.height
                             Text {                     // pilaster — tinted by agent identity
                                 anchors.centerIn: parent
+                                visible: !row.isChild   // children hang off the beam, not a barline
                                 text: "│"
                                 font.family: gadget.faceMono; font.pixelSize: 40
                                 color: row.emph ? gadget.withA(notes.paletteHot, 0.9)
@@ -603,7 +724,8 @@ Item {
                                 property real bob: 0
                                 anchors.verticalCenterOffset: -4 + bob
                                 text: gadget.glyphFor(modelData.state)
-                                font.family: gadget.faceMusic; font.pixelSize: 25
+                                font.family: gadget.faceMusic
+                                font.pixelSize: row.isChild ? 20 : 25   // child note ~0.8×
                                 color: row.accent
 
                                 // WORKING — the note bobs & shimmers: lively, alive.
@@ -644,19 +766,32 @@ Item {
                         }
 
                         Column {
+                            id: body
                             anchors.left: gutter.right; anchors.leftMargin: 10
                             anchors.right: elapsedText.left; anchors.rightMargin: 8
                             anchors.verticalCenter: parent.verticalCenter
-                            spacing: 3
+                            spacing: 2
 
                             Row {
+                                width: parent.width
                                 spacing: 8
-                                Text {
+                                Text {                     // the session NAME (title, else agent)
                                     id: agentName
-                                    text: (modelData.agent || "session")
-                                    font.family: gadget.faceSerif; font.pixelSize: 15
+                                    // leave room for the tags/state that follow
+                                    width: Math.min(implicitWidth, body.width - 92)
+                                    elide: Text.ElideRight
+                                    text: row.nameText
+                                    font.family: gadget.faceSerif
+                                    font.pixelSize: row.isChild ? 13 : 15
                                     font.weight: row.emph ? Font.Bold : Font.Medium
                                     color: notes.paletteFg
+                                }
+                                Text {                     // subagent type / agent, when a title took the name
+                                    anchors.baseline: agentName.baseline
+                                    visible: row.hasTitle
+                                    text: (row.subagent ? "⟐ " : "") + (modelData.agent || "")
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: row.idHue
                                 }
                                 Text {                     // which agent conducts this shell
                                     anchors.baseline: agentName.baseline
@@ -672,6 +807,16 @@ Item {
                                     font.pixelSize: 11
                                     color: row.accent
                                 }
+                            }
+                            // ACTIVITY — the current command/tool, tinted like the
+                            // state; the "what is it doing" line. Hidden when absent.
+                            Text {
+                                width: parent.width
+                                visible: row.activityText.length > 0
+                                text: "▸ " + row.activityText
+                                elide: Text.ElideRight
+                                font.family: gadget.faceMono; font.pixelSize: 10
+                                color: gadget.withA(row.accent, 0.95)
                             }
                             Item {
                                 width: parent.width; height: cwdText.implicitHeight
