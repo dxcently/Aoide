@@ -52,33 +52,23 @@ Item {
 
     // live state ────────────────────────────────────────────────────────────────
     // This roster is the tty roster: EVERY live terminal window, whether or not it
-    // is a tracked Aoide session. Two sources are MERGED:
-    //   · `sessions`  — the tracked stage records (sessions.json), rich state.
-    //   · `windows`   — the live terminal WINDOWS enumerated from Hyprland
-    //                   (`hyprctl clients -j`, filtered to terminal classes).
-    // A window that maps to a tracked session (shared window address) shows the
-    // session's rich state; a window with no tracked session shows as a plain
-    // terminal (agent "shell", idle liveness, its window cwd/title). De-duped by
-    // window address → one row per real terminal.
-    property var sessions: []              // tracked stage records
-    property var windows: []               // live terminal windows (hyprctl)
-    property var rows: []                   // the MERGED roster actually drawn
+    // is a tracked Aoide session. It is a PURE VIEW of ONE source — the bridge's
+    // `sessions.json` (Widget–Bridge Contract). The daemon now publishes a
+    // synthetic `shell` record (keyed `win:<address>`) for every untracked bare
+    // terminal, so `sessions.json` alone is a complete terminal roster: the widget
+    // never enumerates Hyprland itself. We just filter to the windowed records and
+    // de-dupe by window address → one row per real terminal.
+    property var sessions: []              // the complete stage roster (sessions.json)
+    property var rows: []                   // the windowed roster actually drawn
     property real nowMs: Date.now()
     property string emphId: ""
     property int projectCount: 0
     // Signature of the RENDERED roster — rebuild() only swaps the ListView model
-    // when this changes, so the frequent stage rewrites AND the periodic window
-    // re-reads don't tear down + recreate the row delegates (which would drop the
-    // hovered row's containsMouse and flicker the bar highlight mid-hover).
+    // when this changes, so the frequent stage rewrites don't tear down + recreate
+    // the row delegates (which would drop the hovered row's containsMouse and
+    // flicker the bar highlight mid-hover).
     property string _rosterSig: ""
     property string _pendingClearId: ""    // deferred hover-clear guard
-
-    // Terminal window classes we treat as a tty (anchored, ascii-lowercased in jq).
-    readonly property string termClassRe:
-        "^(kitty|foot|footclient|alacritty|wezterm|org.wezfurlong.wezterm|ghostty|"
-      + "com.mitchellh.ghostty|xterm|uxterm|konsole|urxvt|rxvt|termite|tilix|contour|"
-      + "rio|st|kgx|org.gnome.console|blackbox|terminator|sakura|wave|xfce4-terminal|"
-      + "gnome-terminal|qterminal|lxterminal|deepin-terminal)$"
 
     function withA(cstr, a) {                      // alpha on a role string
         var c = Qt.darker(cstr, 1.0);
@@ -180,11 +170,12 @@ Item {
         return (rec && rec.agent ? rec.agent : "sh") + " " + where + " $";
     }
 
-    // ── MERGE: live terminal windows ⋈ tracked sessions ──────────────────────────
-    // One row per real terminal window (de-duped by address). If a tracked record
-    // shares the window, its rich state is shown (an AGENT record wins over the
-    // bare shell for that window — the terminal reads as what's running in it);
-    // otherwise the window shows as a plain "shell" terminal at idle liveness.
+    // ── The windowed roster: filter + de-dupe the stage records ──────────────────
+    // One row per real terminal window (de-duped by window address). A record with
+    // NO window address yet (a `sub:` node, or an agent hook-registered before its
+    // window resolved) is NOT a terminal — it is excluded until it has one. When a
+    // window is shared by two records (a conducted shell + the claude running in
+    // it), the AGENT record wins — the terminal reads as what's running in it.
     // classify by `kind` (daemon-published), falling back to agent!="shell".
     function recKind(rec) {
         var k = (rec && rec.kind ? rec.kind : "").toLowerCase();
@@ -194,57 +185,36 @@ Item {
     }
     function isAgentRec(rec) { return recKind(rec) !== "shell"; }
     function terminalRows() {
-        var out = [];
-        var wins = windows || [];
-        for (var i = 0; i < wins.length; i++) {
-            var w = wins[i];
-            var addr = w.address || "";
-            var best = null, shell = null;
-            for (var j = 0; j < sessions.length; j++) {
-                var s = sessions[j];
-                if ((s.windowAddress || "") !== addr) continue;
-                if (isAgentRec(s)) { best = s; break; }   // agent record wins
-                if (!shell) shell = s;
-            }
-            var rec = best || shell;
-            var wsId = (w.workspace !== undefined && w.workspace !== null) ? w.workspace : -1;
-            if (rec) {
-                out.push({
-                    sessionId:     rec.sessionId || "",
-                    agent:         rec.agent || "shell",
-                    state:         rec.state || "idle",
-                    cwd:           rec.cwd || w.cwd || "",
-                    startedAt:     rec.startedAt || "",
-                    workspace:     (wsId !== -1 ? wsId
-                                    : (rec.workspace !== undefined ? rec.workspace : -1)),
-                    windowAddress: addr,
-                    title:         w.title || "",
-                    sessionTitle:  rec.title || "",       // the human SESSION name
-                    activity:      rec.activity || "",    // the current command/tool
-                    say:           rec.say || "",         // the agent's latest words
-                    wclass:        w.class || "",
-                    tracked:       true
-                });
-            } else {                                      // a plain, untracked tty
-                out.push({
-                    sessionId:     "",
-                    agent:         "shell",
-                    state:         "idle",                // liveness: mapped window = open, at rest
-                    cwd:           w.cwd || "",
-                    startedAt:     "",
-                    workspace:     wsId,
-                    windowAddress: addr,
-                    title:         w.title || "",
-                    sessionTitle:  "",
-                    activity:      "",                    // a plain tty runs no tracked tool
-                    say:           "",                    // a plain tty has no agent voice
-                    wclass:        w.class || "",
-                    tracked:       false
-                });
-            }
+        // group the windowed records by address; the agent record wins a shared window.
+        var byAddr = ({});
+        var order = [];                        // first-seen address order (stable enough pre-sort)
+        for (var i = 0; i < sessions.length; i++) {
+            var s = sessions[i];
+            var addr = s.windowAddress || "";
+            if (!addr) continue;               // no window yet → not on the tty roster
+            var cur = byAddr[addr];
+            if (cur === undefined) { byAddr[addr] = s; order.push(addr); }
+            else if (!isAgentRec(cur) && isAgentRec(s)) { byAddr[addr] = s; }  // agent wins
         }
-        // stable order: by workspace, then window address (so live re-reads that
-        // return windows in a jittery order don't reshuffle the roster).
+        var out = [];
+        for (var k = 0; k < order.length; k++) {
+            var rec = byAddr[order[k]];
+            var wsId = (rec.workspace !== undefined && rec.workspace !== null) ? rec.workspace : -1;
+            out.push({
+                sessionId:     rec.sessionId || "",
+                agent:         rec.agent || "shell",
+                state:         rec.state || "idle",
+                cwd:           rec.cwd || "",
+                startedAt:     rec.startedAt || "",
+                workspace:     wsId,
+                windowAddress: rec.windowAddress || "",
+                title:         rec.title || "",       // session name (tracked) / window title (synthetic)
+                activity:      rec.activity || "",    // the current command/tool
+                say:           rec.say || ""          // the agent's latest words
+            });
+        }
+        // stable order: by workspace, then window address (so re-reads that return
+        // records in a jittery order don't reshuffle the roster).
         out.sort(function (a, b) {
             return (a.workspace - b.workspace)
                 || (a.windowAddress < b.windowAddress ? -1
@@ -260,7 +230,7 @@ Item {
             var r = list[i];
             parts.push([r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
                         r.workspace, r.windowAddress, r.title,
-                        r.sessionTitle, r.activity, r.say].join(""));
+                        r.activity, r.say].join(""));
         }
         return parts.join("");
     }
@@ -319,16 +289,11 @@ Item {
         }
         rebuild();
     }
-    function parseClients(txt) {
-        try {
-            windows = (txt && txt.trim().length > 0) ? JSON.parse(txt) : [];
-        } catch (e) {
-            windows = [];
-        }
-        rebuild();
-    }
 
-    // the stage file — hot-reloads on change ─────────────────────────────────────
+    // the stage file — the ONLY source; hot-reloads on change ─────────────────────
+    // `sessions.json` is now the complete terminal roster (the daemon publishes a
+    // synthetic `shell` record per untracked tty), so this FileView is all the
+    // widget needs — no `hyprctl` enumeration, per the Widget–Bridge Contract.
     FileView {
         id: stage
         path: gadget.stagePath
@@ -339,35 +304,8 @@ Item {
         onFileChanged: reload()
     }
 
-    // live terminal-window enumeration: hyprctl clients, filtered to terminal
-    // classes, each augmented with the window's cwd (readlink /proc/<pid>/cwd).
-    // Emits a JSON array [{address,class,title,workspace,pid,mapped,cwd}, …].
-    Process {
-        id: clientsProc
-        command: ["sh", "-c",
-            "hyprctl clients -j | jq -c --arg re '" + gadget.termClassRe + "' "
-          + "'.[] | select((.class//\"\"|ascii_downcase)|test($re)) | "
-          + "{address, class, title, workspace:(.workspace.id // -1), pid, mapped}' | "
-          + "while read -r line; do pid=$(printf '%s' \"$line\" | jq -r .pid); "
-          + "cwd=$(readlink /proc/$pid/cwd 2>/dev/null); "
-          + "printf '%s' \"$line\" | jq -c --arg cwd \"$cwd\" '. + {cwd:$cwd}'; done | jq -s -c '.'"]
-        stdout: StdioCollector { id: clientsOut; onStreamFinished: gadget.parseClients(clientsOut.text) }
-    }
-    function refreshWindows() { if (!clientsProc.running) clientsProc.running = true }
-
-    // Focus a plain (untracked) window — tracked rows use bridge.focusSession.
-    Process { id: focusProc }
-    function focusWindow(addr) {
-        if (!addr) return;
-        focusProc.command = ["hyprctl", "dispatch", "focuswindow", "address:" + addr];
-        focusProc.running = true;
-    }
-
-    // Re-read the window list on a cadence so freshly-opened/closed plain
-    // terminals appear/disappear; the stage FileView already covers tracked state.
-    Timer { interval: 1500; running: true; repeat: true; onTriggered: gadget.refreshWindows() }
     Timer { interval: 1000; running: true; repeat: true; onTriggered: gadget.nowMs = Date.now() }
-    Component.onCompleted: { parseStage(); refreshWindows() }
+    Component.onCompleted: parseStage()
 
     // cast shadow — lifts the temple off any marble wallpaper ────────────────────
     Rectangle {
@@ -827,12 +765,12 @@ Item {
                                                        modelData.workspace !== undefined ? modelData.workspace : -1)
                             onExited:  gadget.requestHoverClear(gadget.rowKey(modelData))
                             onClicked: {
-                                // tracked row → focus its session; plain terminal →
-                                // focus its Hyprland window directly.
+                                // Every row now carries a sessionId — a tracked
+                                // agent/shell, or the daemon's synthetic `win:<addr>`
+                                // for a bare tty. The bridge resolves it to a window
+                                // (the one narrow outbound socket verb).
                                 if (modelData.sessionId && gadget.bridge && gadget.bridge.focusSession)
                                     gadget.bridge.focusSession(modelData.sessionId);
-                                else
-                                    gadget.focusWindow(modelData.windowAddress);
                             }
                         }
                     }
