@@ -61,6 +61,9 @@ The 2026-07-27 log entry below is **log-only**: 37 commits (the port tail, the r
 - **Mixed commit 3d03d95** — optional manual split (`git reset --mixed 8567ff1`), user's hand only.
 - **Baton 3D DAG** — planned in `design/Baton-3D-DAG.md`; implementation awaits the user's green light.
 
+### [2026-07-30] open: External-Edit-Tracking report-back mechanism undecided
+Whether the orchestrator learns about a detected external edit via PTY injection (risks colliding with a human mid-keystroke), a visual badge on the gadget rows (depends on a human noticing it), or some other mechanism is not decided. See [[External-Edit-Tracking]] for the full writeup of both candidates and the v1 pull-model CLI that works regardless of which (or neither) is chosen.
+
 ### [2026-07-30] open: `aoide.surfaces.sessionGraph` registry entry has no QML body
 The Greek widget rebuild (commit 353390a) retired the standalone DAG overlay (`AoideSessionGraph.qml` + `GraphRow.qml`) and the shared `GraphModel.qml` from the QML tree, but `modules/facets/quickshell/default.nix` still declares `sessionGraph.owner = "quickshell"` in the surface-ownership registry. Whether that entry should be dropped (no surface to own) or a body re-added (a future full-screen DAG view) is a code-side decision, not made in this pass — see [[Session-Graph]], [[Quickshell]].
 
@@ -449,3 +452,11 @@ gadget paragraph to state the daemon does the Hyprland work and the widget
 is a pure filter/de-dupe-by-window-address view, matching
 [[Widget-Bridge-Contract]]. No manifest change (both pages updated in place).
 - **New Open Thread** (`## Open Threads` above): whether the `aoide.surfaces.sessionGraph` owner-registry entry should be dropped now that no QML file backs it, or a body re-added — a code-side question, left for the dev/orchestrator side rather than decided here.
+
+## [2026-07-30] ingest | External-Edit-Tracking (planned feature)
+- **Minted `concepts/orchestration/External-Edit-Tracking.md`** on khoa's steer (explicitly "make this a planned feature" — documentation only, nothing built): the plan for detecting a human editing files directly inside a conducted shell (opening `nvim` and saving, outside the orchestrator's own `Edit`/`Write` calls), which is invisible to the orchestrator today. Design: `conduct`'s existing PTY tick — already using `EDITOR_BASENAMES`/`friendly_editor_command` (`pkgs/aoide/src/graph.rs`) for the `activity` display — takes a `git status --porcelain` snapshot when the foreground process enters the editor set and another when it leaves, diffs the two to the paths that became newly modified during that specific window (not everything dirty in the repo), and rides a `git diff --stat` alongside; a new stage file `song/stage/edits.json` (same atomic write-temp-then-rename pattern as every other stage file) records one event per detected edit, keyed to the shell's `sessionId` and its `parentSessionId` (the [[Session-Graph]] edge that says who to report back to); a v1 pull-model CLI (`aoide graph edits [--session] [--since] [--json]` + `graph edits ack --id`) is the concrete report-back mechanism. Scoped to git-repo cwds only for v1 — no mtime-scanning fallback, no attempt to generalize beyond git.
+- **Open thread carried, not resolved**: how the orchestrator learns about a new edit event WITHOUT polling — Claude Code's hook surface only fires session→bridge, so nothing pushes bridge→session mid-turn today. Two candidates are on record (PTY injection via `graph send`, flagged for its human-mid-keystroke collision risk; a visual badge on the Conductor/Terminals gadget rows, which depends on a human noticing it) and neither is chosen — see the new Open Threads entry below.
+- Registered per [[Assertion]]'s "documenting the unbuilt" pattern: `Status: specified; not implemented` up top, present-indicative prose about the design throughout.
+- Wired into `SCHEMA.md` (Notes manifest, 53 → 54; snapshot unchanged at 2026-07-30; Tags gained `editor`, `git`) and `ingest/index.md` (new Concepts bullet).
+- Cross-linked (both directions, one line each): [[Conductor-Channel]], [[Session-Graph]], [[Agent-Hooking]], [[Widget-Bridge-Contract]].
+- Nothing built: no changes to `pkgs/aoide/src`, no QML, no new stage file on disk.

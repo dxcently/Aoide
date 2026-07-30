@@ -178,3 +178,4 @@ split, and the reaper's own `crate::reap` module — all switched in and verifie
 
 - [[shellbridge]] · [[Quickshell]] · [[Conductor-Channel]] · [[Terminal-Commander]]
 - [[Session-Graph]] · [[Agent-Hooking]] · [[Gadget-Dock]] · [[Widget-Maker]]
+- [[External-Edit-Tracking]] — a planned stage file (`song/stage/edits.json`) following this same atomic-write contract, and a candidate report-back mechanism extending the `say`/`activity` field pattern.

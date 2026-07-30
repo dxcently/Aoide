@@ -149,3 +149,4 @@ Pass `--parent "$AOIDE_SESSION_ID"` (or the `--parent` flag on `session start`) 
 - [[Terminal-Commander]] — the graph concept (projects anchor sessions by cwd).
 - [[shellbridge]] — its socket accept loop is live for the window-jump verb (`focuswindow`), but session *registration* (start/phase/end) still has no socket verb; the CLI doors above remain the writers — and the permanent fallback.
 - [[Widget-Bridge-Contract]] — the full `sessions.json` field contract and canonical-state rules the states above feed.
+- [[External-Edit-Tracking]] — a planned feature riding the same conducted-shell registration this page describes, writing a new `song/stage/edits.json` alongside `sessions`/`hooks`/`graph`.

@@ -193,3 +193,4 @@ the schema (open thread, see [[aoide-cli]]).
 - [[Agent-Interface]]
 - [[Codebase]]
 - [[Widget-Bridge-Contract]]
+- [[External-Edit-Tracking]] — a planned feature that reads the `parentSessionId` edge here to resolve which orchestrator owns a conducted shell's detected edits.

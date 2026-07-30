@@ -62,7 +62,7 @@ snapshot: 2026-07-30
 
 ### Tags
 
-agent · aoide · architecture · auto-discovery · base16 · baton · bridge · cli · coding-agent · compositor · conductor · content · daemon · dag · declarative · deployment · design · desktop · drachma · dxflake · extensibility · features · flake · gadget · glyph · governance · graph · harness · hyprland · integration · ipc · knowledge · mcp · melete · meta · mneme · naming · nix · node · onboarding · orchestration · orchestrator · pantheon · pipeline · policy · protocol · pty · qml · quickshell · rebuild · rice · rust · security · session · shell · song · stylix · terminal · theming · tui · ui · vault · wayland · widget · wiki
+agent · aoide · architecture · auto-discovery · base16 · baton · bridge · cli · coding-agent · compositor · conductor · content · daemon · dag · declarative · deployment · design · desktop · drachma · dxflake · editor · extensibility · features · flake · gadget · git · glyph · governance · graph · harness · hyprland · integration · ipc · knowledge · mcp · melete · meta · mneme · naming · nix · node · onboarding · orchestration · orchestrator · pantheon · pipeline · policy · protocol · pty · qml · quickshell · rebuild · rice · rust · security · session · shell · song · stylix · terminal · theming · tui · ui · vault · wayland · widget · wiki
 
 ### Notes
 
@@ -86,6 +86,7 @@ concepts/orchestration/Agent-Interface.md
 concepts/orchestration/Baton-3D-DAG.md
 concepts/orchestration/Conductor-Channel.md
 concepts/orchestration/Content-Pipeline.md
+concepts/orchestration/External-Edit-Tracking.md
 concepts/orchestration/Session-Graph.md
 concepts/orchestration/Terminal-Commander.md
 concepts/song/Ricing-Protocol.md
