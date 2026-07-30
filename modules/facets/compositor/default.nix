@@ -138,10 +138,20 @@ let
     # translucent (glyphs stay opaque/crisp); Hyprland then blurs behind that
     # translucent surface, giving the frosted Win7 read. The whole-window opacity
     # rule keeps the FOCUSED terminal fully crisp (active 1.0) and adds a gentle
-    # Aero fade when it loses focus (inactive 0.90). Hyprland 0.56 matches with
-    # the `match:<prop> <value>` form (same as the layerrules above); the old
-    # `class:^(kitty)$` form is rejected ("invalid field ... missing a value").
-    windowrule = opacity 1.0 0.90, match:class kitty
+    # Aero fade when it loses focus (inactive 0.80, deepened from 0.90 so an
+    # unfocused terminal reads as visibly receded against a focused one).
+    # Hyprland 0.56 matches with the `match:<prop> <value>` form (same as the
+    # layerrules above); the old `class:^(kitty)$` form is rejected ("invalid
+    # field ... missing a value"). Terminals ONLY — this is not a global
+    # inactive_opacity: media/image/video/browser windows carry arbitrary,
+    # non-theme-matched content and must stay 1.0/1.0 by never matching a rule.
+    # LEGIBILITY FLOOR (khoa + Fable advisory): 0.80 keeps unfocused terminal
+    # text over the marble field at ≈3.7:1, still glanceable. Fable's floor is
+    # 0.75 (≈3.2:1); 0.70 breaks readability outright. If a live vision check
+    # ever finds unfocused terminal text hard to read, raise this toward 0.85 —
+    # never drop below 0.75. The lines/text stay clean and readable; the
+    # transparency serves that, not the other way around.
+    windowrule = opacity 1.0 0.80, match:class kitty
     # Edged everywhere (khoa): hard square corners on the terminal too — the
     # global decoration rounding is already 0, so this pins kitty to match
     # (the earlier `rounding 3` softened only the terminal; now nothing rounds).
