@@ -139,3 +139,4 @@ the shell — no bar, no dock, no wallpaper. See
 - [[drachma]]
 - [[Codebase]]
 - [[Hyprland]]
+- [[Widget-Bridge-Contract]]

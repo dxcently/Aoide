@@ -95,3 +95,4 @@ ricing. A bad generation can never reach the running system without the
 - [[Full-Architecture]]
 - [[Melete]]
 - [[Gadget-Dock]]
+- [[Widget-Bridge-Contract]]

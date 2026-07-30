@@ -58,7 +58,7 @@ This file and every `protocol/OPERATIONS/` page obey the rules they describe. Ch
 
 Snapshot of this wiki's files, diffed on each lint pass and rewritten at the end. The wiki is meant to be read whole; this manifest exists for the lint self-description check, not to spare you the reading.
 
-snapshot: 2026-07-29
+snapshot: 2026-07-30
 
 ### Tags
 
@@ -76,6 +76,7 @@ concepts/Snowflake-Anatomy.md
 concepts/desktop/Desktop-Architecture.md
 concepts/desktop/Feature-Set.md
 concepts/desktop/Gadget-Dock.md
+concepts/desktop/Widget-Bridge-Contract.md
 concepts/desktop/Widget-Maker.md
 concepts/governance/Fork-and-Run.md
 concepts/governance/Governance.md

@@ -133,3 +133,4 @@ reaping") for the predicate.
 - [[Terminal-Commander]]
 - [[Session-Graph]]
 - [[Gadget-Dock]]
+- [[Widget-Bridge-Contract]]
