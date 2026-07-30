@@ -70,21 +70,33 @@ get work done and how you test the conductor mesh.
   running session. An orchestrator freely commands its own spawned children
   (parent-autogate); everything else is **pending** until `--yes`. Use this to
   exercise the conductor while you build with it — dogfooding is testing.
-- **Fan out with sub-agents when it pays.** The standing orchestration shape
-  (khoa, 2026-07-29): **the main dev agent is an Opus agent orchestrating** —
-  it decomposes, dispatches, and lands the result. Worker
-  agents: **Opus codes** (design-critical or vision work), **Sonnet generals**
-  (broad search / mechanical sweeps / parallel legwork). Send independent
-  agents in one batch so they run concurrently; keep the *conclusion*, not
-  their file dumps.
-- **Fable is an OPTIONAL advisor, not a required gate** (khoa, 2026-07-30 —
-  rescinding the "always present" rule set earlier the same day). Fable remains
-  the standing judgement tier available for a code read (correctness, coherence,
-  test adequacy) or a **vision pass** on worker output when a second eye adds
-  value — but review is NOT mandatory, and **khoa reviews visual output himself**
-  ("I will just look at it"). Use Fable by judgement — adversarial correctness
-  checks, or when khoa isn't watching a visual change — not as a blanket
-  requirement on every diff. The orchestrator still reviews diffs and lands.
+- **Fan out with sub-agents when it pays — the current tiering** (khoa,
+  2026-07-30, superseding the 2026-07-29 shape below): **"Aoide Dev" (the main
+  dev session) orchestrates on Sonnet 5** — it decomposes, dispatches, reviews
+  every diff, and lands. **Coding runs through Melete, on Opus 5** — the
+  orchestrator does not edit code directly; it dispatches the coding task to
+  Melete (shell on yomi-strix / Osaka connector) and reviews what comes back.
+  **Design and review are the higher tier** — Fable and Opus are used for
+  designing an approach and reviewing worker output (judgement calls), not for
+  mechanical execution. **Wiki maintenance is delegated to a Sonnet 5
+  "librarian" agent** (§6) — the orchestrator hands off wiki updates rather
+  than writing them itself, so that work stays out of the main context.
+
+  *(Superseded shape, kept for history: 2026-07-29 had the main dev agent
+  orchestrating on Opus, with Opus itself coding design-critical work and
+  Sonnet generals doing broad search/mechanical sweeps.)*
+
+  Send independent agents in one batch so they run concurrently; keep the
+  *conclusion*, not their file dumps.
+- **Fable/Opus review is OPTIONAL, not a required gate** (khoa, 2026-07-30 —
+  rescinding the "always present" rule set earlier the same day). The higher
+  tier remains the standing judgement layer available for a code read
+  (correctness, coherence, test adequacy) or a **vision pass** on worker output
+  when a second eye adds value — but review is NOT mandatory, and **khoa
+  reviews visual output himself** ("I will just look at it"). Use it by
+  judgement — adversarial correctness checks, or when khoa isn't watching a
+  visual change — not as a blanket requirement on every diff. The orchestrator
+  still reviews diffs and lands.
 - **Resume, don't respawn.** An agent that died mid-task on an API error is
   resumed with its context intact (`SendMessage` by id) — a fresh `Agent` call
   starts cold.
@@ -192,10 +204,21 @@ coherent, verified changes can land directly.
 
 ---
 
-## 6. Adjusting the wiki (do this every time)
+## 6. Adjusting the wiki (do this every time) — delegated to the librarian
 
-The wiki is part of the deliverable, not documentation-after-the-fact. After any
-behavior/design change:
+The wiki is part of the deliverable, not documentation-after-the-fact. **The
+orchestrator does not write these updates itself** (khoa, 2026-07-30): wiki
+maintenance is delegated to a standing **Sonnet 5 "librarian" agent**, so wiki
+work stays out of the orchestrator's own context. The librarian's mandate: keep
+every page stating **what currently IS the case** — present-indicative, matching
+the live repo/system — never a plan or a future intent (that is what open flags
+and this handoff are for). It can be handed a broad, standing brief ("bring the
+wiki current against the repo") and left to run in the background rather than
+scoped to one page per call; the orchestrator dispatches to it whenever a
+behavior/design change needs the wiki updated, and moves on without waiting on
+or reviewing every line itself.
+
+After any behavior/design change, delegate the following to the librarian:
 
 - Update the page that owns the concept — e.g. a conductor change →
   [[Conductor-Channel]]; a graph/session change → [[Session-Graph]]; a new
