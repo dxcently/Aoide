@@ -36,8 +36,9 @@ IPC. This page is the contract both sides are built to.
 | `sessionId` | key. Sub-agent nodes are `sub:<tool_use_id>`. |
 | `kind` | `agent` \| `shell` \| `subagent` — what the record IS (widgets never infer role from the agent string). |
 | `state` | the CANONICAL live state — exactly one of `working` \| `awaiting` \| `idle` \| `done`. |
-| `activity` | the current command (a shell's foreground command) or tool/sub-task (an agent); absent when nothing runs. |
-| `title` | the human session NAME — the first user prompt (set-once), or a `graph send` steer. |
+| `activity` | the current PROCESS: a shell's foreground command / file being edited (`nvim notes.md`, `cargo test`), or its bare shell process when idle (`bash`); an agent's current tool. Absent only when truly nothing runs. |
+| `say` | the agent's latest WORDS — the last line of prose it wrote, tail-read from its own Claude Code transcript. Distinct from `activity` (the process); absent for shells and for an agent that hasn't spoken. |
+| `title` | the human session NAME. Set-once — whichever source lands FIRST wins: the first user prompt (clipped one-liner), Claude Code's own session title (`custom-title` in the transcript, e.g. "Aoide Dev"), or a `graph send` steer. |
 | `cwd` | live working directory (a conducted shell's follows `cd`). |
 | `parentSessionId` | the tree edge — a sub-agent's owner, or a nested claude's launcher. |
 | `agent`, `windowAddress`, `workspace`, `pid`, `conductable`, `socket` | identity + jump/lifecycle. |
@@ -66,6 +67,17 @@ idle_prompt)→`awaiting` · `SessionEnd`→`done`. The idle-prompt only becomes
 `awaiting` when the turn is still `working` (an unanswered question), never for a
 settled session.
 
+Alongside the state mapping, `Stop`/`PostToolUse`/`UserPromptSubmit`/`Notification`
+also tail-read the session's own JSONL transcript (the path a hook payload's
+`transcript_path` gives directly, or derived from `session_id` + `cwd` — Claude
+Code lays transcripts out at `~/.claude/projects/<munge(cwd)>/<session_id>.jsonl`,
+`/` and `.` folded to `-`) to refresh `say` and, set-once, `title` from its
+`custom-title` record. A background **Task** sub-agent gets the same treatment
+from its OWN dedicated transcript (`<session_id>/subagents/agent-<agent_id>.jsonl`,
+correlated to its `sub:<tool_use_id>` node via the sibling `.meta.json`'s
+`toolUseId`) — refreshed on every one of the PARENT's hooks, since a background
+Task outlives the turn that spawned it.
+
 ## The sub-agent tree
 
 A `Task` a claude agent spawns becomes a `subagent` node keyed `sub:<tool_use_id>`,
@@ -82,7 +94,38 @@ The [[Gadget-Dock|Conductor]] renders this hierarchy as musical **beaming** —
 children are smaller notes joined to the parent by a horizontal beam, one indent
 level — staying inside the stave motif rather than a directory tree. Only
 agent→agent/subagent nesting shows in the Conductor; shells stay in the Terminals
-temple.
+temple. A beamed child row shows its OWN `say` (that sub-agent's latest words).
+
+## One agent per window (dedup)
+
+A terminal window hosts one foreground claude, but Claude Code mints a NEW
+`session_id` on compact/resume — and the old record, whose lifecycle-owning `pid`
+resolves to the still-alive TERMINAL (not claude itself), never runs its own
+`SessionEnd`. Left alone it lingers `working` forever: two "claude" rows for one
+terminal, the stale one even masking the real record's `say` in the Terminals
+window-merge. The bridge collapses same-window agent records to one:
+
+- **At registration** — a new agent `SessionStart` on a window already held by
+  another live agent evicts the sibling immediately (a window address cannot be
+  shared by two simultaneously-open windows, so the pair is always a stale re-id).
+- **In the reaper** (`aoide graph reap`, the safety net for a window that resolves
+  later) — among same-window agents past a short grace, keep the one with a real
+  on-disk transcript (→ has `say` → classified `agent` → newest), retire the rest.
+
+Shells are exempt from the rule: a conducted shell and the claude inside it
+legitimately share one window, so dedup runs among `agent`-kind records only.
+
+## The two roster temples
+
+Both are pure views of the same `sessions.json`, but they read it differently:
+
+- **[[Gadget-Dock|Conductor]]** — the AGENT tree. Names each row by its session
+  `title` ("Aoide Dev"), shows `activity` (the tool) and `say` (the words), and
+  beams sub-agents beneath. A conducted shell that only hosts a claude does NOT
+  get its own row — the claude represents that terminal (one row per terminal).
+- **[[Terminal-Commander|Terminals]]** — the PROCESS view. Each row's headline is
+  what the terminal is running (`activity`: the foreground command / edited file,
+  or the shell/agent process when idle), with the `cwd` as subtext.
 
 ## The jump — resolved in the bridge
 
@@ -122,12 +165,14 @@ processes) and per-terminal (`conduct`, which a switch does not kill), and
 Concurrent writers are serialised by an `flock`'d stage lock (atomic rename stops
 torn reads; the lock stops lost updates).
 
-**Status:** the bridge/schema half of this contract landed in the Phase 0–3
-commits (canonical state, live cwd/command, `activity`/`kind`/`title`, the
-sub-agent tree, the `focussession` verb, the `flock` lock, the wired tool/
-notification hooks) and runs after the next gated `switch` ([[Rebuild-Gate]]). The
-widgets are being brought into conformance (the pure-view switch, the beamed tree,
-the `awaiting`-driven dock peek) in the same pass.
+**Status:** live on yomi-strix. The bridge/schema half (canonical state, live
+cwd/command, `activity`/`kind`/`title`, the sub-agent tree, the `focussession`
+verb, the `flock` lock, the wired tool/notification hooks) and the widget
+pure-view conformance (the beamed tree, the `awaiting`-driven dock peek) landed in
+the Phase 0–3 pass; a follow-up added `say` (agent + Task words from the
+transcript), the `custom-title` session name, the same-window agent dedup
+(registration + reaper), the Conductor-as-agent-tree / Terminals-as-process-view
+split, and the reaper's own `crate::reap` module — all switched in and verified.
 
 ## Related
 
