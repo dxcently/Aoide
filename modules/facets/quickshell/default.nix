@@ -135,11 +135,24 @@ in
           # treats the argument as a config NAME and fails on a path in
           # quickshell 0.3.0.
           ExecStart = "${quickshellPkg}/bin/quickshell -p ${shellQmlEntry}";
+          # Qt6's qtbase ships only jpeg/png/gif/ico imageformats plugins (plus
+          # qtsvg); webp/tiff/etc. live in a SEPARATE qtimageformats plugin the
+          # quickshell wrapper does not carry. A song cover may be any of those
+          # formats (sonata's is .webp), and AoideWallpaper renders it through a
+          # Qt Image — with no webp plugin the Image can't decode and the layer
+          # falls back to the solid palette colour (the "wallpaper didn't run
+          # after rebuild" symptom). The wrapper sets QT_PLUGIN_PATH via
+          # makeWrapper --prefix, which PRESERVES an inherited value, so this
+          # plugin dir is scanned alongside the wrapper's own. quickshell follows
+          # this flake's nixpkgs, so this qtimageformats is the exact Qt ABI.
+          Environment = [
+            "QT_PLUGIN_PATH=${pkgs.qt6.qtimageformats}/lib/qt-6/plugins"
+          ]
           # Export the song's baked wallpaper (immutable store path) so
           # AoideWallpaper always has the right cover on boot/rebuild — the live
           # stage/cover.json overrides it, but nothing re-seeded it from the
           # song before, so a rebuild lost the background. Null → no env.
-          Environment = lib.optionals (config.aoide.drachma.wallpaper != null) [
+          ++ lib.optionals (config.aoide.drachma.wallpaper != null) [
             "AOIDE_WALLPAPER=${config.aoide.drachma.wallpaper}"
           ];
           Restart = "on-failure";
