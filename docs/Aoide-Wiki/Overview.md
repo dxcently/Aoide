@@ -20,8 +20,8 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 - [[Widget-Maker]] — the core thesis: Aoide as an extensible, declarative widget maker; the coding agent writes new integrations rather than selecting plugins
 - [[Feature-Set]] — what ships in the box (Melete + Mneme integrated) and the exemplar features: messaging bridge, fleet management, scheduled-job widget
 - [[Terminal-Commander]] — the agent-session widget (conductor-class): watch the terminals running agents and jump to any by click or keybind
-- [[Session-Graph]] — the project/session DAG grown from the flat roster: `aoide graph` viewer + management (anchors + spawned edges, prune, liveness-checked focus, atomic graph.json emit) — rendered on the desktop primarily via the dock's DAG gadget (the standalone overlay is dormant)
-- [[Gadget-Dock]] — the agentWidgets surface realized: Win7-sidebar-homage desktop gadgets (terminal roster, compact DAG, clock, meters) in ASCII box-drawing chrome over Aero-glass blur, colours entirely from drachma — a left-edge pinnable popup on hot-edge hover or SUPER+G
+- [[Session-Graph]] — the project/session DAG grown from the flat roster: `aoide graph` viewer + management (anchors + spawned edges, prune, liveness-checked focus, atomic graph.json emit) — rendered via `graph view`/`--json` and the `aoide baton` TUI; the desktop's Conductor gadget gives the at-a-glance agent-tree view instead of a standalone DAG overlay
+- [[Gadget-Dock]] — the agentWidgets surface realized: `AoidePanel.qml`, a left-edge panel holding four gadgets (Conductor, Terminals, Meters, Power), colours entirely from drachma — its fore-edge peeks at rest and it opens fully on hot-edge hover or SUPER+G
 - [[Lexicon]] — the whole vocabulary in one place: the three original Muses (Aoide · Melete · Mneme), the frozen/performed split, why each word family was selected, and the loop that ties them together
 - [[Snowflake-Anatomy]] — the layered structure of the Aoide flake: nucleus, dendrites, and facets; why Nix's snowflake logo maps to the repo's growth model
 - [[Fork-and-Run]] — the install model: fork upstream, clone to `~/Aoide`, run `aoide onboard`; shared history enables clean upstream merges and upstream contributions
@@ -40,7 +40,7 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 - [[drachma]] — the design-token layer *and* the mint that stamps it: the immutable seam between nix structure and runtime rendering (schema tiers, the two-fan-out model), plus the Node package (wrapping Style Dictionary) that lints/resolves/emits the tokens — stage/drachma.json, hyprctl, and terminal OSC
 - [[aoided]] — the orchestrator daemon: neutral event stream, policy, lint, audit log, and the gated rebuild pipeline
 - [[shellbridge]] — the daemon-to-desktop bridge: atomic JSON state files out, unix-socket commands in, Hyprland IPC consumed
-- [[Quickshell]] — the QML shell runtime (nine surfaces): bar, notification daemon, gadget dock, launcher, OSD, lockscreen, greeter, wallpaper layer, session-graph overlay
+- [[Quickshell]] — the QML shell runtime (nine surfaces declared, eight with a live QML body): bar, notification daemon, gadget dock, launcher, OSD, lockscreen, greeter, wallpaper layer, session-graph (declared, no QML body today)
 - [[Hyprland]] — the Wayland compositor; Aoide's only multiplexer, driven live via hyprctl
 - [[Stylix]] — base16 whole-system theming; the baked fan-out from `rice.nix` to every nix-manageable target
 - [[dxflake]] — the dendritic auto-discovery flake that is Aoide's prior art and adoption target for the nucleus + dendrite walker

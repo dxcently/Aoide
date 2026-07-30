@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-07-28
+updated: 2026-07-30
 tags: [aoide, shell, ui, qml, quickshell]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -36,26 +36,25 @@ writes drachma + keybind fragments with `mkBefore`, and the Quickshell facet app
 its `exec-once` autostart with `mkAfter`, so the two facets compose the one config
 file without collision.
 
-## Nine surfaces
+## The registry — nine declared, eight with a live body
 
-Two registered surfaces carry real bodies, bringing the registry to
-**nine**:
+The facet declares nine `owner = "quickshell"` surfaces
+(`modules/facets/quickshell/default.nix`: bar, notifications, launcher, osd,
+lockscreen, greeter, wallpaper, agentWidgets, sessionGraph):
 
-- **`sessionGraph`** (surface #9, `AoideSessionGraph.qml` + `GraphRow.qml`) —
-  an overlay hot-reloading `song/stage/graph.json` on the same
-  `FileView` pattern as `DrachmaState`, rendering the [[Session-Graph]] DAG as an
-  indented tree. It is **dormant** — no keybind, bridge-only — kept for a
-  future full-screen DAG view.
-- **`agentWidgets`** — the [[Gadget-Dock]], a **left-edge pinnable popup**
-  of Win7-sidebar-homage gadgets (`AoideAgentWidgets.qml`, `GadgetFrame.qml`,
-  and the terminal-manager / DAG / clock / meter gadget files). Hidden by
-  default; it slides in on a 5 px hot-edge hover (pure QML) or on `SUPER+G`
-  (open-and-pin via the bridge), and since it holds the DAG gadget it is the
-  primary DAG affordance on the desktop.
-
-**`GraphModel.qml`** is the canonical QML graph model; both the overlay and
-the dock's `DagGraphGadget` instantiate it, and any future graph consumer
-must too — the tree derivation lives in exactly one place.
+- **`agentWidgets`** — the [[Gadget-Dock]], `AoidePanel.qml`: a **left-edge
+  panel** holding four self-framed gadgets (Conductor, Terminals, Meters,
+  Power). Its fore-edge peeks past the screen edge at rest — further when a
+  session is `awaiting` and unacknowledged — and slides fully in on a 6 px
+  hot-edge hover or on `SUPER+G` (an in-process Hyprland global shortcut the
+  panel itself registers, `aoide:dock`; not a CLI verb). Its Conductor
+  gadget is the desktop's at-a-glance agent view — a beamed session tree,
+  not a literal DAG diagram.
+- **`sessionGraph`** — declared but has **no QML body**: the standalone DAG
+  overlay (`AoideSessionGraph.qml` + `GraphRow.qml`) and the shared
+  `GraphModel.qml` it and the dock's former DAG gadget instantiated are no
+  longer part of the QML tree. `aoide graph view`/`--json` and the `aoide
+  baton` TUI are the DAG's renderers today ([[Session-Graph]]).
 
 ## Launcher (surface #3, built out 2026-07-28)
 

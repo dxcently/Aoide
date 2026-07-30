@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-28
+updated: 2026-07-30
 tags: [aoide, graph, session, terminal, agent, cli]
 ---
 
@@ -16,7 +16,8 @@ graph` (real, every subcommand implemented — `view`/`project`/`link`/
 CLI door and the MCP door share the group ([[Agent-Interface]]).
 
 *Verified green (`nix flake check` + the vm-boot check). Implementation:
-`pkgs/aoide/src/graph.rs` — see [[Codebase]].*
+`pkgs/aoide/src/graph.rs`, with the liveness/dedup reaper in its own
+`pkgs/aoide/src/reap.rs` module — see [[Codebase]].*
 
 ## The graph model
 
@@ -58,29 +59,21 @@ document instead. A sample render:
 `song/stage/graph.json` — the identical write-temp-then-rename pattern as the
 drachma emitter — so [[Quickshell]] can hot-reload it.
 
-The graph renders in two places besides the terminal, both hot-reloading
-`graph.json`:
+The desktop has no standalone DAG-diagram surface today: `graph view`/
+`--json` in the terminal and the `aoide baton` ratatui TUI (DAG/sessions/
+projects/log/status panels) are the DAG's renderers. On the desktop, the
+[[Gadget-Dock]]'s **Conductor gadget** gives the at-a-glance agent view
+instead — a beamed tree of agent/sub-agent sessions
+([[Widget-Bridge-Contract]]), not a literal node/edge diagram. `SUPER+G`
+summons the dock: an in-process Hyprland global shortcut (`aoide:dock`) the
+panel registers itself, not a CLI verb.
 
-- **`DagGraphGadget`** — the compact view inside the [[Gadget-Dock]], the
-  **primary DAG affordance** on the desktop: `SUPER+G` summons the dock popup
-  (bridge path `aoide shell dock toggle`, open-and-pin — still a stub verb;
-  the `aoide shell` group otherwise has no other verbs in the command
-  schema), and the dock contains the DAG gadget.
-- **`AoideSessionGraph`** — the standalone overlay (surface #9,
-  `aoide.surfaces.sessionGraph`), **dormant**: it has no keybind and is
-  reachable only via the bridge, held as the seam for a dedicated
-  full-screen DAG view (unbuilt). It draws the DAG as an indented tree:
-  projects `◆`, sessions `●` with agent/state/short-cwd, spawned children
-  nested, incoming-edge-free sessions under the synthetic `(unanchored)`
-  root. The traversal is cycle-guarded (a visited set), dangling edges are
-  filtered, and a safety net surfaces any unvisited session at depth 0.
-  Colours come entirely from drachma (accent = running, urgent =
-  awaiting/Notification, dimmed fg = done). A row click calls
-  `bridge.focusSession` — the [[shellbridge]] session-jump gate; QML never
-  shells out.
-
-Both instantiate the shared **`GraphModel.qml`**, which holds `buildRows()` —
-the canonical QML graph model; every graph consumer must use it too.
+The `aoide.surfaces.sessionGraph` owner-registry entry
+(`modules/facets/quickshell/default.nix`) is still declared, but no QML file
+backs it — the prior standalone overlay (`AoideSessionGraph.qml` +
+`GraphRow.qml`) and the shared `GraphModel.qml` it and the dock's former DAG
+gadget instantiated are no longer part of the QML tree (open thread: whether
+the registry entry should follow).
 
 ## The management layer
 
@@ -141,6 +134,15 @@ the same `prune_done` path — dropped, orphaned `parentSessionId` links
 cleared, `graph.json` re-staged atomically. `graph reap` never errors on
 "nothing to reap" and never errors on an unreachable compositor.
 
+The same pass also retires **same-window agent duplicates**: a compact/resume
+mints a new `session_id` for a window that already holds a live agent record,
+and the stale one's `pid` resolves to the terminal rather than the agent, so
+liveness alone can't catch it. Among same-window `agent`-kind records past a
+short grace, the keeper is the one with a real on-disk transcript; the rest
+are retired. Shells are exempt (a conducted shell legitimately shares its
+window with the agent inside it). See [[Widget-Bridge-Contract]] for the full
+rule (this same dedup also runs at registration time, in `graph.rs`).
+
 **Interplay with the window-event listener.** [[shellbridge]]'s Hyprland event
 listener (the authoritative `windowAddress` source — see
 [[Terminal-Commander]]) is the *counterpart* to the reaper: it fills the address
@@ -171,12 +173,15 @@ seeing a stale "haunting" session.
 The `stage_dir()` / `AOIDE_STAGE_DIR` mismatch is fixed and documented as a
 contract seam ("Stage-dir resolution", `CONTRACTS.md §4` — see
 [[shellbridge]]). The `focuswindow` exit-0 ambiguity is resolved by the
-liveness check above. The Quickshell DAG surface exists (overlay + dock
-gadget). `conduct-by-default` stamps `parentSessionId` at spawn time for the
-common case — the kitty wrapper passes `--parent "$AOIDE_SESSION_ID"` into
-every nested `aoide conduct` ([[Conductor-Channel]]) — so `graph link` is the
-manual/override path for edges outside that nesting, not the only source. The
-`aoide shell` verbs the keybinds reference are not yet in the command schema.
+liveness check above. `conduct-by-default` stamps `parentSessionId` at spawn
+time for the common case — the kitty wrapper passes `--parent
+"$AOIDE_SESSION_ID"` into every nested `aoide conduct` ([[Conductor-Channel]])
+— so `graph link` is the manual/override path for edges outside that
+nesting, not the only source. The dock's `SUPER+G` toggle and the launcher's
+`SUPER+SPACE` both resolve in-process (Hyprland global shortcuts the QML
+registers itself) rather than through an `aoide shell` CLI verb; only
+`SUPER+ESCAPE` (lock) still execs an `aoide shell lock` command absent from
+the schema (open thread, see [[aoide-cli]]).
 
 ## Related
 
@@ -187,3 +192,4 @@ manual/override path for edges outside that nesting, not the only source. The
 - [[Gadget-Dock]]
 - [[Agent-Interface]]
 - [[Codebase]]
+- [[Widget-Bridge-Contract]]

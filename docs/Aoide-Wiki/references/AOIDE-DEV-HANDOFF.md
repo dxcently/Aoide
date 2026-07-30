@@ -75,7 +75,9 @@ get work done and how you test the conductor mesh.
   dev session) orchestrates on Sonnet 5** — it decomposes, dispatches, reviews
   every diff, and lands. **Coding runs through Melete, on Opus 5** — the
   orchestrator does not edit code directly; it dispatches the coding task to
-  Melete (shell on yomi-strix / Osaka connector) and reviews what comes back.
+  Melete — the on-box coding agent, run as a **local subagent (`Agent` tool),
+  NOT the Melete MCP connector** (khoa, 2026-07-30 — reiterated: MCP is not
+  needed here) — and reviews what comes back.
   **Design and review are the higher tier** — Fable and Opus are used for
   designing an approach and reviewing worker output (judgement calls), not for
   mechanical execution. **Wiki maintenance is delegated to a Sonnet 5
@@ -95,8 +97,13 @@ get work done and how you test the conductor mesh.
   when a second eye adds value — but review is NOT mandatory, and **khoa
   reviews visual output himself** ("I will just look at it"). Use it by
   judgement — adversarial correctness checks, or when khoa isn't watching a
-  visual change — not as a blanket requirement on every diff. The orchestrator
-  still reviews diffs and lands.
+  visual change — not as a blanket requirement on every diff. The one fixed
+  exception: **Melete's own coding output always gets an independent Opus
+  review** — a SEPARATE `Agent` dispatch (not the orchestrator reading the
+  diff itself) that re-derives its own view of the change rather than
+  rubber-stamping Melete's summary — before the orchestrator reads that
+  reviewer's verdict and lands (khoa, 2026-07-30). The orchestrator still
+  reviews diffs and lands.
 - **Resume, don't respawn.** An agent that died mid-task on an API error is
   resumed with its context intact (`SendMessage` by id) — a fresh `Agent` call
   starts cold.

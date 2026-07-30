@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-28
+updated: 2026-07-30
 tags: [aoide, widget, terminal, agent, session]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -105,24 +105,26 @@ DAG of projects and sessions (which project anchors each session, which
 session spawned which), viewed and managed through the `aoide graph` command
 group. The roster is the rows; the graph is the tree they hang from.
 
-The roster also has its **desktop gadget**: the
-`TerminalManagerGadget` in the [[Gadget-Dock]] renders it live from
-`sessions.json` + `hooks.json`, merging the latest hook phase over the raw
-roster state exactly as the Rust graph module does — agent, coloured state,
-shortened cwd, elapsed; click a row to jump. Its per-row prune `[x]` is
-rendered disabled: the shellbridge socket has no prune verb yet (open
-thread) — the dock never invents IPC.
+The roster also has its **desktop gadget**: `TerminalsGadget` in the
+[[Gadget-Dock]] renders the PROCESS view live — merging the tracked
+`sessions.json` records with Hyprland's own client list so every terminal
+window shows, tracked or not. A row's headline is its `activity` (the
+foreground command / edited file, or the bare shell/agent process when idle),
+`cwd` as subtext; click a row to jump. The gadget has no prune affordance:
+the shellbridge socket has no prune verb yet (open thread) — the dock never
+invents IPC. See [[Widget-Bridge-Contract]] for the full field contract.
 
 ### Hover-preview → the bar's workspace glyph
 
-Hovering a roster row also **previews which workspace that terminal lives
-on**, on the bar's [[Gadget-Dock|WorkspaceRow]] (the musical-note-glyph
-workspaces). The bridge is deliberately **pure data, not a compositor action**:
-the roster already carries each session's `workspace` id (stamped by the event
-listener above), so the widget need only *tell the bar which workspace to
-preview* — no `hyprctl`, no invented IPC, both surfaces just read shared state.
+Hovering a roster row in either dock gadget (Conductor or Terminals) also
+**previews which workspace that terminal lives on**, on the bar's
+[[Gadget-Dock|WorkspaceRow]] (the musical-note-glyph workspaces). The bridge
+is deliberately **pure data, not a compositor action**: the roster already
+carries each session's `workspace` id (stamped by the event listener above),
+so the widget need only *tell the bar which workspace to preview* — no
+`hyprctl`, no invented IPC, both surfaces just read shared state.
 
-- The dock row's `HoverHandler` writes the hovered session's `workspace` id to
+- A dock row's `HoverHandler` writes the hovered session's `workspace` id to
   `shared.hoveredWorkspace` (a `property int` on shell.qml's shared QtObject,
   the same object that carries `tracedSessionId` for the DAG trace). It threads
   shell → dock → gadget for the *writer* and shell → bar → WorkspaceRow for the

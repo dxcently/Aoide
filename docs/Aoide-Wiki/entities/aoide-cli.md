@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-07-28
+updated: 2026-07-30
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
@@ -89,11 +89,12 @@ command.
 
 ### Open schema gap
 
-The compositor keybinds `SUPER+ESCAPE` (lock) and `SUPER+G` (dock toggle)
-still invoke `aoide shell lock` / `aoide shell dock toggle` — a verb group not
-among the 36 leaves (open thread). The launcher keybind is not part of this
-gap: `SUPER+SPACE` triggers an in-process Hyprland global shortcut, not a CLI
-verb (see [[Quickshell]]).
+The compositor keybind `SUPER+ESCAPE` (lock) still invokes `aoide shell
+lock` — a verb group not among the leaves (open thread). `SUPER+G` (dock
+toggle) is not part of this gap: like the launcher's `SUPER+SPACE` and the
+wallpaper picker's `SUPER+W`, it triggers an in-process Hyprland global
+shortcut the panel itself registers (`aoide:dock`), not a CLI verb (see
+[[Quickshell]]).
 
 ## Contract-level conventions
 

@@ -1,0 +1,5 @@
+# This directory is a Syncthing folder marker.
+# Do not delete.
+
+folderID: wfmym-xfaic
+created: 2026-07-26T01:11:43-04:00

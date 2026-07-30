@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-28
+updated: 2026-07-30
 tags: [aoide, architecture, desktop, drachma, pipeline]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -174,16 +174,18 @@ The baked side is carried by the three facets, all real:
 - **quickshell** — declares nine surfaces with `owner = "quickshell"` (bar,
   notifications, launcher, osd, lockscreen, greeter, wallpaper, agentWidgets,
   sessionGraph); QML installed to `~/Aoide/qml` via home-manager;
-  `DrachmaState.qml` watches the stage file for the live fan-out. All nine now
-  have real bodies: `AoideBar.qml` is the bar; `AoideLauncher.qml` is the
-  keyboard-driven launcher (`SUPER+SPACE`); `AoideNotifications.qml` +
+  `DrachmaState.qml` watches the stage file for the live fan-out. Eight of
+  the nine carry a live QML body: `AoideBar.qml` is the bar (its own popouts
+  also carry the calendar and now-playing gadgets); `AoideLauncher.qml` is
+  the keyboard-driven launcher (`SUPER+SPACE`); `AoideNotifications.qml` +
   `NotificationCard.qml` are the notification daemon (actions/inline-reply
-  spike still pending); agentWidgets is the [[Gadget-Dock]] — the
-  Win7-sidebar-homage gadgets (terminal roster, compact DAG, clock, CPU/RAM
-  meters, NowPlaying/Power/Calendar), a left-edge pinnable popup on hot-edge
-  hover or `SUPER+G`, all drachma-themed; sessionGraph is the
-  [[Session-Graph]] DAG overlay, built but dormant (bridge-only, no keybind);
-  osd, lockscreen, greeter, and wallpaper round out the set.
+  spike still pending); agentWidgets is the [[Gadget-Dock]] — `AoidePanel.qml`
+  holding four gadgets (Conductor, Terminals, Meters, Power), a left-edge
+  panel that peeks its fore-edge and opens fully on hot-edge hover or
+  `SUPER+G`, all drachma-themed; osd, lockscreen, greeter, and wallpaper
+  round out the set. `sessionGraph` remains declared but has no QML body —
+  the DAG is rendered via `aoide graph view`/`aoide baton`, not a desktop
+  overlay ([[Session-Graph]]).
 - **compositor** — [[Hyprland]]; the system layer holds session/portal wiring,
   the home-manager layer owns `hyprland.conf` with drachma baked at build and
   live-patched via `hyprctl` during rehearsal; greetd is stubbed.

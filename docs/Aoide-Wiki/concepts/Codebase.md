@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-28
+updated: 2026-07-30
 tags: [aoide, architecture, nix, flake, rust, node]
 ---
 
@@ -252,17 +252,19 @@ QML shell skeleton; the baked Stylix and compositor fan-outs; and the whole
 `aoide graph` group — 15 subcommands (`view`, `project add/remove/list`,
 `link`, `session start/phase/end/hook`, `wrap`, `send`, `focus`, `prune`,
 `reap`, `emit`), none a stub (see [[Session-Graph]]) — plus the separate
-`aoide baton` command (also real). `pkgs.aoide` carries 63 unit tests in all
-(above). The QML tree's non-stub surfaces: `AoideSessionGraph.qml` +
-`GraphRow.qml` (the DAG overlay), the shared `GraphModel.qml`, the
-[[Gadget-Dock]] files (`AoideAgentWidgets.qml`, `GadgetFrame.qml`,
-`TerminalManagerGadget.qml`, `DagGraphGadget.qml`, `ClockGadget.qml`,
-`MeterGadget.qml`), `AoideLauncher.qml` (the launcher), and
+`aoide baton` command (also real; the liveness-reap predicate now lives in
+its own `reap.rs` module, split out of `graph.rs`). `pkgs.aoide` carries unit
+tests across the crate (above). The QML tree's non-stub surfaces: the
+[[Gadget-Dock]] files (`AoidePanel.qml`, `GadgetFrame.qml`,
+`ConductorGadget.qml`, `TerminalsGadget.qml`, `MetersGadget.qml`,
+`PowerVitalsGadget.qml`), `AoideLauncher.qml` (the launcher), and
 `AoideNotifications.qml`/`NotificationCard.qml` (the notification daemon) —
 across the facet's nine `owner = "quickshell"` surfaces (bar, notifications,
 launcher, osd, lockscreen, greeter, wallpaper, agentWidgets, sessionGraph; see
-[[Full-Architecture]]). The bootable yomi-strix profile and the vm-boot check
-(above) are likewise real.
+[[Full-Architecture]]). `sessionGraph` is declared but has no QML body today
+— the standalone DAG overlay and its shared `GraphModel.qml` are no longer
+in the QML tree ([[Session-Graph]]). The bootable yomi-strix profile and the
+vm-boot check (above) are likewise real.
 
 **The dendrite set** now spans twenty entries in `modules/dendrites/`: bash
 (the `ad*` nh alias family replacing `dx*`), nh, git, kitty, neovim-via-nvf,
