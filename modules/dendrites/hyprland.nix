@@ -136,6 +136,13 @@ in
         # Hyprland's dispatcher for it.
         bind = SUPER, SPACE, global, aoide:launcher
 
+        # Wallpaper switcher (Hyprland global shortcut → AoideWallpaperPicker.
+        # GlobalShortcut toggle). Registers `aoide:wallpaper` in-process, same
+        # global-shortcuts-v1 seam as the launcher — one press summons the cover
+        # grid over song/covers/, a pick shells `aoide cover set <path>` which
+        # hot-swaps the live wallpaper. No CLI toggle verb, no inbound socket.
+        bind = SUPER, W, global, aoide:wallpaper
+
         # Lock screen
         bind = SUPER, ESCAPE, exec, aoide shell lock
 
