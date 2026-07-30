@@ -121,33 +121,13 @@ Item {
         return s.length ? s : "—";
     }
     // a mood face — the emoticon life ────────────────────────────────────────────
-    // WORKING is the ONLY animated state: its face cycles frames on a per-row
-    // timer, and that motion is the row's whole sense of life. Three sets exist
-    // so a roster of busy terminals doesn't march in lockstep — each row picks
-    // one by a stable hash of its key. Frames within a set are deliberately the
-    // same character count: the face is right-aligned, so a width change per
-    // frame would jitter it sideways instead of emoting in place.
-    readonly property var workFaces: [
-        ["♪(´ε｀ )", "♫(´ε｀ )", "♬(´ε｀ )", "♫(´ε｀ )"],   // cantando — humming over the work
-        ["φ(･ω･｀)", "φ(･ω･´)", "φ(･ω･＾)", "φ(･ω･´)"],   // scribens — pen down, writing
-        ["(･ω･)ゞ", "(･ｖ･)ゞ", "(･ω･)ゞ", "(･０･)ゞ"]      // salutans — nodding at the desk
-    ]
-    function faceSet(id) {
-        var s = id || "", h = 0;
-        for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) & 0x7fffffff;
-        return workFaces[h % workFaces.length];
-    }
-    // the STILL faces — one pose per resting state.
-    function kaomojiFor(state) {
-        switch (normState(state)) {
-        case "awaiting": return "(；・∀・)?";   // needs input — anxious, asking
-        case "working":  return workFaces[0][0]; // animated in the delegate; frame 0 here
-        case "stopped":  return "( ･ω･)b";     // stopped — hands off, standing by
-        case "idle":     return "(－ω－) zzZ";  // idle — long at rest, or fresh/resumed
-        case "done":     return "( ´ ▽ ` )";   // content, retired
-        default:         return "( ・_・)";      // puzzled
-        }
-    }
+    // ── MOOD FACES ───────────────────────────────────────────────────────────────
+    // The kaomoji vocabulary — ten animated WORKING sets and one still pose per
+    // resting state — lives in MoodFaces.qml, shared verbatim with the Conductor.
+    property MoodFaces faces: MoodFaces {}
+    // the STILL face for a state — normalized here, since this file owns the
+    // state vocabulary and MoodFaces deliberately does not.
+    function kaomojiFor(state) { return faces.still(normState(state)); }
 
     // the single emphasized terminal (traced, else first working) ────────────────
     function computeEmph(list) {
@@ -789,19 +769,31 @@ Item {
                                     id: kao                        // the mood face
                                     anchors.right: parent.right
                                     anchors.verticalCenter: cwdText.verticalCenter
-                                    // WORKING animates: the face cycles its set's
-                                    // frames. Every resting state holds one pose.
-                                    readonly property var frames: gadget.faceSet(gadget.rowKey(modelData))
-                                    property int frame: 0
+                                    // A FIXED box, right-aligned: the frames of a
+                                    // set differ in width on purpose (that width
+                                    // change is the movement), and an auto-sized
+                                    // Text would drag cwdText's elide around with
+                                    // it every frame.
+                                    width: 96
+                                    horizontalAlignment: Text.AlignRight
+                                    // WORKING animates; every resting state holds
+                                    // one pose. The SET is fixed for the life of
+                                    // the terminal — hashed from its row key, so it
+                                    // looks arbitrary across the roster but never
+                                    // changes under the row, not even when a roster
+                                    // refresh rebuilds this delegate.
+                                    property int setIdx: gadget.faces.pickFor(gadget.rowKey(modelData))
+                                    property int frame: gadget.faces.phaseFor(gadget.rowKey(modelData),
+                                                                              frames.length)
+                                    readonly property var frames: gadget.faces.workingFrames(setIdx)
                                     text: row.working ? frames[frame % frames.length]
                                                       : gadget.kaomojiFor(modelData.state)
                                     font.pixelSize: 10
                                     color: gadget.withA(row.accent, 0.85)
                                     Timer {
                                         running: row.working
-                                        repeat: true; interval: 420
-                                        onTriggered: kao.frame++
-                                        onRunningChanged: if (!running) kao.frame = 0
+                                        repeat: true; interval: 300
+                                        onTriggered: kao.frame = (kao.frame + 1) % kao.frames.length
                                     }
                                 }
                             }

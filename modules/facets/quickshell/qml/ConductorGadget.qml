@@ -117,39 +117,15 @@ Item {
         return s.length ? s : "—";
     }
 
-    // ── MOOD FACES — the emoticon life ───────────────────────────────────────────
-    // WORKING is the ONLY animated state: its face cycles frames on a per-row
-    // timer, and that motion is now the widget's whole sense of life (the note
-    // glyph itself holds still). Every other state wears one settled pose.
-    //
-    // Three working sets exist so a roster of busy agents doesn't march in
-    // lockstep; each row picks one by a stable hash of its session id, so a
-    // given session always wears the same face across restarts.
-    //
-    // Every frame within a set is the SAME character count on purpose — the
-    // face is right-aligned in its row, so a frame that changed width would
-    // make the whole face jitter sideways instead of emoting in place.
-    readonly property var workFaces: [
-        ["♪(´ε｀ )", "♫(´ε｀ )", "♬(´ε｀ )", "♫(´ε｀ )"],   // cantando — humming over the work
-        ["φ(･ω･｀)", "φ(･ω･´)", "φ(･ω･＾)", "φ(･ω･´)"],   // scribens — pen down, writing
-        ["(･ω･)ゞ", "(･ｖ･)ゞ", "(･ω･)ゞ", "(･０･)ゞ"]      // salutans — nodding at the desk
-    ]
-    function faceSet(id) {
-        var s = id || "", h = 0;
-        for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) & 0x7fffffff;
-        return workFaces[h % workFaces.length];
-    }
-    // the STILL faces — one pose per resting state.
-    function kaomojiFor(state) {
-        switch (normState(state)) {
-        case "awaiting": return "(；・∀・)?";   // needs input — anxious, asking
-        case "working":  return workFaces[0][0]; // animated in the delegate; frame 0 here
-        case "stopped":  return "( ･ω･)b";     // stopped — hands off, standing by
-        case "idle":     return "(－ω－) zzZ";  // idle — long at rest, or fresh/resumed
-        case "done":     return "( ´ ▽ ` )";   // content, retired
-        default:         return "( ・_・)";      // puzzled
-        }
-    }
+    // ── MOOD FACES ───────────────────────────────────────────────────────────────
+    // The kaomoji vocabulary — ten animated WORKING sets and one still pose per
+    // resting state — lives in MoodFaces.qml, shared verbatim with the Terminals
+    // temple. Held as a plain child object: it is a table plus pure lookups, so
+    // there is nothing to thread down from shell.qml the way DrachmaState is.
+    property MoodFaces faces: MoodFaces {}
+    // the STILL face for a state — normalized here, since this file owns the
+    // state vocabulary and MoodFaces deliberately does not.
+    function kaomojiFor(state) { return faces.still(normState(state)); }
 
     // ── ROSTER FILTER (concepts/Conductor-Channel) ───────────────────────────────
     // A conductor's stage shows only what it conducts:
@@ -869,19 +845,31 @@ Item {
                                     id: kao                        // the mood face
                                     anchors.right: parent.right
                                     anchors.verticalCenter: cwdText.verticalCenter
-                                    // WORKING animates: the face cycles its set's
-                                    // frames. Every resting state holds one pose.
-                                    readonly property var frames: gadget.faceSet(modelData.sessionId || "")
-                                    property int frame: 0
+                                    // A FIXED box, right-aligned: the frames of a
+                                    // set differ in width on purpose (that width
+                                    // change is the movement), and an auto-sized
+                                    // Text would drag cwdText's elide around with
+                                    // it every frame.
+                                    width: 96
+                                    horizontalAlignment: Text.AlignRight
+                                    // WORKING animates; every resting state holds
+                                    // one pose. The SET is fixed for the life of
+                                    // the session — hashed from its id, so it looks
+                                    // arbitrary across the roster but never changes
+                                    // under the row, not even when a roster refresh
+                                    // rebuilds this delegate.
+                                    property int setIdx: gadget.faces.pickFor(modelData.sessionId || "")
+                                    property int frame: gadget.faces.phaseFor(modelData.sessionId || "",
+                                                                              frames.length)
+                                    readonly property var frames: gadget.faces.workingFrames(setIdx)
                                     text: row.working ? frames[frame % frames.length]
                                                       : gadget.kaomojiFor(modelData.state)
                                     font.pixelSize: 10
                                     color: gadget.withA(row.accent, 0.85)
                                     Timer {
                                         running: row.working
-                                        repeat: true; interval: 420
-                                        onTriggered: kao.frame++
-                                        onRunningChanged: if (!running) kao.frame = 0
+                                        repeat: true; interval: 300
+                                        onTriggered: kao.frame = (kao.frame + 1) % kao.frames.length
                                     }
                                 }
                             }
