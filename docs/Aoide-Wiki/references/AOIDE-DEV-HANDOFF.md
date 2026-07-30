@@ -524,6 +524,28 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   empty `windows` list unless it persists past a short window, or diff
   against the previous snapshot rather than trusting one read). Not fixed.
   Open. See [[Terminal-Commander]].
+- **[cleanup · khoa 2026-07-30] Legacy widget audit — one dead file found and
+  removed, nothing else orphaned.** Swept every `.qml` file under
+  `modules/facets/quickshell/qml/` against `shell.qml`'s instantiation chain.
+  `AoideJournal.qml` — a fold-out "book" presentation alternative to the codex
+  dock, forked at the same commit as `AoidePanel.qml` (`353390a`) but never
+  instantiated and never carried forward past that commit — was confirmed
+  dead (referenced nowhere except a stale comment in `AoidePanel.qml`) and
+  **deleted**. `TerminalManagerGadget.qml`, `DagGraphGadget.qml`,
+  `BatonGadget.qml`, `GraphRow.qml`, `AoideSessionGraph.qml`,
+  `AoideAgentWidgets.qml` — the earlier generation these superseded — were
+  already gone (deleted in that same rebuild commit); no action needed there.
+  **Open:** if the "fold-out journal" presentation idea is still wanted as an
+  alternate dock surface, it needs a fresh build against the current
+  `ConductorGadget`/`TerminalsGadget`/`MetersGadget`/`PowerVitalsGadget`
+  temples (its old copies of those gadget instantiations were already stale
+  against the pantheon rebuild) — not a resurrection of the deleted file. Also
+  still open, unrelated: the `Γ`/`dag.trace` order-mark surviving unused in
+  `GadgetFrame`'s map, and the `aoide.surfaces.sessionGraph` registry entry
+  with no QML body (both noted in `song/songbook/sonata/design/
+  greek-grammar.md` §4 as flags tracked "outside this file" — this is that
+  file; neither had an actual ledger entry until now). See
+  [[Gadget-Dock]].
 
 ---
 
