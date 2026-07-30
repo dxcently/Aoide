@@ -37,32 +37,43 @@ QtObject {
 
     // ── WORKING — ten animated sets, one assigned per session ────────────────
     readonly property var working: [
-        { name: "pulsans",   // the fist bump — wind up, throw, connect
-          frames: ["( ･_･)⊃", "( ･∀･)⊃", "( ｀∀´)⊃●", "( ･∀･)⊃●"] },
-        { name: "moderans",  // conducting — a new note comes off the baton each beat
-          frames: ["( ･ω･)ノ♩", "( ･ω･)ノ♪", "( ･ω･)ノ♫", "( ･ω･)ノ♬"] },
-        { name: "cantans",   // both fists pumping to the beat
-          // Fists down (ｏ…ｏ) → fists up (ヽ…ノ), twice, the note turning over
-          // on the upbeat. All glyphs fullwidth so the pump doesn't drag the
-          // face sideways as it swings.
-          frames: ["♪ｏ( ･∀･)ｏ", "♪ヽ( ･∀･)ノ", "♫ｏ( ｀∀´)ｏ", "♫ヽ( ･∀･)ノ"] },
-        { name: "emittens",  // a note let go, drifting off across the bar
-          frames: ["( ･ω･)♪　　", "( ･ω･)　♪　", "( ･ω･)　　♪", "( ･ω･)　♪　"] },
+        { name: "sibilans",  // whistling — a puckered ｏ mouth with a two-note
+          // conveyor streaming away across the bar: each note advances a cell
+          // per frame while a fresh one is born at the lips, so the tune travels
+          // and never stops. The one the desk hums to itself.
+          frames: ["( ･ｏ･)♪　♫", "( ･ｏ･)　♪　", "( ･ｏ･)♫　♪", "( ･ｏ･)　♫　"] },
+        { name: "moderans",  // conducting — TWO independent rates: the arm
+          // sweeps every frame (ノ→ー→＼→ー), while the note only advances on
+          // the ictus, half the arm's rate (frames 1/3), so the beat and the
+          // sound it lands on visibly move at different speeds.
+          frames: ["( ･ω･)ノ♪　", "( ･ω･)ー♪　", "( ｀∀´)＼　♪", "( ･ω･)ー　♪"] },
+        { name: "pulsans",   // the flying fist — wound up, launched across the
+          // gap, contact with the ●, and back for the next punch. Two rates
+          // here too: the fist travels every frame, the face only snaps on
+          // impact (frame 3) and settles on recoil (frame 4).
+          frames: ["( ｀ω´)つ　　●", "( ｀ω´)　つ　●", "( ＾∀＾)　　つ●", "( ･ω･)　つ　●"] },
+        { name: "battuens",  // drumming — TWO independent rates: the sticks
+          // alternate on their own beat (left frame 2, right frame 4 — every
+          // other frame), while a hi-hat ♪ ticks the off-beats (frames 1/3),
+          // twice the stick's rate.
+          frames: ["ノ( ･ω･)ノ♪", "＿( ｀∀´)ノ　", "ノ( ･ω･)ノ♪", "ノ( ｀∀´)＿　"] },
+        { name: "saltans",   // side-step dance — the whole body travels the box,
+          // left → centre → right → centre, arms up on the steps.
+          frames: ["ヽ( ･∀･)ノ　　", "　ｏ( ･ω･)ｏ　", "　　ヽ( ･∀･)ノ", "　ｏ( ･ω･)ｏ　"] },
+        { name: "oscillans", // the metronome — a pendulum ticking ＼ ノ ／ ノ
+          // beside a face that keeps its own counsel. A swing you can count.
+          frames: ["＼　( ･ω･)", "ノ　( ･ω･)", "／　( ･ω･)", "ノ　( ･ω･)"] },
         { name: "psallens",  // plucking — the hand travels the string
           frames: ["＝＝つ( ･ω･)", "＝つ＝( ･ω･)", "つ＝＝( ･ω･)", "＝つ＝( ･ω･)"] },
         { name: "scribens",  // writing the part out — pen sweeping the page
           // The paper (＿＿) is a fixed track and the pen (φ) travels along it,
-          // so the stroke reads as writing. Swapping only the MOUTH — which is
-          // what this set used to do — read as a face twitching, not a hand.
+          // so the stroke reads as writing, not as a twitching mouth.
           frames: ["＿＿φ( ･ω･)", "＿φ＿( ･ω･)", "φ＿＿( ･ω･)", "＿φ＿( ･ω･)"] },
-        { name: "saltans",   // dancing the beat — the note changes hands
-          frames: ["♪( ･ω･)　", "　( ･∀･)♪", "♫( ･ω･)　", "　( ･∀･)♫"] },
-        { name: "oscillans", // swaying inside its own bar
-          frames: ["(　･ω･)", "( ･ω･)", "(･ω･　)", "( ･ω･)"] },
-        { name: "rotans",    // turning on the spot
-          frames: ["(ノ･ω･)ノ", "(　･ω･)　", "ヽ(･ω･ヽ)", "(　･ω･)　"] },
-        { name: "malleans",  // percussion — the stick coming down
-          frames: ["( ･_･)ノ", "( ･_･)＼", "( ｀_´)／", "( ･_･)＼"] }
+        { name: "cantans",   // both fists pumping to the beat, note turning over
+          frames: ["♪ｏ( ･∀･)ｏ", "♪ヽ( ･∀･)ノ", "♫ｏ( ｀∀´)ｏ", "♫ヽ( ･∀･)ノ"] },
+        { name: "inclinans", // the curtain call — arms flung up, compose, a deep
+          // bow with hands presented low, rise. A performer taking it forever.
+          frames: ["ヽ( ･∀･)ノ", "　( ･ω･)　", "ｏ( ＿＿)ｏ", "　( ･ω･)　"] }
     ]
 
     // Which set a session wears, for its whole life. Hashed from the row's key
