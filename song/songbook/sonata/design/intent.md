@@ -33,7 +33,7 @@ an ember horizon band low on the right.
 
 Because the desktop is a **cream frosted-glass** surface — "brightness is
 opacity, not colour": kitty renders at `background_opacity` 0.86 and the bar
-panes at ~0.58 opacity **over** this ground — `base00` stays in the pale
+panes at ~0.45 opacity **over** this ground — `base00` stays in the pale
 cream-glass family. Its temperature is shifted from the previous parchment
 key toward this image's light register: the peach-cream cloudlight and the
 rose mirror-water, rather than a warm classical parchment.
@@ -87,6 +87,31 @@ WCAG relative-luminance ratios against `base00` (`#f4e9e2`):
 | accent `base0D` on `base00` | 4.20:1 | ≥ 3:1 | PASS |
 | urgent `base08` on `base00` | 4.38:1 | ≥ 3:1 | PASS |
 
+## Current surface elements (as performed)
+
+How the key currently reads on yomi-strix — sonata's instantiation of the
+house grammar (`song/songbook/default/design/pantheon.md`). The glass alphas
+are facet/dendrite constants, not drachma notes; they are tuned against THIS
+key and recorded here as its design memory:
+
+| Surface | Element | Value |
+|---|---|---|
+| bar sheet (`AoideBar.qml`) | `paletteBg` glass alpha | 0.45 |
+| bar popouts (`BarPopout.qml`) | same glass as the bar | 0.45 |
+| kitty terminal (kitty dendrite) | `background_opacity` | 0.86 (compositor fades unfocused windows to 0.90) |
+| launcher (`AoideLauncher.qml`) | glass alpha (over busy windows) | 0.72 |
+| dock + gadget frames (`AoideAgentWidgets`/`GadgetFrame`) | glass alpha | 0.72 |
+| workspace strip | resting notes | solid plum ink (`paletteFg` `#3b2f3a`) |
+| workspace strip | active note | swells 15→19px, fills `accent` `#5a6f9c` on a soft accent glow |
+| workspace strip | urgent | pulses `glitchPink` (`base08` `#b34a52`) |
+| window frames | active / inactive | `#4f8598` cyan-teal hairline / `#ecdcd8` rose-cream (2px, rounding 0) |
+| the one blaze | ✎N live-sessions cell + DAG/TERMINALS trace | `hot` horizon-green `#5f8a7a` |
+| wallpaper | baked cover | `song/covers/yuki-sonata.png` |
+
+Every text element sits on a glass backing (bar sheet, frames, chips) — the
+high-variance cover never carries bare text, so no outline treatment is in
+use.
+
 ## Iteration Log
 
 - 2026-07-26: initial commit as the replay fixture; palette-only, no cover.
@@ -97,3 +122,8 @@ WCAG relative-luminance ratios against `base00` (`#f4e9e2`):
 - 2026-07-29: cover swapped to `song/covers/yuki-sonata.png` — the same
   artwork as `sonata.webp` (identical scene and dimensions, PNG master), so
   the region-keyed palette carries over unchanged.
+- 2026-07-29: bar sheet and popout glass lowered 0.62/0.60 → 0.45/0.45
+  (khoa: a more transparent strip; the hyprglass blur carries legibility).
+  Current surface elements recorded above; rice design memory now lives
+  per-song (this file), with the house grammar in the default rice's
+  `design/pantheon.md`.

@@ -70,10 +70,15 @@ get work done and how you test the conductor mesh.
   running session. An orchestrator freely commands its own spawned children
   (parent-autogate); everything else is **pending** until `--yes`. Use this to
   exercise the conductor while you build with it — dogfooding is testing.
-- **Fan out with sub-agents when it pays.** The standing orchestration shape:
-  **Opus codes, Sonnet generals (broad search / parallel legwork), the main
-  session reviews and lands.** Send independent agents in one batch so they run
-  concurrently; keep the *conclusion*, not their file dumps.
+- **Fan out with sub-agents when it pays.** The standing orchestration shape
+  (khoa, 2026-07-29): **the main dev agent is an Opus agent orchestrating** —
+  it decomposes, dispatches, reviews every diff, and lands the result. Worker
+  agents: **Opus codes** (design-critical or vision work), **Sonnet generals**
+  (broad search / mechanical sweeps / parallel legwork). **Fable advises**: it
+  is consulted on the *decisions and outputs* of the Sonnet/Opus workers — a
+  judgement tier over the fan-out, not a worker itself. Send independent
+  agents in one batch so they run concurrently; keep the *conclusion*, not
+  their file dumps.
 - **Resume, don't respawn.** An agent that died mid-task on an API error is
   resumed with its context intact (`SendMessage` by id) — a fresh `Agent` call
   starts cold.
@@ -186,10 +191,16 @@ coherent, verified changes can land directly.
 The wiki is part of the deliverable, not documentation-after-the-fact. After any
 behavior/design change:
 
-- Update the page that owns the concept — e.g. a ricing/glass/opacity change →
-  [[songbook/Ricing-Protocol|Ricing Protocol]]; a conductor change →
+- Update the page that owns the concept — e.g. a conductor change →
   [[Conductor-Channel]]; a graph/session change → [[Session-Graph]]; a new
   gadget → [[Widget-Maker]] / [[Gadget-Dock]].
+- **Rice design goes to the songbook, not the wiki** (khoa, 2026-07-29): any
+  design decision about a rice — a key, an opacity, a surface element — lands
+  in that song's `song/songbook/<name>/design/` (sonata:
+  `design/intent.md`); cross-cutting house grammar in the default rice's
+  `song/songbook/default/design/pantheon.md`. The wiki's `songbook/` folder
+  keeps only protocol ([[songbook/Ricing-Protocol|Ricing Protocol]]), build
+  specs, and pointer pages — a protocol change still edits the wiki page.
 - Follow [[Wiki-Protocol]] / `SCHEMA.md`: `[[Wikilinks]]`, frontmatter, house
   voice. The wiki is small — **read the whole wiki** when in doubt about where a
   fact belongs.
@@ -294,8 +305,13 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   `shellbridge.rs` doc comment updated; cargo tests pass (78, incl. the
   rewritten `preview_stages_a_derivable_cover_from_the_covers_library`). The
   `hero` song is deleted outright — the songbook holds `default` and `sonata`;
-  (b) thin the wiki's `songbook/` pages to protocol + pointers once the per-song `design/`
-  folders hold the memory — still owed. The `songbook/sonata/design/intent.md`
+  (b) **RESOLVED 2026-07-29:** the wiki's `songbook/` pages are protocol +
+  pointers — the Pantheon grammar migrated to
+  `song/songbook/default/design/pantheon.md` (the default rice owns the house
+  grammar), sonata's current surface elements are recorded in
+  `song/songbook/sonata/design/intent.md`, and `songbook/Pantheon-Grammar.md`
+  is the pointer page (khoa steer: rice design memory lives per-song in the
+  songbook — see §6). The `songbook/sonata/design/intent.md`
   refresh is **RESOLVED 2026-07-29:** intent.md now states the sonata.webp key —
   the light dusk key read region-by-region from `song/covers/sonata.webp` (the
   pianist on mirror-water), with the palette+base16 re-keyed off that cover
@@ -327,6 +343,19 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   `qt6.qtimageformats` (webp/tiff/…) since 2026-07-29; a switcher's format
   support is bounded by that plugin set, so keep the export when touching the
   service. Open Thread `rice preview --gallery` folds into this. **Open.**
+- **[bug · reported 2026-07-29 by khoa] Sessions appear to untrack after a
+  rebuild.** Symptom: previously-tracked agent sessions stop showing as
+  tracked (roster/DAG/✎N) after a `nixos-rebuild` switch. Not yet diagnosed.
+  Seams to check, in likely order: (a) the switch restarts `shellbridge` /
+  `aoide-graph-reap` — does a restarted reaper sweep live sessions whose
+  hook stream went quiet during the restart window? (b) hook events during
+  the restart are lost (socket down) so `sessions.json` entries go stale and
+  the reaper later prunes them as dead; (c) the units' PATH/env after
+  restart (the hyprctl-on-unit-PATH class of failure — window→session
+  matching dying silently as `focus-failed`); (d) stage files themselves
+  survive (gitignored, not store-managed), so if the data is intact the loss
+  is in matching/reaping, not storage. Repro: track a session, run a switch,
+  compare `stage/sessions.json` + `aoide graph emit` before/after. **Open.**
 - **[bug · found 2026-07-28 wiki sweep] Melete adapter subscribes to nothing.**
   `modules/nucleus/melete-adapter.nix` sets
   `AOIDE_ADAPTER_SUBSCRIBE=rebuild-proposed,rice-preview-ready,notification-action`,
@@ -385,7 +414,10 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
 - **[planned · khoa] Dark `moonlight-sonata` song** — the dark counterpart to
   the light `sonata` key, to be added later (khoa: "after merge and rebuild").
 - **[planned · future] Default song with Pantheon thematics** — the shipped
-  `default` baseline to be composed with the Pantheon grammar. See
+  `default` baseline to be composed with the Pantheon grammar. The grammar
+  DOC already lives with the default rice
+  (`song/songbook/default/design/pantheon.md`, 2026-07-29); composing
+  `default`'s actual palette/rice to wear it is the part still open. See
   [[songbook/Pantheon-Grammar]].
 
 ---

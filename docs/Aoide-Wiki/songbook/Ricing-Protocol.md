@@ -34,13 +34,12 @@ check whenever a rice or song changes.
 > The worked examples below (the `sonata` opacity numbers, the derivation
 > notes) are shown here to make the *protocol* legible — they are illustrations
 > of what the songbook records, **mirrored** from the song agent's domain, not
-> this page's to own. Today that songbook is **sparse**: `song/songbook/` holds
-> only a placeholder for the cross-cutting memory, so migrating this page's
-> content into it is still pending (flagged for the handoff). The one per-song
-> design note that exists — `song/songbook/sonata/design/intent.md` — now states
-> the shipped key (the light dusk key read from `song/covers/yuki-sonata.png`,
-> region by region, with computed contrast). Treat `song/` as the destination
-> of record; this page points there.
+> this page's to own. The songbook holds that memory now: the house design
+> grammar is the default rice's (`song/songbook/default/design/pantheon.md`),
+> and `song/songbook/sonata/design/intent.md` states the shipped key (the
+> light dusk key read from `song/covers/yuki-sonata.png`, region by region,
+> with computed contrast and the current surface elements). `song/` is the
+> destination of record; this page points there.
 
 ## 1. Two separated concerns: creating a base16, and applying it
 
@@ -95,7 +94,7 @@ Two things to look at, side by side, on the live desktop:
    away from its declared polarity. "Close" beats "identical-on-paper but
    wrong on screen." The light key holds a bright cream Aero-glass terminal
    (kitty `background_opacity` 0.86) next to a cream frosted-glass bar and its
-   popouts at a *close* opacity (0.58 / 0.60); the cream `base00` is
+   popouts at their own, more transparent opacity (0.45 / 0.45); the cream `base00` is
    `#f4e9e2` (sonata's peach-cream). **Brightness is opacity, not colour**: how much of the dim
    wallpaper is allowed to show through, not the hex value — a surface can
    read "too dark" and still be exactly the right colour, so the fix for a

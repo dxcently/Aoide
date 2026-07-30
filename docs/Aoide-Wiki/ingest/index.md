@@ -45,7 +45,7 @@ type: index
 Design pages are **song-agent design memory** mirrored in the dev wiki; their content is bound to migrate into a songbook under `song/` ([[Song-Anatomy]], handoff flag). The wiki keeps the *protocol* and the load-bearing QML constants.
 
 - [[songbook/Ricing-Protocol|Ricing Protocol]] — answers: the creation/application split (deriving a base16 vs Stylix fanning it out), the mandatory light/dark vision-check, and where per-song design memory belongs (the songbook), worked through the `sonata` light key
-- [[songbook/Pantheon-Grammar|Pantheon Grammar]] — answers: the first-song visual language (hollow wireframe depth recipe + `GadgetFrame` constants, the meaning-bearing glyph grammar, the multicolor role seam), the multicolor field, and the cream light key
+- [[songbook/Pantheon-Grammar|Pantheon Grammar]] — answers: where the house design language lives (`song/songbook/default/design/pantheon.md` — depth recipe, glyph grammar, role seam, the glass) and where each song's current elements live (`song/songbook/<name>/design/intent.md`)
 - [[songbook/Conductor-Channel|Conductor Channel]] — answers: how a wrapped agent session is commanded (PTY control socket, the gated `graph send` injection door, parent-autogate)
 - [[songbook/Baton-3D-DAG|Baton 3D DAG]] — answers: the PLANNED ratatui 3D-wireframe DAG view for `aoide baton` (not yet implemented — a build plan)
 

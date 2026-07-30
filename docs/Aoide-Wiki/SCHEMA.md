@@ -8,7 +8,7 @@ The standalone wiki for the Aoide project — the agent-agnostic Hyprland/Quicks
 
 ## Read the whole thing
 
-Working entry cost, in order: `Overview.md` → every page under `concepts/`, `entities/`, and `songbook/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; `AOIDE-DEV-HANDOFF.md` — the development agent's operating manual; `pantheon/` — the design reference stills). The wiki is deliberately small enough to read end to end. Note: `songbook/` mirrors **song-agent design memory** whose home is the songbook under `song/` ([[Song-Anatomy]]); the migration is an Open Thread in `ingest/log.md`.
+Working entry cost, in order: `Overview.md` → every page under `concepts/`, `entities/`, and `songbook/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; `AOIDE-DEV-HANDOFF.md` — the development agent's operating manual; `pantheon/` — the design reference stills). The wiki is deliberately small enough to read end to end. Note: **rice design memory lives in the songbook under `song/`, per song** — the house grammar in `song/songbook/default/design/`, each song's elements in `song/songbook/<name>/design/` ([[Song-Anatomy]]). The wiki's `songbook/` folder carries protocol, build specs, and pointer pages only; design content written about a rice goes to that rice's `design/` folder, not here.
 
 ## The shape
 
@@ -18,7 +18,7 @@ Aoide-Wiki/
   Overview.md      ← the Aoide overview / hub
   concepts/        ← ideas, mechanisms, frameworks
   entities/        ← named things (components, tools, hosts)
-  songbook/        ← design language + build specs (song-agent design memory mirrored here; home is song/songbook/)
+  songbook/        ← ricing protocol + build specs + pointers (rice design memory lives in song/songbook/<song>/design/)
   ingest/
     index.md       ← content catalog
     log.md         ← append-only history + Open Threads

@@ -67,12 +67,15 @@ Alongside the per-song folders, the songbook root holds the memory that
 crosses every song: `learnings.md`, `preferences.md`, `update-playbook.md`
 (the schema-migration playbook). The agent reads these before every `rice gen`
 and appends after every adopt/reject — the write-back that is the "self" in
-[[Self-Ricing]]. The songbook root is also the home of the design grammar and
-ricing memory — [[songbook/Pantheon-Grammar|Pantheon Grammar]] and the
-[[songbook/Ricing-Protocol|Ricing Protocol]]'s worked examples.
+[[Self-Ricing]].
 
-**Status:** both pages sit in the dev wiki; the migration into the songbook is
-tracked in `references/AOIDE-DEV-HANDOFF.md` §7.
+Rice design memory lives in the songbook, per song: the house design grammar
+is the default rice's — `song/songbook/default/design/pantheon.md` — and each
+song's current design elements live in its own `design/intent.md` (sonata's
+records the key, the glass values, and the surface elements as performed).
+The wiki's `songbook/` folder carries protocol ([[songbook/Ricing-Protocol|
+Ricing Protocol]]), build specs, and a pointer page for the grammar
+([[songbook/Pantheon-Grammar|Pantheon Grammar]]).
 
 ## Runtime state — the gitignored half
 
@@ -93,7 +96,8 @@ sees a torn file (`CONTRACTS.md §4`). The files:
 
 Which files are present is runtime-dependent (e.g. `cover.json` appears once a
 wallpaper is staged; `AOIDE_WALLPAPER` on the Quickshell unit re-seeds it across
-rebuilds — see [[songbook/Pantheon-Grammar]] §6). The stage dir is resolved
+rebuilds — the facet bakes the song's `wallpaper` note into the unit env, see
+[[Quickshell]]). The stage dir is resolved
 via the `AOIDE_STAGE_DIR` contract seam ([[shellbridge]]); the flake's
 `no-song-read` check forbids any nix module reading `stage/` at build time, so
 runtime state can never become load-bearing for the build.
@@ -131,4 +135,5 @@ top-level `song/` dir. The lookup is the Song Map
 - [[Self-Ricing]] — the rice loop, songbook discipline, and coverage tiers
 - [[drachma]] — the mint that resolves/lints/emits the stage file, the `aoide.drachma` seam `drachma.json` carries
 - [[shellbridge]] · [[Session-Graph]] — the writers of the runtime stage files
-- [[songbook/Ricing-Protocol]] · [[songbook/Pantheon-Grammar]] — the design memory
+- [[songbook/Ricing-Protocol]] · [[songbook/Pantheon-Grammar]] — the ricing
+  protocol, and the pointer to the grammar's songbook home
