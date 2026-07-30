@@ -58,6 +58,30 @@ QtObject {
         (raw.base16 && raw.base16.base0E) ? raw.base16.base0E : paletteAccent
     readonly property color glitchPink: // base08 — reserved glitch/alt accent
         (raw.base16 && raw.base16.base08) ? raw.base16.base08 : paletteAccent
+    readonly property color base09:     // base09 — unnamed elsewhere; bar note glyphs
+        (raw.base16 && raw.base16.base09) ? raw.base16.base09 : paletteAccent
+    readonly property color base0F:     // base0F — rust; unnamed elsewhere; bar note glyphs
+        (raw.base16 && raw.base16.base0F) ? raw.base16.base0F : paletteAccent
+
+    // ── Accent spread — the 8-hue base16 accent cycle, in base08→base0F order.
+    // Consumers that want a DISTINCT colour per small integer id (e.g. the bar's
+    // per-workspace note glyphs) call noteColor(id) rather than reaching into
+    // base16 directly — keeps the cycle order defined in one place.
+    readonly property var accentSpread: [
+        glitchPink,    // base08 terracotta
+        base09,        // base09
+        paletteAccent, // base0A gold
+        paletteHot,    // base0B laurel
+        wireCyan,      // base0C teal
+        holoBlue,      // base0D aegean
+        violet,        // base0E murex
+        base0F         // base0F rust
+    ]
+    function noteColor(id) {
+        var n = accentSpread.length
+        var i = ((id - 1) % n + n) % n   // 1-based id, safe for id <= 0 too
+        return accentSpread[i]
+    }
 
     // ── Bar component shortcuts ────────────────────────────────────────────
     readonly property color barBg:     raw.bar ? raw.bar.bg     : paletteBg

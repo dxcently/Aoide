@@ -13,13 +13,16 @@
 // Pitch (staff degree) still rises with id so the open workspaces spell an
 // ascending run. The SELECTED workspace is HIGHLIGHTED: its note swells, fills
 // with the song's paletteAccent, and rests on a soft accent highlight-pill (the
-// old black playhead re-cast as a glow behind the played note). Resting notes are
-// SOLID umber ink (notes.paletteFg). Urgent workspaces PULSE in glitchPink.
+// old black playhead re-cast as a glow behind the played note). Resting notes
+// each carry their OWN hue — id → notes.noteColor(id) cycles the 8-slot base16
+// accent spread (terracotta/base09/gold/laurel/teal/aegean/murex/rust), so every
+// workspace is colour-identifiable at rest, not just by glyph shape. Urgent
+// workspaces PULSE in glitchPink, overriding their resting hue.
 // Clicking a note activates its workspace (Hyprland activate() — same real-service
 // idiom, no shell-out, no invented IPC). Degrade: off Hyprland → an empty staff.
 //
-// Colour comes ONLY from the notes singleton; the lone sanctioned literal is a
-// faint light outline on the accent-filled active glyph, for separation.
+// Colour comes ONLY from the notes singleton — including the active glyph's
+// defining ink outline (paletteFg); no colour literals remain.
 
 import QtQuick
 import Quickshell.Hyprland
@@ -72,6 +75,13 @@ Item {
         var name = ws ? ("" + (ws.name || "")).toLowerCase() : ""
         return name.indexOf("magic") !== -1 || name.indexOf("scratch") !== -1
     }
+    // Resting-state hue — each workspace id gets its own distinct base16 accent
+    // (drachma.noteColor cycles the 8-hue accent spread by id). Active/urgent/
+    // preview states still override this in the delegate below.
+    function wsColor(ws) {
+        var id = ws ? (ws.id || 1) : 1
+        return root.notes.noteColor(id)
+    }
     // Staff degree → vertical offset (up is negative y). Specials ride high on
     // a ledger; regular ids wrap through a 7-degree scale centred on the staff.
     function pitchOffset(ws) {
@@ -97,6 +107,14 @@ Item {
         return -1
     }
 
+    // Selected-workspace colour = that workspace's OWN per-id hue (not a uniform
+    // gold), so the highlight-pill and the swelled note read in the workspace's
+    // own colour, just emphasised. Falls back to the accent when nothing's active.
+    readonly property color activeColor:
+        (root.activeIndex >= 0 && root.wsList[root.activeIndex])
+        ? root.notes.noteColor(root.wsList[root.activeIndex].id)
+        : root.notes.paletteAccent
+
     // ── The highlight-pill — a soft accent glow that eases under the played
     // note (the old playhead re-cast). Declared before the notes so it sits
     // behind them, reinforcing which workspace is selected.
@@ -107,7 +125,7 @@ Item {
         width: root.cellW - 2
         height: 22
         radius: 0
-        color: root.notes.paletteAccent
+        color: root.activeColor
         opacity: 0.20
         anchors.verticalCenter: parent.verticalCenter
         x: root.activeIndex >= 0
@@ -167,20 +185,25 @@ Item {
                 height: root.height
 
                 // The SOLID note glyph, parked at this note's pitch on the staff.
-                // Resting → solid umber ink; the played note swells + fills with
-                // the song's accent; urgent → glitchPink. A faint light outline
-                // rides only the accent-filled active glyph, for separation.
+                // Resting → its own base16 accent hue (root.wsColor, one of 8
+                // distinct colours cycled by workspace id — see DrachmaState.
+                // noteColor); the played note KEEPS its own hue but swells and
+                // rests on a same-hue highlight pill; urgent → glitchPink. A
+                // defining ink outline (paletteFg) rides only the active glyph.
                 Text {
                     id: noteGlyph
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: (cell.height - height) / 2 + root.pitchOffset(cell.modelData)
                     text: root.wsGlyph(cell.modelData)
-                    color: cell.isActive ? root.notes.paletteAccent
+                    color: cell.isActive ? root.wsColor(cell.modelData)
                           : (cell.isUrgent ? root.notes.glitchPink
                                            : (cell.isPreview ? root.notes.holoBlue
-                                                             : root.notes.paletteFg))
+                                                             : root.wsColor(cell.modelData)))
+                    // Selected note = its OWN hue, swelled + pilled + given a
+                    // defining ink outline (paletteFg) so it reads as highlighted
+                    // against the opaque marble bar without changing its colour.
                     style: cell.isActive ? Text.Outline : Text.Normal
-                    styleColor: Qt.rgba(1, 1, 1, 0.5)
+                    styleColor: root.notes.paletteFg
                     font.family: "monospace"
                     font.pixelSize: cell.isActive ? root.activeSize : root.restSize
                     font.bold: true
@@ -191,9 +214,13 @@ Item {
                 }
 
                 // Urgent pulse (blink_red homage) — breathes the whole note.
+                // alwaysRunToEnd: the last keyframe returns opacity to 1.0, so
+                // when urgency clears mid-cycle the note settles fully opaque
+                // instead of sticking dim.
                 SequentialAnimation on opacity {
                     running: cell.isUrgent
                     loops: Animation.Infinite
+                    alwaysRunToEnd: true
                     NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
                     NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
                 }
