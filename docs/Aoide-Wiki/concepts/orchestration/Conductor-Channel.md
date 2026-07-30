@@ -126,4 +126,3 @@ Risks: PTY controlling-tty setup (setsid/TIOCSCTTY ordering) — mitigate with a
 
 - [[shellbridge]] — the socket layer this finally grows a real verb set on: the accept loop is live (`focuswindow`), and the conduct wrap's per-session socket remains the separate, robust injection path.
 - [[Terminal-Commander]] · [[Session-Graph]] · [[Baton-3D-DAG]] · [[Agent-Hooking]] · [[aoided]] · [[Lexicon]] (conductor-class).
-- [[External-Edit-Tracking]] — a planned feature extending this PTY tick to snapshot `git status` around a conducted shell's editor window.

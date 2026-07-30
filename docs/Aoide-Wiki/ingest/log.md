@@ -61,8 +61,8 @@ The 2026-07-27 log entry below is **log-only**: 37 commits (the port tail, the r
 - **Mixed commit 3d03d95** — optional manual split (`git reset --mixed 8567ff1`), user's hand only.
 - **Baton 3D DAG** — planned in `design/Baton-3D-DAG.md`; implementation awaits the user's green light.
 
-### [2026-07-30] open: External-Edit-Tracking report-back mechanism undecided
-Whether the orchestrator learns about a detected external edit via PTY injection (risks colliding with a human mid-keystroke), a visual badge on the gadget rows (depends on a human noticing it), or some other mechanism is not decided. See [[External-Edit-Tracking]] for the full writeup of both candidates and the v1 pull-model CLI that works regardless of which (or neither) is chosen.
+### [2026-07-30] closed: External-Edit-Tracking report-back mechanism undecided
+~~Whether the orchestrator learns about a detected external edit via PTY injection (risks colliding with a human mid-keystroke), a visual badge on the gadget rows (depends on a human noticing it), or some other mechanism is not decided.~~ **Closed 2026-07-30** — moot: khoa moved the whole feature off the wiki (it was never built) into `references/AOIDE-DEV-HANDOFF.md` §7 "Open flags" as a ledger entry. The report-back question, along with the rest of the design, now lives there rather than as a wiki open thread.
 
 ### [2026-07-30] open: `aoide.surfaces.sessionGraph` registry entry has no QML body
 The Greek widget rebuild (commit 353390a) retired the standalone DAG overlay (`AoideSessionGraph.qml` + `GraphRow.qml`) and the shared `GraphModel.qml` from the QML tree, but `modules/facets/quickshell/default.nix` still declares `sessionGraph.owner = "quickshell"` in the surface-ownership registry. Whether that entry should be dropped (no surface to own) or a body re-added (a future full-screen DAG view) is a code-side decision, not made in this pass — see [[Session-Graph]], [[Quickshell]].
@@ -460,3 +460,10 @@ is a pure filter/de-dupe-by-window-address view, matching
 - Wired into `SCHEMA.md` (Notes manifest, 53 → 54; snapshot unchanged at 2026-07-30; Tags gained `editor`, `git`) and `ingest/index.md` (new Concepts bullet).
 - Cross-linked (both directions, one line each): [[Conductor-Channel]], [[Session-Graph]], [[Agent-Hooking]], [[Widget-Bridge-Contract]].
 - Nothing built: no changes to `pkgs/aoide/src`, no QML, no new stage file on disk.
+
+## [2026-07-30] remove | External-Edit-Tracking page retired — moved to the dev handoff ledger
+- **Deleted `concepts/orchestration/External-Edit-Tracking.md`** on khoa's steer: the feature is still unbuilt (nothing in `pkgs/aoide/src` implements it), so per the wiki's own present-indicative rule it does not belong here as a page. The full design (PTY-tick before/after `git status` snapshots, the `song/stage/edits.json` stage file, the `aoide graph edits`/`edits ack` pull-model CLI, and the open report-back question) now lives as a single ledger entry in `references/AOIDE-DEV-HANDOFF.md` §7 "Open flags" — content unchanged, just relocated off the wiki.
+- Deregistered from `SCHEMA.md` (Notes manifest, 54 → 53; snapshot unchanged at 2026-07-30) and `ingest/index.md` (Concepts bullet removed).
+- Removed the four `[[External-Edit-Tracking]]` `## Related` bullets that pointed at it: [[Conductor-Channel]], [[Session-Graph]], [[Agent-Hooking]], [[Widget-Bridge-Contract]] — each page's remaining Related list is otherwise untouched, no dangling wikilinks left.
+- The matching Open Threads entry above (report-back mechanism undecided) is marked closed-as-moot rather than deleted, so the log stays an accurate history of the thread's life.
+- `references/AOIDE-DEV-HANDOFF.md` itself was edited directly by the orchestrator, not by this pass — out of scope here.

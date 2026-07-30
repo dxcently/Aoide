@@ -28,7 +28,6 @@ type: index
 - [[Wiki-Protocol]] — answers: how the wiki protocol gives each project a standalone wiki in one shared shape, what its mint and convert operations do, who owns it (Mneme/Melete), and the default location (the project's repo)
 - [[Ricing-Protocol|Ricing Protocol]] — answers: the creation/application split (deriving a base16 vs Stylix fanning it out), the mandatory light/dark vision-check, and where per-song design memory belongs (the songbook), worked through the `sonata` light key
 - [[Conductor-Channel|Conductor Channel]] — answers: how a wrapped agent session is commanded (PTY control socket, the gated `graph send` injection door, parent-autogate)
-- [[External-Edit-Tracking]] — answers: the PLANNED detection of a human's direct file edits inside a conducted shell (before/after `git status --porcelain` snapshots around an editor's foreground window, the new `song/stage/edits.json` stage file, the `aoide graph edits`/`edits ack` pull-model CLI, and the still-open bridge→session report-back question) — not yet implemented, a build plan
 - [[Baton-3D-DAG|Baton 3D DAG]] — answers: the PLANNED ratatui 3D-wireframe DAG view for `aoide baton` (not yet implemented — a build plan)
 
 ## Entities

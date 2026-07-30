@@ -86,7 +86,6 @@ concepts/orchestration/Agent-Interface.md
 concepts/orchestration/Baton-3D-DAG.md
 concepts/orchestration/Conductor-Channel.md
 concepts/orchestration/Content-Pipeline.md
-concepts/orchestration/External-Edit-Tracking.md
 concepts/orchestration/Session-Graph.md
 concepts/orchestration/Terminal-Commander.md
 concepts/song/Ricing-Protocol.md

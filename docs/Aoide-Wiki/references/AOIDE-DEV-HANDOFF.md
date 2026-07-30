@@ -456,6 +456,70 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   (`song/songbook/default/design/pantheon.md`, 2026-07-29); composing
   `default`'s actual palette/rice to wear it is the part still open. See
   [[Self-Ricing]].
+- **[planned · khoa 2026-07-30 — kept OFF the wiki, flag only]
+  External-Edit-Tracking.** Catch a human's direct file edits made via an
+  editor (`nvim`/`vim`/…) inside a conducted shell, using git, and report back
+  to the orchestrating session that a file changed outside its own `Edit`/
+  `Write` tool calls. **Not implemented** — khoa's steer: an unbuilt feature
+  lives in this ledger, not as a wiki concept page (a wiki page states what
+  currently IS; §6). Design summary, so nothing is lost: `conduct`'s existing
+  PTY tick already recognizes an editor foreground process
+  (`EDITOR_BASENAMES`/`friendly_editor_command`, `graph.rs`) — snapshot `git
+  status --porcelain` when the editor becomes foreground (only when the cwd
+  resolves to a repo) and again when it drops back to the bare shell prompt;
+  diff the two snapshots to the paths that became newly modified/added during
+  that window (not every dirty path in the repo), riding a `git diff --stat`
+  alongside. A new stage file, `song/stage/edits.json`, one record per
+  detected edit (`sessionId`, `parentSessionId`, `repoRoot`/`cwd`, `editor`,
+  `paths`, `diffstat`, `startedAt`/`endedAt`), same atomic write-temp-rename
+  contract as the other stage files. v1 CLI, pull-model: `aoide graph edits
+  [--session <id>] [--since <ts>] [--json]` to list, `aoide graph edits ack
+  --id <editId>` to acknowledge + prune. **Still undecided:** how the
+  orchestrator learns without polling — Claude Code's hook surface is
+  session→bridge only, so nothing pushes bridge→session mid-turn today. Two
+  candidates on record, neither chosen: (a) PTY injection (`graph send`-style)
+  to type a notice ahead of the orchestrator's next prompt read — real risk:
+  collides with a human mid-keystroke in that same terminal; (b) a visual
+  badge on the session's Conductor/Terminals row, extending the `say`/
+  `activity` field pattern — sidesteps the collision risk, costs depending on
+  a human noticing. Scope is git-repos-only in v1 (khoa: "it can use git for
+  this" — no mtime-scanning fallback). See [[Conductor-Channel]],
+  [[Session-Graph]], [[Widget-Bridge-Contract]].
+- **[flagged · khoa 2026-07-30] Session continuity across a shellbridge
+  restart — preference recorded, not designed.** Every gated `switch` restarts
+  `shellbridge.service`, which wipes its `RuntimeDirectory`
+  (`/run/user/1000/aoide/`) and therefore every live `conduct` process's
+  injection socket, even though the `conduct` process itself is untouched and
+  keeps running. khoa considered making the socket/runtime path itself immune
+  to the restart and called it too risky — fighting the unit's own restart
+  semantics rather than working with them. **Preferred direction instead:** a
+  conducted session should be able to **detect its socket is gone and
+  stop/resume** — notice the door closed and reconnect/re-open once
+  shellbridge comes back — rather than the daemon trying to preserve
+  continuity across its own restart. Not designed — this is a direction, not
+  a spec. Open. See [[Conductor-Channel]].
+- **[gap · found in review 2026-07-30] `reconcile_untracked_terminals` has no
+  transient-read grace, unlike the reaper.** `sync_untracked_terminal_windows`
+  (`pkgs/aoide/src/graph.rs:3328`) only short-circuits when `hyprctl_clients()`
+  returns `None` (compositor genuinely unavailable) — but a call that
+  *succeeds* with an empty client list (an IPC hiccup, not a real "zero
+  windows open") looks identical to "every terminal closed." Because
+  `reconcile_untracked_terminals` (`graph.rs:3174`) builds its `desired` set
+  purely from that one snapshot, a transient empty read drops every synthetic
+  `win:*` terminal record in that pass, then recreates them fresh
+  (`..Default::default()`) on the next good tick. The reaper already guards
+  the equivalent case for its own liveness sweep (`reap.rs:214`,
+  `effective_live_addresses`/`is_recent`: a degenerate empty snapshot falls
+  back to pid-only liveness) — this function has no analogous fallback.
+  Effect: a visible flicker (Terminals rows vanish/reappear) plus a wasted
+  double stage-write/restage, and — relevant to the External-Edit-Tracking
+  flag above, which would key in-progress edit state to a shell's sessionId —
+  any per-session state not re-derivable from the live window would be
+  silently dropped on a false-negative empty read, indistinguishable from a
+  real window close. Fix shape: mirror the reaper's grace (don't trust an
+  empty `windows` list unless it persists past a short window, or diff
+  against the previous snapshot rather than trusting one read). Not fixed.
+  Open. See [[Terminal-Commander]].
 
 ---
 
