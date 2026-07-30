@@ -365,21 +365,20 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   `AOIDE_WALLPAPER` env baked into the quickshell service, so the wallpaper
   survives rebuilds; a proper fix (preview reads the song's wallpaper note) is
   still owed. See [[Self-Ricing]].
-- **[feature · flagged 2026-07-29 by khoa] A comprehensive wallpaper switcher,
-  quickshell-native.** The seams already exist: `song/covers/` is the shared
-  wallpaper library; `AoideWallpaper.qml` renders whatever `stage/cover.json`
-  names (`{"path": ...}`, FileView-watched, hot-swaps live) and falls back to
-  the baked `AOIDE_WALLPAPER` store path. What's owed on top: a switcher
-  surface (a quickshell picker — thumbnail grid over `song/covers/`, in the
-  launcher's glass idiom or its own popout) that writes `stage/cover.json`
-  via shellbridge; a `aoide cover <set|list|next>` CLI verb driving the same
-  seam; transition treatment (crossfade in AoideWallpaper rather than a hard
-  `source` swap); and per-monitor selection once multi-output lands. Related
-  residual: quickshell's Qt runtime decodes covers only through the
-  imageformats plugins on `QT_PLUGIN_PATH` — the facet exports
-  `qt6.qtimageformats` (webp/tiff/…) since 2026-07-29; a switcher's format
-  support is bounded by that plugin set, so keep the export when touching the
-  service. Open Thread `rice preview --gallery` folds into this. **Open.**
+- **[feature · flagged 2026-07-29 by khoa — PARTIALLY RESOLVED 2026-07-30]
+  A comprehensive wallpaper switcher, quickshell-native.** The switcher
+  surface has since shipped: `AoideWallpaperPicker.qml` (a `GadgetFrame`-hosted
+  thumbnail grid over `song/covers/`, keyboard nav, `SUPER+W` → the
+  `aoide:wallpaper` global shortcut in `hyprland.nix`) writes `stage/cover.json`,
+  which `AoideWallpaper.qml` still renders/hot-swaps as before; `aoide cover
+  set <path-or-name>` (real, not stubbed) drives the same seam from the CLI.
+  **Still owed**, unchanged from the original ask: `list`/`next` verbs (only
+  `set` exists); transition treatment (still a hard `source` swap in
+  `AoideWallpaper.qml`, no crossfade `Behavior`); per-monitor selection once
+  multi-output lands. Related residual (unchanged): the `qt6.qtimageformats`
+  plugin-path export bounds the picker's/`AoideWallpaper`'s format support —
+  keep it when touching the service. Open Thread `rice preview --gallery`
+  still folds into this. **Open** — narrowed, not closed.
 - **[bug · reported 2026-07-29 by khoa] Sessions appear to untrack after a
   rebuild.** Symptom: previously-tracked agent sessions stop showing as
   tracked (roster/DAG/✎N) after a `nixos-rebuild` switch. Not yet diagnosed.
