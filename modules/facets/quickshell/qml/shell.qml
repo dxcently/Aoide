@@ -109,48 +109,13 @@ ShellRoot {
         }
     }
 
-    // ── Gadget dock (surface #8, agentWidgets) ─────────────────────────────
-    // Win7-sidebar homage: LEFT-edge PINNABLE POPUP of ASCII-chromed gadgets on
-    // Aero-glass. Full-height, non-exclusive, TOP layer so the hot-edge hover
-    // reaches it above tiled windows. The input mask is the thin hot strip
-    // when closed and the whole window while shown — so the retracted drawer
-    // never deadens the left edge of the screen. Contains the DAG gadget →
-    // this popup is the primary DAG affordance.
-    PanelWindow {
-        id: dockWin
-        anchors { top: true; bottom: true; left: true }
-        implicitWidth: dock.dockWidth + 2 * dock.edgeMargin
-        exclusiveZone: 0
-        color: "transparent"
-        WlrLayershell.layer: WlrLayer.Top
-        WlrLayershell.namespace: "aoide-dock"
-
-        mask: Region {
-            // Always-live hot strip.
-            Region { x: 0; y: 0; width: dock.hotEdgeWidth; height: dockWin.height }
-            // Whole window only while the drawer is shown (zero-width = off).
-            Region {
-                x: 0; y: 0
-                width: dock.shown ? dockWin.width : 0
-                height: dockWin.height
-            }
-        }
-
-        AoideAgentWidgets {
-            id: dock
-            anchors.fill: parent
-            notes: notes
-            bridge: bridge
-            shared: shared
-        }
-    }
-
-    // ── Desktop gadget layer (Win7 tear-off) ───────────────────────────────
-    // Floating copies of dock gadgets, dragged out onto the desktop. Full-
-    // screen non-exclusive Top layer; its input mask is the union of the
-    // floating gadgets' rects (see DesktopGadgets.qml) so bare desktop stays
-    // click-through. Namespace "aoide-gadgets" — verify with `hyprctl layers`.
-    DesktopGadgets {
+    // ── Center-left dock (surface: "dock") ─────────────────────────────────
+    // The temple's home: four self-framed stele gadgets (Conductor, Terminals,
+    // Meters, Power) stacked into one summoned column pinned to the LEFT edge,
+    // vertically centred. Owns its own PanelWindow + WlrLayershell + toggle
+    // GlobalShortcut (SUPER+P → aoide:dock) internally — shell.qml just hands it
+    // the shared singletons. Replaces the old AoideAgentWidgets hot-edge drawer.
+    AoidePanel {
         notes: notes
         bridge: bridge
         shared: shared
@@ -165,13 +130,10 @@ ShellRoot {
     //   - AoideOsd           : volume/brightness OSD
     //   - AoideLockscreen    : ext-session-lock surface
     //   - AoideGreeter       : greetd greeter surface
-    //   - AoideSessionGraph  : DORMANT full-screen DAG overlay (no keybind;
-    //     the dock above holds the live DAG gadget).
     AoideNotifications { notes: notes; bridge: bridge }
     AoideLauncher { notes: notes; bridge: bridge }
     AoideWallpaperPicker { notes: notes }
     AoideOsd { notes: notes }
     AoideLockscreen { notes: notes }
     AoideGreeter { notes: notes }
-    AoideSessionGraph { notes: notes; bridge: bridge }
 }

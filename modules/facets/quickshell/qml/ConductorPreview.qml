@@ -27,16 +27,29 @@ ShellRoot {
             anchors.fill: parent
             anchors.margins: 0
 
-            // stub palette — the warm Greek-marble light theme (hex only here)
+            // stub palette — the warm Greek-marble light theme (hex only here).
+            // Mirrors the DrachmaState roles the gadget reads, incl. the base16
+            // accent spread exposed via noteColor(i) (identity hues per agent).
             notes: QtObject {
+                id: stubNotes
                 property string paletteBg:     "#e9e2d0"   // pale marble ground
                 property string paletteFg:     "#3a2a3a"   // dark plum ink
-                property string paletteAccent: "#a07414"   // Attic gold
-                property string paletteHot:    "#4e8b45"   // laurel green (the one standout)
-                property string paletteUrgent: "#b5502f"   // terracotta
-                property string wireCyan:      "#5f7d6e"   // bronze-verdigris
-                property string holoBlue:      "#3f6d86"   // aegean
-                property string violet:        "#7a4a76"   // murex
+                property string paletteAccent: "#a07414"   // Attic gold      (base0A)
+                property string paletteHot:    "#4e8b45"   // laurel green    (base0B, the one standout)
+                property string paletteUrgent: "#b5502f"   // terracotta      (base08)
+                property string wireCyan:      "#5f7d6e"   // bronze-verdigris(base0C)
+                property string holoBlue:      "#3f6d86"   // aegean          (base0D)
+                property string violet:        "#7a4a76"   // murex           (base0E)
+                property string glitchPink:    "#b5502f"   // terracotta      (base08)
+                property string base09:        "#b3711b"   // amber           (base09)
+                property string base0F:        "#8a5a3c"   // rust            (base0F)
+                // the 8-hue base16 accent cycle, base08→base0F (DrachmaState order)
+                property var accentSpread: [glitchPink, base09, paletteAccent, paletteHot,
+                                            wireCyan, holoBlue, violet, base0F]
+                function noteColor(id) {
+                    var n = accentSpread.length;
+                    return accentSpread[((id - 1) % n + n) % n];
+                }
             }
 
             // stub socket sender

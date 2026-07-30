@@ -1,26 +1,25 @@
-// GadgetFrame.qml — one Pantheon PANE (round 4 — the pane replaces the box).
+// GadgetFrame.qml — one sonata TEMPLE BAY (Greek-grammar reskin of the pane).
 //
-// Round 4 retired the Windows-7 ASCII double-box chrome (╔═[ TITLE ]═╗ … ╚═╝).
-// A gadget is now a PANTHEON PANE: a thin hollow WIREFRAME outline (base0C
-// wireCyan, dim) around the SAME translucent Aero glass body + gloss (the glass
-// stays — blur, sheen and frost are untouched), with the title rendered as a
-// small lowercase dotted CALLOUT label sitting on the pane's top edge, tapped by
-// a short angled LEADER line — the reference stills' `optic nerve.LE.dk.002`
-// token pattern. All colors from notes (zero hardcoded hex; the one literal is
-// the transparent fill of the outline/depth copies).
+// Sonata's house grammar (song/songbook/sonata/design/greek-grammar.md §4) recasts
+// the former Pantheon wireframe pane as a FLAT typographic temple bay: an
+// entablature drawn from box characters over the SAME translucent Aero glass body
+// + gloss (glass untouched — blur, sheen, frost stay). The 3D vanishing-point
+// depth stack is RETIRED (this grammar is flat). Element map:
+//   • pediment  — a ╱‾‾ ╲ raking cap carrying the surface's Greek order-mark at
+//                 the apex; the orchestration token is inscribed on the architrave
+//                 rule ─── beneath it (labelColor = paletteFg, same dim).
+//   • cornice   — a heavy ═══ rule under the pediment.
+//   • columns   — ║ side rails down the left/right body edges (1px verdigris rule;
+//                 a tiled ║ glyph breaks up at variable bay heights, so the shaft
+//                 is drawn as a crisp rule per the LEGIBILITY-FIRST rule).
+//   • stylobate — a ▔▁ stepped base course the whole bay stands on.
+// All structural chrome wears the wireCyan (bronze-verdigris) role at ≤ 0.5 alpha
+// — a HARD invariant (grammar §5): on warm marble the verdigris out-reads the
+// laurel one-hot blaze unless the opacity ladder caps it. radius: 0 kept.
+// All colors from notes (zero hardcoded hex).
 //
 // Usage (default property → children land in the body):
 //   GadgetFrame { notes: notes; title: "baton.control"; BatonGadget { … } }
-//
-// ── Vanishing-point depth (round 4) ─────────────────────────────────────────
-// The two hollow back-outline copies no longer offset a fixed down-right: they
-// project toward the SCREEN CENTRE (the refs' vanishing point at 960,540). Each
-// host sets `depthDx`/`depthDy` — a normalized -1..1 direction — and the frame
-// multiplies the offset magnitudes by it, so a pane on the left edge stacks
-// rightward, a pane below-centre stacks up, etc. Default +1/+1 (down-right)
-// suits the top-left field. Magnitudes are unchanged from round 3 — subtle by
-// design. A clipping host must add `depthExtent` of headroom on the side the
-// direction points (recheck when flipping a sign — it changes which side clips).
 
 import QtQuick
 
@@ -30,18 +29,38 @@ Item {
     required property var notes
     property string title: ""
 
-    // ── Tear-off affordance (Win7 "drag gadget to the desktop") ─────────────
-    // A small dim ↗ token folded into the callout row's tail; a transparent
-    // MouseArea over it emits floatRequested(). The dock wires this to
-    // DesktopGadgets; BarPopout leaves it false (no tear-off).
+    // ── Greek order-mark (grammar §1) — the pediment-apex label per surface ──
+    // A stable per-surface capital-Greek order-mark; the orchestration token
+    // (title) survives verbatim as the architrave inscription beneath it, so
+    // identity/search are unaffected. Unknown surfaces fall back to the neutral
+    // middot (a music-contract glyph, harmless).
+    readonly property var orderMarks: ({
+        "baton.control":     "Α",  // Α
+        "terminals.roster":  "Β",  // Β
+        "dag.trace":         "Γ",  // Γ
+        "meters.pulse":      "Δ",  // Δ
+        "power.reserve":     "Θ",  // Θ
+        "volume.level":      "Λ",  // Λ
+        "battery.gauge":     "Ξ",  // Ξ
+        "calendar.sheet":    "Π",  // Π
+        "nowplaying.score":  "Σ",  // Σ
+        "gadgets.case":      "Ω"   // Ω
+    })
+    readonly property string orderMark:
+        orderMarks[title] !== undefined ? orderMarks[title] : "·"
+
+    // ── Tear-off affordance (drag gadget to the desktop) ────────────────────
+    // A small dim ↗ token folded into the pediment tail; a transparent MouseArea
+    // over it emits floatRequested(). The dock wires this to DesktopGadgets;
+    // BarPopout leaves it false (no tear-off).
     property bool floatable: false
     signal floatRequested()
 
-    // ── Chrome recede on trace (round 3, carried forward) ───────────────────
-    // While a session is traced (the one-neon element blazes green in the body),
-    // the pane's own chrome (callout, leader, outline, depth copies) steps back
-    // to chromeOpacity so nothing competes with the hot element. The glass body
-    // is left alone. The frame DISCOVERS the trace from its body child's `shared`
+    // ── Chrome recede on trace (grammar §4) ─────────────────────────────────
+    // While a session is traced (the one laurel blaze fires in the body), the
+    // bay's own chrome (pediment, columns, cornice, stylobate) steps back to
+    // chromeOpacity so nothing competes with the hot element. The glass body is
+    // left alone. The frame DISCOVERS the trace from its body child's `shared`
     // object; frames whose gadget is not trace-aware are unaffected. Overridable.
     property bool chromeDim: {
         var items = body.data
@@ -59,59 +78,31 @@ Item {
     property real glassOpacity: 0.72
 
     // ── Chrome colour overrides (additive; default to the song's note reads) ──
-    // The dock leaves these at their defaults, so its panes render unchanged. The
-    // bar's BarPopout overrides them to the WHITE-SHEET palette (opaque white
-    // glass, black outline/label) so the bar's popouts match the sheet-music bar.
+    // The dock leaves these at their defaults, so its bays render unchanged. The
+    // bar's BarPopout overrides them to the popout palette (opaque glass, ink
+    // chrome/label) so the bar's popouts match the sheet-music bar.
     property color glassColor: notes.paletteBg
-    property color outlineColor: notes.wireCyan
-    property color depthColor: notes.holoBlue
+    property color outlineColor: notes.wireCyan     // verdigris structural chrome
     property color labelColor: notes.paletteFg
-    onOutlineColorChanged: leader.requestPaint()
 
-    // ── Pantheon wireframe-depth seam (tunable constants) ───────────────────
-    // Two hollow OUTLINE copies of the pane, offset toward the vanishing point
-    // behind the glass, at decreasing opacity — the "stacked offset volume" read
-    // from the reference stills. Transparent fill + border only (no MouseArea)
-    // so they never intercept input. Back copies are holoBlue (base0D) — a step
-    // cooler/dimmer than the wireCyan front outline, so the stack reads as depth.
-    property int depthOff1: 3        // near copy offset magnitude (px)
-    property int depthOff2: 6        // far copy offset magnitude (px)
-    property real depthOpacity1: 0.35
-    property real depthOpacity2: 0.18
-    readonly property int depthExtent: depthOff2   // headroom a clipper must add
-
-    // Vanishing-point direction — normalized -1..1; +1/+1 = down-right (default,
-    // suits the top-left field). Hosts override per their position vs (960,540).
-    property real depthDx: 1
-    property real depthDy: 1
+    // ── Retired depth seam (kept as no-op declarations for API compatibility) ─
+    // The flat Greek grammar drops the two hollow vanishing-point outline copies.
+    // These properties are no longer drawn, but hosts (BarPopout, DesktopGadgets)
+    // still SET some of them, so the declarations remain to keep the public API
+    // intact. depthExtent is now 0 — the flat bay needs no offset headroom.
+    property color depthColor: notes.holoBlue       // unused (was back-copy hue)
+    property int depthOff1: 3                        // unused
+    property int depthOff2: 6                        // unused
+    property real depthOpacity1: 0.35                // unused
+    property real depthOpacity2: 0.18                // unused
+    readonly property int depthExtent: 0             // flat grammar — no headroom
+    property real depthDx: 1                          // unused (no lean)
+    property real depthDy: 1                          // unused (no lean)
 
     // ── Body content sink (children nest here) ──────────────────────────────
     default property alias content: body.data
 
     implicitHeight: frameColumn.implicitHeight + 14
-
-    // ── Wireframe depth stack (declared first → renders behind the glass) ───
-    // Far copy (dimmer, ×off2) then near copy (×off1), each projected along the
-    // vanishing-point direction. Only the sliver past the pane edge shows as a
-    // clean outline; the rest reads as a faint double-rule ghost through glass.
-    Rectangle {
-        x: root.depthOff2 * root.depthDx; y: root.depthOff2 * root.depthDy
-        width: root.width; height: root.height
-        radius: 0
-        color: "transparent"
-        border.color: root.depthColor
-        border.width: 1
-        opacity: root.depthOpacity2 * root.chromeOpacity
-    }
-    Rectangle {
-        x: root.depthOff1 * root.depthDx; y: root.depthOff1 * root.depthDy
-        width: root.width; height: root.height
-        radius: 0
-        color: "transparent"
-        border.color: root.depthColor
-        border.width: 1
-        opacity: root.depthOpacity1 * root.chromeOpacity
-    }
 
     // ── Glass panel (unchanged — blur/frost/translucency stays) ─────────────
     Rectangle {
@@ -133,14 +124,49 @@ Item {
         }
     }
 
-    // ── Wireframe outline (the front face — crisp hollow rule over the glass) ─
+    // ── Column rails — the ║ side order down the left/right body edges ───────
+    // A crisp 1px verdigris shaft each side; wireCyan structural role, ≤ 0.5.
     Rectangle {
-        anchors.fill: parent
-        radius: 0
-        color: "transparent"
-        border.color: root.outlineColor
-        border.width: 1
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        width: 1
+        color: root.outlineColor
         opacity: 0.5 * root.chromeOpacity
+    }
+    Rectangle {
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        width: 1
+        color: root.outlineColor
+        opacity: 0.5 * root.chromeOpacity
+    }
+
+    // ── Stylobate — the stepped base course the bay stands on (▔ over ▁) ──────
+    Column {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        spacing: 0
+        Text {
+            width: parent.width
+            clip: true
+            text: "▔".repeat(120)        // ▔ upper step edge
+            color: root.outlineColor
+            opacity: 0.5 * root.chromeOpacity
+            font.family: "monospace"
+            font.pixelSize: 8
+        }
+        Text {
+            width: parent.width
+            clip: true
+            text: "▁".repeat(120)        // ▁ ground line
+            color: root.outlineColor
+            opacity: 0.5 * root.chromeOpacity
+            font.family: "monospace"
+            font.pixelSize: 8
+        }
     }
 
     Column {
@@ -149,68 +175,86 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.margins: 6
-        spacing: 3
+        spacing: 2
 
-        // ── Callout title — lowercase dotted label on a short angled leader ──
+        // ── Pediment header — raking cap + cornice + inscribed architrave ────
         Item {
             width: parent.width
-            implicitHeight: Math.max(calloutText.implicitHeight, 12)
+            implicitHeight: pediment.implicitHeight
 
-            Row {
-                id: calloutRow
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 4
+            Column {
+                id: pediment
+                width: parent.width
+                spacing: 0
 
-                // Leader — the refs' anchor tick + short rule tapping the label.
-                Canvas {
-                    id: leader
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 13
-                    height: 10
-                    opacity: 0.6 * root.chromeOpacity
-                    onPaint: {
-                        var ctx = getContext("2d")
-                        ctx.reset()
-                        ctx.clearRect(0, 0, width, height)
-                        ctx.strokeStyle = root.outlineColor
-                        ctx.fillStyle = root.outlineColor
-                        ctx.lineWidth = 1
-                        var cy = height / 2
-                        // anchor tick at the left, a horizontal rule, a terminal dot
-                        ctx.beginPath(); ctx.moveTo(1, cy - 3); ctx.lineTo(1, cy + 3); ctx.stroke()
-                        ctx.beginPath(); ctx.moveTo(1, cy); ctx.lineTo(width - 2, cy); ctx.stroke()
-                        ctx.beginPath(); ctx.arc(width - 2, cy, 1.3, 0, 2 * Math.PI); ctx.fill()
-                    }
-                    Connections {
-                        target: root.notes
-                        function onWireCyanChanged() { leader.requestPaint() }
-                    }
-                }
-
+                // Raking cornice cap ╱‾‾ Α ‾‾╲ — order-mark at the apex.
                 Text {
-                    id: calloutText
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: root.title
-                    color: root.labelColor
-                    opacity: 0.55 * root.chromeOpacity
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: "╱‾‾ " + root.orderMark + " ‾‾╲"
+                    color: root.outlineColor
+                    opacity: 0.5 * root.chromeOpacity
                     font.family: "monospace"
-                    font.pixelSize: 11
-                    elide: Text.ElideRight
+                    font.pixelSize: 10
                 }
-            }
 
-            // Tear-off token — dim ↗ at the callout's tail (affordance, not song).
-            Text {
-                id: floatToken
-                visible: root.floatable
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: "↗"
-                color: root.outlineColor
-                opacity: 0.6 * root.chromeOpacity
-                font.family: "monospace"
-                font.pixelSize: 12
+                // Cornice — the heavy rule under the pediment.
+                Text {
+                    width: parent.width
+                    clip: true
+                    text: "═".repeat(120)        // ═══
+                    color: root.outlineColor
+                    opacity: 0.5 * root.chromeOpacity
+                    font.family: "monospace"
+                    font.pixelSize: 9
+                }
+
+                // Architrave — the plain rule the inscription sits on. The short
+                // ─── tick (replacing the old anchor-tick leader) is followed by
+                // the orchestration token in labelColor; the ↗ tear-off token
+                // folds into the tail.
+                Item {
+                    width: parent.width
+                    implicitHeight: Math.max(inscription.implicitHeight, 12)
+
+                    Row {
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 4
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "───"    // ───
+                            color: root.outlineColor
+                            opacity: 0.5 * root.chromeOpacity
+                            font.family: "monospace"
+                            font.pixelSize: 11
+                        }
+
+                        Text {
+                            id: inscription
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.title
+                            color: root.labelColor
+                            opacity: 0.55 * root.chromeOpacity
+                            font.family: "monospace"
+                            font.pixelSize: 11
+                            elide: Text.ElideRight
+                        }
+                    }
+
+                    // Tear-off token — dim ↗ folded into the pediment tail.
+                    Text {
+                        id: floatToken
+                        visible: root.floatable
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "↗"                    // ↗
+                        color: root.outlineColor
+                        opacity: 0.6 * root.chromeOpacity
+                        font.family: "monospace"
+                        font.pixelSize: 12
+                    }
+                }
             }
         }
 
@@ -222,7 +266,7 @@ Item {
         }
     }
 
-    // ── Tear-off click target — over the ↗ token at the callout's right end ──
+    // ── Tear-off click target — over the ↗ token at the pediment's right end ──
     MouseArea {
         visible: root.floatable
         enabled: root.floatable

@@ -24,10 +24,25 @@ Item {
         // paletteBg is a color (not a hex string) → use its .r/.g/.b channels.
         color: Qt.rgba(notes.paletteBg.r, notes.paletteBg.g, notes.paletteBg.b, 0.85)
 
+        // A temple façade (greek-grammar §4 "Flat skeletons"): a wide ╱‾‾‾‾‾╲
+        // pediment over a ‖ ‖ colonnade framing the password field. Pure chrome
+        // dress — the clock, password logic, and lock behaviour are untouched.
+        // Structural chrome wears bronze-verdigris (wireCyan) at ≤ 0.5 (§5 cap);
+        // the field keeps its Attic-gold (paletteAccent) active border.
         ColumnLayout {
             anchors.centerIn: parent
             spacing: 24
             width: 320
+
+            // ── Pediment: the façade acroterion cap ────────────────────────
+            Text {
+                Layout.alignment: Qt.AlignHCenter
+                text: "╱‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾╲"
+                color: notes.wireCyan
+                opacity: 0.5
+                font.family: "monospace"
+                font.pixelSize: 16
+            }
 
             // Time display
             Text {
@@ -44,33 +59,54 @@ Item {
                 }
             }
 
-            // Password input
-            Rectangle {
+            // ── Password input, framed by a ‖ ‖ colonnade ──────────────────
+            RowLayout {
                 Layout.fillWidth: true
-                height: 44
-                radius: 8
-                color: notes.barBg
-                border.color: notes.paletteAccent
-                border.width: 1
+                spacing: 10
 
-                TextInput {
-                    id: pwInput
-                    anchors { fill: parent; margins: 10 }
-                    echoMode: TextInput.Password
-                    color: notes.paletteFg
-                    font.pixelSize: 16
-                    // STUB: onAccepted → PAM auth via shellbridge
+                Text {
+                    text: "‖"
+                    color: notes.wireCyan
+                    opacity: 0.5
+                    font.family: "monospace"
+                    font.pixelSize: 30
+                }
 
-                    // Placeholder overlay — plain TextInput has no
-                    // placeholderText (Controls TextField property).
-                    Text {
-                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-                        text: "Password"
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 44
+                    radius: 0
+                    color: notes.barBg
+                    border.color: notes.paletteAccent
+                    border.width: 1
+
+                    TextInput {
+                        id: pwInput
+                        anchors { fill: parent; margins: 10 }
+                        echoMode: TextInput.Password
                         color: notes.paletteFg
-                        opacity: 0.5
                         font.pixelSize: 16
-                        visible: pwInput.text.length === 0
+                        // STUB: onAccepted → PAM auth via shellbridge
+
+                        // Placeholder overlay — plain TextInput has no
+                        // placeholderText (Controls TextField property).
+                        Text {
+                            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                            text: "Password"
+                            color: notes.paletteFg
+                            opacity: 0.5
+                            font.pixelSize: 16
+                            visible: pwInput.text.length === 0
+                        }
                     }
+                }
+
+                Text {
+                    text: "‖"
+                    color: notes.wireCyan
+                    opacity: 0.5
+                    font.family: "monospace"
+                    font.pixelSize: 30
                 }
             }
         }

@@ -24,23 +24,42 @@ Item {
         border.width: 1
         opacity: 0.0  // STUB: animate to 1 on osd state, back to 0 after timeout
 
-        Row {
+        // A small centred stele: a ╱‾‾╲ pediment over a single value line
+        // (icon + value). Border paletteAccent (Attic gold) kept; fade timing
+        // untouched. Gold reads here only as a line/fill, never as body text.
+        Column {
             anchors.centerIn: parent
-            spacing: 12
+            spacing: 2
 
-            // Icon stub
-            Rectangle {
-                width: 20; height: 20
-                radius: 0
+            // ── Pediment: the acroterion cap ───────────────────────────────
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "╱‾‾‾‾‾‾╲"
                 color: notes.paletteAccent
+                opacity: 0.7
+                font.family: "monospace"
+                font.pixelSize: 9
             }
 
-            // Value label stub
-            Text {
-                text: "—"   // STUB: bind to stage/osd.json value
-                color: notes.paletteFg
-                font.pixelSize: 14
-                anchors.verticalCenter: parent.verticalCenter
+            // ── The value line (icon + value) ──────────────────────────────
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: 12
+
+                // Icon stub
+                Rectangle {
+                    width: 20; height: 20
+                    radius: 0
+                    color: notes.paletteAccent
+                }
+
+                // Value label stub
+                Text {
+                    text: "—"   // STUB: bind to stage/osd.json value
+                    color: notes.paletteFg
+                    font.pixelSize: 14
+                    anchors.verticalCenter: parent.verticalCenter
+                }
             }
         }
     }

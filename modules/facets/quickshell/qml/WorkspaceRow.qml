@@ -21,8 +21,8 @@
 // Clicking a note activates its workspace (Hyprland activate() — same real-service
 // idiom, no shell-out, no invented IPC). Degrade: off Hyprland → an empty staff.
 //
-// Colour comes ONLY from the notes singleton — including the active glyph's
-// defining ink outline (paletteFg); no colour literals remain.
+// Colour comes ONLY from the notes singleton, save one sanctioned literal:
+// the white outline on the selected (active) glyph, for separation.
 
 import QtQuick
 import Quickshell.Hyprland
@@ -150,7 +150,7 @@ Item {
         height: 24
         radius: 0
         color: "transparent"
-        border.color: root.notes.holoBlue
+        border.color: root.notes.paletteAccent
         border.width: 2
         opacity: 0.85
         anchors.verticalCenter: parent.verticalCenter
@@ -180,9 +180,26 @@ Item {
                 // ws — the note tints holoBlue to echo the ring. Active/urgent
                 // both outrank the preview tint (they carry live meaning).
                 readonly property bool isPreview: root.hoveredIndex === cell.index && !cell.isActive
+                // Mouse-hover: previews this workspace as the selection target.
+                readonly property bool isHovered: cellMouse.containsMouse
 
                 width: root.cellW
                 height: root.height
+
+                // Hover-select pill — mousing a note previews it in the PRIMARY
+                // gold (khoa): a soft gold underlay behind the glyph so you see
+                // which workspace a click will jump to. Distinct from the active
+                // note (its own hue + white outline). Declared before the glyph
+                // so it renders behind it.
+                Rectangle {
+                    visible: cell.isHovered && !cell.isActive
+                    anchors.centerIn: parent
+                    width: root.cellW - 2
+                    height: 22
+                    radius: 0
+                    color: root.notes.paletteAccent
+                    opacity: 0.18
+                }
 
                 // The SOLID note glyph, parked at this note's pitch on the staff.
                 // Resting → its own base16 accent hue (root.wsColor, one of 8
@@ -197,13 +214,14 @@ Item {
                     text: root.wsGlyph(cell.modelData)
                     color: cell.isActive ? root.wsColor(cell.modelData)
                           : (cell.isUrgent ? root.notes.glitchPink
-                                           : (cell.isPreview ? root.notes.holoBlue
-                                                             : root.wsColor(cell.modelData)))
+                                           : (cell.isHovered ? root.notes.paletteAccent
+                                                             : (cell.isPreview ? root.notes.paletteAccent
+                                                                               : root.wsColor(cell.modelData))))
                     // Selected note = its OWN hue, swelled + pilled + given a
-                    // defining ink outline (paletteFg) so it reads as highlighted
-                    // against the opaque marble bar without changing its colour.
+                    // WHITE outline (khoa) so it reads as highlighted against the
+                    // opaque marble bar without changing its colour.
                     style: cell.isActive ? Text.Outline : Text.Normal
-                    styleColor: root.notes.paletteFg
+                    styleColor: Qt.rgba(1, 1, 1, 0.9)
                     font.family: "monospace"
                     font.pixelSize: cell.isActive ? root.activeSize : root.restSize
                     font.bold: true
@@ -226,7 +244,9 @@ Item {
                 }
 
                 MouseArea {
+                    id: cellMouse
                     anchors.fill: parent
+                    hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         if (cell.modelData && cell.modelData.activate)

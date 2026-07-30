@@ -146,13 +146,14 @@ in
         # Lock screen
         bind = SUPER, ESCAPE, exec, aoide shell lock
 
-        # Gadget dock popup (shellbridge → AoideAgentWidgets open-and-pin).
-        # SUPER+G summons the LEFT-edge pinnable dock popup, which CONTAINS the
-        # DAG gadget (the dock is now the primary DAG affordance). The dock also
-        # opens on mouse hot-edge hover (pure QML). The standalone
-        # AoideSessionGraph overlay keeps NO bind — it is bridge-only/dormant
-        # (see its header note).
-        bind = SUPER, G, exec, aoide shell dock toggle
+        # Panel dock (Hyprland global shortcut → the center-left panel's
+        # GlobalShortcut toggle). SUPER+G opens/closes the center-left book-edge
+        # dock that holds the widget sub-panels (conductor, terminals, meters,
+        # power). It registers `aoide:dock` in-process (same global-shortcuts-v1
+        # seam as the launcher/wallpaper) — no CLI verb (the old `aoide shell
+        # dock` was an unimplemented stub), no inbound socket. The dock also
+        # peeks out on its own as an alert when an agent needs a response.
+        bind = SUPER, G, global, aoide:dock
 
         # Rice preview / adopt shortcuts
         bind = SUPER SHIFT, P, exec, aoide rice preview

@@ -91,11 +91,12 @@ Item {
         Text {
             text: root.rule("┌", "┐")
             color: root.notes.wireCyan
+            opacity: 0.5
             font.family: "monospace"
             font.pixelSize: 12
         }
         Row {
-            Text { text: "│"; color: root.notes.wireCyan; font.family: "monospace"; font.pixelSize: 12 }
+            Text { text: "│"; color: root.notes.wireCyan; opacity: 0.5; font.family: "monospace"; font.pixelSize: 12 }
             Text {
                 text: root.centerTitle()
                 color: root.notes.paletteFg
@@ -103,18 +104,19 @@ Item {
                 font.pixelSize: 12
                 font.bold: true
             }
-            Text { text: "│"; color: root.notes.wireCyan; font.family: "monospace"; font.pixelSize: 12 }
+            Text { text: "│"; color: root.notes.wireCyan; opacity: 0.5; font.family: "monospace"; font.pixelSize: 12 }
         }
         Text {
             text: root.rule("├", "┤")
             color: root.notes.wireCyan
+            opacity: 0.5
             font.family: "monospace"
             font.pixelSize: 12
         }
 
         // ── Weekday header ───────────────────────────────────────────────
         Row {
-            Text { text: "│"; color: root.notes.wireCyan; font.family: "monospace"; font.pixelSize: 12 }
+            Text { text: "│"; color: root.notes.wireCyan; opacity: 0.5; font.family: "monospace"; font.pixelSize: 12 }
             Text {
                 text: "Su Mo Tu We Th Fr Sa"
                 color: root.notes.paletteFg
@@ -122,7 +124,7 @@ Item {
                 font.family: "monospace"
                 font.pixelSize: 12
             }
-            Text { text: "│"; color: root.notes.wireCyan; font.family: "monospace"; font.pixelSize: 12 }
+            Text { text: "│"; color: root.notes.wireCyan; opacity: 0.5; font.family: "monospace"; font.pixelSize: 12 }
         }
 
         // ── Week rows ────────────────────────────────────────────────────
@@ -131,7 +133,7 @@ Item {
             delegate: Row {
                 id: weekRow
                 required property var modelData
-                Text { text: "│"; color: root.notes.wireCyan; font.family: "monospace"; font.pixelSize: 12 }
+                Text { text: "│"; color: root.notes.wireCyan; opacity: 0.5; font.family: "monospace"; font.pixelSize: 12 }
                 Row {
                     spacing: 0
                     Repeater {
@@ -150,7 +152,7 @@ Item {
                         }
                     }
                 }
-                Text { text: "│"; color: root.notes.wireCyan; font.family: "monospace"; font.pixelSize: 12 }
+                Text { text: "│"; color: root.notes.wireCyan; opacity: 0.5; font.family: "monospace"; font.pixelSize: 12 }
             }
         }
 
@@ -158,6 +160,7 @@ Item {
         Text {
             text: root.rule("└", "┘")
             color: root.notes.wireCyan
+            opacity: 0.5
             font.family: "monospace"
             font.pixelSize: 12
         }

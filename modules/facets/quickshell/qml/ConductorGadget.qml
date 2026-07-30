@@ -14,6 +14,14 @@ import Quickshell.Io
 //                  line; its live state is spoken as a notation glyph
 //                  (♪ working · 𝄐 awaiting · 𝄽 idle · 𝄂 done · · unknown), and
 //                  a final barline 𝄂 closes the score. (glyphs = HARD CONTRACT)
+//                  State is also spoken by MOTION: working = the note bobs +
+//                  a running-shimmer slides the ledger; awaiting = a terracotta
+//                  row pulse + a deep held note-pulse; idle = a slow breath.
+//
+// ROSTER = only what a conductor conducts: agent sessions + the shells an agent
+// is attached to (shared `windowAddress`); bare unattended shells are hidden.
+// Rows are colour-coded by agent identity (base16 noteColor spread) over the
+// state spread, with the ONE laurel `paletteHot` reserved for the traced row.
 //   · TERMINAL   — box-drawing frames the roster like a TUI panel; each row
 //                  hangs from a monospace column │ (pilaster + staff barline).
 //   · KAOMOJI    — a small mood face gives each session life; the empty stage
@@ -39,7 +47,9 @@ Item {
     readonly property string faceMusic: "Noto Music"                // notation
 
     // live state ────────────────────────────────────────────────────────────────
-    property var sessions: []
+    property var sessions: []              // raw roster (every stage record)
+    property var visibleRows: []           // filtered roster actually drawn
+    property var agentIndex: ({})           // effective-agent name → identity slot
     property real nowMs: Date.now()
     property string emphId: ""
     property int projectCount: 0
@@ -87,17 +97,69 @@ Item {
         return "( ・_・)";                                                       // puzzled
     }
 
-    // the single emphasized session (traced, else first working) ─────────────────
+    // ── ROSTER FILTER (concepts/Conductor-Channel) ───────────────────────────────
+    // A conductor's stage shows only what it conducts:
+    //   (a) AGENT sessions      — `agent` is a real agent (e.g. claude), not a
+    //                             bare "shell"; and
+    //   (b) agent-ATTACHED shells — a conductable shell that SHARES its Hyprland
+    //                             `windowAddress` with an agent session (the agent
+    //                             runs inside that very terminal window).
+    // Plain shells with no agent in their window are hidden. The shared window
+    // address IS the connection signal — the SessionRecord.windowAddress written
+    // by shellbridge (graph.rs) and mirrored on graph.json nodes; two records that
+    // agree on it live in one terminal, so the agent is conducting that shell.
+    function isAgentRec(rec) {
+        var a = (rec && rec.agent ? rec.agent : "").toLowerCase();
+        return a.length > 0 && a !== "shell";
+    }
+    function conductorFor(rec) {            // agent name sharing this shell's window, else ""
+        var wa = rec && rec.windowAddress ? rec.windowAddress : "";
+        if (!wa) return "";
+        for (var i = 0; i < sessions.length; i++) {
+            var o = sessions[i];
+            if (o !== rec && isAgentRec(o) && (o.windowAddress || "") === wa)
+                return o.agent;
+        }
+        return "";
+    }
+    function computeVisible() {
+        var out = [];
+        for (var i = 0; i < sessions.length; i++) {
+            var r = sessions[i];
+            if (isAgentRec(r)) { out.push(r); continue; }
+            var by = conductorFor(r);
+            if (by) {                       // an agent-attached shell — clone + annotate
+                var clone = {};
+                for (var k in r) clone[k] = r[k];
+                clone._conductedBy = by;
+                out.push(clone);
+            }
+        }
+        return out;
+    }
+    function effAgent(rec) {                // the identity a row colour-codes by
+        return isAgentRec(rec) ? rec.agent : (rec && rec._conductedBy ? rec._conductedBy : "");
+    }
+    // stable per-agent identity hue, from the base16 accent spread (noteColor) —
+    // conducted shells borrow their conductor's hue so a pair reads as one voice.
+    function hueFor(rec) {
+        var k = effAgent(rec);
+        var idx = agentIndex[k];
+        if (k.length === 0 || idx === undefined) return notes.holoBlue;
+        return notes.noteColor ? notes.noteColor(idx + 1) : notes.holoBlue;
+    }
+
+    // the single emphasized session (traced, else first working) — over VISIBLE ──
     function computeEmph() {
         var i;
         if (shared && shared.tracedSessionId) {
-            for (i = 0; i < sessions.length; i++)
-                if (sessions[i].sessionId === shared.tracedSessionId)
+            for (i = 0; i < visibleRows.length; i++)
+                if (visibleRows[i].sessionId === shared.tracedSessionId)
                     return shared.tracedSessionId;
         }
-        for (i = 0; i < sessions.length; i++)
-            if (/(run|active|tool|work|busy|trace)/.test((sessions[i].state || "").toLowerCase()))
-                return sessions[i].sessionId;
+        for (i = 0; i < visibleRows.length; i++)
+            if (/(run|active|tool|work|busy|trace)/.test((visibleRows[i].state || "").toLowerCase()))
+                return visibleRows[i].sessionId;
         return "";
     }
 
@@ -122,10 +184,19 @@ Item {
     }
 
     function recompute() {
+        visibleRows = computeVisible();
+        // assign each distinct effective-agent a stable identity slot (order of
+        // first appearance), so hueFor() cycles the base16 spread deterministically.
+        var idx = ({}), slot = 0, i;
+        for (i = 0; i < visibleRows.length; i++) {
+            var k = effAgent(visibleRows[i]);
+            if (k.length > 0 && idx[k] === undefined) { idx[k] = slot; slot++; }
+        }
+        agentIndex = idx;
         emphId = computeEmph();
         var seen = ({}), n = 0;
-        for (var i = 0; i < sessions.length; i++) {
-            var c = sessions[i].cwd || "?";
+        for (i = 0; i < visibleRows.length; i++) {
+            var c = visibleRows[i].cwd || "?";
             if (!seen[c]) { seen[c] = true; n++; }
         }
         projectCount = n;
@@ -291,7 +362,7 @@ Item {
                 Text {
                     id: ffL
                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                    text: "└─┤ " + gadget.sessions.length + " session" + (gadget.sessions.length === 1 ? "" : "s")
+                    text: "└─┤ " + gadget.visibleRows.length + " session" + (gadget.visibleRows.length === 1 ? "" : "s")
                           + " · " + gadget.projectCount + " project" + (gadget.projectCount === 1 ? "" : "s") + " ├"
                     font.family: gadget.faceMono; font.pixelSize: 11
                     color: gadget.withA(notes.paletteFg, 0.8)
@@ -333,7 +404,7 @@ Item {
                 Column {
                     anchors.centerIn: parent
                     spacing: 4
-                    visible: gadget.sessions.length === 0
+                    visible: gadget.visibleRows.length === 0
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         horizontalAlignment: Text.AlignHCenter
@@ -362,7 +433,7 @@ Item {
                     }
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        text: "no sessions on the stage"
+                        text: "no agent sessions"
                         font.family: gadget.faceMono; font.pixelSize: 10
                         color: gadget.withA(notes.paletteFg, 0.4)
                     }
@@ -371,8 +442,8 @@ Item {
                 ListView {
                     id: roster
                     anchors.fill: parent
-                    visible: gadget.sessions.length > 0
-                    model: gadget.sessions
+                    visible: gadget.visibleRows.length > 0
+                    model: gadget.visibleRows
                     spacing: 0
                     boundsBehavior: Flickable.StopAtBounds
                     clip: true
@@ -383,11 +454,17 @@ Item {
                         height: 52
 
                         property bool emph: modelData.sessionId === gadget.emphId
-                        property bool awaiting: gadget.isAwaiting(modelData.state)
+                        // the three live motion states (glyph contract, by motion)
+                        readonly property string st: (modelData.state || "").toLowerCase()
+                        property bool working:  /(run|active|tool|work|busy|trace)/.test(st)
+                        property bool awaiting:  gadget.isAwaiting(modelData.state)
+                        property bool idle:     /(idle|ready|sleep)/.test(st)
+                        // per-agent identity hue (base16 spread); conducted shells
+                        // borrow their conductor's hue.
+                        property color idHue: gadget.hueFor(modelData)
+                        property string conductedBy: modelData._conductedBy || ""
                         property color accent: emph ? notes.paletteHot
                                                     : gadget.stateColor(modelData.state)
-
-                        onAwaitingChanged: if (!awaiting) noteGlyph.opacity = 1
 
                         Rectangle {                    // staff ledger line
                             anchors.bottom: parent.bottom
@@ -399,6 +476,49 @@ Item {
                             color: row.emph ? gadget.withA(notes.paletteHot, 0.10)
                                             : (hover.containsMouse ? gadget.withA(notes.paletteAccent, 0.08)
                                                                    : "transparent")
+                        }
+                        // AWAITING — a terracotta attention pulse washes the whole
+                        // row (distinct from working's travelling shimmer). The
+                        // stalled state is unmistakable at row scale.
+                        Rectangle {
+                            id: awaitWash
+                            anchors.fill: parent; anchors.bottomMargin: 1
+                            color: notes.paletteUrgent
+                            opacity: 0.0
+                            visible: row.awaiting
+                            SequentialAnimation on opacity {
+                                running: row.awaiting
+                                loops: Animation.Infinite; alwaysRunToEnd: true
+                                onRunningChanged: if (!running) awaitWash.opacity = 0.0
+                                NumberAnimation { to: 0.16; duration: 560; easing.type: Easing.OutCubic }
+                                NumberAnimation { to: 0.0;  duration: 640; easing.type: Easing.InOutSine }
+                            }
+                        }
+                        // WORKING — a running-shimmer slides along the ledger line:
+                        // "alive / making progress", moving where the pulse throbs.
+                        Rectangle {
+                            id: shimmer
+                            height: 1
+                            width: parent.width * 0.30
+                            anchors.bottom: parent.bottom
+                            color: row.emph ? notes.paletteHot : notes.paletteAccent
+                            opacity: 0.0
+                            visible: row.working
+                            x: -width
+                            ParallelAnimation {
+                                running: row.working
+                                loops: Animation.Infinite; alwaysRunToEnd: true
+                                onRunningChanged: if (!running) { shimmer.opacity = 0.0; shimmer.x = -shimmer.width }
+                                NumberAnimation {
+                                    target: shimmer; property: "x"
+                                    from: -shimmer.width; to: row.width
+                                    duration: 1150; easing.type: Easing.InOutSine
+                                }
+                                SequentialAnimation {
+                                    NumberAnimation { target: shimmer; property: "opacity"; from: 0.0; to: 0.85; duration: 380 }
+                                    NumberAnimation { target: shimmer; property: "opacity"; to: 0.0; duration: 770 }
+                                }
+                            }
                         }
                         Rectangle {                    // laurel-green spine (the one standout)
                             anchors.left: parent.left; anchors.top: parent.top
@@ -412,27 +532,58 @@ Item {
                             anchors.left: parent.left; anchors.leftMargin: 12
                             anchors.verticalCenter: parent.verticalCenter
                             width: 26; height: parent.height
-                            Text {
+                            Text {                     // pilaster — tinted by agent identity
                                 anchors.centerIn: parent
                                 text: "│"
                                 font.family: gadget.faceMono; font.pixelSize: 40
                                 color: row.emph ? gadget.withA(notes.paletteHot, 0.9)
-                                                : gadget.withA(notes.wireCyan, 0.5)
+                                                : gadget.withA(row.idHue, 0.6)
                             }
                             Text {
                                 id: noteGlyph
                                 anchors.centerIn: parent
                                 // Noto Music seats the notehead low in a tall em
                                 // box; lift it to sit between the two text lines.
-                                anchors.verticalCenterOffset: -4
+                                // `bob` drives the WORKING bounce off that rest line.
+                                property real bob: 0
+                                anchors.verticalCenterOffset: -4 + bob
                                 text: gadget.glyphFor(modelData.state)
                                 font.family: gadget.faceMusic; font.pixelSize: 25
                                 color: row.accent
-                                SequentialAnimation on opacity {
+
+                                // WORKING — the note bobs & shimmers: lively, alive.
+                                SequentialAnimation {
+                                    id: workBob
+                                    running: row.working
+                                    loops: Animation.Infinite; alwaysRunToEnd: true
+                                    onRunningChanged: if (!running) { noteGlyph.bob = 0; noteGlyph.opacity = 1 }
+                                    ParallelAnimation {
+                                        NumberAnimation { target: noteGlyph; property: "bob"; from: 0; to: 5; duration: 300; easing.type: Easing.OutQuad }
+                                        NumberAnimation { target: noteGlyph; property: "opacity"; to: 0.7; duration: 300 }
+                                    }
+                                    ParallelAnimation {
+                                        NumberAnimation { target: noteGlyph; property: "bob"; from: 5; to: 0; duration: 340; easing.type: Easing.InQuad }
+                                        NumberAnimation { target: noteGlyph; property: "opacity"; to: 1.0; duration: 340 }
+                                    }
+                                    PauseAnimation { duration: 140 }
+                                }
+                                // AWAITING — a deep held pulse: stalled, summoning.
+                                SequentialAnimation {
+                                    id: awaitPulse
                                     running: row.awaiting
                                     loops: Animation.Infinite; alwaysRunToEnd: true
-                                    NumberAnimation { to: 0.28; duration: 620; easing.type: Easing.InOutSine }
-                                    NumberAnimation { to: 1.0;  duration: 620; easing.type: Easing.InOutSine }
+                                    onRunningChanged: if (!running) { noteGlyph.opacity = 1; noteGlyph.bob = 0 }
+                                    NumberAnimation { target: noteGlyph; property: "opacity"; to: 0.2; duration: 560; easing.type: Easing.InOutSine }
+                                    NumberAnimation { target: noteGlyph; property: "opacity"; to: 1.0; duration: 300; easing.type: Easing.OutBack }
+                                }
+                                // IDLE — a slow, gentle breath: at rest, but living.
+                                SequentialAnimation {
+                                    id: idleBreath
+                                    running: row.idle
+                                    loops: Animation.Infinite; alwaysRunToEnd: true
+                                    onRunningChanged: if (!running) { noteGlyph.opacity = 1; noteGlyph.bob = 0 }
+                                    NumberAnimation { target: noteGlyph; property: "opacity"; to: 0.6; duration: 1750; easing.type: Easing.InOutSine }
+                                    NumberAnimation { target: noteGlyph; property: "opacity"; to: 1.0; duration: 1750; easing.type: Easing.InOutSine }
                                 }
                             }
                         }
@@ -451,6 +602,13 @@ Item {
                                     font.family: gadget.faceSerif; font.pixelSize: 15
                                     font.weight: row.emph ? Font.Bold : Font.Medium
                                     color: notes.paletteFg
+                                }
+                                Text {                     // which agent conducts this shell
+                                    anchors.baseline: agentName.baseline
+                                    visible: row.conductedBy.length > 0
+                                    text: "⇢ " + row.conductedBy
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: row.idHue
                                 }
                                 Text {
                                     anchors.baseline: agentName.baseline
@@ -496,6 +654,18 @@ Item {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
+                            // hovering a roster row lights up that session's
+                            // workspace on the bar (shared.hoveredWorkspace →
+                            // WorkspaceRow preview highlight). Null-guard shared;
+                            // clear back to the -1 resting sentinel on exit.
+                            onEntered: {
+                                if (gadget.shared)
+                                    gadget.shared.hoveredWorkspace = (modelData.workspace !== undefined ? modelData.workspace : -1);
+                            }
+                            onExited: {
+                                if (gadget.shared)
+                                    gadget.shared.hoveredWorkspace = -1;
+                            }
                             onClicked: {
                                 if (gadget.bridge && gadget.bridge.focusSession)
                                     gadget.bridge.focusSession(modelData.sessionId);

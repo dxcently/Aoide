@@ -83,22 +83,20 @@ let
         }
     }
 
-    # Glass for the quickshell surfaces (dxflake's "namespace waybar" rule,
-    # aoide-native namespaces — set per-PanelWindow in shell.qml). Blur reads
-    # through the bar's translucent barBg and the dock's Aero frames; the
-    # wallpaper surface (aoide-wallpaper) is deliberately NOT blurred.
-    # ignore_alpha keeps the surfaces' fully-transparent regions (the dock's
-    # retracted drawer, the bar's popout gutter) from rendering as a grey
-    # blur stripe. (Field names per the 0.5x rules rework: "ignorealpha" is
-    # rejected by hyprctl on 0.56 — verified live.)
-    layerrule = blur on, match:namespace aoide-bar
-    layerrule = blur on, match:namespace aoide-dock
+    # Glass for the quickshell surfaces. For THIS rice (sonata) the bar
+    # (aoide-bar) is OPAQUE marble and NOT glassed. The center-left dock
+    # (aoide-dock) layer IS blurred/glassed, but its panels are mostly opaque
+    # marble — only the TERMINALS temple is translucent, so the blur + hyprglass
+    # frost THROUGH it while the opaque Conductor/Meters/Power panels hide it.
+    # The launcher stays frosted glass. The wallpaper is never blurred.
+    # blur_popups frosts the bar's popouts. ignore_alpha keeps transparent
+    # regions from rendering as a grey blur stripe.
     # aoide-launcher: the summoned launcher pane rides the same frosted glass as
     # the dock (it is a Pantheon pane too). Blur + ignore_alpha so its cream
     # glass frosts over whatever window it covers and its transparent scrim/edges
     # don't render as a grey blur stripe.
+    layerrule = blur on, match:namespace aoide-dock
     layerrule = blur on, match:namespace aoide-launcher
-    layerrule = ignore_alpha 0.05, match:namespace aoide-bar
     layerrule = ignore_alpha 0.05, match:namespace aoide-dock
     layerrule = ignore_alpha 0.05, match:namespace aoide-launcher
     # blur_popups extends the glass to the bar's PopupWindow children (the
@@ -128,7 +126,7 @@ let
         }
         layers {
             enabled = 1
-            namespaces = aoide-bar, aoide-dock, aoide-launcher
+            namespaces = aoide-dock, aoide-launcher
             preset = glass
         }
     }

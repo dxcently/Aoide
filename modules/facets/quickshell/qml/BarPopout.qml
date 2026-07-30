@@ -57,13 +57,15 @@ PopupWindow {
         notes: root.notes
         title: root.title
 
-        // Glass popout chrome — matches the bar: a CREAM frosted card at 0.45
-        // (the compositor's blur_popups frosts behind it) with plum ink, so the
-        // now-playing / volume / battery / calendar popouts read as one glass
-        // with the bar and terminals. (The dock's panes leave these unset.)
+        // Glass popout chrome — DECOUPLED from the bar: a CREAM frosted card at
+        // 0.72 (the compositor's blur_popups frosts behind it) with plum ink.
+        // New law — the strip is air (0.30) but every floating pane joins the
+        // frame/dock glass tier at 0.72, so the now-playing / volume / battery /
+        // calendar popouts read SOLID over arbitrary windows and carry their
+        // dense text. (The dock's panes leave these unset.)
         glassColor: Qt.rgba(Qt.color(root.notes.paletteBg).r,
                             Qt.color(root.notes.paletteBg).g,
-                            Qt.color(root.notes.paletteBg).b, 0.45)
+                            Qt.color(root.notes.paletteBg).b, 0.72)
         glassOpacity: 1.0
         outlineColor: root.notes.paletteFg
         depthColor: root.notes.paletteFg
