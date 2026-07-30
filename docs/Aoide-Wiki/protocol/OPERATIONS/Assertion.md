@@ -1,6 +1,6 @@
 # Assertion
 
-How a page states things. Every content page — `concepts/`, `entities/`, `songbook/`, `Overview.md` — asserts the system **as it is at HEAD**, in the present indicative. One tense, one mood.
+How a page states things. Every content page — `concepts/`, `entities/`, `Overview.md` — asserts the system **as it is at HEAD**, in the present indicative. One tense, one mood.
 
 The rule exists because these pages are read as a specification. A reader cannot tell, from prose alone, whether "the wrapper is no longer spawned" describes today's code or yesterday's; whether "this would grant a scoped path" describes a shipped mechanism or a wish. Mixing state, history, and speculation in one voice makes every sentence require external verification, which defeats the point of writing it down.
 

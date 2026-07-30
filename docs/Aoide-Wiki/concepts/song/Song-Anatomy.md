@@ -73,9 +73,9 @@ Rice design memory lives in the songbook, per song: the house design grammar
 is the default rice's — `song/songbook/default/design/pantheon.md` — and each
 song's current design elements live in its own `design/intent.md` (sonata's
 records the key, the glass values, and the surface elements as performed).
-The wiki's `songbook/` folder carries protocol ([[songbook/Ricing-Protocol|
-Ricing Protocol]]), build specs, and a pointer page for the grammar
-([[songbook/Pantheon-Grammar|Pantheon Grammar]]).
+The wiki carries only the protocol ([[Ricing-Protocol|Ricing Protocol]], in
+`concepts/song/`) — design content about a rice goes to that rice's `design/`
+folder in the repo, not the wiki.
 
 ## Runtime state — the gitignored half
 
@@ -135,5 +135,5 @@ top-level `song/` dir. The lookup is the Song Map
 - [[Self-Ricing]] — the rice loop, songbook discipline, and coverage tiers
 - [[drachma]] — the mint that resolves/lints/emits the stage file, the `aoide.drachma` seam `drachma.json` carries
 - [[shellbridge]] · [[Session-Graph]] — the writers of the runtime stage files
-- [[songbook/Ricing-Protocol]] · [[songbook/Pantheon-Grammar]] — the ricing
-  protocol, and the pointer to the grammar's songbook home
+- [[Ricing-Protocol]] — the ricing protocol this page's per-song design memory
+  supports

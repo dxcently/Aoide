@@ -10,6 +10,8 @@
 
 Create kind folders lazily — only when the first note of that kind is minted.
 
+A kind folder may group its pages into subfolders by domain (e.g. `concepts/song/`) once it grows large enough to warrant it — nesting is allowed because the bare-name wikilink rule below keeps every link resolvable regardless of subfolder.
+
 ## File names
 
 Use readable title case with hyphens for multi-word names: `Self-Ricing.md`, `Song-Vocabulary.md`, `Song-Anatomy.md`.

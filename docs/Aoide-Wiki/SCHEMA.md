@@ -8,7 +8,7 @@ The standalone wiki for the Aoide project — the agent-agnostic Hyprland/Quicks
 
 ## Read the whole thing
 
-Working entry cost, in order: `Overview.md` → every page under `concepts/`, `entities/`, and `songbook/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; `AOIDE-DEV-HANDOFF.md` — the development agent's operating manual; `pantheon/` — the design reference stills). The wiki is deliberately small enough to read end to end. Note: **rice design memory lives in the songbook under `song/`, per song** — the house grammar in `song/songbook/default/design/`, each song's elements in `song/songbook/<name>/design/` ([[Song-Anatomy]]). The wiki's `songbook/` folder carries protocol, build specs, and pointer pages only; design content written about a rice goes to that rice's `design/` folder, not here.
+Working entry cost, in order: `Overview.md` → every page under `concepts/` (including its `orchestration/`, `desktop/`, `song/`, and `governance/` subfolders) and `entities/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; `AOIDE-DEV-HANDOFF.md` — the development agent's operating manual; `pantheon/` — the design reference stills). The wiki is deliberately small enough to read end to end. Note: **rice design memory lives in the songbook under `song/`, per song** — the house grammar in `song/songbook/default/design/`, each song's elements in `song/songbook/<name>/design/` ([[Song-Anatomy]]). The wiki's `concepts/song/Ricing-Protocol.md` carries protocol only; design content written about a rice goes to that rice's `design/` folder in the repo, not here.
 
 ## The shape
 
@@ -16,9 +16,13 @@ Working entry cost, in order: `Overview.md` → every page under `concepts/`, `e
 Aoide-Wiki/
   SCHEMA.md        ← you are here: this wiki's constitution + note manifest
   Overview.md      ← the Aoide overview / hub
-  concepts/        ← ideas, mechanisms, frameworks
+  concepts/        ← ideas, mechanisms, frameworks — grouped by part of Aoide
+    orchestration/   ← agent sessions, the graph, the conductor channel, the baton
+    desktop/         ← the Quickshell/Hyprland desktop surfaces
+    song/            ← the performed half — song anatomy, vocabulary, self-ricing, ricing protocol
+    governance/      ← the rebuild gate, fork model, wiki protocol
+    (root)           ← cross-cutting: Codebase, Full-Architecture, Snowflake-Anatomy, Lexicon
   entities/        ← named things (components, tools, hosts)
-  songbook/        ← ricing protocol + build specs + pointers (rice design memory lives in song/songbook/<song>/design/)
   ingest/
     index.md       ← content catalog
     log.md         ← append-only history + Open Threads
@@ -54,7 +58,7 @@ This file and every `protocol/OPERATIONS/` page obey the rules they describe. Ch
 
 Snapshot of this wiki's files, diffed on each lint pass and rewritten at the end. The wiki is meant to be read whole; this manifest exists for the lint self-description check, not to spare you the reading.
 
-snapshot: 2026-07-28
+snapshot: 2026-07-29
 
 ### Tags
 
@@ -65,25 +69,28 @@ agent · aoide · architecture · auto-discovery · base16 · baton · bridge ·
 ```
 Overview.md
 SCHEMA.md
-concepts/Agent-Interface.md
 concepts/Codebase.md
-concepts/Content-Pipeline.md
-concepts/Desktop-Architecture.md
-concepts/Feature-Set.md
-concepts/Fork-and-Run.md
 concepts/Full-Architecture.md
-concepts/Gadget-Dock.md
-concepts/Governance.md
 concepts/Lexicon.md
-concepts/Rebuild-Gate.md
-concepts/Self-Ricing.md
-concepts/Session-Graph.md
 concepts/Snowflake-Anatomy.md
-concepts/Song-Anatomy.md
-concepts/Song-Vocabulary.md
-concepts/Terminal-Commander.md
-concepts/Widget-Maker.md
-concepts/Wiki-Protocol.md
+concepts/desktop/Desktop-Architecture.md
+concepts/desktop/Feature-Set.md
+concepts/desktop/Gadget-Dock.md
+concepts/desktop/Widget-Maker.md
+concepts/governance/Fork-and-Run.md
+concepts/governance/Governance.md
+concepts/governance/Rebuild-Gate.md
+concepts/governance/Wiki-Protocol.md
+concepts/orchestration/Agent-Interface.md
+concepts/orchestration/Baton-3D-DAG.md
+concepts/orchestration/Conductor-Channel.md
+concepts/orchestration/Content-Pipeline.md
+concepts/orchestration/Session-Graph.md
+concepts/orchestration/Terminal-Commander.md
+concepts/song/Ricing-Protocol.md
+concepts/song/Self-Ricing.md
+concepts/song/Song-Anatomy.md
+concepts/song/Song-Vocabulary.md
 entities/Agent-Hooking.md
 entities/Hyprland.md
 entities/Melete.md
@@ -91,14 +98,10 @@ entities/Mneme.md
 entities/Quickshell.md
 entities/Stylix.md
 entities/aoide-cli.md
-entities/drachma.md
 entities/aoided.md
+entities/drachma.md
 entities/dxflake.md
 entities/shellbridge.md
-songbook/Baton-3D-DAG.md
-songbook/Conductor-Channel.md
-songbook/Pantheon-Grammar.md
-songbook/Ricing-Protocol.md
 ingest/index.md
 ingest/log.md
 protocol/OPERATIONS/Assertion.md

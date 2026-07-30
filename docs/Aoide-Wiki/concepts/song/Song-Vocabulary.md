@@ -77,4 +77,4 @@ The `noSongRead` check guards only the runtime dirs (`stage/`, `auditions/`). Co
 - [[Stylix]]
 - [[Snowflake-Anatomy]]
 - [[Fork-and-Run]]
-- [[songbook/Ricing-Protocol|Ricing Protocol]] — the creation/application split and the light/dark vision-check
+- [[Ricing-Protocol|Ricing Protocol]] — the creation/application split and the light/dark vision-check

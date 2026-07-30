@@ -42,7 +42,7 @@ synthesis with a real 16-colour derivation.
 That said, songs may also supply the full sixteen slots directly as
 `aoide.drachma.base16` (bypassing synthesis) — the `sonata` song does,
 keyed by hand from its wallpaper; see
-[[songbook/Ricing-Protocol|the Ricing Protocol]].
+[[Ricing-Protocol|the Ricing Protocol]].
 
 ## Polarity — light or dark, one switch
 
@@ -55,7 +55,7 @@ mirror-water (the key's design memory: `song/songbook/sonata/design/intent.md`).
 Because polarity is a single fan-out switch,
 flipping it is cheap — the discipline that makes it *look* right everywhere
 (terminal, bar, every widget agreeing) is the vision-check in
-[[songbook/Ricing-Protocol|the Ricing Protocol]], not the switch itself.
+[[Ricing-Protocol|the Ricing Protocol]], not the switch itself.
 
 ## Related
 
@@ -63,5 +63,5 @@ flipping it is cheap — the discipline that makes it *look* right everywhere
 - [[Quickshell]]
 - [[Codebase]]
 - [[drachma]]
-- [[songbook/Ricing-Protocol|Ricing Protocol]]
-- [[songbook/Pantheon-Grammar|Pantheon Grammar]]
+- [[Ricing-Protocol|Ricing Protocol]]
+- [[Song-Anatomy]] — the songbook where the house grammar and per-song design memory live

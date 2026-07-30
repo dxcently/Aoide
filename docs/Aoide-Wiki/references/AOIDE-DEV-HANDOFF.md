@@ -124,7 +124,7 @@ Rules of thumb:
   preview` hot-reload the shell without a rebuild.
 - **Always look.** Screenshot, read it back, and judge coherence yourself
   (light/dark polarity, bar↔terminal↔gadget agreement) *before* showing the
-  user — that is the [[songbook/Ricing-Protocol|Ricing Protocol]] vision check,
+  user — that is the [[Ricing-Protocol|Ricing Protocol]] vision check,
   and it applies to any visual change, not just rices.
 
 ---
@@ -198,9 +198,9 @@ behavior/design change:
   design decision about a rice — a key, an opacity, a surface element — lands
   in that song's `song/songbook/<name>/design/` (sonata:
   `design/intent.md`); cross-cutting house grammar in the default rice's
-  `song/songbook/default/design/pantheon.md`. The wiki's `songbook/` folder
-  keeps only protocol ([[songbook/Ricing-Protocol|Ricing Protocol]]), build
-  specs, and pointer pages — a protocol change still edits the wiki page.
+  `song/songbook/default/design/pantheon.md`. The wiki keeps only protocol
+  ([[Ricing-Protocol|Ricing Protocol]], under `concepts/song/`) — a protocol
+  change still edits the wiki page.
 - Follow [[Wiki-Protocol]] / `SCHEMA.md`: `[[Wikilinks]]`, frontmatter, house
   voice. The wiki is small — **read the whole wiki** when in doubt about where a
   fact belongs.
@@ -309,9 +309,10 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   pointers — the Pantheon grammar migrated to
   `song/songbook/default/design/pantheon.md` (the default rice owns the house
   grammar), sonata's current surface elements are recorded in
-  `song/songbook/sonata/design/intent.md`, and `songbook/Pantheon-Grammar.md`
-  is the pointer page (khoa steer: rice design memory lives per-song in the
-  songbook — see §6). The `songbook/sonata/design/intent.md`
+  `song/songbook/sonata/design/intent.md`, and the wiki's
+  `songbook/Pantheon-Grammar.md` pointer page has since been retired — the
+  grammar's sole home is now the repo file above (khoa steer: rice design
+  memory lives per-song in the songbook — see §6). The `songbook/sonata/design/intent.md`
   refresh is **RESOLVED 2026-07-29:** intent.md now states the sonata.webp key —
   the light dusk key read region-by-region from `song/covers/sonata.webp` (the
   pianist on mirror-water), with the palette+base16 re-keyed off that cover
@@ -418,7 +419,7 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   DOC already lives with the default rice
   (`song/songbook/default/design/pantheon.md`, 2026-07-29); composing
   `default`'s actual palette/rice to wear it is the part still open. See
-  [[songbook/Pantheon-Grammar]].
+  [[Self-Ricing]].
 
 ---
 
@@ -440,7 +441,7 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
 
 - [[AOIDE-HANDOFF]] — the original design contract (what Aoide *is*)
 - [[Agent-Interface]] — the CLI/MCP action layer
-- [[songbook/Ricing-Protocol]] — the vision-check discipline
+- [[Ricing-Protocol]] — the vision-check discipline
 - [[Rebuild-Gate]] — why the switch is user-gated
 - [[Conductor-Channel]] · [[Session-Graph]] · [[Terminal-Commander]] — the
   orchestration surfaces you both use and test

@@ -22,6 +22,7 @@ A wiki lives **in its project's own repo**, wherever a wiki is needed — defaul
 
 - `SCHEMA.md` and `Overview.md` are required at mint.
 - `concepts/` appears with the first concept page; `entities/` and `references/` are lazy.
+- A kind folder may nest its pages into domain subfolders (e.g. `concepts/<part>/`) once it grows large enough to warrant grouping — bare-name wikilinks keep this link-safe regardless of depth.
 - Each wiki is self-describing: its `SCHEMA.md` carries its own note manifest, diffed on lint. No cross-project index.
 - The keeping rules live in `OPERATIONS/`; the mint/convert procedures in `PROTOCOL.md`; the stamped skeleton in `_template/`.
 - Frontmatter, naming, and links follow [[Frontmatter]], [[Naming]], [[Wikilinks]].

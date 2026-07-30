@@ -25,6 +25,9 @@ type: index
 - [[Governance]] — answers: who may trigger a rebuild, where the audit log lives, and how the mutation policy (radial distance from nucleus) governs change frequency
 - [[Rebuild-Gate]] — answers: how an agent turns a proposed change into a running system, what the default propose-then-human-`switch` path is, what the opt-in `aoide.rebuild` capability grants, and why a passwordless narrowly-scoped polkit unit beats giving the agent a sudo password
 - [[Wiki-Protocol]] — answers: how the wiki protocol gives each project a standalone wiki in one shared shape, what its mint and convert operations do, who owns it (Mneme/Melete), and the default location (the project's repo)
+- [[Ricing-Protocol|Ricing Protocol]] — answers: the creation/application split (deriving a base16 vs Stylix fanning it out), the mandatory light/dark vision-check, and where per-song design memory belongs (the songbook), worked through the `sonata` light key
+- [[Conductor-Channel|Conductor Channel]] — answers: how a wrapped agent session is commanded (PTY control socket, the gated `graph send` injection door, parent-autogate)
+- [[Baton-3D-DAG|Baton 3D DAG]] — answers: the PLANNED ratatui 3D-wireframe DAG view for `aoide baton` (not yet implemented — a build plan)
 
 ## Entities
 
@@ -39,15 +42,6 @@ type: index
 - [[Melete]] — answers: what the integrated (not vendored) coding harness is (Rust/Rune/Python tiers, the daemon + MCP tool surface), its full feature set (coding dispatch, run control, shell/fleet, skills, backups, maintenance), and its part in Aoide as the widget-making engine
 - [[Mneme]] — answers: what the integrated (not vendored) knowledge server is (the shell-less client's vault API — the "door"), why it is a separate daemon from Melete, its feature set (read/write/versions/trash/conventions/skills), and its part behind the content pipeline and wiki protocol
 - [[Agent-Hooking]] — answers: how ANY agent harness registers on the baton — the three idempotent doors (Claude-Code-shaped hook payload, the `aoide graph session` verbs, the conduct wrapper) that write the `sessions`/`hooks`/`graph` stage files every widget and the baton render from
-
-## Design
-
-Design pages are **song-agent design memory** mirrored in the dev wiki; their content is bound to migrate into a songbook under `song/` ([[Song-Anatomy]], handoff flag). The wiki keeps the *protocol* and the load-bearing QML constants.
-
-- [[songbook/Ricing-Protocol|Ricing Protocol]] — answers: the creation/application split (deriving a base16 vs Stylix fanning it out), the mandatory light/dark vision-check, and where per-song design memory belongs (the songbook), worked through the `sonata` light key
-- [[songbook/Pantheon-Grammar|Pantheon Grammar]] — answers: where the house design language lives (`song/songbook/default/design/pantheon.md` — depth recipe, glyph grammar, role seam, the glass) and where each song's current elements live (`song/songbook/<name>/design/intent.md`)
-- [[songbook/Conductor-Channel|Conductor Channel]] — answers: how a wrapped agent session is commanded (PTY control socket, the gated `graph send` injection door, parent-autogate)
-- [[songbook/Baton-3D-DAG|Baton 3D DAG]] — answers: the PLANNED ratatui 3D-wireframe DAG view for `aoide baton` (not yet implemented — a build plan)
 
 ## References
 

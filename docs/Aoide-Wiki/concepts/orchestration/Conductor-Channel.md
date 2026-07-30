@@ -1,5 +1,5 @@
 ---
-type: design
+type: concept
 created: 2026-07-28
 updated: 2026-07-28
 tags: [aoide, agent, orchestration, conductor, pty, ipc, baton]

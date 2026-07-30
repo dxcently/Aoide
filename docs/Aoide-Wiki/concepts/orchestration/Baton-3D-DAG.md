@@ -1,5 +1,5 @@
 ---
-type: design
+type: concept
 created: 2026-07-27
 updated: 2026-07-28
 tags: [aoide, design, baton, dag, tui, pantheon]
@@ -57,4 +57,4 @@ Ship A + B. C supersedes A's parser and depends on nothing but that upstream com
 
 Risks: braille legibility at gadget sizes (mitigate: mini mode drops to fewer, larger boxes); label overlap (declutter rule); none performance-shaped (dozens of nodes, redraw on change only).
 
-*Related: [[Pantheon-Grammar]] (the rice-side language this must rhyme with), entities/Baton, CONTRACTS.md exit codes/door discipline (unchanged by this work).*
+*Related: the Pantheon grammar (`song/songbook/default/design/pantheon.md`) — the rice-side language this must rhyme with — [[Song-Anatomy]], entities/Baton, CONTRACTS.md exit codes/door discipline (unchanged by this work).*

@@ -1,5 +1,5 @@
 ---
-type: design
+type: concept
 created: 2026-07-28
 updated: 2026-07-28
 tags:
@@ -112,9 +112,10 @@ Two things to look at, side by side, on the live desktop:
    notification/OSD cards, workspace highlight) sets `radius: 0`. No surface
    rounds; a stray rounded corner reads as a surface that missed the grammar.
 2. **Widget colours match the bar.** Every gadget, popout, and dock surface
-   pulls from the same `aoide.drachma.*` roles the bar uses
-   ([[Pantheon-Grammar]]'s glyph/role grammar: `wireCyan`, `holoBlue`,
-   `violet`, `glitchPink`, `paletteAccent`/`paletteHot`). A widget that
+   pulls from the same `aoide.drachma.*` roles the bar uses (the house
+   grammar's glyph/role palette, recorded in the default rice's design memory
+   — see [[Song-Anatomy]] — `wireCyan`, `holoBlue`, `violet`, `glitchPink`,
+   `paletteAccent`/`paletteHot`). A widget that
    *looks* subtly off (a slightly different cream, an accent that reads as a
    different hue) usually means it resolved a fallback instead of the song's
    actual drachma value — the fix is in the drachma wiring, not a local hex
@@ -128,8 +129,6 @@ facet reading another module, a surface with two owners); it cannot catch
 
 ## Related
 
-- [[Pantheon-Grammar]] — the visual grammar (glyphs, depth recipe, roles) this
-  protocol keeps coherent across surfaces; likewise song-agent design memory.
 - [[Stylix]] — the application half: one base16 scheme, baked fan-out.
 - [[drachma]] — the drachma seam creation writes into and application reads from.
 - [[Song-Vocabulary]] — key/song/cover vocabulary this protocol operates on.
