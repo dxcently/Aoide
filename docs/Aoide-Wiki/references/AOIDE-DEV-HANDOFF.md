@@ -77,16 +77,14 @@ get work done and how you test the conductor mesh.
   (broad search / mechanical sweeps / parallel legwork). Send independent
   agents in one batch so they run concurrently; keep the *conclusion*, not
   their file dumps.
-- **A Fable advisor is ALWAYS present when a worker's work is reviewed**
-  (khoa, 2026-07-30). Fable is the standing judgement tier over the fan-out —
-  not a worker itself, and **the orchestrator does not self-review in its
-  place.** Every worker's *decisions and outputs* pass through a Fable review
-  before they land: code changes get a Fable read (correctness, coherence,
-  test adequacy); anything visual gets a Fable **vision pass** (render/screenshot
-  → Fable judges, with legibility as the pass/fail bar) before it is shown to
-  khoa or committed. The orchestrator dispatches the Fable review, folds its
-  verdict back to the worker for fixes, and only then lands. No worker output
-  is accepted on the orchestrator's own say-so.
+- **Fable is an OPTIONAL advisor, not a required gate** (khoa, 2026-07-30 —
+  rescinding the "always present" rule set earlier the same day). Fable remains
+  the standing judgement tier available for a code read (correctness, coherence,
+  test adequacy) or a **vision pass** on worker output when a second eye adds
+  value — but review is NOT mandatory, and **khoa reviews visual output himself**
+  ("I will just look at it"). Use Fable by judgement — adversarial correctness
+  checks, or when khoa isn't watching a visual change — not as a blanket
+  requirement on every diff. The orchestrator still reviews diffs and lands.
 - **Resume, don't respawn.** An agent that died mid-task on an API error is
   resumed with its context intact (`SendMessage` by id) — a fresh `Agent` call
   starts cold.
