@@ -221,6 +221,7 @@ Item {
                     title:         w.title || "",
                     sessionTitle:  rec.title || "",       // the human SESSION name
                     activity:      rec.activity || "",    // the current command/tool
+                    say:           rec.say || "",         // the agent's latest words
                     wclass:        w.class || "",
                     tracked:       true
                 });
@@ -236,6 +237,7 @@ Item {
                     title:         w.title || "",
                     sessionTitle:  "",
                     activity:      "",                    // a plain tty runs no tracked tool
+                    say:           "",                    // a plain tty has no agent voice
                     wclass:        w.class || "",
                     tracked:       false
                 });
@@ -258,7 +260,7 @@ Item {
             var r = list[i];
             parts.push([r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
                         r.workspace, r.windowAddress, r.title,
-                        r.sessionTitle, r.activity].join(""));
+                        r.sessionTitle, r.activity, r.say].join(""));
         }
         return parts.join("");
     }
@@ -666,10 +668,17 @@ Item {
                         property bool awaiting: gadget.isAwaiting(modelData.state)
                         property color accent: emph ? notes.paletteHot
                                                     : gadget.stateColor(modelData.state)
-                        readonly property bool hasTitle: (modelData.sessionTitle || "").length > 0
-                        readonly property string nameText: hasTitle ? modelData.sessionTitle
-                                                                    : (modelData.agent || "shell")
                         readonly property string activityText: modelData.activity || ""
+                        // the row's MAIN label: what the terminal is running — the
+                        // foreground command / file being edited (`nvim notes.md`,
+                        // `cargo test`), or the shell/agent process itself when idle
+                        // (`bash`, `claude`). The dir rides below as subtext.
+                        readonly property string procText: activityText.length > 0
+                                                           ? activityText
+                                                           : (modelData.agent || "shell")
+                        // the agent's latest WORDS (transcript tail) — distinct
+                        // from procText (the process). Plain ttys stay silent.
+                        readonly property string sayText: modelData.say || ""
 
                         onAwaitingChanged: if (!awaiting) noteGlyph.opacity = 1
 
@@ -740,39 +749,39 @@ Item {
                             Row {
                                 width: parent.width
                                 spacing: 8
-                                Text {                     // the SESSION name (title, else agent)
-                                    id: agentName
+                                Text {                     // the PROCESS / command / file being edited
+                                    id: procName
                                     width: Math.min(implicitWidth, body.width - 78)
                                     elide: Text.ElideRight
-                                    text: row.nameText
-                                    font.family: gadget.faceSerif; font.pixelSize: 15
+                                    text: row.procText
+                                    font.family: gadget.faceMono; font.pixelSize: 14
                                     font.weight: row.emph ? Font.Bold : Font.Medium
                                     color: notes.paletteFg
                                 }
-                                Text {                     // agent, when a title took the name
-                                    anchors.baseline: agentName.baseline
-                                    visible: row.hasTitle
-                                    text: modelData.agent || ""
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: gadget.withA(gadget.sig, 0.9)
-                                }
                                 Text {
-                                    anchors.baseline: agentName.baseline
+                                    anchors.baseline: procName.baseline
                                     text: gadget.stateLabel(modelData.state)
                                     font.family: gadget.faceSerif; font.italic: true
                                     font.pixelSize: 11
                                     color: row.accent
                                 }
                             }
-                            // ACTIVITY — the current foreground command / tool.
+                            // SAY — a claude terminal's latest words, tail-read from
+                            // its transcript by the bridge; dim quoted prose, up to
+                            // two lines. Hidden for plain ttys / a silent agent.
                             Text {
                                 width: parent.width
-                                visible: row.activityText.length > 0
-                                text: "▸ " + row.activityText
+                                visible: row.sayText.length > 0
+                                text: "“" + row.sayText + "”"
+                                wrapMode: Text.WordWrap
+                                maximumLineCount: 2
                                 elide: Text.ElideRight
-                                font.family: gadget.faceMono; font.pixelSize: 10
-                                color: gadget.withA(row.accent, 0.95)
+                                font.family: gadget.faceSerif; font.italic: true
+                                font.pixelSize: 10
+                                color: gadget.withA(notes.paletteFg, 0.55)
                             }
+                            // the DIR — the terminal's working directory, as subtext
+                            // (falls back to the window title for a cwd-less tty).
                             Item {
                                 width: parent.width; height: cwdText.implicitHeight
                                 Text {
@@ -780,8 +789,7 @@ Item {
                                     anchors.left: parent.left
                                     anchors.right: kao.left; anchors.rightMargin: 6
                                     elide: Text.ElideMiddle
-                                    // a shell prompt reading the tty's own cwd (or title)
-                                    text: gadget.promptFor(modelData)
+                                    text: gadget.shortCwd(modelData.cwd) || (modelData.title || "")
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: gadget.withA(gadget.sig, 0.95)
                                 }

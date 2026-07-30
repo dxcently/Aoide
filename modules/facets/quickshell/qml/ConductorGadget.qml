@@ -209,11 +209,12 @@ Item {
         }
         for (i = 0; i < sessions.length; i++) {
             r = sessions[i];
-            if (isShellRec(r)) {                          // a shell — flat, only if conducted
-                var by = conductorFor(r);
-                if (by) { var cl = shallow(r); cl._depth = 0; cl._conductedBy = by; out.push(cl); }
-                continue;
-            }
+            // No shell emits in the Conductor: it is the AGENT tree. A conducted
+            // shell that hosts a claude is represented BY that claude (which emits
+            // as its own root just below); every other shell lives in the Terminals
+            // temple. This drops the redundant "shell → claude" host row so one
+            // terminal reads as exactly one row.
+            if (isShellRec(r)) continue;
             var p = r.parentSessionId || "";
             if (p && byId[p] && !isShellRec(byId[p])) continue;  // nested → emitted by its parent
             walk(r, 0, "");
@@ -254,7 +255,7 @@ Item {
         for (var i = 0; i < rows.length; i++) {
             var r = rows[i];
             parts.push([r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
-                        r.workspace, r._conductedBy, r.title, r.activity,
+                        r.workspace, r._conductedBy, r.title, r.activity, r.say,
                         r.kind, r.parentSessionId, r._depth, r._parentAgent].join(""));
         }
         return parts.join("");
@@ -607,9 +608,17 @@ Item {
                         readonly property bool hasTitle: (modelData.title || "").length > 0
                         // the row's display name: the human session name (title),
                         // else the agent.
+                        // the row NAME: the session name (title — Claude's own
+                        // session title, e.g. "Aoide Dev", bridged from the
+                        // transcript), else the agent. The Conductor is the AGENT
+                        // view — it names by session, not by cwd (that is the
+                        // Terminals temple's subtext).
                         readonly property string nameText: hasTitle ? modelData.title
                                                                     : (modelData.agent || "session")
                         readonly property string activityText: modelData.activity || ""
+                        // the agent's latest WORDS (transcript tail) — distinct
+                        // from activityText (the current tool). Shells never speak.
+                        readonly property string sayText: modelData.say || ""
                         // a beam is coloured from the PARENT's identity hue so the
                         // group reads as one gesture (falls back to own hue).
                         readonly property color beamHue: gadget.hueForAgent(
@@ -817,6 +826,20 @@ Item {
                                 elide: Text.ElideRight
                                 font.family: gadget.faceMono; font.pixelSize: 10
                                 color: gadget.withA(row.accent, 0.95)
+                            }
+                            // SAY — the agent's latest words, tail-read from its
+                            // transcript by the bridge; dim quoted prose, up to two
+                            // lines. The "what is it saying" line under the tool.
+                            Text {
+                                width: parent.width
+                                visible: row.sayText.length > 0
+                                text: "“" + row.sayText + "”"
+                                wrapMode: Text.WordWrap
+                                maximumLineCount: 2
+                                elide: Text.ElideRight
+                                font.family: gadget.faceSerif; font.italic: true
+                                font.pixelSize: 10
+                                color: gadget.withA(notes.paletteFg, 0.55)
                             }
                             Item {
                                 width: parent.width; height: cwdText.implicitHeight
