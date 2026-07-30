@@ -120,8 +120,8 @@ QtObject {
           // it up," made literal.
           frames: ["󰏖　　( ・ω・)つ󰏖", "󰏖　( ・ω・)つ󰏖　", "󰏖󰏖( ・ω・)つ　　", "󰏖󰏖　( ・ω・)つ　"] },
         { name: "roll",     // barrel freight — the parcel rolls out ahead and
-          // back, tumbling 󰏖→ｏ→󰏖 as it turns, the arm つ chasing it.
-          frames: ["( ｀ω´)つ󰏖　　", "( ｀ω´)つ　ｏ　", "( ｀ω´)つ　　󰏖", "( ｀ω´)つ　ｏ　"] }
+          // back, tumbling 󰏖→→󰏖 as it turns, the arm つ chasing it.
+          frames: ["( ｀ω´)つ󰏖　　", "( ｀ω´)つ　　", "( ｀ω´)つ　　󰏖", "( ｀ω´)つ　　"] }
     ]
 
     // Which set a SUBAGENT wears, for its whole life. Hashed from the row's key
