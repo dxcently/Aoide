@@ -41,12 +41,18 @@ ShellRoot {
         property ListModel floatingModel: ListModel {}
         property string tracedSessionId: ""
 
-        // Hover-preview bridge (concepts/Terminal-Commander): TerminalManagerGadget
-        // writes the hovered terminal row's Hyprland workspace id here; the bar's
+        // Hover-preview bridge (concepts/Terminal-Commander): the roster gadgets
+        // write the hovered terminal row's Hyprland workspace id here; the bar's
         // WorkspaceRow reads it and paints a distinct PREVIEW highlight on that
         // workspace glyph. -1 is the sentinel for "nothing hovered" (no real
         // workspace carries id -1). Pure QML data link — no hyprctl dispatch.
         property int hoveredWorkspace: -1
+        // The IDENTITY of the hovered row (its sessionId), tracked alongside the
+        // workspace int so a row DELEGATE that gets torn down + recreated by a
+        // roster refresh (sessions.json / hyprctl re-read) can re-assert the
+        // highlight from its own id instead of losing it — the fix for the
+        // "highlight flickers then vanishes while still hovering" bug. "" = none.
+        property string hoveredSessionId: ""
 
         // Cascading seed position so successive tear-offs don't stack exactly.
         function floatGadget(kind) {

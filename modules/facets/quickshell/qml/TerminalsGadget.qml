@@ -51,10 +51,34 @@ Item {
     readonly property color sig: notes.holoBlue
 
     // live state ────────────────────────────────────────────────────────────────
-    property var sessions: []
+    // This roster is the tty roster: EVERY live terminal window, whether or not it
+    // is a tracked Aoide session. Two sources are MERGED:
+    //   · `sessions`  — the tracked stage records (sessions.json), rich state.
+    //   · `windows`   — the live terminal WINDOWS enumerated from Hyprland
+    //                   (`hyprctl clients -j`, filtered to terminal classes).
+    // A window that maps to a tracked session (shared window address) shows the
+    // session's rich state; a window with no tracked session shows as a plain
+    // terminal (agent "shell", idle liveness, its window cwd/title). De-duped by
+    // window address → one row per real terminal.
+    property var sessions: []              // tracked stage records
+    property var windows: []               // live terminal windows (hyprctl)
+    property var rows: []                   // the MERGED roster actually drawn
     property real nowMs: Date.now()
     property string emphId: ""
     property int projectCount: 0
+    // Signature of the RENDERED roster — rebuild() only swaps the ListView model
+    // when this changes, so the frequent stage rewrites AND the periodic window
+    // re-reads don't tear down + recreate the row delegates (which would drop the
+    // hovered row's containsMouse and flicker the bar highlight mid-hover).
+    property string _rosterSig: ""
+    property string _pendingClearId: ""    // deferred hover-clear guard
+
+    // Terminal window classes we treat as a tty (anchored, ascii-lowercased in jq).
+    readonly property string termClassRe:
+        "^(kitty|foot|footclient|alacritty|wezterm|org.wezfurlong.wezterm|ghostty|"
+      + "com.mitchellh.ghostty|xterm|uxterm|konsole|urxvt|rxvt|termite|tilix|contour|"
+      + "rio|st|kgx|org.gnome.console|blackbox|terminator|sakura|wave|xfce4-terminal|"
+      + "gnome-terminal|qterminal|lxterminal|deepin-terminal)$"
 
     function withA(cstr, a) {                      // alpha on a role string
         var c = Qt.darker(cstr, 1.0);
@@ -100,16 +124,16 @@ Item {
     }
 
     // the single emphasized terminal (traced, else first working) ────────────────
-    function computeEmph() {
+    function computeEmph(list) {
         var i;
         if (shared && shared.tracedSessionId) {
-            for (i = 0; i < sessions.length; i++)
-                if (sessions[i].sessionId === shared.tracedSessionId)
+            for (i = 0; i < list.length; i++)
+                if (list[i].sessionId === shared.tracedSessionId)
                     return shared.tracedSessionId;
         }
-        for (i = 0; i < sessions.length; i++)
-            if (/(run|active|tool|work|busy|trace)/.test((sessions[i].state || "").toLowerCase()))
-                return sessions[i].sessionId;
+        for (i = 0; i < list.length; i++)
+            if (/(run|active|tool|work|busy|trace)/.test((list[i].state || "").toLowerCase()))
+                return list[i].sessionId;
         return "";
     }
 
@@ -132,32 +156,151 @@ Item {
         if (parts.length <= 2) return p;
         return "…/" + parts.slice(-2).join("/");
     }
-    // a shell prompt — the terminal reads its own cwd back ────────────────────────
-    function promptFor(agent, cwd) {
-        return (agent || "sh") + " " + gadget.shortCwd(cwd) + " $";
+    // a shell prompt — the terminal reads its own cwd (or, lacking one, its window
+    // title) back. Plain untracked terminals often have no stage cwd, so the live
+    // window title stands in.
+    function promptFor(rec) {
+        var where = rec && rec.cwd ? gadget.shortCwd(rec.cwd)
+                                   : (rec && rec.title ? rec.title : "");
+        return (rec && rec.agent ? rec.agent : "sh") + " " + where + " $";
     }
 
-    function recompute() {
-        emphId = computeEmph();
+    // ── MERGE: live terminal windows ⋈ tracked sessions ──────────────────────────
+    // One row per real terminal window (de-duped by address). If a tracked record
+    // shares the window, its rich state is shown (an AGENT record wins over the
+    // bare shell for that window — the terminal reads as what's running in it);
+    // otherwise the window shows as a plain "shell" terminal at idle liveness.
+    function isAgentRec(rec) {
+        var a = (rec && rec.agent ? rec.agent : "").toLowerCase();
+        return a.length > 0 && a !== "shell";
+    }
+    function terminalRows() {
+        var out = [];
+        var wins = windows || [];
+        for (var i = 0; i < wins.length; i++) {
+            var w = wins[i];
+            var addr = w.address || "";
+            var best = null, shell = null;
+            for (var j = 0; j < sessions.length; j++) {
+                var s = sessions[j];
+                if ((s.windowAddress || "") !== addr) continue;
+                if (isAgentRec(s)) { best = s; break; }   // agent record wins
+                if (!shell) shell = s;
+            }
+            var rec = best || shell;
+            var wsId = (w.workspace !== undefined && w.workspace !== null) ? w.workspace : -1;
+            if (rec) {
+                out.push({
+                    sessionId:     rec.sessionId || "",
+                    agent:         rec.agent || "shell",
+                    state:         rec.state || "idle",
+                    cwd:           rec.cwd || w.cwd || "",
+                    startedAt:     rec.startedAt || "",
+                    workspace:     (wsId !== -1 ? wsId
+                                    : (rec.workspace !== undefined ? rec.workspace : -1)),
+                    windowAddress: addr,
+                    title:         w.title || "",
+                    wclass:        w.class || "",
+                    tracked:       true
+                });
+            } else {                                      // a plain, untracked tty
+                out.push({
+                    sessionId:     "",
+                    agent:         "shell",
+                    state:         "idle",                // liveness: mapped window = open, at rest
+                    cwd:           w.cwd || "",
+                    startedAt:     "",
+                    workspace:     wsId,
+                    windowAddress: addr,
+                    title:         w.title || "",
+                    wclass:        w.class || "",
+                    tracked:       false
+                });
+            }
+        }
+        // stable order: by workspace, then window address (so live re-reads that
+        // return windows in a jittery order don't reshuffle the roster).
+        out.sort(function (a, b) {
+            return (a.workspace - b.workspace)
+                || (a.windowAddress < b.windowAddress ? -1
+                    : a.windowAddress > b.windowAddress ? 1 : 0);
+        });
+        return out;
+    }
+
+    // a signature over ONLY the fields the delegate renders (see rebuild()).
+    function rosterSig(list) {
+        var parts = [];
+        for (var i = 0; i < list.length; i++) {
+            var r = list[i];
+            parts.push([r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
+                        r.workspace, r.windowAddress, r.title].join(""));
+        }
+        return parts.join("");
+    }
+
+    function rebuild() {
+        var next = terminalRows();
+        emphId = computeEmph(next);
         var seen = ({}), n = 0;
-        for (var i = 0; i < sessions.length; i++) {
-            var c = sessions[i].cwd || "?";
+        for (var i = 0; i < next.length; i++) {
+            var c = next[i].cwd || next[i].title || "?";
             if (!seen[c]) { seen[c] = true; n++; }
         }
         projectCount = n;
+        var sig = rosterSig(next);
+        if (sig !== _rosterSig || rows.length !== next.length) {
+            _rosterSig = sig;
+            rows = next;
+        }
     }
+
+    // ── Hover→bar highlight, made robust to delegate churn (see shell.qml) ───────
+    // A stable hover key per row: the tracked sessionId, or (for a plain untracked
+    // terminal with no sessionId) its window address — so the deferred-clear guard
+    // and the re-assert can still identify the row across a rebuild.
+    function rowKey(rec) {
+        if (rec && rec.sessionId) return rec.sessionId;
+        return rec && rec.windowAddress ? "win:" + rec.windowAddress : "";
+    }
+    function setHover(sid, ws) {
+        if (!shared) return;
+        _pendingClearId = "";
+        shared.hoveredSessionId = sid;
+        shared.hoveredWorkspace = (ws !== undefined ? ws : -1);
+    }
+    function requestHoverClear(sid) {
+        if (!shared || shared.hoveredSessionId !== sid) return;
+        _pendingClearId = sid;
+        Qt.callLater(applyHoverClear);
+    }
+    function applyHoverClear() {
+        if (_pendingClearId && shared && shared.hoveredSessionId === _pendingClearId) {
+            shared.hoveredSessionId = "";
+            shared.hoveredWorkspace = -1;
+        }
+        _pendingClearId = "";
+    }
+
     function parseStage() {
         try {
             var t = stage.text();
-            if (!t || t.trim().length === 0) { sessions = []; recompute(); return; }
+            if (!t || t.trim().length === 0) { sessions = []; rebuild(); return; }
             var o = JSON.parse(t);
             sessions = (o && o.sessions) ? o.sessions : [];
         } catch (e) {
             sessions = [];
         }
-        recompute();
+        rebuild();
     }
-    onSessionsChanged: recompute()
+    function parseClients(txt) {
+        try {
+            windows = (txt && txt.trim().length > 0) ? JSON.parse(txt) : [];
+        } catch (e) {
+            windows = [];
+        }
+        rebuild();
+    }
 
     // the stage file — hot-reloads on change ─────────────────────────────────────
     FileView {
@@ -169,8 +312,36 @@ Item {
         onLoaded: gadget.parseStage()
         onFileChanged: reload()
     }
+
+    // live terminal-window enumeration: hyprctl clients, filtered to terminal
+    // classes, each augmented with the window's cwd (readlink /proc/<pid>/cwd).
+    // Emits a JSON array [{address,class,title,workspace,pid,mapped,cwd}, …].
+    Process {
+        id: clientsProc
+        command: ["sh", "-c",
+            "hyprctl clients -j | jq -c --arg re '" + gadget.termClassRe + "' "
+          + "'.[] | select((.class//\"\"|ascii_downcase)|test($re)) | "
+          + "{address, class, title, workspace:(.workspace.id // -1), pid, mapped}' | "
+          + "while read -r line; do pid=$(printf '%s' \"$line\" | jq -r .pid); "
+          + "cwd=$(readlink /proc/$pid/cwd 2>/dev/null); "
+          + "printf '%s' \"$line\" | jq -c --arg cwd \"$cwd\" '. + {cwd:$cwd}'; done | jq -s -c '.'"]
+        stdout: StdioCollector { id: clientsOut; onStreamFinished: gadget.parseClients(clientsOut.text) }
+    }
+    function refreshWindows() { if (!clientsProc.running) clientsProc.running = true }
+
+    // Focus a plain (untracked) window — tracked rows use bridge.focusSession.
+    Process { id: focusProc }
+    function focusWindow(addr) {
+        if (!addr) return;
+        focusProc.command = ["hyprctl", "dispatch", "focuswindow", "address:" + addr];
+        focusProc.running = true;
+    }
+
+    // Re-read the window list on a cadence so freshly-opened/closed plain
+    // terminals appear/disappear; the stage FileView already covers tracked state.
+    Timer { interval: 1500; running: true; repeat: true; onTriggered: gadget.refreshWindows() }
     Timer { interval: 1000; running: true; repeat: true; onTriggered: gadget.nowMs = Date.now() }
-    Component.onCompleted: parseStage()
+    Component.onCompleted: { parseStage(); refreshWindows() }
 
     // cast shadow — lifts the temple off any marble wallpaper ────────────────────
     Rectangle {
@@ -372,7 +543,7 @@ Item {
                 Text {
                     id: ffL
                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                    text: "╰─┤ " + gadget.sessions.length + " terminal" + (gadget.sessions.length === 1 ? "" : "s")
+                    text: "╰─┤ " + gadget.rows.length + " terminal" + (gadget.rows.length === 1 ? "" : "s")
                           + " · " + gadget.projectCount + " cwd" + (gadget.projectCount === 1 ? "" : "s") + " ├"
                     font.family: gadget.faceMono; font.pixelSize: 11
                     color: gadget.withA(notes.paletteFg, 0.8)
@@ -414,7 +585,7 @@ Item {
                 Column {
                     anchors.centerIn: parent
                     spacing: 4
-                    visible: gadget.sessions.length === 0
+                    visible: gadget.rows.length === 0
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         horizontalAlignment: Text.AlignHCenter
@@ -452,8 +623,8 @@ Item {
                 ListView {
                     id: roster
                     anchors.fill: parent
-                    visible: gadget.sessions.length > 0
-                    model: gadget.sessions
+                    visible: gadget.rows.length > 0
+                    model: gadget.rows
                     spacing: 0
                     boundsBehavior: Flickable.StopAtBounds
                     clip: true
@@ -463,12 +634,24 @@ Item {
                         width: roster.width
                         height: 52
 
-                        property bool emph: modelData.sessionId === gadget.emphId
+                        // an emph row must have a real sessionId — plain untracked
+                        // terminals ("" id) never claim the traced crown.
+                        property bool emph: (modelData.sessionId || "") !== ""
+                                            && modelData.sessionId === gadget.emphId
                         property bool awaiting: gadget.isAwaiting(modelData.state)
                         property color accent: emph ? notes.paletteHot
                                                     : gadget.stateColor(modelData.state)
 
                         onAwaitingChanged: if (!awaiting) noteGlyph.opacity = 1
+
+                        // Re-assert the bar highlight if this row is rebuilt while
+                        // it is the hovered one (roster refresh under a still pointer).
+                        Component.onCompleted: {
+                            if (gadget.shared && gadget.shared.hoveredSessionId !== ""
+                                && gadget.shared.hoveredSessionId === gadget.rowKey(modelData))
+                                gadget.setHover(gadget.rowKey(modelData),
+                                                modelData.workspace !== undefined ? modelData.workspace : -1);
+                        }
 
                         Rectangle {                    // staff ledger line
                             anchors.bottom: parent.bottom
@@ -548,8 +731,8 @@ Item {
                                     anchors.left: parent.left
                                     anchors.right: kao.left; anchors.rightMargin: 6
                                     elide: Text.ElideMiddle
-                                    // a shell prompt reading the tty's own cwd
-                                    text: gadget.promptFor(modelData.agent, modelData.cwd)
+                                    // a shell prompt reading the tty's own cwd (or title)
+                                    text: gadget.promptFor(modelData)
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: gadget.withA(gadget.sig, 0.95)
                                 }
@@ -578,21 +761,21 @@ Item {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            // hovering a roster row lights up that session's
+                            // hovering a roster row lights up that terminal's
                             // workspace on the bar (shared.hoveredWorkspace →
-                            // WorkspaceRow preview highlight). Null-guard shared;
-                            // clear back to the -1 resting sentinel on exit.
-                            onEntered: {
-                                if (gadget.shared)
-                                    gadget.shared.hoveredWorkspace = (modelData.workspace !== undefined ? modelData.workspace : -1);
-                            }
-                            onExited: {
-                                if (gadget.shared)
-                                    gadget.shared.hoveredWorkspace = -1;
-                            }
+                            // WorkspaceRow preview highlight). Keyed on rowKey and
+                            // cleared through the deferred guard so a roster refresh
+                            // can't strand or wipe a hover the pointer still holds.
+                            onEntered: gadget.setHover(gadget.rowKey(modelData),
+                                                       modelData.workspace !== undefined ? modelData.workspace : -1)
+                            onExited:  gadget.requestHoverClear(gadget.rowKey(modelData))
                             onClicked: {
-                                if (gadget.bridge && gadget.bridge.focusSession)
+                                // tracked row → focus its session; plain terminal →
+                                // focus its Hyprland window directly.
+                                if (modelData.sessionId && gadget.bridge && gadget.bridge.focusSession)
                                     gadget.bridge.focusSession(modelData.sessionId);
+                                else
+                                    gadget.focusWindow(modelData.windowAddress);
                             }
                         }
                     }

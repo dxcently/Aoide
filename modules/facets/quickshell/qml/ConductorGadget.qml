@@ -53,6 +53,14 @@ Item {
     property real nowMs: Date.now()
     property string emphId: ""
     property int projectCount: 0
+    // Signature of the RENDERED roster — recompute() only swaps the ListView
+    // model when this changes, so the frequent no-op sessions.json rewrites
+    // (agents heartbeat while their state/cwd stay put) don't tear down and
+    // rebuild the row delegates. A live delegate keeps its MouseArea's
+    // containsMouse, so a hover over the bar-highlight row survives the reload.
+    property string _rosterSig: ""
+    // A deferred hover-clear guard (see setHover/requestHoverClear below).
+    property string _pendingClearId: ""
 
     function withA(cstr, a) {                      // alpha on a role string
         var c = Qt.darker(cstr, 1.0);
@@ -150,17 +158,55 @@ Item {
     }
 
     // the single emphasized session (traced, else first working) — over VISIBLE ──
-    function computeEmph() {
+    function computeEmph(rows) {
         var i;
         if (shared && shared.tracedSessionId) {
-            for (i = 0; i < visibleRows.length; i++)
-                if (visibleRows[i].sessionId === shared.tracedSessionId)
+            for (i = 0; i < rows.length; i++)
+                if (rows[i].sessionId === shared.tracedSessionId)
                     return shared.tracedSessionId;
         }
-        for (i = 0; i < visibleRows.length; i++)
-            if (/(run|active|tool|work|busy|trace)/.test((visibleRows[i].state || "").toLowerCase()))
-                return visibleRows[i].sessionId;
+        for (i = 0; i < rows.length; i++)
+            if (/(run|active|tool|work|busy|trace)/.test((rows[i].state || "").toLowerCase()))
+                return rows[i].sessionId;
         return "";
+    }
+
+    // a signature over ONLY the fields the delegate renders — so a rewrite that
+    // touches nothing visible (a heartbeat timestamp, a socket path) yields the
+    // same string and we keep the existing delegates (and the live hover) intact.
+    function rosterSig(rows) {
+        var parts = [];
+        for (var i = 0; i < rows.length; i++) {
+            var r = rows[i];
+            parts.push([r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
+                        r.workspace, r._conductedBy].join(""));
+        }
+        return parts.join("");
+    }
+
+    // ── Hover→bar highlight, made robust to delegate churn ───────────────────────
+    // The row delegate calls these instead of poking `shared` directly. Hover is
+    // keyed on the row's sessionId so a rebuilt delegate can re-assert it, and the
+    // clear is DEFERRED (Qt.callLater) + cancellable so a teardown-triggered exit
+    // that is immediately followed by the same row's re-creation does not wipe a
+    // hover the pointer still holds.
+    function setHover(sid, ws) {
+        if (!shared) return;
+        _pendingClearId = "";                       // cancel any deferred clear
+        shared.hoveredSessionId = sid;
+        shared.hoveredWorkspace = (ws !== undefined ? ws : -1);
+    }
+    function requestHoverClear(sid) {
+        if (!shared || shared.hoveredSessionId !== sid) return;
+        _pendingClearId = sid;
+        Qt.callLater(applyHoverClear);
+    }
+    function applyHoverClear() {
+        if (_pendingClearId && shared && shared.hoveredSessionId === _pendingClearId) {
+            shared.hoveredSessionId = "";
+            shared.hoveredWorkspace = -1;
+        }
+        _pendingClearId = "";
     }
 
     function elapsed(startedAt) {
@@ -184,22 +230,31 @@ Item {
     }
 
     function recompute() {
-        visibleRows = computeVisible();
+        var next = computeVisible();
         // assign each distinct effective-agent a stable identity slot (order of
         // first appearance), so hueFor() cycles the base16 spread deterministically.
         var idx = ({}), slot = 0, i;
-        for (i = 0; i < visibleRows.length; i++) {
-            var k = effAgent(visibleRows[i]);
+        for (i = 0; i < next.length; i++) {
+            var k = effAgent(next[i]);
             if (k.length > 0 && idx[k] === undefined) { idx[k] = slot; slot++; }
         }
         agentIndex = idx;
-        emphId = computeEmph();
+        emphId = computeEmph(next);
         var seen = ({}), n = 0;
-        for (i = 0; i < visibleRows.length; i++) {
-            var c = visibleRows[i].cwd || "?";
+        for (i = 0; i < next.length; i++) {
+            var c = next[i].cwd || "?";
             if (!seen[c]) { seen[c] = true; n++; }
         }
         projectCount = n;
+        // Only reassign the ListView model when the rendered roster actually
+        // changed. agentIndex/emphId/projectCount above are plain properties whose
+        // re-evaluation does NOT recreate delegates; `visibleRows` is the model, so
+        // holding its reference stable across no-op reloads is what stops the flicker.
+        var sig = rosterSig(next);
+        if (sig !== _rosterSig || visibleRows.length !== next.length) {
+            _rosterSig = sig;
+            visibleRows = next;
+        }
     }
     function parseStage() {
         try {
@@ -649,6 +704,16 @@ Item {
                             color: row.emph ? notes.paletteHot : notes.paletteAccent
                         }
 
+                        // If this row is (re)created while it is the hovered row —
+                        // e.g. a genuine roster change rebuilt the delegate under a
+                        // stationary pointer — re-assert its workspace highlight so
+                        // the bar preview persists without waiting for a mouse move.
+                        Component.onCompleted: {
+                            if (gadget.shared && gadget.shared.hoveredSessionId === (modelData.sessionId || ""))
+                                gadget.setHover(modelData.sessionId || "",
+                                                modelData.workspace !== undefined ? modelData.workspace : -1);
+                        }
+
                         MouseArea {
                             id: hover
                             anchors.fill: parent
@@ -656,16 +721,12 @@ Item {
                             cursorShape: Qt.PointingHandCursor
                             // hovering a roster row lights up that session's
                             // workspace on the bar (shared.hoveredWorkspace →
-                            // WorkspaceRow preview highlight). Null-guard shared;
-                            // clear back to the -1 resting sentinel on exit.
-                            onEntered: {
-                                if (gadget.shared)
-                                    gadget.shared.hoveredWorkspace = (modelData.workspace !== undefined ? modelData.workspace : -1);
-                            }
-                            onExited: {
-                                if (gadget.shared)
-                                    gadget.shared.hoveredWorkspace = -1;
-                            }
+                            // WorkspaceRow preview highlight). Keyed on sessionId and
+                            // cleared through the deferred guard so a roster refresh
+                            // can't strand or wipe a hover the pointer still holds.
+                            onEntered: gadget.setHover(modelData.sessionId || "",
+                                                       modelData.workspace !== undefined ? modelData.workspace : -1)
+                            onExited:  gadget.requestHoverClear(modelData.sessionId || "")
                             onClicked: {
                                 if (gadget.bridge && gadget.bridge.focusSession)
                                     gadget.bridge.focusSession(modelData.sessionId);
