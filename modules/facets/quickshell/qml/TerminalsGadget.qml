@@ -685,7 +685,7 @@ Item {
                         Column {
                             id: body
                             anchors.left: gutter.right; anchors.leftMargin: 10
-                            anchors.right: elapsedText.left; anchors.rightMargin: 8
+                            anchors.right: parent.right; anchors.rightMargin: 12
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 2
 
@@ -694,7 +694,11 @@ Item {
                                 spacing: 8
                                 Text {                     // the PROCESS / command / file being edited
                                     id: procName
-                                    width: Math.min(implicitWidth, body.width - 78)
+                                    // the state tag claims its space FIRST; the process
+                                    // name elides into the rest (a fixed reserve let a
+                                    // long command push the tag off the right edge).
+                                    width: Math.max(24, Math.min(implicitWidth,
+                                                    body.width - stateTag.slot))
                                     elide: Text.ElideRight
                                     text: row.procText
                                     font.family: gadget.faceMono; font.pixelSize: 14
@@ -702,14 +706,30 @@ Item {
                                     color: notes.paletteFg
                                 }
                                 Text {
+                                    id: stateTag
+                                    readonly property real slot: visible ? implicitWidth + 8 : 0
                                     anchors.baseline: procName.baseline
                                     text: gadget.stateLabel(modelData.state)
                                     font.family: gadget.faceSerif; font.italic: true
                                     font.pixelSize: 11
                                     color: row.accent
                                 }
+                            }
+                            // TALLY — elapsed since the terminal opened, and the
+                            // Hyprland workspace it sits on. Both ride UNDER the
+                            // process line: pinned to the row's right edge they
+                            // collided with the wrapped say prose and the kaomoji.
+                            Row {
+                                width: parent.width
+                                spacing: 8
+                                Text {                     // elapsed, tallied in aegean
+                                    id: elapsedText
+                                    text: gadget.elapsed(modelData.startedAt)
+                                    font.family: gadget.faceMono; font.pixelSize: 11
+                                    color: row.emph ? notes.paletteHot : gadget.sig
+                                }
                                 Text {                     // the Hyprland workspace — plain number tag
-                                    anchors.baseline: procName.baseline
+                                    anchors.baseline: elapsedText.baseline
                                     visible: row.wsId >= 0
                                     text: "ws" + row.wsId
                                     font.family: gadget.faceMono; font.pixelSize: 10
@@ -752,15 +772,6 @@ Item {
                                     color: gadget.withA(row.accent, 0.85)
                                 }
                             }
-                        }
-
-                        Text {                          // elapsed, tallied in aegean
-                            id: elapsedText
-                            anchors.right: parent.right; anchors.rightMargin: 12
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: gadget.elapsed(modelData.startedAt)
-                            font.family: gadget.faceMono; font.pixelSize: 12
-                            color: row.emph ? notes.paletteHot : gadget.sig
                         }
 
                         MouseArea {

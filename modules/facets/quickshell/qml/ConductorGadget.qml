@@ -782,7 +782,7 @@ Item {
                         Column {
                             id: body
                             anchors.left: gutter.right; anchors.leftMargin: 10
-                            anchors.right: elapsedText.left; anchors.rightMargin: 8
+                            anchors.right: parent.right; anchors.rightMargin: 12
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 2
 
@@ -791,8 +791,12 @@ Item {
                                 spacing: 8
                                 Text {                     // the session NAME (title, else agent)
                                     id: agentName
-                                    // leave room for the tags/state that follow
-                                    width: Math.min(implicitWidth, body.width - 92)
+                                    // The state tag claims its space FIRST and the
+                                    // name elides into whatever is left — a fixed
+                                    // reserve let a long title push the tag off the
+                                    // row's right edge (Row does not elide for us).
+                                    width: Math.max(24, Math.min(implicitWidth,
+                                                    body.width - stateTag.slot))
                                     elide: Text.ElideRight
                                     text: row.nameText
                                     font.family: gadget.faceSerif
@@ -800,29 +804,50 @@ Item {
                                     font.weight: row.emph ? Font.Bold : Font.Medium
                                     color: notes.paletteFg
                                 }
-                                Text {                     // subagent type / agent, when a title took the name
-                                    anchors.baseline: agentName.baseline
-                                    visible: row.hasTitle
-                                    text: (row.subagent ? "⟐ " : "") + (modelData.agent || "")
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: row.idHue
-                                }
-                                Text {                     // which agent conducts this shell
-                                    anchors.baseline: agentName.baseline
-                                    visible: row.conductedBy.length > 0
-                                    text: "⇢ " + row.conductedBy
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: row.idHue
-                                }
                                 Text {
+                                    id: stateTag
+                                    readonly property real slot: visible ? implicitWidth + 8 : 0
                                     anchors.baseline: agentName.baseline
                                     text: gadget.stateLabel(modelData.state)
                                     font.family: gadget.faceSerif; font.italic: true
                                     font.pixelSize: 11
                                     color: row.accent
                                 }
+                            }
+                            // TALLY — the row's metadata line: elapsed, then the
+                            // agent TAG Claude labels its sub-agents with, then the
+                            // conductor, then the Hyprland workspace. All of it
+                            // rides UNDER the name so the name line stays a name and
+                            // a state; pinned to the row's right edge the elapsed
+                            // time collided with the wrapped say prose and, on a
+                            // child row, with the kaomoji.
+                            Row {
+                                width: parent.width
+                                spacing: 8
+                                Text {                     // elapsed, tallied in gold
+                                    id: elapsedText
+                                    text: gadget.elapsed(modelData.startedAt)
+                                    font.family: gadget.faceMono; font.pixelSize: 11
+                                    color: row.emph ? notes.paletteHot : notes.paletteAccent
+                                }
+                                Text {                     // subagent type / agent, when a title took the name
+                                    id: agentTag
+                                    anchors.baseline: elapsedText.baseline
+                                    visible: row.hasTitle
+                                    text: (row.subagent ? "⟐ " : "") + (modelData.agent || "")
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: row.idHue
+                                }
+                                Text {                     // which agent conducts this shell
+                                    id: condTag
+                                    anchors.baseline: elapsedText.baseline
+                                    visible: row.conductedBy.length > 0
+                                    text: "⇢ " + row.conductedBy
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: row.idHue
+                                }
                                 Text {                     // the Hyprland workspace — plain number tag
-                                    anchors.baseline: agentName.baseline
+                                    anchors.baseline: elapsedText.baseline
                                     visible: row.wsId >= 0
                                     text: "ws" + row.wsId
                                     font.family: gadget.faceMono; font.pixelSize: 10
@@ -873,15 +898,6 @@ Item {
                                     color: gadget.withA(row.accent, 0.85)
                                 }
                             }
-                        }
-
-                        Text {                          // elapsed, tallied in gold
-                            id: elapsedText
-                            anchors.right: parent.right; anchors.rightMargin: 12
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: gadget.elapsed(modelData.startedAt)
-                            font.family: gadget.faceMono; font.pixelSize: 12
-                            color: row.emph ? notes.paletteHot : notes.paletteAccent
                         }
 
                         // If this row is (re)created while it is the hovered row —
