@@ -39,291 +39,309 @@
   options.aoide.neovim.enable = lib.mkEnableOption "Neovim via nvf (dxflake stack: rose-pine, LSP/treesitter, telescope, neo-tree)";
 
   config = lib.mkIf config.aoide.neovim.enable {
-    home-manager.users.${config.aoide.user} = {
-      imports = [ inputs.nvf.homeManagerModules.default ];
+    home-manager.users.${config.aoide.user} =
+      { pkgs, lib, ... }:
+      {
+        imports = [ inputs.nvf.homeManagerModules.default ];
 
-      # nvf provides the only `nvim` in the profile (header), so the dendrite
-      # that installs the editor also declares it the default — EDITOR/VISUAL
-      # for login shells, TTY, and SSH on this single-user box. Guarded by the
-      # same aoide.neovim.enable, so the editor default never outlives nvim.
-      home.sessionVariables = {
-        EDITOR = "nvim";
-        VISUAL = "nvim";
-      };
+        # nvf provides the only `nvim` in the profile (header), so the dendrite
+        # that installs the editor also declares it the default — EDITOR/VISUAL
+        # for login shells, TTY, and SSH on this single-user box. Guarded by the
+        # same aoide.neovim.enable, so the editor default never outlives nvim.
+        home.sessionVariables = {
+          EDITOR = "nvim";
+          VISUAL = "nvim";
+        };
 
-      programs.nvf = {
-        enable = true;
+        programs.nvf = {
+          enable = true;
 
-        settings.vim = {
-          # dxflake split aliases across nvf + a bare programs.neovim; both
-          # live on nvf's wrapper here (see header).
-          vimAlias = true;
-          viAlias = true;
+          settings.vim = {
+            # dxflake split aliases across nvf + a bare programs.neovim; both
+            # live on nvf's wrapper here (see header).
+            vimAlias = true;
+            viAlias = true;
 
-          # mkForce: the Stylix facet's auto-imported HM nvf target pushes a
-          # base16 theme at nvf; dxflake pinned rose-pine over its stylix the
-          # same way. Forced so the dendrite's pick wins deterministically.
-          theme = lib.mkForce {
-            enable = true;
-            name = "rose-pine";
-            style = "main";
-          };
+            # nvf's languages.rust only bundles rust-analyzer (see
+            # modules/plugins/languages/rust.nix upstream) — the toolchain
+            # itself is deliberately left off the general PATH everywhere else
+            # in Aoide (cargo/rustc live in the flake devShell, not
+            # home.packages), matching the "nix develop -c cargo test" convention
+            # used throughout this repo. But Neovim's OWN built-in LSP root_dir
+            # detection (vim.lsp's rust_analyzer config, not a plugin) shells out
+            # to `rustc` directly to find the sysroot, and errors when it's
+            # missing (confirmed live: "ENOENT ... (cmd): 'rustc'" opening any
+            # pkgs/aoide/src/*.rs file). extraPackages scopes the fix to nvim's
+            # OWN wrapped PATH only — the rest of the system stays toolchain-free.
+            extraPackages = [
+              pkgs.rustc
+              pkgs.cargo
+            ];
 
-          keymaps = [
-            {
-              key = "<leader>y";
-              mode = [
-                "v"
-                "n"
-              ];
-              action = ''"+y'';
-              desc = "Yank into system clipboard";
-            }
-            {
-              key = "<leader>d";
-              mode = [
-                "v"
-                "n"
-              ];
-              action = ''"+d'';
-              desc = "Cut into system clipboard";
-            }
-            {
-              key = "<leader>Y";
-              mode = [
-                "v"
-                "n"
-              ];
-              action = ''"+yg_'';
-              desc = "Yank to the right of cursor into system clipboard";
-            }
-            {
-              key = "<leader>p";
-              mode = [
-                "v"
-                "n"
-              ];
-              action = ''"+p'';
-              desc = "Paste from system clipboard";
-            }
-            {
-              key = "<leader>P";
-              mode = [
-                "v"
-                "n"
-              ];
-              action = ''"+P'';
-              desc = "Paste to the left of cursor from system clipboard";
-            }
-            {
-              key = "<C-h>";
-              mode = [ "i" ];
-              action = "<Left>";
-              desc = "Move left in insert mode";
-            }
-            {
-              key = "<C-j>";
-              mode = [ "i" ];
-              action = "<Down>";
-              desc = "Move down in insert mode";
-            }
-            {
-              key = "<C-k>";
-              mode = [ "i" ];
-              action = "<Up>";
-              desc = "Move up in insert mode";
-            }
-            {
-              key = "<C-l>";
-              mode = [ "i" ];
-              action = "<Right>";
-              desc = "Move right in insert mode";
-            }
-            {
-              key = "<leader>nt";
-              mode = [ "n" ];
-              action = "<cmd>Neotree toggle<cr>";
-              desc = "File browser toggle";
-            }
-            {
-              key = "<leader>nh";
-              mode = [ "n" ];
-              action = ":nohl<CR>";
-              desc = "Clear search highlights";
-            }
-            {
-              key = "<leader>?";
-              mode = [ "n" ];
-              action = "<cmd>Cheatsheet<cr>";
-              desc = "Opens cheatsheet.nvim";
-            }
-          ];
+            # mkForce: the Stylix facet's auto-imported HM nvf target pushes a
+            # base16 theme at nvf; dxflake pinned rose-pine over its stylix the
+            # same way. Forced so the dendrite's pick wins deterministically.
+            theme = lib.mkForce {
+              enable = true;
+              name = "rose-pine";
+              style = "main";
+            };
 
-          options = {
-            autoindent = true;
-            wrap = false;
-            tabstop = 4;
-            shiftwidth = 4;
-            termguicolors = true;
-          };
+            keymaps = [
+              {
+                key = "<leader>y";
+                mode = [
+                  "v"
+                  "n"
+                ];
+                action = ''"+y'';
+                desc = "Yank into system clipboard";
+              }
+              {
+                key = "<leader>d";
+                mode = [
+                  "v"
+                  "n"
+                ];
+                action = ''"+d'';
+                desc = "Cut into system clipboard";
+              }
+              {
+                key = "<leader>Y";
+                mode = [
+                  "v"
+                  "n"
+                ];
+                action = ''"+yg_'';
+                desc = "Yank to the right of cursor into system clipboard";
+              }
+              {
+                key = "<leader>p";
+                mode = [
+                  "v"
+                  "n"
+                ];
+                action = ''"+p'';
+                desc = "Paste from system clipboard";
+              }
+              {
+                key = "<leader>P";
+                mode = [
+                  "v"
+                  "n"
+                ];
+                action = ''"+P'';
+                desc = "Paste to the left of cursor from system clipboard";
+              }
+              {
+                key = "<C-h>";
+                mode = [ "i" ];
+                action = "<Left>";
+                desc = "Move left in insert mode";
+              }
+              {
+                key = "<C-j>";
+                mode = [ "i" ];
+                action = "<Down>";
+                desc = "Move down in insert mode";
+              }
+              {
+                key = "<C-k>";
+                mode = [ "i" ];
+                action = "<Up>";
+                desc = "Move up in insert mode";
+              }
+              {
+                key = "<C-l>";
+                mode = [ "i" ];
+                action = "<Right>";
+                desc = "Move right in insert mode";
+              }
+              {
+                key = "<leader>nt";
+                mode = [ "n" ];
+                action = "<cmd>Neotree toggle<cr>";
+                desc = "File browser toggle";
+              }
+              {
+                key = "<leader>nh";
+                mode = [ "n" ];
+                action = ":nohl<CR>";
+                desc = "Clear search highlights";
+              }
+              {
+                key = "<leader>?";
+                mode = [ "n" ];
+                action = "<cmd>Cheatsheet<cr>";
+                desc = "Opens cheatsheet.nvim";
+              }
+            ];
 
-          syntaxHighlighting = true;
+            options = {
+              autoindent = true;
+              wrap = false;
+              tabstop = 4;
+              shiftwidth = 4;
+              termguicolors = true;
+            };
 
-          telescope.enable = true;
-          spellcheck = {
-            enable = false;
-          };
+            syntaxHighlighting = true;
 
-          lsp = {
-            enable = true;
-            formatOnSave = true;
-            lspkind.enable = true;
-            trouble.enable = true;
-            lspSignature.enable = true;
-            nvim-docs-view.enable = false;
-            inlayHints.enable = false;
-            # Tailwind is web-frontend tooling Aoide doesn't use — shelved with
-            # the css block below.
-            # presets.tailwindcss-language-server.enable = true;
-          };
+            telescope.enable = true;
+            spellcheck = {
+              enable = false;
+            };
 
-          languages = {
-            enableFormat = true;
-            enableTreesitter = true;
-            enableExtraDiagnostics = true;
+            lsp = {
+              enable = true;
+              formatOnSave = true;
+              lspkind.enable = true;
+              trouble.enable = true;
+              lspSignature.enable = true;
+              nvim-docs-view.enable = false;
+              inlayHints.enable = false;
+              # Tailwind is web-frontend tooling Aoide doesn't use — shelved with
+              # the css block below.
+              # presets.tailwindcss-language-server.enable = true;
+            };
 
-            # ── Enabled: the Aoide working set ────────────────────────────
-            bash.enable = true;
-            rust.enable = true; # aoide CLI / aoided
-            typescript.enable = true; # notes package (ts/js + node)
-            nix = {
-              enable = true; # this repo
-              format = {
+            languages = {
+              enableFormat = true;
+              enableTreesitter = true;
+              enableExtraDiagnostics = true;
+
+              # ── Enabled: the Aoide working set ────────────────────────────
+              bash.enable = true;
+              rust.enable = true; # aoide CLI / aoided
+              typescript.enable = true; # notes package (ts/js + node)
+              nix = {
+                enable = true; # this repo
+                format = {
+                  enable = true;
+                  # dxflake used alejandra; Aoide's flake formatter is nixfmt —
+                  # keep the two in agreement.
+                  type = [ "nixfmt" ];
+                };
+              };
+              markdown = {
                 enable = true;
-                # dxflake used alejandra; Aoide's flake formatter is nixfmt —
-                # keep the two in agreement.
-                type = [ "nixfmt" ];
+                extensions = {
+                  #markview-nvim.enable = true;
+                  render-markdown-nvim.enable = true;
+                };
+              };
+
+              # ── Shelved: the rest of dxflake's language set ───────────────
+              # Preserved intact; re-enable a language by uncommenting its block.
+              # python.enable = true;
+              # clang.enable = true;
+              # html.enable = true;
+              # lua.enable = true;
+              # typst = {
+              #   enable = true;
+              #   extensions.typst-preview-nvim.enable = true;
+              #   format = {
+              #     enable = true;
+              #     type = [ "typstyle" ];
+              #   };
+              # };
+              # css = {
+              #   enable = true;
+              #   format.enable = true;
+              #   lsp.enable = true;
+              # };
+            };
+
+            visuals = {
+              nvim-cursorline.enable = true;
+              fidget-nvim.enable = true;
+
+              highlight-undo.enable = true;
+              indent-blankline.enable = true;
+            };
+
+            statusline = {
+              lualine = {
+                enable = true;
+                # mkForce: same Stylix nvf-target collision as theme above (it
+                # pins lualine to "base16"); dxflake ran lualine on "auto".
+                theme = lib.mkForce "auto";
               };
             };
-            markdown = {
+
+            autopairs.nvim-autopairs.enable = true;
+
+            autocomplete.nvim-cmp.enable = true;
+            snippets.luasnip.enable = true;
+
+            tabline = {
+              nvimBufferline.enable = true;
+            };
+
+            treesitter = {
+              context.enable = false; # annoying
+              indent.enable = false; # annoying indenter
+            };
+
+            binds = {
+              whichKey.enable = true;
+              cheatsheet.enable = true;
+            };
+
+            git = {
               enable = true;
-              extensions = {
-                #markview-nvim.enable = true;
-                render-markdown-nvim.enable = true;
+              gitsigns.enable = true;
+              gitsigns.codeActions.enable = false; # throws an annoying debug message
+            };
+
+            filetree.neo-tree = {
+              enable = true;
+            };
+
+            dashboard = {
+              dashboard-nvim.enable = true;
+              alpha.enable = true;
+            };
+
+            notify = {
+              nvim-notify.enable = true;
+            };
+
+            utility = {
+              ccc.enable = true;
+              icon-picker.enable = false;
+              surround.enable = true;
+              diffview-nvim.enable = true;
+              nix-develop.enable = true;
+              motion = {
+                precognition.enable = true;
+              };
+
+              images = {
+                image-nvim.enable = false;
               };
             };
 
-            # ── Shelved: the rest of dxflake's language set ───────────────
-            # Preserved intact; re-enable a language by uncommenting its block.
-            # python.enable = true;
-            # clang.enable = true;
-            # html.enable = true;
-            # lua.enable = true;
-            # typst = {
-            #   enable = true;
-            #   extensions.typst-preview-nvim.enable = true;
-            #   format = {
-            #     enable = true;
-            #     type = [ "typstyle" ];
-            #   };
-            # };
-            # css = {
-            #   enable = true;
-            #   format.enable = true;
-            #   lsp.enable = true;
-            # };
-          };
-
-          visuals = {
-            nvim-cursorline.enable = true;
-            fidget-nvim.enable = true;
-
-            highlight-undo.enable = true;
-            indent-blankline.enable = true;
-          };
-
-          statusline = {
-            lualine = {
-              enable = true;
-              # mkForce: same Stylix nvf-target collision as theme above (it
-              # pins lualine to "base16"); dxflake ran lualine on "auto".
-              theme = lib.mkForce "auto";
-            };
-          };
-
-          autopairs.nvim-autopairs.enable = true;
-
-          autocomplete.nvim-cmp.enable = true;
-          snippets.luasnip.enable = true;
-
-          tabline = {
-            nvimBufferline.enable = true;
-          };
-
-          treesitter = {
-            context.enable = false; # annoying
-            indent.enable = false; # annoying indenter
-          };
-
-          binds = {
-            whichKey.enable = true;
-            cheatsheet.enable = true;
-          };
-
-          git = {
-            enable = true;
-            gitsigns.enable = true;
-            gitsigns.codeActions.enable = false; # throws an annoying debug message
-          };
-
-          filetree.neo-tree = {
-            enable = true;
-          };
-
-          dashboard = {
-            dashboard-nvim.enable = true;
-            alpha.enable = true;
-          };
-
-          notify = {
-            nvim-notify.enable = true;
-          };
-
-          utility = {
-            ccc.enable = true;
-            icon-picker.enable = false;
-            surround.enable = true;
-            diffview-nvim.enable = true;
-            nix-develop.enable = true;
-            motion = {
-              precognition.enable = true;
+            ui = {
+              borders.enable = true;
+              noice.enable = true;
+              colorizer.enable = true;
+              illuminate.enable = true;
+              smartcolumn = {
+                enable = true;
+              };
+              fastaction.enable = true;
             };
 
-            images = {
-              image-nvim.enable = false;
+            session = {
+              nvim-session-manager.enable = false;
             };
-          };
 
-          ui = {
-            borders.enable = true;
-            noice.enable = true;
-            colorizer.enable = true;
-            illuminate.enable = true;
-            smartcolumn = {
-              enable = true;
+            comments = {
+              comment-nvim.enable = true;
             };
-            fastaction.enable = true;
-          };
-
-          session = {
-            nvim-session-manager.enable = false;
-          };
-
-          comments = {
-            comment-nvim.enable = true;
           };
         };
       };
-    };
   };
 }
