@@ -624,6 +624,11 @@ Item {
                         readonly property color beamHue: gadget.hueForAgent(
                             (modelData._parentAgent && modelData._parentAgent.length > 0)
                                 ? modelData._parentAgent : gadget.effAgent(modelData))
+                        // the live Hyprland workspace this row sits on — a plain
+                        // arabic number tag (NOT a note-glyph); -1 = none yet.
+                        readonly property int wsId: (modelData.workspace !== undefined
+                                                     && modelData.workspace !== null)
+                                                        ? modelData.workspace : -1
 
                         Rectangle {                    // staff ledger line
                             anchors.bottom: parent.bottom
@@ -815,6 +820,13 @@ Item {
                                     font.family: gadget.faceSerif; font.italic: true
                                     font.pixelSize: 11
                                     color: row.accent
+                                }
+                                Text {                     // the Hyprland workspace — plain number tag
+                                    anchors.baseline: agentName.baseline
+                                    visible: row.wsId >= 0
+                                    text: "ws" + row.wsId
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: row.idHue
                                 }
                             }
                             // ACTIVITY — the current command/tool, tinted like the

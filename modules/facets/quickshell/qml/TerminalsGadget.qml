@@ -617,6 +617,11 @@ Item {
                         // the agent's latest WORDS (transcript tail) — distinct
                         // from procText (the process). Plain ttys stay silent.
                         readonly property string sayText: modelData.say || ""
+                        // the live Hyprland workspace this row sits on — a plain
+                        // arabic number tag (NOT a note-glyph); -1 = none yet.
+                        readonly property int wsId: (modelData.workspace !== undefined
+                                                     && modelData.workspace !== null)
+                                                        ? modelData.workspace : -1
 
                         onAwaitingChanged: if (!awaiting) noteGlyph.opacity = 1
 
@@ -702,6 +707,13 @@ Item {
                                     font.family: gadget.faceSerif; font.italic: true
                                     font.pixelSize: 11
                                     color: row.accent
+                                }
+                                Text {                     // the Hyprland workspace — plain number tag
+                                    anchors.baseline: procName.baseline
+                                    visible: row.wsId >= 0
+                                    text: "ws" + row.wsId
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: gadget.withA(gadget.sig, 0.85)
                                 }
                             }
                             // SAY — a claude terminal's latest words, tail-read from
