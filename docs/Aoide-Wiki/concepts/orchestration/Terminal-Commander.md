@@ -74,7 +74,7 @@ The plumbing already exists ([[Desktop-Architecture]], [[shellbridge]]):
   cover a session whose window the event listener didn't stamp (e.g. a hook-only
   Claude Code session with no recorded conduct pid for the listener to walk).
 - Claude Code hooks (`Notification` / `Stop` / `Pre-PostToolUse`) post execution
-  phase, so each row shows live state (running · awaiting input · idle · done).
+  phase, so each row shows live state (working · awaiting · stopped · idle · done).
 - Unwrapped agents fall back to process-signal / window-title heuristics.
 
 ## The list
@@ -87,7 +87,7 @@ session:
 |---|---|
 | agent | claude · melete-run · … |
 | where | repo / cwd |
-| state | running · awaiting-input · idle · done |
+| state | working · awaiting · stopped · idle · done |
 | elapsed | 04:12 |
 | window | Hyprland address (used for the jump) |
 

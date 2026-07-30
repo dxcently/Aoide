@@ -24,7 +24,7 @@ Four self-framed gadgets stack in one scrolling column:
   agent/sub-agent sessions plus any shell an agent is attached to (a shared
   `windowAddress`); a bare, unattended shell is hidden. Rows are named by
   session `title`, coloured/glyphed by the canonical `state`
-  (♪ working · 𝄐 awaiting · 𝄽 idle · 𝄂 done), and show each agent's `say`;
+  (♪ working · 𝄐 awaiting · 𝄁 stopped · 𝄽 idle · 𝄂 done), and show each agent's `say`;
   sub-agents beam beneath their parent one indent level
   ([[Widget-Bridge-Contract]]). Each row also carries a plain arabic-numeral
   `wsN` tag next to its state label, naming the row's live Hyprland

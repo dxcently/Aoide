@@ -21,17 +21,24 @@ Pipe ONE hook payload as JSON on stdin:
 echo '{"session_id":"…","hook_event_name":"…","cwd":"…","message":"…"}' | aoide graph session hook
 ```
 
-Event → canonical-state map (the door is a silent no-op for everything else, and NEVER exits non-zero — safe inside any hook config). The four canonical states are `working`/`awaiting`/`idle`/`done` ([[Widget-Bridge-Contract]]); a legacy `running`/`waiting`/`blocked` write from an older door is folded onto this set by a read-side shim (`canonical_state`) the first time anything touches the file, so no migration step is needed:
+Event → canonical-state map (the door is a silent no-op for everything else, and NEVER exits non-zero — safe inside any hook config). The five canonical states are `working`/`awaiting`/`stopped`/`idle`/`done` ([[Widget-Bridge-Contract]]); a legacy `running`/`waiting`/`blocked` write from an older door is folded onto this set by a read-side shim (`canonical_state`) the first time anything touches the file, so no migration step is needed:
 
 | event | state |
 |---|---|
-| `SessionStart` | registers the session, `idle` |
+| `SessionStart` | registers the session, `idle`. A resume folds a `stopped` record back to `idle` (resumed, not yet active) but never resets a live `working`/`awaiting` turn |
 | `UserPromptSubmit` | `working` (and, set-once, NAMES the session from the prompt) |
 | `PreToolUse` / `PostToolUse` | `working`, setting the owner's `activity` to the tool |
-| `Stop` | `idle` (turn over, human's move) |
+| `Stop` | `stopped` (turn over, human's move — alive at the prompt, and recently so) |
 | `Notification`, `permission_prompt` / message contains "permission" | `awaiting` (mid-turn, agent NEEDS a human) |
 | `Notification`, `idle_prompt` / message contains "waiting for your input" | `awaiting` only if currently `working` (an unseen mid-turn question); no-op otherwise |
 | `SessionEnd` | `done` |
+
+`stopped` and `done` are different things and never collapse: `Stop` ends a TURN,
+`SessionEnd` ends the SESSION. The one transition no event delivers is `stopped` →
+`idle` — a session simply left alone emits nothing — so the reaper's ~12 s pass ages
+it, an hour after the `Stop` that set it. The stop instant is the session's rolling
+`hooks.json` `updatedAt`; the decay writes `sessions.json` and `hooks.json` together
+so the merge cannot resurrect the warm state.
 
 Hooks give you edges and there is no "un-awaiting" event, so every path OUT of a permission prompt must land on a mapped event. Approve → the tool runs → `PostToolUse` clears it back to `working`. Deny with feedback → the model continues → next `PreToolUse`/`Stop`. Reply or interrupt → `UserPromptSubmit`/`Stop`. The set is closed; an `awaiting` flag cannot stick.
 
@@ -55,7 +62,8 @@ Canonical state vocabulary and how the desktop renders it:
 |---|---|---|
 | `working` | ♪ | in a turn / running a tool; normal row in the widgets |
 | `awaiting` | 𝄐 | needs the human (permission prompt or the idle-input ping); the bar's `✎N` cell flips paletteHot→glitchPink and pulses while ANY session is `awaiting` |
-| `idle` | 𝄽 | alive but at rest — a fresh session, or a finished turn |
+| `stopped` | 𝄁 | the TURN ended and the agent sits at its prompt, within the last hour — alive and warm; a section barline, not the final one |
+| `idle` | 𝄽 | at rest and cold — stopped for more than an hour, or freshly created / resumed and not yet active |
 | `done` | 𝄂 | final barline, dimmed; `graph prune` sweeps them |
 
 ### 3. The wrapper — hookless agents (codex, gemini, aider, anything)
@@ -132,9 +140,14 @@ Map its lifecycle onto the explicit verbs. Example shape (pseudo-config for any 
 on_start:    aoide graph session start --id "$MY_ID" --agent myagent --cwd "$PWD"
 on_tool:     aoide graph session phase --id "$MY_ID" --phase working
 on_ask:      aoide graph session phase --id "$MY_ID" --phase awaiting
-on_turn_end: aoide graph session phase --id "$MY_ID" --phase idle
+on_turn_end: aoide graph session phase --id "$MY_ID" --phase stopped
 on_exit:     aoide graph session end   --id "$MY_ID"
 ```
+
+`--phase stop` and `--phase stopped` both mean the TURN ended and both fold to
+`stopped`; process exit is `graph session end` (or the `exit`/`finished`/`complete`
+vocabulary). A harness that has no turn-end event at all can leave the session
+`working` and let its `on_exit` close it.
 
 The one rule: whatever fires on "agent asks a human something" maps to `awaiting`, and every event that means "moving again" maps back to `working` — keep the clearing set closed.
 

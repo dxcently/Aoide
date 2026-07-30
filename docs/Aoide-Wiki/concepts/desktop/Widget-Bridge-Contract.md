@@ -36,7 +36,7 @@ IPC. This page is the contract both sides are built to.
 |---|---|
 | `sessionId` | key. Sub-agent nodes are `sub:<tool_use_id>`. |
 | `kind` | `agent` \| `shell` \| `subagent` — what the record IS (widgets never infer role from the agent string). |
-| `state` | the CANONICAL live state — exactly one of `working` \| `awaiting` \| `idle` \| `done`. |
+| `state` | the CANONICAL live state — exactly one of `working` \| `awaiting` \| `stopped` \| `idle` \| `done`. |
 | `activity` | the current PROCESS: a shell's foreground command / file being edited (`nvim notes.md`, `cargo test`), or its bare shell process when idle (`bash`); an agent's current tool. Absent only when truly nothing runs. |
 | `say` | the agent's latest WORDS — the last line of prose it wrote, tail-read from its own Claude Code transcript. Distinct from `activity` (the process); absent for shells and for an agent that hasn't spoken. |
 | `title` | the human session NAME. Set-once — whichever source lands FIRST wins: the first user prompt (clipped one-liner), Claude Code's own session title (`custom-title` in the transcript, e.g. "Aoide Dev"), or a `graph send` steer. |
@@ -49,10 +49,23 @@ switches on the string, it does NOT regex-guess:
 - `working` — in a turn / running a tool, or a shell running a foreground command.
 - `awaiting` — needs the user. Set ONLY by the `Notification` hook (a permission
   prompt, or the ~60 s idle-input prompt). The invariant is **`needsInput ⇔
-  state == awaiting`**: a finished turn (`Stop`) settles to `idle`, not
+  state == awaiting`**: a finished turn (`Stop`) settles to `stopped`, not
   `awaiting`, so the anxious state keeps its signal value.
-- `idle` — alive but at rest (a fresh session, a finished turn, a bare prompt).
-- `done` — ended.
+- `stopped` — the TURN ended and the agent is sitting at its prompt, RECENTLY
+  (within the last hour). Alive and warm: the face of a session you just finished
+  talking to. Set by `Stop`.
+- `idle` — at rest and COLD: `stopped` for more than an hour, or freshly created /
+  resumed and not yet active (a shell at its bare prompt reads `idle` too).
+- `done` — the SESSION ended (`SessionEnd`, or a reap). Never `stopped`: `Stop`
+  ends a turn, `SessionEnd` ends the session, and the two never collapse.
+
+**The `stopped` → `idle` decay.** No hook event fires for a session that is simply
+left alone, so the only way out of `stopped` is AGE. The reaper's ~12 s pass
+(`aoide graph reap`) ages every `stopped` session an hour after the `Stop` that set
+it; the stop instant is the session's rolling `hooks.json` `updatedAt`, so no new
+field and no migration are involved. The decay writes `sessions.json` and
+`hooks.json` together — the merge overlays the hook phase onto the roster state, so
+touching only one file would resurrect the warm badge on the next read.
 
 **Activity labels are basename-clean.** A shell's `activity` label always
 collapses `argv[0]` to its basename before display, never a raw path — a known
@@ -73,10 +86,13 @@ touches the file, so migration needs no rollout.
 
 `SessionStart`→`idle` · `UserPromptSubmit`→`working` (and the prompt NAMES the
 session, set-once) · `PreToolUse`/`PostToolUse`→`working`, setting the owner's
-`activity` to the tool · `Stop`→`idle` · `Notification`(permission_prompt /
-idle_prompt)→`awaiting` · `SessionEnd`→`done`. The idle-prompt only becomes
-`awaiting` when the turn is still `working` (an unanswered question), never for a
-settled session.
+`activity` to the tool · `Stop`→`stopped` · `Notification`(permission_prompt /
+idle_prompt)→`awaiting` · `SessionEnd`→`done` · and, off the clock rather than off
+an event, `stopped`→`idle` after an hour in the reaper pass. The idle-prompt only
+becomes `awaiting` when the turn is still `working` (an unanswered question), never
+for a settled session. `SessionStart` on an existing id (a resume/compact) folds a
+`stopped` record back to `idle` — resumed and not yet active — while leaving a live
+`working`/`awaiting` turn alone.
 
 Alongside the state mapping, `Stop`/`PostToolUse`/`UserPromptSubmit`/`Notification`
 also tail-read the session's own JSONL transcript (the path a hook payload's
@@ -159,7 +175,7 @@ no session id.)
 4. **Outbound is a narrow socket.** `focussession`/`focuswindow` jumps and
    `graph send` injection — nothing else leaves QML.
 5. **Colour only from [[drachma]]**; hard corners; the music-glyph state contract
-   (♪ working · 𝄐 awaiting · 𝄽 idle · 𝄂 done) is a hard contract.
+   (♪ working · 𝄐 awaiting · 𝄁 stopped · 𝄽 idle · 𝄂 done) is a hard contract.
 6. **Degrade.** An empty/missing stage file is an empty roster; off-Hyprland the
    jump/enumeration simply no-ops.
 7. **Hot-reload discipline.** `sessions.json` heartbeats constantly, so reassign a
