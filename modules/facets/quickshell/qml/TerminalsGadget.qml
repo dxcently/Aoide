@@ -13,9 +13,12 @@ import Quickshell.Io
 // SHARED across the pantheon (the family resemblance):
 //   · opaque + DEFINED body — hard plum border, inset keyline, cast shadow;
 //     no pale washout, fully legible. All colour from `notes` roles; radius 0.
-//   · MUSIC state-glyph contract  ♪ working · 𝄐 awaiting · 𝄽 idle · 𝄂 done ·
-//     · unknown, closed by a final barline 𝄂. (glyphs = HARD CONTRACT)
-//   · KAOMOJI mood faces give each shell life; ASCII / box-drawing throughout.
+//   · MUSIC state-glyph contract  ♪ working · 𝄐 awaiting · 𝄼 stopped · 𝄽 idle ·
+//     𝄂 done · · unknown, closed by a final barline 𝄂. (glyphs = HARD CONTRACT)
+//   · KAOMOJI every working row draws from MoodFaces.qml's general `working`
+//     pool (terminals have no subagent concept, so the `packages` courier
+//     pool never appears here), re-rolled at random each roster refresh;
+//     ASCII / box-drawing throughout.
 //   · the FUNCTION: agent · state · cwd · elapsed, click → focusSession,
 //     an empty state, and hot-reload of the stage file.
 //
@@ -691,14 +694,17 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 2
 
-                            Row {
+                            Item {
                                 width: parent.width
-                                spacing: 8
+                                height: procName.height
                                 Text {                     // the PROCESS / command / file being edited
                                     id: procName
-                                    // the state tag claims its space FIRST; the process
-                                    // name elides into the rest (a fixed reserve let a
-                                    // long command push the tag off the right edge).
+                                    anchors.left: parent.left
+                                    // the state tag claims its space FIRST (pinned
+                                    // to the row's right edge below); the process
+                                    // name elides into the rest (a fixed reserve
+                                    // let a long command push the tag off the
+                                    // right edge).
                                     width: Math.max(24, Math.min(implicitWidth,
                                                     body.width - stateTag.slot))
                                     elide: Text.ElideRight
@@ -710,6 +716,7 @@ Item {
                                 Text {
                                     id: stateTag
                                     readonly property real slot: visible ? implicitWidth + 8 : 0
+                                    anchors.right: parent.right
                                     anchors.baseline: procName.baseline
                                     text: gadget.stateLabel(modelData.state)
                                     font.family: gadget.faceSerif; font.italic: true

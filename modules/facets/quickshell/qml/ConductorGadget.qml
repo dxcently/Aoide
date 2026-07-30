@@ -12,11 +12,12 @@ import Quickshell.Io
 //                  drawn Greek-key meander ruling off the entablature.
 //   · MUSIC      — the roster is a stave; each session is a note on a ledger
 //                  line; its live state is spoken as a notation glyph
-//                  (♪ working · 𝄐 awaiting · 𝄽 idle · 𝄂 done · · unknown), and
-//                  a final barline 𝄂 closes the score. (glyphs = HARD CONTRACT)
-//                  State is also spoken by MOTION: working = the note bobs +
-//                  a running-shimmer slides the ledger; awaiting = a terracotta
-//                  row pulse + a deep held note-pulse; idle = a slow breath.
+//                  (♪ working · 𝄐 awaiting · 𝄼 stopped · 𝄽 idle · 𝄂 done ·
+//                  · unknown), and a final barline 𝄂 closes the score.
+//                  (glyphs = HARD CONTRACT). State is ALSO spoken by the
+//                  kaomoji layer below — the note glyph itself no longer
+//                  bobs or shimmers; that motion moved entirely onto the
+//                  face. The awaiting row wash + note-pulse are kept.
 //
 // ROSTER = only what a conductor conducts: agent sessions + the shells an agent
 // is attached to (shared `windowAddress`); bare unattended shells are hidden.
@@ -24,8 +25,13 @@ import Quickshell.Io
 // state spread, with the ONE laurel `paletteHot` reserved for the traced row.
 //   · TERMINAL   — box-drawing frames the roster like a TUI panel; each row
 //                  hangs from a monospace column │ (pilaster + staff barline).
-//   · KAOMOJI    — a small mood face gives each session life; the empty stage
-//                  gets an ASCII temple and a shrug.
+//   · KAOMOJI    — every working row wears one of TWO pools (MoodFaces.qml):
+//                  a SUBAGENT wears the `packages` courier pool, hashed from
+//                  its id so its set is fixed for its whole delivery run;
+//                  every top-level agent wears the general `working` pool,
+//                  re-rolled at random each roster refresh. Resting states
+//                  (awaiting/stopped/idle/done) each hold one still pose.
+//                  The empty stage gets an ASCII temple and a shrug.
 //
 // LEGIBLE + DEFINED: the body is opaque marble with a hard 2px plum border and
 // a gold keyline — no pale washout. RESTRAINED: motifs carry state or structure.
@@ -738,15 +744,17 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 2
 
-                            Row {
+                            Item {
                                 width: parent.width
-                                spacing: 8
+                                height: agentName.height
                                 Text {                     // the session NAME (title, else agent)
                                     id: agentName
-                                    // The state tag claims its space FIRST and the
-                                    // name elides into whatever is left — a fixed
+                                    anchors.left: parent.left
+                                    // The state tag claims its space FIRST (pinned
+                                    // to the row's right edge below) and the name
+                                    // elides into whatever is left — a fixed
                                     // reserve let a long title push the tag off the
-                                    // row's right edge (Row does not elide for us).
+                                    // row's right edge.
                                     width: Math.max(24, Math.min(implicitWidth,
                                                     body.width - stateTag.slot))
                                     elide: Text.ElideRight
@@ -759,6 +767,7 @@ Item {
                                 Text {
                                     id: stateTag
                                     readonly property real slot: visible ? implicitWidth + 8 : 0
+                                    anchors.right: parent.right
                                     anchors.baseline: agentName.baseline
                                     text: gadget.stateLabel(modelData.state)
                                     font.family: gadget.faceSerif; font.italic: true
@@ -872,6 +881,14 @@ Item {
                                         packageRow ? gadget.faces.packages : gadget.faces.working)
                                     text: row.working ? frames[frame % frames.length]
                                                       : gadget.kaomojiFor(modelData.state)
+                                    // Explicit family (every other Text in this
+                                    // row sets one too): the `packages` pool's
+                                    // parcel glyph lives in the Nerd Font's
+                                    // private-use icon range, which only
+                                    // resolves against a Nerd Font — Qt's CJK/
+                                    // kana fallback (relied on everywhere else
+                                    // in this file) has no claim on that range.
+                                    font.family: gadget.faceMono
                                     font.pixelSize: 10
                                     color: gadget.withA(row.accent, 0.85)
                                     Timer {

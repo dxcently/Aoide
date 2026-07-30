@@ -130,19 +130,22 @@ vocabulary is lifted VERBATIM from `pkgs/aoide/src/baton/theme.rs`
 |-------|-----------------------------------------|
 | `♪`   | working (running / active / tool)       |
 | `𝄐`   | awaiting (await / block / notification) |
-| `𝄽`   | idle                                    |
-| `𝄂`   | done (also `stop`)                      |
+| `𝄼`   | stopped (the turn just ended, < 1h ago) |
+| `𝄽`   | idle (cold: stopped > 1h, or fresh/resumed) |
+| `𝄂`   | done (the session itself ended)         |
 | `·`   | unknown                                 |
 
 Used by `ConductorGadget` and `TerminalsGadget` (both switch on the daemon's
-canonical `working|awaiting|idle|done` strings — no regex derivation). The
-colours partnering the glyph are a fixed shared spread: working → gold
-(`paletteAccent`), awaiting → terracotta (`paletteUrgent`), idle → murex
+canonical `working|awaiting|stopped|idle|done` strings — no regex derivation).
+`stopped` is a genuinely separate fifth state, not a `done` alias — the bridge
+splits "the turn ended" (stopped, decaying to idle after an hour of no
+activity) from "the session ended" (done). The colours partnering the glyph
+are a fixed shared spread: working → gold (`paletteAccent`), awaiting →
+terracotta (`paletteUrgent`), stopped → aegean (`holoBlue`), idle → murex
 (`violet`), done → verdigris (`wireCyan`), unknown → dim ink — identical in
-every temple, so a "working" note reads the same in every house. (This
-replaced the earlier "done → dim" pairing.) The emphasized/traced row
-overrides its glyph to laurel (§5). No Greek motif touches the glyphs
-themselves.
+every temple, so a "working" note reads the same in every house. The
+emphasized/traced row overrides its glyph to laurel (§5). No Greek motif
+touches the glyphs themselves.
 
 ---
 
@@ -158,7 +161,7 @@ Which Greek hue plays which `notes` role (full derivation in `design/intent.md`)
 | `paletteUrgent`     | base08 | terracotta          | urgent / blocked                        |
 | `paletteHot`        | base0B | laurel leaf-green   | the ONE blaze (traced element)          |
 | `wireCyan`          | base0C | bronze-verdigris    | columns, meanders, structural rules     |
-| `holoBlue`          | base0D | aegean deep-blue    | preview / information — the workspace preview ring, links, cool syntax ("the sea between the columns"); NOT chrome |
+| `holoBlue`          | base0D | aegean deep-blue    | preview / information — the workspace preview ring, links, cool syntax ("the sea between the columns"); NOT chrome. Also the `stopped` state colour (§2) — a second job, not a chrome exception |
 | `violet`            | base0E | Tyrian/murex        | DAG project steles                      |
 | `glitchPink`        | base08 | terracotta          | urgent pulse (== urgent here)           |
 
@@ -239,8 +242,12 @@ keyline + cast shadow the temples share.
   the sliver — acknowledges it; the peek re-arms on the next false→true edge.
 
 The old `Ω`/`gadgets.case` pediment, the pin token, and the `𝄂𝄚𝅦𝄚𝄞𝅄` footer
-seam went down with the colonnade. The fold-out journal presentation is
-preserved on disk as `AoideJournal.qml` but is not instantiated by `shell.qml`.
+seam went down with the colonnade. The fold-out journal presentation
+(`AoideJournal.qml`) — a duplicate fork of the dock built at the same commit
+as the codex but never instantiated by `shell.qml` and never carried forward
+past that one commit — has been DELETED, same as `DagGraphGadget` below; an
+open flag on reviving its "fold-out book" idea, if wanted, is tracked outside
+this file (see the dev handoff).
 
 ### The four temples — the shared pantheon bars
 
@@ -272,26 +279,66 @@ the old "done → dim" pairing; see §2.)
 - **`ConductorGadget`** — the agent roster (`[ baton ]`): only what a conductor
   conducts — agent/subagent sessions, plus shells sharing an agent's window,
   read as a pure view of the daemon's `sessions.json`. Rows are a **stave**:
-  each session a note on a ledger line, hung on a `│` pilaster tinted by its
-  per-agent identity hue (the base16 `noteColor` spread; a conducted shell
-  borrows its conductor's hue). Child sessions are **beamed** off their parent
-  — a quaver beam + stem in the parent's hue, depth clamped to one indent.
-  State is also spoken by MOTION: working = the note bobs + a running shimmer
-  slides the ledger; awaiting = a terracotta row wash + a deep held note-pulse;
-  idle = a slow breath. Rows carry name (session title, else agent), state
-  word, `ws N` workspace tag, `▸` activity line, a quoted "say" line (the
-  agent's latest words), short cwd in aegean, a kaomoji, elapsed in gold.
-  Hovering a row previews its workspace on the bar; click →
-  `bridge.focusSession`. The emphasized row (traced, else first working) takes
-  the laurel: 3px spine + wash + laurel note/elapsed.
+  each TOP-LEVEL session a note on a ledger line, hung on a `│` pilaster
+  tinted by its per-agent identity hue (the base16 `noteColor` spread; a
+  conducted shell borrows its conductor's hue). Child sessions are **beamed**
+  off their parent — a stem + quaver-beam limb in the parent's hue, running
+  all the way to the child's name; the child carries NO notehead of its own,
+  depth clamped to one indent (deeper nesting flattens to the same limb).
+  State is spoken by the glyph/colour pair (§2) and by the kaomoji layer
+  below — the note glyph itself no longer bobs, and there is no shimmer or
+  idle-breath animation on the ledger; that motion moved entirely onto the
+  face. The awaiting row wash + a deep held note-pulse are kept. Rows carry
+  name (session title, else agent) with its state tag on the SAME line, then
+  a second tally line below: elapsed time, the agent/subagent tag (`⟐` marks
+  a subagent), a `⇢ conductedBy` tag where relevant, and the `ws N` workspace
+  tag — followed by a `▸` activity line, a quoted "say" line (the agent's
+  latest transcript words), short cwd in aegean, and the kaomoji riding the
+  cwd line at a fixed right-aligned width. Hovering a row previews its
+  workspace on the bar; click → `bridge.focusSession`. The emphasized row
+  (traced, else first working) takes the laurel: 3px spine + wash + laurel
+  note/elapsed.
 - **`TerminalsGadget`** — the tty roster (`[ tty ]`): EVERY live terminal
   window, tracked or not (the daemon publishes synthetic `shell` records;
   the widget only filters + de-dupes by window address — agent record wins a
   shared window). Rows hang on a `║` twin-groove column; the main label is the
-  running process/command, the cwd rides below in aegean; scroll-cornered
+  running process/command, with the SAME second-tally-line layout as the
+  Conductor (elapsed + `ws N`, no agent/conductor tags — this roster has no
+  tree) below it; the cwd rides on its own line in aegean; scroll-cornered
   frame (`╭ ╮ ╰ ╯`, echoing the volutes). Same hover-preview, click-to-focus,
-  say-line, and laurel-crown row idioms as the Conductor — only the
-  architecture differs.
+  say-line, kaomoji-on-the-cwd-line, and laurel-crown row idioms as the
+  Conductor — only the architecture differs.
+
+**The kaomoji layer** (`MoodFaces.qml`, shared verbatim by both temples,
+instantiated as a plain child object — it holds no state, so nothing needs
+threading from `shell.qml`) is the state's expressive voice now that the
+ledger itself sits still. It has TWO pools:
+
+- **`working`** — the general pool (currently 15 sets), a lively unthemed
+  vocabulary (a cheer, a dance, a table flip, a stroll-whistle, a fishing
+  cast…) with no forced concept and no forced facing direction; two design
+  passes tried both a music-desk theme and a mandatory left-facing rule and
+  both were explicitly retired. Every top-level agent row and every terminal
+  row draws from this pool — and the pick is a genuine `Math.random()`, not a
+  hash: it re-rolls every time the row's delegate is (re)created, i.e. on
+  every roster refresh. Deliberate: variety over identity for these rows.
+- **`packages`** — the subagent pool (currently 4 courier sets: `haul`,
+  `handoff`, `stack`, `roll`), each carrying the parcel glyph `口`. Only rows
+  where `kind === "subagent"` ever draw from it. Unlike the general pool, a
+  subagent's set is HASHED from its session id and held for its whole life —
+  a courier's small delivery story reads better with a consistent identity
+  than with the general pool's per-refresh shuffle.
+
+Both pools follow the same authoring rules regardless of theme: motion must
+be POSITIONAL (a prop travelling a fixed track, or the whole figure changing
+cell), every frame within a set renders at an identical width (fixed-width,
+right-aligned box — a wider frame just shifts its own left edge and reads as
+a stretch), padding that needs to hold width uses the ideographic space
+U+3000 (an ASCII trailing space is trimmed by Qt and won't shift anything),
+and glyphs stay inside the shell's proven CJK/kana/music repertoire (tofu is
+constant-width and reads as a working animation that quietly died). Each
+resting state (`awaiting`/`stopped`/`idle`/`done`/unknown) holds one still
+pose, shared by both pools.
 - **`MetersGadget`** — CPU + RAM (`[ /proc ]`), read from `/proc/stat` +
   `/proc/meminfo` on a ~2s tick. Each meter is a **voice**: its load spoken as
   a dynamic marking (`𝆏𝆏 𝆏 𝆐 𝆑 𝆑𝆑`), its gauge an ASCII bar `⟦▓▓▓░░░⟧` — CPU
@@ -353,8 +400,14 @@ Greek: each workspace is a solid note glyph carrying its OWN hue from the
 base16 `noteColor` spread; the selected note keeps its own hue but swells,
 rests on a same-hue highlight pill, and takes a white outline (the one
 sanctioned colour literal, for separation on the opaque sheet); hover-select
-previews in gold; urgent pulses `glitchPink`. The melody is colour-coded, not
-Greek-ified.
+previews in gold; the widget-hover preview ring (holoBlue) marks whichever
+workspace a hovered Terminals row lives on; urgent pulses `glitchPink`. All
+THREE of these marks (`highlight`, `previewRing`, the per-cell hover pill) are
+genuinely round (`radius: width / 2`) — a deliberate, narrow exception to the
+shell's otherwise-universal `radius: 0` hard-corner rule (§4 intro, §5): they
+were always called "pills" in the code and the name is now literal, since a
+square-cornered "pill" never actually read as one. Nothing else in the shell
+rounds a corner. The melody is colour-coded, not Greek-ified.
 
 ### Flat skeletons
 

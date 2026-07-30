@@ -43,10 +43,11 @@ QtObject {
     // fullwidth cells and ASCII chars), so the right-aligned box never
     // stretches. U+3000 ideographic spaces hold the width.
     readonly property var working: [
-        { name: "whistle",   // notes conveyor left one cell per frame (always
-          // exactly two notes on screen), while the pucker cycles ｏ↔・ and
-          // the brows rock ´｀↔｀´ — mouth, head, and stream all moving.
-          frames: ["　♫　♪( ´ｏ｀)", "♫　♪　( ´・｀)", "　♪　♫( ｀ｏ´)", "♪　♫　( ｀・´)"] },
+        { name: "whistle",   // strolling whistle, hands-in-pockets chill: flat
+          // 一一 eyes never move, the pucker still cycles ｏ↔・, and a single
+          // lazy ♪ ambles across the box one cell per beat — unhurried, not
+          // startled.
+          frames: ["　　　♪( 一ｏ一)", "　　♪　( 一・一)", "　♪　　( 一ｏ一)", "♪　　　( 一・一)"] },
         { name: "cheer",     // jumping side to side, arms thrown up ＼／, then
           // swung down ／＼, then up again ヽノ — a full-body bounce.
           frames: ["　＼( ＾ｏ＾)／", "／( ＾ｏ＾)＼　", "　ヽ( ＾ｏ＾)ノ", "＼( ＾ｏ＾)／　"] },
@@ -76,32 +77,51 @@ QtObject {
           frames: ["　ｏ( ＾ω＾)ｏ　", "ｏ　( ＾ω＾)　ｏ", "　ｏ( ＾ω＾)　ｏ", "ｏ　( ＾ω＾)ｏ　"] },
         { name: "boogie",    // arms-up dancer sweeps left→mid→right→mid across
           // the box while a single ♪ flits from side to side around it.
-          frames: ["♪ヽ( ・ω・)ノ　　", "　ヽ( ・ω・)ノ♪　", "　　ヽ( ・ω・)ノ♪", "　♪ヽ( ・ω・)ノ　"] }
+          frames: ["♪ヽ( ・ω・)ノ　　", "　ヽ( ・ω・)ノ♪　", "　　ヽ( ・ω・)ノ♪", "　♪ヽ( ・ω・)ノ　"] },
+        { name: "fishing",   // cast → the line ～ unspools to full length → the
+          // float ｏ settles at the tip → BITE: the line snaps a cell shorter
+          // and the face clenches ｀´ — then the loop recasts.
+          frames: ["( ・ω・)ノ～　　　", "( ・ω・)ノ～～～　", "( ・ω・)ノ～～～ｏ", "( ｀ω´)ノ～～ｏ　"] },
+        { name: "scribble",  // the pen φ walks the page line ＿＿＿ one cell per
+          // beat, left to right, then wraps — a new line started.
+          frames: ["( ・ω・)φ＿＿＿", "( ・ω・)＿φ＿＿", "( ・ω・)＿＿φ＿", "( ・ω・)＿＿＿φ"] },
+        { name: "sip",       // tea break: the cup つ口 lifts a cell to the lips
+          // and back while the steam ～ curls around it; eyes go ＾＾ on the
+          // sip and 一一 on the contented exhale.
+          frames: ["( ・ω・)　つ口～", "( ・ω・)つ口　～", "( ＾ω＾)つ口～　", "( 一ω一)　つ口～"] },
+        { name: "read",      // book ⊂口, eyes down 一一 scanning; a page peels
+          // up ／, tumbles over ＼ a cell further, and lands — a beat of
+          // ＾＾ satisfaction before the next page.
+          frames: ["( 一ω一)⊂口　　", "( 一ω一)⊂口／　", "( 一ω一)⊂口　＼", "( ＾ω＾)⊂口　　"] },
+        { name: "lift",      // reps: the barbell ｏ＝ｏ is pressed out to full
+          // extension one cell per beat and pulled back, strain face ｀´ held
+          // the whole set.
+          frames: ["( ｀ω´)⊃ｏ＝ｏ　　", "( ｀ω´)　⊃ｏ＝ｏ　", "( ｀ω´)　　⊃ｏ＝ｏ", "( ｀ω´)　⊃ｏ＝ｏ　"] }
     ]
 
     // ── PACKAGES — the subagent pool: a courier delivering work back to the
     // main agent that dispatched it. A subagent always wears one of THESE
     // sets, never the general pool above — see pickFor()/randomIndex() below
     // for the policy split. Not locked to any count; add more as they come.
-    // Every set carries the parcel 口 somewhere; same fixed-width/U+3000
+    // Every set carries the parcel 󰏖 somewhere; same fixed-width/U+3000
     // rules as the general pool.
     readonly property var packages: [
         { name: "haul",     // the delivery run itself — courier marches the
           // full width of the box, parcel leading in the outstretched arm;
           // the loop restart reads as the next run.
-          frames: ["( ｀ー´)⊃口　　　", "　( ｀ー´)⊃口　　", "　　( ｀ー´)⊃口　", "　　　( ｀ー´)⊃口"] },
+          frames: ["( ｀ー´)⊃󰏖　　　", "　( ｀ー´)⊃󰏖　　", "　　( ｀ー´)⊃󰏖　", "　　　( ｀ー´)⊃󰏖"] },
         { name: "handoff",  // step-and-drop gait: carry → thrust forward →
-          // release (a gap opens between hand つ and 口 as it sits down) →
+          // release (a gap opens between hand つ and 󰏖 as it sits down) →
           // long reach to re-grab, then carry again.
-          frames: ["( ・ω・)つ口　　", "( ・ω・)　つ口　", "( ・ω・)つ　口　", "( ・ω・)　　つ口"] },
+          frames: ["( ・ω・)つ󰏖　　", "( ・ω・)　つ󰏖　", "( ・ω・)つ　󰏖　", "( ・ω・)　　つ󰏖"] },
         { name: "stack",    // shuttle run to a pile at the left edge: arrive
-          // with a box, close in, DROP (the pile grows 口→口口, the hand
+          // with a box, close in, DROP (the pile grows 󰏖→󰏖󰏖, the hand
           // empties), step back for the next — "where the main agent picks
           // it up," made literal.
-          frames: ["口　　( ・ω・)つ口", "口　( ・ω・)つ口　", "口口( ・ω・)つ　　", "口口　( ・ω・)つ　"] },
+          frames: ["󰏖　　( ・ω・)つ󰏖", "󰏖　( ・ω・)つ󰏖　", "󰏖󰏖( ・ω・)つ　　", "󰏖󰏖　( ・ω・)つ　"] },
         { name: "roll",     // barrel freight — the parcel rolls out ahead and
-          // back, tumbling 口→ｏ→口 as it turns, the arm つ chasing it.
-          frames: ["( ｀ω´)つ口　　", "( ｀ω´)つ　ｏ　", "( ｀ω´)つ　　口", "( ｀ω´)つ　ｏ　"] }
+          // back, tumbling 󰏖→ｏ→󰏖 as it turns, the arm つ chasing it.
+          frames: ["( ｀ω´)つ󰏖　　", "( ｀ω´)つ　ｏ　", "( ｀ω´)つ　　󰏖", "( ｀ω´)つ　ｏ　"] }
     ]
 
     // Which set a SUBAGENT wears, for its whole life. Hashed from the row's key
