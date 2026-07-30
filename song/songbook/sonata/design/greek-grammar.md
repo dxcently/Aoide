@@ -11,19 +11,24 @@ wireframe. The colour register is Greek marble (see `design/intent.md`).
 
 **What this is compatible with, and what it changes.** This grammar reads the
 SAME `notes` role vocabulary (`paletteBg/Fg/Accent/Urgent/Hot`, `wireCyan`,
-`holoBlue`, `violet`, `glitchPink`, `windowBorder`, `barBg`) and keeps **every
-function, data source, and geometry identical** — same FileView seams, same
-click targets, same 36px strip, same real-data discipline. It changes only the
-**drawn chrome idiom** (wireframe → typographic-Greek) and the **callout dress**
-(lowercase-dotted token gains a Greek order-mark). The **musical state-glyph
-contract is untouched** — `♪ 𝄐 𝄽 𝄂 ·` stay verbatim (see §2).
+`holoBlue`, `violet`, `glitchPink`, `windowBorder`, `barBg`) and keeps the same
+real-data discipline (FileView seams, real Quickshell services, no invented
+IPC), the same 36px bar strip, and the same click targets. It began as a
+chrome-only reskin plan; the **pantheon rebuild** (`353390a`) then rebuilt the
+dock widgets FRESH in this grammar — §4 records the as-built result, not the
+original reskin mapping. The **musical state-glyph contract is untouched
+throughout** — `♪ 𝄐 𝄽 𝄂 ·` stay verbatim (see §2).
 
 ---
 
 ## 1. The motif vocabulary
 
-Five architectural motifs, all drawn from monospace text. They are the alphabet
-every surface is reskinned from.
+Five architectural motifs, drawn from monospace text — or, since the pantheon
+rebuild, as flat **Canvas line-work** (1–1.5px strokes: still a drawn line,
+never a rendered volume). The temples paint their ornament courses this way —
+the Greek-key meander, egg-and-dart, the triglyph-and-metope band, the Ionic
+volute capital + dentil course — while frames, rails, and stylobates stay box
+characters. They are the alphabet every surface is built from.
 
 ### Columns (the vertical order)
 
@@ -87,6 +92,14 @@ survive). Assignment:
 Lowercase Greek (α β γ …) is available for sub-marks (e.g. a session's tier) but
 is NOT required; the order-mark is the load-bearing use.
 
+The full table lives verbatim in `GadgetFrame`'s `orderMarks` map, but after
+the pantheon rebuild only the bar-popout marks are LIVE on screen — `Λ` `Ξ`
+`Π` `Σ` (plus the `·` fallback the wallpaper picker's `wallpaper.summon`
+falls to). `Α Β Γ Δ Θ Ω` have no surface carrying their titles any more: the
+temples are self-framed and inscribe their names in carved serif
+(CONDUCTOR · TERMINALS · METERS · POWER) instead of a pediment order-mark
+(§4).
+
 ### The musical motifs coexist (unchanged)
 
 The music glyphs are **inscriptions carved into the stone**, not replaced:
@@ -94,8 +107,13 @@ The music glyphs are **inscriptions carved into the stone**, not replaced:
 - the **state tier** `♪ 𝄐 𝄽 𝄂 ·` (theme.rs contract, §2) reads like a letter
   set into a frieze — it sits inside the body where it already sits.
 - the **clef** `𝄞` (bar power key), the **rests** `𝄽 𝄾 𝄿 𝅀 𝅁 𝅂 𝆑`, the **note
-  heads** `♩ ♪ ♫ ♬ 𝅘𝅥𝅮 𝅘𝅥𝅯`, the network marks `𝆹𝅥𝅮 𝆺𝅥𝅯`, and the seam run
-  `𝄂𝄚𝅦𝄚` all stay verbatim.
+  heads** `♩ ♪ ♫ ♬ 𝅘𝅥𝅮 𝅘𝅥𝅯`, and the network marks `𝆹𝅥𝅮 𝆺𝅥𝅯` all stay verbatim.
+  (The old dock's `𝄂𝄚𝅦𝄚` seam run retired with the colonnade — no surface
+  draws it today.)
+- each temple carries its OWN clef as its crown (§4): `𝄞` treble (Conductor),
+  `𝄢` bass (Terminals), `𝄡` alto (Meters) — and Power crowns with the Greek
+  koppa `ϟ`, a letter that reads as Zeus's lightning, standing in where no
+  clef fits.
 - where a meander frieze and a musical seam would both appear, the musical seam
   wins (it carries meaning); the meander yields.
 
@@ -116,9 +134,15 @@ vocabulary is lifted VERBATIM from `pkgs/aoide/src/baton/theme.rs`
 | `𝄂`   | done (also `stop`)                      |
 | `·`   | unknown                                 |
 
-Used by `BatonGadget`, `DagGraphGadget`, `TerminalManagerGadget`. The colours
-partnering the glyph come from the roles (working → hot/accent, awaiting →
-urgent, done → dim) exactly as today. No Greek motif touches these.
+Used by `ConductorGadget` and `TerminalsGadget` (both switch on the daemon's
+canonical `working|awaiting|idle|done` strings — no regex derivation). The
+colours partnering the glyph are a fixed shared spread: working → gold
+(`paletteAccent`), awaiting → terracotta (`paletteUrgent`), idle → murex
+(`violet`), done → verdigris (`wireCyan`), unknown → dim ink — identical in
+every temple, so a "working" note reads the same in every house. (This
+replaced the earlier "done → dim" pairing.) The emphasized/traced row
+overrides its glyph to laurel (§5). No Greek motif touches the glyphs
+themselves.
 
 ---
 
@@ -146,165 +170,259 @@ decoration.
 
 ## 4. Widget-by-widget map
 
-Each surface's function, data, and geometry are UNCHANGED. Only the drawn chrome
-idiom changes. `GadgetFrame` is the main lever (it propagates to ~10 surfaces).
+AS BUILT after the pantheon rebuild (`353390a feat(rice/sonata): Greek pantheon
+widgets` and the bridge-view passes that followed it). The old dock family —
+`AoideAgentWidgets`, `BatonGadget`, `TerminalManagerGadget`, `DagGraphGadget`,
+`MeterGadget`, `PowerGadget`, `DesktopGadgets`, `AoideSessionGraph`,
+`GraphModel`/`GraphRow`, `ClockGadget`, `SessionChip` — was DELETED, not
+reskinned. The field now splits into two chrome families:
 
-### `GadgetFrame` — the entablature (core; propagates to ~10 surfaces)
+- the **entablature** — `GadgetFrame`, the box-character temple bay, worn by
+  the bar's popouts (and the wallpaper picker);
+- the **pantheon temples** — four SELF-FRAMED marble steles (`ConductorGadget`,
+  `TerminalsGadget`, `MetersGadget`, `PowerVitalsGadget`) stacked inside the
+  codex dock (`AoidePanel`). These are fresh builds in this grammar, each
+  drawing its own chrome; none of them instantiates `GadgetFrame`.
 
-The pane becomes a **temple bay**. Element-by-element re-cast of the current
-frame:
+### `GadgetFrame` — the entablature (bar popouts + wallpaper picker)
 
-- **Depth stack retired.** Pantheon's two `holoBlue` offset outline copies (the
-  3D "stacked offset volume") are DROPPED — this grammar is flat. `depthOff1/2`,
-  `depthOpacity1/2`, `depthDx/Dy` go unused (or a single 1px `wireCyan` cast
-  base-shadow under the stylobate replaces them — a column's ground shadow, not
-  a 3D offset). No vanishing-point lean.
-- **Callout row → pediment.** The lowercase-dotted title on its Canvas leader
-  becomes a **pediment header**: a `╱‾‾‾‾╲` triangular cap with the surface's
-  Greek order-mark (§1) at the apex, the orchestration token
-  (`baton.control` …) inscribed on the architrave rule beneath it, in `labelColor`
-  (= `paletteFg`) at the same dim opacity. The Canvas anchor-tick leader is
-  replaced by the architrave rule `───────`.
-- **Front outline → columns + cornice.** The single `wireCyan` hollow rule
-  becomes: `║` column rails down the left and right body edges, a `═══════`
-  cornice under the pediment, and a **stylobate** base rule (`▔▁` step) along the
-  bottom. All `wireCyan` (bronze-verdigris), dim (~0.5), `radius: 0` kept.
-- **Glass body + Aero gloss — UNCHANGED.** `glassColor` (= `paletteBg`),
-  `glassOpacity` 0.72, and the gloss gradient stay exactly as they are.
-- **`floatable` ↗ token** stays (affordance, not song), folded into the pediment
-  raking-cornice tail.
-- **`chromeDim` on trace — kept.** While a child gadget is traced, the pediment,
-  columns, cornice, and stylobate step back to `chromeOpacity` (0.55) so the one
-  laurel blaze in the body dominates. The glass body is left alone.
+The pane is a **temple bay**, implemented as designed:
 
-Because `BarPopout` and `DesktopGadgets` host `GadgetFrame`, they inherit the
-entablature for free (no per-host headroom math is needed once the offset stack
-is gone — a simplification the flat grammar buys).
+- **Depth stack retired.** The two `holoBlue` offset outline copies are gone —
+  drawn nowhere. `depthOff1/2`, `depthOpacity1/2`, `depthDx/Dy` remain as no-op
+  property declarations (hosts still set them), and `depthExtent` is pinned 0.
+- **Pediment header.** A `╱‾‾ Α ‾‾╲` raking cap carries the surface's Greek
+  order-mark (§1) at the apex; a heavy `═` cornice runs beneath it; the
+  orchestration token is inscribed after a short `───` architrave tick in
+  `labelColor` (= `paletteFg`), dim 0.55. The Canvas anchor-tick leader is gone.
+- **Columns + stylobate.** The side rails are crisp 1px verdigris rules (a tiled
+  `║` glyph broke up at variable bay heights — legibility-first, the shaft is a
+  rule); the base is a `▔` over `▁` stepped stylobate in text. All `wireCyan`
+  at 0.5 alpha (the §5 cap), `radius: 0`.
+- **Glass body + Aero gloss — kept.** `glassColor` (= `paletteBg`),
+  `glassOpacity` 0.72, and the gloss gradient are unchanged.
+- **`floatable` ↗ token** kept, folded into the pediment tail.
+- **`chromeDim` on trace — kept.** Chrome steps to 0.55 while a body child's
+  `shared.tracedSessionId` is live; the glass body is left alone.
 
-### The dock — `AoideAgentWidgets` (the colonnade)
+**Hosts, as wired today:** the bar's four `BarPopout`s — `volume.level` (`Λ`),
+`battery.gauge` (`Ξ`), `nowplaying.score` (`Σ`), `calendar.sheet` (`Π`) — which
+override the chrome to the popout palette (cream card at 0.72 over
+`blur_popups`, plum-ink rails and label), and `AoideWallpaperPicker`
+(`wallpaper.summon`, no assigned order-mark → the `·` fallback). The dock does
+NOT host `GadgetFrame` any more; the `Α Β Γ Δ Θ Ω` entries in its order-mark
+map still exist in code but no live surface carries those titles.
 
-The dock is a **colonnade**: the container body is one long temple wall the
-gadget bays stand inside.
+### The dock — `AoidePanel` (the codex)
 
-- **Duplicated frame block must match `GadgetFrame`.** The dock body carries its
-  own copy of the (now-retired) depth recipe — the two `holoBlue` offset copies
-  at lines ~200–217. These are DROPPED in lockstep with `GadgetFrame`; the body
-  keeps its `paletteBg` glass + `wireCyan` outline + gloss, re-cast as `║`
-  column rails down both edges and a stylobate base rule.
-- **Header callout → the dock pediment.** `gadgets.case` with its `pin.on/off`
-  token becomes the `Ω` pediment (order-mark `Ω`, inscription `gadgets.case`);
-  the pin token stays a lowercase-dotted state at the tail (kept verbatim —
-  affordance).
-- **Footer run — kept verbatim.** `𝄂𝄚𝅦𝄚𝄞𝅄ㅤ` stays as the dock's one musical
-  seam, now read as the **stylobate inscription** carved along the base course.
-  It wins over any meander frieze (§1).
-- The gadget stack order (Baton, Terminals, DAG, slack, Meters, Power) and the
-  hot-edge reveal/pin state machine are untouched.
+The colonnade is gone; the dock was rebuilt as a **codex** — a closed book seen
+edge-on, peeking from the CENTER-LEFT screen edge (`SUPER+G`, the `aoide:dock`
+global shortcut). Not a `GadgetFrame` host and not glass: an OPAQUE marble
+board (`paletteBg`) with the hard 2px plum border + inset 1px Attic-gold
+keyline + cast shadow the temples share.
 
-### Dock gadgets (state glyphs + one-hot preserved)
+- **Spine** (inner edge) — a carved band: twin gold rules + a column of `◆`
+  binding stations.
+- **Fore-edge** (outer, screen-facing edge) — a stack of page-edge striations:
+  thin varied `paletteFg` rules with an occasional gilt (`paletteAccent`) leaf
+  and a gold ribbon bookmark. This sliver is what peeks at rest.
+- **Header** — a `𝄞` clef cartouche + "AOIDE" in carved serif, answered by a
+  small italic `ᾠδή` on the right, over a hairline gold rule.
+- **Body** — the four temples stacked at native size (Conductor 360×520,
+  Terminals 360×520, Meters 340×268, Power 340×268) in a Flickable capped at
+  ≤ 92% of the screen; a slim gold scrollbar in the gutter and a breathing
+  `▽ more` hint when content is below the fold.
+- **The awaiting peek** — the dock stays hidden until an agent needs a
+  response: any session in canonical state `awaiting` slides the fore-edge
+  sliver out as an alert (debounced against heartbeat rewrites of
+  `sessions.json`). Opening the dock — keybind, hot-edge hover, or a click on
+  the sliver — acknowledges it; the peek re-arms on the next false→true edge.
 
-- **`BatonGadget`** — the tab strip and SESSIONS mini-view keep their layout;
-  the `𝄂𝄚𝅦𝄚` status-line prefix (its one seam) and the `♪𝄐𝄽𝄂` state glyphs are
-  verbatim. Its empty-state note `nothing to conduct ♪(´ε｀ )` is kept. The
-  only Greek touch: session rows may carry a lowercase `α/β/…` sub-mark, optional.
-- **`TerminalManagerGadget`** — one row per session: `⠿` drag handle, agent,
-  state glyph (`♪𝄐𝄽𝄂`), short cwd, elapsed. All kept. The **traced row** keeps
-  its `paletteHot` (laurel) border + halo — the one-hot rule (§5). No 3D halo
-  language change is needed; a border blaze is already flat.
-- **`DagGraphGadget`** — the showpiece, re-cast as a **catalogue of steles**:
-  - node boxes → small **steles/metopes**: single-ruled `wireCyan` box = session;
-    double-ruled `violet` (amethyst) box = project (the double rule reads as a
-    triglyph pair). Kept exactly as the current outline logic.
-  - the drawn kinked-elbow **leader** (per-row Canvas) stays — it is a drawn
-    line, not a wireframe volume, so it survives; recolour to `wireCyan` at rest,
-    `paletteHot` (laurel) when the child is traced, as now. Optionally the elbow's
-    corner turns a single meander fret, but the cheap straight elbow is fine.
-  - the **traced node** keeps its `paletteHot` blaze: 2px laurel border + the
-    two/three-ring halo (a flat glow, kept) + bold label. Still exactly ONE blaze.
-  - state glyphs and lowercase callout ids (`session.9f3a…`) kept verbatim.
-- **`MeterGadget`** — CPU/RAM `[▓▓▓░░░] NN%` ASCII gauges kept; the gauge bar
-  reads as a fluted-column fill. Δ order-mark on its `GadgetFrame` pediment.
-- **`PowerGadget`** — battery rest-notation icons (`𝄽 𝄾 𝄿 𝅀 𝅁 𝅂 𝆑`) + charge
-  bar + network glyphs kept verbatim; its `𝄂𝄚𝅦𝄚` seam stays. Θ order-mark.
+The old `Ω`/`gadgets.case` pediment, the pin token, and the `𝄂𝄚𝅦𝄚𝄞𝅄` footer
+seam went down with the colonnade. The fold-out journal presentation is
+preserved on disk as `AoideJournal.qml` but is not instantiated by `shell.qml`.
 
-### The bar — `AoideBar` / `WorkspaceRow` (LIGHT TOUCH)
+### The four temples — the shared pantheon bars
 
-khoa: "the bar is ok, maybe add some greekness on top." Hard constraints kept:
-the **36px strip geometry**, the **black structural staff ink** (`#000000` staff
-lines, barlines, playhead), and the **functional glyph set** (clef `𝄞`, rests,
-note-heads, network `𝆹𝅥𝅮/𝆺𝅥𝅯`) — all untouched. The cream `paletteBg` @0.45
-glass and Aero gloss stay. Only additive Greek seasoning, all in black ink so it
-reads as part of the engraved staff:
+Each dock gadget is a distinct **temple**: same family, different god's house.
+Every temple carries: the opaque marble stele (2px plum border, inset 1px
+keyline in its signature hue, cast shadow, `radius: 0`) — Terminals alone keeps
+a translucent 0.72 glass body (compositor blur + hyprglass frost through it);
+a carved-serif inscription beside its clef; a Canvas-drawn frieze in its
+signature hue; a box-drawing TUI frame (`┌─┤ label ├…┐` over the body,
+`└─┤ tally ├ … 𝄂 ┘` closing it — the final barline closes every score); the
+`♪ 𝄐 𝄽 𝄂 ·` state tier verbatim (§2); kaomoji mood faces; a `TACET` +
+`ᕕ( ᐛ )ᕗ` empty state (Conductor's under an ASCII temple, Terminals' under an
+ASCII column); gold ink for the numeric tallies; and exactly ONE laurel
+`paletteHot` standout (§5). Type is three voices: Noto Serif (carved marble),
+JetBrainsMono (the terminal), Noto Music (notation).
 
-- a single small **meander fret** (`⌐¬` or `┏┛┗┓`, ~2–3 cells) sits just after
-  the clef as a key-signature ornament, before the first staff content — the one
-  Greek mark on the strip.
-- the final `𝄂` measure-close may gain a matching tiny meander tick to bookend
-  it. Optional; symmetric with the head fret.
-- the clock/title `/` slur may render as a Greek middot `·` (already black,
-  already dim) — a one-glyph nod, no geometry change.
-- **`WorkspaceRow` untouched.** Note-heads, pitch-on-staff, the accent-fill
-  active swell, the `holoBlue` preview ring, the `glitchPink` (terracotta) urgent
-  pulse — all kept. The melody is not Greek-ified.
+| temple | order | signature hue | clef / crown | frieze |
+|---|---|---|---|---|
+| `ConductorGadget` | Doric | Attic gold (`paletteAccent`) | `𝄞` treble | Greek-key meander |
+| `TerminalsGadget` | Ionic | aegean (`holoBlue`) | `𝄢` bass | volute capital + dentil course + egg-and-dart |
+| `MetersGadget` | Doric | verdigris teal (`wireCyan`) | `𝄡` alto C | triglyph-and-metope |
+| `PowerVitalsGadget` | Corinthian | murex (`violet`) | `ϟ` koppa (a Greek letter as lightning — no clef) | egg-and-dart ovolo |
+
+The state COLOUR spread is shared across temples: working → gold
+(`paletteAccent`), awaiting → terracotta (`paletteUrgent`), idle → murex
+(`violet`), done → verdigris (`wireCyan`), unknown → dim ink. (This supersedes
+the old "done → dim" pairing; see §2.)
+
+- **`ConductorGadget`** — the agent roster (`[ baton ]`): only what a conductor
+  conducts — agent/subagent sessions, plus shells sharing an agent's window,
+  read as a pure view of the daemon's `sessions.json`. Rows are a **stave**:
+  each session a note on a ledger line, hung on a `│` pilaster tinted by its
+  per-agent identity hue (the base16 `noteColor` spread; a conducted shell
+  borrows its conductor's hue). Child sessions are **beamed** off their parent
+  — a quaver beam + stem in the parent's hue, depth clamped to one indent.
+  State is also spoken by MOTION: working = the note bobs + a running shimmer
+  slides the ledger; awaiting = a terracotta row wash + a deep held note-pulse;
+  idle = a slow breath. Rows carry name (session title, else agent), state
+  word, `ws N` workspace tag, `▸` activity line, a quoted "say" line (the
+  agent's latest words), short cwd in aegean, a kaomoji, elapsed in gold.
+  Hovering a row previews its workspace on the bar; click →
+  `bridge.focusSession`. The emphasized row (traced, else first working) takes
+  the laurel: 3px spine + wash + laurel note/elapsed.
+- **`TerminalsGadget`** — the tty roster (`[ tty ]`): EVERY live terminal
+  window, tracked or not (the daemon publishes synthetic `shell` records;
+  the widget only filters + de-dupes by window address — agent record wins a
+  shared window). Rows hang on a `║` twin-groove column; the main label is the
+  running process/command, the cwd rides below in aegean; scroll-cornered
+  frame (`╭ ╮ ╰ ╯`, echoing the volutes). Same hover-preview, click-to-focus,
+  say-line, and laurel-crown row idioms as the Conductor — only the
+  architecture differs.
+- **`MetersGadget`** — CPU + RAM (`[ /proc ]`), read from `/proc/stat` +
+  `/proc/meminfo` on a ~2s tick. Each meter is a **voice**: its load spoken as
+  a dynamic marking (`𝆏𝆏 𝆏 𝆐 𝆑 𝆑𝆑`), its gauge an ASCII bar `⟦▓▓▓░░░⟧` — CPU
+  fills murex, RAM fills aegean, ≥ 85% goes terracotta. One kaomoji reads the
+  whole box; honest bytes (`used / total GB`) sit on the closing ledger line.
+  The laurel goes to the CALMEST voice, and only if genuinely calm (< 55%) —
+  silence is the healthy note.
+- **`PowerVitalsGadget`** — battery + network (`[ upower ]`), from UPower and
+  `/proc/net/route`. The battery drains toward silence: charge is a rest glyph
+  (`𝄽 𝄾 𝄿 𝅀 𝅁 𝅂` emptier→fuller, full `𝆑`, charging `𝄮`, mains `𝄻`) over an
+  ASCII charge bar (teal fill; gold when charging/full; terracotta when low).
+  The link is a sustained note `𝅗𝅥` while up, a rest `𝄽` when dead; iface +
+  detail in aegean. An HONEST empty state on a desktop: "AC — no battery
+  present", never a faked 100%. The laurel goes to the live network link.
+
+### The preview harnesses — `*Preview.qml`
+
+Each temple has a **preview sibling** (`ConductorPreview`, `TerminalsPreview`,
+`MetersPreview`, `PowerPreview`): a standalone `qs -p` harness that floats just
+that gadget on an overlay surface for a screenshot, carrying a stub gold-marble
+palette (hex values sanctioned here only — they mirror the drachma roles) and
+a stub bridge. The
+roster pair honour `QS_STAGE` to exercise the empty state; Meters/Power read
+the machine's real `/proc` + UPower live. They are development fixtures, not
+shell surfaces — `shell.qml` never loads them.
+
+### `DagGraphGadget` — RETIRED
+
+The stele-catalogue DAG showpiece was deleted in the rebuild along with its
+overlay mirror (`AoideSessionGraph`/`GraphModel`/`GraphRow`). Nothing replaces
+it in this grammar: the Conductor's beamed tree is the only nesting view. The
+`Γ`/`dag.trace` order-mark survives unused in `GadgetFrame`'s map, and the
+`aoide.surfaces.sessionGraph` registry entry has no QML body (an open flag,
+tracked outside this file).
+
+### The launcher — `AoideLauncher` (the Propylaea)
+
+The one GLASS temple among the opaque steles: the launcher is the entrance —
+the propylaea, the gate you pass through to summon an app — so its body stays
+frosted (`paletteBg` translucent over compositor blur + hyprglass) while
+wearing the full pantheon chrome: 2px plum border, inset gold keyline,
+`radius: 0`, a carved-serif inscription, a Greek-key meander rule, a `┤ … ├`
+TUI frame around the search line, the `♪` prompt idiom, kaomoji on the empty
+stage. The selected row is its one laurel: a `paletteHot` note + spine over an
+Attic-gold accent box.
+
+### The bar — `AoideBar` / `WorkspaceRow` (what actually shipped)
+
+khoa: "the bar is ok, maybe add some greekness on top" — the planned meander
+fret / `𝄂` bookend tick / middot slur were NEVER built; no Greek mark sits on
+the strip. What shipped instead is the manuscript strip going OPAQUE: the sheet
+fills `paletteBg` at alpha 1.0, no glass, no gloss (intent.md's surface table
+is the record). Kept: the 36px geometry, the black structural staff ink
+(`#000000` staff lines, barlines), and the functional glyph set (`𝄞` clef —
+also the powermenu key, rests, note-heads, network marks, the closing `𝄂`).
+The `✎N` agent-sessions cell rests laurel `paletteHot` and pulses `glitchPink`
+when a session blocks. `WorkspaceRow` did change, in the SONG vein, not the
+Greek: each workspace is a solid note glyph carrying its OWN hue from the
+base16 `noteColor` spread; the selected note keeps its own hue but swells,
+rests on a same-hue highlight pill, and takes a white outline (the one
+sanctioned colour literal, for separation on the opaque sheet); hover-select
+previews in gold; urgent pulses `glitchPink`. The melody is colour-coded, not
+Greek-ified.
 
 ### Flat skeletons
 
-Each is a plain `Rectangle`/`Item` with a `border`; the Greek grammar gives each
-a **stele** treatment (pediment cap + column rails + stylobate base), drawn in
-box characters, function identical:
+Each is a plain `Rectangle`/`Item` given a **stele** treatment (pediment cap +
+column rails + stylobate base) in box characters, function identical — all
+implemented as designed:
 
 - **`NotificationCard`** — a **votive stele**: a `╱‾‾╲` pediment carrying the app
   name, `║` rails, a stylobate base rule. Urgent (`urgency === 2`) swaps the rail
-  colour to `notifUrgent` (terracotta) and pulses — the existing
-  `notes.notifUrgent`/`windowBorder` border logic, re-dressed as rails.
+  colour to `notifUrgent` (terracotta) at 0.9 and pulses; at rest the
+  `windowBorder` verdigris chrome holds the §5 cap (0.5).
 - **`AoideOsd`** — a small centred **stele**: pediment + a single value line;
-  border `paletteAccent` (now gold) kept. The fade-in/out timing is untouched.
+  border `paletteAccent` (gold) kept. The fade-in/out timing is untouched.
 - **`AoideLockscreen`** / **`AoideGreeter`** — a **temple façade**: a wide
-  `╱‾‾‾‾‾╲` pediment over a `‖ ‖ ‖` colonnade framing the password/login field;
-  border `paletteAccent` kept. Pure chrome dress over the existing skeleton.
-- **`AoideSessionGraph`** / **`GraphRow`** — the overlay DAG mirrors
-  `DagGraphGadget`'s stele idiom: project rows `◆`→ double-ruled amethyst stele,
-  session rows `●`→ single `wireCyan` stele + state glyph + short cwd; depth via
-  indentation kept; `stateColor` map (`paletteAccent`/`paletteUrgent`/dim) kept.
-  Clicking a session row still routes `activate(windowAddress)` through the gate.
+  `╱‾‾‾‾‾╲` pediment over a `‖ ‖` colonnade framing the password/login field,
+  verdigris at 0.5; the field keeps its Attic-gold active border. Pure chrome
+  dress over the existing skeleton.
 
 ---
 
 ## 5. The one-hot rule & restraint in the Greek key
 
-Mirrors Pantheon §4–5's discipline, transposed to marble:
+Mirrors Pantheon §4–5's discipline, transposed to marble — restated to what the
+pantheon rebuild actually enforces:
 
-- **One blaze.** Exactly the traced/live element blazes **laurel green**
-  (`paletteHot`, base0B) — the DAG traced node (2px laurel border + halo + bold
-  label) and its partner **TERMINALS** traced row (border + halo). Nothing else
-  is ever laurel. When nothing is traced, the whole field rests dim.
-- **The field rests low.** Project steles read `violet` (Tyrian/murex) a touch
-  stronger than idle session steles (`wireCyan`); done nodes nearly vanish (dim
-  ~0.2). The dim ladder is unchanged from the Pantheon constants (`dimProject`
-  0.45 · `dimIdle` 0.35 · `dimDone` 0.2 · `dimCallout` 0.35).
-- **INVARIANT — the verdigris cap.** All structural `wireCyan` (bronze-verdigris)
-  chrome — columns (`║ ▌ ▐ │ ‖`), meander friezes, cornices, and stylobates —
-  MUST render at **≤ 0.5 alpha at all times**. This is a hard rule the reskin
-  must honor, not a tunable default. On the warm marble ground the teal verdigris
-  is chromatically louder than the laurel `hot` blaze, so the opacity ladder is
-  the ONLY thing keeping the structural role from out-blazing the one-hot green.
-  A verdigris rule drawn at full strength would steal the trace. Never exceed 0.5.
-- **Three jobs, three hues, never crossed.** **Gold = the chrome state**
-  (`paletteAccent`, base0A — active workspace fill, open toggles, running marks);
-  calm and everywhere-eligible. **Laurel = the one blaze** (`paletteHot`, base0B —
-  the traced element only). **Terracotta = the summons** (`urgent`/`glitchPink`,
-  base08 — blocked pulse, low battery). Aegean (`holoBlue`, base0D) is a fourth,
-  quieter voice — preview/information (the workspace preview ring, links), never
-  chrome state and never a blaze.
+- **One laurel standout PER TEMPLE.** Laurel green (`paletteHot`, base0B) is
+  still the only standout hue, but the unit of restraint is the temple, not the
+  whole desktop: each surface elects exactly one laurel element. Conductor and
+  Terminals crown the traced row (`shared.tracedSessionId`, else the first
+  working row) — 3px laurel spine + wash + laurel note/elapsed; Meters crowns
+  the CALMEST voice, and only if genuinely calm (< 55%); Power crowns the live
+  network link; the launcher crowns the selected row; the bar's `✎N` cell
+  rests laurel. Nothing else is ever laurel. (Note the drift from the original
+  "exactly one blaze in the whole field" — several temples can each show their
+  one standout at once.)
+- **The field rests low.** Idle rows and empty states read dim ink
+  (0.4–0.65 washes); ledger lines run their temple's hue at ~0.3; the
+  emphasis/hover washes are 0.08–0.10. The old DAG dim-ladder constants
+  (`dimProject`/`dimIdle`/`dimDone`/`dimCallout`) retired with the DAG.
+- **The verdigris cap — narrowed to the STRUCTURAL role.** Where `wireCyan`
+  plays structural chrome — `GadgetFrame`'s rails/cornice/stylobate, the
+  skeletons' rails and colonnades, ledger lines — it holds the original
+  **≤ 0.5 alpha** cap (the teal would out-shout the laurel at full strength).
+  BUT the Meters temple wears teal as its SIGNATURE hue, and signature chrome
+  (clef, keyline, frieze, TUI frame) runs strong (0.55–0.95, the frieze at
+  full stroke) in every temple by design — Meters' teal included. As built,
+  the cap binds the role, not the hue. (This is a departure from the original
+  Fable-review invariant as worded in intent.md's log; flagged, not silently
+  blessed.)
+- **Hues now hold several jobs each.** The rebuild added two job classes on
+  top of the original three: the per-temple **signature hue** (gold /
+  aegean / teal / murex carrying one temple's architecture each, §4) and the
+  shared **state spread** (working gold · awaiting terracotta · idle murex ·
+  done verdigris, §2), plus gauge fills (CPU murex, RAM aegean, battery teal)
+  and the per-agent/per-workspace **identity cycle** (`noteColor` over the
+  8-slot base16 spread). Laurel alone keeps a single job — the standout.
+  Terracotta remains the summons everywhere (awaiting pulse, low battery,
+  urgent workspace, urgent notification).
 - **STANDING RULE — gold is a fill / line, never running body text.** Attic gold
   `paletteAccent` clears only 3.54:1 on marble (< 4.5 AA), so it may fill a
-  note-head, stroke an active border, or tint a toggle, but MUST NOT be used for
-  running body text. Same class as the verdigris cap: a chrome colour with a
-  contrast ceiling, not a text colour. (The verdigris ≤ 0.5 invariant above is
-  unaffected and still stands.)
-- **Colours are ROLES, not ornament.** The meander and columns do not introduce a
-  second decorative hue; they wear the structural `wireCyan` role. A surface that
-  reaches for a stray extra colour has left the grammar.
+  note-head, stroke an active border, tint a toggle — and, in the temples, ink
+  the short numeric tallies (elapsed, percentages) — but MUST NOT carry running
+  body prose. Body text is always `paletteFg` ink.
+- **Colours are ROLES, not ornament.** An ornament course wears its temple's
+  signature hue and nothing else; a surface that reaches for a stray extra
+  colour beyond its signature + the shared spreads has left the grammar. The
+  one sanctioned literal in the whole shell is the white outline on the bar's
+  selected note (§4).
 
 ---
 
