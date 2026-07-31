@@ -63,6 +63,10 @@ Item {
     // ── Note + bridge dependencies (injected by shell.qml) ────────────────
     required property var notes
     required property var bridge
+    // The staging engine (StagingEngine singleton) — the calendar
+    // popout below asks it whether the active song dresses the "calendar"
+    // slot before opening.
+    required property var stagingEngine
     // Shared session state (shell.qml's QtObject). Threaded through so the
     // centre WorkspaceRow can read `shared.hoveredWorkspace` — the gadget-dock
     // hover-preview bridge (concepts/Terminal-Commander). Optional/null-safe so
@@ -84,10 +88,19 @@ Item {
         onTriggered: root.now = new Date()
     }
 
-    // ── Keep the default sink's audio subobject live ───────────────────────
-    PwObjectTracker { objects: Pipewire.defaultAudioSink ? [Pipewire.defaultAudioSink] : [] }
+    // ── Keep the default sink + source audio subobjects live ───────────────
+    // Both nodes must be tracked or their `.audio` subobject never binds; the
+    // source (microphone) gets the same treatment as the sink.
+    PwObjectTracker {
+        objects: {
+            var o = []
+            if (Pipewire.defaultAudioSink)   o.push(Pipewire.defaultAudioSink)
+            if (Pipewire.defaultAudioSource) o.push(Pipewire.defaultAudioSource)
+            return o
+        }
+    }
 
-    // ── Volume helpers (Pipewire) ──────────────────────────────────────────
+    // ── Volume helpers — OUTPUT / sink (Pipewire) ──────────────────────────
     readonly property var sinkAudio: (Pipewire.ready && Pipewire.defaultAudioSink
                                        && Pipewire.defaultAudioSink.audio)
                                       ? Pipewire.defaultAudioSink.audio : null
@@ -111,17 +124,25 @@ Item {
     function volToggleMute() {
         if (sinkAudio) sinkAudio.muted = !sinkAudio.muted
     }
-    // ASCII slider for the hover popout, e.g. [▮▮▮▮▮▯▯▯▯▯] 52%
-    function volSlider(pct) {
-        var cells = 10
-        var p = pct
-        if (p < 0) p = 0
-        if (p > 100) p = 100
-        var filled = Math.round(p / 100 * cells)
-        var s = "["
-        for (var i = 0; i < cells; i++) s += (i < filled) ? "▮" : "▯"
-        s += "]"
-        return s
+
+    // ── Microphone helpers — INPUT / source (Pipewire) ─────────────────────
+    // Same shape as the sink: defaultAudioSource is a PwNode whose `.audio`
+    // sub-object carries `volume` (capture gain, 0..1) and `muted`.
+    readonly property var srcAudio: (Pipewire.ready && Pipewire.defaultAudioSource
+                                      && Pipewire.defaultAudioSource.audio)
+                                     ? Pipewire.defaultAudioSource.audio : null
+    readonly property bool micAvail: srcAudio !== null
+    readonly property bool micMuted: srcAudio ? srcAudio.muted : false
+    readonly property int micPct: srcAudio ? Math.round(srcAudio.volume * 100) : 0
+    function micAdjust(deltaPct) {
+        if (!srcAudio) return
+        var v = srcAudio.volume + deltaPct / 100
+        if (v < 0) v = 0
+        if (v > 1) v = 1
+        srcAudio.volume = v
+    }
+    function micToggleMute() {
+        if (srcAudio) srcAudio.muted = !srcAudio.muted
     }
 
     // ── Battery helpers (UPower) ───────────────────────────────────────────
@@ -205,12 +226,54 @@ Item {
         onTextChanged: {
             try {
                 var d = JSON.parse(sessionsFile.text())
-                root.sessionCount = (d && d.sessions) ? d.sessions.length : 0
-                root.sessionsBlocked = root.anyStateBlocked(d && d.sessions, "state")
+                var arr = (d && d.sessions) ? d.sessions : []
+                root.sessionCount = arr.length
+                root.sessionsBlocked = root.anyStateBlocked(arr, "state")
+                root.sessionsData = arr
             } catch (e) { /* absent/garbage → hold count */ }
         }
         Component.onCompleted: sessionsFile.reload()
     }
+    // ── Active model (the clock's subtext) ──────────────────────────────────
+    // The whole session roster, kept so the clock subtext can name whichever
+    // model is running RIGHT NOW. Selection prefers the FOCUSED session (the
+    // one whose Hyprland window has focus), falling back to the most-recently
+    // started agent that has published a model. Subagents carry their OWN model
+    // (aoide reads each subagent's own transcript), so a focused agent that has
+    // handed a Task to a different tier still shows the agent's model here.
+    property var sessionsData: []
+    function pickModelId(arr, addr) {
+        if (!arr || arr.length === 0) return ""
+        // 1. The focused window's session, if it has a model.
+        if (addr && addr.length > 0) {
+            for (var i = 0; i < arr.length; i++) {
+                var s = arr[i]
+                if (s && s.windowAddress === addr && s.model) return s.model
+            }
+        }
+        // 2. Fallback: most-recently-started session with a model, preferring a
+        //    real agent over a subagent/shell (ISO-8601 sorts lexically).
+        var best = null
+        for (var j = 0; j < arr.length; j++) {
+            var r = arr[j]
+            if (!r || !r.model) continue
+            if (best === null) { best = r; continue }
+            var rSub = (r.kind === "subagent")
+            var bSub = (best.kind === "subagent")
+            if (bSub && !rSub) { best = r; continue }
+            if (rSub && !bSub) continue
+            if (("" + (r.startedAt || "")) > ("" + (best.startedAt || ""))) best = r
+        }
+        return best && best.model ? best.model : ""
+    }
+    // The full raw transcript model id, dashes and all (e.g. "claude-sonnet-5").
+    function modelLabel(raw) {
+        return raw ? ("" + raw) : ""
+    }
+    readonly property string activeAddress:
+        Hyprland.activeToplevel ? ("" + Hyprland.activeToplevel.address) : ""
+    readonly property string currentModelRaw: pickModelId(root.sessionsData, root.activeAddress)
+    readonly property string currentModelLabel: modelLabel(root.currentModelRaw)
     FileView {
         id: hooksFile
         path: root.hooksPath
@@ -301,8 +364,15 @@ Item {
     }
 
     // ── Popout visibility state ─────────────────────────────────────────────
-    property bool volShown: false      // volume hover slider
+    // The audio popout (the two-column colonnade) is shared: it opens while the
+    // pointer is over the ♪ vol cell, the ● mic cell, OR the popout body itself
+    // (so its columns can be clicked/scrolled without it closing under you).
+    property bool volCellHover: false  // pointer over the vol cell
+    property bool micCellHover: false  // pointer over the mic cell
+    property bool audioBodyHover: false // pointer inside the colonnade popout
+    readonly property bool audioShown: volCellHover || micCellHover || audioBodyHover
     property bool battShown: false     // battery hover popout
+    property bool calShown: false      // calendar click popout (song widget slot)
 
     // ══ MUSICAL GEOMETRY ═══════════════════════════════════════════════════
     // The staff sits at the strip's vertical midline; five lines a staffGap
@@ -433,16 +503,56 @@ Item {
             }
         }
 
-        // ── Clock + date. Lives on the bar, not the dock — the ambient face
-        // belongs beside the measure, not in the case.
-        Text {
+        // ── Clock + date, with the active model as a dim subtext line under
+        // the time (the focused session's running model). Lives on the bar,
+        // not the dock — the ambient face belongs beside the measure, not in
+        // the case.
+        Item {
             id: clockText
             anchors.verticalCenter: parent.verticalCenter
-            text: Qt.formatDateTime(root.now, "hh:mm AP  dddd MMM dd")
-            color: root.notes.paletteFg
-            font.family: "monospace"
-            font.pixelSize: 14
-            font.bold: true
+            implicitWidth: clockCol.implicitWidth
+            implicitHeight: clockCol.implicitHeight
+            width: implicitWidth
+            height: implicitHeight
+
+            Column {
+                id: clockCol
+                anchors.centerIn: parent
+                spacing: 0
+
+                Text {
+                    text: Qt.formatDateTime(root.now, "hh:mm AP  dddd MMM dd")
+                    color: root.calShown ? root.notes.paletteAccent : root.notes.paletteFg
+                    font.family: "monospace"
+                    font.pixelSize: 14
+                    font.bold: true
+                }
+                // The active model — a small dim caption under the time, the
+                // same secondary-text idiom the roster gadgets use. Collapses
+                // to nothing until a focused agent has published a model.
+                Text {
+                    visible: root.currentModelLabel.length > 0
+                    text: root.currentModelLabel
+                    color: root.notes.paletteFg
+                    // Dim caption, but not so dim it vanishes at 1x on the cream
+                    // page (Fable review, 2026-07-31): 0.62 keeps it clearly
+                    // secondary to the 14px bold time while staying glance-legible.
+                    opacity: 0.62
+                    font.family: "monospace"
+                    font.pixelSize: 9
+                    elide: Text.ElideRight
+                }
+            }
+
+            // Click opens the calendar popout — a per-song flavor-widget
+            // slot (WidgetSlot below). Nothing to click through to when the
+            // active song hasn't authored one; the popout itself gates on
+            // stagingEngine.has(...) so an unauthored calendar simply won't open.
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.calShown = !root.calShown
+            }
         }
         // The " / " separator — a slur between clock and title.
         Text {
@@ -453,11 +563,12 @@ Item {
             font.pixelSize: 14
             opacity: 0.55
         }
-        // Active-window title (music kaomoji when empty).
+        // Active-window title (music kaomoji when empty). khoa, 2026-07-31:
+        // primary-color ink — paletteAccent, not paletteFg.
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: root.winTitle()
-            color: root.notes.paletteFg
+            color: root.notes.paletteAccent
             font.family: "monospace"
             font.pixelSize: 14
             font.bold: true
@@ -492,13 +603,17 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: 10
 
-        // Volume — scroll = adjust, click = mute, hover = ASCII slider popout.
+        // Volume (OUTPUT) — scroll = adjust, click = mute, hover = the colonnade
+        // popout (shared with mic). Attic-gold ink; hover feedback is
+        // opacity + underline (the base is already the accent).
         Text {
             id: volText
             anchors.verticalCenter: parent.verticalCenter
             visible: root.volAvail
             text: root.volMuted ? "𝄽 vol" : (root.volIcon(root.volPct) + " " + root.volPct)
-            color: root.volShown ? root.notes.paletteAccent : root.notes.paletteFg
+            color: root.notes.paletteAccent
+            opacity: root.audioShown ? 1.0 : 0.8
+            font.underline: root.audioShown
             font.family: "monospace"
             font.pixelSize: 14
             font.bold: true
@@ -506,11 +621,39 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onEntered: root.volShown = true
-                onExited: root.volShown = false
+                onEntered: root.volCellHover = true
+                onExited: root.volCellHover = false
                 onClicked: root.volToggleMute()
                 onWheel: {
                     root.volAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
+                    wheel.accepted = true
+                }
+            }
+        }
+
+        // Microphone (INPUT) — the cool aegean voice, paired beside the vol cell.
+        // scroll = adjust capture gain, click = mute, hover = the shared popout.
+        // ● recording dot when live; a 𝄽 rest when muted (mirrors the vol cell).
+        Text {
+            id: micText
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.micAvail
+            text: root.micMuted ? "𝄽 mic" : ("● " + root.micPct)
+            color: root.notes.holoBlue
+            opacity: root.audioShown ? 1.0 : 0.8
+            font.underline: root.audioShown
+            font.family: "monospace"
+            font.pixelSize: 14
+            font.bold: true
+            MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onEntered: root.micCellHover = true
+                onExited: root.micCellHover = false
+                onClicked: root.micToggleMute()
+                onWheel: {
+                    root.micAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
                     wheel.accepted = true
                 }
             }
@@ -572,20 +715,26 @@ Item {
     // The cell ids above (volText/battText) anchor them. Meters/power/clock
     // popouts moved to the AoideAgentWidgets dock (bottom-seated frames).
 
-    // Volume hover slider.
-    BarPopout {
-        notes: root.notes
+    // Audio control — the two-column colonnade (MIC + VOL), a self-framed marble
+    // stele hosted BARE (StelePopout, no GadgetFrame — it draws its own chrome).
+    // Shared popout hung under the vol cell, opened by hovering EITHER audio cell
+    // (or the body, so its columns can be clicked/scrolled without it closing).
+    StelePopout {
         cell: volText
-        title: "volume.level"
-        popoutWidth: 180
-        shown: root.volShown && root.volAvail
-        Text {
-            width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            text: root.volMuted ? "muted" : (root.volSlider(root.volPct) + " " + root.volPct + "%")
-            color: "#14141a"
-            font.family: "monospace"
-            font.pixelSize: 14
+        shown: root.audioShown && (root.volAvail || root.micAvail)
+        AudioColonnade {
+            notes: root.notes
+            outPct: root.volPct
+            outMuted: root.volMuted
+            outAvail: root.volAvail
+            inPct: root.micPct
+            inMuted: root.micMuted
+            inAvail: root.micAvail
+            onOutToggle: root.volToggleMute()
+            onOutAdjust: function(d) { root.volAdjust(d) }
+            onInToggle: root.micToggleMute()
+            onInAdjust: function(d) { root.micAdjust(d) }
+            onHoveredChanged: root.audioBodyHover = hovered
         }
     }
 
@@ -615,6 +764,26 @@ Item {
                 font.family: "monospace"
                 font.pixelSize: 11
             }
+        }
+    }
+
+    // Calendar — a per-song flavor-widget slot (CONTRACTS.md §5). No shared
+    // fallback: the old song-blind CalendarGadget was retired, so an
+    // unauthored calendar slot simply doesn't open (gated below on
+    // stagingEngine.has(...), not just calShown) rather than popping an empty
+    // frame.
+    BarPopout {
+        notes: root.notes
+        cell: clockText
+        title: "calendar.sheet"
+        shown: root.calShown && root.stagingEngine.has(root.notes.songName, "calendar")
+        reveal: true
+        WidgetSlot {
+            width: parent.width
+            notes: root.notes
+            bridge: root.bridge
+            stagingEngine: root.stagingEngine
+            slot: "calendar"
         }
     }
 }

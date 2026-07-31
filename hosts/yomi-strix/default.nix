@@ -67,6 +67,9 @@
   aoide.screenshot.enable = true;
   aoide.vision.enable = true;
 
+  # Audio backend (PipeWire + WirePlumber) — real volume control for the bar.
+  aoide.audio.enable = true;
+
   # Shipped dendrites (off unless wanted; aoide.mcp.enable stays false — house policy).
   aoide.obsidian.enable = true;
   aoide.firefox.enable = true;

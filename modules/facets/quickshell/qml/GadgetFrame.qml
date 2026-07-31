@@ -19,7 +19,7 @@
 // All colors from notes (zero hardcoded hex).
 //
 // Usage (default property → children land in the body):
-//   GadgetFrame { notes: notes; title: "baton.control"; BatonGadget { … } }
+//   GadgetFrame { notes: notes; title: "conductor.control"; ConductorGadget { … } }
 
 import QtQuick
 
@@ -35,12 +35,14 @@ Item {
     // identity/search are unaffected. Unknown surfaces fall back to the neutral
     // middot (a music-contract glyph, harmless).
     readonly property var orderMarks: ({
-        "baton.control":     "Α",  // Α
+        "conductor.control": "Α",  // Α
         "terminals.roster":  "Β",  // Β
         "dag.trace":         "Γ",  // Γ
         "meters.pulse":      "Δ",  // Δ
         "power.reserve":     "Θ",  // Θ
         "volume.level":      "Λ",  // Λ
+        "audio.control":     "Η",  // Η — reads as two joined columns (the porch)
+
         "battery.gauge":     "Ξ",  // Ξ
         "calendar.sheet":    "Π",  // Π
         "nowplaying.score":  "Σ",  // Σ
