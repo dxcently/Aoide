@@ -815,11 +815,12 @@ Item {
                                     font.family: gadget.faceMono; font.pixelSize: 11
                                     color: row.emph ? notes.paletteHot : notes.paletteAccent
                                 }
-                                Text {                     // subagent type / agent, when a title took the name
+                                Text {                     // the running Claude model, when known — else
+                                                            // the subagent type / agent, when a title took the name
                                     id: agentTag
                                     anchors.baseline: elapsedText.baseline
                                     visible: row.hasTitle
-                                    text: (row.subagent ? "⟐ " : "") + (modelData.agent || "")
+                                    text: (row.subagent ? "⟐ " : "") + (modelData.model || modelData.agent || "")
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: row.idHue
                                 }

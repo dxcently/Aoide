@@ -214,7 +214,8 @@ Item {
                 windowAddress: rec.windowAddress || "",
                 title:         rec.title || "",       // session name (tracked) / window title (synthetic)
                 activity:      rec.activity || "",    // the current command/tool
-                say:           rec.say || ""          // the agent's latest words
+                say:           rec.say || "",         // the agent's latest words
+                model:         rec.model || ""        // the running Claude model, if known
             });
         }
         // stable order: by workspace, then window address (so re-reads that return
@@ -234,7 +235,7 @@ Item {
             var r = list[i];
             parts.push([r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
                         r.workspace, r.windowAddress, r.title,
-                        r.activity, r.say].join(""));
+                        r.activity, r.say, r.model].join(""));
         }
         return parts.join("");
     }
@@ -736,6 +737,13 @@ Item {
                                     text: gadget.elapsed(modelData.startedAt)
                                     font.family: gadget.faceMono; font.pixelSize: 11
                                     color: row.emph ? notes.paletteHot : gadget.sig
+                                }
+                                Text {                     // the running Claude model, when known
+                                    anchors.baseline: elapsedText.baseline
+                                    visible: (modelData.model || "").length > 0
+                                    text: modelData.model || ""
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: gadget.withA(gadget.sig, 0.85)
                                 }
                                 Text {                     // the Hyprland workspace — plain number tag
                                     anchors.baseline: elapsedText.baseline

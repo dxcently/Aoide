@@ -229,51 +229,10 @@ Item {
                 var arr = (d && d.sessions) ? d.sessions : []
                 root.sessionCount = arr.length
                 root.sessionsBlocked = root.anyStateBlocked(arr, "state")
-                root.sessionsData = arr
             } catch (e) { /* absent/garbage → hold count */ }
         }
         Component.onCompleted: sessionsFile.reload()
     }
-    // ── Active model (the clock's subtext) ──────────────────────────────────
-    // The whole session roster, kept so the clock subtext can name whichever
-    // model is running RIGHT NOW. Selection prefers the FOCUSED session (the
-    // one whose Hyprland window has focus), falling back to the most-recently
-    // started agent that has published a model. Subagents carry their OWN model
-    // (aoide reads each subagent's own transcript), so a focused agent that has
-    // handed a Task to a different tier still shows the agent's model here.
-    property var sessionsData: []
-    function pickModelId(arr, addr) {
-        if (!arr || arr.length === 0) return ""
-        // 1. The focused window's session, if it has a model.
-        if (addr && addr.length > 0) {
-            for (var i = 0; i < arr.length; i++) {
-                var s = arr[i]
-                if (s && s.windowAddress === addr && s.model) return s.model
-            }
-        }
-        // 2. Fallback: most-recently-started session with a model, preferring a
-        //    real agent over a subagent/shell (ISO-8601 sorts lexically).
-        var best = null
-        for (var j = 0; j < arr.length; j++) {
-            var r = arr[j]
-            if (!r || !r.model) continue
-            if (best === null) { best = r; continue }
-            var rSub = (r.kind === "subagent")
-            var bSub = (best.kind === "subagent")
-            if (bSub && !rSub) { best = r; continue }
-            if (rSub && !bSub) continue
-            if (("" + (r.startedAt || "")) > ("" + (best.startedAt || ""))) best = r
-        }
-        return best && best.model ? best.model : ""
-    }
-    // The full raw transcript model id, dashes and all (e.g. "claude-sonnet-5").
-    function modelLabel(raw) {
-        return raw ? ("" + raw) : ""
-    }
-    readonly property string activeAddress:
-        Hyprland.activeToplevel ? ("" + Hyprland.activeToplevel.address) : ""
-    readonly property string currentModelRaw: pickModelId(root.sessionsData, root.activeAddress)
-    readonly property string currentModelLabel: modelLabel(root.currentModelRaw)
     FileView {
         id: hooksFile
         path: root.hooksPath
@@ -503,46 +462,16 @@ Item {
             }
         }
 
-        // ── Clock + date, with the active model as a dim subtext line under
-        // the time (the focused session's running model). Lives on the bar,
-        // not the dock — the ambient face belongs beside the measure, not in
-        // the case.
-        Item {
+        // ── Clock + date. Lives on the bar, not the dock — the ambient face
+        // belongs beside the measure, not in the case.
+        Text {
             id: clockText
             anchors.verticalCenter: parent.verticalCenter
-            implicitWidth: clockCol.implicitWidth
-            implicitHeight: clockCol.implicitHeight
-            width: implicitWidth
-            height: implicitHeight
-
-            Column {
-                id: clockCol
-                anchors.centerIn: parent
-                spacing: 0
-
-                Text {
-                    text: Qt.formatDateTime(root.now, "hh:mm AP  dddd MMM dd")
-                    color: root.calShown ? root.notes.paletteAccent : root.notes.paletteFg
-                    font.family: "monospace"
-                    font.pixelSize: 14
-                    font.bold: true
-                }
-                // The active model — a small dim caption under the time, the
-                // same secondary-text idiom the roster gadgets use. Collapses
-                // to nothing until a focused agent has published a model.
-                Text {
-                    visible: root.currentModelLabel.length > 0
-                    text: root.currentModelLabel
-                    color: root.notes.paletteFg
-                    // Dim caption, but not so dim it vanishes at 1x on the cream
-                    // page (Fable review, 2026-07-31): 0.62 keeps it clearly
-                    // secondary to the 14px bold time while staying glance-legible.
-                    opacity: 0.62
-                    font.family: "monospace"
-                    font.pixelSize: 9
-                    elide: Text.ElideRight
-                }
-            }
+            text: Qt.formatDateTime(root.now, "hh:mm AP  dddd MMM dd")
+            color: root.calShown ? root.notes.paletteAccent : root.notes.paletteFg
+            font.family: "monospace"
+            font.pixelSize: 14
+            font.bold: true
 
             // Click opens the calendar popout — a per-song flavor-widget
             // slot (WidgetSlot below). Nothing to click through to when the
