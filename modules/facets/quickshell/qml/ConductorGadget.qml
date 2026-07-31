@@ -25,13 +25,20 @@ import Quickshell.Io
 // state spread, with the ONE laurel `paletteHot` reserved for the traced row.
 //   · TERMINAL   — box-drawing frames the roster like a TUI panel; each row
 //                  hangs from a monospace column │ (pilaster + staff barline).
-//   · KAOMOJI    — every working row wears one of TWO pools (MoodFaces.qml):
-//                  a SUBAGENT wears the `packages` courier pool, hashed from
-//                  its id so its set is fixed for its whole delivery run;
-//                  every top-level agent wears the general `working` pool,
-//                  re-rolled at random each roster refresh. Resting states
-//                  (awaiting/stopped/idle/done) each hold one still pose.
-//                  The empty stage gets an ASCII temple and a shrug.
+//   · KAOMOJI    — every working row wears one of THREE pools (MoodFaces.qml),
+//                  each pinned by a hash of the row's identity so the set
+//                  never reshuffles under it, even though the underlying
+//                  roster model gets swapped (and every delegate recreated)
+//                  on ordinary activity heartbeats: a SUBAGENT wears the
+//                  `packages` courier pool, hashed from its own id; a
+//                  top-level agent currently coordinating an active subagent
+//                  wears the `receiving` pool (catch/inbox), hashed from its
+//                  id + a ":subs" suffix so the pin deliberately changes when
+//                  it transitions in/out of that state; every other
+//                  top-level agent wears the general `working` pool, hashed
+//                  from its own id. Resting states (awaiting/stopped/idle/
+//                  done) each hold one still pose. The empty stage gets an
+//                  ASCII temple and a shrug.
 //
 // LEGIBLE + DEFINED: the body is opaque marble with a hard 2px plum border and
 // a gold keyline — no pale washout. RESTRAINED: motifs carry state or structure.
@@ -158,6 +165,21 @@ Item {
     function isShellRec(rec) { return recKind(rec) === "shell"; }
     function isAgentRec(rec) { return !isShellRec(rec); }   // agent OR subagent
     function isSubagentRec(rec) { return recKind(rec) === "subagent"; }
+    // Whether `sessionId` currently has at least one ACTIVE (working) subagent
+    // child — used to bias a top-level row's kaomoji toward the `receiving`
+    // pool while it's coordinating dispatched work, distinct from a plain
+    // solo agent. Derived from the raw roster (`sessions`), not the
+    // flattened/depth-clamped `visibleRows`, so it reflects the true parent/
+    // child relationship regardless of display tree depth.
+    function hasActiveSubagents(sessionId) {
+        if (!sessionId) return false;
+        for (var i = 0; i < sessions.length; i++) {
+            var r = sessions[i];
+            if ((r.parentSessionId || "") === sessionId && isSubagentRec(r) && isWorking(r.state))
+                return true;
+        }
+        return false;
+    }
     function conductorFor(rec) {            // agent name sharing this shell's window, else ""
         var wa = rec && rec.windowAddress ? rec.windowAddress : "";
         if (!wa) return "";
@@ -864,23 +886,34 @@ Item {
                                     width: 96
                                     horizontalAlignment: Text.AlignRight
                                     // WORKING animates; every resting state holds
-                                    // one pose. A SUBAGENT wears the `packages`
-                                    // courier pool, hashed from its id so its set
-                                    // is fixed for its whole life (a consistent
-                                    // delivery story). Every other row (top-level
-                                    // agents) wears the general `working` pool,
-                                    // re-rolled at random each time this delegate
-                                    // is (re)created — i.e. on every roster
-                                    // refresh — for variety rather than identity.
+                                    // one pose. Every row's set is HASHED from a
+                                    // pin key (pickFor/phaseFor), never drawn at
+                                    // random — the underlying roster model gets
+                                    // reassigned (and every delegate recreated)
+                                    // on ordinary activity/say heartbeats, far
+                                    // more often than the roster actually
+                                    // changes, so a random pick would visibly
+                                    // reshuffle mid-session. A SUBAGENT wears the
+                                    // `packages` courier pool, pinned to its own
+                                    // id for its whole life (a consistent
+                                    // delivery story). A top-level row that
+                                    // currently has an active subagent child
+                                    // wears the `receiving` pool (catch/inbox) —
+                                    // pinned to id+":subs", so the set changes
+                                    // (deliberately) only when it transitions
+                                    // into/out of coordinating subagents. Every
+                                    // other row is a plain solo agent, pinned to
+                                    // its own id in the general `working` pool.
                                     property bool packageRow: row.subagent
-                                    property int setIdx: packageRow
-                                        ? gadget.faces.pickFor(modelData.sessionId || "", gadget.faces.packages)
-                                        : gadget.faces.randomIndex(gadget.faces.working.length)
-                                    property int frame: packageRow
-                                        ? gadget.faces.phaseFor(modelData.sessionId || "", frames.length)
-                                        : gadget.faces.randomIndex(frames.length)
-                                    readonly property var frames: gadget.faces.workingFrames(setIdx,
-                                        packageRow ? gadget.faces.packages : gadget.faces.working)
+                                    property bool receivingRow: !packageRow
+                                        && gadget.hasActiveSubagents(modelData.sessionId || "")
+                                    readonly property string moodKey: (modelData.sessionId || "")
+                                        + (receivingRow ? ":subs" : "")
+                                    readonly property var moodPool: packageRow ? gadget.faces.packages
+                                        : (receivingRow ? gadget.faces.receiving : gadget.faces.working)
+                                    property int setIdx: gadget.faces.pickFor(moodKey, moodPool)
+                                    property int frame: gadget.faces.phaseFor(moodKey, frames.length)
+                                    readonly property var frames: gadget.faces.workingFrames(setIdx, moodPool)
                                     text: row.working ? frames[frame % frames.length]
                                                       : gadget.kaomojiFor(modelData.state)
                                     // Explicit family (every other Text in this

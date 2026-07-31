@@ -17,8 +17,8 @@ import Quickshell.Io
 //     𝄂 done · · unknown, closed by a final barline 𝄂. (glyphs = HARD CONTRACT)
 //   · KAOMOJI every working row draws from MoodFaces.qml's general `working`
 //     pool (terminals have no subagent concept, so the `packages` courier
-//     pool never appears here), re-rolled at random each roster refresh;
-//     ASCII / box-drawing throughout.
+//     pool never appears here), hashed from the row's stable key so its set
+//     stays pinned across a delegate rebuild; ASCII / box-drawing throughout.
 //   · the FUNCTION: agent · state · cwd · elapsed, click → focusSession,
 //     an empty state, and hot-reload of the stage file.
 //
@@ -786,11 +786,20 @@ Item {
                                     // WORKING animates; every resting state holds
                                     // one pose. Terminals have no subagent concept
                                     // (that's a Conductor-only idea), so every row
-                                    // wears the general `working` pool, re-rolled
-                                    // at random each time this delegate is
-                                    // (re)created — i.e. on every roster refresh.
-                                    property int setIdx: gadget.faces.randomIndex(gadget.faces.working.length)
-                                    property int frame: gadget.faces.randomIndex(frames.length)
+                                    // wears the general `working` pool — but HASHED
+                                    // from the row's stable key (pickFor/phaseFor),
+                                    // never drawn at random: the underlying roster
+                                    // model gets reassigned (and every delegate
+                                    // recreated) on ordinary cwd/activity
+                                    // heartbeats, far more often than the roster
+                                    // actually changes, so a random pick would
+                                    // visibly reshuffle mid-session. `rowKey` is
+                                    // the same stable identity (sessionId, else
+                                    // "win:"+windowAddress) already used for
+                                    // hover-across-rebuild above.
+                                    readonly property string moodKey: gadget.rowKey(modelData)
+                                    property int setIdx: gadget.faces.pickFor(moodKey, gadget.faces.working)
+                                    property int frame: gadget.faces.phaseFor(moodKey, frames.length)
                                     readonly property var frames: gadget.faces.workingFrames(setIdx)
                                     text: row.working ? frames[frame % frames.length]
                                                       : gadget.kaomojiFor(modelData.state)

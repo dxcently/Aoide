@@ -82,9 +82,9 @@ QtObject {
         { name: "boogie",    // arms-up dancer sweeps left→mid→right→mid across
           // the box while a single ♪ flits from side to side around it.
           frames: ["♪ヽ( ・ω・)ノ　　", "　ヽ( ・ω・)ノ♪　", "　　ヽ( ・ω・)ノ♪", "　♪ヽ( ・ω・)ノ　"] },
-        // toss/duet/weave assume ⊃/⊂ render at 2 cells (matching ノ/ヽ) in the
-        // shell's Nerd Font, unlike every other ⊃/⊂ set here which just
-        // reorders a constant glyph multiset. Re-check frame width by
+        // toss/duet/weave/lift assume ⊃/⊂ render at 2 cells (matching ノ/ヽ)
+        // in the shell's Nerd Font, unlike every other ⊃/⊂ set here which
+        // just reorders a constant glyph multiset. Re-check frame width by
         // East-Asian-Width cell count if that font ever changes.
         { name: "toss",      // a lazy game of catch between two ´ω｀ twins who
           // wear the same soft face the whole rally; the arms do the acting —
@@ -110,10 +110,11 @@ QtObject {
           // up ／, tumbles over ＼ a cell further, and lands — a beat of
           // ＾＾ satisfaction before the next page.
           frames: ["( 一ω一)⊂口　　", "( 一ω一)⊂口／　", "( 一ω一)⊂口　＼", "( ＾ω＾)⊂口　　"] },
-        { name: "lift",      // reps: the barbell ｏ＝ｏ is pressed out to full
-          // extension one cell per beat and pulled back, strain face ｀´ held
-          // the whole set.
-          frames: ["( ｀ω´)⊃ｏ＝ｏ　　", "( ｀ω´)　⊃ｏ＝ｏ　", "( ｀ω´)　　⊃ｏ＝ｏ", "( ｀ω´)　⊃ｏ＝ｏ　"] },
+        { name: "lift",      // two spotters share one barbell: the presser ⊃
+          // launches it across, ready hands ノ/ヽ track it crossing the gap,
+          // the catcher ⊂ receives it at full extension — same ｀ω´ strain on
+          // both faces, unchanging, the whole set.
+          frames: ["( ｀ω´)⊃ｏ＝ｏ　　ヽ( ｀ω´)", "( ｀ω´)ノ　ｏ＝ｏ　ヽ( ｀ω´)", "( ｀ω´)ノ　　ｏ＝ｏ⊂( ｀ω´)", "( ｀ω´)ノ　ｏ＝ｏ　⊂( ｀ω´)"] },
         { name: "catch",     // incoming delivery: a parcel 󰏗 sails in from the
           // right a cell per beat, arms ノ up and ready, and lands in the
           // hand つ with a ＾ω＾ — the loop restart is the next drop.
@@ -126,8 +127,8 @@ QtObject {
 
     // ── PACKAGES — the subagent pool: a courier delivering work back to the
     // main agent that dispatched it. A subagent always wears one of THESE
-    // sets, never the general pool above — see pickFor()/randomIndex() below
-    // for the policy split. Not locked to any count; add more as they come.
+    // sets, never the general pool above — see pickFor() below for how a
+    // row's pool is chosen. Not locked to any count; add more as they come.
     // Every set carries the parcel 󰏗 somewhere; same fixed-width/U+3000
     // rules as the general pool.
     readonly property var packages: [
@@ -149,6 +150,15 @@ QtObject {
           frames: ["( ｀ω´)つ󰏗　　", "( ｀ω´)つ　　", "( ｀ω´)つ　　󰏗", "( ｀ω´)つ　　"] }
     ]
 
+    // ── RECEIVING — a two-set slice of `working`, reserved for a top-level
+    // agent that currently has active subagent children — "receiving" their
+    // dispatched work, as distinct from a plain solo agent. Not a separately
+    // authored table, just a filtered view over `working`, so the two sets
+    // stay in lockstep with their frames if those ever change.
+    readonly property var receiving: working.filter(function (s) {
+        return s.name === "catch" || s.name === "inbox";
+    })
+
     // Which set a SUBAGENT wears, for its whole life. Hashed from the row's key
     // (its sessionId) rather than drawn at random, so it survives the delegate
     // being rebuilt by a roster refresh — a Math.random() pick re-rolled every
@@ -168,16 +178,6 @@ QtObject {
     function phaseFor(key, len) {
         var n = Math.max(1, len || 1);
         return Math.abs(_hash(key, 131)) % n;
-    }
-    // A genuinely random index into a pool of size `n` — used for everything
-    // that ISN'T a subagent (plain terminals, top-level agents). Deliberately
-    // the opposite policy from pickFor: these rows re-roll their set every
-    // time their delegate is (re)created, i.e. whenever the roster refreshes.
-    // That's a real design choice, not an oversight — subagents get a stable
-    // identity because their courier tells a small continuing story; everyone
-    // else just gets variety.
-    function randomIndex(n) {
-        return Math.floor(Math.random() * Math.max(1, n || 1));
     }
     function _hash(key, mult) {
         var s = "" + (key || "");
