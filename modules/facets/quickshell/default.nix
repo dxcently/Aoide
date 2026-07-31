@@ -26,6 +26,11 @@ let
   cfg = config.aoide.facets.quickshell;
   t = config.aoide.drachma;
 
+  # Committed songs live here (CONTRACTS.md §5) — versioned score, legitimately
+  # walked at build time (checks.no-song-read only bans song/ RUNTIME infixes,
+  # never song/songbook/).
+  songbook = ../../../song/songbook;
+
   # ── Component-tier fallback helpers ────────────────────────────────────────
   # Each is: use the component override when set, else fall back to the palette.
   # Facets apply the fallback here (CONTRACTS.md §1 rule: "Facets apply the
@@ -44,9 +49,43 @@ let
   # session start. At runtime Quickshell hot-reloads from song/stage/drachma.json
   # via a FileView; the build only installs the structural QML, not the note
   # values themselves.
-  quickshellConfig = pkgs.runCommand "aoide-quickshell-config" { } ''
+  #
+  # ── Per-song flavor widgets (CONTRACTS.md §5) ───────────────────────────
+  # Beyond the shared, song-blind QML tree above, this also carries per-song
+  # widget QML from song/songbook/*/widgets/ — versioned score, not runtime —
+  # for EVERY committed song at once, so a live `aoide rice preview <name>`
+  # can hot-swap a widget's BODY (not just its colours) with no rebuild. Only
+  # the fixed, in-scope slot enum is copied; a song's other files are ignored.
+  # A generated manifest.json records which songs authored which slots, so
+  # runtime QML (the staging engine, StagingEngine.qml) can check availability without probing the
+  # filesystem per-frame.
+  quickshellConfig = pkgs.runCommand "aoide-quickshell-config" { nativeBuildInputs = [ pkgs.jq ]; } ''
     mkdir -p "$out/qml"
     cp -r ${./qml}/. "$out/qml/"
+
+    # ── Carry over per-song flavor widgets + manifest ──────────────────────
+    mkdir -p "$out/qml/songs"
+    manifest="$out/qml/songs/manifest.json"
+    echo '{}' > "$manifest"
+    SLOTS="calendar notifications"
+    for d in ${songbook}/*/; do
+      name=$(basename "$d")
+      slots=""
+      for slot in $SLOTS; do
+        if [ -f "$d/widgets/$slot.qml" ]; then
+          mkdir -p "$out/qml/songs/$name"
+          cp "$d/widgets/$slot.qml" "$out/qml/songs/$name/$slot.qml"
+          slots="$slots $slot"
+        fi
+      done
+      if [ -n "$slots" ]; then
+        slotsJson=$(printf '%s\n' $slots | jq -R . | jq -s .)
+        tmp=$(mktemp)
+        jq --arg name "$name" --argjson slots "$slotsJson" \
+          '.[$name] = $slots' "$manifest" > "$tmp"
+        mv "$tmp" "$manifest"
+      fi
+    done
   '';
 
   # Path used at runtime: ~/Aoide/qml/shell.qml is Quickshell's entry point.

@@ -78,7 +78,7 @@ survive). Assignment:
 
 | order-mark | surface / callout token       |
 |------------|-------------------------------|
-| `Α`        | baton.control                 |
+| `Α`        | conductor.control              |
 | `Β`        | terminals.roster              |
 | `Γ`        | dag.trace                     |
 | `Δ`        | meters.pulse                  |
@@ -122,7 +122,7 @@ The music glyphs are **inscriptions carved into the stone**, not replaced:
 ## 2. The glyph grammar — state tier is a HARD contract
 
 Identical to Pantheon §2, restated so this grammar stands alone. The state
-vocabulary is lifted VERBATIM from `pkgs/aoide/src/baton/theme.rs`
+vocabulary is lifted VERBATIM from `pkgs/aoide/src/conductor/theme.rs`
 (`state_glyph`/`classify`) and kept in lockstep with the Rust — the grammar
 **reuses** it, never replaces it:
 
@@ -186,6 +186,34 @@ reskinned. The field now splits into two chrome families:
   `TerminalsGadget`, `MetersGadget`, `PowerVitalsGadget`) stacked inside the
   codex dock (`AoidePanel`). These are fresh builds in this grammar, each
   drawing its own chrome; none of them instantiates `GadgetFrame`.
+
+**Amendment (khoa, 2026-07-31) — the two families converge on ONE panel
+chrome.** `GadgetFrame`'s flat entablature bay is narrowed/superseded as the
+default for POPOUT BODIES: every widget's outer panel — bar popouts included,
+not just dock temples — should read as the same opaque marble-stele grammar
+`NotificationCard.qml` and the four pantheon temples already share (opaque
+body, 2px `paletteFg` border, 1px inset signature-hue keyline, cast shadow, a
+box-drawing TUI frame top AND bottom closing on a `𝄂` barline, a carved-serif
+crown + name caption, `radius: 0`) — see `NotificationCard.qml`'s own header
+for the canonical description. `GadgetFrame` may still own the outer
+`BarPopout` window/positioning plumbing; the CONTENT chrome inside it
+converges on the stele, not the flat bay. khoa's framing: **"it's ascii/
+greek/diff pantheon styles for each widget"** — ONE shared body-chrome
+convention, but every widget keeps its own distinct classical-order identity
+(hue/crown/motif/frieze) within it, same as the four temples already do
+relative to each other. Applies to every widget built from this point
+forward (the audio/mic+vol widget and the calendar widget are the first
+carrying it).
+
+**Amendment (khoa, 2026-07-31) — off/muted/disabled states read as literally
+"broken."** Where a widget has an off/muted/disabled state to represent (the
+audio widget's mic/vol mute is the first case), reach for literal broken/
+ruined-classical-architecture iconography — a snapped column shaft, a missing
+capital, a jagged break — legible from silhouette alone, before reaching for
+an abstract overlay (a slash-through, a dim badge, a strikethrough). This
+sits alongside, not instead of, the §2 session-state glyph contract above —
+that table stays the hard contract for agent/session state; this is the
+parallel convention for a widget's own on/off controls.
 
 ### `GadgetFrame` — the entablature (bar popouts + wallpaper picker)
 
@@ -276,7 +304,7 @@ The state COLOUR spread is shared across temples: working → gold
 (`violet`), done → verdigris (`wireCyan`), unknown → dim ink. (This supersedes
 the old "done → dim" pairing; see §2.)
 
-- **`ConductorGadget`** — the agent roster (`[ baton ]`): only what a conductor
+- **`ConductorGadget`** — the agent roster (`[ conductor ]`): only what a conductor
   conducts — agent/subagent sessions, plus shells sharing an agent's window,
   read as a pure view of the daemon's `sessions.json`. Rows are a **stave**:
   each TOP-LEVEL session a note on a ledger line, hung on a `│` pilaster
@@ -415,7 +443,7 @@ rounds a corner. The melody is colour-coded, not Greek-ified.
 `AoideNotifications`, `CalendarGadget`, `NowPlayingGadget`, none of which had a
 grammar entry here) were **deleted** from the shared `qml/` tree — they were
 song-blind stubs/chrome with no per-song identity, cleared to make room for
-§7's per-song widget mechanism. Their old stele/temple-façade treatment
+§7's staging engine. Their old stele/temple-façade treatment
 (pediment + rails + stylobate, described here until this edit) is no longer
 live anywhere; a song authoring a replacement under the §7 convention starts
 fresh, it doesn't need to match this retired look.
@@ -486,53 +514,65 @@ pantheon rebuild actually enforces:
   Greek forms — they are the Rust-locked score, and the Greek forms frame them,
   never replace them.
 
-## 7. Planned — per-song flavor widgets (drachma schema v1)
+## 7. Per-song flavor widgets — BUILT for `calendar` + `notifications`
 
-**Status: PLANNED, not built.** khoa (2026-07-30): the rerice mechanic should be
-declarative and mostly nix, and a song should be able to carry its OWN QML for
-"flavor" surfaces — the six just retired in §4 — while core chrome (bar,
-launcher, wallpaper, dock frame + gadgets) stays one shared, song-blind
+**Status: BUILT (2026-07-30, plan→execute pipeline), for exactly two slots.**
+khoa's original framing held: the rerice mechanic is declarative and mostly
+nix, and a song carries its OWN QML for "flavor" surfaces while core chrome
+(bar, launcher, wallpaper, dock frame + gadgets) stays one shared, song-blind
 implementation. Live hot-swap (via `aoide rice preview <name>`, no rebuild)
-must keep working for these too, not just colours.
+works for these too, not just colours — confirmed live: the bar's calendar
+popout swaps body between `default` and `sonata` with no rebuild/restart.
 
-**Today's baseline:** one shared `modules/facets/quickshell/qml/` tree, copied
-verbatim into the store regardless of active song — widget *structure* is
-100% song-blind, only `aoide.drachma.*` colours vary. Each song's
-`song/songbook/<name>/drachma.json` is a hand/agent-maintained, **git-committed**
-JSON file (NOT nix-generated — `pkgs/drachma`'s CLI only resolves/emits an
-already-authored file); `aoide rice preview <name>` copies it straight to
-`stage/drachma.json`, and `DrachmaState.qml`'s `FileView` re-parses on that
-atomic swap — this is the existing fast hot-reload path colours ride today.
+The six-slot sketch this section originally carried was YAGNI-trimmed to the
+two slots that actually have a host anchor. `greeter`/`lockscreen`/`osd`/
+`nowPlaying` remain **unbuilt, no host anchor** — no live surface exists to
+hang them off yet; they stay a documented future extension point, not
+speculative code.
 
-**Recommended shape:**
-- **Convention:** `song/songbook/<name>/widgets/<Slot>.qml`, a fixed slot enum
-  — `greeter`, `lockscreen`, `osd`, `notifications`, `calendar`, `nowPlaying`
-  — matching the six retired surfaces. Free-form slot names don't work: the
-  shared chrome needs a fixed `Loader` anchor per slot regardless of whether a
-  song fills it. A song omits files for slots it doesn't dress.
-- **Build (rebuild, declarative nix):** the quickshell facet's derivation
-  (`modules/facets/quickshell/default.nix`), after its existing `cp -r`, also
-  walks `song/songbook/*/widgets/` and copies every song's slot files to
-  `$out/qml/songs/<name>/<Slot>.qml` — ALL songs' bodies land on disk at once
-  (home-manager already installs the tree recursively), which is what makes
-  cross-song live preview possible at all.
-- **Runtime selection (live, no rebuild):** the widget path is fully
-  deterministic from `<songName>/<slot>`, so a `Loader.source` can be a plain
-  string template off the active song's name (which needs to reach the stage
-  file as one new field) — **not** a new key threaded through
-  `pkgs/drachma`'s schema/resolve/emit pipeline (that pipeline validates a
-  closed key set today and would need real JS changes, more machinery than
-  this needs). `Loader.status` handles a missing file gracefully; an empty
-  slot means an inactive Loader, no dead surface.
+**As-built shape:**
+- **Convention:** `song/songbook/<name>/widgets/<slot>.qml`, fixed slot enum
+  **`{ calendar, notifications }`**. A song omits files for slots it doesn't
+  dress.
+- **Build:** the quickshell facet's derivation
+  (`modules/facets/quickshell/default.nix`), after its existing `cp -r`, walks
+  `song/songbook/*/widgets/` and copies each in-scope slot file to
+  `$out/qml/songs/<name>/<slot>.qml`, plus a generated
+  `$out/qml/songs/manifest.json` (`{ "<name>": ["<slot>", …] }`) — ALL songs'
+  bodies land on disk at once, which is what makes cross-song live preview
+  possible at all.
+- **Runtime resolution:** `DrachmaState.qml`'s `songName` property reads an
+  **additive** `song` field `aoide rice preview <name>` now injects into
+  staged `drachma.json` (CONTRACTS.md §4 — no schema version bump; the same
+  additive precedent as `parentSessionId`). The staging engine (`StagingEngine.qml`) reads the
+  manifest (`has`/`source`); `WidgetSlot.qml` is the fixed per-slot anchor —
+  it resolves the song's file when authored, else falls back to shared chrome
+  (or nothing, for `calendar`, since the old song-blind `CalendarGadget` was
+  retired). `WidgetSlot` manages the loaded item's lifecycle via
+  `Component.createObject(parent, initialProperties)` rather than a
+  declarative `Loader` — QML `required property` can only be satisfied at
+  object creation, which a `Loader`'s `onLoaded`-time property assignment is
+  too late for.
+- **Live hosts:** `AoideBar.qml`'s calendar `BarPopout` (click the clock
+  cell) and `AoideNotifications.qml`'s per-card `Repeater` (falls back to the
+  shared `NotificationCard` — every card renders via that fallback this pass,
+  since no song has authored `widgets/notifications.qml` yet).
 - **Containment:** widget QML is store-copied score, like cover art — at
-  runtime it sees only `DrachmaState` + `ShellBridge`, never nix `config.*`,
-  so a song stays structurally incapable of leaking host/facet options
-  through this surface (CONTRACTS.md §5 holds).
-- **Touch list when built:** `modules/facets/quickshell/default.nix`,
-  `modules/nucleus/options.nix` (a `widgets` submodule under `drachma`),
-  `shell.qml` + `AoideBar.qml` (the six `Loader` anchors), `CONTRACTS.md`
-  (§1/§5 schema version bump to v1), `song/songbook/update-playbook.md`.
-  Confirmed NOT needed: `lib/checks.nix` (`songShape` only inspects `.nix`
-  files; `no-song-read` only bans runtime dirs, not committed `songbook/`).
+  runtime it sees only `DrachmaState` (`notes`) + `ShellBridge` (`bridge`),
+  plus a slot's declared extras (`notifications`' `notification`), never nix
+  `config.*` — a song stays structurally incapable of leaking host/facet
+  options through this surface (CONTRACTS.md §5 holds, unchanged: a song's
+  `rice.nix` still sets **only** `aoide.drachma`).
+- **Touched:** `modules/facets/quickshell/default.nix`,
+  `pkgs/aoide/src/dispatch.rs` (`handle_rice_preview`),
+  `DrachmaState.qml` (new `songName`), the staging engine (`StagingEngine.qml` + `WidgetSlot.qml`)
+  (new), `AoideBar.qml`, `AoideNotifications.qml`, `shell.qml`,
+  `song/songbook/{default,sonata}/widgets/calendar.qml` (new proof stubs),
+  `song/songbook/update-playbook.md` (new). **Confirmed not needed** (as
+  predicted): `lib/checks.nix` (`songShape` only inspects `.nix` files;
+  `no-song-read` only bans runtime dirs, not committed `songbook/`); no
+  `modules/nucleus/options.nix` submodule (widgets are files, not nix
+  options); no `CONTRACTS.md` schema version bump (the `song` field is
+  additive, same as `parentSessionId`).
 
 See `docs/Aoide-Wiki/references/AOIDE-DEV-HANDOFF.md` §7 for the ledger flag.

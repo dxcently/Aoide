@@ -25,6 +25,10 @@ ShellRoot {
     // ── Shared singletons (one instance for the whole session) ─────────────
     DrachmaState { id: notes }
     ShellBridge { id: bridge }
+    // The staging engine (CONTRACTS.md §5) — reads the manifest
+    // the quickshell facet's build carries into ~/Aoide/qml/songs/, resolves
+    // WidgetSlot's "does the active song dress this slot" / "where's its QML".
+    StagingEngine { id: stagingEngine }
 
     // ── Shared session state (floating gadgets + DAG trace link) ───────────
     // A plain QtObject passed by property, exactly like notes/bridge — the
@@ -112,6 +116,7 @@ ShellRoot {
             notes: notes
             bridge: bridge
             shared: shared
+            stagingEngine: stagingEngine
         }
     }
 
@@ -127,11 +132,13 @@ ShellRoot {
         shared: shared
     }
 
-    // ── Overlay skeletons (load clean; each gains its own PanelWindow wrapper
-    // in a later pass). Hidden/dormant by default; kept wired to notes/bridge
-    // so the swap seam stays intact.
-    //   - AoideLauncher      : SUPER+Space launcher (bridge-toggled)
+    // ── Overlay surfaces — each owns its own PanelWindow internally, wired
+    // to notes/bridge only. Hidden/dormant until summoned/triggered.
+    //   - AoideLauncher        : SUPER+Space launcher (bridge-toggled)
     //   - AoideWallpaperPicker : SUPER+W wallpaper switcher (global-shortcut)
+    //   - AoideNotifications   : org.freedesktop.Notifications popup stack,
+    //                            bottom-right (live whenever a notification exists)
     AoideLauncher { notes: notes; bridge: bridge }
     AoideWallpaperPicker { notes: notes }
+    AoideNotifications { notes: notes; bridge: bridge; stagingEngine: stagingEngine }
 }

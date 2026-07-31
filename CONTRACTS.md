@@ -217,6 +217,13 @@ applied) — Quickshell reads concrete colours, never `null`.
 Writes are atomic (write-temp-then-rename) so a hot-reload never reads a torn
 file.
 
+**Additive in v0:** the staged file MAY carry an optional top-level `song`
+field (string) — the name `aoide rice preview <name>` was invoked with. Set by
+`handle_rice_preview` (mirrors the `parentSessionId` additive precedent in
+§4's sessions.json). Absent means "no song identity" (a notes file staged some
+other way). `DrachmaState.qml`'s `songName` property reads it to resolve
+per-song flavor widgets (§5) — readers must tolerate both forms.
+
 ### `song/stage/sessions.json` / `hooks.json` — **v0**
 
 The shellbridge roster + live hook phases (full field tables in
@@ -336,6 +343,39 @@ disproportionate for v0; see the `TODO(song-shape v1)` in `lib/checks.nix`).
 
 **Migration to v1:** the update playbook migrates `song/songbook/*/rice.nix`
 and `drachma.json` from v0 to v1 with the drachma schema (§1).
+
+### Per-song flavor widgets
+
+Beyond `aoide.drachma` notes, a song MAY also carry its own QML for a fixed
+set of "flavor" surfaces — committed files, not nix options:
+
+- **Convention:** `song/songbook/<name>/widgets/<slot>.qml`. Fixed slot enum,
+  **currently `{ calendar, notifications }`** (documented here as what IS
+  built, not what's speculatively planned — a slot is added to this list
+  only once it's actually wired). A song omits files for slots it doesn't
+  dress.
+- **Build:** the quickshell facet's derivation
+  (`modules/facets/quickshell/default.nix`) copies every committed song's
+  in-scope slot files to `$out/qml/songs/<name>/<slot>.qml`, plus a generated
+  `$out/qml/songs/manifest.json` recording which songs authored which slots —
+  ALL songs' bodies land on disk at once (home-manager installs the tree
+  recursively), which is what makes cross-song live preview possible.
+- **Runtime resolution:** `DrachmaState.qml`'s `songName` property (above)
+  names the active song; the staging engine (`StagingEngine.qml`) reads the manifest and answers
+  "does `<song>` dress `<slot>`"; `WidgetSlot.qml` is the fixed per-slot
+  anchor a host surface embeds — it loads the song's file when authored, else
+  falls back to shared chrome (or renders nothing, when no fallback exists).
+  `aoide rice preview <name>` (§4) drives this live, no rebuild: it stages
+  `song` into `drachma.json`, `DrachmaState`'s `songName` updates, and every
+  `WidgetSlot` re-resolves.
+- **Fixed injected-prop contract:** a loaded widget receives `notes`
+  (`DrachmaState`) and `bridge` (`ShellBridge`) always, plus whatever
+  slot-specific extras the anchor declares (e.g. notifications' `notification`)
+  — **never** nix `config.*`. This does not loosen the song-shape rule above:
+  a song's `rice.nix` still sets **ONLY** `aoide.drachma` — widgets are
+  committed QML files carried by the build, not nix options, and a widget is
+  structurally incapable of reaching host/facet options through this surface.
+- **Playbook:** `song/songbook/update-playbook.md`.
 
 ---
 

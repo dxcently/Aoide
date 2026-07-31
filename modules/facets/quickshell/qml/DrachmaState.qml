@@ -32,6 +32,15 @@ QtObject {
         "window": { "border": "#40897a", "borderInactive": "#eaddc6" }
     })
 
+    // ── Song name ───────────────────────────────────────────────────────────
+    // Additive optional field (`aoide rice preview <name>` injects `song` into
+    // the staged notes — dispatch.rs handle_rice_preview) — drives per-song
+    // flavor-widget resolution (the staging engine: StagingEngine.qml /
+    // WidgetSlot.qml). Absent (a
+    // notes file staged some other way) means "no song identity" — resolvers
+    // treat "" as "nothing authored", never a crash.
+    readonly property string songName: (raw.song) ? raw.song : ""
+
     // ── Palette shortcuts ──────────────────────────────────────────────────
     readonly property color paletteBg:     raw.palette ? raw.palette.bg     : "#f4ecdc"
     readonly property color paletteFg:     raw.palette ? raw.palette.fg     : "#423420"

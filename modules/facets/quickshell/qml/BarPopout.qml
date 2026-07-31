@@ -29,6 +29,25 @@ PopupWindow {
     property int popoutWidth: 288
     property bool shown: false
 
+    // ── Scroll-open unroll reveal (opt-in) ──────────────────────────────────
+    // Off by default — volume/battery popouts leave `reveal` false and keep
+    // the current instant-show behaviour. The calendar popout opts in.
+    //
+    // Critical constraint: the popup window itself (a real xdg_popup) must
+    // NEVER resize during the animation — only the FRAME's painted height
+    // animates, inside a window whose implicit size is already the full
+    // static size (see implicitWidth/implicitHeight below, left untouched).
+    // Closing just flips `shown` false instantly — no reverse animation.
+    property bool reveal: false
+    property int  revealMs: 200
+    property real revealFrac: 1.0
+    onShownChanged: if (shown && reveal) { revealFrac = 0; revealAnim.restart() }
+    NumberAnimation {
+        id: revealAnim
+        target: root; property: "revealFrac"
+        to: 1.0; duration: root.revealMs; easing.type: Easing.OutCubic
+    }
+
     // Children forward into the frame's body via an explicit slot Item —
     // aliasing GadgetFrame's own default alias (alias-to-alias) is invalid QML.
     default property alias content: slot.data
@@ -53,7 +72,8 @@ PopupWindow {
         anchors.top: parent.top
         anchors.topMargin: 4
         width: root.popoutWidth
-        height: implicitHeight
+        height: root.reveal ? Math.round(implicitHeight * root.revealFrac) : implicitHeight
+        clip: true
         notes: root.notes
         title: root.title
 
