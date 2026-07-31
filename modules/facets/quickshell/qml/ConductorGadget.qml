@@ -130,8 +130,10 @@ Item {
     // there is nothing to thread down from shell.qml the way DrachmaState is.
     property MoodFaces faces: MoodFaces {}
     // the STILL face for a state — normalized here, since this file owns the
-    // state vocabulary and MoodFaces deliberately does not.
-    function kaomojiFor(state) { return faces.still(normState(state)); }
+    // state vocabulary and MoodFaces deliberately does not. The `true` marks
+    // these rows as AGENTS: an idle agent stares blankly ('_') where an idle
+    // terminal sleeps.
+    function kaomojiFor(state) { return faces.still(normState(state), true); }
 
     // ── ROSTER FILTER (concepts/Conductor-Channel) ───────────────────────────────
     // A conductor's stage shows only what it conducts:

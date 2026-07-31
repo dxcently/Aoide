@@ -82,12 +82,23 @@ QtObject {
         { name: "boogie",    // arms-up dancer sweeps left→mid→right→mid across
           // the box while a single ♪ flits from side to side around it.
           frames: ["♪ヽ( ・ω・)ノ　　", "　ヽ( ・ω・)ノ♪　", "　　ヽ( ・ω・)ノ♪", "　♪ヽ( ・ω・)ノ　"] },
-        { name: "toss",      // a game of catch where everything plays: the ball
-          // ｏ crosses between the two, the arms swing (⊃ hurl · ノ ready ·
-          // ⊂ scoop · ヽ ready), and the pair share one mood the whole rally
-          // — both tense up ＞ω＜ on the throw, both light up ＾ω＾ on the
-          // catch.
-          frames: ["(＞ω＜)⊃ｏ　ヽ(＞ω＜)", "(＾ω＾)ノ　ｏ⊂(＾ω＾)", "(＞ω＜)ノ　ｏ⊂(＞ω＜)", "(＾ω＾)⊃ｏ　ヽ(＾ω＾)"] },
+        // toss/duet/weave assume ⊃/⊂ render at 2 cells (matching ノ/ヽ) in the
+        // shell's Nerd Font, unlike every other ⊃/⊂ set here which just
+        // reorders a constant glyph multiset. Re-check frame width by
+        // East-Asian-Width cell count if that font ever changes.
+        { name: "toss",      // a lazy game of catch between two ´ω｀ twins who
+          // wear the same soft face the whole rally; the arms do the acting —
+          // ⊃ hurl, hold through the flight, ⊂ scoop on the landing, then
+          // the return throw, mirrored.
+          frames: ["(´ω｀)⊃ｏ　　ヽ(´ω｀)", "(´ω｀)ノ　ｏ　ヽ(´ω｀)", "(´ω｀)ノ　　ｏ⊂(´ω｀)", "(´ω｀)ノ　ｏ　⊂(´ω｀)"] },
+        { name: "duet",      // the same ´ω｀ twins, different game: a single ♪
+          // lobbed back and forth — the tune is the ball, passed one cell per
+          // beat down the same throw/scoop arc.
+          frames: ["(´ω｀)⊃♪　　ヽ(´ω｀)", "(´ω｀)ノ　♪　ヽ(´ω｀)", "(´ω｀)ノ　　♪⊂(´ω｀)", "(´ω｀)ノ　♪　⊂(´ω｀)"] },
+        { name: "weave",     // and their juggling act: a ball each, thrown up
+          // together ノ…ヽ, crossing ｏｏ in the middle, caught ⊃…⊂ on the
+          // other side — same soft faces the whole exchange.
+          frames: ["(´ω｀)⊃ｏ　　ｏ⊂(´ω｀)", "(´ω｀)ノｏ　　ｏヽ(´ω｀)", "(´ω｀)ノ　ｏｏ　ヽ(´ω｀)", "(´ω｀)ノｏ　　ｏヽ(´ω｀)"] },
         { name: "scribble",  // the pen φ walks the page line ＿＿＿ one cell per
           // beat, left to right, then wraps — a new line started.
           frames: ["( ・ω・)φ＿＿＿", "( ・ω・)＿φ＿＿", "( ・ω・)＿＿φ＿", "( ・ω・)＿＿＿φ"] },
@@ -192,12 +203,15 @@ QtObject {
     // ── RESTING — one still pose per state ───────────────────────────────────
     // Takes the CANONICAL state (the caller normalizes; this file does not own
     // the state vocabulary). Five canonical states since the bridge split
-    // `idle`: working · awaiting · stopped · idle · done.
-    function still(canonState) {
+    // `idle`: working · awaiting · stopped · idle · done. `agent` splits the
+    // one pose that differs by caller: an idle AGENT (Conductor row) sits
+    // blank-faced ('_'), while an idle TERMINAL just sleeps.
+    function still(canonState, agent) {
         switch (canonState) {
         case "awaiting": return "(；･∀･)?";    // needs the human — anxious, asking
         case "stopped":  return "( ･ω･)b";     // turn over, hands off, standing by
-        case "idle":     return "(－ω－) zzZ";  // cold: long at rest, or fresh/resumed
+        case "idle":     return agent ? "('_')"          // cold agent: vacant stare
+                                      : "(－ω－) zzZ";  // cold tty: fast asleep
         case "done":     return "( ´▽｀ )";     // content, retired
         case "working":  return working[0].frames[0];   // animated by the caller
         default:         return "( ･_･)";       // puzzled
