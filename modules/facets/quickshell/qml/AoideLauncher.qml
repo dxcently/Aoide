@@ -566,6 +566,33 @@ PanelWindow {
             }
         }
 
+        // faint manuscript rules — fill blank page space below the entries
+        // at the same 38px pitch as a real ManuscriptRow (see `height: 38`
+        // on that component), so an empty/partial page reads as ruled
+        // parchment rather than blank cream. Same hairline treatment as the
+        // real unselected row rule. Sibling of `lv`, placed before the sparse
+        // filler so the filler text sits in front of the rules.
+        Item {
+            id: blankRules
+            anchors.left: lv.left; anchors.right: lv.right
+            y: lv.y + lv.contentHeight
+            height: Math.max(0, (parent.height - 36) - y)
+            visible: height > 0
+
+            readonly property int rowPitch: 38
+            readonly property int ruleCount: Math.floor(blankRules.height / blankRules.rowPitch)
+
+            Repeater {
+                model: blankRules.ruleCount
+                Rectangle {
+                    y: (index + 1) * blankRules.rowPitch - 1
+                    width: blankRules.width
+                    height: 1
+                    color: root.withA(root.notes.paletteFg, 0.13)
+                }
+            }
+        }
+
         // honest sparse filler — LEFT page only (few entries all land there).
         // A sibling of the ListView, not a footer: a footer counts toward
         // contentHeight and sizing off it loops.
@@ -610,7 +637,7 @@ PanelWindow {
         id: rig
         anchors.centerIn: parent
         width: book.tomeW
-        height: 48 + 26 + book.height
+        height: 48 + 10 + book.height
 
         opacity: Math.min(1, root.fold * 1.4)
 
@@ -660,7 +687,7 @@ PanelWindow {
         // ── glow — blooms behind both objects as the book opens ─────────────
         Rectangle {
             id: glowBook
-            x: -book.boardPad - 6; y: 68
+            x: -book.boardPad - 6; y: book.y - 6
             width: book.tomeW + 2 * book.boardPad + 12
             height: book.height + 12
             visible: false
@@ -694,6 +721,24 @@ PanelWindow {
             blurMax: 40
             autoPaddingEnabled: true
             opacity: 0.5 * root.fold
+        }
+
+        // ── bookmark ribbon — ties the incantation strip to the book's spine.
+        // Same accent-ribbon treatment as the one dangling at the tome's foot
+        // (see book's `ribbon` Rectangle below): paletteAccent at 0.85 alpha.
+        // The strip's horizontal center and the book's spine (gutter between
+        // the covers) both sit at rig.width/2, so a single vertical bar
+        // reaches both without going diagonal. Declared before `incantation`
+        // and `book` so both paint over it — the strip hides its top end,
+        // the covers swallow its tail, and it reads as tucked into the spine.
+        Rectangle {
+            id: stripRibbon
+            width: 8
+            x: (rig.width - width) / 2
+            y: incantation.y + incantation.height
+            height: Math.max(0, (book.y + 14) - y)
+            color: root.withA(root.notes.paletteAccent, 0.85)
+            opacity: root.fold * root.fold
         }
 
         // ── THE INCANTATION STRIP — the search bar, floating above the book ─
@@ -812,7 +857,7 @@ PanelWindow {
         Item {
             id: book
             x: 0
-            y: 74
+            y: 58
 
             readonly property int pageW: 430
             readonly property int pageH: 470
