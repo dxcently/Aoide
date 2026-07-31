@@ -2,12 +2,12 @@
 type: entity
 created: 2026-07-27
 updated: 2026-07-30
-tags: [aoide, agent, session, baton, orchestration, graph]
+tags: [aoide, agent, session, conductor, orchestration, graph]
 ---
 
-# Agent Hooking — putting ANY agent on the baton
+# Agent Hooking — putting ANY agent on the conductor
 
-*The stage files `song/stage/{sessions,hooks,graph}.json` are the single truth; the `aoide baton` TUI, the [[Gadget-Dock]]'s Conductor/Terminals gadgets, and the orchestration daemons all render from them. Anything that writes these files through the doors below becomes a full citizen of the graph.*
+*The stage files `song/stage/{sessions,hooks,graph}.json` are the single truth; the `aoide conductor` TUI, the [[Gadget-Dock]]'s Conductor/Terminals gadgets, and the orchestration daemons all render from them. Anything that writes these files through the doors below becomes a full citizen of the graph.*
 
 ## The three doors
 
@@ -100,29 +100,39 @@ aoide graph send --id "$AOIDE_SESSION_ID" [--submit] [--yes] -- some text to typ
 `graph send` is the one gated injection door — held pending approval by
 default, `--yes` (or an autogate policy) delivers it, and every outcome is
 audited. Use `graph wrap` for pure observe-only registration; use `conduct`
-when something (a human via the `baton` TUI, or another agent) needs to type
+when something (a human via the `conductor` TUI, or another agent) needs to type
 into the session later.
 
 ## Per-agent recipes
 
 ### Claude Code
 
-`.claude/settings.json` (project or user scope) — six events, one identical command each. The payload arrives on stdin; the door does the mapping:
+`.claude/settings.json` — nine events (`SessionStart`, `UserPromptSubmit`,
+`PreToolUse`, `PostToolUse`, `Notification`, `SubagentStart`, `SubagentStop`,
+`Stop`, `SessionEnd`), one identical command each. The payload arrives on
+stdin; the door does the mapping:
 
 ```json
 {
   "hooks": {
-    "SessionStart":     [ { "hooks": [ { "type": "command", "command": "command -v aoide >/dev/null && aoide graph session hook >/dev/null 2>&1; exit 0" } ] } ],
-    "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "command -v aoide >/dev/null && aoide graph session hook >/dev/null 2>&1; exit 0" } ] } ],
-    "Notification":     [ { "hooks": [ { "type": "command", "command": "command -v aoide >/dev/null && aoide graph session hook >/dev/null 2>&1; exit 0" } ] } ],
-    "PostToolUse":      [ { "hooks": [ { "type": "command", "command": "command -v aoide >/dev/null && aoide graph session hook >/dev/null 2>&1; exit 0" } ] } ],
-    "Stop":             [ { "hooks": [ { "type": "command", "command": "command -v aoide >/dev/null && aoide graph session hook >/dev/null 2>&1; exit 0" } ] } ],
-    "SessionEnd":       [ { "hooks": [ { "type": "command", "command": "command -v aoide >/dev/null && aoide graph session hook >/dev/null 2>&1; exit 0" } ] } ]
+    "SessionStart":     [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
+    "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
+    "PreToolUse":       [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
+    "PostToolUse":      [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
+    "Notification":     [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
+    "SubagentStart":    [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
+    "SubagentStop":     [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
+    "Stop":             [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
+    "SessionEnd":       [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ]
   }
 }
 ```
 
-`Notification` + `PostToolUse` are what make **blocked** visible — without them a session on a permission prompt reads `running` forever.
+`Notification` + `PostToolUse` are what make **blocked** visible — without them a session on a permission prompt reads `running` forever. `SubagentStart` / `SubagentStop` are what put a spawned sub-agent (e.g. an `Agent`-tool call) on the graph as its own row, parented to the session that spawned it, rather than folding invisibly into the parent's activity.
+
+**Scope: global vs. project-local.** `.claude/settings.json` can live at project scope (`<repo>/.claude/settings.json`, tracked per-project, `command -v`-resolves `aoide` but can also hardcode a dev build's path) or at user scope (`~/.claude/settings.json`, applies to every Claude Code session on the machine regardless of cwd). **Only the global file covers sessions started outside a project that carries its own `.claude/settings.json`** — a Claude Code session opened in, say, `~/dxflake` never touches this repo's project-local hooks, so it registers on the graph only if `~/.claude/settings.json` also carries the same nine hooks. Without them, that session is invisible to `aoide graph session hook` entirely: Hyprland's window listener still picks up the enclosing terminal as a bare `shell`-kind row (window address, pid, cwd), but the Claude process itself never becomes an `agent`-kind row with turn state, phase, or a spawned-by edge. As of 2026-07-30, `~/.claude/settings.json` carries the same nine hooks as this repo's project-local file (pointed at whatever `aoide` resolves to on `PATH`, no worktree-specific path baked in) — this is a fresh-machine onboarding step for anyone setting up Claude Code as an Aoide harness: the global file needs the hooks too, not just the repo's.
+
+This is specific to **Claude Code's** hook system — other harnesses wired through this repo's [[aoide-cli|other doors]] (the wrapper, the explicit verbs) don't have a settings-file split like this one.
 
 ### Any plain CLI agent (no hook system)
 
@@ -153,12 +163,12 @@ The one rule: whatever fires on "agent asks a human something" maps to `awaiting
 
 ### Nesting (sub-agents)
 
-Pass `--parent "$AOIDE_SESSION_ID"` (or the `--parent` flag on `session start`) from inside a wrapped/hooked session and the DAG draws the spawned-by edge — orchestrator → worker trees render in the dock and baton automatically. Cycles are checked and refused.
+Pass `--parent "$AOIDE_SESSION_ID"` (or the `--parent` flag on `session start`) from inside a wrapped/hooked session and the DAG draws the spawned-by edge — orchestrator → worker trees render in the dock and conductor automatically. Cycles are checked and refused.
 
 ## Related
 
 - `aoide guide` — the terse in-CLI version of this page.
-- [[aoide-cli]] — the full command tree, including `conduct` and the interactive `baton` TUI that renders every door's sessions.
+- [[aoide-cli]] — the full command tree, including `conduct` and the interactive `conductor` TUI that renders every door's sessions.
 - [[Terminal-Commander]] — the graph concept (projects anchor sessions by cwd).
 - [[shellbridge]] — its socket accept loop is live for the window-jump verb (`focuswindow`), but session *registration* (start/phase/end) still has no socket verb; the CLI doors above remain the writers — and the permanent fallback.
 - [[Widget-Bridge-Contract]] — the full `sessions.json` field contract and canonical-state rules the states above feed.

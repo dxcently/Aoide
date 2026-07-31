@@ -44,14 +44,15 @@ Four self-framed gadgets stack in one scrolling column:
 
 Clicking a Conductor/Terminals row jumps to its terminal via the
 [[shellbridge]] socket. The full session DAG has no standalone desktop
-surface today — `aoide graph view`/`--json` and the `aoide baton` TUI are its
+surface today — `aoide graph view`/`--json` and the `aoide conductor` TUI are its
 renderers; the dock's Conductor gadget gives the desktop its at-a-glance
 agent-tree view instead of a literal graph diagram ([[Session-Graph]]).
 
-Nothing else is part of the canonical dock (the bar's own popouts carry the
-calendar and now-playing gadgets, not the dock — see [[Quickshell]]). A fork
-can add its own gadgets on the same recipe (a frame, drachma-only colour, a
-stage file for data).
+Nothing else is part of the canonical dock — the bar's own calendar popout is
+not a dock gadget; its body is resolved per-song by the staging engine
+([[Widget-Maker#The staging engine — a song overrides desktop chrome]]), not
+hosted here. A fork can add its own gadgets on the same recipe (a frame,
+drachma-only colour, a stage file for data).
 
 ## Posture — a left-edge panel
 

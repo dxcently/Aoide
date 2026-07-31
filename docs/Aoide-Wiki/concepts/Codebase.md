@@ -252,7 +252,7 @@ QML shell skeleton; the baked Stylix and compositor fan-outs; and the whole
 `aoide graph` group — 15 subcommands (`view`, `project add/remove/list`,
 `link`, `session start/phase/end/hook`, `wrap`, `send`, `focus`, `prune`,
 `reap`, `emit`), none a stub (see [[Session-Graph]]) — plus the separate
-`aoide baton` command (also real; the liveness-reap predicate now lives in
+`aoide conductor` command (also real; the liveness-reap predicate now lives in
 its own `reap.rs` module, split out of `graph.rs`). `pkgs.aoide` carries unit
 tests across the crate (above). The QML tree's non-stub surfaces: the
 [[Gadget-Dock]] files (`AoidePanel.qml`, `GadgetFrame.qml`,

@@ -74,6 +74,43 @@ works. Preview is the sketch; adopt is the truth — identical discipline to
 ricing. A bad generation can never reach the running system without the
 [[Governance|gate]], and every step lands in the single audit log.
 
+## The staging engine — a song overrides desktop chrome
+
+A narrower, sibling mechanism to the make-a-widget loop above: not the agent
+building a *new* capability, but a **song** ([[Song-Anatomy]]) replacing a
+piece of *existing* chrome with its own QML. **The staging engine**
+(`StagingEngine.qml`) resolves the active song's drachma tokens
+(`DrachmaState`/`notes`) to per-slot QML; **`WidgetSlot.qml`** is the fixed
+per-slot anchor a host surface embeds, which asks the engine whether the
+active song dressed that slot and loads its file, or falls back to shared
+chrome. Two slots are live today: `calendar` (`AoideBar`'s calendar popout)
+and `notifications` (`AoideNotifications`'s per-card repeater, falling back
+to the shared `NotificationCard` when a song hasn't authored one — true of
+every song so far).
+
+A song authors a slot by dropping `songbook/<name>/widgets/<slot>.qml`
+([[Song-Anatomy]]); the quickshell facet's build carries every committed
+song's widget files into `$out/qml/songs/<name>/` alongside a generated
+`manifest.json`, which the engine reads to answer `has(song, slot)` /
+`source(song, slot)`. Because `DrachmaState.songName` is what
+`aoide rice preview <name>` stages, switching the previewed song
+**hot-swaps every `WidgetSlot`'s loaded body live — no rebuild, no
+restart** — the same preview-without-rebuild discipline as the rice loop
+itself ([[Self-Ricing]]), just applied to widget bodies instead of colour.
+Adding a *new* song's widget files to the carried set still needs a rebuild
+(the facet has to know to copy them); swapping which already-carried song is
+active does not.
+
+**Containment invariant** (`CONTRACTS.md §5`): a loaded song widget receives
+only `notes` (`DrachmaState`) and `bridge` (`ShellBridge`), plus whatever
+slot-specific extras the anchor declares (e.g. notifications' `notification`)
+— never nix `config.*`. This doesn't loosen the song-shape rule elsewhere in
+this page: a song's `rice.nix` still sets only `aoide.drachma`; widget bodies
+are committed QML files the build carries, not nix options, so a song widget
+is structurally incapable of reaching host/facet options through this
+surface. `greeter`/`lockscreen`/`osd`/`nowPlaying` remain unbuilt slots — no
+host anchor exists for them yet.
+
 ## What this makes Aoide
 
 - **Integrate whatever you see fit** — messaging, fleet control, timers, a
@@ -96,3 +133,4 @@ ricing. A bad generation can never reach the running system without the
 - [[Melete]]
 - [[Gadget-Dock]]
 - [[Widget-Bridge-Contract]]
+- [[Song-Anatomy]] — where a song's `widgets/` folder lives on disk

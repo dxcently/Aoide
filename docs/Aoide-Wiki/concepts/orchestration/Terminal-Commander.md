@@ -19,7 +19,7 @@ The herdr multiplexer is the prior-art pattern (an external tool — agent-termi
 herding; not part of the Aoide vocabulary, whose word for this duty is
 conductor-class — see [[Lexicon]]); Aoide ships this as a first-class widget,
 and the agent can regenerate or extend it like any other integration. The TUI
-sibling is [[Lexicon|the baton]] (`aoide baton`).
+sibling is [[Lexicon|the conductor]] (`aoide conductor`).
 
 ## What it watches
 

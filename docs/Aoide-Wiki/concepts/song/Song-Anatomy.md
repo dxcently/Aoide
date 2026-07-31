@@ -58,7 +58,7 @@ holds:
 | `palette/` | this song's transpose keys — the palette variants `rice transpose <song> <key>` swaps among |
 | `sounds/` | notification + system sounds (the chimes dimension) |
 | `icons/` | per-song icon overrides |
-| `widgets/` | per-song widget bodies |
+| `widgets/` | per-song widget bodies — QML files the staging engine resolves per slot ([[Widget-Maker#The staging engine — a song overrides desktop chrome]]) |
 | `design/` | the song's design memory — `intent.md` (palette rationale, iteration log), ingested like any content ([[Self-Ricing#Songbook Discipline — the "Self" in Self-Ricing]]) |
 
 ### `songbook/` root — cross-cutting design memory
@@ -137,3 +137,4 @@ top-level `song/` dir. The lookup is the Song Map
 - [[shellbridge]] · [[Session-Graph]] — the writers of the runtime stage files
 - [[Ricing-Protocol]] — the ricing protocol this page's per-song design memory
   supports
+- [[Widget-Maker]] — the staging engine, which resolves a song's `widgets/` files to live desktop chrome

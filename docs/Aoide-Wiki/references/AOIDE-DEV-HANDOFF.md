@@ -15,7 +15,7 @@ and is scoped narrower than it is broad: read it fully before touching the repo.
 > **What Aoide is — don't conflate (the canonical framing).** **Aoide** is an
 > agent-**orchestration core**: bridges and APIs across terminal, shell, system,
 > and OS so any shell-capable agent can command any other; it runs anywhere
-> there's a shell, headless included (`conduct`/`graph`/`baton` in the Rust
+> there's a shell, headless included (`conduct`/`graph`/`conductor` in the Rust
 > binary). **AoideOS** is the **NixOS distribution** built on that core, adding
 > the Quickshell widget-maker and the drachma/rice theming engine — *that* layer
 > is the "specialized widget maker," not the core. Aoide **integrates and
@@ -75,11 +75,19 @@ get work done and how you test the conductor mesh.
   dev session) orchestrates** — it decomposes, dispatches, reviews every diff,
   and lands. **The orchestrator's own model is deliberately unspecified here**
   (khoa, 2026-07-30) — it varies by session and by the harness in use, so this
-  spec names the ROLE, never the model. **Coding runs through Melete, on Opus
-  5** — the orchestrator does not edit code directly; it dispatches the coding
-  task to Melete — the on-box coding agent, run as a **local subagent (`Agent`
-  tool), NOT the Melete MCP connector** (khoa, 2026-07-30 — reiterated: MCP is
-  not needed here) — and reviews what comes back.
+  spec names the ROLE, never the model. **Coding runs through a dedicated
+  coding subagent, on Opus 5** — the orchestrator does not edit code directly;
+  it dispatches the coding task to a local `Agent`-tool subagent and reviews
+  what comes back. *(Correction, khoa, 2026-07-31: this subagent was
+  informally, confusingly called "Melete" below and in earlier session
+  history. It is NOT the real Melete — Melete is a separate, real MCP
+  connector (`Melete:Sakaki`/`Melete:Osaka`) whose core capability is
+  coding-agent dispatch, `run_code_task` and kin, used from the boxless
+  claude.ai context to orchestrate an actual Claude Code session running on a
+  box. It was never invoked from this repo's own dev sessions — see
+  `entities/Melete.md` and the corrected `10 ♜ AGENT/S²CHEMA.md` in the Magi
+  vault / global `~/.claude/CLAUDE.md` for the real system. Read every
+  "Melete" below as "the local coding subagent.")*
   **Design and review are the higher tier** — Fable and Opus are used for
   designing an approach and reviewing worker output (judgement calls), not for
   mechanical execution. **Wiki maintenance is delegated to a Sonnet 5
@@ -262,7 +270,7 @@ list; add one the moment you raise it. Current open flags (2026-07-30):
   `aoided`.** The new [[Quickshell]] launcher (surface #3, built 2026-07-28)
   launches apps with `DesktopEntry.execute()` — the Quickshell-native
   side-effect idiom already used across the shell (`WorkspaceRow.activate()`,
-  `BatonGadget` → `execDetached`), **not** a shell-out invented in QML. House
+  `ConductorGadget` → `execDetached`), **not** a shell-out invented in QML. House
   rule #6 ("everything flows through `aoided`") would instead route an
   app-launch verb through the bridge, but **no such verb exists** and adding one
   buys nothing over `execute()` while re-introducing a shell-exec in the daemon.
@@ -413,14 +421,96 @@ list; add one the moment you raise it. Current open flags (2026-07-30):
   empty `windows` list unless it persists past a short window, or diff
   against the previous snapshot rather than trusting one read). Not fixed.
   Open. See [[Terminal-Commander]].
-- **[cleanup · khoa 2026-07-30, audit done] Legacy widget audit — one open
+- **[cleanup · khoa 2026-07-30, audit done — fold-out-journal thread CLOSED
+  2026-07-31, see the Grimoire entry below] Legacy widget audit — one open
   thread.** `AoideJournal.qml` (dead fold-out journal alternative to the codex
-  dock) was confirmed dead and deleted; nothing else orphaned. **Open:** if
-  the fold-out journal idea is still wanted, it needs a fresh build against
-  current `ConductorGadget`/`TerminalsGadget`/`MetersGadget`/`PowerVitalsGadget`
-  — not a resurrection. Also open, unrelated: the `Γ`/`dag.trace` order-mark
-  unused in `GadgetFrame`'s map, and the `aoide.surfaces.sessionGraph` registry
-  entry with no QML body. See [[Gadget-Dock]].
+  dock) was confirmed dead and deleted; nothing else orphaned. The fold-out
+  journal idea DID get revived, per khoa's fresh-build condition — landing on
+  the launcher (a book you open to find an app), not the dock. Still open,
+  unrelated: the `Γ`/`dag.trace` order-mark unused in `GadgetFrame`'s map, and
+  the `aoide.surfaces.sessionGraph` registry entry with no QML body. See
+  [[Gadget-Dock]].
+- **[feature · landed 2026-07-31] The Grimoire — `AoideLauncher.qml` rebuilt as
+  a book.** A chrome-only rebrand of the app launcher (file, component,
+  `aoide:launcher` global shortcut, `aoide-launcher` compositor namespace, and
+  SUPER+SPACE all unchanged — only the visible surface changed): two glass
+  leaves astride a carved spine, Y-rotation leaf-turn transplanted from the
+  deleted `AoideJournal.qml` (`git show 353390a:...AoideJournal.qml`),
+  chapters partitioned by freedesktop category with page one a live
+  "most-summoned" frequency index backed by a new `GrimoireLedger.qml`
+  (QML-direct atomic write to `song/stage/grimoire.json`, no new `aoided`
+  verb — same idiom as `DesktopEntry.execute()`). Picked up cold from a prior
+  agent's on-disk state (its transcript was lost to an unrelated session-limit
+  kill) and closed out by a Fable review that had read the file mid-build and
+  flagged three defects: (1) `ResultLeaf` rendered 0×0 — `Row` positions
+  children but doesn't size them, and neither the component nor its two
+  instantiation sites set width/height; fixed by sizing the component to
+  `book.leafW`/`book.leafH`. (2) A broken two-way search binding
+  (`TextInput { text: root.query; onTextChanged: root.query = text }`) meant
+  `root.query = ""` (Escape, or the shown-state reset) cleared the app's
+  state but left stale text visibly in the box; fixed by clearing
+  `searchInput.text` directly everywhere the query needed resetting. (3)
+  Scroll-to-selection was already implemented on disk (a per-leaf
+  `Connections` on `root.selIndexChanged` calling `positionViewAtIndex`) —
+  did not need a fix. Fixing (1) surfaced two knock-on bugs the zero-size
+  leaf had been masking: a genuine `Binding loop detected for property
+  "height"` (the sparse-filler text was a ListView `footer:` item sized off
+  `lv.height - lv.contentHeight`, but a footer counts toward `contentHeight`
+  itself — fixed by making it a plain sibling `Item` instead of a ListView
+  footer) and a duplicate-empty-state read (when the current list is empty,
+  `splitAt = Math.ceil(0/2) = 0`, so both leaves shared `leafOffset === 0`
+  and the "gate to first leaf" check matched both — fixed with an explicit
+  `isLeft` flag set per instantiation rather than an offset-equality test).
+  Verified live on `yomi-strix`: synced into the deployed `~/Aoide/qml/` tree,
+  `aoide-quickshell.service` restarted clean (no QML errors, no binding-loop
+  warning) across several restarts; SUPER+SPACE screenshots confirm the
+  cold-start frequency page reads as a genuine, unpadded empty state (real
+  ranked entries first, kaomoji filler only when real entries are thin, never
+  dim alphabetical filler); search and category-chapter flip (`Ctrl+L`/`▷`)
+  both render real content in both leaves; launching Firefox via the launcher
+  wrote `song/stage/grimoire.json` immediately, the entry SURVIVED a full
+  `aoide-quickshell.service` restart (process-level, not just a QML hot
+  reload), and a second launch incremented the count 1→2 — the persistence
+  claim the dead agent's last message said it was "verifying" is now
+  confirmed for real. Not done in this pass: the working tree was
+  deliberately left uncommitted for a separate landing pass; the book's
+  height (621) is still a magic number rather than derived from content —
+  low-priority, flagged but not fixed. See [[Quickshell]].
+- **[design · reworked 2026-07-31, verified live, awaiting khoa's read]
+  Grimoire chrome rebuilt as a RECTANGULAR OPEN BOOK — fourth chrome, three
+  iterations in one sitting.** The sequence, khoa steering each cut: (1) the
+  permanent −6° resting Y-rotation (the "photographed at an angle" cue from
+  the entry above) read as a rendering defect ("the grimoire is tilted?") →
+  ordered scrapped and rebuilt ground-up around three named parameters:
+  Pantheon, glass+glow, book-with-search-bar. (2) A first rebuild kept the
+  old slab/header/meander/cartouche/footer bones under new trim — rejected
+  as "exactly like the old one"; a redesign with NO concept of the old
+  chrome demanded. (3) A curved-silhouette tome with a `holoBlue` offset
+  depth stack, corner connectors, and `wireCyan` leader-line callouts was
+  cut back: "remove the pantheon holo-blue framing stuff — make it a
+  rectangular book." What now stands in `AoideLauncher.qml` (functional
+  core — shortcut, ledger, chapters, search ranking, leaf-turn, honest
+  sparse states — untouched throughout): two rectangular Aero-glass pages
+  (2px ink border, gloss, gold margin keylines) meeting at a shaded gutter
+  crease; below them a fading ink fore-edge stack closed by a glass
+  cover-boards band carrying the "GRIMOIRE · βίβλος" spine inscription,
+  with the accent ribbon dangling through it; a separate floating glass
+  incantation strip ABOVE the book as the search bar (placeholder: "speak,
+  and the book answers…"), each object with its own MultiEffect glow keyed
+  to the summon; rows are ruled manuscript lines (hairline rule per entry,
+  no row boxes — the selected line's rule ignites `paletteHot`, the one
+  neon element); navigation is book-native — thumb-index tabs on the right
+  fore-edge (♪ for the frequency index, α β γ … per alphabetical spread),
+  dog-eared bottom corners to turn, running headers + folios in the page
+  margins. Summon = the book swings open from its spine line (horizontal
+  scale, zero rotation anywhere; rest pose dead flat). Deployment note
+  discovered en route: the live shell reads the untracked `~/Aoide/qml/`
+  working copy, NOT `modules/facets/quickshell/qml/` — the first rebuild
+  "still looked old" because only the repo module had changed; synced and
+  service-restarted thereafter. Verified live on yomi-strix: clean restart
+  (no QML errors, no binding loops), SUPER+SPACE screenshot vision-checked
+  (light palette only so far — dark-palette pass still owed per the ricing
+  protocol). Landing (pathspec commit, no AI trailer) waits on khoa's read.
 - **[cleanup · khoa 2026-07-30, second audit done — SUPERSEDED same day]
   Legacy widget audit #2 (non-dock surfaces).** Survey found nothing dead but
   named four surfaces (`AoideGreeter`, `AoideLockscreen`, `AoideOsd`,
@@ -448,15 +538,26 @@ list; add one the moment you raise it. Current open flags (2026-07-30):
   `docs/Aoide-Wiki/concepts/Codebase.md:261`,
   `docs/Aoide-Wiki/concepts/Full-Architecture.md:180-181`,
   `docs/Aoide-Wiki/ingest/log.md:17` — wiki pages need the Sonnet librarian
-  (§6), `README.md` folds into the existing README-lag flag above. **Planned
-  replacement, NOT built this pass:** `song/songbook/sonata/design/
-  greek-grammar.md` §7 has the full design (consulted an Opus advisor, then
-  independently corrected against `pkgs/drachma`'s actual source before
-  writing it up) — a fixed six-slot convention
-  (`song/songbook/<name>/widgets/<Slot>.qml`), built into the store for every
-  song simultaneously so `aoide rice preview <name>` can still hot-swap a
-  widget's BODY live, not just its colours (khoa was explicit this must keep
-  working, not regress to rebuild-only). See [[Gadget-Dock]], [[Quickshell]].
+  (§6), `README.md` folds into the existing README-lag flag above.
+  **Per-song flavor widgets — BUILT for `calendar` + `notifications`
+  (2026-07-30, plan→execute pipeline).** `song/songbook/sonata/design/
+  greek-grammar.md` §7's six-slot sketch was YAGNI-trimmed to the two slots
+  with a real host anchor: the quickshell facet's derivation
+  (`modules/facets/quickshell/default.nix`) now carries every committed
+  song's `widgets/{calendar,notifications}.qml` into
+  `$out/qml/songs/<name>/` plus a generated `manifest.json`; `DrachmaState.
+  songName` (fed by `aoide rice preview <name>` staging a `song` field) drives
+  the staging engine (`StagingEngine.qml`/`WidgetSlot.qml`), the runtime resolver + fixed per-slot
+  anchor; `AoideBar.qml`'s calendar popout and `AoideNotifications.qml`'s
+  per-card `Repeater` both route through `WidgetSlot` now (notifications
+  falls back to the shared `NotificationCard` when a song hasn't authored
+  one — true of every song this pass). Live hot-swap confirmed: `aoide rice
+  preview sonata`/`default` swaps the calendar popout's body with no
+  rebuild/restart. `greeter`/`lockscreen`/`osd`/`nowPlaying` remain
+  **unbuilt, no host anchors** — cut from this pass in the plan's own YAGNI
+  trim pending a real trigger/data source for each; see
+  `song/songbook/update-playbook.md` for the authoring steps and
+  `CONTRACTS.md` §5 for the schema note. See [[Gadget-Dock]], [[Quickshell]].
 - **[plan · khoa 2026-07-30, not yet executed] Conductor/Terminals: kill the
   duplicate claude, name rows by cwd, show `say` on terminals.** (The plan
   file `~/.claude/plans/squishy-tickling-puffin.md` has since been reused

@@ -67,10 +67,10 @@ The full map lives in [[Song-Vocabulary]]; the logic of the family here. A **ric
 
 A few terms name the connective tissue rather than either half:
 
+- **conductor** — the ensemble's tool: `aoide conductor`, the TUI that watches the ensemble of running agent terminals and cues between them, with Hyprland as the multiplexer (real windows). The wider **conductor-class** covers every surface with that duty — the Terminal Commander widget, the DAG gadget, the conductor. See [[Terminal-Commander]], [[Session-Graph]].
 - **door** — an entry point into the one dispatch layer: `cli`, `mcp`, `daemon` (and the TUI rides the cli door). Every operation enters through a door and exits into the one audit log. One body, several doors.
-- **gate** — the rebuild gate ([[Rebuild-Gate]]): agents propose, the human admits. The single point where the performed half is allowed to re-freeze the crystal.
 - **drachma** — the design tokens AND the engine that mints them ([[drachma]], `pkgs/drachma`): the Greek coin, one name for the whole token layer. Values and engine are one thing: the tokens are drachma, resolved/validated/emitted by drachma (`stage/drachma.json`, hyprctl, OSC).
-- **baton** — the conductor's tool: `aoide baton`, the TUI that watches the ensemble of running agent terminals and cues between them, with Hyprland as the multiplexer (real windows). The wider **conductor-class** covers every surface with that duty — the Terminal Commander widget, the DAG gadget, the baton. See [[Terminal-Commander]], [[Session-Graph]].
+- **gate** — the rebuild gate ([[Rebuild-Gate]]): agents propose, the human admits. The single point where the performed half is allowed to re-freeze the crystal.
 - **wiki / vault** — Mneme's memory surfaces: this wiki for design context, the vault for content.
 
 ## Why the seam is a coin

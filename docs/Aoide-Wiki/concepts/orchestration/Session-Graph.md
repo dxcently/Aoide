@@ -60,7 +60,7 @@ document instead. A sample render:
 drachma emitter — so [[Quickshell]] can hot-reload it.
 
 The desktop has no standalone DAG-diagram surface today: `graph view`/
-`--json` in the terminal and the `aoide baton` ratatui TUI (DAG/sessions/
+`--json` in the terminal and the `aoide conductor` ratatui TUI (DAG/sessions/
 projects/log/status panels) are the DAG's renderers. On the desktop, the
 [[Gadget-Dock]]'s **Conductor gadget** gives the at-a-glance agent view
 instead — a beamed tree of agent/sub-agent sessions

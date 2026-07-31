@@ -66,7 +66,7 @@ marks the session (and its hook phase) `done` (ok no-op on an unknown id); and
 hook JSON (`session_id`, `cwd`, `hook_event_name`) and maps SessionStart→start,
 UserPromptSubmit/PreToolUse→phase running, Stop→phase waiting, SessionEnd→end,
 never exiting non-zero so it is safe to wire into interactive-session hooks.
-`startedAt` is stamped ISO-8601 UTC (hand-rolled, round-tripping the baton
+`startedAt` is stamped ISO-8601 UTC (hand-rolled, round-tripping the conductor
 reader — no chrono in the offline lock).
 
 The stage also carries two more files: `song/stage/projects.json` (the

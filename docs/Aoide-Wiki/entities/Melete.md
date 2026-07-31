@@ -43,6 +43,17 @@ missing.
   connector is the doer harness — distinct from the [[Mneme]] connector (the
   vault door) and the Aoide connector (the desktop/system frame's own management
   surface). See [[Agent-Interface]].
+- **Not a substitute for an agent's own shell.** Melete's core capability is
+  coding-agent dispatch (`run_code_task` and kin) — the mechanism the boxless
+  claude.ai context uses to orchestrate a real Claude Code session running on
+  a box. `run_shell`/`ssh_exec` exist too, but only as a secondary, attended
+  surface for box work around the vault. An agent already running on a box
+  (an Aoide dev session included) has a real shell and uses it directly,
+  always — it never routes its own command execution through Melete's
+  `run_shell` as if Melete were "my shell, over MCP." (This repo's own dev
+  sessions never invoke the real Melete connector at all — an earlier
+  session informally, incorrectly used "Melete" as a codename for a local
+  `Agent`-tool coding subagent; see `AOIDE-DEV-HANDOFF.md` §2.)
 - **Declarative surface:** one `config.toml`; self-update swaps which Nix store
   path the service points at (a `canary` channel — a flake-generation rollback in
   spirit).

@@ -39,7 +39,7 @@ and the MCP tool list all derive. **37 leaves** (`aoide schema --json | jq
 | `mcp serve`, `daemon`, `shellbridge`, `adapter melete` | 4 | real |
 | `graph` group (15 leaves — below) | 15 | real |
 | `conduct` | 1 | real |
-| `baton` | 1 | real |
+| `conductor` | 1 | real |
 
 A stub returns a structured `Outcome` with status `not-implemented` (exit
 `64`), never a crash — arg-parsing, the schema entry, the audit-log append,
@@ -83,17 +83,17 @@ terminal; its five failure reasons are `session-not-found` /
 `no-window-address` / `hyprctl-unavailable` / `hyprctl-failed` /
 `window-not-found`.
 
-### `conduct` and `baton`
+### `conduct` and `conductor`
 
-**`conduct`** is `graph wrap`'s PTY-backed sibling — same
-register/wait/end lifecycle, but on a controlling tty plus a per-session
-control socket, so `graph send` can type into the running agent while its own
-TUI runs undisturbed. **`baton`** is the interactive terminal frontend over
-the whole trunk: a ratatui TUI (DAG / sessions / projects / log / status
-panels, ~500ms poll, no watcher/async runtime) that dispatches every action
-through the same `dispatch()` the CLI and MCP doors use — never a second
-implementation, so the one audit log can't tell a baton keypress from a typed
-command.
+The two are deliberately distinct parts of speech. **`conduct`** is the verb —
+`graph wrap`'s PTY-backed sibling — same register/wait/end lifecycle, but on a
+controlling tty plus a per-session control socket, so `graph send` can type
+into the running agent while its own TUI runs undisturbed. **`conductor`** is
+the noun — the interactive terminal frontend over the whole trunk: a ratatui
+TUI (DAG / sessions / projects / log / status panels, ~500ms poll, no
+watcher/async runtime) that dispatches every action through the same
+`dispatch()` the CLI and MCP doors use — never a second implementation, so the
+one audit log can't tell a conductor keypress from a typed command.
 
 ### Open schema gap
 

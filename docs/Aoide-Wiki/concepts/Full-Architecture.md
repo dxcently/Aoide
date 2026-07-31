@@ -184,7 +184,7 @@ The baked side is carried by the three facets, all real:
   panel that peeks its fore-edge and opens fully on hot-edge hover or
   `SUPER+G`, all drachma-themed; osd, lockscreen, greeter, and wallpaper
   round out the set. `sessionGraph` remains declared but has no QML body —
-  the DAG is rendered via `aoide graph view`/`aoide baton`, not a desktop
+  the DAG is rendered via `aoide graph view`/`aoide conductor`, not a desktop
   overlay ([[Session-Graph]]).
 - **compositor** — [[Hyprland]]; the system layer holds session/portal wiring,
   the home-manager layer owns `hyprland.conf` with drachma baked at build and
@@ -281,7 +281,7 @@ This is shipped code: the Rust crate ([[aoide-cli]]) installs two binaries,
 truth; the stdio MCP façade (`aoide mcp serve --stdio`) generates its tool list
 from it, one-to-one. The tree holds **37 commands** — real (26): `guide`,
 `schema`, `rice lint`, `rice preview`, `cover set`, `mcp serve`, `daemon`,
-`shellbridge`, `conduct`, `baton`, `adapter melete`, and the 15-verb `graph`
+`shellbridge`, `conduct`, `conductor`, `adapter melete`, and the 15-verb `graph`
 group (the
 [[Session-Graph]] DAG viewer + management layer over projects and sessions,
 incl. `graph send`/`wrap`/`reap`, all real); stubs (11, exit 64):

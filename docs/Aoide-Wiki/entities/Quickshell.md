@@ -54,7 +54,7 @@ lockscreen, greeter, wallpaper, agentWidgets, sessionGraph):
   overlay (`AoideSessionGraph.qml` + `GraphRow.qml`) and the shared
   `GraphModel.qml` it and the dock's former DAG gadget instantiated are no
   longer part of the QML tree. `aoide graph view`/`--json` and the `aoide
-  baton` TUI are the DAG's renderers today ([[Session-Graph]]).
+  conductor` TUI are the DAG's renderers today ([[Session-Graph]]).
 
 ## Launcher (surface #3, built out 2026-07-28)
 
@@ -76,7 +76,7 @@ Two design decisions worth carrying forward:
   global shortcut is the cleanest inbound trigger — no new `aoided` verb, no
   inbound socket.
 - **Launch is `DesktopEntry.execute()`** — the same Quickshell-native side-effect
-  idiom the shell already uses (`WorkspaceRow.activate()`, `BatonGadget` →
+  idiom the shell already uses (`WorkspaceRow.activate()`, `ConductorGadget` →
   `execDetached`). Routing app-launch through `aoided` per house rule #6 has
   no such verb today; flagged, not silently baked. See
   [[references/AOIDE-DEV-HANDOFF]] §7.
