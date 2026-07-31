@@ -794,6 +794,12 @@ Item {
                                     readonly property var frames: gadget.faces.workingFrames(setIdx)
                                     text: row.working ? frames[frame % frames.length]
                                                       : gadget.kaomojiFor(modelData.state)
+                                    // Explicit family: the general pool now
+                                    // carries the parcel glyph (the receiving
+                                    // sets), and that icon lives in the Nerd
+                                    // Font's private-use range — Qt's CJK/kana
+                                    // fallback has no claim on it.
+                                    font.family: gadget.faceMono
                                     font.pixelSize: 10
                                     color: gadget.withA(row.accent, 0.85)
                                     Timer {

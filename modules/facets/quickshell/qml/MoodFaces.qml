@@ -29,13 +29,17 @@
 //   • Stay inside the CJK/kana/music repertoire the shell's fonts actually
 //     cover. Anything exotic renders as tofu, and tofu is the same width every
 //     frame, so it looks like a working animation that has simply stopped.
+//     The one sanctioned exception is the parcel glyph 󰏗 (U+F03D7, plus roll's
+//     mid-tumble circle U+F111): those live in the Nerd Font's private-use
+//     range, and since BOTH pools now carry them, every Text that draws these
+//     frames must set font.family to the Nerd Font (both gadgets do).
 
 import QtQuick
 
 QtObject {
     id: root
 
-    // ── WORKING — ten animated sets, one assigned per session ────────────────
+    // ── WORKING — the general animated pool, one set assigned per session ────
     // Third redesign: no unifying theme, no fixed direction — each set is just
     // a lively web-style kaomoji animation. Motion is POSITIONAL and BIG: the
     // figure or its prop visibly changes cell position every frame. Every
@@ -68,20 +72,22 @@ QtObject {
         { name: "jab",       // the fist ⊃ fires out three cells to full
           // extension and snaps back — a straight one-two punch.
           frames: ["( ｀ω´)⊃　　", "( ｀ω´)　⊃　", "( ｀ω´)　　⊃", "( ｀ω´)　⊃　"] },
-        { name: "spin",      // a full twirl: face front, profile, back of the
-          // head (blank), other profile — while the outstretched arms ＼／
-          // swap sides every frame like a spinning-top blur.
-          frames: ["＼( ・ｏ・)／", "／( ｏ・　)＼", "＼( 　　　)／", "／( 　・ｏ)＼"] },
+        { name: "dig",       // shovel duty: each scoop of dirt 彡 is flung a
+          // cell further until it sails clean off the edge, then one
+          // empty-handed beat before the next spadeful.
+          frames: ["( ｀ω´)⊃彡　　", "( ｀ω´)⊃　彡　", "( ｀ω´)⊃　　彡", "( ｀ω´)⊃　　　"] },
         { name: "juggle",    // two balls ping in and out on both sides of the
           // face, out of phase — near/near, far/far, split, swapped.
           frames: ["　ｏ( ＾ω＾)ｏ　", "ｏ　( ＾ω＾)　ｏ", "　ｏ( ＾ω＾)　ｏ", "ｏ　( ＾ω＾)ｏ　"] },
         { name: "boogie",    // arms-up dancer sweeps left→mid→right→mid across
           // the box while a single ♪ flits from side to side around it.
           frames: ["♪ヽ( ・ω・)ノ　　", "　ヽ( ・ω・)ノ♪　", "　　ヽ( ・ω・)ノ♪", "　♪ヽ( ・ω・)ノ　"] },
-        { name: "fishing",   // cast → the line ～ unspools to full length → the
-          // float ｏ settles at the tip → BITE: the line snaps a cell shorter
-          // and the face clenches ｀´ — then the loop recasts.
-          frames: ["( ・ω・)ノ～　　　", "( ・ω・)ノ～～～　", "( ・ω・)ノ～～～ｏ", "( ｀ω´)ノ～～ｏ　"] },
+        { name: "toss",      // a game of catch where everything plays: the ball
+          // ｏ crosses between the two, the arms swing (⊃ hurl · ノ ready ·
+          // ⊂ scoop · ヽ ready), and the pair share one mood the whole rally
+          // — both tense up ＞ω＜ on the throw, both light up ＾ω＾ on the
+          // catch.
+          frames: ["(＞ω＜)⊃ｏ　ヽ(＞ω＜)", "(＾ω＾)ノ　ｏ⊂(＾ω＾)", "(＞ω＜)ノ　ｏ⊂(＞ω＜)", "(＾ω＾)⊃ｏ　ヽ(＾ω＾)"] },
         { name: "scribble",  // the pen φ walks the page line ＿＿＿ one cell per
           // beat, left to right, then wraps — a new line started.
           frames: ["( ・ω・)φ＿＿＿", "( ・ω・)＿φ＿＿", "( ・ω・)＿＿φ＿", "( ・ω・)＿＿＿φ"] },
@@ -96,7 +102,15 @@ QtObject {
         { name: "lift",      // reps: the barbell ｏ＝ｏ is pressed out to full
           // extension one cell per beat and pulled back, strain face ｀´ held
           // the whole set.
-          frames: ["( ｀ω´)⊃ｏ＝ｏ　　", "( ｀ω´)　⊃ｏ＝ｏ　", "( ｀ω´)　　⊃ｏ＝ｏ", "( ｀ω´)　⊃ｏ＝ｏ　"] }
+          frames: ["( ｀ω´)⊃ｏ＝ｏ　　", "( ｀ω´)　⊃ｏ＝ｏ　", "( ｀ω´)　　⊃ｏ＝ｏ", "( ｀ω´)　⊃ｏ＝ｏ　"] },
+        { name: "catch",     // incoming delivery: a parcel 󰏗 sails in from the
+          // right a cell per beat, arms ノ up and ready, and lands in the
+          // hand つ with a ＾ω＾ — the loop restart is the next drop.
+          frames: ["( ・ω・)ノ　　󰏗", "( ・ω・)ノ　󰏗　", "( ・ω・)ノ󰏗　　", "( ＾ω＾)つ󰏗　　"] },
+        { name: "inbox",     // the other doorstep: parcels 󰏗 slide in from the
+          // left edge and each one is scooped in behind the arm ⊂ the moment
+          // it arrives — received, tucked, next.
+          frames: ["󰏗　　⊂( ・ω・)", "　󰏗　⊂( ・ω・)", "　　󰏗⊂( ・ω・)", "　　⊂󰏗( ＾ω＾)"] }
     ]
 
     // ── PACKAGES — the subagent pool: a courier delivering work back to the
