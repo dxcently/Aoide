@@ -409,22 +409,16 @@ were always called "pills" in the code and the name is now literal, since a
 square-cornered "pill" never actually read as one. Nothing else in the shell
 rounds a corner. The melody is colour-coded, not Greek-ified.
 
-### Flat skeletons
+### Flat skeletons — RETIRED 2026-07-30
 
-Each is a plain `Rectangle`/`Item` given a **stele** treatment (pediment cap +
-column rails + stylobate base) in box characters, function identical — all
-implemented as designed:
-
-- **`NotificationCard`** — a **votive stele**: a `╱‾‾╲` pediment carrying the app
-  name, `║` rails, a stylobate base rule. Urgent (`urgency === 2`) swaps the rail
-  colour to `notifUrgent` (terracotta) at 0.9 and pulses; at rest the
-  `windowBorder` verdigris chrome holds the §5 cap (0.5).
-- **`AoideOsd`** — a small centred **stele**: pediment + a single value line;
-  border `paletteAccent` (gold) kept. The fade-in/out timing is untouched.
-- **`AoideLockscreen`** / **`AoideGreeter`** — a **temple façade**: a wide
-  `╱‾‾‾‾‾╲` pediment over a `‖ ‖` colonnade framing the password/login field,
-  verdigris at 0.5; the field keeps its Attic-gold active border. Pure chrome
-  dress over the existing skeleton.
+`NotificationCard`, `AoideOsd`, `AoideLockscreen`, `AoideGreeter` (plus
+`AoideNotifications`, `CalendarGadget`, `NowPlayingGadget`, none of which had a
+grammar entry here) were **deleted** from the shared `qml/` tree — they were
+song-blind stubs/chrome with no per-song identity, cleared to make room for
+§7's per-song widget mechanism. Their old stele/temple-façade treatment
+(pediment + rails + stylobate, described here until this edit) is no longer
+live anywhere; a song authoring a replacement under the §7 convention starts
+fresh, it doesn't need to match this retired look.
 
 ---
 
@@ -491,3 +485,54 @@ pantheon rebuild actually enforces:
   clef/rest/note functional glyphs, and the `𝄂𝄚𝅦𝄚` seam are never swapped for
   Greek forms — they are the Rust-locked score, and the Greek forms frame them,
   never replace them.
+
+## 7. Planned — per-song flavor widgets (drachma schema v1)
+
+**Status: PLANNED, not built.** khoa (2026-07-30): the rerice mechanic should be
+declarative and mostly nix, and a song should be able to carry its OWN QML for
+"flavor" surfaces — the six just retired in §4 — while core chrome (bar,
+launcher, wallpaper, dock frame + gadgets) stays one shared, song-blind
+implementation. Live hot-swap (via `aoide rice preview <name>`, no rebuild)
+must keep working for these too, not just colours.
+
+**Today's baseline:** one shared `modules/facets/quickshell/qml/` tree, copied
+verbatim into the store regardless of active song — widget *structure* is
+100% song-blind, only `aoide.drachma.*` colours vary. Each song's
+`song/songbook/<name>/drachma.json` is a hand/agent-maintained, **git-committed**
+JSON file (NOT nix-generated — `pkgs/drachma`'s CLI only resolves/emits an
+already-authored file); `aoide rice preview <name>` copies it straight to
+`stage/drachma.json`, and `DrachmaState.qml`'s `FileView` re-parses on that
+atomic swap — this is the existing fast hot-reload path colours ride today.
+
+**Recommended shape:**
+- **Convention:** `song/songbook/<name>/widgets/<Slot>.qml`, a fixed slot enum
+  — `greeter`, `lockscreen`, `osd`, `notifications`, `calendar`, `nowPlaying`
+  — matching the six retired surfaces. Free-form slot names don't work: the
+  shared chrome needs a fixed `Loader` anchor per slot regardless of whether a
+  song fills it. A song omits files for slots it doesn't dress.
+- **Build (rebuild, declarative nix):** the quickshell facet's derivation
+  (`modules/facets/quickshell/default.nix`), after its existing `cp -r`, also
+  walks `song/songbook/*/widgets/` and copies every song's slot files to
+  `$out/qml/songs/<name>/<Slot>.qml` — ALL songs' bodies land on disk at once
+  (home-manager already installs the tree recursively), which is what makes
+  cross-song live preview possible at all.
+- **Runtime selection (live, no rebuild):** the widget path is fully
+  deterministic from `<songName>/<slot>`, so a `Loader.source` can be a plain
+  string template off the active song's name (which needs to reach the stage
+  file as one new field) — **not** a new key threaded through
+  `pkgs/drachma`'s schema/resolve/emit pipeline (that pipeline validates a
+  closed key set today and would need real JS changes, more machinery than
+  this needs). `Loader.status` handles a missing file gracefully; an empty
+  slot means an inactive Loader, no dead surface.
+- **Containment:** widget QML is store-copied score, like cover art — at
+  runtime it sees only `DrachmaState` + `ShellBridge`, never nix `config.*`,
+  so a song stays structurally incapable of leaking host/facet options
+  through this surface (CONTRACTS.md §5 holds).
+- **Touch list when built:** `modules/facets/quickshell/default.nix`,
+  `modules/nucleus/options.nix` (a `widgets` submodule under `drachma`),
+  `shell.qml` + `AoideBar.qml` (the six `Loader` anchors), `CONTRACTS.md`
+  (§1/§5 schema version bump to v1), `song/songbook/update-playbook.md`.
+  Confirmed NOT needed: `lib/checks.nix` (`songShape` only inspects `.nix`
+  files; `no-song-read` only bans runtime dirs, not committed `songbook/`).
+
+See `docs/Aoide-Wiki/references/AOIDE-DEV-HANDOFF.md` §7 for the ledger flag.

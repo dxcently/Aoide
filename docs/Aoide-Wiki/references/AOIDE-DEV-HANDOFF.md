@@ -329,7 +329,9 @@ list; add one the moment you raise it. Current open flags (2026-07-30):
   trigger is `aoide:launcher` not `aoide shell launcher toggle`; command count
   is 36 (three gated) not 28; `rice preview` is real; `aoide.rebuild` is
   described as shippable but has no `options.nix` option (it's planned).
-  Reconcile alongside any songbook-touching pass.
+  **Also now stale (found 2026-07-30):** `README.md:65` still describes a
+  clock→`CalendarGadget` popup, deleted this session (see the legacy-widgets
+  entry above). Reconcile alongside any songbook-touching pass.
 - **[limitation · known] The window→session listener can't resolve a hook-only
   session that has no recorded pid** — it walks the session's pid, and a
   Claude session registered purely via hooks (never conducted) has none. The
@@ -419,28 +421,51 @@ list; add one the moment you raise it. Current open flags (2026-07-30):
   — not a resurrection. Also open, unrelated: the `Γ`/`dag.trace` order-mark
   unused in `GadgetFrame`'s map, and the `aoide.surfaces.sessionGraph` registry
   entry with no QML body. See [[Gadget-Dock]].
-- **[cleanup · khoa 2026-07-30, second audit done] Legacy widget audit #2
-  (non-dock surfaces) — nothing dead, one functional gap confirmed.** khoa
-  suspected more stale widgets beyond the dock in
-  `modules/facets/quickshell/qml/`. Full survey (all 26 files, `shell.qml`'s
-  instantiation graph, design-marker grep): every file is either reachable
-  (dock gadgets + six dormant overlay skeletons — `AoideGreeter`,
-  `AoideLockscreen`, `AoideLauncher`, `AoideNotifications`,
-  `AoideWallpaperPicker`, `AoideOsd` — wired into `shell.qml` but not live)
-  or a standalone `*Preview.qml` dev harness (by design, never shell-wired).
-  All already carry the current Pantheon vocabulary — no stale styling found.
-  **Open, unrelated to styling:** `AoideGreeter`/`AoideLockscreen`/`AoideOsd`/
-  `AoideNotifications` are self-labeled `(skeleton)`/`STUB` — chrome only, not
-  wired to their real backing protocol (greetd, `ext-session-lock-v1`,
-  `stage/osd.json`, a rendered notification list respectively). Pre-existing
-  unbuilt feature work, not something to delete. See [[Gadget-Dock]],
-  [[Quickshell]].
+- **[cleanup · khoa 2026-07-30, second audit done — SUPERSEDED same day]
+  Legacy widget audit #2 (non-dock surfaces).** Survey found nothing dead but
+  named four surfaces (`AoideGreeter`, `AoideLockscreen`, `AoideOsd`,
+  `AoideNotifications`) as unbuilt skeleton/stub chrome. khoa's decision after
+  seeing this: delete them rather than leave them dormant — see the very next
+  entry below, which is what actually happened. `AoideWallpaperPicker`/
+  `AoideLauncher` (also named in that survey) were NOT touched — they're live,
+  not stubs.
+- **[cleanup · khoa 2026-07-30, LANDED commit `5924c89`] Stripped legacy
+  flavor widgets; per-song replacement is planned, not built.** Deleted
+  `AoideGreeter.qml`, `AoideLockscreen.qml`, `AoideOsd.qml`,
+  `AoideNotifications.qml`, `NotificationCard.qml`, `CalendarGadget.qml`,
+  `NowPlayingGadget.qml` from `modules/facets/quickshell/qml/` — song-blind
+  stubs/chrome with no per-song identity, cleared by khoa's explicit call to
+  make room for a real per-song mechanism rather than leave them dormant.
+  Wiring removed from `shell.qml` (the four overlay instantiations) and
+  `AoideBar.qml` (the now-playing/calendar `BarPopout`s, plus the `TrayCell`
+  component and `openGadget`/`toggleGadget`/`calShown`/`npCell` state that
+  only existed to open them) — independently reviewed clean (no dangling
+  refs, no orphaned state, no layout breakage). `WorkspaceRow`/`shell.qml`
+  itself/the launcher/bar/wallpaper/dock all confirmed untouched, per khoa's
+  explicit scope. **Open follow-up (found by the same review):** several docs
+  now describe deleted components as if live — `README.md:65`,
+  `docs/Aoide-Wiki/entities/Quickshell.md:28-29`,
+  `docs/Aoide-Wiki/concepts/Codebase.md:261`,
+  `docs/Aoide-Wiki/concepts/Full-Architecture.md:180-181`,
+  `docs/Aoide-Wiki/ingest/log.md:17` — wiki pages need the Sonnet librarian
+  (§6), `README.md` folds into the existing README-lag flag above. **Planned
+  replacement, NOT built this pass:** `song/songbook/sonata/design/
+  greek-grammar.md` §7 has the full design (consulted an Opus advisor, then
+  independently corrected against `pkgs/drachma`'s actual source before
+  writing it up) — a fixed six-slot convention
+  (`song/songbook/<name>/widgets/<Slot>.qml`), built into the store for every
+  song simultaneously so `aoide rice preview <name>` can still hot-swap a
+  widget's BODY live, not just its colours (khoa was explicit this must keep
+  working, not regress to rebuild-only). See [[Gadget-Dock]], [[Quickshell]].
 - **[plan · khoa 2026-07-30, not yet executed] Conductor/Terminals: kill the
-  duplicate claude, name rows by cwd, show `say` on terminals.** (Plan file
-  `~/.claude/plans/squishy-tickling-puffin.md` has since been reused for a
-  later planning session and no longer holds this — **this ledger entry is
-  now the authoritative summary**, re-derive the full plan from it if picked
-  up.) Shape: extract the reaper into
+  duplicate claude, name rows by cwd, show `say` on terminals.** (The plan
+  file `~/.claude/plans/squishy-tickling-puffin.md` has since been reused
+  TWICE for later planning sessions — most recently for the legacy-widget
+  strip above — and no longer holds this. **This ledger entry is now the
+  authoritative summary**, re-derive the full plan from it if picked up; if
+  the plan file gets reused again, that's expected — plan-mode files are
+  scratch space, not durable storage, this ledger is.) Shape: extract the
+  reaper into
   `pkgs/aoide/src/reap.rs` (behavior-preserving move), add
   `superseded_agent_duplicates` to retire same-window agent-record duplicates
   (fixes a live bug — one terminal was showing three "claude" rows, one
