@@ -419,9 +419,28 @@ list; add one the moment you raise it. Current open flags (2026-07-30):
   — not a resurrection. Also open, unrelated: the `Γ`/`dag.trace` order-mark
   unused in `GadgetFrame`'s map, and the `aoide.surfaces.sessionGraph` registry
   entry with no QML body. See [[Gadget-Dock]].
+- **[cleanup · khoa 2026-07-30, second audit done] Legacy widget audit #2
+  (non-dock surfaces) — nothing dead, one functional gap confirmed.** khoa
+  suspected more stale widgets beyond the dock in
+  `modules/facets/quickshell/qml/`. Full survey (all 26 files, `shell.qml`'s
+  instantiation graph, design-marker grep): every file is either reachable
+  (dock gadgets + six dormant overlay skeletons — `AoideGreeter`,
+  `AoideLockscreen`, `AoideLauncher`, `AoideNotifications`,
+  `AoideWallpaperPicker`, `AoideOsd` — wired into `shell.qml` but not live)
+  or a standalone `*Preview.qml` dev harness (by design, never shell-wired).
+  All already carry the current Pantheon vocabulary — no stale styling found.
+  **Open, unrelated to styling:** `AoideGreeter`/`AoideLockscreen`/`AoideOsd`/
+  `AoideNotifications` are self-labeled `(skeleton)`/`STUB` — chrome only, not
+  wired to their real backing protocol (greetd, `ext-session-lock-v1`,
+  `stage/osd.json`, a rendered notification list respectively). Pre-existing
+  unbuilt feature work, not something to delete. See [[Gadget-Dock]],
+  [[Quickshell]].
 - **[plan · khoa 2026-07-30, not yet executed] Conductor/Terminals: kill the
-  duplicate claude, name rows by cwd, show `say` on terminals.** Full plan on
-  disk at `~/.claude/plans/squishy-tickling-puffin.md`: extract the reaper into
+  duplicate claude, name rows by cwd, show `say` on terminals.** (Plan file
+  `~/.claude/plans/squishy-tickling-puffin.md` has since been reused for a
+  later planning session and no longer holds this — **this ledger entry is
+  now the authoritative summary**, re-derive the full plan from it if picked
+  up.) Shape: extract the reaper into
   `pkgs/aoide/src/reap.rs` (behavior-preserving move), add
   `superseded_agent_duplicates` to retire same-window agent-record duplicates
   (fixes a live bug — one terminal was showing three "claude" rows, one
