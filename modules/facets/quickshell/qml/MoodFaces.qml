@@ -103,25 +103,25 @@ QtObject {
     // main agent that dispatched it. A subagent always wears one of THESE
     // sets, never the general pool above — see pickFor()/randomIndex() below
     // for the policy split. Not locked to any count; add more as they come.
-    // Every set carries the parcel 󰏖 somewhere; same fixed-width/U+3000
+    // Every set carries the parcel 󰏗 somewhere; same fixed-width/U+3000
     // rules as the general pool.
     readonly property var packages: [
         { name: "haul",     // the delivery run itself — courier marches the
           // full width of the box, parcel leading in the outstretched arm;
           // the loop restart reads as the next run.
-          frames: ["( ｀ー´)⊃󰏖　　　", "　( ｀ー´)⊃󰏖　　", "　　( ｀ー´)⊃󰏖　", "　　　( ｀ー´)⊃󰏖"] },
+          frames: ["( ｀ー´)⊃󰏗　　　", "　( ｀ー´)⊃󰏗　　", "　　( ｀ー´)⊃󰏗　", "　　　( ｀ー´)⊃󰏗"] },
         { name: "handoff",  // step-and-drop gait: carry → thrust forward →
-          // release (a gap opens between hand つ and 󰏖 as it sits down) →
+          // release (a gap opens between hand つ and 󰏗 as it sits down) →
           // long reach to re-grab, then carry again.
-          frames: ["( ・ω・)つ󰏖　　", "( ・ω・)　つ󰏖　", "( ・ω・)つ　󰏖　", "( ・ω・)　　つ󰏖"] },
+          frames: ["( ・ω・)つ󰏗　　", "( ・ω・)　つ󰏗　", "( ・ω・)つ　󰏗　", "( ・ω・)　　つ󰏗"] },
         { name: "stack",    // shuttle run to a pile at the left edge: arrive
-          // with a box, close in, DROP (the pile grows 󰏖→󰏖󰏖, the hand
+          // with a box, close in, DROP (the pile grows 󰏗→󰏗󰏗, the hand
           // empties), step back for the next — "where the main agent picks
           // it up," made literal.
-          frames: ["󰏖　　( ・ω・)つ󰏖", "󰏖　( ・ω・)つ󰏖　", "󰏖󰏖( ・ω・)つ　　", "󰏖󰏖　( ・ω・)つ　"] },
+          frames: ["󰏗　　( ・ω・)つ󰏗", "󰏗　( ・ω・)つ󰏗　", "󰏗󰏗( ・ω・)つ　　", "󰏗󰏗　( ・ω・)つ　"] },
         { name: "roll",     // barrel freight — the parcel rolls out ahead and
-          // back, tumbling 󰏖→→󰏖 as it turns, the arm つ chasing it.
-          frames: ["( ｀ω´)つ󰏖　　", "( ｀ω´)つ　　", "( ｀ω´)つ　　󰏖", "( ｀ω´)つ　　"] }
+          // back, tumbling 󰏗→→󰏗 as it turns, the arm つ chasing it.
+          frames: ["( ｀ω´)つ󰏗　　", "( ｀ω´)つ　　", "( ｀ω´)つ　　󰏗", "( ｀ω´)つ　　"] }
     ]
 
     // Which set a SUBAGENT wears, for its whole life. Hashed from the row's key
