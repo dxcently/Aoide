@@ -102,11 +102,28 @@ PanelWindow {
         return Qt.rgba(c.r, c.g, c.b, a)
     }
 
-    // Greek alphabetic numeral for tab n (0-based); falls back to arabic.
+    // Greek tab label for chapter n (0-based), bijective base-24 so it never
+    // runs out: α β … ω, then αα αβ … (like spreadsheet columns).
     readonly property string greekLetters: "αβγδεζηθικλμνξοπρστυφχψω"
     function greekNum(n) {
-        return (n >= 0 && n < root.greekLetters.length)
-               ? root.greekLetters.charAt(n) : ("" + (n + 1))
+        if (n < 0) return ""
+        var L = root.greekLetters
+        var s = ""
+        var m = n + 1
+        while (m > 0) {
+            var rem = (m - 1) % L.length
+            s = L.charAt(rem) + s
+            m = Math.floor((m - 1) / L.length)
+        }
+        return s
+    }
+    function romanNumeral(n) {
+        if (n < 1 || n > 3999) return "" + n;
+        var th = ["","M","MM","MMM"];
+        var hu = ["","C","CC","CCC","CD","D","DC","DCC","DCCC","CM"];
+        var te = ["","X","XX","XXX","XL","L","LX","LXX","LXXX","XC"];
+        var on = ["","I","II","III","IV","V","VI","VII","VIII","IX"];
+        return th[Math.floor(n/1000)] + hu[Math.floor(n/100)%10] + te[Math.floor(n/10)%10] + on[n%10];
     }
 
     // ── The ledger (frequency chapter's data source) ────────────────────────
@@ -213,7 +230,7 @@ PanelWindow {
             var fe = root.appsById[freqIds[f]]
             if (fe) freqEntries.push(fe)
         }
-        out.push({ id: "frequency", title: "MOST SUMMONED", whisper: "συνήθεια",
+        out.push({ id: "frequency", title: "MOST SUMMONED", whisper: "ἕξις",
                    hue: root.notes.paletteAccent, entries: freqEntries })
 
         var all = []
@@ -226,7 +243,7 @@ PanelWindow {
             var firstCh = slice.length ? ("" + (slice[0].name || "?")).charAt(0).toUpperCase() : "?"
             var lastCh  = slice.length ? ("" + (slice[slice.length - 1].name || "?")).charAt(0).toUpperCase() : "?"
             out.push({ id: "page" + pageNum, title: firstCh + " – " + lastCh,
-                       whisper: "σελίς " + pageNum, hue: root.notes.wireCyan, entries: slice })
+                       whisper: "σελίς " + root.romanNumeral(pageNum), hue: root.notes.wireCyan, entries: slice })
         }
         return out
     }
@@ -482,10 +499,10 @@ PanelWindow {
             anchors.top: parent.top; anchors.topMargin: 22
             anchors.horizontalCenter: parent.horizontalCenter
             text: page.isLeft
-                  ? (root.searching ? "ζήτησις"
+                  ? (root.searching ? "SEARCH"
                         : (root.currentChapter ? root.currentChapter.title : ""))
                   : (root.searching
-                        ? (root.currentList.length + " match" + (root.currentList.length === 1 ? "" : "es"))
+                        ? (root.currentList.length === 0 ? "οὐδέν" : root.currentList.length === 1 ? "I εὕρημα" : root.romanNumeral(root.currentList.length) + " εὑρήματα")
                         : (root.currentChapter ? root.currentChapter.whisper : ""))
             font.family: root.faceSerif
             font.pixelSize: 13
@@ -623,9 +640,8 @@ PanelWindow {
             anchors.leftMargin: 28
             anchors.rightMargin: 28
             text: page.isLeft
-                  ? (root.currentList.length + " " + (root.searching ? "result" : "app")
-                     + (root.currentList.length === 1 ? "" : "s"))
-                  : ((root.chapterIndex + 1) + " / " + root.chapters.length)
+                  ? (root.currentList.length === 0 ? "οὐδέν" : (root.currentList.length === 1 ? (root.searching ? "I εὕρημα" : "I δαίμων") : root.romanNumeral(root.currentList.length) + (root.searching ? " εὑρήματα" : " δαίμονες")))
+                  : (root.romanNumeral(root.chapterIndex + 1) + " / " + root.romanNumeral(root.chapters.length))
             font.family: root.faceMono
             font.pixelSize: 10
             color: root.withA(root.notes.paletteFg, 0.45)
@@ -807,7 +823,7 @@ PanelWindow {
 
                 Text {
                     anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-                    text: "summon application"
+                    text: "τί ζητεῖς;"
                     color: root.notes.paletteFg
                     opacity: 0.4
                     font.family: root.faceMono
@@ -1256,8 +1272,8 @@ PanelWindow {
                 y: book.pageH / 2 - height / 2
                 visible: root.currentList.length === 0 && !root.freqSparse
                 text: root.searching
-                      ? "no app by that name ♪(´ε｀ )"
-                      : "no apps here ♪(´ε｀ )"
+                      ? "οὐδὲν τοιοῦτον ὄνομα ♪(´ε｀ )"
+                      : "οὐδὲν ἐνταῦθα ♪(´ε｀ )"
                 color: root.notes.paletteFg
                 opacity: 0.5 * root.fold
                 font.family: root.faceMono
