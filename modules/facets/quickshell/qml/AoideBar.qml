@@ -12,10 +12,8 @@
 //   HEAD      : 𝄞 treble clef — the key of the piece AND the powermenu key
 //               (click → powermenu). It opens the staff.
 //   LEFT      : ✎N agent-sessions (blocks → glitchPink pulse, a shipped tell),
-//               the gadget tray (♫ now-playing, a click-toggled BarPopout —
-//               meters/power/clock moved to the AoideAgentWidgets dock, seated
-//               at its bottom below the agent pair), and the active-window
-//               title (music-kaomoji when empty).
+//               the clock/date readout, and the active-window title
+//               (music-kaomoji when empty).
 //   CENTRE    : the workspaces, written as NOTE-HEADS on the staff line
 //               (WorkspaceRow) — the melody of the measure, flanked by barlines.
 //   RIGHT     : the expression marks — ♫ volume, 𝄾 battery (rests: the battery
@@ -41,8 +39,8 @@
 // and only muddied the type on cream).
 // One restrained STATE accent survives from the song (DrachmaState): the ACTIVE
 // workspace note-head fills with paletteAccent, the BLOCKED ✎ pulse + low battery
-// go glitchPink, and open/hover toggles (clock→calendar, volume, tray) flash
-// paletteAccent. Everything at rest is black.
+// go glitchPink, and open/hover toggles (volume) flash paletteAccent.
+// Everything at rest is black.
 //
 // Data sources (unchanged real Quickshell services — the plumbing survives):
 //   - Hyprland   → workspaces (WorkspaceRow) + active window title.
@@ -306,16 +304,6 @@ Item {
     property bool volShown: false      // volume hover slider
     property bool battShown: false     // battery hover popout
 
-    // Gadget tray: now-playing is the sole bar-spawned gadget (meters/power
-    // live in the AoideAgentWidgets dock instead; the clock/date stay on the
-    // bar as a plain readout). Click-toggled.
-    property string openGadget: ""
-    function toggleGadget(key) {
-        openGadget = (openGadget === key) ? "" : key
-    }
-    // Clock → calendar sheet (click-toggled, its own popout below).
-    property bool calShown: false
-
     // ══ MUSICAL GEOMETRY ═══════════════════════════════════════════════════
     // The staff sits at the strip's vertical midline; five lines a staffGap
     // apart. Content is written on the staff, so every cell centres on it.
@@ -334,23 +322,6 @@ Item {
         color: "#000000"
         opacity: 0.7
         anchors.verticalCenter: parent.verticalCenter
-    }
-
-    // A tray glyph-button (♫ ▦ ⌁ ◔): active → accent, else resting black ink.
-    component TrayCell: Text {
-        property string gkey: ""
-        anchors.verticalCenter: parent.verticalCenter
-        width: implicitWidth + 9
-        horizontalAlignment: Text.AlignHCenter
-        color: root.openGadget === gkey ? root.notes.paletteAccent : root.notes.paletteFg
-        opacity: root.openGadget === gkey ? 1.0 : 0.92
-        font.family: "monospace"
-        font.pixelSize: 14
-        MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.toggleGadget(parent.gkey)
-        }
     }
 
     // ══ THE MANUSCRIPT STRIP ═══════════════════════════════════════════════
@@ -462,23 +433,16 @@ Item {
             }
         }
 
-        // (now-playing ♫ moved to the RIGHT stave, beside volume.)
-
-        // ── Clock + date (click → calendar popout). Lives on the bar, not the
-        // dock — the ambient face belongs beside the measure, not in the case.
+        // ── Clock + date. Lives on the bar, not the dock — the ambient face
+        // belongs beside the measure, not in the case.
         Text {
             id: clockText
             anchors.verticalCenter: parent.verticalCenter
             text: Qt.formatDateTime(root.now, "hh:mm AP  dddd MMM dd")
-            color: root.calShown ? root.notes.paletteAccent : root.notes.paletteFg
+            color: root.notes.paletteFg
             font.family: "monospace"
             font.pixelSize: 14
             font.bold: true
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.calShown = !root.calShown
-            }
         }
         // The " / " separator — a slur between clock and title.
         Text {
@@ -527,10 +491,6 @@ Item {
         anchors.rightMargin: root.edgePad
         anchors.verticalCenter: parent.verticalCenter
         spacing: 10
-
-        // Now-playing ♫ — the click-toggled score popout (moved here from the
-        // left tray, so it sits with the other expression marks on the right).
-        TrayCell { id: npCell; gkey: "np"; text: "♫"; anchors.verticalCenter: parent.verticalCenter }
 
         // Volume — scroll = adjust, click = mute, hover = ASCII slider popout.
         Text {
@@ -609,8 +569,8 @@ Item {
 
     // ══ POPOUTS — real PopupWindows under their bar cells (BarPopout) ══════
     // Each is its own xdg_popup with GadgetFrame chrome (glass via blur_popups).
-    // The cell ids above (volText/battText/npCell) anchor them. Meters/power/
-    // clock popouts moved to the AoideAgentWidgets dock (bottom-seated frames).
+    // The cell ids above (volText/battText) anchor them. Meters/power/clock
+    // popouts moved to the AoideAgentWidgets dock (bottom-seated frames).
 
     // Volume hover slider.
     BarPopout {
@@ -655,30 +615,6 @@ Item {
                 font.family: "monospace"
                 font.pixelSize: 11
             }
-        }
-    }
-
-    // ── Gadget tray popout: now-playing is the sole bar-spawned gadget ──────
-    BarPopout {
-        notes: root.notes
-        cell: npCell
-        title: "nowplaying.score"
-        shown: root.openGadget === "np"
-        NowPlayingGadget {
-            width: parent.width
-            notes: root.notes
-        }
-    }
-
-    // ── Clock → Calendar sheet (bound to the bar's clock/date readout) ──────
-    BarPopout {
-        notes: root.notes
-        cell: clockText
-        title: "calendar.sheet"
-        shown: root.calShown
-        CalendarGadget {
-            width: parent.width
-            notes: root.notes
         }
     }
 }

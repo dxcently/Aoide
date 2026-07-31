@@ -130,16 +130,8 @@ ShellRoot {
     // ── Overlay skeletons (load clean; each gains its own PanelWindow wrapper
     // in a later pass). Hidden/dormant by default; kept wired to notes/bridge
     // so the swap seam stays intact.
-    //   - AoideNotifications : notification stack (bridge-fed)
     //   - AoideLauncher      : SUPER+Space launcher (bridge-toggled)
     //   - AoideWallpaperPicker : SUPER+W wallpaper switcher (global-shortcut)
-    //   - AoideOsd           : volume/brightness OSD
-    //   - AoideLockscreen    : ext-session-lock surface
-    //   - AoideGreeter       : greetd greeter surface
-    AoideNotifications { notes: notes; bridge: bridge }
     AoideLauncher { notes: notes; bridge: bridge }
     AoideWallpaperPicker { notes: notes }
-    AoideOsd { notes: notes }
-    AoideLockscreen { notes: notes }
-    AoideGreeter { notes: notes }
 }
