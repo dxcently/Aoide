@@ -89,26 +89,28 @@ get work done and how you test the conductor mesh.
   *(Superseded shape, kept for history: 2026-07-29 had the main dev agent
   orchestrating on Opus, with Opus itself coding design-critical work and
   Sonnet generals doing broad search/mechanical sweeps. A 2026-07-30 revision
-  pinned the orchestrator to Sonnet 5; that pin is withdrawn — the role no
-  longer names a model.)*
+  pinned the orchestrator to Sonnet 5, then withdrew the pin; a later
+  2026-07-30 revision routed coding through Melete on Opus 5. Both are
+  superseded by the plan/execute/review pipeline below, same day.)*
 
   Send independent agents in one batch so they run concurrently; keep the
   *conclusion*, not their file dumps.
-- **Fable/Opus review is OPTIONAL, not a required gate** (khoa, 2026-07-30 —
-  rescinding the "always present" rule set earlier the same day). The higher
-  tier remains the standing judgement layer available for a code read
-  (correctness, coherence, test adequacy) or a **vision pass** on worker output
-  when a second eye adds value — but review is NOT mandatory, and **khoa
-  reviews visual output himself** ("I will just look at it"). Use it by
-  judgement — adversarial correctness checks, or when khoa isn't watching a
-  visual change — not as a blanket requirement on every diff. **The separate
-  reviewer on Melete's output is no longer mandatory either** (khoa,
-  2026-07-30 — withdrawing the "one fixed exception" set earlier the same
-  day): Melete already runs its own code/test loop, so a second Opus/Fable
-  pass is a judgement call, not a gate. Reach for it when the change is
-  subtle, stateful, concurrency-sensitive, or hard to verify by reading — skip
-  it for small mechanical diffs the orchestrator can check itself. The
-  orchestrator still reviews every diff and lands.
+- **Plan → execute → review pipeline** (khoa, 2026-07-30 — supersedes both the
+  Melete-codes-on-Opus shape and the "review is optional" ruling above).
+  Three standing roles, one dispatch each per unit of work: an **Opus 5 agent
+  plans** (scopes the change, names files/functions, sequences the steps —
+  same job as `Plan` mode/agent, just now a fixed pipeline stage, not an
+  occasional detour); a **Sonnet agent executes** the plan — code + CI/CD
+  mechanics (build, test, deploy the local loop) — mirroring the plan's steps
+  rather than improvising scope; then a **Fable or Opus 5 agent reviews** the
+  executor's output before it lands (correctness/coherence read, or a vision
+  pass for visual work) — this review step is a standing part of the
+  pipeline, not a judgement call to skip. **The orchestrator's job narrows to:
+  dispatch each stage, make small edits itself** (typo-class, not
+  implementation), **and keep the operations log current** — this file's
+  open-flags ledger (§7) plus memory — rather than writing the implementation
+  or the review. khoa still reviews visual output himself when he's watching;
+  the pipeline's review stage covers the rest.
 - **Resume, don't respawn.** An agent that died mid-task on an API error is
   resumed with its context intact (`SendMessage` by id) — a fresh `Agent` call
   starts cold.
@@ -254,7 +256,7 @@ After any behavior/design change, delegate the following to the librarian:
 
 Per §4, flags raised but not yet closed live HERE so the next agent inherits
 them (not in one agent's head). Close a flag by resolving it AND editing this
-list; add one the moment you raise it. Current open flags (2026-07-28):
+list; add one the moment you raise it. Current open flags (2026-07-30):
 
 - **[decision · khoa] App-launch exec discipline — `execute()` vs.
   `aoided`.** The new [[Quickshell]] launcher (surface #3, built 2026-07-28)
@@ -272,98 +274,10 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   sibling `SUPER+ESCAPE → aoide shell lock` is still an unimplemented `aoide
   shell *` stub — untouched, worth its own pass.) Lands on the next gated
   `switch`. See [[Quickshell]].
-- **[incident · RESOLVED 2026-07-28] Shell crash-loop from a leftover
-  `ExecStart` drop-in.** A hand-written systemd drop-in
-  (`~/.config/systemd/user/aoide-quickshell.service.d/override.conf`), left by a
-  live `-c`→`-p` verification on the `worktree-devtools-dendrites` branch,
-  pinned the shell's `ExecStart` to that worktree's `shell.qml`. The worktree
-  was later deleted, so quickshell crash-looped 77× ("Could not open config
-  file") — no bar, dock, gadgets, or wallpaper (the wallpaper *is* the shell:
-  one `wlr-layer-shell` process, see [[Quickshell]]). The `-c`→`-p` fix it was
-  verifying is already baked into the live unit, so the drop-in was redundant
-  *and* broken. **Fixed** by deleting the drop-in and restarting; the baked unit
-  points at `~/Aoide/qml/shell.qml` and stands correctly. **Rule that now
-  binds all agents:** never override the shell service's `ExecStart` to a
-  worktree/volatile path — iterate live with a *separate* foreground `qs -p
-  <worktree>/shell.qml` instead. **Hardening (built, awaiting a gated switch):**
-  added `StartLimitIntervalSec=60`/`StartLimitBurst=5` to the unit so a
-  persistent bad load parks `failed` after 5 tries instead of thrashing forever
-  — the `ConditionPathExists` guard only checks existence, not validity. Lands
-  on the next `switch` (toplevel built, not yet activated per [[Rebuild-Gate]]).
-- **[decision · khoa — RESOLVED 2026-07-28] `notes` vs `drachma` naming.**
-  Settled: **`drachma` is the single canonical name** — the token *values* and
-  the mint are one thing, not a values-vs-engine split. Shipped as `aoide.drachma`,
-  `stage/drachma.json`, `DrachmaState.qml`, and the `drachma` package (commit
-  0117a79, "the note engine takes the coin"). "Notes" survives only as the
-  musical image, never the primary name/filename. Pages reconciled ([[drachma]],
-  [[Lexicon]]); the `Notes` concept page was **retired 2026-07-28** and merged
-  into [[drachma]], so the wiki now has one page for the token layer (`Notes`
-  survives as a drachma alias so dated log history still resolves).
-  Residual: a few Quickshell facet bodies still carry
-  the `notes.` property-id mid-rename to `drachma.` — cosmetic follow-up, not a
-  contract question.
-- **[restructure · khoa — RESOLVED 2026-07-28; wiki + code both landed]
-  Songbook consolidation + rime retirement.** The single per-song home is now
-  `song/songbook/<song>/`, self-contained: `rice.nix`, `drachma.json`, `assets/`
-  (wallpaper + cover — was flat `song/covers/`), `palette/` (was `song/keys/`),
-  `sounds/` (was `song/chimes/`), `icons/`, `widgets/`, `design/` (per-song
-  intent + design memory — was `repertoire/<n>/liner/`). Cross-cutting memory
-  (`learnings.md`, `preferences.md`, `update-playbook.md`) sits at `songbook/`
-  root. `repertoire/` is subsumed; the allegorical subfolder names are dropped
-  for sensible ones. **`backstage/` is CUT** — it never existed on disk and held
-  nothing; runtime dirs are exactly `stage/` (live) + `auditions/` (propose gate).
-  The **whole wiki was swept to describe this as canonical** (2026-07-28,
-  multi-agent), so the **wiki is deliberately AHEAD of the code**. Taxonomy
-  (khoa 2026-07-28): **nucleus** is the core every host inherits; **dendrites**
-  are opt-in per host; **facets** + **rime** are ricing *machinery* (surfaces +
-  engine) that hold no content — all song content lives in `song/songbook/`.
-  So the shipped default rice `modules/rime/default/` also moves to
-  `song/songbook/default/` (the songbook's one merge-only, upstream-owned song),
-  leaving `modules/rime/` as engine-only. Physical migration still owed: move
-  `song/repertoire/<n>/` + flat `covers/`/`keys/`/`chimes/` into
-  `songbook/<n>/{...}` AND `modules/rime/default/` → `song/songbook/default/`;
-  update `pkgs/aoide/src/shellbridge.rs` (`repertoire_notes`/`covers_dir`) +
-  `dispatch.rs` (`resolve_rice_notes`/`derive_cover`), per-song `rice.nix`
-  wallpaper paths, `lib/mkHost.nix` (walks `song/repertoire/`), `lib/checks.nix`
-  `noSongRead` infixes (drop `backstage`), `.gitignore` (drop `song/backstage/`),
-  `CONTRACTS.md`. **LANDED 2026-07-28:** `git mv` moved sonata/hero/default →
-  `song/songbook/<song>/{rice.nix, drachma.json, assets/, design/}` (history
-  preserved); `modules/rime/` deleted (it held no engine — the rice engine is
-  `pkgs/drachma` + facets + the walker); Rust resolution rewritten
-  (`repertoire_notes`→`songbook_notes`, `covers_dir` dropped, `derive_cover`
-  reads `songbook/<name>/assets/`); mkHost/vmTest/flake/checks/.gitignore +
-  CONTRACTS/AGENTS/BUILD/README updated; `backstage` gone everywhere. Validated:
-  `nix build .#aoide` (cargo tests pass), toplevel eval, `aoide rice preview
-  sonata` resolves from songbook. **Residuals still open:** (a) — **RESOLVED
-  2026-07-29:** `song/songbook/default/rice.nix`'s wallpaper note is `null`;
-  the stylix facet bakes its deterministic solid from `palette.bg` instead of
-  borrowing another song's cover. Separately, **covers moved back to
-  `song/covers/` 2026-07-29** (a shared wallpaper library any song references
-  by literal path, e.g. `../../covers/sonata.webp`) — the per-song `assets/`
-  described above no longer holds cover art; `pkgs/aoide/src/dispatch.rs`
-  `derive_cover` was repointed the same day at `song/covers/<name>.<ext>` (the
-  `cover.<ext>` probe dropped — ambiguous in a shared dir) and the
-  `shellbridge.rs` doc comment updated; cargo tests pass (78, incl. the
-  rewritten `preview_stages_a_derivable_cover_from_the_covers_library`). The
-  `hero` song is deleted outright — the songbook holds `default` and `sonata`;
-  (b) **RESOLVED 2026-07-29:** the wiki's `songbook/` pages are protocol +
-  pointers — the Pantheon grammar migrated to
-  `song/songbook/default/design/pantheon.md` (the default rice owns the house
-  grammar), sonata's current surface elements are recorded in
-  `song/songbook/sonata/design/intent.md`, and the wiki's
-  `songbook/Pantheon-Grammar.md` pointer page has since been retired — the
-  grammar's sole home is now the repo file above (khoa steer: rice design
-  memory lives per-song in the songbook — see §6). The `songbook/sonata/design/intent.md`
-  refresh is **RESOLVED 2026-07-29:** intent.md now states the sonata.webp key —
-  the light dusk key read region-by-region from `song/covers/sonata.webp` (the
-  pianist on mirror-water), with the palette+base16 re-keyed off that cover
-  (pale peach-cream `base00`, plum-ink `base05`, dusk slate-blue accent, crimson
-  urgent, horizon-green hot) and computed light-polarity contrast; the stale
-  indigo-nocturne / interim Alma-Tadema takes are both retired. The
-  `Ricing-Protocol`/`Pantheon-Grammar`/`Song-Anatomy`/`Stylix`/`Full-Architecture`
-  pages were reconciled to the new key in the same pass; (c) `lib/checks.nix` carries
-  pre-existing nixfmt-1.4.0 drift (unrelated to this change) — a formatting-only
-  pass is owed.
+- **[cleanup · khoa — songbook consolidation LANDED 2026-07-28/29, one residual
+  open] `lib/checks.nix` carries pre-existing nixfmt-1.4.0 drift** (unrelated
+  to the songbook restructure that surfaced it) — a formatting-only pass is
+  owed. See [[Self-Ricing]].
 - **[bug · follow-up] `aoide rice preview <name>` derives the cover by
   song-name convention** (`song/covers/<name>.*` as of 2026-07-29) instead of
   reading `aoide.drachma.wallpaper`. Mitigated live by the
@@ -410,39 +324,12 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   (`aoide schema --json`), so the vm-boot check can fail against its own tree.
   Bump the assertion or make it non-brittle. See [[Codebase]]. **Open.**
 - **[docs · found 2026-07-28] `README.md` (repo root, not in the wiki) lags the
-  swept wiki** on several points the wiki now has right: shipped song is `sonata`
-  not `hero`; launcher trigger is the `aoide:launcher` global shortcut not
-  `aoide shell launcher toggle`; command count is 36 (three gated) not 28; `rice
-  preview` is real; the `aoide.rebuild` capability is described as shippable but
-  has no `options.nix` option (it is planned). Reconcile when the song migration
-  lands — the README needs the repertoire→songbook + backstage edits anyway.
-  **Partially closed 2026-07-28**: the dendrite roster is now correct — it had
-  claimed "Dendrites (14)" while 19 were on disk (it omitted `cli`, `firefox`,
-  `melete`, `mneme`, `screenshot`, `vision`); now 20 with `hyprland`, and the
-  wiki's two roster spots ([[Codebase]], [[Full-Architecture]]) were corrected
-  from "eighteen" to twenty at the same time. The remaining points above stand.
-- **[refactor · khoa — LANDED 2026-07-28] Hyprland split: look vs behaviour.**
-  `modules/facets/compositor/default.nix` mixed three jobs in 390 lines. The
-  host-invariant half now lives in the new `modules/dendrites/hyprland.nix`
-  (`aoide.hyprland.enable`, ON for yomi-strix): keybinds, input devices, tiling
-  layout, misc/ecosystem, and the seam for **behavioural** window rules. The
-  facet keeps the drachma-derived look (colours, gaps, rounding, blur, the
-  aoide-* layerrules, hyprglass, the kitty opacity/rounding rules — those two
-  ARE appearance, which is why they did *not* move) plus session plumbing
-  (programs.hyprland, the systemd/Wayland handoff, hyprpolkitagent, portal,
-  greetd). Rationale: a facet reads `aoide.drachma` and renders (CONTRACTS §2);
-  a bind module reads no drachma, so it is a dendrite — the shape these binds
-  had in dxflake before the port. Verified: 59 binds at HEAD → 59 in the
-  dendrite, and the generated `hyprland.conf` diffs against the live
-  generation-35 file as **additions only** (the newly seeded input/layout/misc
-  blocks); every pre-existing line is byte-identical and in place. Ordering in
-  the shared `extraConfig` (a `lines` option): facet `mkBefore` 500 → dendrite
-  1000 → screenshot dendrite 1000. Corrected while here: the old comment
-  claiming "the quickshell facet appends its autostart with mkAfter" was stale
-  — quickshell writes nothing to hyprland.conf (it autostarts via a systemd
-  user service). Residual: `input.accel_profile = flat` / `force_no_accel` are
-  ported dxflake mouse-feel opinions, easy to drop if khoa dislikes them on
-  this box; the behavioural-windowrule section is deliberately empty.
+  swept wiki.** Dendrite roster was corrected 2026-07-28 (20, incl.
+  `hyprland`); still lagging: shipped song is `sonata` not `hero`; launcher
+  trigger is `aoide:launcher` not `aoide shell launcher toggle`; command count
+  is 36 (three gated) not 28; `rice preview` is real; `aoide.rebuild` is
+  described as shippable but has no `options.nix` option (it's planned).
+  Reconcile alongside any songbook-touching pass.
 - **[limitation · known] The window→session listener can't resolve a hook-only
   session that has no recorded pid** — it walks the session's pid, and a
   Claude session registered purely via hooks (never conducted) has none. The
@@ -524,28 +411,25 @@ list; add one the moment you raise it. Current open flags (2026-07-28):
   empty `windows` list unless it persists past a short window, or diff
   against the previous snapshot rather than trusting one read). Not fixed.
   Open. See [[Terminal-Commander]].
-- **[cleanup · khoa 2026-07-30] Legacy widget audit — one dead file found and
-  removed, nothing else orphaned.** Swept every `.qml` file under
-  `modules/facets/quickshell/qml/` against `shell.qml`'s instantiation chain.
-  `AoideJournal.qml` — a fold-out "book" presentation alternative to the codex
-  dock, forked at the same commit as `AoidePanel.qml` (`353390a`) but never
-  instantiated and never carried forward past that commit — was confirmed
-  dead (referenced nowhere except a stale comment in `AoidePanel.qml`) and
-  **deleted**. `TerminalManagerGadget.qml`, `DagGraphGadget.qml`,
-  `BatonGadget.qml`, `GraphRow.qml`, `AoideSessionGraph.qml`,
-  `AoideAgentWidgets.qml` — the earlier generation these superseded — were
-  already gone (deleted in that same rebuild commit); no action needed there.
-  **Open:** if the "fold-out journal" presentation idea is still wanted as an
-  alternate dock surface, it needs a fresh build against the current
-  `ConductorGadget`/`TerminalsGadget`/`MetersGadget`/`PowerVitalsGadget`
-  temples (its old copies of those gadget instantiations were already stale
-  against the pantheon rebuild) — not a resurrection of the deleted file. Also
-  still open, unrelated: the `Γ`/`dag.trace` order-mark surviving unused in
-  `GadgetFrame`'s map, and the `aoide.surfaces.sessionGraph` registry entry
-  with no QML body (both noted in `song/songbook/sonata/design/
-  greek-grammar.md` §4 as flags tracked "outside this file" — this is that
-  file; neither had an actual ledger entry until now). See
-  [[Gadget-Dock]].
+- **[cleanup · khoa 2026-07-30, audit done] Legacy widget audit — one open
+  thread.** `AoideJournal.qml` (dead fold-out journal alternative to the codex
+  dock) was confirmed dead and deleted; nothing else orphaned. **Open:** if
+  the fold-out journal idea is still wanted, it needs a fresh build against
+  current `ConductorGadget`/`TerminalsGadget`/`MetersGadget`/`PowerVitalsGadget`
+  — not a resurrection. Also open, unrelated: the `Γ`/`dag.trace` order-mark
+  unused in `GadgetFrame`'s map, and the `aoide.surfaces.sessionGraph` registry
+  entry with no QML body. See [[Gadget-Dock]].
+- **[plan · khoa 2026-07-30, not yet executed] Conductor/Terminals: kill the
+  duplicate claude, name rows by cwd, show `say` on terminals.** Full plan on
+  disk at `~/.claude/plans/squishy-tickling-puffin.md`: extract the reaper into
+  `pkgs/aoide/src/reap.rs` (behavior-preserving move), add
+  `superseded_agent_duplicates` to retire same-window agent-record duplicates
+  (fixes a live bug — one terminal was showing three "claude" rows, one
+  phantom masking `say`), name untitled rows by cwd basename in both gadgets,
+  suppress the Conductor's flat `shell → claude` row, and surface `say` on the
+  Terminals claude row. Not started — first candidate for the new
+  plan→execute→review pipeline (§2). See [[Conductor-Channel]],
+  [[Session-Graph]].
 
 ---
 
