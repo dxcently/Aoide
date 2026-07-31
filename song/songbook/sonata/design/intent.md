@@ -166,7 +166,7 @@ text on the wallpaper, so no outline treatment is in use.
   Pantheon wireframe grammar, the blueprint for the widget reskin. The cover
   still points at `yuki-sonata.png` (covers/ is out of this re-key's scope); a
   Greek cover is a follow-up. The musical state-glyph contract (`♪ 𝄐 𝄽 𝄂 ·`,
-  from `pkgs/aoide/src/baton/theme.rs`) is untouched — the Greek forms frame it,
+  from `pkgs/aoide/src/conductor/theme.rs`) is untouched — the Greek forms frame it,
   never replace it.
 - 2026-07-29: Fable review GO-WITH-TWEAKS. Applied at palette level: (a) the
   one-hot laurel `hot`/`base0B` brightened `#5f7a37` → `#6b8b33` so the green

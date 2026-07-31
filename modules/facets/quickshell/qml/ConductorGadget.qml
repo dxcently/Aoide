@@ -3,7 +3,7 @@ import Quickshell
 import Quickshell.Io
 
 // ── THE CONDUCTOR ────────────────────────────────────────────────────────────
-// A live view of the agent-session roster (the `aoide baton` conductor):
+// A live view of the agent-session roster (the `aoide conductor`):
 // a Doric temple rendered in a terminal, keeping a musical score.
 //
 // Four voices, layered so each earns its place:
@@ -101,7 +101,7 @@ Item {
         default: return "";                                                            // unknown
         }
     }
-    // state → notation glyph (VERBATIM contract, from baton/theme.rs) ────────────
+    // state → notation glyph (VERBATIM contract, from conductor/theme.rs) ────────────
     function glyphFor(state) {
         switch (normState(state)) {
         case "working":  return "♪";
@@ -421,7 +421,7 @@ Item {
             anchors.fill: parent
             anchors.margins: 13
 
-            // ── ENTABLATURE: clef · inscription · [baton] tag ─────────────────
+            // ── ENTABLATURE: clef · inscription · [conductor] tag ─────────────
             Item {
                 id: head
                 anchors.top: parent.top
@@ -451,7 +451,7 @@ Item {
                 Text {                                // terminal tag
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "[ baton ]"
+                    text: "[ conductor ]"
                     font.family: gadget.faceMono; font.pixelSize: 11
                     color: gadget.withA(notes.wireCyan, 0.95)
                 }

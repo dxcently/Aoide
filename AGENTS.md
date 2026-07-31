@@ -8,7 +8,7 @@ terminal is a conductable, tracked session by default** (see Conducting under
 Tier 1). It runs anywhere there is a shell — portable, headless-capable,
 agent-first. *AoideOS* is the **distribution built on that core**: the NixOS
 flake that ADDITIONALLY ships the Quickshell widget-making toolkit (bar, dock,
-gadgets, the DAG/baton surfaces) and the specialized ricer (song/notes theming).
+gadgets, the DAG/conductor surfaces) and the specialized ricer (song/notes theming).
 Aoide is the engine; AoideOS is the desktop around it. A capability that works
 with only a shell is "Aoide"; one that is desktop/Quickshell/rice is "AoideOS".
 

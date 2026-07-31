@@ -96,7 +96,7 @@ Item {
         default: return "";
         }
     }
-    // state → notation glyph (VERBATIM contract, from baton/theme.rs) ────────────
+    // state → notation glyph (VERBATIM contract, from conductor/theme.rs) ────────────
     function glyphFor(state) {
         switch (normState(state)) {
         case "working":  return "♪";

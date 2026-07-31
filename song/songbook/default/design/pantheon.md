@@ -58,7 +58,7 @@ To tune the whole rig, edit the five constants in `GadgetFrame.qml`.
 
 Glyphs carry **meaning**, never decoration. Three tiers plus one seam:
 
-### State tier — `baton/theme.rs` vocabulary (verbatim)
+### State tier — `conductor/theme.rs` vocabulary (verbatim)
 
 | glyph | state                                   |
 |-------|-----------------------------------------|
@@ -68,7 +68,7 @@ Glyphs carry **meaning**, never decoration. Three tiers plus one seam:
 | `𝄂`   | done (also `stop`)                      |
 | `·`   | unknown                                 |
 
-Used by `BatonGadget`, `DagGraphGadget` (session nodes wear the state glyph),
+Used by `ConductorGadget`, `DagGraphGadget` (session nodes wear the state glyph),
 and `TerminalManagerGadget` (cwd + elapsed drop to a dim lowercase callout
 line). Kept in lockstep with the Rust so every surface reads the same score.
 
@@ -80,7 +80,7 @@ Identity; untouched.
 ### Kaomoji identity
 
 The bar's empty-title kaomoji rotation (re-rolled at random on every
-active-window change) is the dxflake identity — kept. `BatonGadget`'s
+active-window change) is the dxflake identity — kept. `ConductorGadget`'s
 "nothing to conduct ♪(´ε｀ )" is its own empty-state note — kept.
 
 ### Seam tier — one footer divider per container
@@ -88,7 +88,7 @@ active-window change) is the dxflake identity — kept. `BatonGadget`'s
 At most **one** staff-run seam divider per container, in the footer:
 
 - Dock (`AoideAgentWidgets`): `𝄂𝄚𝅦𝄚𝄞𝅄` footer run — the container's one seam.
-- `BatonGadget`: the `𝄂𝄚𝅦𝄚` status-line prefix — the pane's one seam.
+- `ConductorGadget`: the `𝄂𝄚𝅦𝄚` status-line prefix — the pane's one seam.
 - `GadgetFrame` draws a *structural* `╚═══╝` box footer (box-drawing, not an
   ornament glyph) — that is chrome, not a seam glyph.
 
@@ -110,7 +110,7 @@ Gratuitous ornaments — glyphs with no job — are absent from the grammar:
 | `𝄚𝅦𝄚𝄂` right end-cap   | `AoideBar.qml`        | pure decoration at the strip's right   |
 | `◆` / `●` node markers | `DagGraphGadget.qml`  | meaningless; the grammar uses *meaningful* forms instead: double-rule outline = project, single = session; session state glyph = live state |
 | `├─ │ └─` limb glyphs  | `DagGraphGadget.qml`  | the grammar uses a *drawn* leader instead (a per-row Canvas painting the refs' kinked elbow into the indent gutter), so edges read as neon lines, not text |
-| `[running]`/`[awaiting]`/`[done]` word-badges | `TerminalManagerGadget.qml` | text badges violate the state tier; the grammar uses the baton state glyphs (`♪ 𝄐 𝄽 𝄂`) instead |
+| `[running]`/`[awaiting]`/`[done]` word-badges | `TerminalManagerGadget.qml` | text badges violate the state tier; the grammar uses the conductor state glyphs (`♪ 𝄐 𝄽 𝄂`) instead |
 
 ---
 
@@ -163,7 +163,7 @@ The Pantheon effect at full strength:
   live during drag (flips across the midline), the bar's slab hairlines
   project down.
 - **Orchestration vocabulary**: callout titles say what the thing conducts —
-  `gadgets.case`, `baton.control`, `terminals.roster`, `dag.trace`,
+  `gadgets.case`, `conductor.control`, `terminals.roster`, `dag.trace`,
   `volume.level`, `battery.gauge`, `clock.face`, `nowplaying.score`,
   `meters.pulse`, `power.reserve`, `calendar.sheet`. Body words are out;
   orchestration words are in.

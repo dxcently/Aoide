@@ -14,7 +14,7 @@
 // `focuswindow`, so switching the wallpaper cannot write stage/cover.json from
 // here. Instead a pick shells out through the ONE CLI verb built for this —
 // `aoide cover set <path>` (Quickshell.execDetached, the same exec idiom
-// BatonGadget uses) — which atomic-writes stage/cover.json. AoideWallpaper.qml
+// ConductorGadget uses) — which atomic-writes stage/cover.json. AoideWallpaper.qml
 // FileView-watches that file and hot-swaps the live wallpaper. No new socket,
 // no QML file write.
 //

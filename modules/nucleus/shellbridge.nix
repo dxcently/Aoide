@@ -102,7 +102,7 @@ lib.mkIf config.aoide.enable {
   # `conduct`/`wrap` process can never run its own `graph session end` — the
   # session record is stranded `running` in the roster forever (22 dead
   # `conduct-*` shells piled up in ~8 minutes of use). No QML surface can fix
-  # this: widgets/baton cannot spawn `hyprctl` (no process-spawning in QML).
+  # this: widgets/conductor cannot spawn `hyprctl` (no process-spawning in QML).
   #
   # So the sweep lives HERE, next to the stage/graph infra it repairs: a cheap
   # periodic `aoide graph reap` that gathers live `hyprctl clients -j` window
@@ -181,7 +181,18 @@ lib.mkIf config.aoide.enable {
   #       "windowAddress": "string — Hyprland window address for focuswindow dispatch",
   #       "cwd":           "string — working directory / repo path",
   #       "state":         "string — 'running' | 'awaiting-input' | 'idle' | 'done'",
-  #       "startedAt":     "ISO-8601 timestamp"
+  #       "startedAt":     "ISO-8601 timestamp",
+  #       # --- additive v0-safe fields (absent on legacy/shell records) ---
+  #       "kind":          "string? — 'agent' | 'shell' | 'subagent'",
+  #       "parentSessionId": "string? — spawned-by edge (subagent → parent)",
+  #       "title":         "string? — session name (custom-title / graph-send)",
+  #       "activity":      "string? — current tool/command being run",
+  #       "say":           "string? — agent's latest words (transcript tail)",
+  #       "model":         "string? — active Claude model id, e.g. 'claude-sonnet-5'",
+  #       "workspace":     "int?    — Hyprland workspace id of the window",
+  #       "pid":           "int?    — lifecycle-owning process pid",
+  #       "conductable":   "bool?   — spawned under `aoide conduct`",
+  #       "socket":        "string? — per-session injection socket path"
   #     }
   #   ]
   # }
