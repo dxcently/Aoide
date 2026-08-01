@@ -411,6 +411,7 @@ PanelWindow {
         Row {
             anchors {
                 left: parent.left
+                leftMargin: 34
                 right: parent.right
                 verticalCenter: parent.verticalCenter
                 verticalCenterOffset: -1
@@ -564,7 +565,7 @@ PanelWindow {
             anchors.topMargin: 62
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 36
-            anchors.left: parent.left; anchors.leftMargin: 28
+            anchors.left: parent.left; anchors.leftMargin: 14
             anchors.right: parent.right; anchors.rightMargin: 28
             clip: true
             model: page.entries
@@ -739,22 +740,20 @@ PanelWindow {
             opacity: 0.5 * root.fold
         }
 
-        // ── bookmark ribbon — ties the incantation strip to the book's spine.
-        // Same accent-ribbon treatment as the one dangling at the tome's foot
-        // (see book's `ribbon` Rectangle below): paletteAccent at 0.85 alpha.
-        // The strip's horizontal center and the book's spine (gutter between
-        // the covers) both sit at rig.width/2, so a single vertical bar
-        // reaches both without going diagonal. Declared before `incantation`
-        // and `book` so both paint over it — the strip hides its top end,
-        // the covers swallow its tail, and it reads as tucked into the spine.
-        Rectangle {
-            id: stripRibbon
-            width: 8
-            x: (rig.width - width) / 2
-            y: incantation.y + incantation.height
-            height: Math.max(0, (book.y + 14) - y)
-            color: root.withA(root.notes.paletteAccent, 0.85)
-            opacity: root.fold * root.fold
+        // ── treble clef — a standalone gold emanation mark at the rig's
+        // top-left, above the incantation strip. Fades in with the summon
+        // like the other emanation glyphs (Repeater above). Gold only, never
+        // paletteHot.
+        Text {
+            id: trebleClef
+            x: -34
+            y: -40
+            rotation: -14
+            text: "𝄞"
+            font.family: root.faceMusic
+            font.pixelSize: 40
+            color: root.withA(root.notes.paletteAccent, 0.9)
+            opacity: root.fold * 0.9
         }
 
         // ── THE INCANTATION STRIP — the search bar, floating above the book ─
