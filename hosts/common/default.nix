@@ -67,6 +67,7 @@
   # so on a host that hasn't deployed the out-of-band binaries the units simply
   # stay inactive (clean, documented cold-host state) rather than crash-looping.
   # A host opts out with `aoide.{melete,mneme}.enable = false;` (mkDefault).
-  aoide.melete.enable = lib.mkDefault true;
+  # Melete's LOCAL harness is OFF — Melete is reached over MCP, not run on-box.
+  aoide.melete.enable = lib.mkDefault false;
   aoide.mneme.enable = lib.mkDefault true;
 }
