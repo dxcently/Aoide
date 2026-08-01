@@ -53,7 +53,7 @@ missing.
   `run_shell` as if Melete were "my shell, over MCP." (This repo's own dev
   sessions never invoke the real Melete connector at all — an earlier
   session informally, incorrectly used "Melete" as a codename for a local
-  `Agent`-tool coding subagent; see `AOIDE-DEV-HANDOFF.md` §2.)
+  `Agent`-tool coding subagent; see `AOIDE-DEV.md` §2.)
 - **Declarative surface:** one `config.toml`; self-update swaps which Nix store
   path the service points at (a `canary` channel — a flake-generation rollback in
   spirit).

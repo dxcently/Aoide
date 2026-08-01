@@ -79,7 +79,7 @@ Two design decisions worth carrying forward:
   idiom the shell already uses (`WorkspaceRow.activate()`, `ConductorGadget` →
   `execDetached`). Routing app-launch through `aoided` per house rule #6 has
   no such verb today; flagged, not silently baked. See
-  [[references/AOIDE-DEV-HANDOFF]] §7.
+  [[AOIDE-DEV]] §7.
 
 The compositor facet also adds `aoide-launcher` to the blur / `ignore_alpha` /
 hyprglass namespaces so the pane frosts like the bar and dock. Both the keybind
@@ -127,7 +127,7 @@ do **not** hijack the service's `ExecStart` with a systemd drop-in. A drop-in
 that pins `ExecStart` to a worktree path defeats `ConditionPathExists` (which
 watches only the baked path) once the worktree path is gone, crash-looping
 the shell — no bar, no dock, no wallpaper. See
-[[references/AOIDE-DEV-HANDOFF]] §7.
+[[AOIDE-DEV]] §7.
 
 ## Related
 

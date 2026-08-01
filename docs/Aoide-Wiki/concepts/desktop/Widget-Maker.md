@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-28
+updated: 2026-07-31
 tags: [aoide, extensibility, declarative, widget, agent]
 ---
 
@@ -89,17 +89,32 @@ to the shared `NotificationCard` when a song hasn't authored one — true of
 every song so far).
 
 A song authors a slot by dropping `songbook/<name>/widgets/<slot>.qml`
-([[Song-Anatomy]]); the quickshell facet's build carries every committed
-song's widget files into `$out/qml/songs/<name>/` alongside a generated
-`manifest.json`, which the engine reads to answer `has(song, slot)` /
-`source(song, slot)`. Because `DrachmaState.songName` is what
-`aoide rice preview <name>` stages, switching the previewed song
-**hot-swaps every `WidgetSlot`'s loaded body live — no rebuild, no
-restart** — the same preview-without-rebuild discipline as the rice loop
-itself ([[Self-Ricing]]), just applied to widget bodies instead of colour.
-Adding a *new* song's widget files to the carried set still needs a rebuild
-(the facet has to know to copy them); swapping which already-carried song is
-active does not.
+([[Song-Anatomy]]) — the build imposes no fixed slot enum: the quickshell
+facet's build copies **any** `widgets/*.qml` file a committed song carries
+into `$out/qml/songs/<name>/<slot>.qml`, keyed by filename, alongside a
+generated `manifest.json` (`{song: [slots]}`) the engine reads to answer
+`has(song, slot)` / `source(song, slot)`. Being carried is not being
+rendered, though: a slot only shows on screen once a host surface embeds a
+`WidgetSlot` anchor naming that exact slot — presence is the host's call
+(which surfaces exist to be dressed), which variant fills an enabled slot is
+the song's (via the manifest). Two anchors are wired today: `calendar`
+(`AoideBar`'s calendar popout) and `notifications` (`AoideNotifications`'s
+per-card repeater, falling back to the shared `NotificationCard` when a song
+hasn't authored one — true of every song so far). The catalog of which slot
+names have a wired anchor, and what extra properties each anchor passes,
+lives in `modules/facets/quickshell/qml/slots.md`, alongside the shape every
+widget file follows: an `Item` root (`WidgetSlot` sizes off its
+`implicit*`), `required property var notes`/`bridge` injected by every
+anchor unconditionally, any slot-specific extras declared as their own
+`required property`, and never `config.*`.
+
+Because `DrachmaState.songName` is what `aoide rice preview <name>` stages,
+switching the previewed song **hot-swaps every `WidgetSlot`'s loaded body
+live — no rebuild, no restart** — the same preview-without-rebuild
+discipline as the rice loop itself ([[Self-Ricing]]), just applied to widget
+bodies instead of colour. Adding a *new* song's widget files to the carried
+set still needs a rebuild (the facet has to know to copy them); swapping
+which already-carried song is active does not.
 
 **Containment invariant** (`CONTRACTS.md §5`): a loaded song widget receives
 only `notes` (`DrachmaState`) and `bridge` (`ShellBridge`), plus whatever

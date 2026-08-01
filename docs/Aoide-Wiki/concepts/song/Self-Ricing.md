@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-07-28
+updated: 2026-07-31
 tags: [aoide, rice, agent]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -10,23 +10,48 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Aoide ships the rice engine as a builtin. The engine provides the loop, the schema, and the preview mechanism. Everything else — the songs, the preferences, the accumulated taste — it learns by doing.
 
-**Status today:** the loop below is the *designed* shape. `rice lint` (delegates to [[drachma]]) and `rice preview` are implemented — `rice preview` stages `stage/drachma.json` and the [[Quickshell]] shell hot-reloads it live (the hyprctl / terminal-OSC fan-out is not yet wired into it). `rice gen`, `rice adopt`, and `rice transpose` are declared but not yet implemented (stub, exit `64`) — narrate those as planned, not as a working pipeline.
+**Status today:** the loop below is the *designed* shape. `rice lint` (delegates to [[drachma]]), `rice preview`, and `rice mint` are implemented. `rice preview` stages `stage/drachma.json`, [[Quickshell]] hot-reloads it live via `FileView`, and geometry + window-border colours apply to the running compositor over `hyprctl` in the same step (terminal-OSC fan-out is not yet wired into it). `rice gen`, `rice adopt`, and `rice transpose` are declared but not yet implemented (stub, exit `64`) — narrate those as planned, not as a working pipeline.
 
 ## The Rice Loop
 
 ```
 aoide rice gen <prompt|wallpaper>   (planned)
     ↓  reads songbook/ first, always
+aoide rice mint <name> [--from]     (real — scaffolds a new song directly, below)
 rice lint                           (real — drachma schema validation)
     ↓  fail → reject + songbook note
-rice preview                        (real — stages ephemeral stage/drachma.json)
-    ↓  quickshell hot-reload (hyprctl · terminal OSC fan-out planned)
+rice preview                        (real — stages stage/drachma.json + live hyprctl apply)
+    ↓  quickshell hot-reload + live geometry/border colours (terminal OSC fan-out planned)
 aoide rice adopt <name>             (planned — User gates this step)
     ↓  committed to song/songbook/<song>/
     ↓  gated rebuild
 ```
 
-Preview is the sketch; adopt is the truth. GTK/Qt surfaces require app restarts and are adopt-only, accepted by design.
+Preview is the sketch — a live compositor call, no rebuild; `aoide.song` selecting a song and rebuilding is the truth — it bakes `hyprland.conf` (geometry, borders), themes every nix-manageable app via [[Stylix]], assembles and deploys the song's widgets, and sets the host's boot default. GTK/Qt surfaces require app restarts and are adopt-only, accepted by design.
+
+## Minting a song
+
+`aoide rice mint <name> [--from <song>] [--force] [--json]` (alias `rice
+new`) scaffolds a new committed song directly, without going through `gen`:
+`song/songbook/<name>/rice.nix` (a self-gating `lib.mkIf (config.aoide.song
+== "<name>")` block copying the `palette`/`window`/`geometry` tiers from
+`--from`, defaulting to `default` — the only `.nix` file the scaffold
+writes, satisfying the song-shape check), a `drachma.json` mirror of the
+same values, an honest-empty `design/intent.md` pointing at the widget-slot
+catalog and the update playbook rather than fabricating design rationale,
+and `widgets/.gitkeep`. No `hypr/` directory — geometry lives in `rice.nix`
+alongside palette and window, not as a separate tier of files. Because it is
+an ordinary schema command (`gated: false`, in `schema --json` and the MCP
+tool list), an agent can bootstrap a song through the same door a human
+would.
+
+## Geometry
+
+A song may set `aoide.drachma.geometry` — gaps, border size, rounding, and
+blur, every field optional — alongside its palette and window tiers; see
+[[drachma#The geometry tier]] for the field list and the fallback/live-apply
+mechanism. A song that sets no geometry performs with the compositor
+facet's own defaults, unchanged.
 
 ## Shipped Defaults Are Immutable
 

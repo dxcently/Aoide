@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-07-28
+updated: 2026-07-31
 aliases: [aoide-drachma, aoide-notes, Notes, notes package, note engine]
 tags: [aoide, drachma, theming, base16, node]
 ---
@@ -55,9 +55,37 @@ adopted state cannot diverge. This is the "zero drift" guarantee.
 | Palette (base16) | Settled | [[Stylix]] consumes natively; no open questions |
 | Semantic tier | Open (v1 design-system work) | Names meanings, survives transposition |
 | Component tier | Open (v1 design-system work) | Maps semantics to specific surfaces |
+| Geometry tier | Settled, nix + CLI only | `aoide.drachma.geometry` — see below |
 
 The open schema question is scoped to the semantic and component tiers only.
 The palette tier is closed.
+
+## The geometry tier
+
+`aoide.drachma.geometry` (`modules/nucleus/options.nix`) carries the
+compositor's shape values: `gapsOut`, `gapsIn`, `borderSize`, `rounding`,
+`blurEnabled`, `blurSize`, `blurPasses` — every field `nullOr`, so a song
+that sets none of them yields the same `hyprland.conf` as one that omits the
+block entirely. The compositor facet (`modules/facets/compositor/default.nix`)
+reads the tier directly and falls back field-by-field to its own opinionated
+defaults (`8`/`6`/`2`/`0`/`true`/`8`/`3`) for anything unset. This tier sits
+outside the `drachma` Node package's own schema — it is never validated by
+`drachma lint`, only carried through `stage/drachma.json` alongside the
+palette/component values for `aoide`'s own live-apply seam (below); the
+staged schema version stays `"0"`, the same additive-optional posture as the
+base16 block.
+
+Preview applies geometry and the window-border colours to the running
+compositor directly: `aoide rice preview` builds one `hyprctl --batch`
+`keyword` list, in a fixed order (gaps → border size → border colours →
+rounding → blur), emitting a keyword only for a field that actually resolves
+— an unset geometry field is skipped, not defaulted, so the call never fights
+a host's baked config or a user's own live tweak. The call is a no-op off
+Hyprland (guarded on `HYPRLAND_INSTANCE_SIGNATURE`) and never fails the
+preview outcome. It never runs `hyprctl reload` — every field it touches is
+live-settable via `keyword`, and a reload would re-read the baked
+`hyprland.conf` from disk, discarding whatever else the compositor is
+carrying live.
 
 ## Prior art — wrap, don't rewrite
 

@@ -76,19 +76,10 @@ get work done and how you test the conductor mesh.
   and lands. **The orchestrator's own model is deliberately unspecified here**
   (khoa, 2026-07-30) — it varies by session and by the harness in use, so this
   spec names the ROLE, never the model. **Coding runs through a dedicated
-  coding subagent, on Opus 5** — the orchestrator does not edit code directly;
+  coding subagent, on Sonnet 5** — the orchestrator does not edit code directly;
   it dispatches the coding task to a local `Agent`-tool subagent and reviews
-  what comes back. *(Correction, khoa, 2026-07-31: this subagent was
-  informally, confusingly called "Melete" below and in earlier session
-  history. It is NOT the real Melete — Melete is a separate, real MCP
-  connector (`Melete:Sakaki`/`Melete:Osaka`) whose core capability is
-  coding-agent dispatch, `run_code_task` and kin, used from the boxless
-  claude.ai context to orchestrate an actual Claude Code session running on a
-  box. It was never invoked from this repo's own dev sessions — see
-  `entities/Melete.md` and the corrected `10 ♜ AGENT/S²CHEMA.md` in the Magi
-  vault / global `~/.claude/CLAUDE.md` for the real system. Read every
-  "Melete" below as "the local coding subagent.")*
-  **Design and review are the higher tier** — Fable and Opus are used for
+  what comes back.
+  **Design and review are the higher tier** — Fable are used for
   designing an approach and reviewing worker output (judgement calls), not for
   mechanical execution. **Wiki maintenance is delegated to a Sonnet 5
   "librarian" agent** (§6) — the orchestrator hands off wiki updates rather
@@ -510,7 +501,89 @@ list; add one the moment you raise it. Current open flags (2026-07-30):
   service-restarted thereafter. Verified live on yomi-strix: clean restart
   (no QML errors, no binding loops), SUPER+SPACE screenshot vision-checked
   (light palette only so far — dark-palette pass still owed per the ricing
-  protocol). Landing (pathspec commit, no AI trailer) waits on khoa's read.
+  protocol). **LANDED + finishing touches (2026-07-31, orchestrated
+  plan→execute→review):** the rectangular chrome was in fact already
+  committed as `d3b28e4` (mis-messaged "hinged 3D open book" — the file
+  content is the rectangular version) and pushed to `origin/main`; the
+  "awaiting read" status above was stale. Two khoa-chosen finishing touches
+  then landed on top as `802e603` (pathspec, no AI trailer, unpushed):
+  (1) **docked the search strip** — closed the strip↔book gap (`book.y`
+  74→58, matching `rig.height` gap constant 26→10) and threaded an 8px
+  `paletteAccent` bookmark ribbon from the incantation strip's foot into the
+  spine gutter, continuous with the existing foot ribbon + its `fold*fold`
+  fade, so the strip hangs from the tome instead of floating; (2) **ruled the
+  empty pages** — faint manuscript hairlines (`withA(paletteFg, 0.13)`) as a
+  `BookPage` sibling of `lv`, at the 38px entry row-pitch, filling only the
+  blank region below the last entry (header/folio zones excluded), so an
+  empty/partial page reads as ruled paper not blank cream — rules only, no
+  decoration. Realigned `glowBook.y` to track `book.y` (regression from the
+  gap close). khoa's hard constraints held: glass/gloss/blur untouched, every
+  color via base16/drachma accessors (zero new hex). Executed by a Sonnet
+  agent, **Fable-reviewed** (verdict SHIP-WITH-NITS — the two nits, ribbon
+  width discontinuity + `glowBook` misalignment, were then fixed and
+  re-reviewed), vision-checked live on yomi-strix (light palette; dark pass
+  waived by khoa). Not done: `802e603` is unpushed; the book height (621)
+  magic number is still un-derived (low-priority, carried from the entry
+  above). **Then a third pass — Attic Greek (`defea43`, unpushed, same
+  pipeline):** khoa asked to render the launcher in Ancient (Attic) Greek.
+  Key finding — the existing Greek (`σελίς`, `βίβλος`, `συνήθεια`, `ζήτησις`)
+  was ALREADY Attic (`ζήτησις` is the ancient -ις form; the words start with
+  consonants so gain no polytonic breathings), so the real levers were the
+  numeral system + the English text. Added a Milesian numeral helper
+  `atticNumeral(n)` (αʹ βʹ γʹ … ϛʹ=6 … ϟʹ=90 … ϡʹ=900, keraia U+02B9 — the
+  NFC-stable form of U+0374, kept deliberately) driving page folios + counts;
+  counts now read `δαίμονες` (spirits) for apps / `εὑρήματα` for search hits
+  (sg `δαίμων`/`εὕρημα`, zero → `οὐδέν`); `MOST SUMMONED`→`τὰ συνηθέστατα`,
+  placeholder→`τί ζητεῖς;`, empty states→`οὐδὲν τοιοῦτον ὄνομα`/`οὐδὲν
+  ἐνταῦθα`, sparse filler→`ἡ βίβλος ἔτι μανθάνει τὰ σὰ ἤθη`. `βίβλος` kept
+  (Attic; the Ionic `βύβλος` was offered and declined). Executed by Sonnet,
+  **Fable-reviewed as a classicist** (verdict: Greek 9/9 correct byte-level;
+  it caught a latent numeral bug — `huns` array missing sampi, so 900–999 →
+  `"undefined…"` — fixed with ϡ, plus a zero-count `οὐδέν` special-case so no
+  Arabic 0 leaks into the Greek). Vision-checked live on yomi-strix: `τί
+  ζητεῖς;`, `τὰ συνηθέστατα`, `γʹ δαίμονες`, folio `αʹ / βʹ`, and the sparse
+  filler all render with correct diacritics + the keraia tick, no missing
+  glyphs. (Note: a parallel `nh` switch by khoa ran during this pass and its
+  `home-manager-khoa.service` step warned/failed at activation — did NOT
+  corrupt the launcher: the untracked `qml/` copy is a real file, survived the
+  rebuild, palette/drachma injection intact. Worth watching per the
+  sessions-untrack-after-rebuild flag.) **Then REBALANCED same session on
+  khoa's steer ("there should still be some english… at least use roman
+  numerals"):** the full-Greek immersion was pulled back. Greek Milesian
+  numerals → **Roman numerals** (`romanNumeral(n)`, `atticNumeral` removed) for
+  folios/counts/page-labels (`III apps`, `I / II`, `page IV`); headers/counts/
+  search-header reverted to **English** (`MOST SUMMONED` / `by habit`,
+  `SEARCH`, `apps`/`results`); **kept in Attic Greek as flavor accents** only:
+  the cover `βίβλος`, the search placeholder `τί ζητεῖς;`, the two empty
+  states, the sparse filler `ἡ βίβλος ἔτι μανθάνει τὰ σὰ ἤθη`, and the α β γ
+  chapter tabs. Fable re-reviewed (SHIP, romanNumeral correct through
+  MCMXCIV, kept-Greek byte-intact); vision-checked live (`MOST SUMMONED` /
+  `by habit`, `III apps`, `I / II`, Greek search bar + filler all render
+  clean). The Attic commit `defea43` was **amended** into `4b56ae6` (this
+  final Greek/English/Roman state) — so the Grimoire now carries TWO unpushed
+  commits total: `802e603` (dock + ruled pages) and `4b56ae6`
+  (English/Roman/Greek-accent chrome). Two orchestrator judgment calls left
+  open for khoa: the alphabetical `σελίς`-whisper and the `ζήτησις` header
+  were treated as "headers" → English; the α β γ chapter tabs were kept Greek
+  (index tabs, not numeric readouts) — any of these trivially flippable.
+  **Final khoa refinement (folded into `4b56ae6`):** the noun BESIDE a number
+  goes back to Greek while the numeral stays Roman (`III δαίμονες`,
+  `III εὑρήματα`, `σελίς N`, zero `οὐδέν`), and the sparse-state filler
+  reverted to English ("the grimoire is still learning your habits"). So the
+  live rule of thumb is: numbers Roman, the word next to a number Greek,
+  headers + the learning-message English, cover/search-bar/empty-states Greek
+  accents. Vision-checked live (`III δαίμονες`, `I / II`, English filler,
+  Greek search bar all render clean). Two Grimoire commits remain unpushed:
+  `802e603` (dock + ruled pages) and `4b56ae6`. **Two further khoa tweaks
+  folded into `4b56ae6`:** (1) the chapter-tab labeler `greekNum` was made a
+  **bijective base-24 Greek sequence** (α…ω, then αα αβ … like spreadsheet
+  columns) so the tab "alpha order" never runs out / falls back to Arabic when
+  a 25th+ alphabetical page is added (the tab column already Repeats over
+  `chapters.length`, so this closes the labeling gap); hand-traced α β ω αα αβ
+  αω βα. (2) the frequency right-page whisper changed from English "by habit"
+  → Greek **`ἕξις`** (Aristotelian "settled disposition acquired by habit,"
+  from ἔχω) — khoa wanted that one header Greek but distinct from the earlier
+  `συνήθεια`; vision-checked live.
 - **[cleanup · khoa 2026-07-30, second audit done — SUPERSEDED same day]
   Legacy widget audit #2 (non-dock surfaces).** Survey found nothing dead but
   named four surfaces (`AoideGreeter`, `AoideLockscreen`, `AoideOsd`,

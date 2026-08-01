@@ -36,7 +36,7 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 
 ## Entities
 
-- [[aoide-cli]] — the `aoide` binary: the CLI trunk (37-command tree incl. `cover set`, the `graph` group, `conduct`, and `conductor`), `schema --json` as single source of truth, the stdio MCP façade, structured exit codes, and the `aoided` daemon binary
+- [[aoide-cli]] — the `aoide` binary: the CLI trunk (38-command tree incl. `cover set`, `rice mint`, the `graph` group, `conduct`, and `conductor`), `schema --json` as single source of truth, the stdio MCP façade, structured exit codes, and the `aoided` daemon binary
 - [[drachma]] — the design-token layer *and* the mint that stamps it: the immutable seam between nix structure and runtime rendering (schema tiers, the two-fan-out model), plus the Node package (wrapping Style Dictionary) that lints/resolves/emits the tokens — stage/drachma.json, hyprctl, and terminal OSC
 - [[aoided]] — the orchestrator daemon: neutral event stream, policy, lint, audit log, and the gated rebuild pipeline
 - [[shellbridge]] — the daemon-to-desktop bridge: atomic JSON state files out, unix-socket commands in, Hyprland IPC consumed

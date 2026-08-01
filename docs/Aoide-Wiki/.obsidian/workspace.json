@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "concepts/desktop/Gadget-Dock.md",
+                "file": "references/AOIDE-DEV.md",
                 "mode": "preview",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Gadget-Dock"
+              "title": "AOIDE-DEV"
             }
           }
         ]
@@ -184,12 +184,14 @@
       "bases:Create new base": false
     }
   },
-  "active": "a08434cfefed05a3",
+  "active": "42dfa585539042e9",
   "lastOpenFiles": [
+    "concepts/orchestration/Conductor-Channel.md",
+    "references/AOIDE-DEV.md",
+    "concepts/desktop/Gadget-Dock.md",
     "concepts/desktop/Gadget-Dock.md.tmp.2114.2fdf437dda85",
     "concepts/desktop/Desktop-Architecture.md",
     "concepts/desktop/Feature-Set.md",
-    "concepts/desktop/Gadget-Dock.md",
     "concepts/desktop/Widget-Maker.md",
     "concepts/governance/Wiki-Protocol.md",
     "concepts/governance/Rebuild-Gate.md",
@@ -198,7 +200,6 @@
     "concepts/orchestration/Terminal-Commander.md",
     "concepts/orchestration/Session-Graph.md",
     "concepts/orchestration/Content-Pipeline.md",
-    "concepts/orchestration/Conductor-Channel.md",
     "concepts/orchestration/Baton-3D-DAG.md",
     "concepts/orchestration/Agent-Interface.md",
     "concepts/Snowflake-Anatomy.md",
@@ -206,7 +207,6 @@
     "concepts/Full-Architecture.md",
     "concepts/Codebase.md",
     "entities/dxflake.md",
-    "references/AOIDE-DEV-HANDOFF.md",
     "SCHEMA.md.tmp.37403.04221a4136f8",
     "references/AOIDE-DEV-HANDOFF.md.tmp.37403.0039337846a1",
     "references/pantheon/e1392de1-1000082841.png",
@@ -222,7 +222,6 @@
     "protocol/OPERATIONS/Lint.md.tmp.37403.8b9728bc12ec",
     "protocol/SHAPE.md.tmp.37403.e38a155801fe",
     "protocol/OPERATIONS/Naming.md.tmp.37403.ee421ea136fe",
-    "SCHEMA.md.tmp.37403.69c31f18cea1",
     "concepts/song/Ricing-Protocol.md",
     "concepts/song/Self-Ricing.md",
     "concepts/song/Song-Vocabulary.md",

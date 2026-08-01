@@ -8,7 +8,7 @@ The standalone wiki for the Aoide project — the agent-agnostic Hyprland/Quicks
 
 ## Read the whole thing
 
-Working entry cost, in order: `Overview.md` → every page under `concepts/` (including its `orchestration/`, `desktop/`, `song/`, and `governance/` subfolders) and `entities/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; `AOIDE-DEV-HANDOFF.md` — the development agent's operating manual; `pantheon/` — the design reference stills). The wiki is deliberately small enough to read end to end. Note: **rice design memory lives in the songbook under `song/`, per song** — the house grammar in `song/songbook/default/design/`, each song's elements in `song/songbook/<name>/design/` ([[Song-Anatomy]]). The wiki's `concepts/song/Ricing-Protocol.md` carries protocol only; design content written about a rice goes to that rice's `design/` folder in the repo, not here.
+Working entry cost, in order: `Overview.md` → every page under `concepts/` (including its `orchestration/`, `desktop/`, `song/`, and `governance/` subfolders) and `entities/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; `AOIDE-DEV.md` — the development agent's operating manual; `pantheon/` — the design reference stills). The wiki is deliberately small enough to read end to end. Note: **rice design memory lives in the songbook under `song/`, per song** — the house grammar in `song/songbook/default/design/`, each song's elements in `song/songbook/<name>/design/` ([[Song-Anatomy]]). The wiki's `concepts/song/Ricing-Protocol.md` carries protocol only; design content written about a rice goes to that rice's `design/` folder in the repo, not here.
 
 ## The shape
 
@@ -26,7 +26,7 @@ Aoide-Wiki/
   ingest/
     index.md       ← content catalog
     log.md         ← append-only history + Open Threads
-  references/      ← raw sources (AOIDE-HANDOFF.md, AOIDE-DEV-HANDOFF.md, pantheon/ stills)
+  references/      ← raw sources (AOIDE-HANDOFF.md, AOIDE-DEV.md, pantheon/ stills)
   protocol/        ← the wiki protocol (Mneme/Melete-owned), staged here; not Aoide content
 ```
 
@@ -119,5 +119,5 @@ protocol/_template/Overview.md
 protocol/_template/ingest/index.md
 protocol/_template/ingest/log.md
 references/AOIDE-HANDOFF.md
-references/AOIDE-DEV-HANDOFF.md
+references/AOIDE-DEV.md
 ```

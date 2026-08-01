@@ -37,7 +37,7 @@ Open questions and conditionals do not appear as page prose. They are routed to 
 | Kind | Destination |
 |---|---|
 | Open design question | `ingest/log.md` → `## Open Threads` |
-| Actionable, scoped work | `references/AOIDE-DEV-HANDOFF.md` → a flagged ledger entry |
+| Actionable, scoped work | `references/AOIDE-DEV.md` → a flagged ledger entry |
 | A what-if surfaced mid-edit | ask the user, or flag it — do not write it into the page |
 
 Prohibited in page prose: `would`, `could`, `might`, `eventually`, `someday`, `TBD`, `probably`, `open question`, `what if`, `we may want to`.

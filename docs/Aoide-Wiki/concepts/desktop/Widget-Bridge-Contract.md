@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-30
-updated: 2026-07-30
+updated: 2026-07-31
 tags: [aoide, bridge, desktop, widget, quickshell, session, ipc]
 ---
 
@@ -39,6 +39,7 @@ IPC. This page is the contract both sides are built to.
 | `state` | the CANONICAL live state — exactly one of `working` \| `awaiting` \| `stopped` \| `idle` \| `done`. |
 | `activity` | the current PROCESS: a shell's foreground command / file being edited (`nvim notes.md`, `cargo test`), or its bare shell process when idle (`bash`); an agent's current tool. Absent only when truly nothing runs. |
 | `say` | the agent's latest WORDS — the last line of prose it wrote, tail-read from its own Claude Code transcript. Distinct from `activity` (the process); absent for shells and for an agent that hasn't spoken. |
+| `model` | the session's currently-active Claude model (e.g. `claude-sonnet-5`), read from the last `assistant`-type transcript line alongside `say`. A sub-agent's `model` is its OWN — a background Task can run a different model than its parent. |
 | `title` | the human session NAME. Set-once — whichever source lands FIRST wins: the first user prompt (clipped one-liner), Claude Code's own session title (`custom-title` in the transcript, e.g. "Aoide Dev"), or a `graph send` steer. |
 | `cwd` | live working directory (a conducted shell's follows `cd`). |
 | `parentSessionId` | the tree edge — a sub-agent's owner, or a nested claude's launcher. |
@@ -98,12 +99,18 @@ Alongside the state mapping, `Stop`/`PostToolUse`/`UserPromptSubmit`/`Notificati
 also tail-read the session's own JSONL transcript (the path a hook payload's
 `transcript_path` gives directly, or derived from `session_id` + `cwd` — Claude
 Code lays transcripts out at `~/.claude/projects/<munge(cwd)>/<session_id>.jsonl`,
-`/` and `.` folded to `-`) to refresh `say` and, set-once, `title` from its
+`/` and `.` folded to `-`) to refresh `say`/`model` and, set-once, `title` from its
 `custom-title` record. A background **Task** sub-agent gets the same treatment
-from its OWN dedicated transcript (`<session_id>/subagents/agent-<agent_id>.jsonl`,
-correlated to its `sub:<tool_use_id>` node via the sibling `.meta.json`'s
-`toolUseId`) — refreshed on every one of the PARENT's hooks, since a background
-Task outlives the turn that spawned it.
+from its OWN dedicated transcript, found one of two ways depending on how the
+sub-agent's node is currently keyed: a `sub:<agent_id>` node (an async `Agent`
+tool re-keyed from its tool-use id once the agent starts) resolves directly to
+the identically-named `agent-<agent_id>.jsonl`; a `sub:<tool_use_id>` node not
+yet re-keyed falls back to scanning the session's `subagents/*.meta.json`
+files for the one whose `toolUseId` matches, then reads its sibling
+`.jsonl`. Both paths are tried on every one of the PARENT's hooks, since a
+background Task outlives the turn that spawned it — an async `Agent`-tool
+sub-agent's `say`/`model` only populate once its node has re-keyed to the
+`agent_id` form.
 
 ## The sub-agent tree
 
@@ -150,6 +157,10 @@ Both are pure views of the same `sessions.json`, but they read it differently:
   `title` ("Aoide Dev"), shows `activity` (the tool) and `say` (the words), and
   beams sub-agents beneath. A conducted shell that only hosts a claude does NOT
   get its own row — the claude represents that terminal (one row per terminal).
+  Each row also carries a small `model` tag; a row with a `title` always shows
+  it, and a sub-agent row (which rarely carries a title — its name already
+  falls back to the agent type) shows it as soon as `model` is known, so a
+  title-less beamed child still surfaces which model it is running.
 - **[[Terminal-Commander|Terminals]]** — the PROCESS view. Each row's headline is
   what the terminal is running (`activity`: the foreground command / edited file,
   or the shell/agent process when idle), with the `cwd` as subtext.

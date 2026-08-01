@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-07-30
+updated: 2026-07-31
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
@@ -23,13 +23,13 @@ the build is offline.*
 
 `schema.rs` declares every command once, in a single `commands()` table — the
 one source of truth from which the CLI dispatcher, the `schema --json` emitter,
-and the MCP tool list all derive. **37 leaves** (`aoide schema --json | jq
+and the MCP tool list all derive. **38 leaves** (`aoide schema --json | jq
 '.commands | length'`):
 
 | Group | Leaves | Real / stub |
 |---|---|---|
 | `guide`, `schema` | 2 | real |
-| `rice lint`, `rice preview` | 2 | real (`lint` delegates to [[drachma]]) |
+| `rice lint`, `rice preview`, `rice mint` | 3 | real (`lint` delegates to [[drachma]]) |
 | `cover set` | 1 | real |
 | `rice gen`, `rice adopt`, `rice transpose` | 3 | stub (`adopt` gated) |
 | `content register/propose/ingest/query` | 4 | stub |
@@ -54,7 +54,14 @@ then-rename pattern as every other stage file) from either an absolute cover
 path or a bare name resolved against `song/covers/`, hot-swapping the live
 wallpaper. It is the CLI-verb slice of the wallpaper-switcher work; the
 quickshell picker surface and a `list`/`next` verb pair remain unbuilt (open
-item, `references/AOIDE-DEV-HANDOFF.md` §7).
+item, `references/AOIDE-DEV.md` §7).
+
+**`rice mint <name>`** (alias `rice new`; `--from <song>` · `--force` ·
+`--json`) scaffolds a new committed song — see [[Self-Ricing#Minting a
+song]] for the shape it writes. It validates `name` and `--from` against a
+strict `^[a-z0-9][a-z0-9-]*$` pattern (rejecting path traversal) and escapes
+`$`/quotes when rendering a copied value into `rice.nix`, so a drachma value
+containing `${…}` can never round-trip into live Nix interpolation.
 
 ### The `graph` group — session/project DAG + the conductor mesh
 

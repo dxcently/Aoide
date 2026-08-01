@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-30
+updated: 2026-07-31
 tags: [aoide, features, integration, melete, mneme]
 ---
 
@@ -30,7 +30,7 @@ that capability.
 **Provenance.** The desktop, agent, pipeline, and governance items are grounded
 in [[references/AOIDE-HANDOFF]]. The messaging bridge, Cloudflare/Tailscale fleet
 exposure, and the scheduled-jobs widget are **planned** — specified here as
-intended features, not present in `aoide schema --json`'s 37-command surface
+intended features, not present in `aoide schema --json`'s 38-command surface
 today; they extend the handoff rather than describe shipped commands.
 
 ## The bundle
@@ -164,7 +164,7 @@ One spine, so a new integration is always the same shape:
 
 Shipped exemplars plus planned extensions — the [[Widget-Maker|agent generates
 more]] on demand. Rows marked *(planned)* have no command yet in `aoide schema
---json`'s 37-command surface.
+--json`'s 38-command surface.
 
 | Capability | Provided by | Surfaced as | Default | Gate |
 |---|---|---|---|---|

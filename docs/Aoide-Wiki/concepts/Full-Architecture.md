@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-30
+updated: 2026-07-31
 tags: [aoide, architecture, desktop, drachma, pipeline]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -82,7 +82,7 @@ trail but exit 64 today.
                                         ▼            │
    ┌─────────────────────────────────────────────────────────────┐
    │  AGENT INTERFACE            aoide <cmd>   ·   aoide mcp serve │   [[Agent-Interface]]
-   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   37 commands · exit 0/1/2/64
+   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   38 commands · exit 0/1/2/64
    └───────────────────────────────┬─────────────────────────────┘
                                     ▼
    ┌─────────────────────────────────────────────────────────────┐
@@ -131,7 +131,7 @@ draws.
 
 | Subsystem            | Inputs                                         | Outputs                                             | Status                                     |
 | -------------------- | ---------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
-| [[Agent-Interface]]  | agent commands; `aoide schema --json`          | dispatched operations; structured `--json` results  | implemented (26 real verbs, 11 exit 64)    |
+| [[Agent-Interface]]  | agent commands; `aoide schema --json`          | dispatched operations; structured `--json` results  | implemented (27 real verbs, 11 exit 64)    |
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`~/Aoide/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped default | `song/songbook/<song>/`; songbook append; preview   | stubbed (`rice lint`/`preview` real)        |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all verbs exit 64)                |
@@ -279,10 +279,10 @@ cannot drift, funnelled through a single policy/audit surface. See
 This is shipped code: the Rust crate ([[aoide-cli]]) installs two binaries,
 `aoide` and `aoided`. `aoide schema --json` is the machine-readable source of
 truth; the stdio MCP façade (`aoide mcp serve --stdio`) generates its tool list
-from it, one-to-one. The tree holds **37 commands** — real (26): `guide`,
-`schema`, `rice lint`, `rice preview`, `cover set`, `mcp serve`, `daemon`,
-`shellbridge`, `conduct`, `conductor`, `adapter melete`, and the 15-verb `graph`
-group (the
+from it, one-to-one. The tree holds **38 commands** — real (27): `guide`,
+`schema`, `rice lint`, `rice preview`, `rice mint`, `cover set`, `mcp serve`,
+`daemon`, `shellbridge`, `conduct`, `conductor`, `adapter melete`, and the
+15-verb `graph` group (the
 [[Session-Graph]] DAG viewer + management layer over projects and sessions,
 incl. `graph send`/`wrap`/`reap`, all real); stubs (11, exit 64):
 `rice gen/adopt/transpose`, the 5-verb `content` group, `make`, `update`,
