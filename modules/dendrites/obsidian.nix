@@ -43,9 +43,15 @@
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
-        # Skeleton: send a registration socket command to shellbridge.
-        # Real implementation: `aoide bridge register-window-class obsidian`.
-        ExecStart = "${pkgs.aoide}/bin/aoide bridge register-window-class obsidian";
+        # STUB, neutralized (2026-08-01). The registration verb
+        # `aoide bridge register-window-class obsidian` was never implemented,
+        # so running it exited 2 on EVERY activation → a degraded home-manager
+        # session → `nh` reporting the whole switch as failed (exit 4). This
+        # oneshot is a no-op success until the real registration lands: replace
+        # `true` with the fragment-write to song/stage/obsidian-sub.json (the
+        # behavior the header comment describes) or a real
+        # `aoide bridge register-window-class` verb.
+        ExecStart = "${pkgs.coreutils}/bin/true";
         Environment = [
           "AOIDE_BRIDGE_SOCKET=%t/aoide/shellbridge.sock"
         ];
