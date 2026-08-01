@@ -106,6 +106,72 @@ QtObject {
     readonly property color windowBorder:         raw.window ? raw.window.border         : paletteAccent
     readonly property color windowBorderInactive: raw.window ? raw.window.borderInactive : paletteBg
 
+    // ── Context-window meter helpers (shared by ConductorGadget/TerminalsGadget) ──
+    // A session row's `contextTokens` (SessionRecord.context_tokens, plumbed
+    // through graph.json / sessions.json — CONTRACTS.md §4) is the raw
+    // input-side token count of the session's LAST request. Turning that into
+    // a meter takes two client-side steps, both pure and shared here so
+    // neither gadget computes it its own (possibly diverging) way.
+
+    // Known/likely long-context model-id substrings → their ceiling. Today's
+    // transcripts never actually spell one of these out (Claude Code logs the
+    // bare id, e.g. `claude-opus-4-8`, even when the session runs the
+    // marketed "[1m]" 1M-context tier) — this map is a defensive placeholder
+    // for the day an id DOES carry an explicit marker; `ctxCeiling` below's
+    // heuristic bump is what actually catches today's transcripts.
+    readonly property var ctxCeilingMap: ({
+        "[1m]": 1000000
+    })
+    // The percentage ceiling for a session's model id, given its OWN token
+    // count. Starts from `ctxCeilingMap` (default 200000 when no substring
+    // matches), then applies the heuristic backstop: a token count that has
+    // already blown past 200k could only belong to a 1M-context session (a
+    // 200k-context request is hard-capped there), so the ceiling is raised to
+    // 1000000 rather than letting the bar pin at a false 100%.
+    function ctxCeiling(modelId, tokens) {
+        var id = (modelId || "").toLowerCase()
+        var mapped = 200000
+        for (var key in ctxCeilingMap) {
+            if (id.indexOf(key) >= 0) { mapped = ctxCeilingMap[key]; break }
+        }
+        return Math.max(mapped, (tokens || 0) > 200000 ? 1000000 : mapped)
+    }
+    // contextTokens / ceiling(model, contextTokens), clamped 0-100.
+    function ctxPercent(modelId, tokens) {
+        var t = tokens || 0
+        if (t <= 0) return 0
+        var pct = t / ctxCeiling(modelId, t) * 100
+        return pct < 0 ? 0 : (pct > 100 ? 100 : pct)
+    }
+    // Compact token-count label: <1000 → raw, ≥1000 → `Nk`, ≥1e6 → `N.NM`.
+    function ctxCompact(n) {
+        var v = n || 0
+        if (v < 1000) return String(v)
+        if (v < 1000000) return Math.round(v / 1000) + "k"
+        return (v / 1000000).toFixed(1) + "M"
+    }
+    // The `[▓▓░░░░]`-style bar (the dock's existing ASCII-gauge grammar — see
+    // AoideBar.qml `battBar` / MetersGadget.qml `barFill`), sized to `cells`
+    // characters. One string, one Text, one colour: the ▓/░ glyphs themselves
+    // (heavy vs light shade) carry the fill/track contrast, so the caller
+    // just tints the whole thing accent-or-urgent (see `ctxColor`).
+    function ctxBar(pct, cells) {
+        var n = cells || 8
+        var filled = Math.round(Math.max(0, Math.min(100, pct)) / 100 * n)
+        var s = "["
+        for (var i = 0; i < n; i++) s += (i < filled) ? "▓" : "░"
+        s += "]"
+        return s
+    }
+    // Fill colour: the song accent, shifting to `paletteUrgent` at/above 85%
+    // (a session about to overflow its window reads as urgent at a glance) —
+    // the same 85% threshold and accent→urgent swap MetersGadget's CPU/RAM
+    // gauges already use.
+    readonly property real ctxUrgentAt: 85
+    function ctxColor(pct, accent) {
+        return pct >= ctxUrgentAt ? paletteUrgent : accent
+    }
+
     // ── File watcher — atomic hot-reload ──────────────────────────────────
     // Declared as a property (not a default-child) because QtObject has no
     // default property — nesting it directly fails to load.

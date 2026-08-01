@@ -289,7 +289,8 @@ Item {
             var r = rows[i];
             parts.push([r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
                         r.workspace, r._conductedBy, r.title, r.activity, r.say,
-                        r.kind, r.parentSessionId, r._depth, r._parentAgent].join(""));
+                        r.kind, r.parentSessionId, r._depth, r._parentAgent,
+                        r.model, r.contextTokens].join(""));
         }
         return parts.join("");
     }
@@ -900,6 +901,30 @@ Item {
                                     text: modelData.model
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: row.idHue
+                                }
+                                Text {                     // CONTEXT-WINDOW METER — bar + compact
+                                                            // count + percent, in the dock's existing
+                                                            // `[▓░]` ASCII-gauge grammar (AoideBar
+                                                            // battBar / MetersGadget barFill). Sits
+                                                            // right after the model tag it describes.
+                                                            // Zero footprint until the session has
+                                                            // produced an assistant turn: this Row
+                                                            // (like the rest of the tally) skips
+                                                            // invisible children entirely, so an
+                                                            // absent contextTokens never reflows the
+                                                            // row — the same effect the sudoBadge/
+                                                            // stateTag slot dance achieves above for
+                                                            // the (anchored, non-Row) name line.
+                                    id: ctxTag
+                                    anchors.baseline: elapsedText.baseline
+                                    visible: (modelData.contextTokens || 0) > 0
+                                    readonly property real pct: notes.ctxPercent(modelData.model, modelData.contextTokens)
+                                    text: notes.ctxBar(pct, 6) + " " + notes.ctxCompact(modelData.contextTokens) + " · " + Math.round(pct) + "%"
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    // song accent (this row's identity hue) → paletteUrgent
+                                    // past ~85%, same threshold/swap as the sudo badge's
+                                    // urgency grammar and MetersGadget's CPU/RAM gauges.
+                                    color: notes.ctxColor(pct, row.idHue)
                                 }
                                 Text {                     // subagent separator — joins the model to
                                                             // the type tag; only when both are present.

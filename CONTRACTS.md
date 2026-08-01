@@ -293,6 +293,19 @@ by `aoide graph link` (cycle-checked), cleared by `aoide graph prune` when the
 parent is removed. Absent means "no spawned-by edge"; readers must tolerate
 both forms, and rewriters must round-trip fields they do not know.
 
+**Additive in v0:** a session record MAY also carry an optional `contextTokens`
+(integer) — the input-side token count (`input_tokens +
+cache_creation_input_tokens + cache_read_input_tokens`) of the freshest
+`type:"assistant"` line's `message.usage` in the session's on-disk Claude Code
+transcript, i.e. "how full is this session's context window at its last
+request" (`output_tokens` is deliberately excluded — that's what the turn just
+produced, not what sat in the window when it was sent). Refreshed at the same
+hook boundaries as `model`/`say`. Mirrors the `needsSudo`/`model` additive
+precedent: absent for shells and until the session has produced an assistant
+turn, and readers must tolerate both forms and round-trip fields they do not
+know. The dock maps the raw count to a context-window meter, deriving its own
+percentage ceiling from `model` client-side.
+
 ### `song/stage/projects.json` — **v0**
 
 Registered project anchor roots for the graph. Written by

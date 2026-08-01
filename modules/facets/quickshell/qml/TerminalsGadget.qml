@@ -215,7 +215,8 @@ Item {
                 title:         rec.title || "",       // session name (tracked) / window title (synthetic)
                 activity:      rec.activity || "",    // the current command/tool
                 say:           rec.say || "",         // the agent's latest words
-                model:         rec.model || ""        // the running Claude model, if known
+                model:         rec.model || "",       // the running Claude model, if known
+                contextTokens: rec.contextTokens || 0 // context-window fill of the last request
             });
         }
         // stable order: by workspace, then window address (so re-reads that return
@@ -235,7 +236,7 @@ Item {
             var r = list[i];
             parts.push([r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
                         r.workspace, r.windowAddress, r.title,
-                        r.activity, r.say, r.model].join(""));
+                        r.activity, r.say, r.model, r.contextTokens].join(""));
         }
         return parts.join("");
     }
@@ -780,6 +781,24 @@ Item {
                                     text: modelData.model || ""
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: gadget.withA(gadget.sig, 0.85)
+                                }
+                                Text {                     // CONTEXT-WINDOW METER — bar + compact
+                                                            // count + percent, in the dock's existing
+                                                            // `[▓░]` ASCII-gauge grammar (AoideBar
+                                                            // battBar / MetersGadget barFill). Zero
+                                                            // footprint until an assistant turn has
+                                                            // produced a usage block: this Row skips
+                                                            // invisible children entirely, same as
+                                                            // the model tag right above it.
+                                    id: ctxTag
+                                    anchors.baseline: elapsedText.baseline
+                                    visible: (modelData.contextTokens || 0) > 0
+                                    readonly property real pct: notes.ctxPercent(modelData.model, modelData.contextTokens)
+                                    text: notes.ctxBar(pct, 6) + " " + notes.ctxCompact(modelData.contextTokens) + " · " + Math.round(pct) + "%"
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    // song accent → paletteUrgent past ~85%, same threshold/
+                                    // swap as the sudo badge's urgency grammar.
+                                    color: notes.ctxColor(pct, gadget.sig)
                                 }
                                 Text {                     // the Hyprland workspace — plain number tag
                                     anchors.baseline: elapsedText.baseline
