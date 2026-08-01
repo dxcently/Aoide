@@ -675,6 +675,13 @@ Item {
                         readonly property int wsId: (modelData.workspace !== undefined
                                                      && modelData.workspace !== null)
                                                         ? modelData.workspace : -1
+                        // blocked on a `sudo` password prompt — a conducted
+                        // SHELL only, but read off whatever record the row
+                        // wears (a plain agent/subagent record simply never
+                        // carries this key). Distinct from ordinary `awaiting`
+                        // ("the agent wants a permission answer"): this reads
+                        // as "it's YOUR terminal password".
+                        readonly property bool needsSudo: modelData.needsSudo === true
 
                         Rectangle {                    // staff ledger line
                             anchors.bottom: parent.bottom
@@ -787,13 +794,13 @@ Item {
                                 Text {                     // the session NAME (title, else agent)
                                     id: agentName
                                     anchors.left: parent.left
-                                    // The state tag claims its space FIRST (pinned
-                                    // to the row's right edge below) and the name
-                                    // elides into whatever is left — a fixed
-                                    // reserve let a long title push the tag off the
-                                    // row's right edge.
+                                    // The state tag + lock badge claim their space
+                                    // FIRST (pinned to the row's right edge below)
+                                    // and the name elides into whatever is left — a
+                                    // fixed reserve let a long title push either tag
+                                    // off the row's right edge.
                                     width: Math.max(24, Math.min(implicitWidth,
-                                                    body.width - stateTag.slot))
+                                                    body.width - stateTag.slot - sudoBadge.slot))
                                     elide: Text.ElideRight
                                     text: row.nameText
                                     font.family: gadget.faceSerif
@@ -810,6 +817,38 @@ Item {
                                     font.family: gadget.faceSerif; font.italic: true
                                     font.pixelSize: 11
                                     color: row.accent
+                                }
+                                Text {                     // SUDO lock badge — distinct from the
+                                                            // ordinary awaiting state tag: this row
+                                                            // needs the user's TERMINAL password, not
+                                                            // an agent permission answer. A MONOCHROME
+                                                            // nerd-font lock (not the 🔒 emoji glyph —
+                                                            // Qt ignores Text.color on color-emoji
+                                                            // glyphs, so it never followed the palette)
+                                                            // rendered in the same mono/nerd face as the
+                                                            // rest of the terminal furniture, so it DOES
+                                                            // honor notes.paletteUrgent.
+                                    id: sudoBadge
+                                    readonly property real slot: visible ? implicitWidth + 6 : 0
+                                    anchors.right: stateTag.left
+                                    anchors.rightMargin: visible ? 6 : 0
+                                    anchors.baseline: agentName.baseline
+                                    visible: row.needsSudo
+                                    text: ""           //  nf-fa-lock
+                                    font.family: gadget.faceMono
+                                    font.pixelSize: 13
+                                    color: notes.paletteUrgent
+                                    // A quicker ping than the row-wide awaiting
+                                    // wash (560/640ms below) — the badge itself
+                                    // reads as urgent even before the eye finds
+                                    // the wash.
+                                    SequentialAnimation on opacity {
+                                        running: row.needsSudo
+                                        loops: Animation.Infinite; alwaysRunToEnd: true
+                                        onRunningChanged: if (!running) sudoBadge.opacity = 1.0
+                                        NumberAnimation { to: 0.35; duration: 380; easing.type: Easing.InOutSine }
+                                        NumberAnimation { to: 1.0;  duration: 380; easing.type: Easing.InOutSine }
+                                    }
                                 }
                             }
                             // TALLY — the row's metadata line, composed into two

@@ -628,6 +628,10 @@ Item {
                         readonly property int wsId: (modelData.workspace !== undefined
                                                      && modelData.workspace !== null)
                                                         ? modelData.workspace : -1
+                        // blocked on a `sudo` password prompt — distinct from
+                        // ordinary `awaiting` ("an agent permission answer"):
+                        // this reads as "it's YOUR terminal password".
+                        readonly property bool needsSudo: modelData.needsSudo === true
 
                         onAwaitingChanged: if (!awaiting) noteGlyph.opacity = 1
 
@@ -701,13 +705,13 @@ Item {
                                 Text {                     // the PROCESS / command / file being edited
                                     id: procName
                                     anchors.left: parent.left
-                                    // the state tag claims its space FIRST (pinned
-                                    // to the row's right edge below); the process
-                                    // name elides into the rest (a fixed reserve
-                                    // let a long command push the tag off the
-                                    // right edge).
+                                    // the state tag + lock badge claim their space
+                                    // FIRST (pinned to the row's right edge below);
+                                    // the process name elides into the rest (a
+                                    // fixed reserve let a long command push either
+                                    // tag off the right edge).
                                     width: Math.max(24, Math.min(implicitWidth,
-                                                    body.width - stateTag.slot))
+                                                    body.width - stateTag.slot - sudoBadge.slot))
                                     elide: Text.ElideRight
                                     text: row.procText
                                     font.family: gadget.faceMono; font.pixelSize: 14
@@ -723,6 +727,38 @@ Item {
                                     font.family: gadget.faceSerif; font.italic: true
                                     font.pixelSize: 11
                                     color: row.accent
+                                }
+                                Text {                     // SUDO lock badge — distinct from the
+                                                            // ordinary awaiting state tag: this
+                                                            // terminal needs the user's password
+                                                            // typed into IT, not an agent decision.
+                                                            // A MONOCHROME nerd-font lock (not the
+                                                            // 🔒 emoji glyph — Qt ignores Text.color
+                                                            // on color-emoji glyphs, so it never
+                                                            // followed the palette) rendered in the
+                                                            // same mono/nerd face as the rest of the
+                                                            // terminal furniture, so it DOES honor
+                                                            // notes.paletteUrgent.
+                                    id: sudoBadge
+                                    readonly property real slot: visible ? implicitWidth + 6 : 0
+                                    anchors.right: stateTag.left
+                                    anchors.rightMargin: visible ? 6 : 0
+                                    anchors.baseline: procName.baseline
+                                    visible: row.needsSudo
+                                    text: ""                     // nf-fa-lock (Nerd Font)
+                                    font.family: gadget.faceMono
+                                    font.pixelSize: 13
+                                    color: notes.paletteUrgent
+                                    // A quicker ping than the state glyph's own
+                                    // awaiting pulse (620ms below) — the badge
+                                    // reads as urgent on its own.
+                                    SequentialAnimation on opacity {
+                                        running: row.needsSudo
+                                        loops: Animation.Infinite; alwaysRunToEnd: true
+                                        onRunningChanged: if (!running) sudoBadge.opacity = 1.0
+                                        NumberAnimation { to: 0.35; duration: 380; easing.type: Easing.InOutSine }
+                                        NumberAnimation { to: 1.0;  duration: 380; easing.type: Easing.InOutSine }
+                                    }
                                 }
                             }
                             // TALLY — elapsed since the terminal opened, and the
