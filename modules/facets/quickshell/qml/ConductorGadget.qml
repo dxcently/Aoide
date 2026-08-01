@@ -638,7 +638,20 @@ Item {
                         readonly property bool isChild: depth > 0
                         readonly property int indent: isChild ? 24 : 0
                         readonly property bool subagent: gadget.isSubagentRec(modelData)
+                        // the MAIN agent — a conductable, non-subagent row (the
+                        // top-of-tree Claude session, as opposed to a Task it
+                        // dispatched, or a plain conducted shell).
+                        readonly property bool mainAgent: gadget.isAgentRec(modelData) && !subagent
                         readonly property bool hasTitle: (modelData.title || "").length > 0
+                        // whether this session's OWN running Claude model is known
+                        // yet (agent and subagent alike each carry their own).
+                        readonly property bool modelKnown: (modelData.model || "").length > 0
+                        // whether the subagent TYPE tag has something to show — a
+                        // title took the name line, so the type (general-purpose,
+                        // Plan, …) needs its own spot; title-less subagents already
+                        // wear their type as nameText, so this stays false then.
+                        readonly property bool showType: subagent && hasTitle
+                            && (modelData.agent || "").length > 0
                         // the row's display name: the human session name (title),
                         // else the agent.
                         // the row NAME: the session name (title — Claude's own
@@ -799,9 +812,29 @@ Item {
                                     color: row.accent
                                 }
                             }
-                            // TALLY — the row's metadata line: elapsed, then the
-                            // agent TAG Claude labels its sub-agents with, then the
-                            // conductor, then the Hyprland workspace. All of it
+                            // TALLY — the row's metadata line, composed into two
+                            // distinct grammars (a shell keeps the third, older
+                            // one). Both separators are drawn from the widget's OWN
+                            // glyph grammar rather than a generic UI arrow — "‖" (a
+                            // musical repeat/parallel bar) reads as the subordinate,
+                            // ECHOING voice a subagent is; "⟐" is the diamond that
+                            // used to sit as the model tag's own prefix, repurposed
+                            // here as the join it was always halfway to being, for
+                            // the PRIMARY (main-agent) line — the two are shape- and
+                            // meaning-distinct at a glance, not just different chars:
+                            //   subagent:   elapsed  model ‖ type       ("‖" joins
+                            //               a subagent's OWN model to its TYPE —
+                            //               general-purpose, Plan, …)
+                            //   main agent: model ⟐ ws                 ("⟐" joins
+                            //               the running model to the workspace it's
+                            //               conducting on — a DIFFERENT glyph than
+                            //               the subagent's, so the two grammars
+                            //               read apart at a glance; elapsed drops
+                            //               out here once a model is known, for the
+                            //               compact read the screenshot called for,
+                            //               but stays as a fallback so the line is
+                            //               never blank before that).
+                            //   shell:      elapsed ⇢ conductor  ws    (unchanged)
                             // rides UNDER the name so the name line stays a name and
                             // a state; pinned to the row's right edge the elapsed
                             // time collided with the wrapped say prose and, on a
@@ -809,18 +842,59 @@ Item {
                             Row {
                                 width: parent.width
                                 spacing: 8
-                                Text {                     // elapsed, tallied in gold
+                                Text {                     // elapsed, tallied in gold — always for
+                                                            // a subagent/shell; a main agent drops it
+                                                            // once its model is known (see the tally
+                                                            // note above), kept meanwhile as a fallback.
                                     id: elapsedText
+                                    visible: !row.mainAgent || !row.modelKnown
                                     text: gadget.elapsed(modelData.startedAt)
                                     font.family: gadget.faceMono; font.pixelSize: 11
                                     color: row.emph ? notes.paletteHot : notes.paletteAccent
                                 }
-                                Text {                     // the running Claude model, when known — else
-                                                            // the subagent type / agent, when a title took the name
+                                Text {                     // the running Claude model, when known —
+                                                            // each session's OWN model (a subagent's
+                                                            // may differ from its parent's).
                                     id: agentTag
                                     anchors.baseline: elapsedText.baseline
-                                    visible: row.hasTitle
-                                    text: (row.subagent ? "⟐ " : "") + (modelData.model || modelData.agent || "")
+                                    visible: row.modelKnown
+                                    text: modelData.model
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: row.idHue
+                                }
+                                Text {                     // subagent separator — joins the model to
+                                                            // the type tag; only when both are present.
+                                                            // A musical parallel/repeat bar, distinct in
+                                                            // shape (not just character) from the main
+                                                            // agent's "⟐" below.
+                                    id: subSep
+                                    anchors.baseline: elapsedText.baseline
+                                    visible: row.subagent && row.modelKnown && row.showType
+                                    text: "‖"
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: row.idHue
+                                }
+                                Text {                     // the subagent's TYPE (general-purpose, Plan, …) —
+                                                            // a title took the name line, so a titled subagent
+                                                            // needs it back here, alongside its model.
+                                                            // Title-less subagents already wear their type as
+                                                            // nameText, so this stays hidden then (no double-up).
+                                    id: subagentTypeTag
+                                    anchors.baseline: elapsedText.baseline
+                                    visible: row.showType
+                                    text: modelData.agent
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: row.idHue
+                                }
+                                Text {                     // main-agent separator — joins the model to
+                                                            // the workspace; the diamond that used to
+                                                            // prefix the model tag itself, repurposed
+                                                            // (deliberately a DIFFERENT glyph than the
+                                                            // subagent's "‖" above).
+                                    id: mainSep
+                                    anchors.baseline: elapsedText.baseline
+                                    visible: row.mainAgent && row.modelKnown && row.wsId >= 0
+                                    text: "⟐"
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: row.idHue
                                 }
@@ -832,9 +906,14 @@ Item {
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: row.idHue
                                 }
-                                Text {                     // the Hyprland workspace — plain number tag
+                                Text {                     // the Hyprland workspace — plain number tag;
+                                                            // the trailing field for a main agent (after
+                                                            // "⟐") or a shell (after elapsed/conductor).
+                                                            // A subagent has no workspace of its own — its
+                                                            // trailing field is the type tag instead.
+                                    id: wsTag
                                     anchors.baseline: elapsedText.baseline
-                                    visible: row.wsId >= 0
+                                    visible: row.wsId >= 0 && !row.subagent
                                     text: "ws" + row.wsId
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: row.idHue
