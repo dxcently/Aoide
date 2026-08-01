@@ -234,6 +234,12 @@ The resolved, flattened note values for Quickshell (QML reads this; hot-reload
 at rehearsal). Derived from the same `aoide.drachma` as the baked `rice.nix`
 fan-out, so preview and adopted state cannot diverge.
 
+Beyond `aoide rice preview <name>`/`cover set`/other emitters writing this
+live, it is also **seeded from the active song's committed notes on every
+activation** (`home.activation.aoideSeedStage`,
+`modules/facets/quickshell/default.nix`) — so a host that boots without ever
+running `rice preview` still has a correct live stage twin from boot.
+
 ```json
 {
   "schemaVersion": "0",

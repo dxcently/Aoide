@@ -31,6 +31,37 @@ let
   # never song/songbook/).
   songbook = ../../../song/songbook;
 
+  # ── Active song's committed notes — also a legitimate build-time read ──────
+  # `song/songbook/<name>/drachma.json` is versioned score (checks.no-song-read
+  # only bans song/{stage,auditions,catalog,index}/, never song/songbook/), so
+  # naming the ACTIVE song's notes file here is allowed for the same reason
+  # `songbook` above is. Path concatenation (not string-interpolating the
+  # whole `songbook` dir) so only this one file gets copied into the store.
+  activeSongNotes = songbook + "/${config.aoide.song}/drachma.json";
+
+  # ── Seed script for `home.activation.aoideSeedStage` (below) ───────────────
+  # Reasserts the ACTIVE song's committed notes into the live stage twin
+  # (`song/stage/drachma.json`, CONTRACTS.md §4) on every activation, injecting
+  # the same `"song"` field `aoide rice preview <name>` would (jq's
+  # `. + {song: …}`; `-S` sorts keys to match serde_json::Value's BTreeMap
+  # ordering) — byte-identical to what `rice preview ${config.aoide.song}`
+  # would stage (verified by hand: `jq -S '. + {song:"sonata"}'` against
+  # song/songbook/sonata/drachma.json reproduces the current staged file
+  # exactly). Write-temp-then-rename in the SAME directory (so the rename is
+  # atomic) mirrors `shellbridge::atomic_write` (pkgs/aoide/src/shellbridge.rs)
+  # so a hot-reloading FileView (DrachmaState.qml) never reads a torn file.
+  # The whole thing is one script (not inline `run` commands) so a
+  # `--dry-run` activation either runs it in full or not at all — never a
+  # half-applied mkdir/mktemp/jq/mv sequence.
+  seedStageScript = pkgs.writeShellScript "aoide-seed-stage" ''
+    set -euo pipefail
+    mkdir -p "$HOME/Aoide/song/stage"
+    tmp=$(mktemp "$HOME/Aoide/song/stage/.drachma.json.XXXXXX")
+    ${pkgs.jq}/bin/jq -S '. + {song: $song}' --arg song "${config.aoide.song}" \
+      "${activeSongNotes}" > "$tmp"
+    mv -f "$tmp" "$HOME/Aoide/song/stage/drachma.json"
+  '';
+
   # ── Component-tier fallback helpers ────────────────────────────────────────
   # Each is: use the component override when set, else fall back to the palette.
   # Facets apply the fallback here (CONTRACTS.md §1 rule: "Facets apply the
@@ -163,6 +194,21 @@ in
         run mkdir -p "$HOME/Aoide/run"
         run ${pkgs.rsync}/bin/rsync -a --delete --chmod=u+w \
           "${quickshellConfig}/qml/" "$HOME/Aoide/run/qml/"
+      '';
+
+      # ── Seed the live stage twin from the active song ──────────────────────
+      # `song/stage/drachma.json` is what DrachmaState.qml hot-reloads
+      # (CONTRACTS.md §4); until now nothing seeded it from the BAKED default,
+      # so a host that never ran `aoide rice preview <name>` had a stale/absent
+      # stage twin even though the compositor/Stylix/QML tree were all built
+      # from the active song. This reasserts the active song's committed notes
+      # into the stage file on every activation — `seedStageScript` (above)
+      # does the actual write. Same "switch = truth resets the sketch"
+      # discipline as `aoideDeployQml`'s rsync above: this OVERWRITES whatever
+      # a live `rice preview`/`cover set` staged, which is intended — the next
+      # `rice preview` can re-sketch over it again live.
+      home.activation.aoideSeedStage = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        run ${seedStageScript}
       '';
 
       # ── Quickshell autostart via systemd user service ─────────────────────
