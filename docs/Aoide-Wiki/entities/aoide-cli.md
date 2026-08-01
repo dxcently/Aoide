@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-07-31
+updated: 2026-08-01
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
@@ -19,12 +19,36 @@ the CLI door and the MCP door so the two can never drift.
 with `meta.mainProgram = "aoide"` and vendored deps (`cargoLock.lockFile`) so
 the build is offline.*
 
-## The command tree
+## The command tree — a self-registering registry
 
-`schema.rs` declares every command once, in a single `commands()` table — the
-one source of truth from which the CLI dispatcher, the `schema --json` emitter,
-and the MCP tool list all derive. **38 leaves** (`aoide schema --json | jq
-'.commands | length'`):
+`pkgs/aoide/src/registry.rs` declares the `Command`/`Registry` types (path,
+summary, args, flags, `gated`, `implemented`, a `handler: fn(&Invocation) ->
+Outcome`, an `available` check) plus the `cmd!`/`arg!`/`flag!` macros that
+build one. Each command group under `pkgs/aoide/src/commands/`
+(`meta.rs`, `rice.rs`, `cover.rs`, `stubs.rs`, `graph.rs`, `infra.rs`) owns a
+`register(&mut Registry)` function that inserts its own entries;
+`commands/mod.rs::all()` assembles the full registry in the historical
+`schema --json` order. Rice and cover handler bodies live in their own
+command module; `commands/graph.rs` holds thin registrations whose
+`handler` points straight at the `crate::graph::*` domain functions —
+nothing there duplicates graph-domain logic.
+
+`dispatch()` (`pkgs/aoide/src/dispatch.rs`) is a thin lookup against the one
+process-wide `Registry` (built once via `OnceLock`) plus the audit-log
+append and gate tail — the same shape run through by both doors. `schema
+--json`, the MCP tool list, and the CLI's own path table all derive from
+that one registry; there is no second, hand-maintained command table
+anywhere in the crate. A `command_paths_match_the_golden_snapshot` unit
+test in `registry.rs` pins the sorted set of every command path, so adding,
+removing, or renaming a leaf shows as a deliberate, visible diff against
+that pinned snapshot. `commands/mod.rs::all()`
+builds the registry through explicit function calls, keeping the crate's
+offline, vendored dependency set unchanged — the same shape as Hermes-agent's
+self-registering tool registry and Claude Code's discrete-tools-behind-a-thin-
+dispatch design.
+
+The command surface itself is unchanged by this shape: **38 leaves**
+(`aoide schema --json | jq '.commands | length'`):
 
 | Group | Leaves | Real / stub |
 |---|---|---|

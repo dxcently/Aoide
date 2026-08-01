@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-28
-updated: 2026-07-28
+updated: 2026-08-01
 tags: [aoide, agent, orchestration, conductor, pty, ipc]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -115,7 +115,7 @@ The `claude` command is never aliased. Conducting is always explicit and aoide-b
 
 ## Phases
 
-1. **Core channel** — additive `conductable`/`socket`/`title` fields; `graph send` + `conduct` verbs in `dispatch.rs` + `schema.rs` (two-doors-one-schema); the PTY multiplexer + per-session socket + injection; the aoided gate (pending/autogate/audit). Unit-testable: a fake child echoes injected bytes; a send with `--yes` reaches it, a send without is held pending.
+1. **Core channel** — additive `conductable`/`socket`/`title` fields; `graph send` + `conduct` registered in `commands/graph.rs` and dispatched through `dispatch.rs`'s registry lookup (two-doors-one-schema); the PTY multiplexer + per-session socket + injection; the aoided gate (pending/autogate/audit). Unit-testable: a fake child echoes injected bytes; a send with `--yes` reaches it, a send without is held pending.
 2. **Discovery** — hyprctl-client match → populate `windowAddress` + read live chat titles.
 3. **Interactive conductor** — `InputKind::Send`, key arm, label-by-title, conductable + pending rendering, approve/deny keys.
 4. **Ergonomics + docs** — the aoide-specific conduct alias; wiki updates to [[shellbridge]], [[Terminal-Commander]], [[Conductor-3D-DAG]].

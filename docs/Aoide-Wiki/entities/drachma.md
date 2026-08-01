@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-07-31
+updated: 2026-08-01
 aliases: [aoide-drachma, aoide-notes, Notes, notes package, note engine]
 tags: [aoide, drachma, theming, base16, node]
 ---
@@ -46,7 +46,12 @@ target — GTK/Qt, terminal, editors, browser, boot. The drachma package keeps
 only the live side.
 
 Because both fan-outs derive from the same drachma values, preview state and
-adopted state cannot diverge. This is the "zero drift" guarantee.
+adopted state cannot diverge. This is the "zero drift" guarantee. Beyond
+`rice preview`/`cover set` writing `stage/drachma.json` live, the quickshell
+facet's `home.activation.aoideSeedStage` reasserts it from the active song's
+committed `song/songbook/<song>/drachma.json` on every activation (see
+[[Codebase#Runtime contracts (socket + stage files)]]), so a freshly booted
+host carries a correct stage twin even before any preview runs.
 
 ## Tier structure
 

@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-31
+updated: 2026-08-01
 tags: [aoide, architecture, desktop, drachma, pipeline]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -173,7 +173,9 @@ The baked side is carried by the three facets, all real:
 
 - **quickshell** — declares nine surfaces with `owner = "quickshell"` (bar,
   notifications, launcher, osd, lockscreen, greeter, wallpaper, agentWidgets,
-  sessionGraph); QML installed to `~/Aoide/qml` via home-manager;
+  sessionGraph); QML rsyncs from the store into the gitignored
+  `~/Aoide/run/qml/` via home-manager activation (source stays
+  `modules/facets/quickshell/qml/`; no `qml/` at the repo root);
   `DrachmaState.qml` watches the stage file for the live fan-out. Eight of
   the nine carry a live QML body: `AoideBar.qml` is the bar (its own popouts
   also carry the calendar and now-playing gadgets); `AoideLauncher.qml` is

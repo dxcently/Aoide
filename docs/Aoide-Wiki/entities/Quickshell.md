@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-07-30
+updated: 2026-08-01
 tags: [aoide, shell, ui, qml, quickshell]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -28,9 +28,15 @@ singletons and the surface widgets (`AoideBar` with the `SessionChip`/
 `WorkspaceRow` session-jump widget, `AoideNotifications` + `NotificationCard`,
 `AoideLauncher`, `AoideOsd`, `AoideLockscreen`, `AoideGreeter`, `AoideWallpaper`)
 — each a stub reading colours from `drachma`, kept in a separate file so [[Melete]]
-can swap them independently. The facet installs the tree to `~/Aoide/qml` via
-home-manager activation. The host runs Aoide live, so that deploy target sits
-**untracked at the repo root** of the user's fork. Crucially, `hyprland.conf`
+can swap them independently. The repo root carries no `qml/` directory —
+widget source lives in `modules/facets/quickshell/qml/`, and the facet's
+`home.activation.aoideDeployQml` rsyncs the built config tree (`rsync -a
+--delete --chmod=u+w`) into the gitignored `~/Aoide/run/qml/`, which Quickshell
+reads as its entry point (`quickshell -p ~/Aoide/run/qml/shell.qml`). The
+deployed tree is self-healing: hot-editing QML directly under `~/Aoide/run/qml/`
+previews live without a rebuild, and every activation's rsync reasserts the
+store's build over any such edit — the same "switch is the truth, hot edits
+are the sketch" discipline as every other stage/preview seam. Crucially, `hyprland.conf`
 is owned by home-manager's `wayland.windowManager.hyprland`: the compositor facet
 writes drachma + keybind fragments with `mkBefore`, and the Quickshell facet appends
 its `exec-once` autostart with `mkAfter`, so the two facets compose the one config
@@ -84,8 +90,7 @@ Two design decisions worth carrying forward:
 The compositor facet also adds `aoide-launcher` to the blur / `ignore_alpha` /
 hyprglass namespaces so the pane frosts like the bar and dock. Both the keybind
 and the blur rules are baked into `hyprland.conf`, so the launcher needs a gated
-`switch` to land live (the QML deploys to the read-only `~/Aoide/qml/` tree the
-same way).
+`switch` to land live (the QML rsyncs into `~/Aoide/run/qml/` the same way).
 
 ## Session service & resilience
 

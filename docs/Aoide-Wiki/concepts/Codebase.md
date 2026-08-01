@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-30
+updated: 2026-08-01
 tags: [aoide, architecture, nix, flake, rust, node]
 ---
 
@@ -191,7 +191,13 @@ Live-side state, all gitignored, none load-bearing for the build:
   channel from QML; adapters and widgets bind exactly this path, never compute
   it.
 - **Stage files** under `song/stage/`: `drachma.json` (resolved drachma colours,
-  written by [[drachma]]), `sessions.json` (agent session roster, written by
+  written by [[drachma]]'s `rice preview`/`cover set`/other emitters at
+  rehearsal, and reseeded from the active song's committed
+  `song/songbook/<song>/drachma.json` on every activation by
+  `home.activation.aoideSeedStage` in `modules/facets/quickshell/default.nix`
+  — a write-temp-then-rename script that injects the same `"song"` field
+  `rice preview` writes, so a host that boots without ever previewing still
+  carries a correct live stage twin from the baked default), `sessions.json` (agent session roster, written by
   [[shellbridge]]; records may carry an additive optional `parentSessionId`),
   `hooks.json` (live Claude Code hook phases), `projects.json` (the project
   registry, kept by `aoide graph project`), and `graph.json` (the resolved
@@ -231,14 +237,17 @@ nix build .#checks.x86_64-linux.vm-boot -L             # headless QEMU boot test
 The Rust crate carries unit tests for the schema (valid JSON, stable top-level
 keys, every command carries `--json` + exit codes, unique paths), the MCP
 door (tool list is one-to-one with the schema; `tools/call` dispatches into the
-same handlers), and the graph module (`pkgs/aoide/src/graph.rs` — pure cores
-plus handlers for all 15 `graph` subcommands: cycle rejection, anchoring, a
-deterministic render snapshot, edge shape, prune orphan-clearing,
-unknown-field round-trip, a serialized stage-dir precedence test, and the pure
-focus-liveness helpers `normalize_addr`/`window_present`) — 63 unit tests
-across the crate at last count. One noted hazard: the env-var test mutex in
-`shellbridge.rs` is module-local — fine while it is the only module with
-env-touching tests.
+same handlers), and the graph domain (`pkgs/aoide/src/graph.rs` is a thin
+re-export root over `graph/{model,doc,common,verbs,window,session_store,
+conduct,send}.rs` plus a shared `testutil` — pure cores plus handlers for all
+15 `graph` subcommands: cycle rejection, anchoring, a deterministic render
+snapshot, edge shape, prune orphan-clearing, unknown-field round-trip, a
+serialized stage-dir precedence test, and the pure focus-liveness helpers
+`normalize_addr`/`window_present`) — 63 unit tests across the crate at last
+count. The split mirrors `conductor.rs` + `conductor/`: the public
+`crate::graph::*` surface `dispatch`/`reap`/`conductor`/`shellbridge` reach is
+unchanged by it. One noted hazard: the env-var test mutex in `shellbridge.rs`
+is module-local — fine while it is the only module with env-touching tests.
 
 ## Walking-skeleton status — real vs stubbed
 

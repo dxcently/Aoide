@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-30
+updated: 2026-08-01
 tags: [aoide, graph, session, terminal, agent, cli]
 ---
 
@@ -12,8 +12,10 @@ sessions** — who spawned whom, and which project each session belongs to —
 with a terminal viewer and a management layer behind one CLI group, `aoide
 graph` (real, every subcommand implemented — `view`/`project`/`link`/
 `session`/`wrap`/`send`/`focus`/`prune`/`reap`/`emit`, per `aoide schema
---json`). Like every command it lives in the single `schema.rs` table, so the
-CLI door and the MCP door share the group ([[Agent-Interface]]).
+--json`). Like every command it registers into the single `commands/`
+registry (`commands/graph.rs`, thin registrations over the `graph/` domain
+functions — see [[aoide-cli]]), so the CLI door and the MCP door share the
+group ([[Agent-Interface]]).
 
 *Verified green (`nix flake check` + the vm-boot check). Implementation:
 `pkgs/aoide/src/graph.rs`, with the liveness/dedup reaper in its own
