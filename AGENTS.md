@@ -57,7 +57,8 @@ sessions out-of-band — you never need to `graph prune` a stale session by hand
 ## Tier 2 — stdio MCP (per-session, optional)
 
 MCP is a façade generated from the same command schema — one implementation,
-two doors, no drift. It is **off by default** (`aoide.mcp.enable = false`).
+two doors, no drift (a third door, A2A, is optional too — CONTRACTS.md §6).
+It is **off by default** (`aoide.mcp.enable = false`).
 Spawn it per session:
 
 ```

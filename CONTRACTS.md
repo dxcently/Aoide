@@ -514,14 +514,63 @@ Server-Sent Events. The MVP door serves exactly:
   advertised skills: Phase B adds an additive `implemented` boolean to §3's
   `schema --json` command entries and the card filters on it, so stub commands
   are never advertised as live skills.
-- **`message/send`** — invoke; returns a Task (or a terminal Message for a
-  synchronous reply).
+- **`message/send`** — invoke; returns a Task. **Phase B2** landed real
+  execution — see "Execution: `message/send`" below.
 - **`tasks/get`** — poll a Task's status by id.
 
 `message/stream` (initial SSE), `tasks/resubscribe` (stream reconnect), and
 `tasks/cancel` are **additive** follow-ons — v0 does not require them, and
 adding them later is not a version bump to this contract (same additive
 discipline as §1/§4's optional tiers).
+
+### Execution: `message/send` (Phase B2)
+
+`message/send` does **both** inject and spawn, decided purely from the
+request (`a2a.rs::decide_send_action`, unit-tested for every branch):
+
+- **Inject** into an existing session when the request's `contextId` names a
+  KNOWN, conductable(+socketed) session (`SessionRecord.conductable` +
+  `.socket`) — and the client did not explicitly ask to spawn. Delivery
+  reuses [`crate::graph::session_send`] (the same gated door `graph send`
+  uses), not a reimplementation of the socket write.
+- **Spawn** a NEW conducted agent when there is no `contextId`, OR the
+  client explicitly asks to spawn via `metadata["aoide/spawn"] == true`
+  (checked on the `message` object first, then top-level `params` —
+  **this key is aoide-specific**, not part of upstream A2A). The prompt is
+  injected as the spawned session's first turn, best-effort, once its control
+  socket appears.
+- A `contextId` naming a known but NOT conductable session, or naming
+  nothing, is a structured JSON-RPC error (`-32004`/`-32001` respectively) —
+  never a silent fallback to spawning.
+
+**The command a spawn runs is `aoide.a2a.spawnAgent`** — a nix option, off
+(`""`) by default, resolved once at `a2a serve` launch (`--spawn-agent` flag →
+`AOIDE_A2A_SPAWN_AGENT` env, set by the `aoide-a2a` systemd unit → the
+option's default). **The A2A client supplies the message/prompt only, never
+the command** — this is the load-bearing invariant that bounds what an
+external A2A caller can do to aoide: task the operator's own
+already-configured agent, or steer a session already running under aoide's
+conductor, but never execute an arbitrary binary. If `spawnAgent` is empty,
+the spawn path returns `{"code": -32004, "message": "A2A spawn not
+configured"}` rather than silently doing nothing.
+
+**Security model.** The capability is admitted **at rebuild time**, not
+per-request: setting `aoide.a2a.spawnAgent` to a non-empty command is the
+user's admission (house policy — "the rebuild is user-gated"), same as any
+other nix option. There is deliberately **no interactive per-request gate**
+like `graph send`'s pending/`--yes`/autogate dance — a JSON-RPC request
+cannot block mid-flight on a human clicking "approve". In its place: the
+spawn target is fixed at rebuild time (never client-chosen), the door is
+loopback/user-scoped by default (same as the rest of §6's security posture),
+and every inject/spawn/error is audited through `Door::A2a`, the same single
+audit log every other door writes.
+
+**MVP simplification, carried over from Phase B:** taskId == contextId ==
+sessionId for both inject and spawn (a fresh spawn's Task/contextId/sessionId
+are all the newly-minted `a2a-<pid>-<ts>` id). Splitting a Task from its
+session for real multi-turn tracking (so a session with several in-flight or
+completed turns exposes each as its own addressable Task) remains future
+work, same as the `TaskState` gaps noted above.
 
 ### Security posture
 
@@ -548,13 +597,14 @@ keyed by the `name` from its fetched AgentCard — the same handle
 
 ### Status
 
-v0 is a walking-skeleton **contract**: the option surface
-(`aoide.a2a.enable`/`bindAddress`/`port`), the `kind:"a2a"` DAG reservation,
-and the `a2a serve` / `a2a agent add|list|remove` command stubs. No server
-runs yet — `implemented: false` on every command, same convention as
-`commands/stubs.rs`. This section is **additive**: it introduces a new
-contract, carries no version bump to §1–§5, and needs no playbook migration
-entry (nothing existing changed shape).
+The option surface (`aoide.a2a.enable`/`bindAddress`/`port`/`spawnAgent`), the
+`kind:"a2a"` DAG reservation, and the `a2a serve` command are **real**: the
+AgentCard, `tasks/get`, and `message/send` (Phase B2: inject-or-spawn
+execution, above) all run. `a2a agent add|list|remove` (the CLIENT-side
+external-agent registry) stay `implemented: false` stubs — that's a later
+phase. This section is **additive**: it introduces a new contract, carries no
+version bump to §1–§5, and needs no playbook migration entry (nothing
+existing changed shape).
 
 ---
 

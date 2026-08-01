@@ -98,9 +98,12 @@ lib.mkIf config.aoide.enable {
 
   # ── A2A façade (opt-in, off by default per house policy) ─────────────────
   # When aoide.a2a.enable is true, start the A2A (Agent2Agent) server: a
-  # read-only JSON-RPC/HTTP door (AgentCard + tasks/get, CONTRACTS.md §6)
+  # JSON-RPC/HTTP door (AgentCard + tasks/get + message/send, CONTRACTS.md §6)
   # exposing aoide-orchestrated sessions to other A2A-speaking agents.
-  # Loopback/user-scoped by default — same security posture as aoide-mcp.
+  # message/send's spawn path only ever launches `aoide.a2a.spawnAgent` (set
+  # below, empty by default = spawning disabled) — never a client-supplied
+  # command. Loopback/user-scoped by default — same security posture as
+  # aoide-mcp.
   systemd.user.services.aoide-a2a = lib.mkIf config.aoide.a2a.enable {
     description = "Aoide A2A (Agent2Agent) door (loopback by default, user-only)";
 
@@ -115,6 +118,7 @@ lib.mkIf config.aoide.enable {
       Environment = [
         "AOIDE_A2A_BIND=${config.aoide.a2a.bindAddress}"
         "AOIDE_A2A_PORT=${toString config.aoide.a2a.port}"
+        "AOIDE_A2A_SPAWN_AGENT=${config.aoide.a2a.spawnAgent}"
         "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
         "AOIDE_USER=${config.aoide.user}"
       ];

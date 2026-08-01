@@ -306,7 +306,7 @@ in
       '';
     };
 
-    # ── A2A door (CONTRACTS.md §6, v0 — contract only, no config behaviour) ──
+    # ── A2A door (CONTRACTS.md §6, v0) ────────────────────────────────────────
     a2a = {
       enable = mkOption {
         type = types.bool;
@@ -331,6 +331,20 @@ in
         type = types.port;
         default = 8710;
         description = "The A2A HTTP port.";
+      };
+
+      spawnAgent = mkOption {
+        type = types.str;
+        default = "";
+        description = ''
+          The command `a2a serve` conducts for an A2A-spawned task
+          (CONTRACTS.md §6, `message/send`'s spawn path). The A2A client
+          supplies only the prompt/message, NEVER the command — the
+          executable always comes from this option, set by the operator at
+          rebuild time (the admission). Empty (the default) disables
+          spawning entirely: `message/send` returns a structured error
+          instead of launching anything.
+        '';
       };
     };
 
