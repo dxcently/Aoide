@@ -180,7 +180,7 @@ pkgs.testers.runNixOSTest {
     machine.succeed("which aoide")
     machine.succeed("which drachma")
 
-    # `aoide schema --json` must parse and report exactly 36 commands.
+    # `aoide schema --json` must parse and report exactly 38 commands.
     # This is a deliberate drift tripwire: adding or removing a command must
     # consciously update this count (it caught 8 commands that had landed
     # unrecorded — graph wrap/reap/send, conduct, conductor, and the graph session
@@ -196,8 +196,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 36, (
-        f"expected 36 commands, got {cmd_count}.  "
+    assert cmd_count == 38, (
+        f"expected 38 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

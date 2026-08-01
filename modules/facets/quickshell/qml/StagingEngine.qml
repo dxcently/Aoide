@@ -25,7 +25,7 @@ QtObject {
     id: root
 
     readonly property string manifestPath:
-        Quickshell.env("HOME") + "/Aoide/qml/songs/manifest.json"
+        Quickshell.env("HOME") + "/Aoide/run/qml/songs/manifest.json"
 
     // { "<song>": ["<slot>", …], … } — empty until the first successful parse.
     property var manifest: ({})

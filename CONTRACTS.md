@@ -48,6 +48,31 @@ Hex format: `#?[0-9a-fA-F]{6}` (leading `#` optional). The note engine
 (`pkgs/drachma`, Agent A) owns the authoritative `rice lint` validator; the
 option type is a permissive gate only.
 
+### Geometry tier (v0 optional overrides — `geometry.*`)
+
+Additive-optional (same status as the base16 tier): every field is `nullOr`,
+defaulting to `null`. A notes file with no `geometry` block behaves exactly
+as before — the compositor facet applies the fallback, not the option
+system. Rides `song/stage/drachma.json` for live application: `aoide rice
+preview` live-applies this tier (plus `window.border`/`borderInactive`) via
+best-effort, guarded `hyprctl keyword` calls — see §4's staged-geometry
+paragraph — in addition to baking the value at build time into
+`hyprland.conf`.
+
+| Key                  | Type          | Fallback | Hyprland keyword       |
+| --------------------- | ------------- | -------- | ----------------------- |
+| `geometry.gapsOut`    | `nullOr int`  | `8`      | `general:gaps_out`      |
+| `geometry.gapsIn`     | `nullOr int`  | `6`      | `general:gaps_in`       |
+| `geometry.borderSize` | `nullOr int`  | `2`      | `general:border_size`   |
+| `geometry.rounding`   | `nullOr int`  | `0`      | `decoration:rounding`   |
+| `geometry.blurEnabled`| `nullOr bool` | `true`   | `decoration:blur:enabled` |
+| `geometry.blurSize`   | `nullOr int`  | `8`      | `decoration:blur:size`  |
+| `geometry.blurPasses` | `nullOr int`  | `3`      | `decoration:blur:passes`|
+
+Border *colours* (`window.border` / `window.borderInactive`, component tier
+above) already map to `col.active_border` / `col.inactive_border` and are
+unaffected by this tier.
+
 ### Cover-art tier (v0 — the wallpaper note)
 
 | Key         | Type            | Default | Falls back to                          |
@@ -110,6 +135,14 @@ place** — never a new root directory:
 Content paths are looked up in the Song Map (`concepts/Song-Vocabulary` in the
 wiki). Creating a new root directory is a **contract change**, not a
 convenience: it lands here first, with review — not sprayed into the tree.
+
+The closed set above is the **committed** root; a handful of **gitignored
+root-runtime** directories sit alongside it without being part of it —
+`catalog/`, `index/`, `log/` (content-pipeline + audit runtime), and `run/`
+(the deployed Quickshell tree rsynced from the store by home-manager,
+`modules/facets/quickshell/default.nix`; disposable, never the checked-in
+source). None of these are ever committed, so none are a contract change to
+add to or write into.
 
 ### Package shape (`pkgs/` is walked too)
 
@@ -223,6 +256,15 @@ field (string) — the name `aoide rice preview <name>` was invoked with. Set by
 §4's sessions.json). Absent means "no song identity" (a notes file staged some
 other way). `DrachmaState.qml`'s `songName` property reads it to resolve
 per-song flavor widgets (§5) — readers must tolerate both forms.
+
+**Additive in v0:** the staged file MAY also carry an optional top-level
+`geometry` block, mirroring §1's geometry tier (`gapsOut`/`gapsIn`/
+`borderSize`/`rounding`/`blurEnabled`/`blurSize`/`blurPasses`, each `nullOr`).
+Absent means "this song carries no geometry opinion" (§1's additive-optional
+tier). `aoide rice preview` reads it (alongside `window.border`/
+`borderInactive`) to build its best-effort `hyprctl keyword` batch — a missing
+block, or a missing/null field within it, is skipped rather than defaulted;
+readers must tolerate both forms.
 
 ### `song/stage/sessions.json` / `hooks.json` — **v0**
 
@@ -349,17 +391,26 @@ and `drachma.json` from v0 to v1 with the drachma schema (§1).
 Beyond `aoide.drachma` notes, a song MAY also carry its own QML for a fixed
 set of "flavor" surfaces — committed files, not nix options:
 
-- **Convention:** `song/songbook/<name>/widgets/<slot>.qml`. Fixed slot enum,
-  **currently `{ calendar, notifications }`** (documented here as what IS
-  built, not what's speculatively planned — a slot is added to this list
-  only once it's actually wired). A song omits files for slots it doesn't
-  dress.
+- **Convention:** `song/songbook/<name>/widgets/<slot>.qml`. ANY `.qml` file
+  a song drops under its `widgets/` dir becomes a slot named for its
+  basename — not a fixed enum. A song omits files for slots it doesn't
+  dress. Authoring a slot file alone does not put it on screen: nothing
+  renders until a host surface actually embeds a `WidgetSlot` anchor for
+  that slot name. The **wired-slot catalog** — which slots a real anchor
+  resolves today, which host embeds each, and each slot's extras/fallback —
+  lives in `modules/facets/quickshell/qml/slots.md`, documented there only
+  once an anchor is actually wired (same "what IS built" discipline as this
+  section).
 - **Build:** the quickshell facet's derivation
-  (`modules/facets/quickshell/default.nix`) copies every committed song's
-  in-scope slot files to `$out/qml/songs/<name>/<slot>.qml`, plus a generated
-  `$out/qml/songs/manifest.json` recording which songs authored which slots —
-  ALL songs' bodies land on disk at once (home-manager installs the tree
-  recursively), which is what makes cross-song live preview possible.
+  (`modules/facets/quickshell/default.nix`) walks every committed song's
+  `widgets/*.qml` files to `$out/qml/songs/<name>/<slot>.qml`, plus a
+  generated `$out/qml/songs/manifest.json` recording which songs authored
+  which slots — ALL songs' bodies land on disk at once (home-manager
+  installs the tree recursively), which is what makes cross-song live
+  preview possible. The manifest shape is unchanged (still
+  `{ "<song>": ["<slot>", …] }`) by generalizing the walk from a fixed slot
+  enum to "every file under `widgets/`" — additive, no contract-version
+  bump.
 - **Runtime resolution:** `DrachmaState.qml`'s `songName` property (above)
   names the active song; the staging engine (`StagingEngine.qml`) reads the manifest and answers
   "does `<song>` dress `<slot>`"; `WidgetSlot.qml` is the fixed per-slot

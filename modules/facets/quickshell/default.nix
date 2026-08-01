@@ -43,22 +43,27 @@ let
   notifFg = if t.notif.fg != null then t.notif.fg else t.palette.fg;
   notifUrgent = if t.notif.urgent != null then t.notif.urgent else t.palette.urgent;
 
-  # ── QML root — the full skeleton config installed into ~/Aoide/qml/ ────────
-  # Each surface widget is a stub that reads its colors from notes. The config
-  # directory is placed in the user's Aoide tree so Quickshell picks it up at
-  # session start. At runtime Quickshell hot-reloads from song/stage/drachma.json
-  # via a FileView; the build only installs the structural QML, not the note
+  # ── QML root — the full skeleton config installed into run/qml/ ────────────
+  # Each surface widget is a stub that reads its colors from notes. Deployed
+  # to a gitignored root-runtime dir (run/, alongside catalog/index/log —
+  # never the repo's checked-in tree) so the live copy can never be confused
+  # with source (modules/facets/quickshell/qml/) or collide with it — this is
+  # what CONTRACTS.md §2 and the deploy-path fix this comment accompanies are
+  # about. At runtime Quickshell hot-reloads from song/stage/drachma.json via
+  # a FileView; the build only installs the structural QML, not the note
   # values themselves.
   #
   # ── Per-song flavor widgets (CONTRACTS.md §5) ───────────────────────────
   # Beyond the shared, song-blind QML tree above, this also carries per-song
   # widget QML from song/songbook/*/widgets/ — versioned score, not runtime —
   # for EVERY committed song at once, so a live `aoide rice preview <name>`
-  # can hot-swap a widget's BODY (not just its colours) with no rebuild. Only
-  # the fixed, in-scope slot enum is copied; a song's other files are ignored.
-  # A generated manifest.json records which songs authored which slots, so
+  # can hot-swap a widget's BODY (not just its colours) with no rebuild. ANY
+  # QML file a song drops under its widgets/ dir becomes a slot named for its
+  # basename; a song's other files (outside widgets/) are ignored. A
+  # generated manifest.json records which songs authored which slots, so
   # runtime QML (the staging engine, StagingEngine.qml) can check availability without probing the
-  # filesystem per-frame.
+  # filesystem per-frame. The wired-slot catalog (which slots an anchor
+  # actually resolves at runtime) lives in qml/slots.md, not here.
   quickshellConfig = pkgs.runCommand "aoide-quickshell-config" { nativeBuildInputs = [ pkgs.jq ]; } ''
     mkdir -p "$out/qml"
     cp -r ${./qml}/. "$out/qml/"
@@ -67,17 +72,18 @@ let
     mkdir -p "$out/qml/songs"
     manifest="$out/qml/songs/manifest.json"
     echo '{}' > "$manifest"
-    SLOTS="calendar notifications"
     for d in ${songbook}/*/; do
       name=$(basename "$d")
       slots=""
-      for slot in $SLOTS; do
-        if [ -f "$d/widgets/$slot.qml" ]; then
+      if [ -d "$d/widgets" ]; then
+        for f in "$d/widgets/"*.qml; do
+          [ -e "$f" ] || continue
+          slot=$(basename "$f" .qml)
           mkdir -p "$out/qml/songs/$name"
-          cp "$d/widgets/$slot.qml" "$out/qml/songs/$name/$slot.qml"
+          cp "$f" "$out/qml/songs/$name/$slot.qml"
           slots="$slots $slot"
-        fi
-      done
+        done
+      fi
       if [ -n "$slots" ]; then
         slotsJson=$(printf '%s\n' $slots | jq -R . | jq -s .)
         tmp=$(mktemp)
@@ -88,10 +94,10 @@ let
     done
   '';
 
-  # Path used at runtime: ~/Aoide/qml/shell.qml is Quickshell's entry point.
-  # The user's fork provides ~/Aoide (aoide.user → /home/<user>/Aoide), so we
-  # activate Quickshell pointing at that tree.
-  shellQmlEntry = "/home/${config.aoide.user}/Aoide/qml/shell.qml";
+  # Path used at runtime: ~/Aoide/run/qml/shell.qml is Quickshell's entry
+  # point — the rsync-deployed copy (see the home.activation entry below),
+  # not the repo's source tree.
+  shellQmlEntry = "/home/${config.aoide.user}/Aoide/run/qml/shell.qml";
 
   # The Quickshell binary from the pre-declared flake input (flake.nix).
   quickshellPkg = inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
@@ -127,16 +133,37 @@ in
       quickshellPkg
     ];
 
-    # ── Install QML config tree into the user's Aoide fork ──────────────────
+    # ── Deploy QML config tree into run/qml/ (rsync, not a symlink tree) ────
     # The config tree (bar/notif/launcher/OSD/lockscreen/greeter/wallpaper)
-    # lives at /home/<user>/Aoide/qml/ so it's under git control in the fork.
-    # We write it via home-manager activation rather than system packages so
-    # the path lands in the user's home tree.
-    home-manager.users.${config.aoide.user} = {
-      home.file."Aoide/qml" = {
-        source = "${quickshellConfig}/qml";
-        recursive = true;
-      };
+    # lands at /home/<user>/Aoide/run/qml/ — a gitignored root-runtime dir,
+    # never the repo's checked-in tree (CONTRACTS.md §2).
+    #
+    # `home.file` would manage this as a tree of symlinks into the nix
+    # store, which is the RIGHT semantics for most home-manager-installed
+    # config — but this facet's whole point is that agents/dev iteration
+    # hot-edit the deployed QML directly to preview without a rebuild
+    # (Quickshell live-reloads on file change). A symlink tree makes that
+    # workflow permanently hostile to the NEXT switch: home-manager finds a
+    # real file where it expects to manage a symlink and refuses to
+    # activate until every stray file is hand-diffed against the fresh
+    # store build and removed — exactly the failure this rsync replaces.
+    #
+    # `rsync -a --delete` makes the deployed tree self-healing instead: a
+    # switch always reasserts the store's truth over whatever was hand-
+    # edited, rather than refusing to proceed. This is deliberate — hot
+    # edits under run/qml/ are previews ("the sketch"); the next switch is
+    # what makes a change real ("the truth"), same discipline as every
+    # other stage/preview seam in this project.
+    # NOTE: this is a home-manager submodule FUNCTION (`{ lib, ... }:`), not a bare
+    # attrset — so `lib` here is home-manager's EXTENDED lib (carrying `lib.hm.dag`),
+    # not the outer NixOS-module lib (which lacks `hm`). `config`/`pkgs`/`quickshellConfig`
+    # still resolve lexically to the outer module scope, unshadowed by the pattern.
+    home-manager.users.${config.aoide.user} = { lib, ... }: {
+      home.activation.aoideDeployQml = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        run mkdir -p "$HOME/Aoide/run"
+        run ${pkgs.rsync}/bin/rsync -a --delete --chmod=u+w \
+          "${quickshellConfig}/qml/" "$HOME/Aoide/run/qml/"
+      '';
 
       # ── Quickshell autostart via systemd user service ─────────────────────
       # The shell surface (bar/dock/wallpaper/notifications/OSD) is started by

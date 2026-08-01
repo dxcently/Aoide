@@ -9,6 +9,9 @@ index/
 log
 log/
 
+# Deployed shell tree (rsynced from the store by home-manager; disposable):
+run/
+
 # Nix build outputs
 result
 result-*

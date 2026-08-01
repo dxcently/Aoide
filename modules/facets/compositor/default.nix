@@ -44,18 +44,21 @@ let
     if t.window.borderInactive != null then t.window.borderInactive else t.palette.bg;
 
   # ── Derived geometry values ───────────────────────────────────────────────
-  # v0 has no geometry-tier notes; these are opinionated defaults that serve
-  # as the immutable baseline. When a geometry tier is added (v1), replace
-  # these with note reads.
-  gapOuter = 8;
-  gapInner = 6;
-  borderWidth = 2;
+  # v0 geometry tier (additive-optional, CONTRACTS.md §1): a song MAY set
+  # aoide.drachma.geometry.*; every field is nullOr and falls back to the
+  # opinionated defaults below when unset (component-tier fallback pattern,
+  # same as windowBorder/windowBorderInactive above). No song sets geometry
+  # today, so these fallbacks ARE the immutable baseline in practice.
+  geo = t.geometry;
+  gapOuter = if geo.gapsOut != null then geo.gapsOut else 8;
+  gapInner = if geo.gapsIn != null then geo.gapsIn else 6;
+  borderWidth = if geo.borderSize != null then geo.borderSize else 2;
   # Edged windows (khoa, with the bw border key): square corners — the
   # dxflake read. The Pantheon wireframe language wants hard outlines too.
-  rounding = 0; # window corner radius (px)
-  blurEnabled = true;
-  blurPasses = 3;
-  blurSize = 8;
+  rounding = if geo.rounding != null then geo.rounding else 0; # window corner radius (px)
+  blurEnabled = if geo.blurEnabled != null then geo.blurEnabled else true;
+  blurPasses = if geo.blurPasses != null then geo.blurPasses else 3;
+  blurSize = if geo.blurSize != null then geo.blurSize else 8;
 
   # ── Hyprland config fragment — notes baked in at build time ──────────────
   # The note emitter (pkgs/drachma, Agent A) re-runs hyprctl keyword dispatch

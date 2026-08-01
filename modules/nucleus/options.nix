@@ -54,6 +54,52 @@ let
     borderInactive = "Unfocused window border colour. Falls back to palette.bg.";
   };
 
+  # ── Geometry submodule (v0 optional tier: gaps/border/rounding/blur) ──────
+  # Additive-optional under the existing v0 schema (same nullOr-with-fallback
+  # shape as the component tier above): every field is optional and falls
+  # back to the compositor facet's opinionated default when unset. A notes
+  # file with no `geometry` block behaves exactly as before — the compositor
+  # facet applies the fallback, not the option system.
+  geometryType = types.submodule {
+    options = {
+      gapsOut = mkOption {
+        type = types.nullOr types.int;
+        default = null;
+        description = "Outer gap between windows and the screen edge (px). Falls back to the compositor facet's default (8) when null.";
+      };
+      gapsIn = mkOption {
+        type = types.nullOr types.int;
+        default = null;
+        description = "Inner gap between adjacent windows (px). Falls back to the compositor facet's default (6) when null.";
+      };
+      borderSize = mkOption {
+        type = types.nullOr types.int;
+        default = null;
+        description = "Window border thickness (px). Falls back to the compositor facet's default (2) when null.";
+      };
+      rounding = mkOption {
+        type = types.nullOr types.int;
+        default = null;
+        description = "Window corner radius (px). Falls back to the compositor facet's default (0) when null.";
+      };
+      blurEnabled = mkOption {
+        type = types.nullOr types.bool;
+        default = null;
+        description = "Whether compositor blur is enabled. Falls back to the compositor facet's default (true) when null.";
+      };
+      blurSize = mkOption {
+        type = types.nullOr types.int;
+        default = null;
+        description = "Blur kernel size. Falls back to the compositor facet's default (8) when null.";
+      };
+      blurPasses = mkOption {
+        type = types.nullOr types.int;
+        default = null;
+        description = "Blur pass count. Falls back to the compositor facet's default (3) when null.";
+      };
+    };
+  };
+
   # ── Palette submodule (v0 closed tier: base16-derived) ────────────────────
   paletteType = types.submodule {
     options = {
@@ -210,6 +256,16 @@ in
             type = windowType;
             default = { };
             description = "Component overrides for compositor window decoration.";
+          };
+          geometry = mkOption {
+            type = geometryType;
+            default = { };
+            description = ''
+              Geometry tier (v0 optional overrides): gaps/border/rounding/blur.
+              Every field is nullOr and falls back to the compositor facet's
+              opinionated default when unset — additive-optional, same status
+              as the base16 tier. Hyprland-only in this pass; no QML consumer.
+            '';
           };
           wallpaper = mkOption {
             type = types.nullOr types.path;
