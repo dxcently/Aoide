@@ -95,4 +95,32 @@ lib.mkIf config.aoide.enable {
       StandardError   = "journal";
     };
   };
+
+  # ── A2A façade (opt-in, off by default per house policy) ─────────────────
+  # When aoide.a2a.enable is true, start the A2A (Agent2Agent) server: a
+  # read-only JSON-RPC/HTTP door (AgentCard + tasks/get, CONTRACTS.md §6)
+  # exposing aoide-orchestrated sessions to other A2A-speaking agents.
+  # Loopback/user-scoped by default — same security posture as aoide-mcp.
+  systemd.user.services.aoide-a2a = lib.mkIf config.aoide.a2a.enable {
+    description = "Aoide A2A (Agent2Agent) door (loopback by default, user-only)";
+
+    wantedBy = [ "aoided.service" ];
+    after    = [ "aoided.service" ];
+    bindsTo  = [ "aoided.service" ];
+
+    serviceConfig = {
+      ExecStart  = "${pkgs.aoide}/bin/aoide a2a serve";
+      Restart    = "on-failure";
+      RestartSec = "5s";
+      Environment = [
+        "AOIDE_A2A_BIND=${config.aoide.a2a.bindAddress}"
+        "AOIDE_A2A_PORT=${toString config.aoide.a2a.port}"
+        "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
+        "AOIDE_USER=${config.aoide.user}"
+      ];
+      NoNewPrivileges = true;
+      StandardOutput  = "journal";
+      StandardError   = "journal";
+    };
+  };
 }

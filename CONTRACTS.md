@@ -197,6 +197,7 @@ Top-level shape (stable keys):
         { "name": "json", "type": "bool", "description": "Structured I/O." }
       ],
       "gated": false,
+      "implemented": true,
       "exitCodes": { "0": "ok", "2": "usage", "1": "error" }
     }
   ]
@@ -209,6 +210,13 @@ Contract guarantees:
 - Errors are structured with meaningful exit codes.
 - All operations idempotent; output reports exactly what changed.
 - `gated: true` marks operations that route through the user rebuild gate.
+- `implemented` (bool) — does this command actually run, or is it still a
+  walking-skeleton stub (`dispatch()` returns the not-implemented envelope
+  without calling a handler)? **Additive** (CONTRACTS.md §6 phase B): no
+  version bump, same additive discipline as §1/§4's optional tiers — it lets
+  a discovery consumer filter to only the live commands without a second
+  command inventory. The A2A AgentCard (§6) is the first such consumer: its
+  `skills` list is exactly the commands with `implemented: true`.
 
 ---
 
@@ -449,9 +457,15 @@ a retired spec.
 **Version.** This section targets A2A over the **JSON-RPC 2.0 / HTTP binding**;
 the method and state names below use that binding's transport spelling
 (`message/send`, `tasks/get`, lowercase-kebab states like `input-required`).
-A2A's current release is **v1.0.0**, whose gRPC/proto binding spells the same
-surface differently (`SendMessage`, `GetTask`, `TASK_STATE_*`); Phase B pins the
-exact protocol version against the A2A SDK.
+Phase B's server implements the **v0.3.x JSON-RPC binding** explicitly: the
+AgentCard advertises `"protocolVersion": "0.3.0"`, keeps the flat `"url"`
+shape (valid and consumable under 0.3.x), and serves `message/send` /
+`tasks/get` with lowercase-kebab states. A2A's current release is **v1.0.0**,
+whose gRPC/proto binding spells the same surface differently (`SendMessage`,
+`GetTask`, `TASK_STATE_*`) and whose JSON-RPC/HTTP AgentCard form moved to a
+top-level `interfaces` array plus a top-level `id`; that v1.0 card shape is an
+**additive follow-on** — a later phase can advertise it alongside (or instead
+of) the 0.3.x form without a contract break here.
 
 ### The mapping (aoide's vocabulary already has an A2A shape)
 
@@ -461,9 +475,10 @@ exact protocol version against the A2A SDK.
 | Task (one unit of work) | a *turn* — what `graph send` injects into a session |
 | `contextId` (conversation) | a `SessionRecord` (the long-lived session) |
 | TaskState `WORKING` | canonical_state `working` |
-| TaskState `COMPLETED` | canonical_state `stopped` (the *turn* ended; the session/context lives on) |
+| TaskState `COMPLETED` | canonical_state `stopped` (the *turn* ended; the session/context lives on) — **also** produced by canonical_state `done` (MVP simplification: both collapse onto `completed` today, even though `done` conceptually ends the whole context, not just a turn — see below) |
 | TaskState `INPUT_REQUIRED` | canonical_state `awaiting` |
 | TaskState `AUTH_REQUIRED` | the `needsSudo` signal (`SessionRecord.needs_sudo`) |
+| TaskState `SUBMITTED` | canonical_state `idle` (aoide's at-rest/cold state — acknowledged but not actively processing; this is the honest A2A state for it, NOT `WORKING`) |
 | `message/stream` (initial SSE) / `tasks/resubscribe` (reconnect) | the hooks + transcript tail already driving `say`/`activity`/`model` |
 | transport (JSON-RPC 2.0/HTTP + SSE) | a new `aoide a2a serve` door |
 
@@ -479,11 +494,12 @@ today. `needsSudo` is a signal carried *alongside* `state`, not a state — so a
 session that is both `awaiting` **and** `needsSudo` surfaces as `AUTH_REQUIRED`
 (**auth-required takes precedence over `INPUT_REQUIRED`**).
 
-`TaskState`'s `SUBMITTED`, `FAILED`, `CANCELED`, `REJECTED` (and 0.3.x's
-`unknown`) have no canonical_state counterpart yet — aoide's five-state
-vocabulary has no failure notion and predates this mapping; a later phase
-either extends the canonical vocabulary or folds them at the edge. Not
-resolved in v0.
+`TaskState`'s `FAILED`, `CANCELED`, `REJECTED` (and 0.3.x's `unknown`) have no
+canonical_state counterpart yet — aoide's five-state vocabulary has no failure
+or cancellation notion and predates this mapping; a later phase either
+extends the canonical vocabulary or folds them at the edge. Not resolved in
+v0. (`SUBMITTED` is no longer in this unresolved set — canonical_state `idle`
+now produces it, per the table above.)
 
 ### Transport and MVP surface
 
