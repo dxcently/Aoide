@@ -482,6 +482,20 @@ PanelWindow {
                                 notes: root.notes
                             }
                         }
+
+                        // Usage — the claude.ai ledger stele, content-driven
+                        // height (short while the live fetch is a stub). Visible
+                        // ONLY once state/usage.json exists (hasData), so a host
+                        // without `aoide usage enable` shows nothing; an invisible
+                        // child is excluded from the Column layout, so it collapses
+                        // to zero footprint rather than leaving a gap.
+                        UsageGadget {
+                            id: usageGadget
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: 340
+                            notes: root.notes
+                            visible: hasData
+                        }
                     }
                 }
 

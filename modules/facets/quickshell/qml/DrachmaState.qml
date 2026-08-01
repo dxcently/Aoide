@@ -194,6 +194,29 @@ QtObject {
         return { any: any, maxFill: maxFill, sumTok: sumTok }
     }
 
+    // ── Usage panel: path + reset-countdown (shared by UsageGadget) ────────
+    // The `aoide usage` poller writes ~/Aoide/state/usage.json (schema §0 —
+    // live plan/weekly utilization + a local this-machine estimate). Path kept
+    // here alongside notePath so a consumer never hard-codes its own copy.
+    readonly property string usagePath:
+        Quickshell.env("HOME") + "/Aoide/state/usage.json"
+    // A compact "resets in 3h20m" from an ISO-8601 instant, relative to `nowMs`
+    // (a live-ticking clock the caller threads in so the countdown counts down
+    // without a re-read). Empty string for a missing/unparseable stamp, so the
+    // caller can omit the clause entirely rather than render a blank.
+    function usageResetIn(iso, nowMs) {
+        if (!iso) return ""
+        var t = Date.parse(iso)
+        if (isNaN(t)) return ""
+        var now = nowMs || Date.now()
+        var d = Math.floor((t - now) / 1000)
+        if (d <= 0) return "resets now"
+        var h = Math.floor(d / 3600), m = Math.floor((d % 3600) / 60)
+        if (h >= 24) { var days = Math.floor(h / 24); return "resets in " + days + "d" + (h % 24) + "h" }
+        if (h > 0) return "resets in " + h + "h" + (m < 10 ? "0" : "") + m + "m"
+        return "resets in " + m + "m"
+    }
+
     // ── File watcher — atomic hot-reload ──────────────────────────────────
     // Declared as a property (not a default-child) because QtObject has no
     // default property — nesting it directly fails to load.
