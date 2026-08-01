@@ -436,6 +436,112 @@ set of "flavor" surfaces — committed files, not nix options:
 
 ---
 
+## 6. A2A door — **v0**
+
+A2A (Agent2Agent, Linux Foundation) is the third door onto aoide, alongside
+the CLI and MCP façade — it exposes an aoide session as a **discoverable
+remote agent** other A2A-speaking agents can address, and (client side) lets
+aoide fold an *external* A2A agent into its own session DAG. A2A is the
+**successor to** ACP (Agent Communication Protocol, BeeAI/IBM) — ACP archived
+Aug 2025 and folded into A2A, so aoide builds against A2A directly rather than
+a retired spec.
+
+**Version.** This section targets A2A over the **JSON-RPC 2.0 / HTTP binding**;
+the method and state names below use that binding's transport spelling
+(`message/send`, `tasks/get`, lowercase-kebab states like `input-required`).
+A2A's current release is **v1.0.0**, whose gRPC/proto binding spells the same
+surface differently (`SendMessage`, `GetTask`, `TASK_STATE_*`); Phase B pins the
+exact protocol version against the A2A SDK.
+
+### The mapping (aoide's vocabulary already has an A2A shape)
+
+| A2A concept | aoide equivalent |
+| --- | --- |
+| AgentCard @ `/.well-known/agent-card.json` | discovery derived from the command registry (`aoide schema --json`) — one schema, same as the MCP tool list |
+| Task (one unit of work) | a *turn* — what `graph send` injects into a session |
+| `contextId` (conversation) | a `SessionRecord` (the long-lived session) |
+| TaskState `WORKING` | canonical_state `working` |
+| TaskState `COMPLETED` | canonical_state `stopped` (the *turn* ended; the session/context lives on) |
+| TaskState `INPUT_REQUIRED` | canonical_state `awaiting` |
+| TaskState `AUTH_REQUIRED` | the `needsSudo` signal (`SessionRecord.needs_sudo`) |
+| `message/stream` (initial SSE) / `tasks/resubscribe` (reconnect) | the hooks + transcript tail already driving `say`/`activity`/`model` |
+| transport (JSON-RPC 2.0/HTTP + SSE) | a new `aoide a2a serve` door |
+
+Because a **Task is a turn** and a **`contextId` is a session**, a `COMPLETED`
+Task maps to `stopped` (the turn ended, the agent is back at the prompt), NOT
+`done` — aoide's `done` means the *session/context* ended, which terminates
+**every** Task under that `contextId` (the five-state vocabulary lives at
+`graph/model.rs::canonical_state`, not §4).
+
+`AUTH_REQUIRED` is a **narrowing**: A2A's auth-required covers any
+client-supplied credential, of which `needsSudo` is aoide's only instance
+today. `needsSudo` is a signal carried *alongside* `state`, not a state — so a
+session that is both `awaiting` **and** `needsSudo` surfaces as `AUTH_REQUIRED`
+(**auth-required takes precedence over `INPUT_REQUIRED`**).
+
+`TaskState`'s `SUBMITTED`, `FAILED`, `CANCELED`, `REJECTED` (and 0.3.x's
+`unknown`) have no canonical_state counterpart yet — aoide's five-state
+vocabulary has no failure notion and predates this mapping; a later phase
+either extends the canonical vocabulary or folds them at the edge. Not
+resolved in v0.
+
+### Transport and MVP surface
+
+Transport is JSON-RPC 2.0 over HTTP, same as upstream A2A; streaming rides
+Server-Sent Events. The MVP door serves exactly:
+
+- **AgentCard** at `/.well-known/agent-card.json` — **derived from** `aoide
+  schema --json` (the same one-schema discipline the MCP tool list follows,
+  concepts/Agent-Interface — no second command inventory to drift), **plus**
+  static card metadata the schema does not carry (card `url`, `version`,
+  `capabilities`, input/output modes). Only **implemented** commands become
+  advertised skills: Phase B adds an additive `implemented` boolean to §3's
+  `schema --json` command entries and the card filters on it, so stub commands
+  are never advertised as live skills.
+- **`message/send`** — invoke; returns a Task (or a terminal Message for a
+  synchronous reply).
+- **`tasks/get`** — poll a Task's status by id.
+
+`message/stream` (initial SSE), `tasks/resubscribe` (stream reconnect), and
+`tasks/cancel` are **additive** follow-ons — v0 does not require them, and
+adding them later is not a version bump to this contract (same additive
+discipline as §1/§4's optional tiers).
+
+### Security posture
+
+The A2A door is **off by default** (house policy), identical to the MCP
+façade — `aoide.a2a.enable` defaults to `false`. When enabled it binds
+**loopback/user-scoped** (`aoide.a2a.bindAddress` defaults to `127.0.0.1`);
+exposing it to the network is a deliberate, explicit per-host choice, never
+the default.
+
+A forwarded A2A message — whether inbound (someone else's agent calling
+aoide's door) or outbound (aoide relaying to a registered external agent) —
+is **untrusted data** crossing aoided's boundary, exactly like an MCP call:
+it is never executed, only routed through the same dispatcher, gate, and
+audit log every other door uses. The A2A door adds no new trust tier.
+
+### Session-DAG integration (client side)
+
+An external A2A agent, once registered (`aoide a2a agent add <url>`), folds
+into the session DAG as a node of `kind: "a2a"` (`graph/model.rs`'s
+`SessionRecord.kind`) — the graph doesn't special-case it beyond that tag;
+existing `spawned`/`anchors` edge machinery applies unchanged. The node is
+keyed by the `name` from its fetched AgentCard — the same handle
+`aoide a2a agent remove <name>` takes.
+
+### Status
+
+v0 is a walking-skeleton **contract**: the option surface
+(`aoide.a2a.enable`/`bindAddress`/`port`), the `kind:"a2a"` DAG reservation,
+and the `a2a serve` / `a2a agent add|list|remove` command stubs. No server
+runs yet — `implemented: false` on every command, same convention as
+`commands/stubs.rs`. This section is **additive**: it introduces a new
+contract, carries no version bump to §1–§5, and needs no playbook migration
+entry (nothing existing changed shape).
+
+---
+
 ## Versioning
 
 - A contract version is a single integer, tracked in this file's section

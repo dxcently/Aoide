@@ -306,6 +306,34 @@ in
       '';
     };
 
+    # ── A2A door (CONTRACTS.md §6, v0 — contract only, no config behaviour) ──
+    a2a = {
+      enable = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Enable the A2A (Agent2Agent) door. Off by default (house policy),
+          same as the MCP façade. Localhost/user-scoped; forwarded A2A
+          messages are untrusted data.
+        '';
+      };
+
+      bindAddress = mkOption {
+        type = types.str;
+        default = "127.0.0.1";
+        description = ''
+          The A2A HTTP bind address. Loopback by default; networked A2A is a
+          deliberate, user-only choice.
+        '';
+      };
+
+      port = mkOption {
+        type = types.port;
+        default = 8710;
+        description = "The A2A HTTP port.";
+      };
+    };
+
     auditLog = mkOption {
       type = types.str;
       default = "/home/${config.aoide.user}/Aoide/log";

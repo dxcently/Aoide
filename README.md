@@ -213,9 +213,9 @@ Your edits live in `hosts/`, `song/`, and **new** dendrite files — all additiv
 
 ### `aoide` — the CLI trunk
 
-`aoide <cmd>` is the **complete** capability surface; any agent with a shell is fully capable. Every command takes/emits `--json`, returns structured exit codes, and is idempotent. `aoide schema --json` is the machine-readable single source of truth (28 commands), and the MCP tool list is **generated from it** — one implementation, two doors, no drift. Run `aoide guide` for the tier-0 onboarding.
+`aoide <cmd>` is the **complete** capability surface; any agent with a shell is fully capable. Every command takes/emits `--json`, returns structured exit codes, and is idempotent. `aoide schema --json` is the machine-readable single source of truth (42 commands), and the MCP tool list is **generated from it** — one implementation, two doors, no drift. Run `aoide guide` for the tier-0 onboarding.
 
-The 28 commands, grouped (`real` = implemented; `stub` = exit `64`, not-implemented):
+The 42 commands, grouped (`real` = implemented; `stub` = exit `64`, not-implemented):
 
 - **Orientation** — `guide`, `schema`, `mcp serve` — all `real`.
 - **`rice` group** (the self-ricing loop): `rice lint` `real`; `rice gen`, `rice preview`, `rice adopt` (gated), `rice transpose` — `stub`.
@@ -225,6 +225,7 @@ The 28 commands, grouped (`real` = implemented; `stub` = exit `64`, not-implemen
 - **`conductor`** (the interactive terminal UI): `real` — an interactive, ASCII-art terminal UI over the same trunk (see below). `aoide conductor` (the TUI, a noun) is distinct from `aoide conduct` (a verb) which wraps a single process into the conductor channel.
 - **Daemon runners** — `daemon` (aoided), `shellbridge`, `adapter melete` — all `real` skeletons.
 - **Lifecycle** — `make` (widget-maker), `update` (gated self-update), `onboard` (first-boot) — all `stub`.
+- **`a2a` group** (the A2A/Agent2Agent door, CONTRACTS.md §6): `a2a serve`, `a2a agent add/list/remove` — all `stub` (the contract skeleton; the server lands in a later phase).
 
 ### `aoide mcp serve --stdio`
 
