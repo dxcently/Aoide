@@ -348,6 +348,29 @@ in
       };
     };
 
+    # ── Usage widget + poller (opt-in, off by default) ───────────────────────
+    usage = {
+      enable = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Enable the claude.ai usage widget + poller (`aoide usage`, a
+          systemd.user timer running it on `aoide.usage.interval`). Off by
+          default, same house policy as the MCP façade and A2A door.
+        '';
+      };
+
+      interval = mkOption {
+        type = types.str;
+        default = "300s";
+        description = ''
+          Poller cadence (systemd `OnUnitActiveSec` duration) for `aoide
+          usage`, which writes the local-estimate half of `state/usage.json`
+          (CONTRACTS.md §4). No network, no credentials.
+        '';
+      };
+    };
+
     auditLog = mkOption {
       type = types.str;
       default = "/home/${config.aoide.user}/Aoide/log";

@@ -138,11 +138,12 @@ convenience: it lands here first, with review — not sprayed into the tree.
 
 The closed set above is the **committed** root; a handful of **gitignored
 root-runtime** directories sit alongside it without being part of it —
-`catalog/`, `index/`, `log/` (content-pipeline + audit runtime), and `run/`
-(the deployed Quickshell tree rsynced from the store by home-manager,
-`modules/facets/quickshell/default.nix`; disposable, never the checked-in
-source). None of these are ever committed, so none are a contract change to
-add to or write into.
+`catalog/`, `index/`, `log/` (content-pipeline + audit runtime), `state/`
+(account/usage runtime, e.g. `state/usage.json`; disposable, never committed),
+and `run/` (the deployed Quickshell tree rsynced from the store by
+home-manager, `modules/facets/quickshell/default.nix`; disposable, never the
+checked-in source). None of these are ever committed, so none are a contract
+change to add to or write into.
 
 ### Package shape (`pkgs/` is walked too)
 
@@ -337,6 +338,36 @@ unanchored).
     { "from": "project:aoide", "to": "session:abc123", "kind": "anchors" },
     { "from": "session:abc123", "to": "session:def456", "kind": "spawned" }
   ]
+}
+```
+
+### `state/usage.json` — **v0**
+
+Account/usage runtime — lives in the gitignored root-runtime `state/` dir
+(§2), NOT `song/stage/`: this is account/global state, not song-scoped or
+rehearsal state. **State-dir resolution** mirrors the stage-dir seam above:
+`$AOIDE_STATE_DIR` when set to an **absolute** path, else `~/Aoide/state`
+derived from `$AOIDE_USER`/`$HOME`. Written by `aoide usage` (`aoide.usage.*`,
+`modules/nucleus/options.nix`; opt-in poller service, off by default).
+
+The `local` block is a rollup computed straight off this machine's own Claude
+Code transcripts (`~/.claude/projects/**/*.jsonl`) — no network, no
+credentials, an ESTIMATE (approximate pricing) for THIS machine only, never a
+billing source of truth. The `live` block is a stub in v0 (`ok:false` with a
+reason) — a later task wires the claude.ai account-usage fetch into it and
+flips `ok:true` on success. Readers must tolerate `live.ok == false` today and
+both forms going forward.
+
+```json
+{
+  "schemaVersion": "0",
+  "fetchedAt": "2026-08-01T12:00:00Z",
+  "live": { "ok": false, "error": "live fetch not wired yet" },
+  "local": {
+    "note": "local estimate, this machine only",
+    "today": { "tokens": 1200000, "costUsd": 4.10 },
+    "week":  { "tokens": 8000000, "costUsd": 27.0 }
+  }
 }
 ```
 

@@ -28,6 +28,7 @@ lib.mkIf config.aoide.enable {
   systemd.user.tmpfiles.rules = [
     "d %h/Aoide/log      0700 - - -"
     "d %h/Aoide/song/stage 0755 - - -"
+    "d %h/Aoide/state    0700 - - -"
   ];
 
   # ── aoided systemd user service ──────────────────────────────────────────
@@ -125,6 +126,39 @@ lib.mkIf config.aoide.enable {
       NoNewPrivileges = true;
       StandardOutput  = "journal";
       StandardError   = "journal";
+    };
+  };
+
+  # ── Usage widget poller (opt-in, off by default per house policy) ────────
+  # When aoide.usage.enable is true, run `aoide usage` on a timer: it computes
+  # the LOCAL token/cost rollup from this machine's own Claude Code
+  # transcripts (no network, no credentials — CONTRACTS.md §4) and atomically
+  # writes state/usage.json for the widget to read. Oneshot service + timer
+  # (not a long-lived process, unlike aoide-mcp/aoide-a2a) since each run is a
+  # quick scan-and-write.
+  systemd.user.services.aoide-usage = lib.mkIf config.aoide.usage.enable {
+    description = "Aoide usage widget: local token/cost rollup (no network, no credentials)";
+
+    serviceConfig = {
+      Type       = "oneshot";
+      ExecStart  = "${pkgs.aoide}/bin/aoide usage";
+      Environment = [
+        "AOIDE_STATE_DIR=%h/Aoide/state"
+        "AOIDE_USER=${config.aoide.user}"
+      ];
+      NoNewPrivileges = true;
+      StandardOutput  = "journal";
+      StandardError   = "journal";
+    };
+  };
+
+  systemd.user.timers.aoide-usage = lib.mkIf config.aoide.usage.enable {
+    description = "Poll the local usage rollup on a timer";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "1m";
+      OnUnitActiveSec = config.aoide.usage.interval;
+      Unit = "aoide-usage.service";
     };
   };
 }

@@ -9,6 +9,9 @@ index/
 log
 log/
 
+# Account/usage runtime (repo root; disposable, never committed):
+state/
+
 # Deployed shell tree (rsynced from the store by home-manager; disposable):
 run/
 
