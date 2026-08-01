@@ -864,13 +864,12 @@ Item {
                                 }
                                 Text {                     // subagent separator — joins the model to
                                                             // the type tag; only when both are present.
-                                                            // A musical parallel/repeat bar, distinct in
-                                                            // shape (not just character) from the main
-                                                            // agent's "⟐" below.
+                                                            // The ano teleia (Greek high dot): a quiet
+                                                            // join, distinct from the main agent's "⟐".
                                     id: subSep
                                     anchors.baseline: elapsedText.baseline
                                     visible: row.subagent && row.modelKnown && row.showType
-                                    text: "‖"
+                                    text: "·"
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: row.idHue
                                 }
