@@ -171,6 +171,28 @@ QtObject {
     function ctxColor(pct, accent) {
         return pct >= ctxUrgentAt ? paletteUrgent : accent
     }
+    // Rollup over a set of session-shaped objects (anything carrying `model` +
+    // `contextTokens` — a raw stage record, or a beamed-tree row): the
+    // hottest window's fill (MAX, never averaged — a worst-case alarm, not a
+    // blended reading) and the raw token SUM. Shared by ConductorGadget's
+    // project-header and fleet-footer rollups so both levels compute the
+    // exact same two numbers the exact same way. `any` is false when nothing
+    // in the set has produced a turn yet, so a caller can omit the gauge
+    // entirely rather than render a false 0%.
+    function ctxRollup(items) {
+        var maxFill = 0, sumTok = 0, any = false
+        var list = items || []
+        for (var i = 0; i < list.length; i++) {
+            var it = list[i]
+            var tok = (it && it.contextTokens) || 0
+            if (tok <= 0) continue
+            any = true
+            sumTok += tok
+            var pct = ctxPercent(it ? it.model : "", tok)
+            if (pct > maxFill) maxFill = pct
+        }
+        return { any: any, maxFill: maxFill, sumTok: sumTok }
+    }
 
     // ── File watcher — atomic hot-reload ──────────────────────────────────
     // Declared as a property (not a default-child) because QtObject has no

@@ -50,6 +50,7 @@ Item {
     required property var bridge           // socket sender (bridge.focusSession)
     property var shared: null              // cross-widget state (shared.tracedSessionId)
     property string stagePath: "/home/khoa/Aoide/song/stage/sessions.json"
+    property string projectsPath: "/home/khoa/Aoide/song/stage/projects.json"
 
     implicitWidth: 360
     implicitHeight: 520
@@ -61,11 +62,26 @@ Item {
 
     // live state ────────────────────────────────────────────────────────────────
     property var sessions: []              // raw roster (every stage record)
-    property var visibleRows: []           // filtered roster actually drawn
+    property var projects: []              // raw project roster ({name, path})
+    property var visibleRows: []           // filtered/grouped roster actually drawn:
+                                            // project-header rows + session rows
     property var agentIndex: ({})           // effective-agent name → identity slot
     property real nowMs: Date.now()
     property string emphId: ""
-    property int projectCount: 0
+    property int projectCount: 0           // distinct ANCHORED projects with ≥1 session
+    property int sessionCount: 0           // total sessions in the roster (fold-independent)
+    // Fleet-wide context rollup (over EVERY session, regardless of fold state
+    // — a collapsed project still counts toward the fleet total).
+    property bool fleetHasCtx: false
+    property real fleetMaxFill: 0
+    property real fleetSumTok: 0
+    // Per-project fold state: projectKey → collapsed(bool). Reassigned (never
+    // mutated in place) on toggle so the property-change + recompute() fire.
+    property var collapsed: ({})
+    // Sentinel bucket key for sessions that anchor to no project — a NUL byte
+    // can never appear in a real filesystem path, so it can't collide with a
+    // project's own `path` key.
+    readonly property string unanchoredKey: "\u0000unanchored"
     // Signature of the RENDERED roster — recompute() only swaps the ListView
     // model when this changes, so the frequent no-op sessions.json rewrites
     // (agents heartbeat while their state/cwd stay put) don't tear down and
@@ -280,17 +296,29 @@ Item {
         return "";
     }
 
-    // a signature over ONLY the fields the delegate renders — so a rewrite that
+    // A signature over ONLY the fields the delegate renders — so a rewrite that
     // touches nothing visible (a heartbeat timestamp, a socket path) yields the
     // same string and we keep the existing delegates (and the live hover) intact.
+    // Extended for project grouping: a "project-header" row folds in its
+    // fold state + rollup, and a "session" row folds in its bucket key -- so
+    // re-anchoring (a projects.json edit) or a fold toggle both yield a
+    // different signature and swap the model, while a no-op heartbeat still
+    // does not. Keeps the pre-existing convention of control-byte field/row
+    // separators (0x1f/0x01) rather than a printable one, so no session
+    // field value can ever collide with the delimiter.
     function rosterSig(rows) {
         var parts = [];
         for (var i = 0; i < rows.length; i++) {
             var r = rows[i];
-            parts.push([r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
-                        r.workspace, r._conductedBy, r.title, r.activity, r.say,
-                        r.kind, r.parentSessionId, r._depth, r._parentAgent,
-                        r.model, r.contextTokens].join(""));
+            if (r._kind === "project-header") {
+                parts.push(["H", r._projectKey, r._collapsed, r._live, r._total,
+                            r._hasCtx, r._maxFill, r._sumTok].join(""));
+            } else {
+                parts.push(["S", r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
+                            r.workspace, r._conductedBy, r.title, r.activity, r.say,
+                            r.kind, r.parentSessionId, r._depth, r._parentAgent,
+                            r.model, r.contextTokens, r._projectKey].join(""));
+            }
         }
         return parts.join("");
     }
@@ -340,27 +368,151 @@ Item {
         return "…/" + parts.slice(-2).join("/");
     }
 
+    // ── PROJECT ANCHORING (mirrors pkgs/aoide/src/graph/model.rs) ────────────────
+    // The anchoring project for `cwd`: the LONGEST matching project root wins
+    // (so a nested project anchors to the deeper root), where a match is
+    // path-component-aware — `cwd === root` or `cwd.startsWith(root + "/")` —
+    // with a trailing "/" trimmed off multi-char roots before the compare. A
+    // faithful port of `cwd_under`/`anchor_for` (model.rs ~lines 222-240):
+    // same conditional trim for the match test, same UNconditional trim for
+    // the tie-break length (mirrors Rust's own asymmetry there). Sessions
+    // under no project root return null (unanchored).
+    function anchorProject(cwd) {
+        if (!cwd) return null;
+        var best = null, bestLen = -1;
+        for (var i = 0; i < projects.length; i++) {
+            var p = projects[i];
+            var root = p.path || "";
+            var matchRoot = (root.length > 1) ? root.replace(/\/+$/, "") : root;
+            var under = (cwd === matchRoot) || (cwd.indexOf(matchRoot + "/") === 0);
+            if (!under) continue;
+            var tieLen = root.replace(/\/+$/, "").length;   // unconditional trim (matches Rust's max_by_key key)
+            if (tieLen > bestLen) { best = p; bestLen = tieLen; }
+        }
+        return best;
+    }
+
+    // ── PROJECT GROUPING ──────────────────────────────────────────────────────
+    // Buckets the beamed tree (computeVisible()'s flat roots+children array,
+    // _depth 0/1) by the project its ROOT anchors to. A depth-1 child
+    // INHERITS its root's bucket rather than being anchored by its own cwd —
+    // subagent records routinely carry no cwd of their own, and splitting a
+    // subtree across groups would sever the beamed-tree nesting the rest of
+    // this file goes to some trouble to preserve. Relies on computeVisible's
+    // walk() ordering: every root's depth-1 descendants are emitted
+    // immediately after it, before the next root, so a single linear pass
+    // (reset the "current" project only at depth 0) is sufficient. Returns
+    // the group keys in render order — alphabetical by project name, with
+    // the unanchored bucket (if non-empty) trailing — plus a key→bucket map.
+    function groupProjects(tree) {
+        var byKey = ({}), order = [];
+        var curKey = "", curName = "";
+        for (var i = 0; i < tree.length; i++) {
+            var r = tree[i];
+            if ((r._depth || 0) === 0) {
+                var proj = anchorProject(r.cwd || "");
+                curKey = proj ? proj.path : unanchoredKey;
+                curName = proj ? proj.name : "";
+            }
+            r._projectKey = curKey;
+            if (!byKey[curKey]) { byKey[curKey] = { name: curName, rows: [] }; order.push(curKey); }
+            byKey[curKey].rows.push(r);
+        }
+        var named = order.filter(function (k) { return k !== unanchoredKey; });
+        named.sort(function (a, b) {
+            var na = (byKey[a].name || "").toLowerCase(), nb = (byKey[b].name || "").toLowerCase();
+            return na < nb ? -1 : (na > nb ? 1 : 0);
+        });
+        if (byKey[unanchoredKey]) named.push(unanchoredKey);
+        return { keys: named, byKey: byKey };
+    }
+
+    // Flattens the grouped buckets into the single ListView model: one
+    // "project-header" row per bucket, then that bucket's "session" rows
+    // (the pre-existing beamed tree, untouched) — omitted while the bucket
+    // is folded, so a collapsed project still shows its header (and thus its
+    // rollup — a folded near-full project keeps flagging itself).
+    function buildVisibleRows(grouped) {
+        var out = [];
+        for (var i = 0; i < grouped.keys.length; i++) {
+            var key = grouped.keys[i];
+            var bucket = grouped.byKey[key];
+            var rollup = notes.ctxRollup(bucket.rows);
+            var live = 0, j;
+            for (j = 0; j < bucket.rows.length; j++) {
+                var st = bucket.rows[j].state;
+                if (isWorking(st) || isAwaiting(st)) live++;
+            }
+            var isUnanchored = key === unanchoredKey;
+            var folded = !!collapsed[key];
+            out.push({
+                _kind: "project-header",
+                _projectKey: key,
+                _label: isUnanchored ? "(unanchored)" : bucket.name,
+                _unanchored: isUnanchored,
+                _collapsed: folded,
+                _live: live,
+                _total: bucket.rows.length,
+                _hasCtx: rollup.any,
+                _maxFill: rollup.maxFill,
+                _sumTok: rollup.sumTok
+            });
+            if (!folded) {
+                for (j = 0; j < bucket.rows.length; j++) {
+                    var rr = bucket.rows[j];
+                    rr._kind = "session";
+                    out.push(rr);
+                }
+            }
+        }
+        return out;
+    }
+
+    // MouseArea target for a project-header row: flips its fold state. The
+    // map is REASSIGNED (never mutated in place) so the property-change
+    // signal fires, then recompute() re-derives visibleRows synchronously —
+    // the same imperative "mutate, then recompute()" shape as every other
+    // roster-affecting action in this file (compare setHover/parseStage).
+    function toggleProject(key) {
+        var c = {};
+        for (var k in collapsed) c[k] = collapsed[k];
+        c[key] = !c[key];
+        collapsed = c;
+        recompute();
+    }
+
     function recompute() {
-        var next = computeVisible();
+        var tree = computeVisible();
         // assign each distinct effective-agent a stable identity slot (order of
         // first appearance), so hueFor() cycles the base16 spread deterministically.
+        // Computed over the FULL tree (fold-independent) so hue assignment never
+        // shuffles just because a project got folded/unfolded.
         var idx = ({}), slot = 0, i;
-        for (i = 0; i < next.length; i++) {
-            var k = effAgent(next[i]);
+        for (i = 0; i < tree.length; i++) {
+            var k = effAgent(tree[i]);
             if (k.length > 0 && idx[k] === undefined) { idx[k] = slot; slot++; }
         }
         agentIndex = idx;
-        emphId = computeEmph(next);
-        var seen = ({}), n = 0;
-        for (i = 0; i < next.length; i++) {
-            var c = next[i].cwd || "?";
-            if (!seen[c]) { seen[c] = true; n++; }
-        }
-        projectCount = n;
+        emphId = computeEmph(tree);
+        sessionCount = tree.length;
+
+        var grouped = groupProjects(tree);
+        var pc = 0;
+        for (i = 0; i < grouped.keys.length; i++)
+            if (grouped.keys[i] !== unanchoredKey) pc++;
+        projectCount = pc;
+
+        var fleet = notes.ctxRollup(tree);
+        fleetHasCtx = fleet.any;
+        fleetMaxFill = fleet.maxFill;
+        fleetSumTok = fleet.sumTok;
+
+        var next = buildVisibleRows(grouped);
         // Only reassign the ListView model when the rendered roster actually
-        // changed. agentIndex/emphId/projectCount above are plain properties whose
-        // re-evaluation does NOT recreate delegates; `visibleRows` is the model, so
-        // holding its reference stable across no-op reloads is what stops the flicker.
+        // changed. agentIndex/emphId/projectCount/sessionCount/fleet* above are
+        // plain properties whose re-evaluation does NOT recreate delegates;
+        // `visibleRows` is the model, so holding its reference stable across
+        // no-op reloads is what stops the flicker.
         var sig = rosterSig(next);
         if (sig !== _rosterSig || visibleRows.length !== next.length) {
             _rosterSig = sig;
@@ -378,7 +530,18 @@ Item {
         }
         recompute();
     }
+    function parseProjects() {
+        try {
+            var t = projStage.text();
+            if (!t || t.trim().length === 0) { projects = []; return; }
+            var o = JSON.parse(t);
+            projects = (o && o.projects) ? o.projects : [];
+        } catch (e) {
+            projects = [];
+        }
+    }
     onSessionsChanged: recompute()
+    onProjectsChanged: recompute()
 
     // the stage file — hot-reloads on change ─────────────────────────────────────
     FileView {
@@ -390,8 +553,19 @@ Item {
         onLoaded: gadget.parseStage()
         onFileChanged: reload()
     }
+    // the project roster — hot-reloads on change, tolerates a missing/empty
+    // file (song/stage/projects.json may not exist yet on a fresh rig).
+    FileView {
+        id: projStage
+        path: gadget.projectsPath
+        watchChanges: true
+        blockLoading: false
+        printErrors: false
+        onLoaded: gadget.parseProjects()
+        onFileChanged: reload()
+    }
     Timer { interval: 1000; running: true; repeat: true; onTriggered: gadget.nowMs = Date.now() }
-    Component.onCompleted: parseStage()
+    Component.onCompleted: { parseStage(); parseProjects(); }
 
     // cast shadow — lifts the stele off any marble wallpaper ─────────────────────
     Rectangle {
@@ -526,10 +700,25 @@ Item {
                 width: parent.width; height: 20
 
                 Text {
+                    // FLEET rollup: the level ABOVE the project header — same
+                    // two numbers (max-fill, token sum) over the ENTIRE roster
+                    // regardless of fold state (a folded project's sessions
+                    // still count here). Uses gadget.sessionCount (the full
+                    // tree, not gadget.visibleRows.length, which now also
+                    // counts project-header rows). The "· ctx …" clause is
+                    // omitted entirely — not rendered as an empty gauge — until
+                    // some session has produced a turn (gadget.fleetHasCtx).
                     id: ffL
                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                    text: "└─┤ " + gadget.visibleRows.length + " session" + (gadget.visibleRows.length === 1 ? "" : "s")
-                          + " · " + gadget.projectCount + " project" + (gadget.projectCount === 1 ? "" : "s") + " ├"
+                    text: "└─┤ " + gadget.sessionCount + " sess"
+                          + " · " + gadget.projectCount + " proj"
+                          + (gadget.fleetHasCtx
+                             ? " · ctx " + notes.ctxBar(gadget.fleetMaxFill, 6) + " "
+                               + Math.round(gadget.fleetMaxFill) + "%"
+                               + (gadget.fleetMaxFill >= notes.ctxUrgentAt ? "!" : "")
+                               + " · " + notes.ctxCompact(gadget.fleetSumTok)
+                             : "")
+                          + " ├"
                     font.family: gadget.faceMono; font.pixelSize: 11
                     color: gadget.withA(notes.paletteFg, 0.8)
                 }
@@ -614,7 +803,30 @@ Item {
                     boundsBehavior: Flickable.StopAtBounds
                     clip: true
 
+                    // Dispatches each row on modelData._kind: a project-header
+                    // row (new) or a plain session row (the pre-existing
+                    // beamed-tree delegate, body unchanged below). Both
+                    // Components are declared as CHILDREN of rowRoot — not
+                    // siblings of the ListView — so their creation context
+                    // chains through rowRoot and modelData stays resolvable
+                    // inside either one (a Loader whose sourceComponent points
+                    // at an externally-declared Component would NOT see the
+                    // per-row modelData/index context properties).
                     delegate: Item {
+                        id: rowRoot
+                        width: roster.width
+                        height: rowLoader.item ? rowLoader.item.height : 0
+
+                        Loader {
+                            id: rowLoader
+                            width: parent.width
+                            sourceComponent: modelData._kind === "project-header"
+                                ? projectHeaderComponent : sessionRowComponent
+                        }
+
+                    Component {
+                        id: sessionRowComponent
+                        Item {
                         id: row
                         width: roster.width
                         // grows to fit name · activity · cwd; a 52 floor keeps the
@@ -638,6 +850,10 @@ Item {
                         readonly property int depth: modelData._depth || 0
                         readonly property bool isChild: depth > 0
                         readonly property int indent: isChild ? 24 : 0
+                        // nests every session row one indent under its project
+                        // header (root or child alike), so the roster reads as
+                        // header, then its own subtree -- not a flat list.
+                        readonly property int groupIndent: 14
                         readonly property bool subagent: gadget.isSubagentRec(modelData)
                         // the MAIN agent — a conductable, non-subagent row (the
                         // top-of-tree Claude session, as opposed to a Task it
@@ -728,7 +944,7 @@ Item {
                         Item {
                             id: beam
                             visible: row.isChild
-                            anchors.left: parent.left; anchors.leftMargin: 18
+                            anchors.left: parent.left; anchors.leftMargin: 18 + row.groupIndent
                             anchors.top: parent.top; anchors.topMargin: 6
                             anchors.bottom: gutter.verticalCenter
                             anchors.bottomMargin: -2
@@ -751,7 +967,7 @@ Item {
                         // the note, hung on a monospace column (pilaster + barline)
                         Item {
                             id: gutter
-                            anchors.left: parent.left; anchors.leftMargin: 12 + row.indent
+                            anchors.left: parent.left; anchors.leftMargin: 12 + row.indent + row.groupIndent
                             anchors.verticalCenter: parent.verticalCenter
                             width: 26; height: parent.height
                             Text {                     // pilaster — tinted by agent identity
@@ -1106,7 +1322,106 @@ Item {
                                     gadget.bridge.focusSession(modelData.sessionId);
                             }
                         }
+                        }   // close: Item { id: row (the session-row delegate body)
+                    }       // close: Component { id: sessionRowComponent
+
+                    // ── PROJECT-HEADER row: ▾/▸ fold glyph · project name ·
+                    // [live/total] badge · the max-fill/token-sum rollup gauge.
+                    // Styled as a course of the same masonry the row ledger
+                    // lines already read as — a deeper marble sub-band closed
+                    // by an accent-toned rule (not the session rows' wireCyan
+                    // ledger, so a header reads apart from a note at a glance)
+                    // — rather than a foreign flat-UI list header.
+                    Component {
+                        id: projectHeaderComponent
+                        Item {
+                            id: hdr
+                            width: roster.width
+                            height: 26
+
+                            readonly property bool folded: modelData._collapsed === true
+                            readonly property bool hasCtx: modelData._hasCtx === true
+                            readonly property real fillPct: modelData._maxFill || 0
+                            readonly property color rollupColor: notes.ctxColor(fillPct, notes.violet)
+
+                            Rectangle {                    // deeper marble sub-band — echoes
+                                                            // the entablature's own band so this
+                                                            // reads as a course of the stele, not
+                                                            // a flat-UI list header; a touch
+                                                            // brighter on hover (the fold target).
+                                anchors.fill: parent
+                                color: gadget.withA(notes.paletteFg, hoverArea.containsMouse ? 0.09 : 0.055)
+                            }
+                            Rectangle {                    // closing rule — accent-toned, distinct
+                                                            // from the session rows' wireCyan ledger
+                                                            // line, so a header reads apart at a glance.
+                                anchors.bottom: parent.bottom
+                                width: parent.width; height: 1
+                                color: gadget.withA(notes.paletteAccent, 0.35)
+                            }
+
+                            Text {                         // fold glyph — ▾ open, ▸ folded
+                                id: foldGlyph
+                                anchors.left: parent.left; anchors.leftMargin: 12
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: hdr.folded ? "▸" : "▾"
+                                font.family: gadget.faceMono; font.pixelSize: 12
+                                color: gadget.withA(notes.paletteAccent, 0.95)
+                            }
+                            Text {                         // project name — serif, matching the
+                                                            // entablature's carved-inscription voice;
+                                                            // the unanchored bucket wears it dimmed
+                                                            // + italic instead of a project's name.
+                                id: projName
+                                anchors.left: foldGlyph.right; anchors.leftMargin: 6
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: modelData._label
+                                font.family: gadget.faceSerif
+                                font.italic: modelData._unanchored === true
+                                font.pixelSize: 13; font.weight: Font.DemiBold
+                                color: modelData._unanchored ? gadget.withA(notes.paletteFg, 0.55) : notes.paletteFg
+                            }
+                            Text {                         // [live] — or [live/total] once they
+                                                            // diverge (a done/idle session sits in
+                                                            // the total but isn't "live").
+                                id: countBadge
+                                anchors.left: projName.right; anchors.leftMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "[" + (modelData._live === modelData._total
+                                             ? modelData._total
+                                             : (modelData._live + "/" + modelData._total)) + "]"
+                                font.family: gadget.faceMono; font.pixelSize: 10
+                                color: gadget.withA(notes.paletteFg, 0.55)
+                            }
+                            Text {                         // ROLLUP — max-fill bar + percent (the
+                                                            // hottest window beneath this header,
+                                                            // urgent past ctxUrgentAt) · raw token
+                                                            // sum, compact. Omitted entirely (not an
+                                                            // empty gauge) until some session in this
+                                                            // project has produced a turn.
+                                id: rollupTag
+                                visible: hdr.hasCtx
+                                anchors.right: parent.right; anchors.rightMargin: 12
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: notes.ctxBar(hdr.fillPct, 6) + " " + Math.round(hdr.fillPct) + "%"
+                                      + (hdr.fillPct >= notes.ctxUrgentAt ? "!" : "")
+                                      + " · " + notes.ctxCompact(modelData._sumTok)
+                                font.family: gadget.faceMono; font.pixelSize: 10
+                                color: hdr.rollupColor
+                            }
+
+                            MouseArea {                    // click anywhere on the header to fold/
+                                                            // unfold — same click-to-act feel as a
+                                                            // session row's click-to-focus.
+                                id: hoverArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: gadget.toggleProject(modelData._projectKey)
+                            }
+                        }
                     }
+                    }   // close: Item { id: rowRoot (the actual ListView delegate)
                 }
             }
         }
