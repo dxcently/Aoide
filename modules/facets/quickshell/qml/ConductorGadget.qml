@@ -364,8 +364,8 @@ Item {
         p = p.replace(/^\/home\/[^/]+/, "~");
         if (p === "~") return "~";
         var parts = p.split("/").filter(function (x) { return x.length; });
-        if (parts.length <= 2) return p;
-        return "…/" + parts.slice(-2).join("/");
+        if (parts.length <= 4) return p;
+        return "…/" + parts.slice(-4).join("/");
     }
 
     // ── PROJECT ANCHORING (mirrors pkgs/aoide/src/graph/model.rs) ────────────────
@@ -1068,136 +1068,6 @@ Item {
                                     }
                                 }
                             }
-                            // TALLY — the row's metadata line, composed into two
-                            // distinct grammars (a shell keeps the third, older
-                            // one). Both separators are drawn from the widget's OWN
-                            // glyph grammar rather than a generic UI arrow — "‖" (a
-                            // musical repeat/parallel bar) reads as the subordinate,
-                            // ECHOING voice a subagent is; "⟐" is the diamond that
-                            // used to sit as the model tag's own prefix, repurposed
-                            // here as the join it was always halfway to being, for
-                            // the PRIMARY (main-agent) line — the two are shape- and
-                            // meaning-distinct at a glance, not just different chars:
-                            //   subagent:   elapsed  model ‖ type       ("‖" joins
-                            //               a subagent's OWN model to its TYPE —
-                            //               general-purpose, Plan, …)
-                            //   main agent: model ⟐ ws                 ("⟐" joins
-                            //               the running model to the workspace it's
-                            //               conducting on — a DIFFERENT glyph than
-                            //               the subagent's, so the two grammars
-                            //               read apart at a glance; elapsed drops
-                            //               out here once a model is known, for the
-                            //               compact read the screenshot called for,
-                            //               but stays as a fallback so the line is
-                            //               never blank before that).
-                            //   shell:      elapsed ⇢ conductor  ws    (unchanged)
-                            // rides UNDER the name so the name line stays a name and
-                            // a state; pinned to the row's right edge the elapsed
-                            // time collided with the wrapped say prose and, on a
-                            // child row, with the kaomoji.
-                            Row {
-                                width: parent.width
-                                spacing: 8
-                                Text {                     // elapsed, tallied in gold — always for
-                                                            // a subagent/shell; a main agent drops it
-                                                            // once its model is known (see the tally
-                                                            // note above), kept meanwhile as a fallback.
-                                    id: elapsedText
-                                    visible: !row.mainAgent || !row.modelKnown
-                                    text: gadget.elapsed(modelData.startedAt)
-                                    font.family: gadget.faceMono; font.pixelSize: 11
-                                    color: row.emph ? notes.paletteHot : notes.paletteAccent
-                                }
-                                Text {                     // the running Claude model, when known —
-                                                            // each session's OWN model (a subagent's
-                                                            // may differ from its parent's).
-                                    id: agentTag
-                                    anchors.baseline: elapsedText.baseline
-                                    visible: row.modelKnown
-                                    text: modelData.model
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: row.idHue
-                                }
-                                Text {                     // CONTEXT-WINDOW METER — bar + percent +
-                                                            // compact count, in the dock's existing
-                                                            // `[▓░]` ASCII-gauge grammar (AoideBar
-                                                            // battBar / MetersGadget barFill). Sits
-                                                            // right after the model tag it describes.
-                                                            // Zero footprint until the session has
-                                                            // produced an assistant turn: this Row
-                                                            // (like the rest of the tally) skips
-                                                            // invisible children entirely, so an
-                                                            // absent contextTokens never reflows the
-                                                            // row — the same effect the sudoBadge/
-                                                            // stateTag slot dance achieves above for
-                                                            // the (anchored, non-Row) name line.
-                                    id: ctxTag
-                                    anchors.baseline: elapsedText.baseline
-                                    visible: (modelData.contextTokens || 0) > 0
-                                    readonly property real pct: notes.ctxPercent(modelData.model, modelData.contextTokens)
-                                    text: notes.ctxBar(pct, 6) + " " + Math.round(pct) + "% · " + notes.ctxCompact(modelData.contextTokens)
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    // song accent (this row's identity hue) → paletteUrgent
-                                    // past ~85%, same threshold/swap as the sudo badge's
-                                    // urgency grammar and MetersGadget's CPU/RAM gauges.
-                                    color: notes.ctxColor(pct, row.idHue)
-                                }
-                                Text {                     // subagent separator — joins the model to
-                                                            // the type tag; only when both are present.
-                                                            // The ano teleia (Greek high dot): a quiet
-                                                            // join, distinct from the main agent's "⟐".
-                                    id: subSep
-                                    anchors.baseline: elapsedText.baseline
-                                    visible: row.subagent && row.modelKnown && row.showType
-                                    text: "·"
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: row.idHue
-                                }
-                                Text {                     // the subagent's TYPE (general-purpose, Plan, …) —
-                                                            // a title took the name line, so a titled subagent
-                                                            // needs it back here, alongside its model.
-                                                            // Title-less subagents already wear their type as
-                                                            // nameText, so this stays hidden then (no double-up).
-                                    id: subagentTypeTag
-                                    anchors.baseline: elapsedText.baseline
-                                    visible: row.showType
-                                    text: modelData.agent
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: row.idHue
-                                }
-                                Text {                     // main-agent separator — joins the model to
-                                                            // the workspace; the diamond that used to
-                                                            // prefix the model tag itself, repurposed
-                                                            // (deliberately a DIFFERENT glyph than the
-                                                            // subagent's "‖" above).
-                                    id: mainSep
-                                    anchors.baseline: elapsedText.baseline
-                                    visible: row.mainAgent && row.modelKnown && row.wsId >= 0
-                                    text: "⟐"
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: row.idHue
-                                }
-                                Text {                     // which agent conducts this shell
-                                    id: condTag
-                                    anchors.baseline: elapsedText.baseline
-                                    visible: row.conductedBy.length > 0
-                                    text: "⇢ " + row.conductedBy
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: row.idHue
-                                }
-                                Text {                     // the Hyprland workspace — plain number tag;
-                                                            // the trailing field for a main agent (after
-                                                            // "⟐") or a shell (after elapsed/conductor).
-                                                            // A subagent has no workspace of its own — its
-                                                            // trailing field is the type tag instead.
-                                    id: wsTag
-                                    anchors.baseline: elapsedText.baseline
-                                    visible: row.wsId >= 0 && !row.subagent
-                                    text: "ws" + row.wsId
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: row.idHue
-                                }
-                            }
                             // ACTIVITY — the current command/tool, tinted like the
                             // state; the "what is it doing" line. Hidden when absent.
                             Text {
@@ -1222,25 +1092,150 @@ Item {
                                 font.pixelSize: 10
                                 color: gadget.withA(notes.paletteFg, 0.55)
                             }
+                            // TALLY + MOOD — the row's metadata line, composed into
+                            // two distinct grammars (a shell keeps the third, older
+                            // one), sharing the line with the animated mood face.
+                            // Both separators are drawn from the widget's OWN glyph
+                            // grammar rather than a generic UI arrow — "·" (the ano
+                            // teleia) reads as the subordinate, ECHOING voice a
+                            // subagent is; "⟐" is the diamond that used to sit as
+                            // the model tag's own prefix, repurposed here as the
+                            // join it was always halfway to being, for the PRIMARY
+                            // (main-agent) line — the two are shape- and meaning-
+                            // distinct at a glance, not just different chars:
+                            //   subagent:   elapsed  model · type       ("·" joins
+                            //               a subagent's OWN model to its TYPE —
+                            //               general-purpose, Plan, …)
+                            //   main agent: model ⟐ ws                 ("⟐" joins
+                            //               the running model to the workspace it's
+                            //               conducting on — a DIFFERENT glyph than
+                            //               the subagent's, so the two grammars
+                            //               read apart at a glance; elapsed drops
+                            //               out here once a model is known, for the
+                            //               compact read the screenshot called for,
+                            //               but stays as a fallback so the line is
+                            //               never blank before that).
+                            //   shell:      elapsed ⇢ conductor  ws    (unchanged)
+                            // rides directly above the cwd line, paired with the
+                            // mood face on its right (the face's spot is unchanged —
+                            // it just now shares the line with its own caption
+                            // instead of sitting astride the cwd path). The meta
+                            // tags pack a Row so an invisible tag never leaves a gap.
                             Item {
-                                width: parent.width; height: cwdText.implicitHeight
-                                Text {
-                                    id: cwdText
+                                width: parent.width
+                                height: Math.max(metaRow.implicitHeight, kao.implicitHeight)
+                                Row {
+                                    id: metaRow
                                     anchors.left: parent.left
                                     anchors.right: kao.left; anchors.rightMargin: 6
-                                    elide: Text.ElideMiddle
-                                    text: gadget.shortCwd(modelData.cwd)
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: gadget.withA(notes.holoBlue, 0.95)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: 8
+                                    Text {                     // elapsed, tallied in gold — always for
+                                                                // a subagent/shell; a main agent drops it
+                                                                // once its model is known (see the tally
+                                                                // note above), kept meanwhile as a fallback.
+                                        id: elapsedText
+                                        visible: !row.mainAgent || !row.modelKnown
+                                        text: gadget.elapsed(modelData.startedAt)
+                                        font.family: gadget.faceMono; font.pixelSize: 11
+                                        color: row.emph ? notes.paletteHot : notes.paletteAccent
+                                    }
+                                    Text {                     // the running Claude model, when known —
+                                                                // each session's OWN model (a subagent's
+                                                                // may differ from its parent's).
+                                        id: agentTag
+                                        anchors.baseline: elapsedText.baseline
+                                        visible: row.modelKnown
+                                        text: modelData.model
+                                        font.family: gadget.faceMono; font.pixelSize: 10
+                                        color: row.idHue
+                                    }
+                                    Text {                     // CONTEXT-WINDOW METER — bar + percent +
+                                                                // compact count, in the dock's existing
+                                                                // `[▓░]` ASCII-gauge grammar (AoideBar
+                                                                // battBar / MetersGadget barFill). Sits
+                                                                // right after the model tag it describes.
+                                                                // Zero footprint until the session has
+                                                                // produced an assistant turn: this Row
+                                                                // (like the rest of the tally) skips
+                                                                // invisible children entirely, so an
+                                                                // absent contextTokens never reflows the
+                                                                // row — the same effect the sudoBadge/
+                                                                // stateTag slot dance achieves above for
+                                                                // the (anchored, non-Row) name line.
+                                        id: ctxTag
+                                        anchors.baseline: elapsedText.baseline
+                                        visible: (modelData.contextTokens || 0) > 0
+                                        readonly property real pct: notes.ctxPercent(modelData.model, modelData.contextTokens)
+                                        text: notes.ctxBar(pct, 6) + " " + Math.round(pct) + "% · " + notes.ctxCompact(modelData.contextTokens)
+                                        font.family: gadget.faceMono; font.pixelSize: 10
+                                        // song accent (this row's identity hue) → paletteUrgent
+                                        // past ~85%, same threshold/swap as the sudo badge's
+                                        // urgency grammar and MetersGadget's CPU/RAM gauges.
+                                        color: notes.ctxColor(pct, row.idHue)
+                                    }
+                                    Text {                     // subagent separator — joins the model to
+                                                                // the type tag; only when both are present.
+                                                                // The ano teleia (Greek high dot): a quiet
+                                                                // join, distinct from the main agent's "⟐".
+                                        id: subSep
+                                        anchors.baseline: elapsedText.baseline
+                                        visible: row.subagent && row.modelKnown && row.showType
+                                        text: "·"
+                                        font.family: gadget.faceMono; font.pixelSize: 10
+                                        color: row.idHue
+                                    }
+                                    Text {                     // the subagent's TYPE (general-purpose, Plan, …) —
+                                                                // a title took the name line, so a titled subagent
+                                                                // needs it back here, alongside its model.
+                                                                // Title-less subagents already wear their type as
+                                                                // nameText, so this stays hidden then (no double-up).
+                                        id: subagentTypeTag
+                                        anchors.baseline: elapsedText.baseline
+                                        visible: row.showType
+                                        text: modelData.agent
+                                        font.family: gadget.faceMono; font.pixelSize: 10
+                                        color: row.idHue
+                                    }
+                                    Text {                     // main-agent separator — joins the model to
+                                                                // the workspace; the diamond that used to
+                                                                // prefix the model tag itself, repurposed
+                                                                // (deliberately a DIFFERENT glyph than the
+                                                                // subagent's "·" above).
+                                        id: mainSep
+                                        anchors.baseline: elapsedText.baseline
+                                        visible: row.mainAgent && row.modelKnown && row.wsId >= 0
+                                        text: "⟐"
+                                        font.family: gadget.faceMono; font.pixelSize: 10
+                                        color: row.idHue
+                                    }
+                                    Text {                     // which agent conducts this shell
+                                        id: condTag
+                                        anchors.baseline: elapsedText.baseline
+                                        visible: row.conductedBy.length > 0
+                                        text: "⇢ " + row.conductedBy
+                                        font.family: gadget.faceMono; font.pixelSize: 10
+                                        color: row.idHue
+                                    }
+                                    Text {                     // the Hyprland workspace — plain number tag,
+                                                                // mirroring TerminalsGadget's ws tag idiom
+                                                                // (same guard, same withA(hue, 0.85) tint).
+                                        id: wsTag
+                                        anchors.baseline: elapsedText.baseline
+                                        visible: row.wsId >= 0
+                                        text: "ws" + row.wsId
+                                        font.family: gadget.faceMono; font.pixelSize: 10
+                                        color: gadget.withA(row.idHue, 0.85)
+                                    }
                                 }
                                 Text {
                                     id: kao                        // the mood face
                                     anchors.right: parent.right
-                                    anchors.verticalCenter: cwdText.verticalCenter
+                                    anchors.verticalCenter: parent.verticalCenter
                                     // A FIXED box, right-aligned: the frames of a
                                     // set differ in width on purpose (that width
                                     // change is the movement), and an auto-sized
-                                    // Text would drag cwdText's elide around with
+                                    // Text would drag metaRow's anchor around with
                                     // it every frame.
                                     width: 96
                                     horizontalAlignment: Text.AlignRight
@@ -1291,6 +1286,17 @@ Item {
                                         onTriggered: kao.frame = (kao.frame + 1) % kao.frames.length
                                     }
                                 }
+                            }
+                            // the DIR — the session's working directory, as subtext.
+                            // Alone on its own line now that the meta tags and the
+                            // mood face share the line above it.
+                            Text {
+                                id: cwdText
+                                width: parent.width
+                                elide: Text.ElideMiddle
+                                text: gadget.shortCwd(modelData.cwd)
+                                font.family: gadget.faceMono; font.pixelSize: 10
+                                color: gadget.withA(notes.holoBlue, 0.95)
                             }
                         }
 

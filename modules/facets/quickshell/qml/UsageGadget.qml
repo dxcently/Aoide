@@ -77,6 +77,17 @@ Item {
     // gates the ENTIRE gadget's visibility (see AoidePanel) so a host without the
     // poller enabled shows nothing at all.
     property var usage: ({})
+    // TICK HOOK — `usage` is reassigned to a FRESH object (JSON.parse always
+    // allocates a new one) at the end of every parseUsage() call, and
+    // parseUsage() only ever runs from usageFile.onLoaded (itself fired by
+    // FileView's watchChanges → onFileChanged → reload()) or
+    // Component.onCompleted's initial read. So onUsageChanged fires exactly
+    // once per aoide poller write (or parse attempt) — never on an idle
+    // frame — which makes it the one signal that means "aoide just pushed
+    // fresh data", as opposed to e.g. the 30s nowMs countdown timer below,
+    // which fires on a clock regardless of whether the file changed at all.
+    // clef (the ❋ spark, declared further down) listens here for its tick.
+    onUsageChanged: clef.tick()
     readonly property bool hasData: !!(usage && (usage.local || usage.live))
 
     // the live block, and its ok flag — every field below is guarded off THIS,
@@ -228,6 +239,45 @@ Item {
                     anchors.verticalCenterOffset: -2
                     text: "❋"; font.family: gadget.faceSymbol; font.pixelSize: 26   // U+274B — the Claude mark
                     color: gadget.signature
+                    transformOrigin: Item.Center
+                    rotation: 0
+                    scale: 1.0
+
+                    // TICK — a quick full spin + scale pulse, fired once per
+                    // aoide poller write (see gadget.onUsageChanged above):
+                    // the spark's MOTION is a live-update heartbeat, distinct
+                    // from the slow idle shimmer below which just keeps it
+                    // from reading as inert between pushes. from/to are set
+                    // imperatively right before each restart (rather than
+                    // bound to clef.rotation) so a tick mid-spin extends
+                    // smoothly instead of snapping back to 0.
+                    function tick() {
+                        tickSpin.from = clef.rotation
+                        tickSpin.to = clef.rotation + 360
+                        tickSpin.restart()
+                        tickPulse.restart()
+                    }
+                    RotationAnimation {
+                        id: tickSpin
+                        target: clef; property: "rotation"
+                        duration: 620
+                        easing.type: Easing.OutCubic
+                    }
+                    SequentialAnimation {
+                        id: tickPulse
+                        NumberAnimation { target: clef; property: "scale"; to: 1.12; duration: 260; easing.type: Easing.OutCubic }
+                        NumberAnimation { target: clef; property: "scale"; to: 1.0;  duration: 340; easing.type: Easing.InCubic }
+                    }
+
+                    // idle — a slow, subtle opacity shimmer so the spark
+                    // never sits fully static between pushes; deliberately
+                    // much quieter than the tick, so the tick still reads
+                    // as the distinct "just updated" event.
+                    SequentialAnimation on opacity {
+                        loops: Animation.Infinite
+                        NumberAnimation { to: 0.72; duration: 1800; easing.type: Easing.InOutSine }
+                        NumberAnimation { to: 1.0;  duration: 1800; easing.type: Easing.InOutSine }
+                    }
                 }
                 Text {
                     anchors.left: clef.right; anchors.leftMargin: 8

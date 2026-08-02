@@ -162,8 +162,8 @@ Item {
         p = p.replace(/^\/home\/[^/]+/, "~");
         if (p === "~") return "~";
         var parts = p.split("/").filter(function (x) { return x.length; });
-        if (parts.length <= 2) return p;
-        return "…/" + parts.slice(-2).join("/");
+        if (parts.length <= 4) return p;
+        return "…/" + parts.slice(-4).join("/");
     }
     // a shell prompt — the terminal reads its own cwd (or, lacking one, its window
     // title) back. Plain untracked terminals often have no stage cwd, so the live
@@ -762,52 +762,6 @@ Item {
                                     }
                                 }
                             }
-                            // TALLY — elapsed since the terminal opened, and the
-                            // Hyprland workspace it sits on. Both ride UNDER the
-                            // process line: pinned to the row's right edge they
-                            // collided with the wrapped say prose and the kaomoji.
-                            Row {
-                                width: parent.width
-                                spacing: 8
-                                Text {                     // elapsed, tallied in aegean
-                                    id: elapsedText
-                                    text: gadget.elapsed(modelData.startedAt)
-                                    font.family: gadget.faceMono; font.pixelSize: 11
-                                    color: row.emph ? notes.paletteHot : gadget.sig
-                                }
-                                Text {                     // the running Claude model, when known
-                                    anchors.baseline: elapsedText.baseline
-                                    visible: (modelData.model || "").length > 0
-                                    text: modelData.model || ""
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: gadget.withA(gadget.sig, 0.85)
-                                }
-                                Text {                     // CONTEXT-WINDOW METER — bar + percent +
-                                                            // compact count, in the dock's existing
-                                                            // `[▓░]` ASCII-gauge grammar (AoideBar
-                                                            // battBar / MetersGadget barFill). Zero
-                                                            // footprint until an assistant turn has
-                                                            // produced a usage block: this Row skips
-                                                            // invisible children entirely, same as
-                                                            // the model tag right above it.
-                                    id: ctxTag
-                                    anchors.baseline: elapsedText.baseline
-                                    visible: (modelData.contextTokens || 0) > 0
-                                    readonly property real pct: notes.ctxPercent(modelData.model, modelData.contextTokens)
-                                    text: notes.ctxBar(pct, 6) + " " + Math.round(pct) + "% · " + notes.ctxCompact(modelData.contextTokens)
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    // song accent → paletteUrgent past ~85%, same threshold/
-                                    // swap as the sudo badge's urgency grammar.
-                                    color: notes.ctxColor(pct, gadget.sig)
-                                }
-                                Text {                     // the Hyprland workspace — plain number tag
-                                    anchors.baseline: elapsedText.baseline
-                                    visible: row.wsId >= 0
-                                    text: "ws" + row.wsId
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: gadget.withA(gadget.sig, 0.85)
-                                }
-                            }
                             // SAY — a claude terminal's latest words, tail-read from
                             // its transcript by the bridge; dim quoted prose, up to
                             // two lines. Hidden for plain ttys / a silent agent.
@@ -822,27 +776,70 @@ Item {
                                 font.pixelSize: 10
                                 color: gadget.withA(notes.paletteFg, 0.55)
                             }
-                            // the DIR — the terminal's working directory, as subtext
-                            // (falls back to the window title for a cwd-less tty).
+                            // TALLY + MOOD — elapsed since the terminal opened, the
+                            // running model, the context-window meter, and the
+                            // Hyprland workspace it sits on, ALL sharing one line
+                            // with the animated mood face: the meta tags pack the
+                            // left (a Row so an invisible tag never leaves a gap),
+                            // the kaomoji stays pinned to the row's right edge —
+                            // same spot it always occupied, now beside its own
+                            // caption instead of astride the cwd path.
                             Item {
-                                width: parent.width; height: cwdText.implicitHeight
-                                Text {
-                                    id: cwdText
+                                width: parent.width
+                                height: Math.max(metaRow.implicitHeight, kao.implicitHeight)
+                                Row {
+                                    id: metaRow
                                     anchors.left: parent.left
                                     anchors.right: kao.left; anchors.rightMargin: 6
-                                    elide: Text.ElideMiddle
-                                    text: gadget.shortCwd(modelData.cwd) || (modelData.title || "")
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: gadget.withA(gadget.sig, 0.95)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: 8
+                                    Text {                     // elapsed, tallied in aegean
+                                        id: elapsedText
+                                        text: gadget.elapsed(modelData.startedAt)
+                                        font.family: gadget.faceMono; font.pixelSize: 11
+                                        color: row.emph ? notes.paletteHot : gadget.sig
+                                    }
+                                    Text {                     // the running Claude model, when known
+                                        anchors.baseline: elapsedText.baseline
+                                        visible: (modelData.model || "").length > 0
+                                        text: modelData.model || ""
+                                        font.family: gadget.faceMono; font.pixelSize: 10
+                                        color: gadget.withA(gadget.sig, 0.85)
+                                    }
+                                    Text {                     // CONTEXT-WINDOW METER — bar + percent +
+                                                                // compact count, in the dock's existing
+                                                                // `[▓░]` ASCII-gauge grammar (AoideBar
+                                                                // battBar / MetersGadget barFill). Zero
+                                                                // footprint until an assistant turn has
+                                                                // produced a usage block: this Row skips
+                                                                // invisible children entirely, same as
+                                                                // the model tag right above it.
+                                        id: ctxTag
+                                        anchors.baseline: elapsedText.baseline
+                                        visible: (modelData.contextTokens || 0) > 0
+                                        readonly property real pct: notes.ctxPercent(modelData.model, modelData.contextTokens)
+                                        text: notes.ctxBar(pct, 6) + " " + Math.round(pct) + "% · " + notes.ctxCompact(modelData.contextTokens)
+                                        font.family: gadget.faceMono; font.pixelSize: 10
+                                        // song accent → paletteUrgent past ~85%, same threshold/
+                                        // swap as the sudo badge's urgency grammar.
+                                        color: notes.ctxColor(pct, gadget.sig)
+                                    }
+                                    Text {                     // the Hyprland workspace — plain number tag
+                                        anchors.baseline: elapsedText.baseline
+                                        visible: row.wsId >= 0
+                                        text: "ws" + row.wsId
+                                        font.family: gadget.faceMono; font.pixelSize: 10
+                                        color: gadget.withA(gadget.sig, 0.85)
+                                    }
                                 }
                                 Text {
                                     id: kao                        // the mood face
                                     anchors.right: parent.right
-                                    anchors.verticalCenter: cwdText.verticalCenter
+                                    anchors.verticalCenter: parent.verticalCenter
                                     // A FIXED box, right-aligned: the frames of a
                                     // set differ in width on purpose (that width
                                     // change is the movement), and an auto-sized
-                                    // Text would drag cwdText's elide around with
+                                    // Text would drag metaRow's anchor around with
                                     // it every frame.
                                     width: 96
                                     horizontalAlignment: Text.AlignRight
@@ -880,6 +877,18 @@ Item {
                                         onTriggered: kao.frame = (kao.frame + 1) % kao.frames.length
                                     }
                                 }
+                            }
+                            // the DIR — the terminal's working directory, as subtext
+                            // (falls back to the window title for a cwd-less tty).
+                            // Alone on its own line now that the meta tags and the
+                            // kaomoji share the line above it.
+                            Text {
+                                id: cwdText
+                                width: parent.width
+                                elide: Text.ElideMiddle
+                                text: gadget.shortCwd(modelData.cwd) || (modelData.title || "")
+                                font.family: gadget.faceMono; font.pixelSize: 10
+                                color: gadget.withA(gadget.sig, 0.95)
                             }
                         }
 
