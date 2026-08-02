@@ -35,9 +35,10 @@
 // pinning (shown) ignores the grace and holds it out until toggled shut.
 //
 // ── Scroll, not pagination ──────────────────────────────────────────────────
-// The four gadgets stack in a Flickable in their NATIVE sizes (Conductor 360×520,
-// Terminals 360×520, Meters 340×268, Power 340×268 — the compact two centred in
-// the 360 column). The body is capped at ≤92% of the screen and the stack scrolls
+// The gadgets stack in a Flickable at ONE shared width (root.gadgetW = 360) so the
+// column is flush — Conductor 360×520, Usage 360×content, Terminals 360×520,
+// Meters 360×268, Power 360×268, all sharing a single left edge (the compact two
+// no longer centred/inset). The body is capped at ≤92% of the screen and scrolls
 // past it, with a slim gold scrollbar in the inner gutter and a "▽ more" hint that
 // fades at the end — a visible affordance that there is more below the fold.
 // Conductor/Terminals declare `bridge` + `shared` and get them; Meters/Power
@@ -206,6 +207,11 @@ PanelWindow {
     readonly property real panelH: Math.min(root.maxPanelH, 960)   // ≤ 92% of the output
 
     readonly property int innerW: 360        // the gadgets' native column width
+    // ── ONE width source for every dock gadget ──────────────────────────────
+    // All five steles in the stack take exactly this width so the column reads
+    // flush — no 340-vs-360 stagger, one shared left edge. (== innerW so a gadget
+    // set to gadgetW fills the flick column edge-to-edge.)
+    readonly property real gadgetW: 360
     readonly property int spineW: 16         // the carved inner-edge spine
     readonly property int striationW: 26     // the outer fore-edge (page striations)
     readonly property int scrollGutter: 12   // the slim scrollbar's lane
@@ -448,53 +454,55 @@ PanelWindow {
                         width: flick.width
                         spacing: 16
 
-                        // Conductor + Terminals — the tall rosters, native 360×520,
-                        // wired with bridge + shared (which they declare).
+                        // ORDER: Conductor → Usage → Terminals → Meters → Power.
+                        // Every gadget takes root.gadgetW so the column is flush —
+                        // one shared left edge, no 340-vs-360 stagger.
+
+                        // Conductor — the tall session roster, native height 520,
+                        // wired with bridge + shared (which it declares).
                         ConductorGadget {
-                            width: 360; height: 520
-                            notes: root.notes
-                            bridge: root.bridge
-                            shared: root.shared
-                        }
-                        TerminalsGadget {
-                            width: 360; height: 520
+                            width: root.gadgetW; height: 520
                             notes: root.notes
                             bridge: root.bridge
                             shared: root.shared
                         }
 
-                        // Meters + Power — the compact steles, native 340×268,
-                        // centred in the column; notes ONLY (declaring an undeclared
-                        // prop is an error, so no bridge/shared here).
-                        Item {
-                            width: stack.width; height: 268
-                            MetersGadget {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                width: 340; height: 268
-                                notes: root.notes
-                            }
-                        }
-                        Item {
-                            width: stack.width; height: 268
-                            PowerVitalsGadget {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                width: 340; height: 268
-                                notes: root.notes
-                            }
-                        }
-
-                        // Usage — the claude.ai ledger stele, content-driven
-                        // height (short while the live fetch is a stub). Visible
-                        // ONLY once state/usage.json exists (hasData), so a host
-                        // without `aoide usage enable` shows nothing; an invisible
-                        // child is excluded from the Column layout, so it collapses
-                        // to zero footprint rather than leaving a gap.
+                        // Usage — the claude.ai ledger stele, sits DIRECTLY under
+                        // the Conductor. Content-driven height (short while the live
+                        // fetch is a stub). Visible ONLY once state/usage.json exists
+                        // (hasData), so a host without `aoide usage enable` shows
+                        // nothing; an invisible Column child is excluded from the
+                        // layout, so it collapses to zero footprint (no gap) rather
+                        // than leaving a hole between Conductor and Terminals.
                         UsageGadget {
                             id: usageGadget
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            width: 340
+                            width: root.gadgetW
                             notes: root.notes
                             visible: hasData
+                        }
+
+                        // Terminals — the tall shells roster, native height 520,
+                        // wired with bridge + shared (which it declares).
+                        TerminalsGadget {
+                            width: root.gadgetW; height: 520
+                            notes: root.notes
+                            bridge: root.bridge
+                            shared: root.shared
+                        }
+
+                        // Meters + Power — the compact steles, native height 268;
+                        // notes ONLY (declaring an undeclared prop is an error, so no
+                        // bridge/shared here). No centring wrapper anymore — they take
+                        // root.gadgetW directly and share the column's left edge with
+                        // the others. Their frames anchors.fill, so the wider 360
+                        // width just fills.
+                        MetersGadget {
+                            width: root.gadgetW; height: 268
+                            notes: root.notes
+                        }
+                        PowerVitalsGadget {
+                            width: root.gadgetW; height: 268
+                            notes: root.notes
                         }
                     }
                 }

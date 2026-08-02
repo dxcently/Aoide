@@ -11,18 +11,21 @@ import Quickshell.Io
 // `aoide usage enable` (which starts the poller). Fifth of the pantheon; it
 // wears the shared marble-stele grammar but stands in its OWN order and hue:
 //
-//   · ORDER      — a LEDGER stele. Its signature is AMBER (base09): the clef,
-//                  the inset keyline, the box-drawing frame and the frieze run
-//                  amber, where the Conductor ran gold, the Meters teal, the
-//                  Power murex and the Terminals aegean — plainly its own
-//                  building. Its frieze is a BEAD-AND-REEL astragal (beads
-//                  alternating with paired reels) — a counting-off ornament,
-//                  fitting a meter of consumption; distinct from the Conductor's
-//                  meander, the Meters' triglyph, the Power's egg-and-dart.
-//   · MUSIC      — the SEGNO 𝄋 ("the sign") crowns it: usage runs in cycles
-//                  that return to their mark. A gold 𝄂 closes the score.
+//   · ORDER      — a LEDGER stele, re-skinned to read as CLAUDE. Its signature is
+//                  base09 — in the light sonata scheme a CLAY / kiln-fired orange
+//                  (#c06a35), the palette's warmest, most Claude-coral note: the
+//                  spark, the inset keyline, the box-drawing frame and the frieze
+//                  all run clay, where the Conductor ran gold, the Meters teal, the
+//                  Power murex and the Terminals aegean — plainly its own building.
+//                  Its frieze is a BEAD-AND-REEL astragal (beads alternating with
+//                  paired reels) — a counting-off ornament, fitting a meter of
+//                  consumption; distinct from the Conductor's meander, the Meters'
+//                  triglyph, the Power's egg-and-dart.
+//   · MUSIC      — the CLAUDE SPARK ❋ (U+274B, a rayed sunburst — the Anthropic
+//                  mark) crowns it, in place of the old segno. A gold 𝄂 closes the
+//                  score.
 //   · TERMINAL   — box-drawing frames the panel; each cap is the dock's shared
-//                  [▓▓░░] shade-glyph gauge (DrachmaState.ctxBar), tinted amber
+//                  [▓▓░░] shade-glyph gauge (DrachmaState.ctxBar), tinted clay
 //                  and swung to terracotta past 85% (ctxColor) like every other
 //                  meter in the house.
 //
@@ -40,17 +43,23 @@ Item {
     required property var notes            // palette roles
     property string usagePath: "/home/khoa/Aoide/state/usage.json"
 
-    implicitWidth: 340
+    implicitWidth: 360   // fallback only; the dock stack sets width = root.gadgetW (360)
     // content-driven height: the frame hugs whatever the sections need, so the
     // degraded (live-stub) state is a short panel, not an empty box.
     implicitHeight: body.implicitHeight + 26
 
     // type voices ──────────────────────────────────────────────────────────────
-    readonly property string faceSerif: "Noto Serif"                // carved marble
-    readonly property string faceMono:  "JetBrainsMono Nerd Font"   // the terminal
-    readonly property string faceMusic: "Noto Music"                // notation
+    readonly property string faceSerif:  "Noto Serif"               // carved marble
+    readonly property string faceMono:   "JetBrainsMono Nerd Font"  // the terminal
+    readonly property string faceMusic:  "Noto Music"               // notation
+    readonly property string faceSymbol: "Noto Sans Symbols 2"      // the Claude spark ❋
 
-    // this temple's signature accent — AMBER (base09), its own among the pantheon
+    // this temple's signature accent — base09, its own among the pantheon. In the
+    // LIGHT sonata scheme base09 resolves to #c06a35, a "clay / kiln-fired orange":
+    // already the palette's warmest, most Claude-coral note that does NOT collide
+    // with urgent (base08 #b0472f terracotta, which ctxColor swings to past 85%).
+    // So the Claude re-skin stays palette-driven on base09 — no off-palette coral.
+    // (A literal Claude clay ≈ #d97757 is noted for the vision-check, not applied.)
     readonly property color signature: notes.base09
 
     readonly property int cells: 14
@@ -134,7 +143,7 @@ Item {
         border.color: notes.paletteFg
         border.width: 2
 
-        Rectangle {                                   // inset keyline — AMBER (Ledger)
+        Rectangle {                                   // inset keyline — CLAY (Claude)
             anchors.fill: parent; anchors.margins: 4
             radius: 0; color: "transparent"
             border.color: gadget.signature; border.width: 1
@@ -198,7 +207,7 @@ Item {
             anchors.margins: 13
             spacing: 8
 
-            // ── ENTABLATURE: segno · CLAUDE · [ claude.ai ] ──────────────────────
+            // ── ENTABLATURE: Claude spark · CLAUDE · [ claude.ai ] ───────────────
             Item {
                 id: head
                 width: parent.width
@@ -208,12 +217,12 @@ Item {
                     anchors.fill: parent; anchors.bottomMargin: 5
                     color: gadget.withA(notes.paletteFg, 0.05)
                 }
-                Text {
-                    id: clef
+                Text {                                // the Claude spark — a rayed
+                    id: clef                          // sunburst, crowning the stele
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
-                    anchors.verticalCenterOffset: -3
-                    text: "𝄋"; font.family: gadget.faceMusic; font.pixelSize: 30   // segno — "the sign"
+                    anchors.verticalCenterOffset: -2
+                    text: "❋"; font.family: gadget.faceSymbol; font.pixelSize: 26   // U+274B — the Claude mark
                     color: gadget.signature
                 }
                 Text {
@@ -233,7 +242,7 @@ Item {
                 }
             }
 
-            // ── bead-and-reel astragal frieze, in amber ──────────────────────────
+            // ── bead-and-reel astragal frieze, in clay ──────────────────────────
             Canvas {
                 id: frieze
                 width: parent.width; height: 13
