@@ -353,16 +353,35 @@ derived from `$AOIDE_USER`/`$HOME`. Written by `aoide usage` (`aoide.usage.*`,
 The `local` block is a rollup computed straight off this machine's own Claude
 Code transcripts (`~/.claude/projects/**/*.jsonl`) — no network, no
 credentials, an ESTIMATE (approximate pricing) for THIS machine only, never a
-billing source of truth. The `live` block is a stub in v0 (`ok:false` with a
-reason) — a later task wires the claude.ai account-usage fetch into it and
-flips `ok:true` on success. Readers must tolerate `live.ok == false` today and
-both forms going forward.
+billing source of truth.
+
+The `live` block is now a **REAL fetch** (was a stub in the first cut):
+`aoide usage` reads the consumer OAuth token from `~/.claude/.credentials.json`
+(`.claudeAiOauth.accessToken`) and calls Claude Code's own account-usage
+endpoint. **The source is UNOFFICIAL / ToS-gray** (an undocumented endpoint;
+personal, read-only, this account only), so the fetch is best-effort and
+**degrades to `ok:false` + a short tokenless reason** on ANY failure (no
+credentials, an "authorized for Claude Code only" rejection, a transport
+error, a non-200, or an unparseable body). The token is never logged, printed,
+or written into `state/usage.json` or any error string. Readers must still
+tolerate `live.ok == false` and must guard every sub-field: on `ok:true` the
+block carries the optional `fiveHour` / `sevenDay` / `sevenDayOpus` /
+`sevenDaySonnet` (each `{utilization, resetsAt}`) and `extraUsage`
+(`{isEnabled, monthlyLimit, usedCredits}`); on `ok:false` it is just
+`{ok:false, error}` (shape-compatible with the original stub).
 
 ```json
 {
   "schemaVersion": "0",
   "fetchedAt": "2026-08-01T12:00:00Z",
-  "live": { "ok": false, "error": "live fetch not wired yet" },
+  "live": {
+    "ok": true,
+    "fiveHour":       { "utilization": 42.5, "resetsAt": "2026-08-01T18:00:00Z" },
+    "sevenDay":       { "utilization": 12.0, "resetsAt": "2026-08-07T00:00:00Z" },
+    "sevenDayOpus":   { "utilization": 5.0,  "resetsAt": "2026-08-07T00:00:00Z" },
+    "sevenDaySonnet": { "utilization": 7.0,  "resetsAt": "2026-08-07T00:00:00Z" },
+    "extraUsage":     { "isEnabled": true, "monthlyLimit": 100.0, "usedCredits": 3.5 }
+  },
   "local": {
     "note": "local estimate, this machine only",
     "today": { "tokens": 1200000, "costUsd": 4.10 },
@@ -370,6 +389,10 @@ both forms going forward.
   }
 }
 ```
+
+When the live fetch fails (the common case off a personal box), the `live`
+block degrades to, e.g., `{ "ok": false, "error": "unauthorized (consumer
+OAuth restricted to Claude Code)" }` and the widget falls back to `local`.
 
 ---
 
