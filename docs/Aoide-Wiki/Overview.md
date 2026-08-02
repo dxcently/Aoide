@@ -34,6 +34,7 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 - [[Governance]] — the rebuild gate (polkit pattern), the single audit log, and the mutation policy encoded in radial distance from the nucleus
 - [[Rebuild-Gate]] — how agents rebuild: the default propose-then-human-`switch` path, and the opt-in `aoide.rebuild` passwordless-narrow polkit capability
 - [[Wiki-Protocol]] — the shipped protocol (Mneme/Melete-owned) that gives each project a standalone wiki in a shared shape; Aoide's own wiki is the self-managed exception; default location is the project's repo
+- [[Package-Layout]] — target blueprint (not yet built): splitting `pkgs/aoide` into pi-style single-charter crates (protocol, conduct, server, client, storage, agent the steward, song, management, evals, conductor, cli), the per-crate charter, the steward's canon + self-audit design, and the phased migration
 
 ## Entities
 

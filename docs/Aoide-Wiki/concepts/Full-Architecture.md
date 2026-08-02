@@ -344,7 +344,9 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 │   └── facets/      quickshell · compositor · stylix          ← render surfaces (drachma-only)
 ├── hosts/           common/ + yomi-strix/ (flags + the aoide.song selector; a real
 │                    hardware profile, switched live and running as the daily desktop)
-├── pkgs/            aoide/ (Rust: aoide + aoided) · drachma/ (Node: drachma)
+├── pkgs/            aoide/ (Rust: aoide + aoided; one crate today — a pi-
+│                    style single-charter crate split is a target blueprint,
+│                    not yet built, see [[Package-Layout]]) · drachma/ (Node)
 ├── song/            songbook/{default,sonata}/ — rice.nix · drachma.json ·
 │                    palette/ · sounds/ · icons/ · widgets/ · design/ (per song);
 │                    covers/ — shared wallpaper library, referenced by rice.nix;
@@ -369,6 +371,7 @@ headless boot of the assembled stack) fail eval on violation.
 
 - [[Overview]]
 - [[Codebase]]
+- [[Package-Layout]]
 - [[Snowflake-Anatomy]]
 - [[Desktop-Architecture]]
 - [[drachma]]

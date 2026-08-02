@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-07-28
+updated: 2026-08-01
 tags: [aoide, agent, cli]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -18,7 +18,10 @@ Three doors open onto aoide — the CLI trunk, the MCP façade, and the
 [[A2A-Door|A2A door]] — and all three derive from the one command schema
 (`aoide schema --json`). There is one implementation; the doors cannot drift.
 The CLI is the complete surface; the other two are generated from it and
-**off by default**.
+**off by default**. The target crate-layout blueprint ([[Package-Layout]])
+carries this invariant into a structural boundary: a `protocol` crate would
+hold the registry, schema, and door types, so every door depends on the one
+contract rather than converging on it by convention.
 
 MCP is generated as a façade from the same command schema that backs the CLI.
 The MCP layer is deliberately optional and agent-added:
@@ -80,3 +83,4 @@ The claude CLI is the first-class agent path. A spawn wrapper registers the agen
 - [[aoide-cli]]
 - [[Codebase]]
 - [[A2A-Door]]
+- [[Package-Layout]]
