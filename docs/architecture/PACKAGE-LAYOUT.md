@@ -1,11 +1,18 @@
 # aoide · package layout (target blueprint)
 
-> **Status: blueprint / not yet built.** This document describes the *target*
-> shape of the `pkgs/aoide` Rust package — a pi-style split into single-charter
-> crates — and the phased migration to reach it. No crates below exist yet
-> except as the current single-crate code they will be carved from. Nothing here
-> asserts present structure; the "maps-from" column is where today's code lives
-> and where it will move. Reference: [earendil-works/pi](https://github.com/earendil-works/pi).
+> **Status: the crate restructure is complete.** Phases 1 through 6b are
+> landed: `pkgs/aoide` is now a Cargo workspace with seven crates carved out —
+> `protocol`, `storage`, `conduct`, `client`, `server`, `song`, `conductor` —
+> plus the root `aoide`/`aoided` binaries. `management` was paired with `song`
+> in the original Phase 5 plan but was deferred, not dropped (see the Phase 5
+> status note below). Phase 6 planning found `cli` isn't a separate crate to
+> build — the root `aoide` package already is the DAG sink (depends on
+> everything, nothing depends on it), so only `conductor` extracted; landed as
+> two sub-phases (6a: a dependency-injection seam so the TUI never needs the
+> trunk's assembled command registry; 6b: the mechanical move). Phase 7
+> (`steward`) and Phase 8 (`evals`) were both planned and the verdict on each
+> is DEFER (see their status notes below) — nothing else is queued to extract.
+> Reference: [earendil-works/pi](https://github.com/earendil-works/pi).
 
 ## Why
 
@@ -122,17 +129,17 @@ pkgs/aoide/
 
 | crate | charter | maps-from (today) | status |
 |---|---|---|---|
-| **protocol** | The single contract: registry, schema doc, `Outcome` envelope + exit codes, `canonical_state`, `Door`, audit event classes, and the A2A-JSON-RPC / MCP wire types. Every door depends on it; it depends on nothing aoide-specific. | `registry.rs`, `output.rs`, `daemon.rs`(Door/audit), a2a/mcp wire types, `CONTRACTS.md`, `commands/meta.rs`(schema) | carve-out |
-| **conduct** | The session core: PTY-backed `conduct` wrap, the session DAG, hook ingestion, liveness reaping. Makes every terminal a tracked, conductable session. | `graph/` (conduct·send·model·doc·window·verbs·common), `shellbridge.rs`, `reap.rs` | carve-out |
-| **server** | `aoided` and the door serve-loops: MCP-over-stdio, A2A JSON-RPC/HTTP/SSE, listeners, sessions, snapshots, the audit sink. Untrusted input stops here. | `daemon.rs`, `mcp.rs`, `a2a.rs`(serve half), `commands/infra.rs` | carve-out |
-| **client** | Outbound: the A2A client registry + send, the melete adapter (neutral-event consumer), transports. Drives external agents and speaks to `aoided`. | `a2a.rs`(client half), `adapter.rs`, `commands/a2a.rs` | carve-out |
-| **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, migrations, search. The steward's `canon` and session memory persist through here. | `graph/session_store.rs`, `song/stage/*`, `state/*` | seed → build |
-| **steward** ★ | A system-management agent driven by the conductor. Runs a harness loop; its tools act on the host via `management`/`conduct`/`song`; it remembers design primitives in `canon`; it self-audits against canon + contracts. | *(new)* | skeleton |
-| **song** | The ricing / design engine: locate `drachma`, apply songs, mint palettes, write the stage, the Pantheon design language. **Rices portably** — applies a song on generic Linux too, not only via Stylix/NixOS modules. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs` | carve-out |
-| **management** | The privileged hands: rebuild/switch, `rice mint`, hypr control, service/daemon ops, sudo-tracking. **Host-abstracted** — a NixOS backend (nixos-rebuild/modules) and a portable-Nix backend (`nix profile`/home-manager-style) behind one seam, chosen by what the host is. The capabilities the steward's tools invoke. | `hypr.rs`, `commands/infra.rs`(host ops), sudo-track (44c6ec9) | carve-out |
-| **evals** | Eval harness: golden snapshots (existing), agent-behavior evals for the steward, door-contract evals, ricing/design evals. | golden-snapshot tests | elevate |
-| **conductor** | The CLI/TUI surface: session DAG view, roster, and the steward's control panel. | `conductor/` (app·ui·graphview·theme) | carve-out |
-| **cli** | The app that wires everything into `aoide` + `aoided`: arg parse, the single dispatcher, `commands/`, guide/onboarding. | `src/bin/*`, `cli.rs`, `dispatch.rs`, `commands/*`, `guide.rs`, `lib.rs` | carve-out |
+| **protocol** | The single contract: registry, schema doc, `Outcome` envelope + exit codes, `canonical_state`, `Door`, audit event classes, and the A2A-JSON-RPC / MCP wire types. Every door depends on it; it depends on nothing aoide-specific. | `registry.rs`, `output.rs`, `daemon.rs`(Door/audit), a2a/mcp wire types, `CONTRACTS.md`, `commands/meta.rs`(schema) | landed (Phase 2) |
+| **conduct** | The session core: PTY-backed `conduct` wrap, the session DAG, hook ingestion, liveness reaping. Makes every terminal a tracked, conductable session. | `graph/` (conduct·send·model·doc·window·verbs·common), `shellbridge.rs`, `reap.rs` | landed (Phase 3b) |
+| **server** | `aoided` and the door serve-loops: MCP-over-stdio, A2A JSON-RPC/HTTP/SSE, listeners, sessions, snapshots, the audit sink. Untrusted input stops here. | `daemon.rs`, `mcp.rs`, `a2a.rs`(serve half), `commands/infra.rs` | landed (Phase 4c) |
+| **client** | Outbound: the A2A client registry + send, the melete adapter (neutral-event consumer), transports. Drives external agents and speaks to `aoided`. | `a2a.rs`(client half), `adapter.rs`, `commands/a2a.rs` | landed (Phase 4b) |
+| **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, migrations, search. The steward's `canon` and session memory persist through here. | `graph/session_store.rs`, `song/stage/*`, `state/*` | landed (Phase 3a); backend is still file-first (seed → build) |
+| **steward** ★ | A system-management agent driven by the conductor. Runs a harness loop; its tools act on the host via `management`/`conduct`/`song`; it remembers design primitives in `canon`; it self-audits against canon + contracts. | *(new)* | skeleton — DEFER (Phase 7) |
+| **song** | The ricing / design engine: locate `drachma`, apply songs, mint palettes, write the stage, the Pantheon design language. **Rices portably** — applies a song on generic Linux too, not only via Stylix/NixOS modules. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs` | landed (Phase 5a+5b) |
+| **management** | The privileged hands: rebuild/switch, `rice mint`, hypr control, service/daemon ops, sudo-tracking. **Host-abstracted** — a NixOS backend (nixos-rebuild/modules) and a portable-Nix backend (`nix profile`/home-manager-style) behind one seam, chosen by what the host is. The capabilities the steward's tools invoke. | `hypr.rs`, `commands/infra.rs`(host ops), sudo-track (44c6ec9) | carve-out — DEFERRED out of Phase 5 (no ETA) |
+| **evals** | Eval harness: golden snapshots (existing), agent-behavior evals for the steward, door-contract evals, ricing/design evals. | golden-snapshot tests | elevate — DEFER (Phase 8) |
+| **conductor** | The CLI/TUI surface: session DAG view, roster, and the steward's control panel. | `crates/conductor/` (app·ui·graphview·theme) | landed (Phase 6a+6b) |
+| **cli** | The app that wires everything into `aoide` + `aoided`: arg parse, the single dispatcher, `commands/`, guide/onboarding. **Not a separate crate** — this is the root `aoide` package itself (the DAG sink: depends on everything, nothing depends on it; a `crates/cli` layer would enforce no invariant, see the Phase 6 status note). | `src/bin/*`, `cli.rs`, `dispatch.rs`, `commands/*`, `guide.rs`, `lib.rs` | **is** the root package (Phase 6 finding) |
 
 ## The steward (`steward`) — detail
 
@@ -173,24 +180,91 @@ green before the next begins. The two shipped binaries never change behavior;
 this is structure, not features.
 
 - **Phase 0 — blueprint.** *(this document + the wiki mirror.)* No code.
-- **Phase 1 — workspace scaffold.** Turn `pkgs/aoide` into a `[workspace]` with
-  the existing crate as the sole member. Nix build green. Purely mechanical.
-- **Phase 2 — extract `protocol`.** Most depended-on, least behavioral risk:
-  registry, `Outcome`, `Door`, `canonical_state`, audit classes, wire types.
-  Every other module now imports it.
-- **Phase 3 — extract `conduct` + seed `storage`.** `graph/` + `shellbridge` +
-  `reap` → `conduct`; `graph/session_store` → `storage`.
-- **Phase 4 — extract `server` + `client`.** Split `a2a.rs` at the serve/client
-  seam; `daemon`/`mcp` → `server`; `adapter` → `client`.
-- **Phase 5 — extract `song` + `management`.** `notes`/`rice`/`cover` → `song`;
-  `hypr`/host-ops/sudo-track → `management`.
-- **Phase 6 — extract `conductor` + `cli`.** `conductor/` → its crate; bins +
-  `commands/` + `cli`/`dispatch` → the top `cli` app crate.
-- **Phase 7 — build `steward` (the agent).** New crate against
+- **Phase 1 — workspace scaffold. LANDED (e6809f6).** Turn `pkgs/aoide` into a
+  `[workspace]` with the existing crate as the sole member. Nix build green.
+  Purely mechanical.
+- **Phase 2 — extract `protocol`. LANDED (fd9bc1e).** Most depended-on, least
+  behavioral risk: registry, `Outcome`, `Door`, `canonical_state`, audit
+  classes, wire types. Every other module now imports it.
+- **Phase 3a — extract `storage`. LANDED (5691985).** `graph/session_store` +
+  stage/state files → `storage`.
+- **Phase 3b — extract `conduct`. LANDED (9c41f2a).** `graph/` +
+  `shellbridge` + `reap` → `conduct`. (The original blueprint listed this as
+  one Phase 3 — "extract `conduct` + seed `storage`" — landed as two units,
+  `storage` first.)
+- **Phase 4a — typed wire structs. LANDED (38f9c62).** A2A/MCP payloads gain
+  typed structs in `protocol`, ahead of the client/server split.
+- **Phase 4b — extract `client`. LANDED (0508e76).** `adapter` + the A2A
+  client half → `client`.
+- **Phase 4c — extract `server`. LANDED (5ae9f6d).** `daemon`/`mcp` + the A2A
+  serve half → `server`. (The original blueprint listed this as one Phase 4 —
+  landed as three units.)
+- **Phase 5a — birth `song`. LANDED (de63880).** `notes.rs` → `song`, as a
+  leaf crate with `notes` + `live` modules (no `storage` dependency yet).
+- **Phase 5b — `song` gains `mint` + `cover`. LANDED (c56faa7).**
+  `commands/rice.rs` + `commands/cover.rs` fold in as `song::mint` /
+  `song::cover`, adding a `storage` dependency.
+- **`management` — DEFERRED out of Phase 5, indefinitely.** The blueprint
+  originally paired `management` with `song` as one phase ("extract `song` +
+  `management`"). Planning research for Phase 5 found `management`'s charter
+  is largely *aspirational*, not just unextracted: there is no
+  `nixos-rebuild`/`switch`/`systemctl` code anywhere in the Rust binary today
+  — by deliberate house policy (rebuild is user-gated, no self-updaters; see
+  `AGENTS.md`). The only real host-effect anywhere in the ricing surface is
+  one env-guarded `hyprctl` call, which stayed inside `song::live` —
+  specifically kept as a separate function from
+  `song::live::geometry_keywords` so a future `management` crate could lift
+  just the host-effect half out later without touching the pure computation.
+  `management` is deferred indefinitely until real host-ops verbs
+  (rebuild/switch/service control) actually get built — there's no ETA, it's
+  not "next," it's "whenever that work exists to extract."
+- **Phase 6 — extract `conductor`; `cli` stays the root package. LANDED
+  (6a: d6b771d, 6b: 1f5ae31).** Planning corrected the original scope: `cli`
+  was never a separate crate to build — the root `aoide` package already is
+  the trunk (depends on everything, nothing depends on it), so a
+  `crates/cli` layer would be ceremony, not architecture. `conductor`
+  extracted cleanly over `{protocol, conduct, storage}` — deliberately not
+  `server` — via a dependency-injection seam (6a): the TUI's `App` takes a
+  `DispatchFn` fn-pointer parameter instead of calling the trunk's assembled
+  `dispatch::dispatch` directly, so it never needs the registry singleton
+  that `server` also couldn't depend on directly back in Phase 4c. Not
+  parallelizable (one entangled module, not independent files) — landed as
+  two sequential sub-phases by a single executor each time, not multiple
+  agents at once. **This is the last phase of the crate restructure** —
+  `pkgs/aoide` is one crate → eight (protocol/storage/conduct/client/server/
+  song/conductor + the root trunk); nothing else is queued to extract.
+- **Phase 7 — build `steward` (the agent). DEFER.** New crate against
   protocol + conduct + storage + management: harness → tools → canon → audit →
-  skills. The first genuinely new capability, not a carve-out.
-- **Phase 8 — elevate `evals`.** Move golden snapshots in; add steward-behavior,
-  door-contract, and ricing/design eval suites.
+  skills. The first genuinely new capability, not a carve-out. Verdict: DEFER.
+  Two of its five pillars are blocked: `harness` (a native LLM turn-loop)
+  would require aoide to adopt a model client it has explicitly refused to
+  own — "any agent with a shell is fully capable" is the core thesis, and
+  aoide wraps no LLM API; `tools`/`skills` need `management`'s host-ops verbs,
+  which don't exist (see above). The one real raw material — a rich
+  design-decision corpus already on disk (`song/songbook/*/design/*.md`, the
+  wiki design-language pages) that `canon` would formalize — isn't worth a
+  crate yet, because the docs are prose, not structured/checkable records; a
+  `canon show` verb today would just be `cat` with a registry entry wrapped
+  around it. Unblock conditions, in priority order: (1) a concrete decision
+  from khoa on whether `steward` is LLM-driven itself or a verb-surface an
+  external agent drives via `conduct`; (2) `management` actually built;
+  (3) a decision to formalize canon into typed primitives.
+- **Phase 8 — elevate `evals`. DEFER, strictly downstream of Phase 6 and
+  Phase 7.** Move golden snapshots in; add steward-behavior, door-contract,
+  and ricing/design eval suites. The blueprint's "golden snapshots
+  (existing)" turned out to be exactly one 50-line test
+  (`command_paths_match_the_golden_snapshot` in `pkgs/aoide/src/registry.rs`)
+  — no `evals/` crate, no fixture files, no harness of any kind exists
+  anywhere; every other "eval" string in the codebase means Nix eval,
+  unrelated. Of the four planned suites: golden snapshots (trivial, and its
+  future home crate `cli` doesn't exist until Phase 6 lands); agent-behavior
+  evals (blocked — no `steward` exists); door-contract evals (already exist
+  correctly, in-crate, in `protocol`/`server`/`client` tests — nothing to
+  extract); ricing/design evals (undesigned research — no scoring exists or
+  is designed, design quality is a human vision-check today). The
+  blueprint's own steward section assigns "formalize the review-pipeline
+  self-check" to `steward/audit`, not `evals` — so this is explicitly a
+  different concept from either.
 
 ## Open questions (each tagged with when it must be settled)
 
@@ -218,5 +292,7 @@ this is structure, not features.
 - **`management` host backend.** The NixOS backend (nixos-rebuild/modules) exists
   today; the **portable-Nix backend** (home-manager-style profile / `nix profile`
   / an Aoide-owned generation for rebuild-switch-rice on a non-NixOS host) is new
-  work — scope it when `management` is carved out (Phase 5), plus how the backend
-  is detected at runtime (are we on NixOS, or generic-Nix?).
+  work. **`management` itself was deferred out of Phase 5**, indefinitely (see
+  the Phase 5 status note above) — this question stays open until real
+  host-ops verbs actually get built and `management` is carved out, plus how
+  the backend is detected at runtime (are we on NixOS, or generic-Nix?).
