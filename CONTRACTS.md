@@ -304,14 +304,18 @@ active", the ordinary state; never an error.
 `A2aAgent` Option convention). `carriedSlots` is **always `[]` today** — no
 widget-carry logic exists yet.
 
-**Honest lifecycle state (Phase A):** only `aoide rice design status` exists
-right now, and it is READ-ONLY — it reports whatever marker is present (or
-`{"active": false}` when absent), but nothing in the CLI writes this file
-yet. `rice design enter` (the intended writer, via `aoide-storage`'s
-`save_design_marker`), `rice design exit` (the intended remover), and a
-`rice design sync` verb are later-phase work, not yet built. Until `enter`
-ships, `design.json` only appears on disk if something outside the CLI drops
-it there by hand.
+**Honest lifecycle state (Phase B):** Phase A shipped the read-only `aoide
+rice design status`. Phase B added `enter`/`exit` — `aoide rice design enter
+<name>` reuses `rice preview <name>`'s live-apply side effects (drachma.json
+hot-reload + best-effort hyprctl geometry/border) and then writes the marker
+via `aoide-storage`'s `save_design_marker`; `aoide rice design exit` clears
+it via `delete_design_marker` (idempotent — exiting with no active session is
+`ok`, not an error). `exit` touches ONLY `stage/design.json`: it never writes
+`run/qml/` or any song file, so a live sketch left behind by a design session
+stays exactly as it was until the next `preview`/`enter` resets it.
+`carriedSlots` stays `[]` — Phase C (widget live-carry into
+`run/qml/songs/`) hasn't landed yet, and neither has a `sync` verb (Phase D)
+to push shared-tree edits back out.
 
 ### `song/stage/sessions.json` / `hooks.json` — **v0**
 
