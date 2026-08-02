@@ -30,7 +30,7 @@ type: index
 - [[Ricing-Protocol|Ricing Protocol]] — answers: the creation/application split (deriving a base16 vs Stylix fanning it out), the mandatory light/dark vision-check, and where per-song design memory belongs (the songbook), worked through the `sonata` light key
 - [[Conductor-Channel|Conductor Channel]] — answers: how a wrapped agent session is commanded (PTY control socket, the gated `graph send` injection door, parent-autogate)
 - [[Conductor-3D-DAG|Conductor 3D DAG]] — answers: the PLANNED ratatui 3D-wireframe DAG view for `aoide conductor` (not yet implemented — a build plan)
-- [[Package-Layout]] — answers: the TARGET BLUEPRINT (not yet built — `pkgs/aoide` is one crate today) for splitting the Rust package into pi-style single-charter crates, the pi→aoide mapping, the target crate tree, the per-crate charter (status: carve-out/skeleton/seed→build/elevate), the steward (`agent`) crate's canon-of-design-primitives + self-audit design, and the phased migration (0–8)
+- [[Package-Layout]] — answers: the TARGET BLUEPRINT (not yet built — `pkgs/aoide` is one crate today) for splitting the Rust package into pi-style single-charter crates, the pi→aoide mapping, the target crate tree, the per-crate charter (status: carve-out/skeleton/seed→build/elevate), the steward (`steward`) crate's canon-of-design-primitives + self-audit design, and the phased migration (0–8)
 
 ## Entities
 

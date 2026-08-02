@@ -251,7 +251,7 @@ is module-local — fine while it is the only module with env-touching tests.
 
 `pkgs/aoide` is **one crate today**. A target blueprint for splitting it into
 pi-style single-charter crates (`protocol`, `conduct`, `server`, `client`,
-`storage`, `agent` the steward, `song`, `management`, `evals`, `conductor`,
+`storage`, `steward`, `song`, `management`, `evals`, `conductor`,
 `cli`) under a `[workspace]` is specified but not built — see
 [[Package-Layout]] for the target tree, per-crate charter, and the phased
 migration.
