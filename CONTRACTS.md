@@ -281,6 +281,38 @@ tier). `aoide rice preview` reads it (alongside `window.border`/
 block, or a missing/null field within it, is skipped rather than defaulted;
 readers must tolerate both forms.
 
+### `song/stage/design.json` — **v0**
+
+The active "design mode" marker — the fact that a particular song is being
+actively iterated on right now, for other tooling to read (concepts/
+Self-Ricing's design-mode extension). Absent means "no design session
+active", the ordinary state; never an error.
+
+```json
+{
+  "song": "moonlight",
+  "enteredAt": "2026-08-02T00:00:00Z",
+  "by": "khoa",
+  "intent": "/home/khoa/Aoide/song/songbook/moonlight/design/intent.md",
+  "intentPresent": true,
+  "sources": ["stage/drachma.json"],
+  "carriedSlots": []
+}
+```
+
+`by` is optional (omitted, not `null`, when absent — the `SessionRecord`/
+`A2aAgent` Option convention). `carriedSlots` is **always `[]` today** — no
+widget-carry logic exists yet.
+
+**Honest lifecycle state (Phase A):** only `aoide rice design status` exists
+right now, and it is READ-ONLY — it reports whatever marker is present (or
+`{"active": false}` when absent), but nothing in the CLI writes this file
+yet. `rice design enter` (the intended writer, via `aoide-storage`'s
+`save_design_marker`), `rice design exit` (the intended remover), and a
+`rice design sync` verb are later-phase work, not yet built. Until `enter`
+ships, `design.json` only appears on disk if something outside the CLI drops
+it there by hand.
+
 ### `song/stage/sessions.json` / `hooks.json` — **v0**
 
 The shellbridge roster + live hook phases (full field tables in

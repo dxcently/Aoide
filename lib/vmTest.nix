@@ -180,13 +180,15 @@ pkgs.testers.runNixOSTest {
     machine.succeed("which aoide")
     machine.succeed("which drachma")
 
-    # `aoide schema --json` must parse and report exactly 44 commands.
+    # `aoide schema --json` must parse and report exactly 45 commands.
     # This is a deliberate drift tripwire: adding or removing a command must
     # consciously update this count (it caught 8 commands that had landed
     # unrecorded — graph wrap/reap/send, conduct, conductor, and the graph session
     # write-verbs; bumped by 4 for the a2a serve / agent add|list|remove stubs
-    # (CONTRACTS.md §6); bumped by 1 for `usage` (CONTRACTS.md §4); most recently
-    # bumped by 1 for `a2a agent send` — the Phase D client-side drive verb.
+    # (CONTRACTS.md §6); bumped by 1 for `usage` (CONTRACTS.md §4); bumped by 1
+    # for `a2a agent send` — the Phase D client-side drive verb; most recently
+    # bumped by 1 for `rice design status` — design-mode Phase A (read-only;
+    # CONTRACTS.md §4's `stage/design.json` entry).
     schema_raw = machine.succeed("aoide schema --json")
     schema_doc = json.loads(schema_raw)
     # schema --json emits a JSON Outcome envelope:
@@ -198,8 +200,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 44, (
-        f"expected 44 commands, got {cmd_count}.  "
+    assert cmd_count == 45, (
+        f"expected 45 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 
