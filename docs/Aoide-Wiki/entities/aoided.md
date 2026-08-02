@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 The orchestrator daemon at the core of the Aoide framework. It emits a neutral event stream that thin per-agent adapters consume — the melete-adapter, for example, translates events into job dispatches. Subscriptions are default-deny per event class, which prevents OSD noise from burning agent runs and keeps forwarded notification text from reaching an agent as commands.
 
-Policy and lint enforcement live in aoided, not in individual adapters or the CLI. A single audit log at `~/Aoide/log` captures all operations from both the CLI and MCP doors — neither door bypasses the gate or writes a separate log.
+Policy and lint enforcement live in aoided, not in individual adapters or the CLI. A single audit log at `~/Aoide/log` captures all operations from every door — the CLI, the MCP façade, and the [[A2A-Door]] (each tagged `Door::Cli`/`Door::Mcp`/`Door::A2a`) — and no door bypasses the gate or writes a separate log.
 
 The gated rebuild pipeline resides here. Rebuilds are User-gated (polkit pipeline pattern): the agent proposes, the User admits, git records. `aoide update` follows the same pattern — it fetches upstream, merges framework paths, runs checks, then proposes the rebuild rather than applying it immediately.
 

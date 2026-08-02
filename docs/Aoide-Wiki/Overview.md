@@ -21,13 +21,14 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 - [[Feature-Set]] — what ships in the box (Melete + Mneme integrated) and the exemplar features: messaging bridge, fleet management, scheduled-job widget
 - [[Terminal-Commander]] — the agent-session widget (conductor-class): watch the terminals running agents and jump to any by click or keybind
 - [[Session-Graph]] — the project/session DAG grown from the flat roster: `aoide graph` viewer + management (anchors + spawned edges, prune, liveness-checked focus, atomic graph.json emit) — rendered via `graph view`/`--json` and the `aoide conductor` TUI; the desktop's Conductor gadget gives the at-a-glance agent-tree view instead of a standalone DAG overlay
-- [[Gadget-Dock]] — the agentWidgets surface realized: `AoidePanel.qml`, a left-edge panel holding four gadgets (Conductor, Terminals, Meters, Power), colours entirely from drachma — its fore-edge peeks at rest and it opens fully on hot-edge hover or SUPER+G
+- [[Gadget-Dock]] — the agentWidgets surface realized: `AoidePanel.qml`, a left-edge panel holding four core gadgets (Conductor, Terminals, Meters, Power) plus an opt-in Usage stele, colours entirely from drachma — its fore-edge peeks at rest and it opens fully on hot-edge hover or SUPER+G
 - [[Lexicon]] — the whole vocabulary in one place: the three original Muses (Aoide · Melete · Mneme), the frozen/performed split, why each word family was selected, and the loop that ties them together
 - [[Snowflake-Anatomy]] — the layered structure of the Aoide flake: nucleus, dendrites, and facets; why Nix's snowflake logo maps to the repo's growth model
 - [[Fork-and-Run]] — the install model: fork upstream, clone to `~/Aoide`, run `aoide onboard`; shared history enables clean upstream merges and upstream contributions
 - [[Self-Ricing]] — the headline feature: the agent generates, lints, previews, and adopts rices; songbook write-back is the "self" in self-ricing
 - [[Song-Vocabulary]] — the performed-half naming map: key, melody, arrangement, instruments, design, songbook, cover, chimes, stage, rehearsal, recording
 - [[Agent-Interface]] — the CLI-first capability surface: `aoide <cmd>`, MCP as a generated façade, guide tiers, and agent-first ergonomics
+- [[A2A-Door]] — aoide's third door: the bidirectional Agent2Agent (JSON-RPC/HTTP) interop wire — a discoverable A2A agent (server) and an A2A client that drives external agents, all from the one command registry
 - [[Desktop-Architecture]] — how aoided, shellbridge, Quickshell, and the compositor compose into a single agent-ready desktop body
 - [[Content-Pipeline]] — the discover → propose → approve → ingest → lint → query pipeline; the approve gate, quarantine branch, and Mneme integration
 - [[Governance]] — the rebuild gate (polkit pattern), the single audit log, and the mutation policy encoded in radial distance from the nucleus

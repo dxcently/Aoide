@@ -12,8 +12,8 @@ The `aoide` binary is the complete capability surface of the framework — the
 CLI trunk of [[Agent-Interface]], written in Rust as a single crate that ships
 two binaries (`aoide` the CLI, `aoided` the daemon) plus a shared library.
 "An API that happens to be typeable": every command emits structured `--json`,
-every command carries meaningful exit codes, and the same handlers back both
-the CLI door and the MCP door so the two can never drift.
+every command carries meaningful exit codes, and the same handlers back the CLI
+door, the MCP façade, and the [[A2A-Door]] so the three can never drift.
 
 *The crate lives at `pkgs/aoide/`; it packages via `rustPlatform.buildRustPackage`
 with `meta.mainProgram = "aoide"` and vendored deps (`cargoLock.lockFile`) so
@@ -47,7 +47,7 @@ offline, vendored dependency set unchanged — the same shape as Hermes-agent's
 self-registering tool registry and Claude Code's discrete-tools-behind-a-thin-
 dispatch design.
 
-The command surface itself is unchanged by this shape: **38 leaves**
+The command surface itself is unchanged by this shape: **44 leaves**
 (`aoide schema --json | jq '.commands | length'`):
 
 | Group | Leaves | Real / stub |
@@ -64,6 +64,16 @@ The command surface itself is unchanged by this shape: **38 leaves**
 | `graph` group (15 leaves — below) | 15 | real |
 | `conduct` | 1 | real |
 | `conductor` | 1 | real |
+| `a2a serve`, `a2a agent add/list/remove/send` | 5 | real |
+| `usage` | 1 | real |
+
+The **`a2a`** group is the [[A2A-Door]] — the third door onto aoide. `a2a
+serve` raises the A2A (Agent2Agent) JSON-RPC/HTTP server (a discoverable
+AgentCard + `message/send` + `tasks/get` + SSE streaming, off by default,
+loopback-bound); the four `a2a agent` verbs are the client side, registering
+and driving external A2A agents through `state/a2a-agents.json`. **`usage`**
+computes the local token/cost rollup that backs the opt-in claude.ai usage
+gadget ([[Gadget-Dock]]).
 
 A stub returns a structured `Outcome` with status `not-implemented` (exit
 `64`), never a crash — arg-parsing, the schema entry, the audit-log append,
@@ -154,9 +164,10 @@ shortcut the panel itself registers (`aoide:dock`), not a CLI verb (see
 - **`stageNotesVersion`** is a top-level field of the schema document (v0),
   pinning the `song/stage/drachma.json` format alongside the command tree so an
   agent reads one version for the whole contract.
-- **Single audit log, both doors.** Every dispatch — CLI or MCP — appends a
-  JSON-lines record to the one audit log (`aoide.auditLog`), tagged with which
-  door it came through. Neither door writes a separate log.
+- **Single audit log, every door.** Every dispatch — CLI, MCP, or A2A —
+  appends a JSON-lines record to the one audit log (`aoide.auditLog`), tagged
+  with which door it came through (`Door::Cli` / `Door::Mcp` / `Door::A2a`). No
+  door writes a separate log.
 
 ## How it finds `drachma`
 
@@ -177,6 +188,7 @@ the log location, else the `aoide.auditLog` default applies.
 ## Related
 
 - [[Agent-Interface]]
+- [[A2A-Door]]
 - [[Session-Graph]]
 - [[Terminal-Commander]]
 - [[Gadget-Dock]]

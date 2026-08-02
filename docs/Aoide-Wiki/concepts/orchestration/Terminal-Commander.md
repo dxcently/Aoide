@@ -93,6 +93,9 @@ session:
 
 An `awaiting-input` row can also raise a chime or fire the notification →
 messaging bridge ([[Feature-Set]]), so a stalled agent reaches you off-screen.
+A conducted shell blocked at a `sudo` **password** prompt carries the distinct
+`needsSudo` signal — surfaced as the dock's [[Gadget-Dock|sudo lock badge]],
+and the same signal the [[A2A-Door]] reports as the `AUTH_REQUIRED` task state.
 
 Conduct-by-default means every closed or killed terminal is also a roster row
 to clean up — a `SUPER+Q` or SIGKILL tears the wrap process down uncatchably,
@@ -180,3 +183,4 @@ The agent can extend it (add columns, filters, per-agent actions) on request.
 - [[Melete]]
 - [[Feature-Set]]
 - [[drachma]]
+- [[A2A-Door]]

@@ -58,7 +58,7 @@ This file and every `protocol/OPERATIONS/` page obey the rules they describe. Ch
 
 Snapshot of this wiki's files, diffed on each lint pass and rewritten at the end. The wiki is meant to be read whole; this manifest exists for the lint self-description check, not to spare you the reading.
 
-snapshot: 2026-07-30
+snapshot: 2026-08-01
 
 ### Tags
 
@@ -82,6 +82,7 @@ concepts/governance/Fork-and-Run.md
 concepts/governance/Governance.md
 concepts/governance/Rebuild-Gate.md
 concepts/governance/Wiki-Protocol.md
+concepts/orchestration/A2A-Door.md
 concepts/orchestration/Agent-Interface.md
 concepts/orchestration/Conductor-3D-DAG.md
 concepts/orchestration/Conductor-Channel.md

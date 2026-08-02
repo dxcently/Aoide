@@ -6,21 +6,40 @@ tags: [aoide, agent, cli]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
 
-# Agent Interface — CLI Trunk, MCP Façade
+# Agent Interface — CLI Trunk, MCP Façade, A2A Door
 
 ## CLI as the capability surface
 
 `aoide <cmd>` is the complete capability surface. Any agent that has a shell is fully capable — no MCP required. The `melete aoide …` passthrough form works identically, so Melete's own tooling routes through the same trunk.
 
-## MCP: one implementation, two doors
+## One implementation, three doors
 
-MCP is generated as a façade from the same command schema that backs the CLI. There is one implementation; the two doors cannot drift. The MCP layer is deliberately optional and agent-added:
+Three doors open onto aoide — the CLI trunk, the MCP façade, and the
+[[A2A-Door|A2A door]] — and all three derive from the one command schema
+(`aoide schema --json`). There is one implementation; the doors cannot drift.
+The CLI is the complete surface; the other two are generated from it and
+**off by default**.
+
+MCP is generated as a façade from the same command schema that backs the CLI.
+The MCP layer is deliberately optional and agent-added:
 
 | Setting | Value |
 |---|---|
 | Default | `mcp.enable = false` |
 | Per-session | agents spawn `aoide mcp serve --stdio` |
 | Network MCP | user-only; never agent-enabled |
+
+## A2A: the interop door
+
+The [[A2A-Door|A2A door]] (Agent2Agent, a Linux Foundation protocol) is the
+third door — the standard wire by which aoide interoperates with *other*
+agents over JSON-RPC-2.0/HTTP. It is **bidirectional**: aoide is both a
+discoverable A2A *agent* (`aoide a2a serve`, off by default, loopback-bound)
+whose AgentCard is generated from the same registry as the MCP tool list, and
+an A2A *client* (`aoide a2a agent add|send`) that registers and drives external
+A2A agents, folding each into the [[Session-Graph]]. Its capability is admitted
+at rebuild time rather than per request; see [[A2A-Door]] for the door, the
+concept mapping, and its security model.
 
 ## Guidance tiers
 
@@ -60,3 +79,4 @@ The claude CLI is the first-class agent path. A spawn wrapper registers the agen
 - [[Session-Graph]]
 - [[aoide-cli]]
 - [[Codebase]]
+- [[A2A-Door]]

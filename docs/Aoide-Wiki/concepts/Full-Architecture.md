@@ -182,8 +182,9 @@ The baked side is carried by the three facets, all real:
   the keyboard-driven launcher (`SUPER+SPACE`); `AoideNotifications.qml` +
   `NotificationCard.qml` are the notification daemon (actions/inline-reply
   spike still pending); agentWidgets is the [[Gadget-Dock]] — `AoidePanel.qml`
-  holding four gadgets (Conductor, Terminals, Meters, Power), a left-edge
-  panel that peeks its fore-edge and opens fully on hot-edge hover or
+  holding four core gadgets (Conductor, Terminals, Meters, Power) plus an
+  opt-in Usage stele, a left-edge panel that peeks its fore-edge and opens
+  fully on hot-edge hover or
   `SUPER+G`, all drachma-themed; osd, lockscreen, greeter, and wallpaper
   round out the set. `sessionGraph` remains declared but has no QML body —
   the DAG is rendered via `aoide graph view`/`aoide conductor`, not a desktop
@@ -266,25 +267,27 @@ notes are dogfooded back through this same pipeline (pre-approved, system-owned)
 so the agent can query its own past rice reasoning. Mneme is read only via its
 API; the vault declares exports, Aoide admits through the same gate.
 
-## The control plane — one gate, one log, two doors
+## The control plane — one gate, one log, three doors
 
-Everything an agent can do is one command schema with two front doors that
+Everything an agent can do is one command schema with three front doors that
 cannot drift, funnelled through a single policy/audit surface. See
-[[Agent-Interface]] and [[Governance]].
+[[Agent-Interface]], [[A2A-Door]], and [[Governance]].
 
 ```
-   agent ──► CLI trunk ────┐
-                           ├──►  aoided  ──►  policy · GATE · audit(~/Aoide/log)
-   agent ──► MCP façade ───┘         (generated from the same schema)
+   agent ──► CLI trunk ─────┐
+   agent ──► MCP façade ─────┼──►  aoided  ──►  policy · GATE · audit(~/Aoide/log)
+   agent ──► A2A door ───────┘         (all generated from the same schema)
 ```
 
 This is shipped code: the Rust crate ([[aoide-cli]]) installs two binaries,
 `aoide` and `aoided`. `aoide schema --json` is the machine-readable source of
 truth; the stdio MCP façade (`aoide mcp serve --stdio`) generates its tool list
-from it, one-to-one. The tree holds **38 commands** — real (27): `guide`,
+from it, and the [[A2A-Door]]'s AgentCard is derived from the same schema — all
+one-to-one. The tree holds **44 commands** — real (33): `guide`,
 `schema`, `rice lint`, `rice preview`, `rice mint`, `cover set`, `mcp serve`,
-`daemon`, `shellbridge`, `conduct`, `conductor`, `adapter melete`, and the
-15-verb `graph` group (the
+`daemon`, `shellbridge`, `conduct`, `conductor`, `adapter melete`, the 5-verb
+`a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`), `usage`, and
+the 15-verb `graph` group (the
 [[Session-Graph]] DAG viewer + management layer over projects and sessions,
 incl. `graph send`/`wrap`/`reap`, all real); stubs (11, exit 64):
 `rice gen/adopt/transpose`, the 5-verb `content` group, `make`, `update`,
@@ -294,7 +297,9 @@ not-implemented.
 On the host, the plane runs as systemd user units, all from the nucleus:
 `aoided`, `shellbridge` (socket `$XDG_RUNTIME_DIR/aoide/shellbridge.sock`),
 `aoide-melete-adapter`, and `aoide-mcp` (gated on `aoide.mcp.enable`, default
-false) — plus the `aoide-obsidian-register` oneshot from the shipped dendrite.
+false) — plus the opt-in `aoide-a2a` ([[A2A-Door]], gated on `aoide.a2a.enable`)
+and `aoide-usage` (gated on `aoide.usage.enable`) units, and the
+`aoide-obsidian-register` oneshot from the shipped dendrite.
 Live state lands in `song/stage/{drachma,sessions,hooks,projects,graph}.json`
 (the last two from the [[Session-Graph]] layer). `lib/mkHost.nix`
 injects `pkgs.aoide` / `pkgs.drachma` by overlay from the **same**
@@ -311,8 +316,8 @@ flake build one binary, not two.
 - Every rebuild is user-gated (polkit pattern): agent proposes, user admits,
   git records. `aoided` is propose-only; no background self-updaters — house
   policy, concrete in the unit definitions.
-- One audit surface: both doors append to the single audit log file
-  (`~/Aoide/log`, the `aoide.auditLog` option) — there is no per-door log.
+- One audit surface: every door (CLI, MCP, A2A) appends to the single audit log
+  file (`~/Aoide/log`, the `aoide.auditLog` option) — there is no per-door log.
 - Trust boundary: forwarded notification text is untrusted data. The melete
   adapter forwards metadata only; an app title must never reach the agent as a
   command — a hard architectural constraint.

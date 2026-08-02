@@ -49,8 +49,9 @@ The facet declares nine `owner = "quickshell"` surfaces
 lockscreen, greeter, wallpaper, agentWidgets, sessionGraph):
 
 - **`agentWidgets`** — the [[Gadget-Dock]], `AoidePanel.qml`: a **left-edge
-  panel** holding four self-framed gadgets (Conductor, Terminals, Meters,
-  Power). Its fore-edge peeks past the screen edge at rest — further when a
+  panel** holding four core self-framed gadgets (Conductor, Terminals, Meters,
+  Power) plus an opt-in claude.ai Usage stele. Its fore-edge peeks past the
+  screen edge at rest — further when a
   session is `awaiting` and unacknowledged — and slides fully in on a 6 px
   hot-edge hover or on `SUPER+G` (an in-process Hyprland global shortcut the
   panel itself registers, `aoide:dock`; not a CLI verb). Its Conductor
