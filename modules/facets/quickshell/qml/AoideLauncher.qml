@@ -635,7 +635,7 @@ PanelWindow {
         // folio, outer bottom margin: count on the left, position on the right
         Text {
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: 13
+            anchors.bottomMargin: 17   // nudged up 4px off the page foot
             anchors.left: page.isLeft ? parent.left : undefined
             anchors.right: page.isLeft ? undefined : parent.right
             anchors.leftMargin: 28
