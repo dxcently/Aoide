@@ -28,7 +28,7 @@ invariant structural rather than conventional.
 |---|---|---|
 | `protocol` (cbor/framing/schemas) | **`protocol`** | aoide's wire is the registry-derived schema + outcome envelope + door types, not a CBOR frame codec. Same role: the contract every surface reads. |
 | `ai` (multi-provider LLM API + oauth) | *(dropped)* | agents bring their own shell + model; aoide wraps no LLM API. The only remnant — active-model *detection* — is a footnote in `conduct`. |
-| `agent` (loop + harness/tools/session/memory) | **`agent`** | aoide's agent is a **system-management steward**, not a coding agent: its tools act on the NixOS host, its memory is *design primitives*, and it is driven by the conductor. |
+| `agent` (loop + harness/tools/session/memory) | **`steward`** | aoide's agent is a **system-management steward**, not a coding agent: its tools act on the NixOS host, its memory is *design primitives*, and it is driven by the conductor. Named for its charter, not the generic `agent`. |
 | `client` (connection/transport/unix/session) | **`client`** | outbound: the A2A client + the melete adapter + transports that drive external agents and talk to `aoided`. |
 | `server` (listener/sessions/snapshots) | **`server`** | `aoided`: the door serve-loops (A2A/MCP), listeners, sessions, snapshots, audit sink. |
 | `storage/sqlite-node` (session store + migrations + search) | **`storage`** | durable session data + memory persistence. Today's `graph/session_store.rs` + stage/state files are the seed; a real store is the target. |
@@ -65,7 +65,7 @@ pkgs/aoide/
       src/ a2a-client · adapter(melete) · transport · session-handle
     storage/                    # durable session data + memory persistence
       src/ session-store · transcript-index · stage-state · migrations · search
-    agent/               ★NEW   # the STEWARD — system-management agent
+    steward/             ★NEW   # the STEWARD — system-management agent
       src/ harness/      —  the run loop (turn loop, tool dispatch, compaction)
            tools/        —  system-management verbs (wraps management/conduct/song)
            canon/        —  memory of DESIGN PRIMITIVES + how-the-user-likes-things
@@ -92,14 +92,14 @@ pkgs/aoide/
 | **server** | `aoided` and the door serve-loops: MCP-over-stdio, A2A JSON-RPC/HTTP/SSE, listeners, sessions, snapshots, the audit sink. Untrusted input stops here. | `daemon.rs`, `mcp.rs`, `a2a.rs`(serve half), `commands/infra.rs` | carve-out |
 | **client** | Outbound: the A2A client registry + send, the melete adapter (neutral-event consumer), transports. Drives external agents and speaks to `aoided`. | `a2a.rs`(client half), `adapter.rs`, `commands/a2a.rs` | carve-out |
 | **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, migrations, search. The steward's `canon` and session memory persist through here. | `graph/session_store.rs`, `song/stage/*`, `state/*` | seed → build |
-| **agent** ★ | The **steward**: a system-management agent driven by the conductor. Runs a harness loop; its tools act on the host via `management`/`conduct`/`song`; it remembers design primitives in `canon`; it self-audits against canon + contracts. | *(new)* | skeleton |
+| **steward** ★ | A system-management agent driven by the conductor. Runs a harness loop; its tools act on the host via `management`/`conduct`/`song`; it remembers design primitives in `canon`; it self-audits against canon + contracts. | *(new)* | skeleton |
 | **song** | The ricing / design engine: locate `drachma`, apply songs, mint palettes, write the stage, the Pantheon design language. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs` | carve-out |
 | **management** | The privileged hands: rebuild/switch, `rice mint`, hypr control, service/daemon ops, sudo-tracking. The capabilities the steward's tools invoke. | `hypr.rs`, `commands/infra.rs`(host ops), sudo-track (44c6ec9) | carve-out |
 | **evals** | Eval harness: golden snapshots (existing), agent-behavior evals for the steward, door-contract evals, ricing/design evals. | golden-snapshot tests | elevate |
 | **conductor** | The CLI/TUI surface: session DAG view, roster, and the steward's control panel. | `conductor/` (app·ui·graphview·theme) | carve-out |
 | **cli** | The app that wires everything into `aoide` + `aoided`: arg parse, the single dispatcher, `commands/`, guide/onboarding. | `src/bin/*`, `cli.rs`, `dispatch.rs`, `commands/*`, `guide.rs`, `lib.rs` | carve-out |
 
-## The steward (`agent`) — detail
+## The steward (`steward`) — detail
 
 The headline new package. What it is and is not:
 
@@ -146,7 +146,7 @@ this is structure, not features.
   `hypr`/host-ops/sudo-track → `management`.
 - **Phase 6 — extract `conductor` + `cli`.** `conductor/` → its crate; bins +
   `commands/` + `cli`/`dispatch` → the top `cli` app crate.
-- **Phase 7 — build `agent` (the steward).** New crate against
+- **Phase 7 — build `steward` (the agent).** New crate against
   protocol + conduct + storage + management: harness → tools → canon → audit →
   skills. The first genuinely new capability, not a carve-out.
 - **Phase 8 — elevate `evals`.** Move golden snapshots in; add steward-behavior,
@@ -154,11 +154,14 @@ this is structure, not features.
 
 ## Open questions (decide before Phase 1)
 
-- **Naming.** Crate names above are literal for clarity (`protocol`, `agent`,
-  `server` …) with aoide-unique domains keeping aoide vocabulary (`conduct`,
-  `song`, `conductor`). If the pantheon grammar should extend to crate names
-  (e.g. a muse-named steward), decide here — renames are cheap pre-build, costly
-  after.
+- **Naming — DECIDED (hybrid).** Plain names where the concept is universal
+  (`protocol`, `server`, `client`, `storage`, `evals`, `cli`); the already-coined
+  aoide vocabulary kept (`conduct`, `song`, `conductor`); and voice only where the
+  crate is aoide's own — the agent is **`steward`** (with `canon` + `audit`
+  inside). Rejected: fully-literal (`agent`), the stagecraft scheme
+  (`podium`/`cue`/…), and the deep-pantheon scheme (`nomos`/`tekton`/…) — the
+  latter two taxed grep-ability on universal crates for no semantic gain, and
+  `mneme`/`melete` collide with live MCP servers.
 - **`storage` backend.** stage/state JSON files (zero-dep, matches today's
   discipline) vs. a real embedded store. pi uses sqlite; aoide's zero-dep rule
   argues for staying file-first until the steward's memory needs query/search.
