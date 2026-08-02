@@ -116,24 +116,68 @@ QtObject {
     // Known/likely long-context model-id substrings → their ceiling. Today's
     // transcripts never actually spell one of these out (Claude Code logs the
     // bare id, e.g. `claude-opus-4-8`, even when the session runs the
-    // marketed "[1m]" 1M-context tier) — this map is a defensive placeholder
-    // for the day an id DOES carry an explicit marker; `ctxCeiling` below's
-    // heuristic bump is what actually catches today's transcripts.
+    // marketed "[1m]" 1M-context tier) — this map stays a defensive
+    // placeholder for the day an id DOES carry an explicit marker. The real
+    // signal today is `ctx1mBase` below, read straight from the user's
+    // ~/.claude/settings.json; the >200k-tokens heuristic in `ctxCeiling`
+    // remains only as the last-resort backstop when neither the map nor the
+    // config knows better.
     readonly property var ctxCeilingMap: ({
         "[1m]": 1000000
     })
+    // ── 1M-context tier, read from ~/.claude/settings.json ──────────────────
+    // Claude Code's own settings carry a top-level `"model"` string that
+    // spells the marketed context tier as a bracket suffix, e.g.
+    // `"opus[1m]"` — the transcript's model id itself never does. Reading
+    // this file is what lets `ctxCeiling` recognize a 1M-context session from
+    // its very first turn, rather than only after 200k+ tokens have already
+    // accumulated.
+    readonly property string settingsPath:
+        Quickshell.env("HOME") + "/.claude/settings.json"
+    // The base model alias running the 1M tier per settings.json (e.g.
+    // "opus", from "opus[1m]"), or "" when the file is absent, unparseable,
+    // or the configured model carries no `[1m]` marker. `ctxCeiling` treats
+    // "" as "no config signal" and falls back to its map + backstop.
+    property string ctx1mBase: ""
+    property FileView settingsFile: FileView {
+        id: settingsFile
+        path: root.settingsPath
+        watchChanges: true
+        blockLoading: false
+        printErrors: false
+        onTextChanged: {
+            try {
+                var parsed = JSON.parse(settingsFile.text())
+                var m = (parsed && parsed.model) ? String(parsed.model) : ""
+                if (/\[1m\]/i.test(m)) {
+                    var lower = m.toLowerCase()
+                    var bracketAt = lower.indexOf("[")
+                    root.ctx1mBase = (bracketAt >= 0 ? lower.substring(0, bracketAt) : lower).trim()
+                } else {
+                    root.ctx1mBase = ""
+                }
+            } catch (e) {
+                root.ctx1mBase = "" // absent/mid-write/garbage → no config signal
+            }
+        }
+        onFileChanged: settingsFile.reload()
+        Component.onCompleted: settingsFile.reload()
+    }
     // The percentage ceiling for a session's model id, given its OWN token
     // count. Starts from `ctxCeilingMap` (default 200000 when no substring
-    // matches), then applies the heuristic backstop: a token count that has
-    // already blown past 200k could only belong to a 1M-context session (a
-    // 200k-context request is hard-capped there), so the ceiling is raised to
-    // 1000000 rather than letting the bar pin at a false 100%.
+    // matches), then folds in the config-derived 1M tier (`ctx1mBase`, from
+    // ~/.claude/settings.json), then applies the heuristic backstop: a token
+    // count that has already blown past 200k could only belong to a
+    // 1M-context session (a 200k-context request is hard-capped there), so
+    // the ceiling is raised to 1000000 rather than letting the bar pin at a
+    // false 100%. The final ceiling is the max of all three signals.
     function ctxCeiling(modelId, tokens) {
         var id = (modelId || "").toLowerCase()
         var mapped = 200000
         for (var key in ctxCeilingMap) {
             if (id.indexOf(key) >= 0) { mapped = ctxCeilingMap[key]; break }
         }
+        if (ctx1mBase !== "" && id.indexOf(ctx1mBase) >= 0) { mapped = Math.max(mapped, 1000000) }
         return Math.max(mapped, (tokens || 0) > 200000 ? 1000000 : mapped)
     }
     // contextTokens / ceiling(model, contextTokens), clamped 0-100.

@@ -782,8 +782,8 @@ Item {
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: gadget.withA(gadget.sig, 0.85)
                                 }
-                                Text {                     // CONTEXT-WINDOW METER — bar + compact
-                                                            // count + percent, in the dock's existing
+                                Text {                     // CONTEXT-WINDOW METER — bar + percent +
+                                                            // compact count, in the dock's existing
                                                             // `[▓░]` ASCII-gauge grammar (AoideBar
                                                             // battBar / MetersGadget barFill). Zero
                                                             // footprint until an assistant turn has
@@ -794,7 +794,7 @@ Item {
                                     anchors.baseline: elapsedText.baseline
                                     visible: (modelData.contextTokens || 0) > 0
                                     readonly property real pct: notes.ctxPercent(modelData.model, modelData.contextTokens)
-                                    text: notes.ctxBar(pct, 6) + " " + notes.ctxCompact(modelData.contextTokens) + " · " + Math.round(pct) + "%"
+                                    text: notes.ctxBar(pct, 6) + " " + Math.round(pct) + "% · " + notes.ctxCompact(modelData.contextTokens)
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     // song accent → paletteUrgent past ~85%, same threshold/
                                     // swap as the sudo badge's urgency grammar.
