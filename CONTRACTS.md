@@ -394,6 +394,30 @@ When the live fetch fails (the common case off a personal box), the `live`
 block degrades to, e.g., `{ "ok": false, "error": "unauthorized (consumer
 OAuth restricted to Claude Code)" }` and the widget falls back to `local`.
 
+### `state/a2a-agents.json` — **v0**
+
+The client-side registry of EXTERNAL A2A agents this aoide has registered by
+AgentCard URL (`aoide a2a agent add`; §6, client side). Lives in the same
+gitignored root-runtime `state/` dir as `usage.json` (state-dir resolution as
+above), NOT `song/stage/`. Written atomically by `aoide a2a agent add/remove`;
+read by `aoide a2a agent list/send` and folded into the session DAG
+(`graph.json`) as `kind:"a2a"` nodes. Keyed by the `name` from the fetched
+card — re-adding the same name replaces in place (dedupe). Each entry's `url`
+is the RESOLVED `message/send` endpoint (the card's own `url`/first-interface
+url, else the origin of the fetched card URL), i.e. what `agent send` POSTs to,
+not the card URL. **Additive / tolerate-missing:** an absent file is simply "no
+agents registered" (never an error), and readers round-trip fields they do not
+know.
+
+```json
+{
+  "schemaVersion": "0",
+  "agents": [
+    { "name": "peer", "url": "http://10.0.0.5:8710/", "description": "…", "registeredAt": "2026-08-01T12:00:00Z" }
+  ]
+}
+```
+
 ---
 
 ## 5. Song shape — **v0**
@@ -685,22 +709,36 @@ audit log every other door uses. The A2A door adds no new trust tier.
 ### Session-DAG integration (client side)
 
 An external A2A agent, once registered (`aoide a2a agent add <url>`), folds
-into the session DAG as a node of `kind: "a2a"` (`graph/model.rs`'s
-`SessionRecord.kind`) — the graph doesn't special-case it beyond that tag;
-existing `spawned`/`anchors` edge machinery applies unchanged. The node is
-keyed by the `name` from its fetched AgentCard — the same handle
-`aoide a2a agent remove <name>` takes.
+into the session DAG as a node of `kind: "a2a"` (mirroring
+`graph/model.rs`'s `SessionRecord.kind` tag) — `build_graph` reads
+`state/a2a-agents.json` (§4) and emits, per agent, a ROOT node
+`{ id: "a2a:<name>", kind: "a2a", name, url, state: "idle" }` (plus
+`description` when non-empty). No edges (an a2a agent anchors to nothing), so
+the existing `spawned`/`anchors` machinery is untouched; a missing/empty
+registry folds nothing (additive). The node is keyed by the `name` from its
+fetched AgentCard — the same handle `aoide a2a agent remove <name>` takes.
+
+`aoide a2a agent add <url>` accepts either a full
+`…/.well-known/agent-card.json` URL or a bare origin (the well-known path is
+appended); it curl-GETs the card, requires at least `name`, keeps
+`description`, and records the card's own `url`/first-interface url (else the
+fetch origin) as the endpoint. `aoide a2a agent send <name> "<message>"` is
+the **drive verb** (the outbound half of bidirectional A2A): it POSTs a
+JSON-RPC `message/send` to that endpoint and reports the returned
+Task/Message. These external calls are **unauthenticated** for the MVP (no
+`securityScheme` handling yet) and loopback/LAN-oriented, consistent with §6's
+security posture; the message text is untrusted data, never executed.
 
 ### Status
 
 The option surface (`aoide.a2a.enable`/`bindAddress`/`port`/`spawnAgent`), the
-`kind:"a2a"` DAG reservation, and the `a2a serve` command are **real**: the
+`kind:"a2a"` DAG fold, and the `a2a serve` command are **real**: the
 AgentCard, `tasks/get`, and `message/send` (Phase B2: inject-or-spawn
-execution, above) all run. `a2a agent add|list|remove` (the CLIENT-side
-external-agent registry) stay `implemented: false` stubs — that's a later
-phase. This section is **additive**: it introduces a new contract, carries no
-version bump to §1–§5, and needs no playbook migration entry (nothing
-existing changed shape).
+execution, above) all run. The CLIENT side is now **real** too (Phase D):
+`a2a agent add|list|remove` maintain the `state/a2a-agents.json` registry
+(§4) and `a2a agent send` drives a registered agent. This section is
+**additive**: it introduces a new contract, carries no version bump to §1–§5,
+and needs no playbook migration entry (nothing existing changed shape).
 
 ---
 
