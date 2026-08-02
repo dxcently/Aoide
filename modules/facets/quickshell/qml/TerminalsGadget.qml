@@ -215,8 +215,9 @@ Item {
                 title:         rec.title || "",       // session name (tracked) / window title (synthetic)
                 activity:      rec.activity || "",    // the current command/tool
                 say:           rec.say || "",         // the agent's latest words
-                model:         rec.model || "",       // the running Claude model, if known
-                contextTokens: rec.contextTokens || 0 // context-window fill of the last request
+                model:          rec.model || "",         // the running Claude model, if known
+                contextTokens:  rec.contextTokens || 0,  // context-window fill of the last request
+                contextCeiling: rec.contextCeiling || 0  // the published ceiling for that model (CONTRACTS.md §4)
             });
         }
         // stable order: by workspace, then window address (so re-reads that return
@@ -236,7 +237,8 @@ Item {
             var r = list[i];
             parts.push([r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
                         r.workspace, r.windowAddress, r.title,
-                        r.activity, r.say, r.model, r.contextTokens].join(""));
+                        r.activity, r.say, r.model, r.contextTokens,
+                        r.contextCeiling].join(""));
         }
         return parts.join("");
     }
@@ -817,7 +819,7 @@ Item {
                                         id: ctxTag
                                         anchors.baseline: elapsedText.baseline
                                         visible: (modelData.contextTokens || 0) > 0
-                                        readonly property real pct: notes.ctxPercent(modelData.model, modelData.contextTokens)
+                                        readonly property real pct: notes.ctxPercent(modelData.contextTokens, modelData.contextCeiling)
                                         text: notes.ctxBar(pct, 6) + " " + Math.round(pct) + "% · " + notes.ctxCompact(modelData.contextTokens)
                                         font.family: gadget.faceMono; font.pixelSize: 10
                                         // song accent → paletteUrgent past ~85%, same threshold/

@@ -304,8 +304,19 @@ produced, not what sat in the window when it was sent). Refreshed at the same
 hook boundaries as `model`/`say`. Mirrors the `needsSudo`/`model` additive
 precedent: absent for shells and until the session has produced an assistant
 turn, and readers must tolerate both forms and round-trip fields they do not
-know. The dock maps the raw count to a context-window meter, deriving its own
-percentage ceiling from `model` client-side.
+know. The dock reads the published `contextCeiling` field (below) to turn the
+raw count into a meter, rather than deriving its own percentage ceiling from
+`model` client-side.
+
+**Additive in v0:** a session record MAY also carry an optional `contextCeiling`
+(integer) — the context-window ceiling, in tokens, for the session's current
+`model` (200k or 1M, per the model-id split `aoide_protocol::context_ceiling_for_model`
+encodes). aoide computes this from `model` at the same hook boundaries as
+`contextTokens`/`model`; clients read the published fact instead of deriving
+their own ceiling. Re-derived whenever `model` changes, so a mid-session model
+switch re-caps the meter automatically. Same lifecycle as `contextTokens`:
+absent for shells and until the session has produced an assistant turn, and a
+legacy record without it falls back to a conservative 200k client-side.
 
 ### `song/stage/projects.json` — **v0**
 

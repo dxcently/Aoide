@@ -113,78 +113,17 @@ QtObject {
     // a meter takes two client-side steps, both pure and shared here so
     // neither gadget computes it its own (possibly diverging) way.
 
-    // Known/likely long-context model-id substrings → their ceiling. Today's
-    // transcripts never actually spell one of these out (Claude Code logs the
-    // bare id, e.g. `claude-opus-4-8`, even when the session runs the
-    // marketed "[1m]" 1M-context tier) — this map stays a defensive
-    // placeholder for the day an id DOES carry an explicit marker. The real
-    // signal today is `ctx1mBase` below, read straight from the user's
-    // ~/.claude/settings.json; the >200k-tokens heuristic in `ctxCeiling`
-    // remains only as the last-resort backstop when neither the map nor the
-    // config knows better.
-    readonly property var ctxCeilingMap: ({
-        "[1m]": 1000000
-    })
-    // ── 1M-context tier, read from ~/.claude/settings.json ──────────────────
-    // Claude Code's own settings carry a top-level `"model"` string that
-    // spells the marketed context tier as a bracket suffix, e.g.
-    // `"opus[1m]"` — the transcript's model id itself never does. Reading
-    // this file is what lets `ctxCeiling` recognize a 1M-context session from
-    // its very first turn, rather than only after 200k+ tokens have already
-    // accumulated.
-    readonly property string settingsPath:
-        Quickshell.env("HOME") + "/.claude/settings.json"
-    // The base model alias running the 1M tier per settings.json (e.g.
-    // "opus", from "opus[1m]"), or "" when the file is absent, unparseable,
-    // or the configured model carries no `[1m]` marker. `ctxCeiling` treats
-    // "" as "no config signal" and falls back to its map + backstop.
-    property string ctx1mBase: ""
-    property FileView settingsFile: FileView {
-        id: settingsFile
-        path: root.settingsPath
-        watchChanges: true
-        blockLoading: false
-        printErrors: false
-        onTextChanged: {
-            try {
-                var parsed = JSON.parse(settingsFile.text())
-                var m = (parsed && parsed.model) ? String(parsed.model) : ""
-                if (/\[1m\]/i.test(m)) {
-                    var lower = m.toLowerCase()
-                    var bracketAt = lower.indexOf("[")
-                    root.ctx1mBase = (bracketAt >= 0 ? lower.substring(0, bracketAt) : lower).trim()
-                } else {
-                    root.ctx1mBase = ""
-                }
-            } catch (e) {
-                root.ctx1mBase = "" // absent/mid-write/garbage → no config signal
-            }
-        }
-        onFileChanged: settingsFile.reload()
-        Component.onCompleted: settingsFile.reload()
+    // The published per-session ceiling (SessionRecord.contextCeiling, plumbed
+    // through sessions.json / graph.json — CONTRACTS.md §4). aoide computes it from
+    // the model; the widget just reads it. The 200k default is ONLY a last-resort
+    // fallback for legacy records written before this field existed.
+    function ctxCeiling(ceiling) {
+        return (ceiling && ceiling > 0) ? ceiling : 200000
     }
-    // The percentage ceiling for a session's model id, given its OWN token
-    // count. Starts from `ctxCeilingMap` (default 200000 when no substring
-    // matches), then folds in the config-derived 1M tier (`ctx1mBase`, from
-    // ~/.claude/settings.json), then applies the heuristic backstop: a token
-    // count that has already blown past 200k could only belong to a
-    // 1M-context session (a 200k-context request is hard-capped there), so
-    // the ceiling is raised to 1000000 rather than letting the bar pin at a
-    // false 100%. The final ceiling is the max of all three signals.
-    function ctxCeiling(modelId, tokens) {
-        var id = (modelId || "").toLowerCase()
-        var mapped = 200000
-        for (var key in ctxCeilingMap) {
-            if (id.indexOf(key) >= 0) { mapped = ctxCeilingMap[key]; break }
-        }
-        if (ctx1mBase !== "" && id.indexOf(ctx1mBase) >= 0) { mapped = Math.max(mapped, 1000000) }
-        return Math.max(mapped, (tokens || 0) > 200000 ? 1000000 : mapped)
-    }
-    // contextTokens / ceiling(model, contextTokens), clamped 0-100.
-    function ctxPercent(modelId, tokens) {
+    function ctxPercent(tokens, ceiling) {
         var t = tokens || 0
         if (t <= 0) return 0
-        var pct = t / ctxCeiling(modelId, t) * 100
+        var pct = t / ctxCeiling(ceiling) * 100
         return pct < 0 ? 0 : (pct > 100 ? 100 : pct)
     }
     // Compact token-count label: <1000 → raw, ≥1000 → `Nk`, ≥1e6 → `N.NM`.
@@ -215,10 +154,10 @@ QtObject {
     function ctxColor(pct, accent) {
         return pct >= ctxUrgentAt ? paletteUrgent : accent
     }
-    // Rollup over a set of session-shaped objects (anything carrying `model` +
-    // `contextTokens` — a raw stage record, or a beamed-tree row): the
-    // hottest window's fill (MAX, never averaged — a worst-case alarm, not a
-    // blended reading) and the raw token SUM. Shared by ConductorGadget's
+    // Rollup over a set of session-shaped objects (anything carrying
+    // `contextTokens` + `contextCeiling` — a raw stage record, or a beamed-tree
+    // row): the hottest window's fill (MAX, never averaged — a worst-case alarm,
+    // not a blended reading) and the raw token SUM. Shared by ConductorGadget's
     // project-header and fleet-footer rollups so both levels compute the
     // exact same two numbers the exact same way. `any` is false when nothing
     // in the set has produced a turn yet, so a caller can omit the gauge
@@ -232,10 +171,38 @@ QtObject {
             if (tok <= 0) continue
             any = true
             sumTok += tok
-            var pct = ctxPercent(it ? it.model : "", tok)
+            var pct = ctxPercent(tok, it ? it.contextCeiling : 0)
             if (pct > maxFill) maxFill = pct
         }
         return { any: any, maxFill: maxFill, sumTok: sumTok }
+    }
+
+    // ── Elapsed-since (shared by ConductorGadget/TerminalsGadget rosters) ──
+    // A compact "how long has this session lived" from its ISO startedAt,
+    // relative to `nowMs` (a live-ticking clock the caller threads in, same
+    // idiom as usageResetIn below). Empty string for a missing/unparseable
+    // stamp so the caller can omit the tally rather than render a blank.
+    //   < 1m   → "42s"
+    //   < 1h   → "8m09s"
+    //   < 24h  → "7h08m"
+    //   ≥ 24h  → "2d03h"
+    function elapsedSince(iso, nowMs) {
+        if (!iso) return ""
+        var t = Date.parse(iso)
+        if (isNaN(t)) return ""
+        var d = Math.floor(((nowMs || Date.now()) - t) / 1000)
+        if (d < 0) d = 0
+        var h = Math.floor(d / 3600)
+        var m = Math.floor((d % 3600) / 60)
+        var s = d % 60
+        if (h >= 24) {
+            var days = Math.floor(h / 24)
+            var hr = h % 24
+            return days + "d" + (hr < 10 ? "0" : "") + hr + "h"
+        }
+        if (h > 0) return h + "h" + (m < 10 ? "0" : "") + m + "m"
+        if (m > 0) return m + "m" + (s < 10 ? "0" : "") + s + "s"
+        return s + "s"
     }
 
     // ── Usage panel: path + reset-countdown (shared by UsageGadget) ────────
