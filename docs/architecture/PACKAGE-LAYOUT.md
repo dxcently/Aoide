@@ -22,13 +22,48 @@ dispatcher, and must never drift. In the split, that single source becomes its
 own crate (`protocol`) that every door depends on — the boundary makes the
 invariant structural rather than conventional.
 
+## What Aoide is — a distributable flake, not a NixOS captive
+
+> **Aoide** — *she scores her own stage, conducts every agent on it, and travels
+> light.* A **self-ricing, agent-conducting** environment distributed as a single
+> **flake**: fork it onto any Linux and Nix provisions its own world. **NixOS
+> optional, never required** — that distro is *AoideOS*; this is the muse herself.
+
+This crate split is the *how* for a load-bearing goal: **Aoide-the-core ships as
+its own package/flake, runnable on any Linux distribution through Nix — the
+package manager, not the OS.** Nix runs on Arch, Debian, Fedora, macOS; AoideOS
+(this repo's NixOS distribution) is one *target*, not the substrate. The muse
+provisions and version-pins her *own* world (binaries, theme assets, the agent's
+tools) via Nix, so a user on any distro does `nix run`/`nix profile install` and
+gets the whole self-ricing, agent-conducting environment without adopting NixOS.
+
+**Design consequences the split must honor (front-of-mind for every crate, and
+for the steward especially):**
+
+- **No NixOS assumption below `cli`.** The workspace is a standalone flake with
+  no dependency on this repo's NixOS modules (nucleus/dendrites/facets). The
+  NixOS integration is a *consumer* of the crates, never the other way round.
+- **`management` is host-abstracted.** The privileged hands speak to a host
+  *backend*: a **NixOS backend** (nixos-rebuild / modules, as today) and a
+  **portable-Nix backend** (home-manager-style profile / `nix profile` / an
+  Aoide-owned generation) selected at runtime by what the host actually is.
+  Rebuild/switch, service control, and sudo-tracking route through that seam.
+- **`song` rices portably.** Theming can't require Stylix/NixOS-module plumbing;
+  the ricing engine must also apply a song on a generic-Linux host (writing the
+  base16 surfaces + reloading Quickshell) so *self-ricing* holds off-NixOS.
+- **The `steward` manages packages via Nix, not the distro's.** Its tools
+  install/pin/upgrade through Aoide's own Nix-managed set — the same on Fedora as
+  on NixOS — so the agent's capabilities are identical everywhere it's forked.
+- **`conduct`/`server`/`client`/`protocol`/`storage` are already OS-neutral**
+  (std + Linux syscalls + files); the split just keeps them that way.
+
 ## The pi → aoide mapping
 
 | pi package | aoide crate | why it differs |
 |---|---|---|
 | `protocol` (cbor/framing/schemas) | **`protocol`** | aoide's wire is the registry-derived schema + outcome envelope + door types, not a CBOR frame codec. Same role: the contract every surface reads. |
 | `ai` (multi-provider LLM API + oauth) | *(dropped)* | agents bring their own shell + model; aoide wraps no LLM API. The only remnant — active-model *detection* — is a footnote in `conduct`. |
-| `agent` (loop + harness/tools/session/memory) | **`steward`** | aoide's agent is a **system-management steward**, not a coding agent: its tools act on the NixOS host, its memory is *design primitives*, and it is driven by the conductor. Named for its charter, not the generic `agent`. |
+| `agent` (loop + harness/tools/session/memory) | **`steward`** | aoide's agent is a **system-management steward**, not a coding agent: its tools act on the host (NixOS *or* any Nix-enabled Linux, via `management`'s backend seam), its memory is *design primitives*, and it is driven by the conductor. Named for its charter, not the generic `agent`. |
 | `client` (connection/transport/unix/session) | **`client`** | outbound: the A2A client + the melete adapter + transports that drive external agents and talk to `aoided`. |
 | `server` (listener/sessions/snapshots) | **`server`** | `aoided`: the door serve-loops (A2A/MCP), listeners, sessions, snapshots, audit sink. |
 | `storage/sqlite-node` (session store + migrations + search) | **`storage`** | durable session data + memory persistence. Today's `graph/session_store.rs` + stage/state files are the seed; a real store is the target. |
@@ -93,8 +128,8 @@ pkgs/aoide/
 | **client** | Outbound: the A2A client registry + send, the melete adapter (neutral-event consumer), transports. Drives external agents and speaks to `aoided`. | `a2a.rs`(client half), `adapter.rs`, `commands/a2a.rs` | carve-out |
 | **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, migrations, search. The steward's `canon` and session memory persist through here. | `graph/session_store.rs`, `song/stage/*`, `state/*` | seed → build |
 | **steward** ★ | A system-management agent driven by the conductor. Runs a harness loop; its tools act on the host via `management`/`conduct`/`song`; it remembers design primitives in `canon`; it self-audits against canon + contracts. | *(new)* | skeleton |
-| **song** | The ricing / design engine: locate `drachma`, apply songs, mint palettes, write the stage, the Pantheon design language. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs` | carve-out |
-| **management** | The privileged hands: rebuild/switch, `rice mint`, hypr control, service/daemon ops, sudo-tracking. The capabilities the steward's tools invoke. | `hypr.rs`, `commands/infra.rs`(host ops), sudo-track (44c6ec9) | carve-out |
+| **song** | The ricing / design engine: locate `drachma`, apply songs, mint palettes, write the stage, the Pantheon design language. **Rices portably** — applies a song on generic Linux too, not only via Stylix/NixOS modules. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs` | carve-out |
+| **management** | The privileged hands: rebuild/switch, `rice mint`, hypr control, service/daemon ops, sudo-tracking. **Host-abstracted** — a NixOS backend (nixos-rebuild/modules) and a portable-Nix backend (`nix profile`/home-manager-style) behind one seam, chosen by what the host is. The capabilities the steward's tools invoke. | `hypr.rs`, `commands/infra.rs`(host ops), sudo-track (44c6ec9) | carve-out |
 | **evals** | Eval harness: golden snapshots (existing), agent-behavior evals for the steward, door-contract evals, ricing/design evals. | golden-snapshot tests | elevate |
 | **conductor** | The CLI/TUI surface: session DAG view, roster, and the steward's control panel. | `conductor/` (app·ui·graphview·theme) | carve-out |
 | **cli** | The app that wires everything into `aoide` + `aoided`: arg parse, the single dispatcher, `commands/`, guide/onboarding. | `src/bin/*`, `cli.rs`, `dispatch.rs`, `commands/*`, `guide.rs`, `lib.rs` | carve-out |
@@ -103,9 +138,14 @@ pkgs/aoide/
 
 The headline new package. What it is and is not:
 
-- **System management, not coding.** Its job is to keep AoideOS coherent —
-  rebuild/switch, run design/ricing passes, wire gadgets, tend songs, watch the
-  session DAG. Its tools are `management` verbs, not file edits in a repo.
+- **System management, not coding.** Its job is to keep the running Aoide
+  coherent — rebuild/switch, run design/ricing passes, wire gadgets, tend songs,
+  watch the session DAG. Its tools are `management` verbs, not file edits in a repo.
+- **Distro-agnostic by construction.** The steward manages packages, themes, and
+  services through Aoide's *own* Nix-managed world via `management`'s backend
+  seam — so its capabilities are identical whether it's forked onto NixOS or a
+  generic Nix-on-Arch/Debian/Fedora host. It never assumes NixOS; "self-ricing,
+  agent-conducting, anywhere Nix runs" is the steward's operating envelope.
 - **Conductor-driven.** It is invoked and steered through the conductor CLI/TUI
   (`conductor` crate) — a first-class conductable session like any other, not a
   hidden background daemon. The human stays in the loop; the steward proposes and
@@ -152,7 +192,7 @@ this is structure, not features.
 - **Phase 8 — elevate `evals`.** Move golden snapshots in; add steward-behavior,
   door-contract, and ricing/design eval suites.
 
-## Open questions (decide before Phase 1)
+## Open questions (each tagged with when it must be settled)
 
 - **Naming — DECIDED (hybrid).** Plain names where the concept is universal
   (`protocol`, `server`, `client`, `storage`, `evals`, `cli`); the already-coined
@@ -165,5 +205,18 @@ this is structure, not features.
 - **`storage` backend.** stage/state JSON files (zero-dep, matches today's
   discipline) vs. a real embedded store. pi uses sqlite; aoide's zero-dep rule
   argues for staying file-first until the steward's memory needs query/search.
+  *(Deferred to Phase 3 by decision — Phases 1–2 don't touch storage internals.)*
 - **`audit` home.** Kept inside `protocol` as a shared spine here; could be its
   own crate if it grows a sink/exporter surface.
+- **Flake packaging (portability).** The workspace ships as its **own standalone
+  flake** — `nix run`/`nix profile install` on any Linux yields the whole
+  environment — with this repo's NixOS modules a *consumer* of it. Decide the
+  boundary: does the crate workspace get its own `flake.nix` (repo consumes it as
+  an input), or does the repo flake expose Aoide-core as a portable
+  `packages.default` + `apps.default` alongside the NixOS module? Author Phase 1's
+  workspace so this stays open (no NixOS-module dependency reaches into the crates).
+- **`management` host backend.** The NixOS backend (nixos-rebuild/modules) exists
+  today; the **portable-Nix backend** (home-manager-style profile / `nix profile`
+  / an Aoide-owned generation for rebuild-switch-rice on a non-NixOS host) is new
+  work — scope it when `management` is carved out (Phase 5), plus how the backend
+  is detected at runtime (are we on NixOS, or generic-Nix?).
