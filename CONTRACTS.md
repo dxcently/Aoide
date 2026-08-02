@@ -584,11 +584,40 @@ Server-Sent Events. The MVP door serves exactly:
 - **`message/send`** — invoke; returns a Task. **Phase B2** landed real
   execution — see "Execution: `message/send`" below.
 - **`tasks/get`** — poll a Task's status by id.
+- **`message/stream`** / **`tasks/resubscribe`** — **Phase C** landed
+  Server-Sent-Events streaming; see "Streaming: SSE (Phase C)" below.
 
-`message/stream` (initial SSE), `tasks/resubscribe` (stream reconnect), and
-`tasks/cancel` are **additive** follow-ons — v0 does not require them, and
-adding them later is not a version bump to this contract (same additive
+`tasks/cancel` remains an **additive** follow-on — v0 does not require it, and
+adding it later is not a version bump to this contract (same additive
 discipline as §1/§4's optional tiers).
+
+### Streaming: SSE (Phase C)
+
+`message/stream` and `tasks/resubscribe` are served over **Server-Sent
+Events** (`a2a.rs::stream_task`). The response is a single long-lived
+`text/event-stream` (`Cache-Control: no-cache`, `Connection: close`), and each
+frame is a `data: <json>\n\n` line whose JSON is a JSON-RPC result envelope
+carrying a task-status update. The server emits **on change**: the first
+observation, then only when `status.state` changes. The **terminal** event is
+marked `final: true` and shaped as A2A's `TaskStatusUpdateEvent` (`{ taskId,
+contextId, status, final:true, kind:"status-update" }`); the client stops on
+it. A resolution error (a failed send, or an unknown `tasks/resubscribe` id →
+`-32001`) is delivered as a single `data:` event carrying the JSON-RPC error,
+then the stream closes.
+
+- **`message/stream`** *sends then streams*: it FIRST runs the same
+  inject/spawn `decide_send_action` execution as `message/send`, then streams
+  the resulting task's status to completion.
+- **`tasks/resubscribe`** *streams an existing task* named by `params.id`.
+
+The stream polls the stage every ~750 ms and is **bounded to 10 minutes**
+(`MAX_STREAM`): a never-terminal session (an idle agent) emits a final event
+and closes at the cap rather than holding a handler thread — and thus a
+`MAX_CONN` connection slot — forever. Concurrent streams are already bounded by
+the `MAX_CONN`/`ConnGuard` cap, since a stream runs inside the same guarded
+handler thread as any other connection. A client disconnect (write failure) is
+detected best-effort and closes the stream. The AgentCard advertises
+`capabilities.streaming: true` accordingly.
 
 ### Execution: `message/send` (Phase B2)
 
