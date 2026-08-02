@@ -173,20 +173,24 @@ Item {
                 font.weight: Font.Medium; font.letterSpacing: 2
                 color: notes.paletteFg
             }
-            Text {                                    // reset countdown (small, dim, italic)
-                anchors.left: umName.right; anchors.leftMargin: 8
-                anchors.baseline: umName.baseline
-                text: gadget.notes.usageResetIn(um.block ? um.block.resetsAt : "", gadget.nowMs)
-                font.family: gadget.faceSerif; font.italic: true
-                font.pixelSize: 10
-                color: gadget.withA(notes.paletteFg, 0.5)
-            }
             Text {                                    // util %, tallied in gold / terracotta
+                id: umPct
                 anchors.right: parent.right
                 anchors.baseline: umName.baseline
                 text: Math.round(um.util) + "%"
                 font.family: gadget.faceMono; font.pixelSize: um.compact ? 12 : 15
                 color: um.urgent ? notes.paletteUrgent : notes.paletteAccent
+            }
+            Text {                                    // reset countdown (small, dim, italic)
+                anchors.left: umName.right; anchors.leftMargin: 8
+                anchors.right: umPct.left; anchors.rightMargin: 6   // bounded — never bleeds under the %
+                anchors.baseline: umName.baseline
+                text: gadget.notes.usageResetIn(um.block ? um.block.resetsAt : "", gadget.nowMs)
+                elide: Text.ElideRight
+                horizontalAlignment: Text.AlignLeft
+                font.family: gadget.faceSerif; font.italic: true
+                font.pixelSize: 10
+                color: gadget.withA(notes.paletteFg, 0.5)
             }
             Text {                                    // the shared shade-glyph gauge
                 anchors.left: parent.left; anchors.right: parent.right
