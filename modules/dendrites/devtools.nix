@@ -9,7 +9,7 @@
 # (fzf, fd, ripgrep, jq, ffmpeg, archives, curl/wget, vim, …) live in the
 # sibling cli.nix dendrite — this file is the developer's set: editors/git UI,
 # Nix tooling, a JS runtime, tunnels. This is where bash.nix's `lg` (lazygit)
-# alias gets its binary. Agentic coding CLIs (claude-code, kimi-code,
+# alias gets its binary. Agentic coding CLIs (claude-code,
 # pi-coding-agent) each got their OWN dendrite — same reasoning as the
 # cli.nix split: a tool graduates out the moment a host wants to toggle it
 # independently. `crc` (claude --rc) in bash.nix now gets its binary from
