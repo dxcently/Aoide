@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-01
+updated: 2026-08-03
 tags: [aoide, graph, session, terminal, agent, cli]
 ---
 
@@ -99,6 +99,11 @@ the registry entry should follow).
   the merged hook phase) along with their hook records; children of a pruned
   session get `parentSessionId` cleared (un-orphaned rather than dangling).
   Everything removed or cleared is reported.
+- **`graph send`** (the gated injection door — full semantics in
+  [[Conductor-Channel]]) types into a conducted session's control socket;
+  `--submit` appends `\n`. One per-harness operator fact: kimi's TUI submits
+  on `\r`, not `\n`, so against a kimi target `--submit` types the line
+  WITHOUT submitting it — deliver `\r` as a separate send.
 
 A durability rule spans the layer: the stage rewriters **round-trip unknown
 fields** (serde flatten), so graph management never clobbers fields other
@@ -140,10 +145,17 @@ The same pass also retires **same-window agent duplicates**: a compact/resume
 mints a new `session_id` for a window that already holds a live agent record,
 and the stale one's `pid` resolves to the terminal rather than the agent, so
 liveness alone can't catch it. Among same-window `agent`-kind records past a
-short grace, the keeper is the one with a real on-disk transcript; the rest
-are retired. Shells are exempt (a conducted shell legitimately shares its
-window with the agent inside it). See [[Widget-Bridge-Contract]] for the full
-rule (this same dedup also runs at registration time, in `graph.rs`).
+short grace, the keeper is the one with a real on-disk transcript (probed
+through the record's own agent profile — see [[Agent-Hooking]]); the rest
+are retired. Shells are exempt, and so is a **conducted PTY host**: an
+`aoide conduct -- <agent>` wrapper classifies as `agent` from its child's
+basename but is the HOST of the agent inside it, so `is_agent_kind` excludes
+any `conductable` record from the dedup entirely — a wrapper-of-agent
+(`conduct -- kimi`) is never retired as a duplicate of the session it hosts.
+The registration-time half of the same rule (in `graph.rs`) likewise spares the
+new record's own `parentSessionId`, so a hooked session starting inside its
+conducted wrapper no longer evicts that wrapper. See
+[[Widget-Bridge-Contract]] for the full rule.
 
 **Interplay with the window-event listener.** [[shellbridge]]'s Hyprland event
 listener (the authoritative `windowAddress` source — see

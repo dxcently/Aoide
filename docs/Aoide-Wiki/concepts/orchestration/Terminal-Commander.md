@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-30
+updated: 2026-08-03
 tags: [aoide, widget, terminal, agent, session]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -73,8 +73,11 @@ The plumbing already exists ([[Desktop-Architecture]], [[shellbridge]]):
   match at `SessionStart`, backfilled on any later hook while still empty. These
   cover a session whose window the event listener didn't stamp (e.g. a hook-only
   Claude Code session with no recorded conduct pid for the listener to walk).
-- Claude Code hooks (`Notification` / `Stop` / `Pre-PostToolUse`) post execution
-  phase, so each row shows live state (working · awaiting · stopped · idle · done).
+- Agent hooks post execution phase, so each row shows live state (working ·
+  awaiting · stopped · idle · done) — claude's `Notification` / `Stop` /
+  `Pre-PostToolUse`, kimi's same core events plus its dedicated
+  `PermissionRequest`; both harnesses dispatch through their agent profile
+  ([[Agent-Hooking]]).
 - Unwrapped agents fall back to process-signal / window-title heuristics.
 
 ## The list

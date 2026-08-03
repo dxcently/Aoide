@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-30
-updated: 2026-07-31
+updated: 2026-08-03
 tags: [aoide, bridge, desktop, widget, quickshell, session, ipc]
 ---
 
@@ -20,8 +20,9 @@ IPC. This page is the contract both sides are built to.
   a unix socket in, and the Hyprland `socket2` window listener that keeps each
   session's `windowAddress`/`workspace` authoritative.
 - **The hook door** (`aoide graph session hook`) — a short-lived process per
-  Claude Code hook event ([[Agent-Hooking]]) that maps the event to a canonical
-  session state (below). This is the Claude↔desktop bridge.
+  agent hook event ([[Agent-Hooking]]) that maps the event to a canonical
+  session state through the harness's agent profile (`--agent`, default
+  claude). This is the agent↔desktop bridge.
 - **`conduct`** ([[Conductor-Channel]]) — owns every terminal's PTY, so it is the
   producer of a shell's live `cwd`, current command, and idle/working state, and
   the injection channel for `graph send`.
@@ -38,8 +39,8 @@ IPC. This page is the contract both sides are built to.
 | `kind` | `agent` \| `shell` \| `subagent` — what the record IS (widgets never infer role from the agent string). |
 | `state` | the CANONICAL live state — exactly one of `working` \| `awaiting` \| `stopped` \| `idle` \| `done`. |
 | `activity` | the current PROCESS: a shell's foreground command / file being edited (`nvim notes.md`, `cargo test`), or its bare shell process when idle (`bash`); an agent's current tool. Absent only when truly nothing runs. |
-| `say` | the agent's latest WORDS — the last line of prose it wrote, tail-read from its own Claude Code transcript. Distinct from `activity` (the process); absent for shells and for an agent that hasn't spoken. |
-| `model` | the session's currently-active Claude model (e.g. `claude-sonnet-5`), read from the last `assistant`-type transcript line alongside `say`. A sub-agent's `model` is its OWN — a background Task can run a different model than its parent. |
+| `say` | the agent's latest WORDS — the last line of prose it wrote, tail-read from its own transcript through its agent profile (claude: the session JSONL; kimi: `wire.jsonl` — see [[Agent-Hooking]]). Distinct from `activity` (the process); absent for shells and for an agent that hasn't spoken. |
+| `model` | the session's currently-active model (e.g. `claude-sonnet-5`, `kimi-code/k3-256k`), read from the transcript tail alongside `say`. A sub-agent's `model` is its OWN — a background Task can run a different model than its parent. |
 | `title` | the human session NAME. Set-once — whichever source lands FIRST wins: the first user prompt (clipped one-liner), Claude Code's own session title (`custom-title` in the transcript, e.g. "Aoide Dev"), or a `graph send` steer. |
 | `cwd` | live working directory (a conducted shell's follows `cd`). |
 | `parentSessionId` | the tree edge — a sub-agent's owner, or a nested claude's launcher. |
@@ -48,10 +49,12 @@ IPC. This page is the contract both sides are built to.
 **Canonical state vocabulary** — the daemon emits these verbatim; the widget
 switches on the string, it does NOT regex-guess:
 - `working` — in a turn / running a tool, or a shell running a foreground command.
-- `awaiting` — needs the user. Set ONLY by the `Notification` hook (a permission
-  prompt, or the ~60 s idle-input prompt). The invariant is **`needsInput ⇔
-  state == awaiting`**: a finished turn (`Stop`) settles to `stopped`, not
-  `awaiting`, so the anxious state keeps its signal value.
+- `awaiting` — needs the user. Set ONLY by the harness's needs-input hook
+  event — claude: the `Notification` hook (a permission prompt, or the ~60 s
+  idle-input prompt); kimi: the dedicated `PermissionRequest` event. The
+  invariant is **`needsInput ⇔ state == awaiting`**: a finished turn (`Stop`)
+  settles to `stopped`, not `awaiting`, so the anxious state keeps its signal
+  value.
 - `stopped` — the TURN ended and the agent is sitting at its prompt, RECENTLY
   (within the last hour). Alive and warm: the face of a session you just finished
   talking to. Set by `Stop`.
@@ -87,8 +90,9 @@ touches the file, so migration needs no rollout.
 
 `SessionStart`→`idle` · `UserPromptSubmit`→`working` (and the prompt NAMES the
 session, set-once) · `PreToolUse`/`PostToolUse`→`working`, setting the owner's
-`activity` to the tool · `Stop`→`stopped` · `Notification`(permission_prompt /
-idle_prompt)→`awaiting` · `SessionEnd`→`done` · and, off the clock rather than off
+`activity` to the tool · `Stop`→`stopped` · the needs-input event→`awaiting`
+(claude: `Notification`(permission_prompt / idle_prompt); kimi: `PermissionRequest`)
+· `SessionEnd`→`done` · and, off the clock rather than off
 an event, `stopped`→`idle` after an hour in the reaper pass. The idle-prompt only
 becomes `awaiting` when the turn is still `working` (an unanswered question), never
 for a settled session. `SessionStart` on an existing id (a resume/compact) folds a
@@ -96,11 +100,17 @@ for a settled session. `SessionStart` on an existing id (a resume/compact) folds
 `working`/`awaiting` turn alone.
 
 Alongside the state mapping, `Stop`/`PostToolUse`/`UserPromptSubmit`/`Notification`
-also tail-read the session's own JSONL transcript (the path a hook payload's
-`transcript_path` gives directly, or derived from `session_id` + `cwd` — Claude
-Code lays transcripts out at `~/.claude/projects/<munge(cwd)>/<session_id>.jsonl`,
-`/` and `.` folded to `-`) to refresh `say`/`model` and, set-once, `title` from its
-`custom-title` record. A background **Task** sub-agent gets the same treatment
+also tail-read the session's own transcript through its agent profile to refresh
+`say`/`model` and, set-once, `title` from the harness's title source (claude:
+the transcript's `custom-title` record; kimi: `state.json`, only when
+`isCustomTitle`). Each profile owns its layout: claude resolves the path a hook
+payload's `transcript_path` gives directly, or derives it from `session_id` +
+`cwd` — Claude Code lays transcripts out at
+`~/.claude/projects/<munge(cwd)>/<session_id>.jsonl`, `/` and `.` folded to
+`-`; kimi globs for `agents/main/wire.jsonl` under
+`${KIMI_CODE_HOME:-~/.kimi-code}/sessions/wd_*/<session_id>/`
+(see [[Agent-Hooking]] for the full kimi layout).
+A claude background **Task** sub-agent gets the same treatment
 from its OWN dedicated transcript, found one of two ways depending on how the
 sub-agent's node is currently keyed: a `sub:<agent_id>` node (an async `Agent`
 tool re-keyed from its tool-use id once the agent starts) resolves directly to
@@ -110,16 +120,21 @@ files for the one whose `toolUseId` matches, then reads its sibling
 `.jsonl`. Both paths are tried on every one of the PARENT's hooks, since a
 background Task outlives the turn that spawned it — an async `Agent`-tool
 sub-agent's `say`/`model` only populate once its node has re-keyed to the
-`agent_id` form.
+`agent_id` form. A kimi sub-node has no transcript probe at all: kimi 0.31.1
+writes no correlator between a hook's `tool_call_id` and its
+`agents/agent-<N>/` directory.
 
 ## The sub-agent tree
 
-A `Task` a claude agent spawns becomes a `subagent` node keyed `sub:<tool_use_id>`,
+A sub-agent a hooked agent spawns (claude's `Task`/`Agent`, kimi's `Agent` —
+whichever tools the profile lists) becomes a `subagent` node keyed `sub:<tool_use_id>`,
 named from the Task description, parented to its owner — the session, or the
 parent `sub:` node when a sub-agent spawns another (so nesting does not flatten
 onto the root). A tool run inside a sub-agent routes its `activity` to that
-sub-node, never the parent. The node is removed when its `Task` returns
-(`PostToolUse`/`SubagentStop`), and a `SessionEnd` cascades to remove the whole
+sub-node, never the parent. The node is removed when its dispatching tool
+returns (`PostToolUse`/`SubagentStop`; kimi's synchronous `Agent` tool always
+closes on the `PostToolUse` of the spawning call, since kimi 0.31.1 never fires
+`SubagentStop`), and a `SessionEnd` cascades to remove the whole
 subtree (Task nodes carry no pid/window, so the liveness reaper cannot). A nested
 real `claude` links via the `AOIDE_SESSION_ID` it inherits in the hook env — so a
 claude conducting another claude nests too.
@@ -132,22 +147,29 @@ temple. A beamed child row shows its OWN `say` (that sub-agent's latest words).
 
 ## One agent per window (dedup)
 
-A terminal window hosts one foreground claude, but Claude Code mints a NEW
+A terminal window hosts one foreground agent, but the harness mints a NEW
 `session_id` on compact/resume — and the old record, whose lifecycle-owning `pid`
-resolves to the still-alive TERMINAL (not claude itself), never runs its own
-`SessionEnd`. Left alone it lingers `working` forever: two "claude" rows for one
+resolves to the still-alive TERMINAL (not the agent itself), never runs its own
+`SessionEnd`. Left alone it lingers `working` forever: two agent rows for one
 terminal, the stale one even masking the real record's `say` in the Terminals
 window-merge. The bridge collapses same-window agent records to one:
 
 - **At registration** — a new agent `SessionStart` on a window already held by
   another live agent evicts the sibling immediately (a window address cannot be
   shared by two simultaneously-open windows, so the pair is always a stale re-id).
+  The eviction spares the new record's own `parentSessionId`: a hooked session
+  starting inside its conducted wrapper must not evict the wrapper it lives in.
 - **In the reaper** (`aoide graph reap`, the safety net for a window that resolves
   later) — among same-window agents past a short grace, keep the one with a real
   on-disk transcript (→ has `say` → classified `agent` → newest), retire the rest.
 
-Shells are exempt from the rule: a conducted shell and the claude inside it
-legitimately share one window, so dedup runs among `agent`-kind records only.
+Shells are exempt from the rule: a conducted shell and the agent inside it
+legitimately share one window, so dedup runs among `agent`-kind records only —
+and a **conducted PTY host is never a candidate at all**: an
+`aoide conduct -- <agent>` wrapper classifies as `agent` from its child's
+basename, but it is the HOST of the session inside it, so `is_agent_kind`
+returns false for any `conductable` record and the dedup (both halves above)
+leaves wrapper-of-agent pairs alone.
 
 ## The two roster temples
 
@@ -155,8 +177,8 @@ Both are pure views of the same `sessions.json`, but they read it differently:
 
 - **[[Gadget-Dock|Conductor]]** — the AGENT tree. Names each row by its session
   `title` ("Aoide Dev"), shows `activity` (the tool) and `say` (the words), and
-  beams sub-agents beneath. A conducted shell that only hosts a claude does NOT
-  get its own row — the claude represents that terminal (one row per terminal).
+  beams sub-agents beneath. A conducted shell that only hosts an agent does NOT
+  get its own row — the agent represents that terminal (one row per terminal).
   Each row also carries a small `model` tag; a row with a `title` always shows
   it, and a sub-agent row (which rarely carries a title — its name already
   falls back to the agent type) shows it as soon as `model` is known, so a

@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-28
-updated: 2026-08-01
+updated: 2026-08-03
 tags: [aoide, agent, orchestration, conductor, pty, ipc]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -53,7 +53,7 @@ The wrap process is the natural owner: it already holds the `Child`, already thr
 ## The verbs
 
 - **`aoide conduct [--agent A] [--parent P] [--id I] -- <command …>`** — the PTY-backed wrap. Same registration semantics as `graph wrap` (spawn-first, running→done, exit mirror, `AOIDE_SESSION_ID` exported) plus the PTY + control socket + `conductable` flag. `graph wrap` stays as the lightweight observe-only wrapper; `conduct` is the controllable one.
-- **`aoide graph send --id <id> [--submit] [--yes] -- <text>`** — the one door both callers use. Connects to the session's control socket and injects `<text>` (+ newline if `--submit`). A central orchestrator agent shells this to steer a child; the conductor calls it under the hood. **Every send routes through the aoided gate + audit log** (below). Sets the target's `title` to the task (auto-rename), and — since aoide owns the PTY — may push an OSC-2 title sequence to the real terminal so the window title (hence the node label) tracks the flow.
+- **`aoide graph send --id <id> [--submit] [--yes] -- <text>`** — the one door both callers use. Connects to the session's control socket and injects `<text>` (+ newline if `--submit`). A central orchestrator agent shells this to steer a child; the conductor calls it under the hood. **Every send routes through the aoided gate + audit log** (below). Sets the target's `title` to the task (auto-rename), and — since aoide owns the PTY — may push an OSC-2 title sequence to the real terminal so the window title (hence the node label) tracks the flow. `--submit`'s newline is `\n` — right for claude's TUI, but kimi's TUI submits on `\r`: against a kimi target `--submit` types the line without submitting it, so send `\r` as a separate send.
 - **Title discovery** — a small hyprctl step (`hyprctl clients -j`, match the session's process to a client) populates `windowAddress` (fixing the cue) and reads the live **chat title** Claude already writes to its terminal window, so un-conducted sessions still label correctly.
 
 ## Conduct-by-default — every terminal is a conducted session (SHIPPED)

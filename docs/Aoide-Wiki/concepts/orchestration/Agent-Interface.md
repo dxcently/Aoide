@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-01
+updated: 2026-08-03
 tags: [aoide, agent, cli]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -68,9 +68,24 @@ Every `aoide` command is designed as an API that happens to be typeable:
 - Published schemas for all state files (`stage/`, drachma, manifests)
 - All operations idempotent; output reports exactly what changed
 
-## Primary agent: claude CLI
+## The hooked agents: claude and kimi
 
-The claude CLI is the first-class agent path. A spawn wrapper registers the agent session and window address with [[shellbridge]]; Claude Code hooks (`Notification` / `Stop` / `Pre-PostToolUse`) post state after each operation. Other agents receive the wrapper or fall back to process-signal states.
+Two harnesses are first-class agent paths through the hook door, dispatched
+through per-harness profiles (`protocol::agents`, see [[Agent-Hooking]]). A
+spawn wrapper registers the agent session and window address with
+[[shellbridge]]; the harness's hooks post state after each operation — claude
+via `Notification` / `Stop` / `Pre-PostToolUse`, kimi via the same core events
+plus its dedicated `PermissionRequest`. `aoide graph session hook --agent
+<name>` selects the profile (default `claude`; unknown names get a structured
+`unknown-agent` error listing the registered ones), and **`aoide hooks install
+<agent> [--capture]`** wires the harness's settings file to pipe its hook
+stream into that door — an idempotent, never-clobbering merge into
+`~/.claude/settings.json` (JSON) or the kimi `config.toml` under
+`$KIMI_CODE_HOME` (default `~/.kimi-code`; TOML `[[hooks]]` tables),
+reporting added/present per event.
+`--capture` is a temporary debugging wrap that tees raw payloads to
+`~/Aoide/state/<agent>-hooks.jsonl`. Other agents receive the wrapper or fall
+back to process-signal states.
 
 ## Related
 
@@ -81,6 +96,7 @@ The claude CLI is the first-class agent path. A spawn wrapper registers the agen
 - [[Wiki-Protocol]]
 - [[Session-Graph]]
 - [[aoide-cli]]
+- [[Agent-Hooking]]
 - [[Codebase]]
 - [[A2A-Door]]
 - [[Package-Layout]]

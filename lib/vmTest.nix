@@ -189,7 +189,8 @@ pkgs.testers.runNixOSTest {
     # for `a2a agent send` — the Phase D client-side drive verb; bumped by 1
     # for `rice design status` — design-mode Phase A (read-only;
     # CONTRACTS.md §4's `stage/design.json` entry); most recently bumped by 2
-    # for `rice design enter`/`exit` — design-mode Phase B, the write side.
+    # for `rice design enter`/`exit` — design-mode Phase B, the write side;
+    # bumped by 1 for `hooks install` — the generic hook-installer verb.
     schema_raw = machine.succeed("aoide schema --json")
     schema_doc = json.loads(schema_raw)
     # schema --json emits a JSON Outcome envelope:
@@ -201,8 +202,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 47, (
-        f"expected 47 commands, got {cmd_count}.  "
+    assert cmd_count == 48, (
+        f"expected 48 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

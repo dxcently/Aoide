@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-08-01
+updated: 2026-08-03
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
@@ -25,7 +25,8 @@ the build is offline.*
 summary, args, flags, `gated`, `implemented`, a `handler: fn(&Invocation) ->
 Outcome`, an `available` check) plus the `cmd!`/`arg!`/`flag!` macros that
 build one. Each command group under `pkgs/aoide/src/commands/`
-(`meta.rs`, `rice.rs`, `cover.rs`, `stubs.rs`, `graph.rs`, `infra.rs`) owns a
+(`meta.rs`, `rice.rs`, `design.rs`, `cover.rs`, `stubs.rs`, `graph.rs`,
+`infra.rs`, `a2a.rs`, `usage.rs`, `hooks.rs`) owns a
 `register(&mut Registry)` function that inserts its own entries;
 `commands/mod.rs::all()` assembles the full registry in the historical
 `schema --json` order. Rice and cover handler bodies live in their own
@@ -47,13 +48,14 @@ offline, vendored dependency set unchanged — the same shape as Hermes-agent's
 self-registering tool registry and Claude Code's discrete-tools-behind-a-thin-
 dispatch design.
 
-The command surface itself is unchanged by this shape: **44 leaves**
+The command surface itself is unchanged by this shape: **48 leaves**
 (`aoide schema --json | jq '.commands | length'`):
 
 | Group | Leaves | Real / stub |
 |---|---|---|
 | `guide`, `schema` | 2 | real |
 | `rice lint`, `rice preview`, `rice mint` | 3 | real (`lint` delegates to [[drachma]]) |
+| `rice design status`/`enter`/`exit` | 3 | real |
 | `cover set` | 1 | real |
 | `rice gen`, `rice adopt`, `rice transpose` | 3 | stub (`adopt` gated) |
 | `content register/propose/ingest/query` | 4 | stub |
@@ -66,6 +68,7 @@ The command surface itself is unchanged by this shape: **44 leaves**
 | `conductor` | 1 | real |
 | `a2a serve`, `a2a agent add/list/remove/send` | 5 | real |
 | `usage` | 1 | real |
+| `hooks install` | 1 | real |
 
 The **`a2a`** group is the [[A2A-Door]] — the third door onto aoide. `a2a
 serve` raises the A2A (Agent2Agent) JSON-RPC/HTTP server (a discoverable
@@ -73,7 +76,17 @@ AgentCard + `message/send` + `tasks/get` + SSE streaming, off by default,
 loopback-bound); the four `a2a agent` verbs are the client side, registering
 and driving external A2A agents through `state/a2a-agents.json`. **`usage`**
 computes the local token/cost rollup that backs the opt-in claude.ai usage
-gadget ([[Gadget-Dock]]).
+gadget ([[Gadget-Dock]]). **`hooks install <agent> [--capture]`** is the
+hook-installer verb: it merges aoide's hook wiring into the named harness's
+settings file (path + format come from the harness's `AgentProfile` — claude:
+JSON merge into `~/.claude/settings.json`; kimi: text-level `[[hooks]]`
+append into `${KIMI_CODE_HOME:-~/.kimi-code}/config.toml`, never a
+parse-rewrite since that file holds providers/credentials), idempotent and
+reporting exactly which events were added vs already present. `--capture`
+installs a parallel set of entries that tee raw payloads to
+`~/Aoide/state/<agent>-hooks.jsonl` for debugging — a distinct idempotency
+key, so capture entries coexist with the plain ones and are removed manually.
+See [[Agent-Hooking]].
 
 A stub returns a structured `Outcome` with status `not-implemented` (exit
 `64`), never a crash — arg-parsing, the schema entry, the audit-log append,
@@ -100,7 +113,9 @@ containing `${…}` can never round-trip into live Nix interpolation.
 ### The `graph` group — session/project DAG + the conductor mesh
 
 `view`, `project add`/`remove`/`list`, `link`, `session start`/`phase`/`end`/
-`hook`, `focus`, `prune`, `emit` are the [[Session-Graph]] viewer +
+`hook` (takes `--agent <name>`, default `claude` — the payload maps through
+that harness's agent profile, [[Agent-Hooking]]), `focus`, `prune`, `emit`
+are the [[Session-Graph]] viewer +
 manager feeding the [[Terminal-Commander]] roster (see [[Agent-Hooking]] for
 the session-registration doors). Three commands turn the graph into a
 live conductor mesh:

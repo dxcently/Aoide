@@ -4,7 +4,7 @@ created: 2026-07-28
 tags: [aoide, handoff, development, agent, operating-manual]
 ---
 
-# Aoide Development — agent handoff
+# Aoide Development — agent protocol
 
 Status: **Aoide/AoideOS is in active development, running live on yomi-strix.**
 Operating manual for a **development agent** working *on* Aoide itself. Sibling
@@ -57,24 +57,36 @@ Aoide **is** an orchestration core — dogfood it while building it.
   a running session. An orchestrator freely commands its own spawned children
   (parent-autogate); everything else is pending until `--yes`.
 - **Plan → execute → review pipeline (current shape).** One dispatch per role,
-  per unit of work: **Opus plans** (scopes the change, names files/functions,
-  sequences steps), **Sonnet executes** (code + build/test/deploy, mirrors
-  the plan rather than improvising scope), **Fable or Opus reviews** before
-  it lands (correctness/coherence, or a vision pass for visual work) — review
-  is standing, not optional, and **coaches the executor directly via
-  SendMessage** rather than a bare pass/fail. The orchestrator's job: dispatch
-  each stage, make only typo-class edits itself, keep §7 + memory current —
-  not write the implementation or the review.
-- **ALL planning/mapping/designing → an Opus agent**, never the orchestrator's
-  own head. The orchestrator concretizes khoa's prompt into a precise brief,
-  dispatches to Opus, then orchestrates execute → review. Scoping a refactor,
-  mapping an extraction, designing a layout/widget/song, choosing between
-  approaches — all go to Opus. **Small nudges stay with the orchestrator:**
-  typo-class edit, pixel/margin move, one-line tweak, config bump — done
-  directly, no Opus round-trip.
-- **Design passes:** khoa looks FIRST, then the advisor (Fable/Opus review).
-- **Wiki maintenance → the Sonnet librarian** (§6), off the orchestrator's own
-  context.
+  per unit of work: the **flagship tier plans** (scopes the change, names
+  files/functions, sequences steps), the **mid tier executes** (code +
+  build/test/deploy, mirrors the plan rather than improvising scope), the
+  **flagship tier reviews** before it lands (correctness/coherence, or a
+  vision pass for visual work) — review is standing, not optional, and
+  **coaches the executor directly via SendMessage** rather than a bare
+  pass/fail. The orchestrator's job: dispatch each stage, make only typo-class
+  edits itself, keep §7 + memory current — not write the implementation or
+  the review.
+- **ALL planning/mapping/designing → a flagship-tier agent**, never the
+  orchestrator's own head. The orchestrator concretizes khoa's prompt into a
+  precise brief, dispatches to the planner, then orchestrates execute →
+  review. Scoping a refactor, mapping an extraction, designing a
+  layout/widget/song, choosing between approaches — all go to the planner.
+  **Small nudges stay with the orchestrator:** typo-class edit, pixel/margin
+  move, one-line tweak, config bump — done directly, no planner round-trip.
+- **Tier mapping per model suite.** The roles above are model-agnostic; the
+  concrete picks per CLI:
+  - **Claude (`claude`):** Opus plans and reviews (Fable may take a review),
+    Sonnet executes, Sonnet runs the §6 librarian.
+  - **Kimi (`kimi`) — K3 is the default, tiered per role:** `k3` (1M context,
+    `high`/`max` thinking effort) plans and reviews; `k3-256k` executes and
+    runs the §6 librarian (same results within 256K at roughly half the
+    quota; `low` effort is enough for librarian upkeep).
+    `kimi-for-coding` / `kimi-for-coding-highspeed` (K2.7) is the fallback
+    when K3 quota or availability pinches, not a first choice.
+- **Design passes:** khoa looks FIRST — that closes the pass. The advisor
+  (flagship-tier review) is on call only, pulled in when khoa asks.
+- **Wiki maintenance → the mid-tier librarian** (§6), off the orchestrator's
+  own context.
 - **Batch independent agents** in one message so they run concurrently; keep
   the conclusion, not their file dumps.
 - **Resume, don't respawn.** An agent that died mid-task on an API error is
@@ -121,8 +133,8 @@ grim out.png ; grim -g "0,0 1920x60" bar.png    # full + crops → read them bac
 - **Ricing/design changes are ALWAYS deployed live — the executor stages
   them.** Not "finished" at qmllint-clean: hot-sync changed QML into the live
   tree and restart the shell (or smallest reload that proves it) so review
-  happens on the render, not the diff. Order: khoa looks first, then the
-  advisor. **Live path: the service reads `run/qml/shell.qml`, so the
+  happens on the render, not the diff. Order: khoa looks first — the advisor
+  is on call only (§2). **Live path: the service reads `run/qml/shell.qml`, so the
   deployed tree is `run/qml/` (writable working copies) — NOT
   `modules/facets/quickshell/qml/` and NOT `~/Aoide/qml/`.** Sync only the
   files you changed (`cp modules/facets/quickshell/qml/<f> run/qml/<f>` then
@@ -135,12 +147,17 @@ Progress/system state live in one HTML **report artifact**, edited in place —
 not re-printed as chat summaries. Current URL:
 `https://claude.ai/code/artifact/f4df295c-128e-40f1-b2fc-a7c5ba7a8241`. Carries
 overview, architecture (ASCII + Mermaid), running-process table, and a
-workstream ledger (status pills + changelog keyed by commit hash).
+workstream ledger (status pills + changelog keyed by commit hash). A synced
+copy is tracked in-repo at `docs/architecture/aoide-report.html` — the
+artifact is the live/shared URL, the repo copy is what survives a fresh
+clone and git history.
 
 - **Update it, don't repeat it.** After landing/milestone: edit + republish to
   the *same file path* (keeps the URL), flip the ledger pill
   (`pending → active → landed · <hash>`), add a changelog line. Reserve chat
-  for decisions/questions/blockers.
+  for decisions/questions/blockers. Copy the same edit into
+  `docs/architecture/aoide-report.html` and commit it — the two must not
+  drift.
 - **Keep identity stable.** Same `<title>` and favicon (🏛️) across redeploys.
   House style: dual light/dark, self-contained, Mermaid on cool-paper,
   verdigris+bronze.
@@ -189,8 +206,8 @@ Small, coherent, verified changes land directly.
 
 ## 6. Adjusting the wiki — delegated to the librarian
 
-Wiki work is delegated to a standing **Sonnet 5 "librarian" agent**, kept out
-of the orchestrator's own context. Mandate: every page states **what
+Wiki work is delegated to a standing **mid-tier "librarian" agent** (see §2
+tier mapping), kept out of the orchestrator's own context. Mandate: every page states **what
 currently IS the case** — present-indicative, matching the live repo/system —
 never a plan or future intent (that's what open flags are for). Can run on a
 broad standing brief in the background rather than one page per call.
@@ -212,6 +229,57 @@ broad standing brief in the background rather than one page per call.
 Flags raised but not yet closed, so the next agent inherits them. Close a
 flag by resolving it AND deleting its line; add one the moment you raise it.
 
+- **[in-progress, uncommitted] kimi CLI integration via the agent-profile
+  seam — Steps 1–6 landed in the WORKING TREE ONLY (2026-08-03); awaiting
+  commit + gated switch.** Rebuild fixed (flake couldn't see the untracked
+  files; `git add -N` on the two new paths unblocked it). Toplevel with the
+  new aoide built green:
+  `/nix/store/fp63rfc1ac0lfdiyqmr2knhxi9gnyf52-nixos-system-yomi-strix-26.11.20260723.e2587ca`
+  (verified: its `aoide` carries `hooks install`). The old pending-activation flag closed same-day:
+  system switched to the `8a10h74i…` toplevel, `kimi 0.31.1` + `claude` on
+  PATH, existing `~/.kimi-code` OAuth carried over. **Nothing is committed;
+  do not clean the tree.** Untracked:
+  `pkgs/aoide/crates/protocol/src/agents.rs`,
+  `pkgs/aoide/src/commands/hooks.rs` — `nix build .#aoide` from the git tree
+  fails E0583 until they're tracked (plain-path build verified green; tests
+  278 pass, skipping the pre-existing environmental PTY hang
+  `conduct_injects_socket_bytes_into_the_child`, reproduced on pristine HEAD).
+  Landed: (1) `protocol::agents` `AgentProfile` seam — every claude-specific
+  (hook event map, permission vocab, subagent tools, model ceilings,
+  transcript locator/extractors, settings spec, payload normalizer) extracted
+  behind profiles; consumers rewired (send.rs, session_store.rs, window.rs,
+  reap.rs, storage/session.rs). (2) `KIMI_PROFILE` + `aoide graph session
+  hook --agent` (default claude, unknown → structured error). (3) `aoide
+  hooks install <agent> [--capture]` — idempotent merge into
+  `~/.kimi-code/config.toml` (honors `KIMI_CODE_HOME`) /
+  `~/.claude/settings.json`; 10 kimi events live-installed (the Step-4
+  capture entries were removed after Step 5; capture log remains at
+  `~/Aoide/state/kimi-hooks.jsonl`). (4) E2E proven on yomi-strix with the
+  debug binary (the live generation still runs OLD aoide — needs a gated
+  switch after commit): register → working → awaiting (`PermissionRequest`)
+  → stopped → done (`/exit` SessionEnd), SIGKILL sweep, `graph send`
+  commanding, sub-agent `Agent` tool observed. (5) kimi payload normalization
+  + real `TranscriptSpec` (`normalize_payload` on the profile maps kimi's
+  `prompt` blocks/`tool_call_id`/`agent_name` to canonical fields; transcript
+  reads `~/.kimi-code/sessions/wd_*/<id>/{state.json,agents/*/wire.jsonl}` —
+  assistant text lives in `context.append_loop_event`, tokens in
+  `usage.record`; live smoke extracted say/model/contextTokens from a real
+  session). (6) BUG FIX: wrapper-of-agent (`aoide conduct -- kimi`) was
+  evicted at child SessionStart (registration-time same-window eviction) and
+  retired by reaper dedup — `is_agent_kind` now excludes `conductable` hosts
+  + the eviction spares `parent_session_id`; unit-tested, but the live
+  systemd reaper runs the OLD binary until the switch, so it will still eat
+  wrapper records meanwhile. Known gaps (kimi 0.31.1): `SubagentStop` and
+  `PermissionResult` never fire (sub-nodes close on PostToolUse(Agent)
+  instead); `Stop` doesn't fire on Esc interrupt (an interrupted turn reads
+  `working` until the next hook); kimi sub-nodes have no transcript probe
+  (no tool_call_id ↔ agent-dir correlator in state.json). Misc findings:
+  kimi TUI submits on `\r` not `\n` (`graph send --submit` doesn't submit —
+  send `\r` separately); model aliases are prefixed
+  (`-m kimi-code/kimi-for-coding`; bare alias errors `config.invalid`); one
+  unexplained instant-exit (SessionStart→SessionEnd) at 02:14, unreproduced.
+  Test-model note: e2e used `kimi-code/kimi-for-coding` (K2.7) per khoa —
+  don't burn K3 on tests.
 - **[decision] App-launch exec discipline.** `DesktopEntry.execute()` is used
   for app-launch (Quickshell-native idiom) rather than routing through
   `aoided` (rule #6) — no such verb exists and adding one buys nothing. Open

@@ -128,7 +128,7 @@
     <p class="dek">A living report on AoideOS: what it is, how the pieces fit (trees + graphs), and the state of the work in flight. Updated in place as the build moves.</p>
     <div class="meta">
       <span class="chip"><b>8</b> crates · <b>2</b> binaries</span>
-      <span class="chip"><b>47</b> commands</span>
+      <span class="chip"><b>48</b> commands</span>
       <span class="chip">3 doors · one schema</span>
       <span class="chip">nucleus · dendrites · facets</span>
       <span class="chip">song = rice</span>
@@ -277,7 +277,7 @@ flowchart TB
   tui --> root
   mcpD --> server
   a2aD --> server
-  root["root aoide — dispatch.rs + registry.rs<br/>commands/* → 47 commands · the trunk"]:::hub
+  root["root aoide — dispatch.rs + registry.rs<br/>commands/* → 48 commands · the trunk"]:::hub
   root -->|injects registry + dispatch fn| server["server<br/>a2a serve · mcp serve · daemon::run"]:::mid
   root --> client["client<br/>A2A outbound · melete adapter"]:::mid
   root --> song["song<br/>notes/lint · live geometry · mint · cover"]:::mid
@@ -300,7 +300,7 @@ flowchart TB
 ├── src/                       the trunk — root aoide + aoided binaries
 │   ├── bin/{aoide.rs, aoided.rs}
 │   ├── cli.rs → dispatch.rs           the one dispatcher  ── three doors, one schema
-│   ├── commands/                      meta · rice · cover · design · graph · infra · a2a · stubs → 47
+│   ├── commands/                      meta · rice · cover · design · graph · hooks · infra · a2a · stubs → 48
 │   ├── conductor/                     the TUI — app · ui · graphview · theme
 │   └── {a2a,mcp,daemon,graph,reap,shellbridge,notes,hypr,adapter}.rs   thin `pub use` shims
 └── crates/
@@ -428,6 +428,7 @@ flowchart TB
   <section>
     <div class="plate-label"><span class="no">§</span><h2>Recent work</h2><span class="h-line"></span><span>changelog</span></div>
     <div class="clog">
+      <div class="centry"><span class="hash pending">pending</span><span class="msg"><b>Agent-profile seam + kimi integration</b> — every claude-hardcoded fact the bridge carried (hook event map, permission vocab, sub-agent tool names, model ceilings, transcript locator/extractors, hook-settings spec) extracted behind <code>protocol::agents</code> <code>AgentProfile</code> entries; the hook door (<code>graph session hook --agent</code>), transcript refresh, window listener, and reaper all dispatch through the table, which today holds <code>claude</code> + <code>kimi</code>. New <code>aoide hooks install &lt;agent&gt; [--capture]</code> verb wires a harness's settings file idempotently (48 commands now). Kimi rides the same door: dedicated <code>PermissionRequest</code>→awaiting, payload normalization (<code>prompt</code> blocks, <code>tool_call_id</code>, <code>agent_name</code>), real <code>TranscriptSpec</code> over <code>~/.kimi-code/sessions/wd_*/&lt;id&gt;/wire.jsonl</code>. Also fixes a live bug: a wrapper-of-agent (<code>aoide conduct -- kimi</code>) was evicted at its child's SessionStart and reaped as a duplicate — conducted PTY hosts are no longer agent-duplicate candidates. E2E-verified on yomi-strix 2026-08-03 with the debug binary. <b>Landed in the working tree only — pending commit + the next gated switch;</b> the live generation still runs the pre-seam aoide.</span></div>
       <div class="centry"><span class="hash pending">pending</span><span class="msg"><b>Kimi Code CLI dendrite</b> — Moonshot AI's terminal coding agent joins the fleet, sibling of <code>claude-code</code>. New <code>pkgs/kimi-code</code>: a real, reproducible <code>fetchurl</code> derivation over upstream's prebuilt Linux x64 binary (hand-verified sha256, not taken on faith from any fetched page), <code>autoPatchelfHook</code>'d against glibc/libstdc++ — needed <code>dontStrip = true</code> since it's a Bun-compiled single-file executable with its JS bundle appended after the ELF body, and the default strip pass was corrupting that payload (symptom: SIGILL on launch). New <code>modules/dendrites/kimi.nix</code> ships <code>aoide.kimi.enable</code> defaulted off, same shape as every other dendrite; yomi-strix opts in. Toplevel builds green; activation is pending an interactive sudo switch.</span></div>
       <div class="centry"><span class="hash">9e61965</span><span class="msg"><b>Conductor "playbill" redesign</b> — the session roster rebuilt from a blind spec (the design agent never saw the old implementation): projects as roman-numeral movements, per-session state read off a fixed-width lamp glyph/color, the old mood-face/kaomoji + hover-clear machinery dropped wholesale. <code>ConductorPreview.qml</code>'s harness now instantiates real <code>DrachmaState</code>/<code>ShellBridge</code> instead of a stub palette. Deployed live to <code>run/qml/</code>, flagged in AOIDE-DEV.md §7 — still awaiting khoa's vision-check before it counts as reviewed design, not just committed.</span></div>
       <div class="centry"><span class="hash">25e2bdb</span><span class="msg"><b>package-layout docs sync</b> — <code>PACKAGE-LAYOUT.md</code> + its wiki mirror flip Phase 6 from "in planning" to landed, record that <code>cli</code> is the root package rather than a separate crate, and confirm the seven-crate final count. <b>Closes out the entire multi-phase package-restructure workstream</b> — Phases 7 (<code>steward</code>) and 8 (<code>evals</code>) remain DEFER, both genuinely blocked on decisions outside the restructure itself, not just unscheduled.</span></div>

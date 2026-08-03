@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-27
-updated: 2026-07-30
+updated: 2026-08-03
 tags: [aoide, agent, session, conductor, orchestration, graph]
 ---
 
@@ -13,15 +13,17 @@ tags: [aoide, agent, session, conductor, orchestration, graph]
 
 Pick by what the agent harness can do. All three converge on the same records; all are idempotent upserts.
 
-### 1. The hook door — harnesses with Claude-Code-shaped hooks
+### 1. The hook door — harnesses with a hook system (claude, kimi)
 
-Pipe ONE hook payload as JSON on stdin:
+Pipe ONE hook payload as JSON on stdin, naming the harness when it isn't the default:
 
 ```sh
-echo '{"session_id":"…","hook_event_name":"…","cwd":"…","message":"…"}' | aoide graph session hook
+echo '{"session_id":"…","hook_event_name":"…","cwd":"…","message":"…"}' | aoide graph session hook --agent claude
 ```
 
-Event → canonical-state map (the door is a silent no-op for everything else, and NEVER exits non-zero — safe inside any hook config). The five canonical states are `working`/`awaiting`/`stopped`/`idle`/`done` ([[Widget-Bridge-Contract]]); a legacy `running`/`waiting`/`blocked` write from an older door is folded onto this set by a read-side shim (`canonical_state`) the first time anything touches the file, so no migration step is needed:
+`--agent` defaults to `claude`; an unknown name is a structured `unknown-agent` error listing the registered profiles. The door resolves the harness's **agent profile** (the seam below) and maps the payload through it — one contract, per-harness tables behind it.
+
+Each profile's `hook_event_map` collapses its harness's event NAMES onto shared semantic classes, which the door then maps to canonical state — claude's map below; kimi's deltas are in the *Kimi Code* recipe further down (the door is a silent no-op for everything unmapped, and NEVER exits non-zero — safe inside any hook config). The five canonical states are `working`/`awaiting`/`stopped`/`idle`/`done` ([[Widget-Bridge-Contract]]); a legacy `running`/`waiting`/`blocked` write from an older door is folded onto this set by a read-side shim (`canonical_state`) the first time anything touches the file, so no migration step is needed:
 
 | event | state |
 |---|---|
@@ -103,6 +105,44 @@ audited. Use `graph wrap` for pure observe-only registration; use `conduct`
 when something (a human via the `conductor` TUI, or another agent) needs to type
 into the session later.
 
+## The agent-profile seam — every harness fact behind one table
+
+Everything the bridge knows about a specific agent harness lives on an
+`AgentProfile` (`pkgs/aoide/crates/protocol/src/agents.rs`), looked up by name
+(`agent_profile(name)`; `known_agents()` lists the registered names — today
+`claude` and `kimi`). One profile carries, whole:
+
+- `hook_event_map` — event name → semantic class (`HookClass`); it also
+  classifies a Notification's detail via prefixed keys (`ntype:<raw
+  notification_type>` exact, `msg:<lowercased message>` substring fallback), so
+  event, type, and message can never cross-classify.
+- `permission_vocab` — message substrings that force `awaiting` unconditionally
+  (claude: `["permission"]`; kimi: empty — it has a dedicated event instead).
+- `subagent_tools` — tool names that dispatch a sub-agent (claude: `Task` +
+  `Agent`; kimi: `Agent` only, synchronous).
+- `normalize_payload` — copies a raw hook payload's harness-native fields onto
+  the canonical names the door reads, before `map_hook` runs (identity for
+  claude; kimi maps `prompt` content-block arrays → `user_prompt`,
+  `tool_call_id` → `tool_use_id`, `agent_name` → `agent_type`).
+- `model_ceiling` — the context-window ceiling for a model id.
+- `transcript` (`TranscriptSpec`) — locate / tail / say / title / model /
+  context_tokens / subagents_dir / find_subagent for the harness's on-disk
+  transcript layout.
+- `hook_settings` (`SettingsSpec`) — where the harness's hook config lives and
+  its format (claude: `~/.claude/settings.json`, JSON; kimi:
+  `${KIMI_CODE_HOME:-~/.kimi-code}/config.toml`, TOML).
+
+Every agent-aware consumer dispatches through the profile rather than
+hardcoding a harness: the hook door (`--agent` → `map_hook` and the
+`SessionStart` window-discovery path in `crates/conduct/src/graph/send.rs`),
+the transcript refresh (`crates/conduct/src/graph/session_store.rs`), the
+window listener's sub-agent tool check (`crates/conduct/src/graph/window.rs`),
+the reaper's transcript probe and same-window dedup (`profile_for` in
+`crates/conduct/src/reap.rs` — a record whose agent has no registered profile falls
+back to the claude layout), and `graph session start`'s default agent
+(`crates/storage/src/session.rs`). A new harness lands as one more entry in the
+profile table, not a scatter of conditionals.
+
 ## Per-agent recipes
 
 ### Claude Code
@@ -128,11 +168,35 @@ stdin; the door does the mapping:
 }
 ```
 
+Writing it by hand is not required: `aoide hooks install claude` merges the same nine entries into `~/.claude/settings.json` (idempotent JSON merge, the rest of the document preserved — see [[Agent-Interface]]).
+
 `Notification` + `PostToolUse` are what make **blocked** visible — without them a session on a permission prompt reads `running` forever. `SubagentStart` / `SubagentStop` are what put a spawned sub-agent (e.g. an `Agent`-tool call) on the graph as its own row, parented to the session that spawned it, rather than folding invisibly into the parent's activity.
 
 **Scope: global vs. project-local.** `.claude/settings.json` can live at project scope (`<repo>/.claude/settings.json`, tracked per-project, `command -v`-resolves `aoide` but can also hardcode a dev build's path) or at user scope (`~/.claude/settings.json`, applies to every Claude Code session on the machine regardless of cwd). **Only the global file covers sessions started outside a project that carries its own `.claude/settings.json`** — a Claude Code session opened in, say, `~/dxflake` never touches this repo's project-local hooks, so it registers on the graph only if `~/.claude/settings.json` also carries the same nine hooks. Without them, that session is invisible to `aoide graph session hook` entirely: Hyprland's window listener still picks up the enclosing terminal as a bare `shell`-kind row (window address, pid, cwd), but the Claude process itself never becomes an `agent`-kind row with turn state, phase, or a spawned-by edge. As of 2026-07-30, `~/.claude/settings.json` carries the same nine hooks as this repo's project-local file (pointed at whatever `aoide` resolves to on `PATH`, no worktree-specific path baked in) — this is a fresh-machine onboarding step for anyone setting up Claude Code as an Aoide harness: the global file needs the hooks too, not just the repo's.
 
-This is specific to **Claude Code's** hook system — other harnesses wired through this repo's [[aoide-cli|other doors]] (the wrapper, the explicit verbs) don't have a settings-file split like this one.
+The settings-file split is specific to harnesses that come through the hook door — claude and kimi each keep their own (profile-declared) settings file, and `aoide hooks install <agent>` writes either one. Harnesses wired through this repo's [[aoide-cli|other doors]] (the wrapper, the explicit verbs) don't have a settings-file split like this one.
+
+### Kimi Code
+
+Kimi speaks the same stdin-JSON hook transport with the same core event names, so it comes through the same door: `--agent kimi`. The profile absorbs the differences (all ground-truthed against captured 0.31.1 payloads):
+
+- **`PermissionRequest` is THE needs-input signal** (→ `awaiting`, unconditional). Kimi's `Notification` carries background-task status, never a permission prompt — there is no notification_type/message vocabulary to classify, and `permission_vocab` is empty.
+- **Payload shape.** `UserPromptSubmit.prompt` is an ARRAY of content blocks (its text blocks join into `user_prompt`); tool events carry `tool_call_id`; `SubagentStart`/`SubagentStop` name the child `agent_name`. `normalize_payload` copies these onto the canonical fields before mapping, leaving the kimi-native fields intact.
+- **Kimi-only events are ok no-ops** — `PermissionResult`, `Interrupt`, `PreCompact`, `PostCompact`, `StopFailure`, `PostToolUseFailure` all map to `Unknown`. Two 0.31.1 gaps ride on that: `SubagentStop` never fires (a sub-agent node closes on the synchronous `PostToolUse` of its `Agent` tool call instead — kimi's `Agent` tool returns `status: completed` in `tool_output`), and `Stop` does NOT fire on an Esc interrupt, so an interrupted turn reads `working` until the next hook arrives.
+- **Transcript layout** — a per-session DIRECTORY at `${KIMI_CODE_HOME:-~/.kimi-code}/sessions/wd_*/<session_id>/` (the `wd_` hash is opaque, so the locator globs for the `<session_id>` child) holding `state.json` (`title`, honored only when `isCustomTitle`) and `agents/main/wire.jsonl` (the transcript; each sub-agent gets its own `agents/agent-<N>/wire.jsonl`). Assistant prose is the last `context.append_loop_event` `content.part` of type `text` (`think` parts are chain-of-thought, not words); the model comes from `usage.record.model` / `llm.request.modelAlias`; context fill is the freshest `usage.record`'s `inputOther + inputCacheRead + inputCacheCreation`. Model ceilings: `k3` → 1M, `k3-256k` / `kimi-for-coding(-highspeed)` → 256K, anything else → the conservative 200K — matched on the basename after the last `/`, because on-disk ids arrive provider-prefixed (`kimi-code/kimi-for-coding`). A kimi sub-node has no transcript probe: 0.31.1 writes no correlator between a hook's `tool_call_id` and its `agent-<N>` dir.
+
+Wiring: `aoide hooks install kimi` (see [[Agent-Interface]]) merges ten `[[hooks]]` tables (the nine core events + `PermissionRequest`) into `config.toml`, honoring `KIMI_CODE_HOME`; by hand, one table per event:
+
+```toml
+[[hooks]]
+event = "SessionStart"
+command = "aoide graph session hook --agent kimi"
+timeout = 5
+```
+
+An entry carries ONLY `event`/`command`/`timeout` — extra fields (a claude-style `matcher`) make kimi's config fail to load.
+
+Operator notes: kimi's TUI submits on `\r`, not `\n` — see [[Conductor-Channel]] for what that means for `graph send --submit`. And kimi's model aliases are provider-prefixed on the CLI too (`-m kimi-code/kimi-for-coding`; a bare alias errors `config.invalid`).
 
 ### Any plain CLI agent (no hook system)
 
@@ -169,6 +233,8 @@ Pass `--parent "$AOIDE_SESSION_ID"` (or the `--parent` flag on `session start`) 
 
 - `aoide guide` — the terse in-CLI version of this page.
 - [[aoide-cli]] — the full command tree, including `conduct` and the interactive `conductor` TUI that renders every door's sessions.
+- [[Agent-Interface]] — the CLI trunk the hook door and `hooks install` live on.
+- [[Conductor-Channel]] — the send/injection semantics, including the kimi `\r` submit caveat.
 - [[Terminal-Commander]] — the graph concept (projects anchor sessions by cwd).
 - [[shellbridge]] — its socket accept loop is live for the window-jump verb (`focuswindow`), but session *registration* (start/phase/end) still has no socket verb; the CLI doors above remain the writers — and the permanent fallback.
 - [[Widget-Bridge-Contract]] — the full `sessions.json` field contract and canonical-state rules the states above feed.
