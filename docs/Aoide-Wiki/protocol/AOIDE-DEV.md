@@ -280,7 +280,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
 - **[bug] Melete adapter subscribes to nothing.**
   `modules/nucleus/melete-adapter.nix` sets
   `AOIDE_ADAPTER_SUBSCRIBE=rebuild-proposed,rice-preview-ready,notification-action`,
-  but `pkgs/aoide/src/adapter.rs::parse_class()` only accepts
+  but `pkgs/aoide/crates/client/src/adapter.rs::parse_class()` only accepts
   `audit/gate/rice/content/notification` — every configured name is silently
   dropped, adapter forwards nothing. Fix: reconcile env values to the
   parser's vocabulary (or widen the parser). See [[Melete]].
@@ -308,7 +308,8 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   human's direct file edits (nvim/vim) inside a conducted shell and report
   back to the orchestrating session. Not implemented. Design on record:
   `conduct`'s PTY tick already detects editor-foreground
-  (`EDITOR_BASENAMES`/`friendly_editor_command`, `graph.rs`) — snapshot `git
+  (`EDITOR_BASENAMES`/`friendly_editor_command`,
+  `crates/conduct/src/graph/conduct.rs`) — snapshot `git
   status --porcelain` around that window, diff to newly-changed paths, write
   `song/stage/edits.json` (atomic write-temp-rename, same contract as other
   stage files); `aoide graph edits [list|ack]` CLI. Undecided: how the
@@ -325,12 +326,13 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   own restart. Not designed. See [[Conductor-Channel]].
 - **[gap, not fixed] `reconcile_untracked_terminals` has no transient-read
   grace, unlike the reaper.** `sync_untracked_terminal_windows`
-  (`pkgs/aoide/src/graph.rs:3328`) only short-circuits when `hyprctl_clients()`
+  (`pkgs/aoide/crates/conduct/src/graph/window.rs:846`) only short-circuits when `hyprctl_clients()`
   returns `None`; a call that *succeeds* with an empty client list (IPC
   hiccup) looks identical to "every terminal closed," so
-  `reconcile_untracked_terminals` (`graph.rs:3174`) drops every synthetic
+  `reconcile_untracked_terminals` (`window.rs:692`) drops every synthetic
   `win:*` record that pass and recreates them fresh next tick. The reaper
-  already guards this for its own liveness sweep (`reap.rs:214`,
+  already guards this for its own liveness sweep
+  (`crates/conduct/src/reap.rs:144`,
   `effective_live_addresses`/`is_recent`) — this function has no analogous
   fallback. Effect: visible flicker + wasted restage; also means any
   per-session state keyed to a window (relevant to External-Edit-Tracking
@@ -351,10 +353,12 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   `song/songbook/update-playbook.md`, `CONTRACTS.md` §5, [[Gadget-Dock]],
   [[Quickshell]].
 - **[plan, not started] Conductor/Terminals: dedupe rows, name by cwd, show
-  `say`.** Shape: extract the reaper into `pkgs/aoide/src/reap.rs`
-  (behavior-preserving move), add `superseded_agent_duplicates` to retire
-  same-window agent-record duplicates (fixes a live bug — one terminal shows
-  three "claude" rows, phantom masking `say`), name untitled rows by cwd
+  `say`.** Partially landed with the Phase 9 crate split: the reaper is
+  extracted (`pkgs/aoide/crates/conduct/src/reap.rs`) and
+  `superseded_agent_duplicates` exists there (`reap.rs:208`) to retire
+  same-window agent-record duplicates (the live bug — one terminal showing
+  three "claude" rows, phantom masking `say`). Still owed: name untitled rows
+  by cwd
   basename in both gadgets, suppress the Conductor's flat `shell → claude`
   row, surface `say` on the Terminals claude row. First candidate for the
   plan→execute→review pipeline. See [[Conductor-Channel]], [[Session-Graph]].
