@@ -52,50 +52,49 @@ this fully before touching the repo.
 
 Aoide **is** an orchestration core — dogfood it while building it.
 
-- **Drive sessions with the conductor.** `aoide conduct -- <cmd>` wraps an
-  agent; `aoide graph send --id <id> [--submit] [--yes] -- <text>` types into
-  a running session. An orchestrator freely commands its own spawned children
-  (parent-autogate); everything else is pending until `--yes`.
-- **Plan → execute → review pipeline (current shape).** One dispatch per role,
-  per unit of work: the **flagship tier plans** (scopes the change, names
-  files/functions, sequences steps), the **mid tier executes** (code +
-  build/test/deploy, mirrors the plan rather than improvising scope), the
-  **flagship tier reviews** before it lands (correctness/coherence, or a
-  vision pass for visual work) — review is standing, not optional, and
-  **coaches the executor directly via SendMessage** rather than a bare
-  pass/fail. The orchestrator's job: dispatch each stage, make only typo-class
-  edits itself, keep §7 + memory current — not write the implementation or
-  the review.
-- **ALL planning/mapping/designing → a flagship-tier agent**, never the
-  orchestrator's own head. The orchestrator concretizes khoa's prompt into a
-  precise brief, dispatches to the planner, then orchestrates execute →
-  review. Scoping a refactor, mapping an extraction, designing a
-  layout/widget/song, choosing between approaches — all go to the planner.
-  **Small nudges stay with the orchestrator:** typo-class edit, pixel/margin
-  move, one-line tweak, config bump — done directly, no planner round-trip.
-- **Tier mapping per model suite.** The roles above are model-agnostic; the
-  concrete picks per CLI:
-  - **Claude (`claude`):** Opus plans and reviews (Fable may take a review),
-    Sonnet executes, Sonnet runs the §6 librarian.
-  - **Kimi (`kimi`) — K3 is the default, tiered per role:** `k3` (1M context,
-    `high`/`max` thinking effort) plans and reviews; `k3-256k` executes and
-    runs the §6 librarian (same results within 256K at roughly half the
-    quota; `low` effort is enough for librarian upkeep).
-    `kimi-for-coding` / `kimi-for-coding-highspeed` (K2.7) is the fallback
-    when K3 quota or availability pinches, not a first choice.
-- **Design passes:** khoa looks FIRST — that closes the pass. The advisor
-  (flagship-tier review) is on call only, pulled in when khoa asks.
-- **Wiki maintenance → the mid-tier librarian** (§6), off the orchestrator's
-  own context.
-- **Batch independent agents** in one message so they run concurrently; keep
-  the conclusion, not their file dumps.
-- **Resume, don't respawn.** An agent that died mid-task on an API error is
-  resumed with context intact (`SendMessage` by id); a fresh `Agent` call
-  starts cold.
-- **Test the agents, not just the code.** Changing a hook/socket/graph
-  verb/reaper → prove it end-to-end: spawn a real session, watch it register
-  in the DAG, command it, kill it, watch the reaper sweep it. See
-  [[Session-Graph]], [[Terminal-Commander]], [[Agent-Hooking]].
+### 2.1 Agent roles and tiers
+
+- **Plan → execute → review.** One dispatch per role and unit: flagship plans
+  (scope, files/functions, sequence), mid tier executes (code, build/test,
+  deploy), flagship reviews (correctness/coherence or vision). Review coaches
+  the executor via SendMessage; it is not a bare pass/fail. The orchestrator
+  dispatches and verifies, but does not implement or review.
+- **Planning/mapping/designing → flagship.** Small nudges stay with the
+  orchestrator: typo, pixel/margin, one-line tweak, or config bump.
+- **Tiers by CLI:** Claude uses Opus for planning/review and Sonnet for
+  execution/librarian; Kimi uses `k3` for planning/review and `k3-256k` for
+  execution/librarian, with K2.7 coding aliases as fallback.
+- **Design:** khoa looks first and closes the pass; the advisor is on call
+  only when khoa asks. **Wiki:** the mid-tier librarian maintains it (§6),
+  outside the orchestrator's context.
+
+### 2.2 Session control and parallelism
+
+- Drive sessions with `aoide conduct -- <cmd>` and command them with
+  `aoide graph send --id <id> [--submit] [--yes] -- <text>`. Parent-autogate
+  applies to children spawned by the orchestrator; other sessions need `--yes`.
+- Batch independent agents so they run concurrently; keep conclusions, not
+  file dumps. Resume a failed agent by id (`SendMessage`) rather than spawning
+  it cold. Test hook/socket/graph/reaper changes end-to-end: register, command,
+  kill, and observe reaping. See [[Session-Graph]], [[Terminal-Commander]],
+  [[Agent-Hooking]].
+
+### 2.3 Shared-worktree discipline
+
+Other agents may be editing this repository. Check `git status --short` before
+any dispatch, leave their files alone, and never overlap writer paths. Give
+children bounded paths and acceptance evidence; use read-only agents when
+ownership is unclear. Follow §5 for branches, staging, and commits.
+
+### 2.4 Pi specifics
+
+This parent Pi session owns khoa's request; Pi children supplement, not replace,
+Aoide's `conduct`/`graph`. `pi-subagents` is installed: use `subagent`, `/run`,
+`/parallel`, or `/chain` only when delegation materially speeds in-scope work;
+skip small edits, focused reads, and work another agent already owns. Children
+ask their supervisor when blocked; the parent verifies their result (§3).
+`pi-mcp-adapter` is on-demand: search the `mcp` proxy first and connect a
+server only when the task needs external MCP capability.
 
 ---
 
