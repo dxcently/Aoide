@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "entities/aoided.md",
-                "mode": "preview",
+                "file": "references/AOIDE-VS-LANGCHAIN-HANDOFF.md",
+                "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "aoided"
+              "title": "AOIDE-VS-LANGCHAIN-HANDOFF"
             }
           }
         ]
@@ -188,6 +188,21 @@
   },
   "active": "a08434cfefed05a3",
   "lastOpenFiles": [
+    "references/AOIDE-VS-LANGCHAIN-HANDOFF.md.tmp.42998.1d1e8821d864",
+    "references/AOIDE-VS-LANGCHAIN-HANDOFF.md.tmp.42998.b50bbd6fec03",
+    "references/AOIDE-VS-LANGCHAIN-HANDOFF.md.tmp.42998.cf3e4840bb1f",
+    "protocol/AOIDE-DEV.md",
+    "references/AOIDE-VS-LANGCHAIN-HANDOFF.md",
+    "references/AOIDE-VS-LANGCHAIN-HANDOFF.md.tmp.42998.cd59b105c006",
+    "SCHEMA.md",
+    "entities/Stylix.md",
+    "concepts/Full-Architecture.md",
+    "references/AOIDE-DEV.md.tmp.42998.b90678f2e70e",
+    "references/AOIDE-DEV.md.tmp.42998.6669c582a034",
+    "references/AOIDE-DEV.md.tmp.42998.49c5cb2d5086",
+    "concepts/desktop/Feature-Set.md",
+    "concepts/desktop/Desktop-Architecture.md",
+    "entities/aoided.md",
     "references/AOIDE-DEV.md.tmp.42998.c78d80960023",
     "concepts/Package-Layout.md",
     "concepts/governance/Wiki-Protocol.md",
@@ -196,39 +211,24 @@
     "ingest/log.md",
     "entities/dxflake.md",
     "entities/drachma.md",
-    "entities/aoided.md",
     "entities/aoide-cli.md",
     "entities/Agent-Hooking.md",
     "protocol/SHAPE.md",
-    "references/AOIDE-DEV.md",
     "concepts/orchestration/Conductor-Channel.md",
     "concepts/desktop/Gadget-Dock.md",
     "concepts/desktop/Gadget-Dock.md.tmp.2114.2fdf437dda85",
-    "concepts/desktop/Desktop-Architecture.md",
-    "concepts/desktop/Feature-Set.md",
     "concepts/desktop/Widget-Maker.md",
     "concepts/governance/Rebuild-Gate.md",
     "concepts/governance/Governance.md",
     "concepts/governance/Fork-and-Run.md",
     "concepts/orchestration/Terminal-Commander.md",
-    "concepts/orchestration/Session-Graph.md",
-    "concepts/orchestration/Content-Pipeline.md",
-    "concepts/orchestration/Baton-3D-DAG.md",
-    "concepts/orchestration/Agent-Interface.md",
     "SCHEMA.md.tmp.37403.04221a4136f8",
     "references/AOIDE-DEV-HANDOFF.md.tmp.37403.0039337846a1",
     "references/pantheon/e1392de1-1000082841.png",
     "references/pantheon/art-direction/25f7a990-1000082857.png",
-    "references/pantheon/art-direction",
     "references/pantheon/a669fb3c-1000082840.png",
     "references/pantheon/82b5f4ed-1000082844.png",
     "references/pantheon/67dd262c-1000082843.png",
-    "references/pantheon/4d7305c6-1000082842.png",
-    "references/pantheon",
-    "ingest/log.md.tmp.37403.9e4a7ba9879d",
-    "protocol/OPERATIONS/Assertion.md.tmp.37403.83050e2f3fac",
-    "protocol/OPERATIONS/Lint.md.tmp.37403.8b9728bc12ec",
-    "protocol/SHAPE.md.tmp.37403.e38a155801fe",
-    "protocol/OPERATIONS/Naming.md.tmp.37403.ee421ea136fe"
+    "references/pantheon/4d7305c6-1000082842.png"
   ]
 }
