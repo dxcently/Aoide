@@ -263,8 +263,8 @@ truth vs sketch:  `aoide song` + rebuild = bakes hypr.conf + Stylix + deploys qm
 
   <!-- PLATE III -->
   <section>
-    <div class="plate-label"><span class="no">III.</span><h2>Three doors, one schema</h2><span class="h-line"></span><span>eight crates now</span></div>
-    <p class="caption">Still <em>one</em> dispatcher + one self-registering <code>registry.rs</code> behind every door (the Hermes pattern holds) — but the monolith it lived in got carved into a real crate DAG this cycle. <code>protocol</code> is the sink everything else depends on: the registry/wire/output contract, never the other direction. The root <code>aoide</code> package is the trunk — it depends on all six, nothing depends on it — and is where <b>CLI</b> and the <b>TUI</b> live directly; <b>MCP</b> and <b>A2A</b>'s serve-loops moved into <code>server</code>, which can't reach the trunk's assembled registry itself (that would be a cycle), so the trunk injects it in as a plain <code>&amp;Registry</code> + dispatch-fn parameter at the two launch sites.</p>
+    <div class="plate-label"><span class="no">III.</span><h2>Three doors, one schema</h2><span class="h-line"></span><span>nine crates, root now virtual</span></div>
+    <p class="caption">Still <em>one</em> dispatcher + one self-registering <code>registry.rs</code> behind every door (the Hermes pattern holds), but Phase 9 finished what Phase 6 stopped short of: the app shell itself moved out into <code>crates/cli</code>, and the workspace root became a bare virtual manifest — <b>no <code>[package]</code>, no <code>src/</code></b>. Domain handlers that used to sit in the root's <code>commands/</code> now live with their domain (graph/hooks → <code>conduct</code>, rice/cover/design → <code>song</code>, usage → <code>storage</code>, a2a-serve/daemon/shellbridge → <code>server</code>, a2a-agent/melete-adapter → <code>client</code>); the root crate keeps only what's coupled to the assembled registry itself (meta, stubs, <code>mcp serve</code>'s tool-count handler). <code>protocol</code> is still the sink everything depends on — registry/wire/output/policy, never the other direction — and <code>server</code> still can't reach <code>cli</code>'s assembled registry (that'd be a cycle), so it's still injected in as a plain <code>&amp;Registry</code> + dispatch-fn parameter at the two launch sites. A ninth, dev-only <code>test-support</code> crate now holds the shared test rig + <code>env_lock</code>.</p>
     <div class="plate">
       <pre class="mermaid">
 %%{init: {'theme':'neutral','flowchart':{'curve':'basis','nodeSpacing':26,'rankSpacing':38},'themeVariables':{'fontFamily':'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize':'13px'}}}%%
@@ -277,40 +277,41 @@ flowchart TB
   tui --> root
   mcpD --> server
   a2aD --> server
-  root["root aoide — dispatch.rs + registry.rs<br/>commands/* → 48 commands · the trunk"]:::hub
-  root -->|injects registry + dispatch fn| server["server<br/>a2a serve · mcp serve · daemon::run"]:::mid
-  root --> client["client<br/>A2A outbound · melete adapter"]:::mid
-  root --> song["song<br/>notes/lint · live geometry · mint · cover"]:::mid
-  root --> conduct["conduct<br/>PTY · session DAG · reap"]:::mid
+  root["crates/cli — dispatch.rs + registry.rs<br/>meta · stubs · mcp tool-count → 48 commands total · the trunk"]:::hub
+  root -->|injects registry + dispatch fn| server["server<br/>a2a serve · mcp serve · daemon::run · shellbridge"]:::mid
+  root --> client["client<br/>A2A outbound (agent *) · melete adapter"]:::mid
+  root --> song["song<br/>rice/cover/design · notes/lint · mint"]:::mid
+  root --> conduct["conduct<br/>PTY · session DAG · reap · hooks install"]:::mid
   server --> conduct
   server --> storage
   client --> storage
   song --> storage
   conduct --> storage
-  storage["storage<br/>session &amp; design records · atomic fs"]:::mid
-  storage --> protocol["protocol — leaf<br/>registry · wire (jsonrpc/a2a/mcp) · policy · output"]:::leaf
+  storage["storage<br/>session &amp; design records · usage · atomic fs"]:::mid
+  storage --> protocol["protocol — leaf<br/>registry · wire (jsonrpc/a2a/mcp) · policy · output · agents"]:::leaf
+  test["test-support<br/>dev-only · test rig + env_lock"]:::dev
   classDef door fill:#efe2ea,stroke:#93436e,color:#123;
   classDef hub fill:#d6ebe4,stroke:#2F7D6B,color:#123,font-weight:600;
   classDef mid fill:#efeade,stroke:#A9743B,color:#123;
   classDef leaf fill:#e6ecef,stroke:#4a6b7a,color:#123,font-weight:600;
+  classDef dev fill:#f0f0f0,stroke:#8698901a,color:#556860,stroke-dasharray:3 3;
       </pre>
     </div>
     <p class="ascii-cap">the workspace, as a tree</p>
     <pre class="ascii">pkgs/aoide/
-├── src/                       the trunk — root aoide + aoided binaries
-│   ├── bin/{aoide.rs, aoided.rs}
-│   ├── cli.rs → dispatch.rs           the one dispatcher  ── three doors, one schema
-│   ├── commands/                      meta · rice · cover · design · graph · hooks · infra · a2a · stubs → 48
-│   ├── conductor/                     the TUI — app · ui · graphview · theme
-│   └── {a2a,mcp,daemon,graph,reap,shellbridge,notes,hypr,adapter}.rs   thin `pub use` shims
+├── Cargo.toml                 virtual workspace root — no [package], no src/ (Phase 9)
 └── crates/
-    ├── protocol/    the leaf — registry · invocation/output · wire{jsonrpc,a2a,mcp} · policy
-    ├── storage/     stage-file records (session/design) · atomic fs · time
-    ├── conduct/     PTY multiplexer · session DAG · hook plumbing · reaper
+    ├── cli/         the trunk — aoide + aoided binaries, dispatch.rs, registry-coupled handlers only
+    │   ├── src/bin/{aoide.rs, aoided.rs}
+    │   └── src/commands/  meta · stubs · mcp-serve tool count            ── three doors, one schema
+    ├── protocol/    the leaf — registry · invocation/output · wire{jsonrpc,a2a,mcp} · policy · agents
+    ├── storage/     stage-file records (session/design/usage) · atomic fs · time
+    ├── conduct/     PTY multiplexer · session DAG · hook plumbing · reaper · graph*/hooks-install verbs
     ├── client/      A2A outbound (agent add/list/send) · melete adapter
-    ├── server/      a2a serve · mcp serve · daemon::run — DI'd, never depends on the trunk
-    ├── song/        drachma lint · live geometry+hyprctl · rice mint · cover
-    └── conductor/   the TUI — app · ui · graphview · theme — DI'd like server</pre>
+    ├── server/      a2a serve · mcp serve · daemon::run · shellbridge — DI'd, never depends on the trunk
+    ├── song/        drachma lint · live geometry+hyprctl · rice mint/cover/design verbs
+    ├── conductor/   the TUI — app · ui · graphview · theme — DI'd like server
+    └── test-support/  dev-only — shared test rig + env_lock (Phase 9)</pre>
   </section>
 
   <!-- PROCESS TABLE -->
@@ -333,10 +334,10 @@ flowchart TB
 
   <!-- PACKAGE RESTRUCTURE -->
   <section>
-    <div class="plate-label"><span class="no">§</span><h2>The package restructure</h2><span class="h-line"></span><span>one crate → eight</span></div>
+    <div class="plate-label"><span class="no">§</span><h2>The package restructure</h2><span class="h-line"></span><span>one crate → nine</span></div>
     <div class="prose">
-      <p>Pi-style: a monorepo of single-charter crates instead of one growing binary. <code>protocol</code> extracts first on purpose — it's the registry/wire/output contract every door and every other crate reads, so "one schema, N doors" stops being a convention and becomes something the compiler enforces. Everything above it (<code>storage</code>, <code>conduct</code>, <code>client</code>, <code>server</code>, <code>song</code>) depends only downward; nothing depends on the trunk. Every phase lands as a <b>reviewed, green-build unit</b> — plan (Opus) → execute (Sonnet) → adversarial review (Fable) → land — and every external call site keeps compiling unchanged behind a <code>pub use</code> shim at the old path.</p>
-      <p>Two phases were <b>deliberately deferred</b>, not forgotten: <code>management</code> (host-ops — rebuild/switch/service control) has almost no real content to extract yet, by house policy (rebuild stays user-gated, no self-updaters); <code>steward</code> (a system-management agent with design-memory + self-audit) is blocked on a product decision that hasn't been made — is it LLM-driven itself, or a verb surface an external agent drives? <code>evals</code> is downstream of both and waits on them.</p>
+      <p>Pi-style: a monorepo of single-charter crates instead of one growing binary. <code>protocol</code> extracts first on purpose — it's the registry/wire/output contract every door and every other crate reads, so "one schema, N doors" stops being a convention and becomes something the compiler enforces. Everything above it (<code>storage</code>, <code>conduct</code>, <code>client</code>, <code>server</code>, <code>song</code>) depends only downward. Phase 9 went one step further than Phase 6 had: instead of leaving the root <code>aoide</code> package as the trunk, the app shell itself moved to <code>crates/cli</code> and the root <code>Cargo.toml</code> became a bare virtual workspace — nothing lives there but the manifest. Every phase lands as a <b>reviewed, green-build unit</b> — plan (Opus) → execute (Sonnet) → adversarial review (Fable) → land — and every external call site keeps compiling unchanged (the lib keeps the historical name <code>aoide</code>, so no <code>use aoide::…</code> caller moved).</p>
+      <p>Two phases remain <b>deliberately deferred</b>, not forgotten: <code>management</code> (host-ops — rebuild/switch/service control) has almost no real content to extract yet, by house policy (rebuild stays user-gated, no self-updaters); <code>steward</code> (a system-management agent with design-memory + self-audit) is blocked on a product decision that hasn't been made — is it LLM-driven itself, or a verb surface an external agent drives? <code>evals</code> is downstream of both and waits on them.</p>
     </div>
     <div class="two-col split" style="margin-top:1.3rem">
       <div>
@@ -347,13 +348,15 @@ flowchart TB
             <tbody>
               <tr><td class="mono">registry.rs, output.rs, dispatch::Invocation</td><td><code>protocol</code></td></tr>
               <tr><td class="mono">daemon.rs (Gate/GateProposal/Subscription)</td><td><code>protocol::policy</code></td></tr>
-              <tr><td class="mono">a2a.rs + mcp.rs wire payloads</td><td><code>protocol::wire</code></td></tr>
-              <tr><td class="mono">shellbridge.rs (fs half), graph/model.rs shapes</td><td><code>storage</code></td></tr>
-              <tr><td class="mono">graph/ (DAG · verbs · window · send), reap.rs</td><td><code>conduct</code></td></tr>
-              <tr><td class="mono">a2a.rs (client half), adapter.rs</td><td><code>client</code></td></tr>
-              <tr><td class="mono">a2a.rs (server half), mcp.rs, daemon::run</td><td><code>server</code></td></tr>
-              <tr><td class="mono">notes.rs, hypr.rs, rice mint/cover engine</td><td><code>song</code></td></tr>
+              <tr><td class="mono">a2a.rs + mcp.rs wire payloads, AgentProfile table</td><td><code>protocol::wire</code>, <code>protocol::agents</code></td></tr>
+              <tr><td class="mono">shellbridge.rs (fs half), graph/model.rs shapes, usage.rs</td><td><code>storage</code></td></tr>
+              <tr><td class="mono">graph/ (DAG · verbs · window · send), reap.rs, hooks install</td><td><code>conduct</code></td></tr>
+              <tr><td class="mono">a2a.rs (client half), adapter.rs, a2a agent *</td><td><code>client</code></td></tr>
+              <tr><td class="mono">a2a.rs (server half), mcp.rs, daemon::run, shellbridge daemon</td><td><code>server</code></td></tr>
+              <tr><td class="mono">notes.rs, hypr.rs, rice mint/cover/design verbs</td><td><code>song</code></td></tr>
               <tr><td class="mono">conductor/ (TUI)</td><td><code>conductor</code> <span class="tag live">live</span></td></tr>
+              <tr><td class="mono">the app shell itself (src/, dispatch.rs, bins)</td><td><code>cli</code> <small>Phase 9 — the new trunk</small></td></tr>
+              <tr><td class="mono">test rig + env_lock (was duplicated per-crate)</td><td><code>test-support</code> <small>dev-only, Phase 9</small></td></tr>
             </tbody>
           </table>
         </div>
@@ -371,13 +374,14 @@ flowchart TB
           <div class="lrow"><span class="ph">5a</span><span class="what">Birth <code>song</code> <small>leaf — notes + live geometry</small></span><span class="pill done">landed · de63880</span></div>
           <div class="lrow"><span class="ph">5b</span><span class="what"><code>song</code> mint + cover</span><span class="pill done">landed · c56faa7</span></div>
           <div class="lrow"><span class="ph">6</span><span class="what">Extract <code>conductor</code> <small>cli stays the root package — no separate crate; DI seam (6a) then the move (6b)</small></span><span class="pill done">landed · d6b771d, 1f5ae31</span></div>
+          <div class="lrow"><span class="ph">9</span><span class="what">Handlers → domain crates, app shell → <code>crates/cli</code> <small>supersedes phase 6's "cli stays root" finding; root is now a virtual workspace</small></span><span class="pill done">landed · 3c46537</span></div>
           <div class="lrow"><span class="ph">7</span><span class="what">steward <small>canon + self-audit agent</small></span><span class="pill wait">deferred — needs khoa's call</span></div>
           <div class="lrow"><span class="ph">8</span><span class="what">evals <small>golden + behavior + door-contract suites</small></span><span class="pill wait">deferred — downstream of 6+7</span></div>
         </div>
       </div>
     </div>
     <div class="callout">
-      <b>Two blueprint corrections, found in planning, not guessed at.</b> The original design put a2a/mcp's wire payloads in <code>client</code> — wrong, both <code>server</code> and <code>client</code> read them, so they went to <code>protocol</code> instead (phase 4). And <code>cli</code> was never going to be a separate crate — the root <code>aoide</code> package already <em>is</code> the trunk (it depends on everything, nothing depends on it), so wrapping it in another layer would enforce no invariant a boundary is supposed to earn (phase 6 planning).
+      <b>A phase-6 finding, later reversed by phase 9 — recorded both times, not quietly swapped.</b> Phase 4 corrected the blueprint in-flight: a2a/mcp's wire payloads went to <code>protocol</code>, not <code>client</code>, since both <code>server</code> and <code>client</code> read them. Phase 6 concluded <code>cli</code> would never be a separate crate — the root <code>aoide</code> package already <em>was</em> the trunk. Phase 9 revisited that once handler-by-handler extraction left the root with almost nothing domain-specific in it: with only registry-coupled code remaining, keeping it in an implicit root package stopped earning its keep, so it became an explicit <code>crates/cli</code> and the root went fully virtual. Same reasoning both times — let the boundary earn its keep or don't draw it — different answer once the code around it had moved.
     </div>
   </section>
 
@@ -428,7 +432,13 @@ flowchart TB
   <section>
     <div class="plate-label"><span class="no">§</span><h2>Recent work</h2><span class="h-line"></span><span>changelog</span></div>
     <div class="clog">
-      <div class="centry"><span class="hash pending">pending</span><span class="msg"><b>Agent-profile seam + kimi integration</b> — every claude-hardcoded fact the bridge carried (hook event map, permission vocab, sub-agent tool names, model ceilings, transcript locator/extractors, hook-settings spec) extracted behind <code>protocol::agents</code> <code>AgentProfile</code> entries; the hook door (<code>graph session hook --agent</code>), transcript refresh, window listener, and reaper all dispatch through the table, which today holds <code>claude</code> + <code>kimi</code>. New <code>aoide hooks install &lt;agent&gt; [--capture]</code> verb wires a harness's settings file idempotently (48 commands now). Kimi rides the same door: dedicated <code>PermissionRequest</code>→awaiting, payload normalization (<code>prompt</code> blocks, <code>tool_call_id</code>, <code>agent_name</code>), real <code>TranscriptSpec</code> over <code>~/.kimi-code/sessions/wd_*/&lt;id&gt;/wire.jsonl</code>. Also fixes a live bug: a wrapper-of-agent (<code>aoide conduct -- kimi</code>) was evicted at its child's SessionStart and reaped as a duplicate — conducted PTY hosts are no longer agent-duplicate candidates. E2E-verified on yomi-strix 2026-08-03 with the debug binary. <b>Landed in the working tree only — pending commit + the next gated switch;</b> the live generation still runs the pre-seam aoide.</span></div>
+      <div class="centry"><span class="hash">23e945d</span><span class="msg"><b>Kimi CLI's nix package pulled, the agent profile stays</b> — the custom <code>pkgs/kimi-code</code> derivation and its <code>kimi-code.nix</code> dendrite are gone (host wiring in <code>yomi-strix/default.nix</code> too); <code>protocol::agents</code>' <code>kimi</code> <code>AgentProfile</code> entry is untouched. Net effect: aoide still knows how to hook/conduct a Kimi session end-to-end, it just no longer ships a house-built Kimi binary — bring your own.</span></div>
+      <div class="centry"><span class="hash">34a587a</span><span class="msg"><b>wiki: Aoide vs. LangChain/LangGraph/LangSmith</b> — a positioning handoff (<code>references/AOIDE-VS-LANGCHAIN-HANDOFF.md</code>): the three-layer comparison table, the <code>steward</code> fork this forces (§2, tied to the still-open Phase 7 call), an open graph-db reframing proposal for the session DAG (§3, discussed not decided), and a stated-intention-only note on the session graph eventually adopting knowledge-graph paradigms — typed entities, semantic (not just structural) edges — rather than a plain process DAG (§4).</span></div>
+      <div class="centry"><span class="hash">5ab2bfa</span><span class="msg"><b>docs resync to Phase 9</b> — code references across the wiki repointed at the new crate paths (<code>adapter.rs</code> → <code>crates/client</code>, graph/reap → <code>crates/conduct</code>); <code>AOIDE-DEV.md</code> itself relocated to <code>docs/Aoide-Wiki/protocol/</code>. <small>39eed5d, 5ab2bfa.</small></span></div>
+      <div class="centry"><span class="hash">3c46537</span><span class="msg"><b>package restructure, phase 9</b> — went further than phase 6 stopped: the root's remaining <code>src/commands/</code> handlers moved out to their domain crates (graph*/hooks-install → <code>conduct</code>, rice*/cover/design → <code>song</code>, usage → <code>storage</code>, a2a-serve/daemon/shellbridge → <code>server</code>, a2a-agent*/melete-adapter → <code>client</code>), the app shell itself became <code>crates/cli</code> (package <code>aoide-cli</code>, lib still named <code>aoide</code> — zero caller churn), and the root <code>Cargo.toml</code> is now a bare virtual workspace with no <code>[package]</code>, no <code>src/</code>. Versions centralized under <code>[workspace.dependencies]</code>; a new dev-only <code>test-support</code> crate holds the shared test rig + <code>env_lock</code> instead of duplicating it per-crate. Behavior-preserving and proven, not assumed: <code>schema --json</code> byte-identical across debug/nix/toplevel builds, golden command-path snapshot unchanged, 278 workspace tests green, yomi-strix toplevel builds.</span></div>
+      <div class="centry"><span class="hash">66b8295</span><span class="msg"><b>Pi header</b> — <code>pi-coding-agent.nix</code> gained a home-manager-deployed extension (<code>~/.pi/agent/extensions/aoide-pi-header.ts</code>) swapping Pi's compact startup wordmark for the block-art mascot; <code>/builtin-header</code> restores the default. TUI-only, no effect in print/JSON/RPC modes.</span></div>
+      <div class="centry"><span class="hash">92b23b1</span><span class="msg">Deleted the default songbook calendar widget.</span></div>
+      <div class="centry"><span class="hash">2a21f80</span><span class="msg"><b>agent-profile seam + kimi integration</b> — every claude-hardcoded fact the bridge carried (hook event map, permission vocab, sub-agent tool names, model ceilings, transcript locator/extractors, hook-settings spec) extracted behind <code>protocol::agents</code> <code>AgentProfile</code> entries; the hook door (<code>graph session hook --agent</code>), transcript refresh, window listener, and reaper all dispatch through the table. New <code>aoide hooks install &lt;agent&gt; [--capture]</code> verb wires a harness's settings file idempotently (48 commands). Also fixed a live bug: a wrapper-of-agent (<code>aoide conduct -- kimi</code>) was evicted at its child's SessionStart and reaped as a duplicate — conducted PTY hosts are no longer agent-duplicate candidates. E2E-verified on yomi-strix with the debug binary. <small>Flag condensed post-commit in a6df64f; the Kimi side of this profile outlived the nix package itself — see 23e945d above.</small></span></div>
       <div class="centry"><span class="hash">9e61965</span><span class="msg"><b>Conductor "playbill" redesign</b> — the session roster rebuilt from a blind spec (the design agent never saw the old implementation): projects as roman-numeral movements, per-session state read off a fixed-width lamp glyph/color, the old mood-face/kaomoji + hover-clear machinery dropped wholesale. <code>ConductorPreview.qml</code>'s harness now instantiates real <code>DrachmaState</code>/<code>ShellBridge</code> instead of a stub palette. Deployed live to <code>run/qml/</code>, flagged in AOIDE-DEV.md §7 — still awaiting khoa's vision-check before it counts as reviewed design, not just committed.</span></div>
       <div class="centry"><span class="hash">25e2bdb</span><span class="msg"><b>package-layout docs sync</b> — <code>PACKAGE-LAYOUT.md</code> + its wiki mirror flip Phase 6 from "in planning" to landed, record that <code>cli</code> is the root package rather than a separate crate, and confirm the seven-crate final count. <b>Closes out the entire multi-phase package-restructure workstream</b> — Phases 7 (<code>steward</code>) and 8 (<code>evals</code>) remain DEFER, both genuinely blocked on decisions outside the restructure itself, not just unscheduled.</span></div>
       <div class="centry"><span class="hash">c56faa7</span><span class="msg"><b>package restructure, phases 1→5b</b> — <code>pkgs/aoide</code> went from one crate to eight: <code>protocol</code> (the registry/wire/output contract every door and crate reads — "one schema, N doors" is now compiler-enforced, not a convention), <code>storage</code>, <code>conduct</code>, <code>client</code>, <code>server</code> (needed a dependency-injection seam — the trunk's assembled command registry can't be a dependency of the crate that serves MCP/A2A, so it's threaded in as a parameter instead; verified the resulting <code>&amp;'static Registry</code> is sound, not just compiling), and <code>song</code>. Every phase landed as plan(Opus)→execute(Sonnet)→adversarial-review(Fable), zero call-site churn behind <code>pub use</code> shims. Two corrections along the way: a2a/mcp wire payloads belong in <code>protocol</code> not <code>client</code> (both server and client read them); <code>management</code> and <code>cli</code> both turned out not to be real crates worth building yet — see the ledger above. <small>e6809f6 … c56faa7, nine commits.</small></span></div>
