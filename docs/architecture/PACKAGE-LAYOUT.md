@@ -1,15 +1,19 @@
 # aoide · package layout (target blueprint)
 
 > **Status: the crate restructure is complete.** Phases 1 through 6b are
-> landed: `pkgs/aoide` is now a Cargo workspace with seven crates carved out —
-> `protocol`, `storage`, `conduct`, `client`, `server`, `song`, `conductor` —
-> plus the root `aoide`/`aoided` binaries. `management` was paired with `song`
+> landed, and Phase 9 finished the job: every domain crate now owns its CLI
+> verbs (`commands` modules), the app shell is `crates/cli` (package
+> `aoide-cli`, lib `aoide`), and the root `Cargo.toml` is a VIRTUAL workspace
+> with one `[workspace.dependencies]` version source — `src/` no longer
+> exists. `management` was paired with `song`
 > in the original Phase 5 plan but was deferred, not dropped (see the Phase 5
 > status note below). Phase 6 planning found `cli` isn't a separate crate to
 > build — the root `aoide` package already is the DAG sink (depends on
 > everything, nothing depends on it), so only `conductor` extracted; landed as
 > two sub-phases (6a: a dependency-injection seam so the TUI never needs the
-> trunk's assembled command registry; 6b: the mechanical move). Phase 7
+> trunk's assembled command registry; 6b: the mechanical move). **Phase 9
+> deliberately superseded that finding** once the handlers left the root —
+> see its status note. Phase 7
 > (`steward`) and Phase 8 (`evals`) were both planned and the verdict on each
 > is DEFER (see their status notes below) — nothing else is queued to extract.
 > Reference: [earendil-works/pi](https://github.com/earendil-works/pi).
@@ -93,20 +97,28 @@ for the steward especially):**
 
 ```
 pkgs/aoide/
-  Cargo.toml                    # [workspace] — members = crates/*
+  Cargo.toml                    # VIRTUAL [workspace] — members = crates/*,
+                                # one [workspace.dependencies] version source (Phase 9)
   crates/
     protocol/                   # one schema, N doors — THE contract
       src/ registry · schema · envelope(Outcome) · canonical_state
            · door(Cli|Mcp|A2a) · audit · wire/{a2a-jsonrpc, mcp}
+           · cmd!/arg!/flag! registration macros (Phase 9)
       CONTRACTS.md              # (moves here — protocol's spec)
     conduct/                    # PTY multiplexer + session DAG + hooks
       src/ conduct · send · model · doc · window · verbs · reap · shellbridge
+           · commands/ (graph*, conduct, hooks install — Phase 9)
     server/                     # aoided — the daemon + door serve-loops
       src/ daemon · listener · mcp-serve · a2a-serve · sessions · snapshots
+           · commands (daemon, shellbridge, a2a serve — Phase 9)
     client/                     # outbound: drive external agents / talk to aoided
       src/ a2a-client · adapter(melete) · transport · session-handle
+           · commands (a2a agent*, adapter melete — Phase 9)
     storage/                    # durable session data + memory persistence
       src/ session-store · transcript-index · stage-state · migrations · search
+           · commands (usage — Phase 9)
+    test-support/        (Phase 9)  # shared test rig — DEV-dependency only
+      src/ scratch-dirs · EnvSaver · fixture payloads · env_lock
     steward/             ★NEW   # the STEWARD — system-management agent
       src/ harness/      —  the run loop (turn loop, tool dispatch, compaction)
            tools/        —  system-management verbs (wraps management/conduct/song)
@@ -115,31 +127,35 @@ pkgs/aoide/
            skills/       —  packaged procedures (rebuild · mint a song · wire a gadget)
     song/                       # ricing / design engine
       src/ notes(drachma-locate) · rice · cover · stage · palette
+           · commands/ (rice*, cover set, rice design — Phase 9)
     management/                 # privileged host-ops — the hands
       src/ hypr · infra · rebuild · service · sudo-track
     evals/               ★NEW   # eval harness
       src/ golden-snapshot · agent-behavior · door-contract · ricing-design
     conductor/                  # the CLI/TUI surface (drives sessions + steward)
-      src/ app · ui · graphview · theme
-    cli/                        # the app: aoide/aoided bins + commands
-      src/ bin/{aoide,aoided} · cli(parse) · dispatch · commands/* · guide
+      src/ app · ui · graphview · theme · commands (conductor — Phase 9)
+    cli/                        # the app: aoide/aoided bins + registry assembly
+      src/ bin/{aoide,aoided} · cli(parse) · dispatch · guide
+           · commands/ (ONLY the root-coupled groups: meta, stubs, mcp serve)
+      tests/ conductor_integration (+ fixtures)
 ```
 
 ## Per-crate charter
 
 | crate | charter | maps-from (today) | status |
 |---|---|---|---|
-| **protocol** | The single contract: registry, schema doc, `Outcome` envelope + exit codes, `canonical_state`, `Door`, audit event classes, and the A2A-JSON-RPC / MCP wire types. Every door depends on it; it depends on nothing aoide-specific. | `registry.rs`, `output.rs`, `daemon.rs`(Door/audit), a2a/mcp wire types, `CONTRACTS.md`, `commands/meta.rs`(schema) | landed (Phase 2) |
-| **conduct** | The session core: PTY-backed `conduct` wrap, the session DAG, hook ingestion, liveness reaping. Makes every terminal a tracked, conductable session. | `graph/` (conduct·send·model·doc·window·verbs·common), `shellbridge.rs`, `reap.rs` | landed (Phase 3b) |
-| **server** | `aoided` and the door serve-loops: MCP-over-stdio, A2A JSON-RPC/HTTP/SSE, listeners, sessions, snapshots, the audit sink. Untrusted input stops here. | `daemon.rs`, `mcp.rs`, `a2a.rs`(serve half), `commands/infra.rs` | landed (Phase 4c) |
-| **client** | Outbound: the A2A client registry + send, the melete adapter (neutral-event consumer), transports. Drives external agents and speaks to `aoided`. | `a2a.rs`(client half), `adapter.rs`, `commands/a2a.rs` | landed (Phase 4b) |
-| **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, migrations, search. The steward's `canon` and session memory persist through here. | `graph/session_store.rs`, `song/stage/*`, `state/*` | landed (Phase 3a); backend is still file-first (seed → build) |
+| **protocol** | The single contract: registry, schema doc, `Outcome` envelope + exit codes, `canonical_state`, `Door`, audit event classes, the A2A-JSON-RPC / MCP wire types, and the `cmd!`/`arg!`/`flag!` registration macros. Every door depends on it; it depends on nothing aoide-specific. | `registry.rs`, `output.rs`, `daemon.rs`(Door/audit), a2a/mcp wire types, `CONTRACTS.md`, `commands/meta.rs`(schema) | landed (Phase 2); macros + `audit_log_path` folded in (Phase 9) |
+| **conduct** | The session core: PTY-backed `conduct` wrap, the session DAG, hook ingestion, liveness reaping — plus its CLI verbs (`graph *`, `conduct`, `hooks install`). Makes every terminal a tracked, conductable session. | `graph/` (conduct·send·model·doc·window·verbs·common), `shellbridge.rs`, `reap.rs`, `commands/graph.rs`, `commands/hooks.rs` | landed (Phase 3b); commands landed (Phase 9) |
+| **server** | `aoided` and the door serve-loops: MCP-over-stdio, A2A JSON-RPC/HTTP/SSE, listeners, sessions, snapshots, the audit sink — plus its CLI verbs (`daemon`, `shellbridge`, `a2a serve`). Untrusted input stops here. | `daemon.rs`, `mcp.rs`, `a2a.rs`(serve half), `commands/infra.rs`(server half), `commands/a2a.rs`(serve verb) | landed (Phase 4c); commands landed (Phase 9) |
+| **client** | Outbound: the A2A client registry + send, the melete adapter (neutral-event consumer), transports — plus its CLI verbs (`a2a agent *`, `adapter melete`). Drives external agents and speaks to `aoided`. | `a2a.rs`(client half), `adapter.rs`, `commands/a2a.rs`(agent verbs), `commands/infra.rs`(adapter verb) | landed (Phase 4b); commands landed (Phase 9) |
+| **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, migrations, search — plus its CLI verb (`usage`). The steward's `canon` and session memory persist through here. | `graph/session_store.rs`, `song/stage/*`, `state/*`, `commands/usage.rs` | landed (Phase 3a); backend is still file-first (seed → build); commands landed (Phase 9) |
+| **test-support** | Shared test rig (scratch dirs, `EnvSaver`, fixture payloads, the single `env_lock`). **Dev-dependency only** — never a production edge. | `commands/mod.rs::test_support`, root `env_lock` | landed (Phase 9) |
 | **steward** ★ | A system-management agent driven by the conductor. Runs a harness loop; its tools act on the host via `management`/`conduct`/`song`; it remembers design primitives in `canon`; it self-audits against canon + contracts. | *(new)* | skeleton — DEFER (Phase 7) |
-| **song** | The ricing / design engine: locate `drachma`, apply songs, mint palettes, write the stage, the Pantheon design language. **Rices portably** — applies a song on generic Linux too, not only via Stylix/NixOS modules. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs` | landed (Phase 5a+5b) |
+| **song** | The ricing / design engine: locate `drachma`, apply songs, mint palettes, write the stage, the Pantheon design language — plus its CLI verbs (`rice *`, `cover set`). **Rices portably** — applies a song on generic Linux too, not only via Stylix/NixOS modules. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs`, `commands/design.rs` | landed (Phase 5a+5b); commands landed (Phase 9) |
 | **management** | The privileged hands: rebuild/switch, `rice mint`, hypr control, service/daemon ops, sudo-tracking. **Host-abstracted** — a NixOS backend (nixos-rebuild/modules) and a portable-Nix backend (`nix profile`/home-manager-style) behind one seam, chosen by what the host is. The capabilities the steward's tools invoke. | `hypr.rs`, `commands/infra.rs`(host ops), sudo-track (44c6ec9) | carve-out — DEFERRED out of Phase 5 (no ETA) |
 | **evals** | Eval harness: golden snapshots (existing), agent-behavior evals for the steward, door-contract evals, ricing/design evals. | golden-snapshot tests | elevate — DEFER (Phase 8) |
-| **conductor** | The CLI/TUI surface: session DAG view, roster, and the steward's control panel. | `crates/conductor/` (app·ui·graphview·theme) | landed (Phase 6a+6b) |
-| **cli** | The app that wires everything into `aoide` + `aoided`: arg parse, the single dispatcher, `commands/`, guide/onboarding. **Not a separate crate** — this is the root `aoide` package itself (the DAG sink: depends on everything, nothing depends on it; a `crates/cli` layer would enforce no invariant, see the Phase 6 status note). | `src/bin/*`, `cli.rs`, `dispatch.rs`, `commands/*`, `guide.rs`, `lib.rs` | **is** the root package (Phase 6 finding) |
+| **conductor** | The CLI/TUI surface: session DAG view, roster, and the steward's control panel — plus its one CLI verb (`conductor`). | `crates/conductor/` (app·ui·graphview·theme), `commands/infra.rs`(conductor verb) | landed (Phase 6a+6b); commands landed (Phase 9) |
+| **cli** | The app that wires everything into `aoide` + `aoided`: arg parse, the single dispatcher, registry assembly (`commands/mod.rs::all()`), guide/onboarding, and the three root-coupled groups (`meta`, `stubs`, `mcp serve`) that read the assembled registry. The DAG sink: depends on everything, nothing depends on it. Its lib keeps the name `aoide` so no caller changes. | `crates/cli/` (bin/*, cli.rs, dispatch.rs, registry.rs, commands/{mod,meta,stubs,infra}.rs, guide.rs, lib.rs) | landed as `crates/cli` (Phase 9 — supersedes the Phase 6 "stays the root package" finding, see the Phase 9 status note) |
 
 ## The steward (`steward`) — detail
 
@@ -230,9 +246,9 @@ this is structure, not features.
   that `server` also couldn't depend on directly back in Phase 4c. Not
   parallelizable (one entangled module, not independent files) — landed as
   two sequential sub-phases by a single executor each time, not multiple
-  agents at once. **This is the last phase of the crate restructure** —
-  `pkgs/aoide` is one crate → eight (protocol/storage/conduct/client/server/
-  song/conductor + the root trunk); nothing else is queued to extract.
+  agents at once. **This was called the last phase of the crate restructure at
+  the time** — Phase 9 later superseded the "`cli` stays the root package"
+  half of this note (the handler-distribution half was never the claim).
 - **Phase 7 — build `steward` (the agent). DEFER.** New crate against
   protocol + conduct + storage + management: harness → tools → canon → audit →
   skills. The first genuinely new capability, not a carve-out. Verdict: DEFER.
@@ -253,7 +269,8 @@ this is structure, not features.
   Phase 7.** Move golden snapshots in; add steward-behavior, door-contract,
   and ricing/design eval suites. The blueprint's "golden snapshots
   (existing)" turned out to be exactly one 50-line test
-  (`command_paths_match_the_golden_snapshot` in `pkgs/aoide/src/registry.rs`)
+  (`command_paths_match_the_golden_snapshot` in
+  `pkgs/aoide/crates/cli/src/registry.rs`)
   — no `evals/` crate, no fixture files, no harness of any kind exists
   anywhere; every other "eval" string in the codebase means Nix eval,
   unrelated. Of the four planned suites: golden snapshots (trivial, and its
@@ -265,6 +282,32 @@ this is structure, not features.
   blueprint's own steward section assigns "formalize the review-pipeline
   self-check" to `steward/audit`, not `evals` — so this is explicitly a
   different concept from either.
+- **Phase 9 — distribute the command handlers; app shell → `crates/cli`;
+  virtual workspace root. LANDED.** The Phases 2–6 restructure moved the
+  domain LOGIC but left ~4,000 lines of command *handlers* in the root
+  package's `src/commands/` — this phase finishes the blueprint's own target
+  table by moving each handler group into its domain crate's `commands`
+  module (nushell-style: a domain's CLI verbs live with the domain;
+  `graph`/`hooks` → conduct, `rice`/`cover`/`design` → song, `usage` →
+  storage, `a2a serve`/`daemon`/`shellbridge` → server, the `a2a agent`
+  verbs/`adapter melete` → client, `conductor` → conductor). Shared
+  prerequisites: `cmd!`/`arg!`/`flag!` + `audit_log_path` → `protocol`;
+  `test_support` + `env_lock` → the new dev-only `test-support` crate;
+  `[workspace.dependencies]` centralizes every version (Cargo.lock
+  unchanged). Root keeps only the registry-coupled groups (`meta`, `stubs`,
+  `mcp serve` — the one handler reading the assembled registry's tool count,
+  the coupling the DI seam can't sever). The app shell then moved to
+  `crates/cli` (package `aoide-cli`, lib still named `aoide`) and the root
+  `Cargo.toml` became a VIRTUAL workspace — **this deliberately supersedes
+  the Phase 6 finding that "`cli` is the root package"**: that verdict was
+  about not adding a no-invariant indirection layer *while the handlers made
+  the root the real monolith*; with the handlers distributed, the remaining
+  shell is exactly the textbook app crate and the virtual-root layout is the
+  monorepo standard. `pkgs/aoide/default.nix` builds/tests/installs from
+  `buildAndTestSubdir = "crates/cli"`. Guards that prove behavior preserved:
+  `schema --json` byte-identical across every phase, the golden command-path
+  snapshot unchanged, full `cargo test --workspace` green. (No Phase 7/8
+  code; Phase 9 numbers after them to keep their DEFER notes stable.)
 
 ## Open questions (each tagged with when it must be settled)
 
