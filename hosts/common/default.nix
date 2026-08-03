@@ -69,5 +69,5 @@
   # A host opts out with `aoide.{melete,mneme}.enable = false;` (mkDefault).
   # Melete's LOCAL harness is OFF — Melete is reached over MCP, not run on-box.
   aoide.melete.enable = lib.mkDefault false;
-  aoide.mneme.enable = lib.mkDefault true;
+  aoide.mneme.enable = lib.mkDefault false;
 }
