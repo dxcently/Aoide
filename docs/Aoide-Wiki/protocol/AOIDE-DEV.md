@@ -229,57 +229,27 @@ broad standing brief in the background rather than one page per call.
 Flags raised but not yet closed, so the next agent inherits them. Close a
 flag by resolving it AND deleting its line; add one the moment you raise it.
 
-- **[in-progress, uncommitted] kimi CLI integration via the agent-profile
-  seam — Steps 1–6 landed in the WORKING TREE ONLY (2026-08-03); awaiting
-  commit + gated switch.** Rebuild fixed (flake couldn't see the untracked
-  files; `git add -N` on the two new paths unblocked it). Toplevel with the
-  new aoide built green:
+- **[landed, pending switch] kimi CLI integration via the agent-profile
+  seam — committed as `2a21f80` (2026-08-03), awaiting the gated switch.**
+  `protocol::agents` `AgentProfile` registry (every harness fact — hook
+  event map, permission vocab, subagent tools, model ceilings, transcript
+  spec, settings spec, payload normalizer — behind one table; claude
+  extracted verbatim, kimi second); `graph session hook --agent`; `aoide
+  hooks install <agent> [--capture]`; kimi payload normalization + real
+  `TranscriptSpec`; wrapper-of-agent eviction fix. 10 kimi hooks
+  live-installed in `~/.kimi-code/config.toml`. Toplevel built green:
   `/nix/store/fp63rfc1ac0lfdiyqmr2knhxi9gnyf52-nixos-system-yomi-strix-26.11.20260723.e2587ca`
-  (verified: its `aoide` carries `hooks install`). The old pending-activation flag closed same-day:
-  system switched to the `8a10h74i…` toplevel, `kimi 0.31.1` + `claude` on
-  PATH, existing `~/.kimi-code` OAuth carried over. **Nothing is committed;
-  do not clean the tree.** Untracked:
-  `pkgs/aoide/crates/protocol/src/agents.rs`,
-  `pkgs/aoide/src/commands/hooks.rs` — `nix build .#aoide` from the git tree
-  fails E0583 until they're tracked (plain-path build verified green; tests
-  278 pass, skipping the pre-existing environmental PTY hang
-  `conduct_injects_socket_bytes_into_the_child`, reproduced on pristine HEAD).
-  Landed: (1) `protocol::agents` `AgentProfile` seam — every claude-specific
-  (hook event map, permission vocab, subagent tools, model ceilings,
-  transcript locator/extractors, settings spec, payload normalizer) extracted
-  behind profiles; consumers rewired (send.rs, session_store.rs, window.rs,
-  reap.rs, storage/session.rs). (2) `KIMI_PROFILE` + `aoide graph session
-  hook --agent` (default claude, unknown → structured error). (3) `aoide
-  hooks install <agent> [--capture]` — idempotent merge into
-  `~/.kimi-code/config.toml` (honors `KIMI_CODE_HOME`) /
-  `~/.claude/settings.json`; 10 kimi events live-installed (the Step-4
-  capture entries were removed after Step 5; capture log remains at
-  `~/Aoide/state/kimi-hooks.jsonl`). (4) E2E proven on yomi-strix with the
-  debug binary (the live generation still runs OLD aoide — needs a gated
-  switch after commit): register → working → awaiting (`PermissionRequest`)
-  → stopped → done (`/exit` SessionEnd), SIGKILL sweep, `graph send`
-  commanding, sub-agent `Agent` tool observed. (5) kimi payload normalization
-  + real `TranscriptSpec` (`normalize_payload` on the profile maps kimi's
-  `prompt` blocks/`tool_call_id`/`agent_name` to canonical fields; transcript
-  reads `~/.kimi-code/sessions/wd_*/<id>/{state.json,agents/*/wire.jsonl}` —
-  assistant text lives in `context.append_loop_event`, tokens in
-  `usage.record`; live smoke extracted say/model/contextTokens from a real
-  session). (6) BUG FIX: wrapper-of-agent (`aoide conduct -- kimi`) was
-  evicted at child SessionStart (registration-time same-window eviction) and
-  retired by reaper dedup — `is_agent_kind` now excludes `conductable` hosts
-  + the eviction spares `parent_session_id`; unit-tested, but the live
-  systemd reaper runs the OLD binary until the switch, so it will still eat
-  wrapper records meanwhile. Known gaps (kimi 0.31.1): `SubagentStop` and
-  `PermissionResult` never fire (sub-nodes close on PostToolUse(Agent)
-  instead); `Stop` doesn't fire on Esc interrupt (an interrupted turn reads
-  `working` until the next hook); kimi sub-nodes have no transcript probe
-  (no tool_call_id ↔ agent-dir correlator in state.json). Misc findings:
-  kimi TUI submits on `\r` not `\n` (`graph send --submit` doesn't submit —
-  send `\r` separately); model aliases are prefixed
-  (`-m kimi-code/kimi-for-coding`; bare alias errors `config.invalid`); one
-  unexplained instant-exit (SessionStart→SessionEnd) at 02:14, unreproduced.
-  Test-model note: e2e used `kimi-code/kimi-for-coding` (K2.7) per khoa —
-  don't burn K3 on tests.
+  (verified: its `aoide` carries `hooks install`). **Until the switch, the
+  live systemd reaper runs the OLD binary and will still retire wrapper
+  records (`aoide conduct -- kimi`).** Known gaps (kimi 0.31.1):
+  `SubagentStop`/`PermissionResult` never fire (sub-nodes close on
+  PostToolUse(Agent)); `Stop` doesn't fire on Esc interrupt; kimi sub-nodes
+  have no transcript probe. Operator facts: kimi TUI submits on `\r` not
+  `\n` (`graph send --submit` types but doesn't submit — send `\r`
+  separately); model aliases are prefixed (`-m kimi-code/kimi-for-coding`);
+  one unexplained instant-exit at 02:14, unreproduced. Capture log (Step-4
+  evidence, deletable): `~/Aoide/state/kimi-hooks.jsonl`. Test-model note:
+  use `kimi-code/kimi-for-coding` (K2.7) for e2e — don't burn K3.
 - **[decision] App-launch exec discipline.** `DesktopEntry.execute()` is used
   for app-launch (Quickshell-native idiom) rather than routing through
   `aoided` (rule #6) — no such verb exists and adding one buys nothing. Open
