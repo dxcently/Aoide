@@ -333,6 +333,14 @@ PanelWindow {
     readonly property var chapterEntries: (root.currentChapter) ? root.currentChapter.entries : []
     readonly property bool clipboardChapter: root.currentChapter
                                            && root.currentChapter.kind === "clipboard"
+    // The clipboard chapter's position in `chapters` (-1 when absent). Its
+    // thumb-tab is not part of the Greek index column — it is pinned to the
+    // bottom of the fore-edge like a bookmark (see the tab column below).
+    readonly property int clipboardChapterIndex: {
+        for (var i = 0; i < root.chapters.length; i++)
+            if (root.chapters[i].kind === "clipboard") return i
+        return -1
+    }
     readonly property var clipboardSearchResults: {
         if (!root.searching) return []
         var q = ("" + root.query).trim().toLowerCase()
@@ -1303,18 +1311,31 @@ PanelWindow {
                     opacity: (1 - root.fold) * 0.5
                 }
 
-                // thumb-index tabs ride the right cover's fore-edge
+                // thumb-index tabs ride the right cover's fore-edge. Every
+                // chapter except the clipboard one gets a slot here; the
+                // clipboard's 🗒 tab is pinned to the bottom of the fore-edge
+                // (the bookmark below), clear of the index column and the
+                // forward dog-ear. The slot math reserves that bottom band
+                // (pageH - 110) so the two never overlap.
                 Column {
                     x: book.pageW - 2
                     y: 34
                     spacing: 4
                     Repeater {
-                        model: root.chapters.length
+                        model: {
+                            var a = []
+                            for (var i = 0; i < root.chapters.length; i++)
+                                if (i !== root.clipboardChapterIndex) a.push(i)
+                            return a
+                        }
                         Rectangle {
-                            readonly property bool isCur: index === root.chapterIndex && !root.searching
+                            readonly property int chap: modelData   // real chapter index
+                            readonly property bool isCur: chap === root.chapterIndex && !root.searching
+                            readonly property int tabCount: Math.max(1,
+                                    root.chapters.length - (root.clipboardChapterIndex >= 0 ? 1 : 0))
                             width: isCur ? 30 : 24
-                            height: Math.max(20, Math.min(34,
-                                    Math.floor((book.pageH - 70) / Math.max(1, root.chapters.length)) - 4))
+                            height: Math.max(1, Math.min(34,
+                                    Math.floor((book.pageH - 110) / tabCount) - 4))
                             radius: 0
                             color: root.withA(root.notes.paletteBg, isCur ? 0.95 : 0.7)
                             border.width: 1
@@ -1323,22 +1344,22 @@ PanelWindow {
                             Text {
                                 anchors.centerIn: parent
                                 text: {
-                                    var d = root.chapters[index]
+                                    var d = root.chapters[chap]
                                     if (d && d.tabSymbol) return d.tabSymbol
-                                    if (index === 0) return "♪"
+                                    if (chap === 0) return "♪"
                                     // Count non-special chapters before this one
                                     // for correct Greek numbering.
                                     var num = 0
-                                    for (var j = 1; j < index; j++) {
+                                    for (var j = 1; j < chap; j++) {
                                         var cj = root.chapters[j]
                                         if (!cj || !cj.tabSymbol) num++
                                     }
                                     return root.greekNum(num)
                                 }
                                 font.family: {
-                                    var d = root.chapters[index]
+                                    var d = root.chapters[chap]
                                     if (d && d.tabSymbol) return root.faceSerif
-                                    return index === 0 ? root.faceMusic : root.faceSerif
+                                    return chap === 0 ? root.faceMusic : root.faceSerif
                                 }
                                 font.pixelSize: 11
                                 color: parent.isCur ? root.notes.paletteAccent
@@ -1347,9 +1368,43 @@ PanelWindow {
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: root.flipToChapter(index)
+                                onClicked: root.flipToChapter(chap)
                             }
                         }
+                    }
+                }
+
+                // the clipboard's 🗒 bookmark — pinned to the bottom of the
+                // fore-edge, 6px clear of the forward dog-ear below it
+                Rectangle {
+                    readonly property bool isCur: root.clipboardChapterIndex >= 0
+                            && root.clipboardChapterIndex === root.chapterIndex
+                            && !root.searching
+                    x: book.pageW - 2
+                    y: book.pageH - 72
+                    width: isCur ? 30 : 24
+                    height: 34
+                    radius: 0
+                    color: root.withA(root.notes.paletteBg, isCur ? 0.95 : 0.7)
+                    border.width: 1
+                    border.color: isCur ? root.notes.paletteAccent
+                                        : root.withA(root.notes.paletteFg, 0.4)
+                    visible: root.clipboardChapterIndex >= 0
+                    Text {
+                        anchors.centerIn: parent
+                        text: {
+                            var c = root.chapters[root.clipboardChapterIndex]
+                            return (c && c.tabSymbol) ? c.tabSymbol : "🗒"
+                        }
+                        font.family: root.faceSerif
+                        font.pixelSize: 11
+                        color: parent.isCur ? root.notes.paletteAccent
+                                            : root.withA(root.notes.paletteFg, 0.6)
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.flipToChapter(root.clipboardChapterIndex)
                     }
                 }
 
