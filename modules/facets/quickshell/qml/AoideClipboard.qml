@@ -83,7 +83,8 @@ QtObject {
 
     // The runtime cache path atomically written by aoide-clipboard-preview.
     function previewPath(id) {
-        return "file://" + Quickshell.env("XDG_RUNTIME_DIR") + "/aoide-clipboard/previews/" + id
+        var cache = Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")
+        return "file://" + cache + "/aoide-clipboard/previews/" + id
     }
 
     function refresh() {
@@ -130,7 +131,8 @@ QtObject {
 
     property Process lister: Process {
         command: ["cliphist", "list"]
-        environment: ({ "CLIPHIST_DB_PATH": Quickshell.env("XDG_RUNTIME_DIR") + "/aoide-clipboard/db" })
+        // No CLIPHIST_DB_PATH override — cliphist's default ~/.cache/cliphist/db
+        // is persistent across reboots, unlike the volatile XDG_RUNTIME_DIR.
 
         stdout: StdioCollector {
             id: listOut

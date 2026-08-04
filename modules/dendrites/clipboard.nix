@@ -1,11 +1,13 @@
 # modules/dendrites/clipboard.nix — clipboard history provider.
 #
 # Dendrite shape v0: guarded on aoide.clipboard.enable, carries its own
-# dependencies, and keeps clipboard data in the user's runtime/cache rather
-# than in the repository. The provider records text and image MIME data via
-# cliphist. Display is handled by the Grimoire launcher (AoideLauncher.qml),
-# which reads the clipboard backend (AoideClipboard.qml) and renders entries
-# as a dedicated chapter — no separate picker surface.
+# dependencies, and keeps clipboard data in the user's XDG cache rather than
+# in the repository — cliphist's DEFAULT db path (~/.cache/cliphist/db),
+# which is persistent across reboots (the earlier XDG_RUNTIME_DIR override
+# was volatile: wiped on every reboot/logout). The provider records text and
+# image MIME data via cliphist. Display is handled by the Grimoire launcher
+# (AoideLauncher.qml), which reads the clipboard backend (AoideClipboard.qml)
+# and renders entries as a dedicated chapter — no separate picker surface.
 {
   config,
   lib,
@@ -27,8 +29,8 @@ let
         exit 2
         ;;
     esac
-    CLIPHIST_DB_PATH="''${XDG_RUNTIME_DIR:?}/aoide-clipboard/db" \
-      ${pkgs.cliphist}/bin/cliphist decode "$1" | ${pkgs.wl-clipboard}/bin/wl-copy
+    # cliphist's default DB path (~/.cache/cliphist/db) — persistent.
+    ${pkgs.cliphist}/bin/cliphist decode "$1" | ${pkgs.wl-clipboard}/bin/wl-copy
   '';
 
   clipboardPreview = pkgs.writeShellScriptBin "aoide-clipboard-preview" ''
@@ -46,15 +48,15 @@ let
         exit 2
         ;;
     esac
-    # Runtime preview cache — private to this user, created once per boot.
-    CACHE="''${XDG_RUNTIME_DIR:?}/aoide-clipboard/previews"
+    # Persistent preview cache — thumbnails keyed by cliphist id, so they
+    # survive reboots as long as the history does.
+    CACHE="''${XDG_CACHE_HOME:-$HOME/.cache}/aoide-clipboard/previews"
     mkdir -p "$CACHE"
     chmod 700 "$CACHE" 2>/dev/null || true
     # Write to a temp file then atomically rename so QML never reads a
     # partial image.
     TMP="$CACHE/.tmp.$1.$$"
-    CLIPHIST_DB_PATH="''${XDG_RUNTIME_DIR:?}/aoide-clipboard/db" \
-      ${pkgs.cliphist}/bin/cliphist decode "$1" > "$TMP"
+    ${pkgs.cliphist}/bin/cliphist decode "$1" > "$TMP"
     mv -f "$TMP" "$CACHE/$1"
   '';
 
@@ -66,7 +68,6 @@ let
   # expected behaviour (it deduplicates by content hash, not source offer).
   clipboardWatch = pkgs.writeShellScriptBin "aoide-clipboard-watch" ''
     set -o pipefail
-    DB="''${CLIPHIST_DB_PATH:?}"
 
     cleanup() {
       kill "$TEXT_PID" "$IMAGE_PID" 2>/dev/null || true
@@ -87,8 +88,9 @@ in
   options.aoide.clipboard.enable = lib.mkEnableOption "clipboard history (cliphist + wl-clipboard, text and images)";
 
   config = lib.mkIf config.aoide.clipboard.enable {
-    # cliphist's database lives under XDG_RUNTIME_DIR at runtime. Nothing here
-    # writes clipboard data into the flake or a Nix store path.
+    # cliphist's database lives at its default XDG cache path (~/.cache/
+    # cliphist/db) — persistent across reboots. Nothing here writes clipboard
+    # data into the flake or a Nix store path.
     environment.systemPackages = [
       pkgs.cliphist
       pkgs.wl-clipboard
@@ -112,17 +114,12 @@ in
         ExecStart = "${clipboardWatch}/bin/aoide-clipboard-watch";
         Restart = "on-failure";
         RestartSec = "3s";
-        Environment = [ "CLIPHIST_DB_PATH=%t/aoide-clipboard/db" ];
-
-        # RuntimeDirectory is created before the sandbox is applied, so the
-        # database's parent exists on the first start and is private to this
-        # user. Keep the watcher constrained to the Wayland/Unix resources it
-        # actually needs.
-        RuntimeDirectory = "aoide-clipboard";
-        RuntimeDirectoryMode = "0700";
+        # The DB and previews live under ~/.cache — the watcher sandbox
+        # allows writes only to those two trees. Keep it constrained to the
+        # Wayland/Unix resources it actually needs.
         UMask = "0077";
         ProtectSystem = "strict";
-        ReadWritePaths = [ "%t/aoide-clipboard" ];
+        ReadWritePaths = [ "%h/.cache/cliphist" "%h/.cache/aoide-clipboard" ];
         PrivateTmp = true;
         NoNewPrivileges = true;
         ProtectKernelTunables = true;
