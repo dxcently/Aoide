@@ -792,7 +792,7 @@ PanelWindow {
                 wrapMode: Text.WordWrap
                 text: root.freqSparse
                       ? "the grimoire is still\nlearning your habits\n(´･ω･`)"
-                      : "the clipboard is still\nempty — copy something\n(´･ω･`)"
+                      : "the notepad is still\nwaiting for more clippings\n(｡･ω･｡)"
                 color: root.notes.paletteFg
                 opacity: 0.5
                 font.family: root.faceMono
