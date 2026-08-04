@@ -1,66 +1,98 @@
-// ConductorGadget.qml — the agent roster temple (Doric · Attic gold · 𝄞).
+// ConductorGadget.qml — the agent roster temple (pantheon · Attic gold · 𝄞).
 //
-// THE PROGRAM — the roster reads as a CONCERT PLAYBILL OF PLAQUES, not a list
-// of lines and not an indented tree. Self-contained: this file owns its data
-// read (stage/sessions.json + projects.json, QS_STAGE honoured), its model
-// build, and its card UI. Nothing here is shared with TerminalsGadget — that
-// temple keeps its own, untouched pattern.
+// THE PROGRAM — the roster reads as a CONCERT PLAYBILL: a pantheon entablature
+// over a hall of collapsible per-project FOLDERS, each folder a numbered
+// movement whose cards are main-agent plaques with their subagent plaques hung
+// beneath. Self-contained: this file owns its data read (stage/sessions.json +
+// projects.json + hooks.json, QS_STAGE honoured), its model build, and its
+// card UI. Nothing here is shared with TerminalsGadget — that temple keeps its
+// own, untouched pattern.
 //
-// ── The structure ───────────────────────────────────────────────────────────
-// PROJECTS are MOVEMENTS: each registered project with live sessions gets a
-// numbered movement header — `I · AOIDE ────── ⌈70%⌉ · 2` — in the project's
-// own identity hue (notes.noteColor by projects.json index). The header tally
-// is the ctxRollup MAX-fill (the movement's hottest window) + top-level count;
-// it never replaces a card's own meter. Sessions outside every project fall
-// into an unnumbered dim UNANCHORED movement; when NO projects are registered
-// at all (a valid, common state) no movement chrome draws — just plaques.
+// ── The entablature (the pantheon) ─────────────────────────────────────────
+// PEDIMENT — a triangular tympanum with raking cornices + a marcato-diamond
+// acroterion, over a marble inscription band: 𝄞 CONDUCTOR [ conductor ].
+// THE SCORE COURSE — the Moonlight motif: five staff hairlines, the C♯ minor
+// key signature (F♯5·C♯5·G♯5·D♯5), nine 𝅘𝅥𝅯 sixteenths in three triplet groups,
+// a small "3" above each group, and the CONDUCTOR'S BATON laid across the
+// score (grip cork → shaft → take-over knot → tip diamond) pointing at the
+// final triplet. THE PROGRAM line (┌─┤ ♪ program ├…┐) closes the entablature.
+// Measured glyph quirks (Noto Music): the 𝅘𝅥𝅯 head rides ~3.9px above the
+// baseline at 16px — the flip's origin.y AND y MUST share the compensation;
+// the ♯ glyph rides ~13.25px above the Text top at 11px — y = staffY − 13.25.
 //
-// Each top-level agent session is a PLAQUE: a hairline-bordered card on a
-// faint marble band. The card carries its project's hue as a 2px left
-// pilaster (which-movement stays answerable mid-scroll) and swings its border
-// terracotta while awaiting.
+// ── Projects are MOVEMENTS, collapsible FOLDERS ────────────────────────────
+// Each registered project with live sessions gets a numbered folder header —
+// `▾ I · AOIDE ──────── 1.2M tok` — in the project's own identity hue. The
+// header carries ONE tally by directive: the project's TOTAL TOKEN SUM
+// (ctxCompact, "tok" suffix) — no bar, no pct, no count. A chevron ▾/▸ marks
+// the fold; clicking the header collapses/expands the folder's rows (snap,
+// no height animation — the rows bay height binds to the open state and clips).
+// Sessions outside every project fall into an unnumbered dim UNANCHORED
+// folder; with NO projects registered no folder chrome draws — just plaques.
+// Subagents hang beneath their nearest non-subagent ancestor (a └ hanger in
+// the gutter), clamped by climbing the parent chain.
 //
-// SUBAGENTS are smaller plaques HUNG beneath their parent card — indented,
-// with a └ hanger in the gutter — each carrying its own name/title AND the
-// `⟐ sub` kind tag travelling with the name (never instead of it), its own
-// full model id, the same status/voice line (▸ activity when the record has
-// one), and its own gauge line when it has tokens. Deeper nesting clamps to
-// the nearest top-level ancestor.
+// ── The 5-slot card template (a stable silhouette, not a grab-bag) ─────────
+// A MAIN card always shows the SAME five lines — absent data renders a dim
+// placeholder, never a collapsed slot, so every main plaque holds one
+// silhouette the eye can scan down:
+//   1 IDENTITY  lamp + name/title + kind tag (⟐ sub / ⇄ a2a) + ϟ hook tag ·
+//               wsN corner (main agents only)
+//   2 PROVENANCE the FULL model id (never abbreviated, ElideMiddle; a dim
+//               "—" placeholder when the record lacks one) — the model name
+//               is ALWAYS shown, for subagents too
+//   3 THINKING  a FIXED box (44px = four 10px lines on mains, 22px = two
+//               lines on subs) holding the live voice (▸ activity, else the
+//               italic “say …”, else a ϟ phase placeholder); text wraps and
+//               the LAST line elides — the fixed height IS the reserved
+//               thinking/tool lane, so random tool-usage text popping in
+//               never shifts the card
+//   4 CONTEXT   the house shade-glyph gauge `[▓▓▓▓░░░░░░] 47% · 95k / 1M tok`
+//               — THIS session's OWN window + token usage, never a rollup
+//   5 DIRECTORY the cwd breadcrumb on its own right-anchored line, ElideLeft
+// The right cluster reads right→left and is TOP-anchored in the thinking box:
+// the clipped kaomoji face (116px) ← the elapsed uptime clock (48px, pins the
+// box's top-right corner) ← sudo. Same offsets on every card, one column of
+// clocks, one column of faces.
 //
-// ── The 4-slot card template (a stable silhouette, not a grab-bag) ──────────
-// A TOP-LEVEL card always shows the SAME four lines — absent data renders a
-// dim placeholder, never a collapsed slot, so every main plaque holds one
-// silhouette the eye can scan down. Sub cards share the template but may
-// collapse slots 2/4 (smaller by design):
-//   1 IDENTITY  lamp ♪ + name/title + kind tag (⟐ sub / ⇄ a2a) · wsN corner
-//   2 PROVENANCE the FULL model id (never abbreviated, ElideMiddle; dim —
-//               placeholder on a main card without one)
-//   3 STATUS    the voice (▸ activity, else the italic “say …”) flowing into
-//               a FIXED-WIDTH right-aligned elapsed column, which anchors the
-//               FIXED-WIDTH kaomoji box — clocks and faces sit at identical
-//               offsets on every card, one readable row template
-//   4 FOOTING   the house shade-glyph gauge `[▓▓▓▓░░░░░░] 47% · 95k tok`
-//               (notes.ctxBar — the Meters-temple convention), THIS session's
-//               OWN tokens, never a rollup; a dim empty track `[░░░░░░░░░░] —`
-//               before the first turn · cwd right, ElideLeft
+// ── Reserved space (the anchoring law — text AND animations) ───────────────
+// Two animated elements, two reserved side-anchored boxes. The LAMP (the §2
+// contract: ♪ 𝄐 𝄼 𝄽 𝄂 · state colours — working pulses via a scale animation,
+// awaiting breathes via an opacity animation) lives INSIDE a fixed 16px box at
+// the card's top-left; both animations are confined to the box — nothing
+// floats, no layout shift. The KAOMOJI TROUPE lives inside the fixed 116px
+// clipped box at the thinking slot's top-right; its frames swap text, never
+// geometry. The thinking slot itself is a fixed-height reserved lane. Every
+// free-length string elides against a fixed partner: name vs tags, model id
+// middle-out, thinking against the face box, cwd left-elided. Every text
+// anchors to EXACTLY one side (left column left, right column right; flex
+// zones use both anchors + elide) — fixed columns, fixed order, right cluster
+// reads right→left. Hover previews the card's workspace + takes the trace;
+// click → bridge.focusSession (a courier focuses its parent's window). One
+// laurel standout (§5): traced card, else first working. All colour from
+// `notes`; radius 0 everywhere.
 //
-// ── Reserved space (the overlap discipline) ─────────────────────────────────
-// Two animated elements, two reserved boxes. The LAMP (the §2 state contract:
-// ♪ 𝄐 𝄼 𝄽 𝄂 · in the shared state-colour spread — working pulses, awaiting
-// breathes, sudo swaps a  lock) owns a fixed 16px box at the card's top-left;
-// the name anchors PAST it. The KAOMOJI TROUPE (MoodFaces — hashed set per
-// session, packages pool for couriers, still poses at rest) owns a fixed-width
-// clipped box at the status line's right edge; the status text anchors its
-// right edge to the box's left. Both partitions are measured, not floated —
-// no content length can push text under either animation.
+// ── The hooks channel (any-agent) ──────────────────────────────────────────
+// stage/hooks.json — [{ sessionId, phase, updatedAt }] — is agent-agnostic:
+// ANY agent session may be hooked into a phase from outside the roster's own
+// state. The hook phase WINS as the card's live state (cardLiveState): it
+// drives the lamp glyph/colour, the metronome pulse, the terracotta breath,
+// the border, and the kaomoji face — while laurel/firstWorkingId/workingCount
+// stay roster-based (stable tallies). Hook surfacing: a ϟ tag on the identity
+// row, a "ϟ phase" placeholder in the thinking box when there is no activity
+// or say, and a ϟN count in the stylobate tally. Phases outside the §2
+// vocabulary fall back to the "·" lamp and the puzzled still — tolerant,
+// never a crash. Stale hook ids (absent from the roster) are ignored: they
+// produce no rows and never inflate the ϟN tally.
 //
-// Every free-length string elides: name against its tag, model id middle-out,
-// activity against the face box, say full-width, cwd left-elided against the
-// ws/usage tags. Hover previews the card's workspace on the bar + takes the
-// trace; click → bridge.focusSession (a courier focuses its parent's window).
-// One laurel standout (§5): traced card, else first working. All colour from
-// `notes`; radius 0 everywhere; integration contract unchanged
-// (width/height/notes/bridge/shared from AoidePanel).
+// ── Reaping ────────────────────────────────────────────────────────────────
+// The liveness reaper (`aoide graph reap`, ~12s timer) sweeps dead sessions
+// out of the stage file out-of-band — the widget needs NO tombstone rows: a
+// session gone from sessions.json is gone from the roster on the next FileView
+// reload; `state: "done"` records stay visible with the done pose (𝄂 lamp,
+// ( ´▽｀ ) face) until they leave the file. Stale hooks never resurrect rows;
+// rebuild() is crash-free on partial/empty records — every stage field is
+// optional (additive-v0 contract).
 
 import QtQuick
 import Quickshell
@@ -94,8 +126,11 @@ Item {
     MoodFaces { id: faces }
     property int faceTick: 0
     Timer {
+        // Runs whenever the stele is visible — NOT gated on roster working
+        // count: a hooked-working session whose roster state is idle must
+        // still animate its face (the hook wins the live state, B4).
         interval: 420
-        running: temple.visible && temple.workingCount > 0
+        running: temple.visible
         repeat: true
         onTriggered: temple.faceTick++
     }
@@ -114,6 +149,8 @@ Item {
 
     property var _sessions: []
     property var _projects: []
+    property var _hooks: []
+    property var hookById: ({})
 
     FileView {
         id: sessionsFile
@@ -133,7 +170,16 @@ Item {
         onLoaded: temple.parseProjects()
         onFileChanged: reload()
     }
-    Component.onCompleted: { parseSessions(); parseProjects() }
+    FileView {
+        id: hooksFile
+        path: temple.stageDir + "/hooks.json"
+        watchChanges: true
+        blockLoading: false
+        printErrors: false
+        onLoaded: temple.parseHooks()
+        onFileChanged: reload()
+    }
+    Component.onCompleted: { parseSessions(); parseProjects(); parseHooks() }
 
     function parseSessions() {
         try {
@@ -150,6 +196,38 @@ Item {
             temple._projects = (o && o.projects) ? o.projects : []
         } catch (e) { temple._projects = [] }
         rebuild()
+    }
+    function parseHooks() {
+        try {
+            var t = hooksFile.text()
+            var o = (t && t.trim().length > 0) ? JSON.parse(t) : null
+            var arr = (o && o.hooks) ? o.hooks : []
+            temple._hooks = arr
+            var byId = {}
+            for (var i = 0; i < arr.length; i++) {
+                var h = arr[i]
+                if (!h || !h.sessionId) continue
+                byId[h.sessionId] = {
+                    phase: ("" + (h.phase || "")).toLowerCase(),
+                    updatedAt: h.updatedAt || ""
+                }
+            }
+            temple.hookById = byId
+        } catch (e) {
+            temple._hooks = []
+            temple.hookById = {}
+        }
+        rebuild()
+    }
+
+    // The hook lookup — the any-agent seam. hookPhase returns "" (falsy) for a
+    // session with no hook, so cardLiveState falls through to the roster state.
+    function hookPhase(id) {
+        var h = temple.hookById[id || ""]
+        return h ? h.phase : ""
+    }
+    function hooked(id) {
+        return !!temple.hookById[id || ""]
     }
 
     // ── Pure formatting helpers (no invented business logic) ────────────────
@@ -169,19 +247,23 @@ Item {
         return s.agent || "agent"
     }
 
-    // cwd → "~"-form, last ≤4 segments, "…/"-marked when truncated. The
-    // renderer ADDITIONALLY left-elides, so even four long segments keep
-    // their tail visible.
+    // cwd breadcrumb: home-relative ("~"), then the FIRST segment, then "…/",
+    // then the LAST TWO segments — `~/Aoide/…/quickshell/qml`. Paths of ≤3
+    // segments show whole; directly in $HOME → "~". The renderer ADDITIONALLY
+    // left-elides, so even a long tail keeps its last segment visible.
     function shortPath(p) {
         if (!p) return ""
         var s = "" + p
         var home = Quickshell.env("HOME")
         if (home && s.indexOf(home) === 0) s = "~" + s.substring(home.length)
+        var isTilde = s.charAt(0) === "~"
         var abs = s.charAt(0) === "/"
         var parts = s.split("/").filter(function (x) { return x.length > 0 })
-        if (parts.length > 4)
-            return "…/" + parts.slice(parts.length - 4).join("/")
-        return (abs ? "/" : "") + parts.join("/")
+        if (isTilde) parts.shift()          // "~" becomes the prefix
+        if (parts.length > 3)
+            return (isTilde ? "~/" : (abs ? "/" : ""))
+                 + parts[0] + "/…/" + parts.slice(parts.length - 2).join("/")
+        return s
     }
 
     // ── §2 state contract — glyph + colour, verbatim ────────────────────────
@@ -213,13 +295,20 @@ Item {
         return (n >= 1 && n <= 12) ? r[n] : ("" + n)
     }
 
-    // ── The movement/plaque model ────────────────────────────────────────────
+    // ── The movement/folder model ───────────────────────────────────────────
     // groups: [{ name, ord (movement numeral, 0 = unnumbered), hueIndex,
     //            anchored, rows: [{ s, kids: [session…] }], items: [all] }]
     property var groups: []
     property string firstWorkingId: ""
     property int totalCount: 0
     property int workingCount: 0
+    property int totalTokens: 0
+    property int hookedCount: 0
+
+    // Collapse state — keyed by project name ("adrift" for the unanchored
+    // folder); survives rebuilds because it lives on the root, not the model.
+    property var collapsed: ({})
+    function isOpen(g) { return !temple.collapsed[g.name || "adrift"] }
 
     function byStart(a, b) {
         var x = (a && a.startedAt) || "", y = (b && b.startedAt) || ""
@@ -305,18 +394,26 @@ Item {
         }
 
         // Tallies + the default laurel (first working top-level plaque).
-        var total = 0, work = 0, fw = ""
+        // totalCount/workingCount/firstWorkingId stay ROSTER-based (stable
+        // tallies); totalTokens sums over EVERY roster item including kids
+        // (both folders and adrift); hookedCount counts only roster items with
+        // a hook — stale hook ids are ignored, they never inflate the ϟN.
+        var total = 0, work = 0, fw = "", toks = 0, hookedN = 0
         for (i = 0; i < gs.length; i++) {
             var rows = gs[i].rows
             for (j = 0; j < rows.length; j++) {
                 var r = rows[j]
                 total++
+                toks += (r.s && r.s.contextTokens) || 0
+                if (temple.hooked(r.s ? r.s.sessionId : "")) hookedN++
                 if (r.s.state === "working") {
                     work++
                     if (fw === "") fw = r.s.sessionId || ""
                 }
                 for (var q = 0; q < r.kids.length; q++) {
                     total++
+                    toks += (r.kids[q].contextTokens) || 0
+                    if (temple.hooked(r.kids[q].sessionId)) hookedN++
                     if (r.kids[q].state === "working") work++
                 }
             }
@@ -325,6 +422,8 @@ Item {
         temple.totalCount = total
         temple.workingCount = work
         temple.firstWorkingId = fw
+        temple.totalTokens = toks
+        temple.hookedCount = hookedN
     }
 
     // The one laurel standout (§5): the traced card when it lives in THIS
@@ -371,57 +470,224 @@ Item {
             border.color: temple.signature; border.width: 1
         }
 
-        // ── ENTABLATURE: 𝄞 · CONDUCTOR · [ conductor ] ───────────────────────
+        // ── ENTABLATURE — the pantheon ───────────────────────────────────────
         Column {
             id: head
             anchors.left: parent.left; anchors.right: parent.right
             anchors.top: parent.top
             anchors.margins: 13
-            spacing: 6
+            spacing: 5
 
+            // ── A2 · pediment + inscription band (h53) ───────────────────────
             Item {
                 width: parent.width
-                height: 34
+                height: 53
 
                 Rectangle {                      // deeper marble band
-                    anchors.fill: parent; anchors.bottomMargin: 4
+                    anchors.top: pediment.bottom
+                    anchors.left: parent.left; anchors.right: parent.right
+                    anchors.bottom: parent.bottom; anchors.bottomMargin: 4
                     color: temple.withA(notes.paletteFg, 0.05)
                 }
-                Text {
-                    id: crownGlyph
-                    anchors.left: parent.left
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.verticalCenterOffset: -2
-                    text: "𝄞"
-                    font.family: temple.faceMusic; font.pixelSize: 24
-                    color: temple.signature
+
+                // the pediment — tympanum, raking cornices, acroterion diamond
+                Canvas {
+                    id: pediment
+                    anchors.top: parent.top
+                    width: parent.width
+                    height: 18
+                    onWidthChanged: requestPaint()
+                    onPaint: {
+                        var ctx = getContext("2d")
+                        ctx.reset()
+                        var w = width, h = height
+                        var baseY = h - 1.4, apexX = w / 2, apexY = 5.5
+                        // tympanum field
+                        ctx.beginPath()
+                        ctx.moveTo(2, baseY)
+                        ctx.lineTo(apexX, apexY)
+                        ctx.lineTo(w - 2, baseY)
+                        ctx.closePath()
+                        ctx.fillStyle = temple.withA(temple.signature, 0.07)
+                        ctx.fill()
+                        // raking cornices + the taenia (base line)
+                        ctx.beginPath()
+                        ctx.moveTo(2, baseY); ctx.lineTo(apexX, apexY)
+                        ctx.moveTo(w - 2, baseY); ctx.lineTo(apexX, apexY)
+                        ctx.moveTo(2, baseY); ctx.lineTo(w - 2, baseY)
+                        ctx.strokeStyle = temple.withA(temple.signature, 0.8)
+                        ctx.lineWidth = 1.1
+                        ctx.stroke()
+                        // the marcato-diamond acroterion at the apex
+                        ctx.beginPath()
+                        ctx.moveTo(apexX, apexY - 5)
+                        ctx.lineTo(apexX + 2.2, apexY - 2.8)
+                        ctx.lineTo(apexX, apexY - 0.6)
+                        ctx.lineTo(apexX - 2.2, apexY - 2.8)
+                        ctx.closePath()
+                        ctx.fillStyle = temple.signature
+                        ctx.fill()
+                    }
                 }
-                Text {
-                    anchors.left: crownGlyph.right; anchors.leftMargin: 10
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "CONDUCTOR"
-                    font.family: temple.faceSerif; font.pixelSize: 17
-                    font.weight: Font.DemiBold; font.letterSpacing: 4
-                    color: notes.paletteFg
-                }
-                Text {
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "[ conductor ]"
-                    font.family: temple.faceMono; font.pixelSize: 11
-                    color: temple.withA(temple.signature, 0.95)
+
+                // the inscription band — 𝄞 CONDUCTOR [ conductor ]
+                Item {
+                    anchors.left: parent.left; anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 34
+
+                    Text {
+                        id: crownGlyph
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.verticalCenterOffset: -2
+                        text: "𝄞"
+                        font.family: temple.faceMusic; font.pixelSize: 24
+                        color: temple.signature
+                    }
+                    Text {
+                        anchors.left: crownGlyph.right; anchors.leftMargin: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "CONDUCTOR"
+                        font.family: temple.faceSerif; font.pixelSize: 17
+                        font.weight: Font.DemiBold; font.letterSpacing: 4
+                        color: notes.paletteFg
+                    }
+                    Text {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "[ conductor ]"
+                        font.family: temple.faceMono; font.pixelSize: 11
+                        color: temple.withA(temple.signature, 0.95)
+                    }
                 }
             }
 
-            Text {                               // Greek-key meander course
+            // ── A3 · the score course (h33) — Moonlight + the baton ──────────
+            Item {
+                id: course
                 width: parent.width
-                clip: true
-                text: "┏┛┗┓".repeat(40)
-                font.family: temple.faceMono; font.pixelSize: 10
-                color: temple.withA(temple.signature, 0.85)
+                height: 33
+
+                Canvas {                         // staff + the baton
+                    anchors.fill: parent
+                    onWidthChanged: requestPaint()
+                    onPaint: {
+                        var ctx = getContext("2d")
+                        ctx.reset()
+                        // the five staff hairlines
+                        ctx.strokeStyle = temple.withA(temple.signature, 0.4)
+                        ctx.lineWidth = 1
+                        ctx.beginPath()
+                        var ys = [7.5, 13, 18.5, 24, 29.5]
+                        for (var i = 0; i < ys.length; i++) {
+                            ctx.moveTo(0, ys[i]); ctx.lineTo(width, ys[i])
+                        }
+                        ctx.stroke()
+                        // the conductor's baton, laid across the score: grip
+                        // cork at the lower right, shaft climbing to the tip
+                        // diamond over the final triplet, with a take-over
+                        // knot 0.16 of the way up the shaft.
+                        var gx = width - 10, gy = 30.5
+                        var tx = width - 105, ty = 13.5
+                        var kx = gx + (tx - gx) * 0.16
+                        var ky = gy + (ty - gy) * 0.16
+                        ctx.strokeStyle = temple.withA(temple.signature, 0.95)
+                        ctx.lineCap = "round"
+                        ctx.beginPath()          // the thin shaft, knot → tip
+                        ctx.moveTo(kx, ky); ctx.lineTo(tx, ty)
+                        ctx.lineWidth = 1.2
+                        ctx.stroke()
+                        ctx.beginPath()          // the thick grip cork, grip → knot
+                        ctx.moveTo(gx, gy); ctx.lineTo(kx, ky)
+                        ctx.lineWidth = 2.4
+                        ctx.stroke()
+                        ctx.beginPath()          // the tip diamond
+                        ctx.moveTo(tx, ty - 1.6)
+                        ctx.lineTo(tx + 1.6, ty)
+                        ctx.lineTo(tx, ty + 1.6)
+                        ctx.lineTo(tx - 1.6, ty)
+                        ctx.closePath()
+                        ctx.fillStyle = temple.signature
+                        ctx.fill()
+                    }
+                }
+
+                // the key signature — C♯ minor: F♯5 · C♯5 · G♯5 · D♯5. The ♯
+                // glyph rides ~13.25px above the Text top in Noto Music at 11px
+                // (measured), so y: staffY − 13.25.
+                Text { x: 16; y: 7.5 - 13.25
+                       text: "\u266F"
+                       font.family: temple.faceMusic; font.pixelSize: 11
+                       color: temple.signature }
+                Text { x: 24; y: 15.75 - 13.25
+                       text: "\u266F"
+                       font.family: temple.faceMusic; font.pixelSize: 11
+                       color: temple.signature }
+                Text { x: 32; y: 4.75 - 13.25
+                       text: "\u266F"
+                       font.family: temple.faceMusic; font.pixelSize: 11
+                       color: temple.signature }
+                Text { x: 40; y: 13 - 13.25
+                       text: "\u266F"
+                       font.family: temple.faceMusic; font.pixelSize: 11
+                       color: temple.signature }
+
+                // the arpeggio — the opening broken chord: C♯₅ E₅ G♯₅,
+                // three triplet groups. sy = staff position of each head:
+                // C♯5 on space 3, E5 on space 4, G♯5 floating above the top.
+                property var moonlight: [
+                    { x: 58,   sy: 15.75 },        // C♯5
+                    { x: 70,   sy: 10.25 },        // E5
+                    { x: 82,   sy: 4.75 },         // G♯5
+                    { x: 102,  sy: 15.75 },        // C♯5
+                    { x: 114,  sy: 10.25 },        // E5
+                    { x: 126,  sy: 4.75 },         // G♯5
+                    { x: 146,  sy: 15.75 },        // C♯5
+                    { x: 158,  sy: 10.25 },        // E5
+                    { x: 170,  sy: 4.75 }          // G♯5
+                ]
+                Repeater {
+                    model: course.moonlight
+                    delegate: Text {
+                        required property var modelData
+                        x: modelData.x
+                        y: modelData.sy - baselineOffset + 3.9
+                        text: "\uD834\uDD61"      // 𝅘𝅥𝅯 sixteenth
+                        font.family: temple.faceMusic; font.pixelSize: 16
+                        color: temple.signature
+                        // Stems DOWN — correct engraving for the upper staff.
+                        // Noto Music's head rides ~3.9px above the baseline at
+                        // 16px (measured); flip origin and y share that
+                        // compensation so heads land on their staff position.
+                        transform: Scale { yScale: -1; origin.y: baselineOffset - 3.9 }
+                    }
+                }
+
+                // the triplet marks — a small "3" above each group. These DO
+                // render: at 9px the digit is only ~4px of ink, so a scan
+                // crop a few pixels off from the window's true position
+                // misses it entirely — verify against the staff, not the
+                // spec's x.
+                Text { x: 67; y: 0.6
+                       text: "3"
+                       font.family: temple.faceSerif; font.italic: true
+                       font.pixelSize: 9
+                       color: temple.withA(temple.signature, 0.9) }
+                Text { x: 111; y: 0.6
+                       text: "3"
+                       font.family: temple.faceSerif; font.italic: true
+                       font.pixelSize: 9
+                       color: temple.withA(temple.signature, 0.9) }
+                Text { x: 155; y: 0.6
+                       text: "3"
+                       font.family: temple.faceSerif; font.italic: true
+                       font.pixelSize: 9
+                       color: temple.withA(temple.signature, 0.9) }
             }
 
-            Item {                               // ┌─┤ ♪ program ├──────┐
+            // ── A4 · the program line (h14) ──────────────────────────────────
+            Item {
                 width: parent.width; height: 14
                 Text {
                     id: tfL
@@ -499,7 +765,7 @@ Item {
                     }
                 }
 
-                // ── MOVEMENTS ────────────────────────────────────────────────
+                // ── MOVEMENTS (the collapsible project folders) ──────────────
                 Repeater {
                     model: temple.groups
                     delegate: Column {
@@ -511,19 +777,29 @@ Item {
                                        : temple.withA(temple.notes.paletteFg, 0.55)
                         readonly property bool headed: g.name !== ""
                         readonly property var roll: temple.notes.ctxRollup(g.items)
+                        readonly property bool open: temple.isOpen(g)
 
                         width: playbill.width
                         spacing: 4
 
-                        // movement header — I · AOIDE ────── ⌈70%⌉ · 2
+                        // the folder header — ▾ I · AOIDE ────── 1.2M tok
                         Item {
                             visible: movement.headed
                             width: parent.width
                             height: visible ? 16 : 0
 
+                            Text {               // the fold chevron
+                                x: 0
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 12
+                                horizontalAlignment: Text.AlignLeft
+                                text: movement.open ? "▾" : "▸"
+                                font.family: temple.faceMono; font.pixelSize: 9
+                                color: movement.hue
+                            }
                             Text {
                                 id: gName
-                                anchors.left: parent.left
+                                anchors.left: parent.left; anchors.leftMargin: 16
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: (movement.g.anchored
                                        ? temple.roman(movement.g.ord) + " · " : "")
@@ -531,71 +807,103 @@ Item {
                                 font.family: temple.faceSerif; font.pixelSize: 11
                                 font.weight: Font.Medium; font.letterSpacing: 3
                                 elide: Text.ElideRight
-                                // long project names shrink against the tally
+                                // long project names shrink against the token
+                                // sum (the budget covers chevron + rule margins)
                                 width: Math.min(implicitWidth,
-                                                parent.width - gStat.implicitWidth - 20)
+                                                parent.width - gSum.implicitWidth - 24)
                                 color: movement.hue
                             }
                             Text {
-                                // MAX-fill rollup (the movement's hottest
-                                // window — additional, never replacing a
-                                // card's own meter) + the plaque count.
-                                id: gStat
+                                // THE DIRECTIVE: the header carries the
+                                // project's TOTAL TOKEN SUM ONLY — no bar, no
+                                // pct, no count.
+                                id: gSum
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: (movement.roll.any
-                                       ? ("⌈" + Math.round(movement.roll.maxFill) + "%⌉ · ")
-                                       : "")
-                                      + movement.g.rows.length
+                                text: movement.roll.any
+                                       ? (temple.notes.ctxCompact(movement.roll.sumTok)
+                                          + " tok")
+                                       : "—"
                                 font.family: temple.faceMono; font.pixelSize: 9
                                 color: movement.roll.any
-                                       ? temple.notes.ctxColor(movement.roll.maxFill,
-                                                               temple.notes.paletteAccent)
+                                       ? temple.withA(temple.notes.paletteAccent, 0.9)
                                        : temple.withA(temple.notes.paletteFg, 0.5)
                             }
                             Rectangle {
                                 anchors.left: gName.right; anchors.leftMargin: 8
-                                anchors.right: gStat.left; anchors.rightMargin: 8
+                                anchors.right: gSum.left; anchors.rightMargin: 8
                                 anchors.verticalCenter: parent.verticalCenter
                                 height: 1
                                 color: temple.withA(movement.hue, 0.3)
                             }
+
+                            // hover ground + the fold toggle
+                            Rectangle {
+                                anchors.fill: parent
+                                visible: foldMouse.containsMouse
+                                color: temple.withA(movement.hue, 0.08)
+                            }
+                            MouseArea {
+                                id: foldMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked:
+                                    temple.collapsed[movement.g.name || "adrift"]
+                                        = movement.open
+                            }
                         }
 
-                        // the movement's plaques (+ hung courier plaques)
-                        Repeater {
-                            model: movement.g.rows
-                            delegate: Column {
-                                id: bay
-                                required property var modelData
-                                readonly property var row: modelData
-                                width: playbill.width
+                        // the folder's rows — deterministic collapse: the bay
+                        // height binds to the open state and clips, so the
+                        // layout is a snap (no height animation; park one as a
+                        // future nicety).
+                        Item {
+                            id: rowsBay
+                            width: parent.width
+                            height: movement.open ? rowsCol.implicitHeight : 0
+                            clip: true
+
+                            Column {
+                                id: rowsCol
+                                width: parent.width
                                 spacing: 3
 
-                                SessionCard { s: bay.row.s; hue: movement.hue }
-
                                 Repeater {
-                                    model: bay.row.kids
-                                    delegate: Item {
+                                    model: movement.g.rows
+                                    delegate: Column {
+                                        id: bay
                                         required property var modelData
-                                        width: bay.width
-                                        implicitHeight: kidCard.implicitHeight
+                                        readonly property var row: modelData
+                                        width: playbill.width
+                                        spacing: 3
 
-                                        Text {   // the hanger, in the gutter
-                                            x: 7; y: 2
-                                            text: "└"
-                                            font.family: temple.faceMono
-                                            font.pixelSize: 11
-                                            color: temple.withA(temple.notes.wireCyan, 0.5)
-                                        }
-                                        SessionCard {
-                                            id: kidCard
-                                            anchors.left: parent.left
-                                            anchors.leftMargin: 18
-                                            anchors.right: parent.right
-                                            s: modelData
-                                            child: true
-                                            hue: movement.hue
+                                        SessionCard { s: bay.row.s; hue: movement.hue }
+
+                                        Repeater {
+                                            model: bay.row.kids
+                                            delegate: Item {
+                                                required property var modelData
+                                                width: bay.width
+                                                implicitHeight: kidCard.implicitHeight
+
+                                                Text {   // the hanger, in the gutter
+                                                    x: 7; y: 2
+                                                    text: "└"
+                                                    font.family: temple.faceMono
+                                                    font.pixelSize: 11
+                                                    color: temple.withA(temple.notes.wireCyan, 0.5)
+                                                }
+                                                SessionCard {
+                                                    id: kidCard
+                                                    anchors.left: parent.left
+                                                    anchors.leftMargin: 18
+                                                    anchors.right: parent.right
+                                                    s: modelData
+                                                    child: true
+                                                    hue: movement.hue
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -632,11 +940,17 @@ Item {
             Text {
                 id: ffL
                 anchors.left: parent.left
+                // right-capped at the final barline (acyclic: ffBar is fixed)
+                // so 30+ voices can never push the tally under the chrome
+                anchors.right: ffBar.left; anchors.rightMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
+                elide: Text.ElideRight
                 text: "└─┤ " + (temple.totalCount === 0
                                 ? "tacet"
                                 : (temple.totalCount + " voices · "
-                                   + temple.workingCount + " working")) + " ├"
+                                   + temple.workingCount + " working · "
+                                   + temple.notes.ctxCompact(temple.totalTokens)
+                                   + " tok · ϟ" + temple.hookedCount)) + " ├"
                 font.family: temple.faceMono; font.pixelSize: 11
                 color: temple.withA(notes.paletteFg, 0.8)
             }
@@ -659,7 +973,7 @@ Item {
             }
             Rectangle {
                 anchors.left: ffL.right; anchors.right: ffBar.left
-                anchors.leftMargin: 2; anchors.rightMargin: 6
+                anchors.leftMargin: 2; anchors.rightMargin: 2
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.verticalCenterOffset: 1
                 height: 1
@@ -670,8 +984,10 @@ Item {
 
     // ═════ ONE PLAQUE ══════════════════════════════════════════════════════════
     // A hairline-bordered card on a marble band, standing on its own context
-    // meter. Two reserved animation boxes (lamp top-left, troupe status-right)
-    // partition the card's width against the text — nothing floats.
+    // meter. The 5-slot template (main) / 3-4-slot compact (sub) — fixed
+    // heights, one silhouette per kind. Reserved boxes: lamp 16px left,
+    // face 116px right, thinking lane fixed — the anchoring law covers the
+    // animated elements too, nothing floats.
     component SessionCard: Item {
         id: card
 
@@ -683,9 +999,15 @@ Item {
         implicitHeight: inner.implicitHeight + 11   // 5 top + text + 6 base
 
         readonly property string sState: (s && s.state) ? ("" + s.state).toLowerCase() : ""
+        readonly property string hookPh: temple.hookPhase(s ? s.sessionId : "")
+        // THE LIVE STATE — the hook phase wins when present; the roster state
+        // is the fallback. This drives the lamp glyph/colour, the metronome
+        // pulse, the terracotta breath, the border, and the kaomoji face.
+        // Laurel/firstWorkingId/workingCount stay ROSTER-based (stable tallies).
+        readonly property string cardLiveState: hookPh !== "" ? hookPh : sState
         readonly property bool sudoHeld: !!(s && s.needsSudo)
-        readonly property bool cardWorking: sState === "working"
-        readonly property bool cardAwaiting: sState === "awaiting" || sudoHeld
+        readonly property bool cardWorking: cardLiveState === "working"
+        readonly property bool cardAwaiting: cardLiveState === "awaiting" || sudoHeld
         readonly property bool cardResting: !cardWorking && !cardAwaiting
         readonly property bool hasCtx: !!(s && s.contextTokens > 0)
         readonly property real ctxPct: hasCtx
@@ -695,10 +1017,11 @@ Item {
         readonly property string sKind: temple.kindOf(s)
         readonly property bool hasWs:
             !!(s && s.workspace !== undefined && s.workspace !== null)
+        readonly property bool hooked: temple.hooked(s ? s.sessionId : "")
 
         // troupe casting — hashed per session id, couriers from the packages
         // pool, everyone else from the general pool; resting states hold the
-        // shared still pose for their state.
+        // shared still pose for their (live) state.
         readonly property var facePool:
             sKind === "subagent" ? faces.packages : faces.working
         readonly property int faceSet:
@@ -708,7 +1031,18 @@ Item {
             ? faceFrames[(temple.faceTick
                           + faces.phaseFor((s && s.sessionId) || "", faceFrames.length))
                          % faceFrames.length]
-            : faces.still(sState, true)
+            : faces.still(cardLiveState, true)
+
+        // the thinking lane — live voice, else say, else the hook placeholder
+        readonly property string liveText: (s && s.activity) ? ("" + s.activity) : ""
+        readonly property string sayText: (s && s.say)
+            ? ("" + s.say).replace(/\s+/g, " ") : ""
+        readonly property bool thinkLive: liveText !== ""
+        readonly property string thinkText: thinkLive
+            ? ((liveText.indexOf("▸") === 0 ? "" : "▸ ") + liveText
+               + (sayText !== "" ? "\n" + sayText : ""))
+            : (sayText !== "" ? sayText
+               : (card.hooked ? ("ϟ " + card.cardLiveState) : "…"))
 
         // the plaque ground + hairline (terracotta while awaiting)
         Rectangle {
@@ -736,16 +1070,16 @@ Item {
             anchors.left: parent.left; anchors.leftMargin: 9
             anchors.right: parent.right; anchors.rightMargin: 6
             anchors.top: parent.top; anchors.topMargin: 5
-            spacing: 2
+            spacing: 3
 
-            // ── 1 · IDENTITY — lamp + name/title + kind tag · wsN corner ─────
+            // ── 1 · IDENTITY — lamp + name + kind tag + ϟ tag · wsN corner ──
             Item {
                 width: parent.width
                 height: 16
 
                 Text {                           // workspace tag — fixed corner
                     id: wsT
-                    visible: card.hasWs
+                    visible: !card.child && card.hasWs
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     text: card.hasWs ? ("ws" + card.s.workspace) : ""
@@ -762,16 +1096,16 @@ Item {
                     Text {
                         id: lamp
                         anchors.centerIn: parent
-                        text: card.sudoHeld ? "" : temple.lampGlyph(card.sState)
+                        text: card.sudoHeld ? "" : temple.lampGlyph(card.cardLiveState)
                         font.family: card.sudoHeld ? temple.faceMono : temple.faceMusic
                         font.pixelSize: 12
                         color: card.laurel
                                ? temple.notes.paletteHot
                                : temple.withA(card.sudoHeld ? temple.notes.paletteUrgent
-                                                            : temple.lampColor(card.sState),
+                                                            : temple.lampColor(card.cardLiveState),
                                               card.cardResting ? 0.55 : 1.0)
 
-                        // working — a metronome pulse
+                        // working — a metronome pulse, confined to the box
                         SequentialAnimation on scale {
                             running: card.cardWorking
                             loops: Animation.Infinite
@@ -779,7 +1113,7 @@ Item {
                             NumberAnimation { to: 1.35; duration: 520; easing.type: Easing.InOutSine }
                             NumberAnimation { to: 1.0;  duration: 520; easing.type: Easing.InOutSine }
                         }
-                        // awaiting — a terracotta breath
+                        // awaiting — a terracotta breath, box-neutral
                         SequentialAnimation on opacity {
                             running: card.cardAwaiting
                             loops: Animation.Infinite
@@ -790,7 +1124,7 @@ Item {
                     }
                 }
 
-                Text {                           // name/title — elides vs both tags
+                Text {                           // name/title — elides vs all tags
                     id: nameT
                     anchors.left: lampBox.right; anchors.leftMargin: 5
                     anchors.verticalCenter: parent.verticalCenter
@@ -799,6 +1133,7 @@ Item {
                     width: Math.min(implicitWidth,
                                     parent.width - 21
                                     - (kindTag.visible ? kindTag.implicitWidth + 6 : 0)
+                                    - (hookTag.visible ? hookTag.implicitWidth + 6 : 0)
                                     - (wsT.visible ? wsT.implicitWidth + 10 : 0))
                     font.family: temple.faceSerif
                     font.pixelSize: card.child ? 12 : 13
@@ -814,14 +1149,24 @@ Item {
                     font.family: temple.faceMono; font.pixelSize: 9
                     color: temple.notes.violet
                 }
+                Text {                           // the ϟ hook tag
+                    id: hookTag
+                    visible: card.hooked
+                    anchors.left: kindTag.visible ? kindTag.right : nameT.right
+                    anchors.leftMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "ϟ"
+                    font.family: temple.faceMono; font.pixelSize: 9
+                    color: temple.withA(temple.lampColor(card.cardLiveState), 0.95)
+                }
             }
 
-            // ── 2 · PROVENANCE — the FULL model id (a fixed slot on mains) ───
-            // Never abbreviated; middle-elided only when it truly must be. A
-            // main card without one holds the slot with a dim placeholder so
-            // the 4-line silhouette never shifts; a sub card may collapse it.
+            // ── 2 · PROVENANCE — the FULL model id (a fixed slot, always) ────
+            // Never abbreviated; middle-elided only when it truly must be. The
+            // model NAME is always shown — mains AND subs — a dim "—" holding
+            // the slot when the record lacks one, so the silhouette never
+            // shifts.
             Text {
-                visible: !card.child || !!(card.s && card.s.model)
                 anchors.left: parent.left; anchors.leftMargin: 21
                 anchors.right: parent.right
                 text: (card.s && card.s.model) ? card.s.model : "—"
@@ -831,22 +1176,20 @@ Item {
                                     (card.s && card.s.model) ? 0.55 : 0.3)
             }
 
-            // ── 3 · STATUS — voice · elapsed (fixed column) · the troupe ─────
-            // One composed line, not bolted boxes: the left voice (▸ activity
-            // when the record carries one — subagents included — else the
-            // italic “say …”) flows up to a FIXED-WIDTH right-aligned elapsed
-            // column, which itself anchors the FIXED-WIDTH clipped troupe box.
-            // Clock and face sit at identical offsets from the card's right
-            // edge on EVERY card, so scanning down the roster reads one column
-            // of clocks and one column of faces.
+            // ── 3 · THINKING — a FIXED box (4 lines main / 2 lines sub) ─────
+            // The right cluster is TOP-anchored and reads right→left: face
+            // (116px clipped) ← elapsed uptime clock (48px, pins the corner)
+            // ← sudo. The thinking text wraps inside the fixed height and the
+            // LAST line elides — the reservation is the lane itself, so tool
+            // text popping in never shifts the card.
             Item {
                 width: parent.width
-                height: 17
+                height: card.child ? 22 : 44
 
                 Item {                           // reserved, clipped troupe box
                     id: faceBox
+                    anchors.top: parent.top
                     anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
                     width: 116; height: 17
                     clip: true
                     Text {
@@ -858,10 +1201,10 @@ Item {
                                            : temple.withA(temple.notes.paletteFg, 0.6)
                     }
                 }
-                Text {                           // elapsed — the fixed clock column
-                    id: elapsedT
+                Text {                           // elapsed — the uptime clock,
+                    id: elapsedT                  // pinned top-right of the slot
+                    anchors.top: parent.top
                     anchors.right: faceBox.left; anchors.rightMargin: 8
-                    anchors.verticalCenter: parent.verticalCenter
                     width: 48
                     horizontalAlignment: Text.AlignRight
                     text: temple.notes.elapsedSince(
@@ -873,64 +1216,89 @@ Item {
                 Text {                           // sudo — beside the clock
                     id: sudoT
                     visible: card.sudoHeld
+                    anchors.top: parent.top
                     anchors.right: elapsedT.left; anchors.rightMargin: 6
-                    anchors.verticalCenter: parent.verticalCenter
                     text: "sudo"
                     font.family: temple.faceMono; font.pixelSize: 9
                     color: temple.notes.paletteUrgent
                 }
-                Text {                           // the voice — live tool, else say
-                    readonly property bool live: !!(card.s && card.s.activity)
-                    visible: live || !!(card.s && card.s.say)
+                Text {                           // the thinking — wraps, 4-line
+                    id: thinkT                     // cap with last-line elide
                     anchors.left: parent.left; anchors.leftMargin: 21
                     anchors.right: sudoT.visible ? sudoT.left : elapsedT.left
                     anchors.rightMargin: 8
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: live ? ("▸ " + card.s.activity)
-                               : ("“" + (((card.s && card.s.say) || "")
-                                         .replace(/\s+/g, " ")) + "”")
+                    anchors.top: parent.top
+                    height: parent.height
+                    verticalAlignment: Text.AlignTop
+                    wrapMode: Text.WordWrap
                     elide: Text.ElideRight
-                    font.family: live ? temple.faceMono : temple.faceSerif
-                    font.italic: !live
+                    lineHeight: 10
+                    lineHeightMode: Text.FixedHeight
+                    text: card.thinkText
+                    font.family: (card.thinkLive || card.hooked)
+                                 ? temple.faceMono : temple.faceSerif
+                    font.italic: !card.thinkLive && !card.hooked
                     font.pixelSize: 10
-                    color: temple.withA(temple.notes.paletteFg, live ? 0.65 : 0.55)
+                    color: card.thinkLive
+                           ? temple.withA(temple.notes.paletteFg, 0.65)
+                           : (card.hooked
+                              ? temple.withA(temple.notes.paletteFg, 0.55)
+                              : (card.sayText !== ""
+                                 ? temple.withA(temple.notes.paletteFg, 0.55)
+                                 : temple.withA(temple.notes.paletteFg, 0.25)))
                 }
             }
 
-            // ── 4 · FOOTING — the shade-glyph gauge · cwd ────────────────────
-            // The house [▓▓▓░░░] convention (notes.ctxBar — the same gauge the
-            // Meters temple reads), filled to THIS session's OWN window, never
-            // a rollup. A main plaque keeps the slot even before its first
-            // turn — a dim empty track — so the silhouette never shifts.
+            // ── 4 · CONTEXT — the window + token usage, its own line ─────────
+            // The house [▓▓▓░░░] gauge (notes.ctxBar), filled to THIS session's
+            // OWN window, never a rollup. A main plaque keeps the slot even
+            // before its first turn — a dim "—" — so the silhouette never
+            // shifts; a sub plaque collapses the slot when it has no tokens.
             Item {
-                visible: !card.child || card.hasCtx || !!(card.s && card.s.cwd)
+                visible: !card.child || card.hasCtx
                 width: parent.width
                 height: 15
 
                 Text {
-                    id: gaugeT
                     anchors.left: parent.left; anchors.leftMargin: 21
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: temple.notes.ctxBar(card.ctxPct, 10)
-                          + (card.hasCtx
-                             ? (" " + Math.round(card.ctxPct) + "% · "
-                                + temple.notes.ctxCompact(card.s.contextTokens) + " tok")
-                             : " —")
+                    anchors.right: parent.right
+                    horizontalAlignment: Text.AlignLeft
+                    text: card.hasCtx
+                          ? (temple.notes.ctxBar(card.ctxPct, 10) + " "
+                             + Math.round(card.ctxPct) + "% · "
+                             + temple.notes.ctxCompact(card.s.contextTokens)
+                             + (card.s.contextCeiling
+                                ? (" / " + temple.notes.ctxCompact(card.s.contextCeiling))
+                                : "") + " tok")
+                          : "—"
+                    elide: Text.ElideRight
                     font.family: temple.faceMono; font.pixelSize: 10
                     color: card.hasCtx
                            ? temple.notes.ctxColor(card.ctxPct, temple.signature)
                            : temple.withA(temple.notes.paletteFg, 0.3)
                 }
-                Text {                           // cwd — tail always survives
-                    visible: !!(card.s && card.s.cwd)
-                    anchors.left: gaugeT.right; anchors.leftMargin: 10
+            }
+
+            // ── 5 · DIRECTORY — the cwd breadcrumb, its own line ─────────────
+            // Right-anchored, ElideLeft so the tail always survives; a dim "—"
+            // holds the line on a main card without a cwd. Subs collapse it.
+            Item {
+                visible: !card.child || !!(card.s && card.s.cwd)
+                width: parent.width
+                height: 14
+
+                Text {
+                    anchors.left: parent.left; anchors.leftMargin: 21
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     horizontalAlignment: Text.AlignRight
-                    text: temple.shortPath(card.s ? card.s.cwd : "")
+                    text: card.s && card.s.cwd
+                          ? temple.shortPath(card.s.cwd) : "—"
                     elide: Text.ElideLeft
                     font.family: temple.faceMono; font.pixelSize: 10
-                    color: temple.withA(temple.notes.holoBlue, 0.85)
+                    color: card.s && card.s.cwd
+                           ? temple.withA(temple.notes.holoBlue, 0.85)
+                           : temple.withA(temple.notes.paletteFg, 0.3)
                 }
             }
         }
