@@ -138,7 +138,8 @@ ShellRoot {
     //   - AoideWallpaperPicker : SUPER+W wallpaper switcher (global-shortcut)
     //   - AoideNotifications   : org.freedesktop.Notifications popup stack,
     //                            bottom-right (live whenever a notification exists)
-    AoideLauncher { notes: notes; bridge: bridge }
+    AoideClipboard { id: clipboard }
+    AoideLauncher { notes: notes; bridge: bridge; clipboard: clipboard }
     AoideWallpaperPicker { notes: notes }
     AoideNotifications { notes: notes; bridge: bridge; stagingEngine: stagingEngine }
 }

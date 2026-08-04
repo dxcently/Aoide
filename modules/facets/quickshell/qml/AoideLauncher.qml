@@ -90,6 +90,7 @@ PanelWindow {
     // ── Note + bridge dependencies (injected by shell.qml) ─────────────────
     required property var notes
     required property var bridge
+    required property var clipboard
 
     // ── Type voices (the Conductor family) ─────────────────────────────────
     readonly property string faceSerif: "Noto Serif"                // carved marble
@@ -142,6 +143,22 @@ PanelWindow {
     function show()   { root.shown = true }
     function hide()   { root.shown = false }
     function toggle() { root.shown = !root.shown }
+    function openClipboard() {
+        flipOut.stop()
+        flipIn.stop()
+        root.flipping = false
+        turn.angle = 0
+        root.shown = true
+        searchInput.text = ""
+        root.selIndex = 0
+        clipboard.refresh()
+        for (var i = 0; i < root.chapters.length; i++) {
+            if (root.chapters[i].kind === "clipboard") {
+                root.chapterIndex = i
+                return
+            }
+        }
+    }
 
     onShownChanged: {
         // Stop any in-flight leaf-turn before a hard reset — otherwise the
@@ -185,6 +202,12 @@ PanelWindow {
         name: "launcher"
         description: "Summon the Aoide app launcher"
         onPressed: root.toggle()
+    }
+    GlobalShortcut {
+        appid: "aoide"
+        name: "clipboard"
+        description: "Open clipboard history in the Grimoire"
+        onPressed: root.openClipboard()
     }
 
     // ── Search + selection state ────────────────────────────────────────────
@@ -232,6 +255,12 @@ PanelWindow {
         }
         out.push({ id: "frequency", title: "MOST SUMMONED", whisper: "ἕξις",
                    hue: root.notes.paletteAccent, entries: freqEntries })
+
+        var clipboardEntries = root.clipboard.parsedEntries || []
+        out.push({ id: "clipboard", kind: "clipboard",
+                   title: "CLIPBOARD", whisper: "ἀποθήκη",
+                   tabSymbol: "🗒",
+                   hue: root.notes.paletteAccent, entries: clipboardEntries })
 
         var all = []
         for (var k in root.appsById) all.push(root.appsById[k])
@@ -302,8 +331,49 @@ PanelWindow {
     }
 
     readonly property var chapterEntries: (root.currentChapter) ? root.currentChapter.entries : []
-    readonly property var currentList: root.searching ? root.searchResults : root.chapterEntries
-    readonly property int splitAt: Math.ceil(root.currentList.length / 2)
+    readonly property bool clipboardChapter: root.currentChapter
+                                           && root.currentChapter.kind === "clipboard"
+    readonly property var clipboardSearchResults: {
+        if (!root.searching) return []
+        var q = ("" + root.query).trim().toLowerCase()
+        var out = []
+        var all = root.clipboard.parsedEntries || []
+        for (var i = 0; i < all.length; i++) {
+            var item = all[i]
+            if (!item) continue
+            // Search the human-readable preview: text preview or image metadata.
+            var previewText = ("" + (item.preview || "")).toLowerCase()
+            if (previewText.indexOf(q) !== -1) out.push(item)
+        }
+        return out
+    }
+    readonly property var currentList: root.searching
+            ? (root.clipboardChapter ? root.clipboardSearchResults : root.searchResults)
+            : root.chapterEntries
+    readonly property string emptyMessage: {
+        if (root.clipboardChapter) {
+            if (root.clipboard.loading) return "reading clipboard history…"
+            if (root.clipboard.loadError) return "clipboard history unavailable"
+            if (root.searching) return "no entries match the filter"
+            if (root.clipboard.parsedEntries.length === 0) return "no clipboard history yet"
+        }
+        return root.searching ? "οὐδὲν τοιοῦτον ὄνομα ♪(´ε｀ )" : "οὐδὲν ἐνταῦθα ♪(´ε｀ )"
+    }
+    // Clipboard text rows are 60px against the ~372px page body → 6 rows
+    // per page; app rows are 38px → 9 rows. Both special chapters fill like
+    // newspaper columns: the LEFT page fills to capacity before the right
+    // page receives anything, so a partial chapter reads as one full page,
+    // not two half pages. (Alphabet chapters keep the balanced split —
+    // they're sized at exactly 18 entries per spread.) The frequency
+    // chapter's entries stay in ledger order: most summoned first.
+    readonly property int clipboardLeftCapacity: 6
+    readonly property int appLeftCapacity: 9
+    readonly property int splitAt:
+            root.clipboardChapter
+            ? Math.min(root.currentList.length, root.clipboardLeftCapacity)
+            : (root.currentChapter && root.currentChapter.id === "frequency")
+              ? Math.min(root.currentList.length, root.appLeftCapacity)
+              : Math.ceil(root.currentList.length / 2)
     readonly property var leftEntries: root.currentList.slice(0, root.splitAt)
     readonly property var rightEntries: root.currentList.slice(root.splitAt)
 
@@ -330,6 +400,10 @@ PanelWindow {
         var list = root.currentList
         if (root.selIndex < 0 || root.selIndex >= list.length) return
         var e = list[root.selIndex]
+        if (root.clipboardChapter) {
+            if (e && root.clipboard.copyById(e.id)) root.hide()
+            return
+        }
         if (e && e.execute) {
             e.execute()
             ledger.record(e.id)
@@ -395,9 +469,11 @@ PanelWindow {
         required property int leafOffset
         readonly property int globalIndex: leafOffset + index
         readonly property bool isSel: root.selIndex === row.globalIndex
+        readonly property bool isClipboard: root.clipboardChapter
+        readonly property bool isClipboardText: row.isClipboard && row.modelData && row.modelData.kind !== "image"
 
         width: ListView.view ? ListView.view.width : 0
-        height: 38
+        height: row.isClipboardText ? 60 : 38
 
         // the ruling
         Rectangle {
@@ -433,29 +509,63 @@ PanelWindow {
                 width: 20; height: 20
                 sourceSize.width: 20; sourceSize.height: 20
                 fillMode: Image.PreserveAspectFit
+                visible: !row.isClipboard
                 source: (row.modelData && row.modelData.icon)
                         ? Quickshell.iconPath(row.modelData.icon, "application-x-executable")
                         : Quickshell.iconPath("application-x-executable")
             }
+            // Clipboard image thumbnail — bounded, file:// URL only.
+            // source binding reads imageStates directly so
+            // imageStatesChanged() triggers re-evaluation.
+            Image {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 32; height: 24
+                sourceSize.width: 32; sourceSize.height: 24
+                fillMode: Image.PreserveAspectFit
+                visible: row.isClipboard && row.modelData
+                         && row.modelData.kind === "image"
+                source: {
+                    if (!row.isClipboard || !row.modelData
+                            || row.modelData.kind !== "image") return ""
+                    var states = root.clipboard.imageStates
+                    var entry = (states && row.modelData.id)
+                                 ? states[row.modelData.id] : undefined
+                    return (entry && entry.source) ? entry.source : ""
+                }
+                Component.onCompleted: {
+                    if (row.modelData && row.modelData.kind === "image"
+                            && /^[0-9]+$/.test(row.modelData.id)) {
+                        root.clipboard.requestPreview(row.modelData.id)
+                    }
+                }
+            }
             Text {
                 id: nameText
                 anchors.verticalCenter: parent.verticalCenter
-                text: (row.modelData && row.modelData.name) ? row.modelData.name : ""
+                text: row.isClipboard
+                      ? ((row.modelData && row.modelData.preview) ? row.modelData.preview : "")
+                      : ((row.modelData && row.modelData.name) ? row.modelData.name : "")
                 color: root.notes.paletteFg
                 opacity: row.isSel ? 1.0 : 0.88
                 font.family: root.faceSerif
-                font.pixelSize: 14
+                font.pixelSize: row.isClipboardText ? 12 : 14
                 font.weight: row.isSel ? Font.Bold : Font.Medium
                 elide: Text.ElideRight
-                // leave room for the gloss note; cap so long names elide
-                width: Math.min(implicitWidth, parent.width * 0.58)
+                wrapMode: row.isClipboardText ? Text.WrapAtWordBoundaryOrAnywhere : Text.NoWrap
+                maximumLineCount: row.isClipboardText ? 3 : 1
+                // leave room for the gloss note; cap so long names elide;
+                // clipboard text wraps across most of the row width
+                width: row.isClipboardText
+                       ? parent.width - 100
+                       : Math.min(implicitWidth, parent.width * 0.58)
             }
             Text {   // generic-name gloss, inline after the name
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.verticalCenterOffset: 1
                 readonly property string sub:
-                    (row.modelData && row.modelData.genericName) ? row.modelData.genericName
-                    : ((row.modelData && row.modelData.comment) ? row.modelData.comment : "")
+                    row.isClipboard ? ("ID " + (row.modelData && row.modelData.id ? row.modelData.id : ""))
+                    : ((row.modelData && row.modelData.genericName) ? row.modelData.genericName
+                    : ((row.modelData && row.modelData.comment) ? row.modelData.comment : ""))
                 visible: sub.length > 0
                 text: sub
                 color: root.withA(root.notes.holoBlue, 0.8)
@@ -585,11 +695,12 @@ PanelWindow {
         }
 
         // faint manuscript rules — fill blank page space below the entries
-        // at the same 38px pitch as a real ManuscriptRow (see `height: 38`
-        // on that component), so an empty/partial page reads as ruled
-        // parchment rather than blank cream. Same hairline treatment as the
-        // real unselected row rule. Sibling of `lv`, placed before the sparse
-        // filler so the filler text sits in front of the rules.
+        // at the same 38px pitch as an app ManuscriptRow, so an empty/partial
+        // page reads as ruled parchment rather than blank cream. (Clipboard
+        // text rows are 60px — the filler rules use the app baseline.)
+        // Same hairline treatment as the real unselected row rule. Sibling of
+        // `lv`, placed before the sparse filler so the filler text sits in
+        // front of the rules.
         Item {
             id: blankRules
             anchors.left: lv.left; anchors.right: lv.right
@@ -1211,8 +1322,24 @@ PanelWindow {
                                                 : root.withA(root.notes.paletteFg, 0.4)
                             Text {
                                 anchors.centerIn: parent
-                                text: index === 0 ? "♪" : root.greekNum(index - 1)
-                                font.family: index === 0 ? root.faceMusic : root.faceSerif
+                                text: {
+                                    var d = root.chapters[index]
+                                    if (d && d.tabSymbol) return d.tabSymbol
+                                    if (index === 0) return "♪"
+                                    // Count non-special chapters before this one
+                                    // for correct Greek numbering.
+                                    var num = 0
+                                    for (var j = 1; j < index; j++) {
+                                        var cj = root.chapters[j]
+                                        if (!cj || !cj.tabSymbol) num++
+                                    }
+                                    return root.greekNum(num)
+                                }
+                                font.family: {
+                                    var d = root.chapters[index]
+                                    if (d && d.tabSymbol) return root.faceSerif
+                                    return index === 0 ? root.faceMusic : root.faceSerif
+                                }
                                 font.pixelSize: 11
                                 color: parent.isCur ? root.notes.paletteAccent
                                                     : root.withA(root.notes.paletteFg, 0.6)
@@ -1270,9 +1397,7 @@ PanelWindow {
                 x: book.pageW - width / 2
                 y: book.pageH / 2 - height / 2
                 visible: root.currentList.length === 0 && !root.freqSparse
-                text: root.searching
-                      ? "οὐδὲν τοιοῦτον ὄνομα ♪(´ε｀ )"
-                      : "οὐδὲν ἐνταῦθα ♪(´ε｀ )"
+                text: root.emptyMessage
                 color: root.notes.paletteFg
                 opacity: 0.5 * root.fold
                 font.family: root.faceMono

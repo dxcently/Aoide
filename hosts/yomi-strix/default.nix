@@ -67,6 +67,9 @@
   aoide.screenshot.enable = true;
   aoide.vision.enable = true;
 
+  # Text clipboard history provider (cliphist + wl-clipboard) with QML picker.
+  aoide.clipboard.enable = true;
+
   # Audio backend (PipeWire + WirePlumber) — real volume control for the bar.
   aoide.audio.enable = true;
 

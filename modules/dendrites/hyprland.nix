@@ -175,7 +175,14 @@ in
 
         # Window controls
         bind = SUPER, Q, killactive
-        bind = SUPER, V, togglefloating
+        # Clipboard history — opens the Grimoire launcher on the clipboard
+        # chapter. The clipboard backend (AoideClipboard.qml) is a non-visual
+        # data provider that feeds cliphist entries into the launcher as
+        # paginated chapters; no separate picker window.
+        bind = SUPER, V, global, aoide:clipboard
+        # Alternate floating binding: SUPER+SHIFT+V keeps the old action
+        # available without occupying the clipboard shortcut.
+        bind = SUPER SHIFT, V, togglefloating
         bind = SUPER, F, fullscreen
 
         # Focus movement — arrows carry the full left/down/up/right set; H/J/K/L
