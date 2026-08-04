@@ -127,6 +127,12 @@ PanelWindow {
         return th[Math.floor(n/1000)] + hu[Math.floor(n/100)%10] + te[Math.floor(n/10)%10] + on[n%10];
     }
 
+    // The searching family — one base face, varied moods and magnifier sides.
+    readonly property var scatterFaces: [
+        "🔍(´･ω･`)", "(´･ω･`)🔍", "🔎(´･ω･`)", "(´･_･`)",
+        "(´･ω･`?)", "🔍(￣ω￣)", "(￢_￢)🔍", "(＾▽＾)🔍"
+    ]
+
     // ── The ledger (frequency chapter's data source) ────────────────────────
     GrimoireLedger { id: ledger }
 
@@ -408,7 +414,24 @@ PanelWindow {
         !root.searching && root.clipboardChapter
         && root.currentList.length < 6
 
-    onQueryChanged: root.selIndex = 0
+    // The search-hunt scatter — re-rolled fresh on every query change, so
+    // each new no-match search (and every keystroke that keeps it empty)
+    // scatters the kaomojis to new spots and faces across the leaf.
+    property var scatter: []
+
+    onQueryChanged: {
+        root.selIndex = 0
+        var a = []
+        for (var i = 0; i < 12; i++) {
+            var top = i < 6
+            a.push({
+                x: 0.05 + 0.90 * Math.random(),
+                y: (top ? 0.06 : 0.62) + (top ? 0.24 : 0.28) * Math.random(),
+                face: root.scatterFaces[Math.floor(Math.random() * root.scatterFaces.length)]
+            })
+        }
+        root.scatter = a
+    }
     onCurrentListChanged: {
         if (root.selIndex >= root.currentList.length)
             root.selIndex = Math.max(0, root.currentList.length - 1)
@@ -774,6 +797,48 @@ PanelWindow {
                 opacity: 0.5
                 font.family: root.faceMono
                 font.pixelSize: 12
+            }
+        }
+
+        // search with nothing found — the kaomojis search BOTH pages now,
+        // scattered across the whole leaf (deterministic positions, varied
+        // faces from the searching family), clear of the centred caption
+        Item {
+            anchors.left: lv.left; anchors.right: lv.right
+            anchors.top: lv.top
+            anchors.bottom: lv.bottom
+            visible: root.searching && root.currentList.length === 0
+
+            Text {   // the caption — query echoed on the left, verdict on the right
+                anchors.centerIn: parent
+                width: parent.width - 16
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                text: page.isLeft
+                      ? "the grimoire is searching\nfor “" + root.query.slice(0, 24) + "”…"
+                      : "nothing under that name\nοὐδὲν τοιοῦτον ὄνομα"
+                color: root.notes.paletteFg
+                opacity: 0.75
+                font.family: root.faceMono
+                font.pixelSize: 12
+            }
+
+            Repeater {
+                // 12 kaomojis per leaf — 6 across the top band, 6 across
+                // the bottom, sparse and spread; positions + faces re-roll
+                // on every query change (root.scatter), so each new hunt
+                // scatters afresh
+                model: root.scatter
+                Text {
+                    required property var modelData
+                    x: modelData.x * parent.width - implicitWidth / 2
+                    y: modelData.y * parent.height - implicitHeight / 2
+                    text: modelData.face
+                    color: root.notes.paletteFg
+                    opacity: 0.5
+                    font.family: root.faceMono
+                    font.pixelSize: 12
+                }
             }
         }
 
@@ -1477,7 +1542,7 @@ PanelWindow {
             Text {
                 x: book.pageW - width / 2
                 y: book.pageH / 2 - height / 2
-                visible: root.currentList.length === 0 && !root.freqSparse && !root.clipSparse
+                visible: root.currentList.length === 0 && !root.searching && !root.freqSparse && !root.clipSparse
                 text: root.emptyMessage
                 color: root.notes.paletteFg
                 opacity: 0.5 * root.fold
