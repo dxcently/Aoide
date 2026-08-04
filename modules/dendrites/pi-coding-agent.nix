@@ -6,8 +6,8 @@
 #   - Carries its own dependencies; reads no other module.
 #   - Enable with one line in hosts/ (see hosts/yomi-strix/default.nix).
 #
-# Another independently-toggleable agentic terminal coding CLI alongside
-# claude-code.nix, rather than bundled into
+# Third sibling of claude-code.nix / kimi-code.nix: another agentic terminal
+# coding CLI, each toggled independently rather than bundled into
 # devtools.nix (same reasoning as that split). Pi is also the structural
 # reference for aoide's own crate-per-charter package restructure
 # (docs/architecture/PACKAGE-LAYOUT.md) — packaging its CLI here is
