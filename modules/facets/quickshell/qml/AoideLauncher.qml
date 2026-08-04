@@ -253,14 +253,8 @@ PanelWindow {
             var fe = root.appsById[freqIds[f]]
             if (fe) freqEntries.push(fe)
         }
-        out.push({ id: "frequency", title: "MOST SUMMONED", whisper: "ἕξις",
+        out.push({ id: "frequency", title: "MOST SUMMONED", whisper: "ἕξις · σελίς I",
                    hue: root.notes.paletteAccent, entries: freqEntries })
-
-        var clipboardEntries = root.clipboard.parsedEntries || []
-        out.push({ id: "clipboard", kind: "clipboard",
-                   title: "CLIPBOARD", whisper: "ἀποθήκη",
-                   tabSymbol: "🗒",
-                   hue: root.notes.paletteAccent, entries: clipboardEntries })
 
         var all = []
         for (var k in root.appsById) all.push(root.appsById[k])
@@ -271,9 +265,27 @@ PanelWindow {
             var pageNum = Math.floor(p / root.pageSize) + 1
             var firstCh = slice.length ? ("" + (slice[0].name || "?")).charAt(0).toUpperCase() : "?"
             var lastCh  = slice.length ? ("" + (slice[slice.length - 1].name || "?")).charAt(0).toUpperCase() : "?"
+            // Book-relative page number: the frequency index is σελίς I, so
+            // the first alphabet page is σελίς II — matching the folio's
+            // `chapterIndex + 1 / N` count.
             out.push({ id: "page" + pageNum, title: firstCh + " – " + lastCh,
-                       whisper: "σελίς " + root.romanNumeral(pageNum), hue: root.notes.wireCyan, entries: slice })
+                       whisper: "σελίς " + root.romanNumeral(pageNum + 1), hue: root.notes.wireCyan, entries: slice })
         }
+
+        // The clipboard closes the book — LAST chapter, so page-flips never
+        // land on it mid-book: flipping from the frequency index reaches the
+        // first alphabet page, and the final flip past the last alphabet
+        // page lands here. Its 🗒 bookmark sits at the bottom of the
+        // fore-edge (see the pinned tab below).
+        var clipboardEntries = root.clipboard.parsedEntries || []
+        out.push({ id: "clipboard", kind: "clipboard",
+                   title: "CLIPBOARD",
+                   // Pushed last, so out.length + 1 is the book's final page
+                   // number — the folio's N / N.
+                   whisper: "ἀποθήκη · σελίς " + root.romanNumeral(out.length + 1),
+                   tabSymbol: "🗒",
+                   hue: root.notes.paletteAccent, entries: clipboardEntries })
+
         return out
     }
 
@@ -388,6 +400,13 @@ PanelWindow {
     readonly property bool freqSparse:
         !root.searching && root.currentChapter && root.currentChapter.id === "frequency"
         && root.currentList.length < 4
+    // The clipboard chapter's sparse state — same treatment as the frequency
+    // index: a kaomoji hint on the left page while there are fewer entries
+    // than the left page's 60px-row capacity (6). It disappears once history
+    // fills the page.
+    readonly property bool clipSparse:
+        !root.searching && root.clipboardChapter
+        && root.currentList.length < 6
 
     onQueryChanged: root.selIndex = 0
     onCurrentListChanged: {
@@ -435,6 +454,11 @@ PanelWindow {
         root.flipping = true
         flipOut.start()
     }
+    // The flip chain is the chapters in array order — one page after
+    // another. The clipboard chapter sits LAST in the book (the 🗒 bookmark
+    // at the bottom of the fore-edge marks the final chapter), so flipping
+    // forward from the last alphabet page lands on it — reachable by
+    // turning pages, never mid-chain.
     function nextChapter() { root.flipToChapter(root.chapterIndex + 1) }
     function prevChapter() { root.flipToChapter(root.chapterIndex - 1) }
 
@@ -737,13 +761,15 @@ PanelWindow {
             anchors.left: lv.left; anchors.right: lv.right
             anchors.top: lv.top; anchors.topMargin: lv.contentHeight + 10
             anchors.bottom: lv.bottom
-            visible: root.freqSparse && page.isLeft && height > 20
+            visible: (root.freqSparse || root.clipSparse) && page.isLeft && height > 20
             Text {
                 anchors.centerIn: parent
                 width: parent.width - 16
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.WordWrap
-                text: "the grimoire is still\nlearning your habits\n(´･ω･`)"
+                text: root.freqSparse
+                      ? "the grimoire is still\nlearning your habits\n(´･ω･`)"
+                      : "the clipboard is still\nempty — copy something\n(´･ω･`)"
                 color: root.notes.paletteFg
                 opacity: 0.5
                 font.family: root.faceMono
@@ -1451,7 +1477,7 @@ PanelWindow {
             Text {
                 x: book.pageW - width / 2
                 y: book.pageH / 2 - height / 2
-                visible: root.currentList.length === 0 && !root.freqSparse
+                visible: root.currentList.length === 0 && !root.freqSparse && !root.clipSparse
                 text: root.emptyMessage
                 color: root.notes.paletteFg
                 opacity: 0.5 * root.fold
