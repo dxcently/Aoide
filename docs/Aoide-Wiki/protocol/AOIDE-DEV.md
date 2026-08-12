@@ -268,15 +268,25 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   transition (currently a hard `source` swap), per-monitor selection once
   multi-output lands. Residual: `qt6.qtimageformats` plugin-path export
   bounds format support — keep it when touching the service.
-- **[bug, not diagnosed] Sessions untrack after a rebuild.** Previously-
+- **[resolved 2026-08-12, class fixed] Sessions untrack after a rebuild.** Previously-
   tracked agent sessions stop showing as tracked (roster/DAG/✎N) after
-  `nixos-rebuild switch`. Seams to check in order: (a) does a
-  restarted reaper/`shellbridge` sweep live sessions whose hook stream went
-  quiet during the restart window; (b) hook events lost during restart →
-  stale `sessions.json` → later pruned as dead; (c) units' PATH/env after
-  restart (hyprctl-on-unit-PATH class failure); (d) stage files are
-  gitignored/not store-managed, so if data survives the loss is in
-  matching/reaping not storage. Repro: track a session, switch, diff
+  `nixos-rebuild switch`. The confirmed live instance: the kimi session
+  `569f4c26` got a SessionEnd hook payload at 05:42Z while the process was
+  still running (kimi never exited — the payload was not its own; likely a
+  test/cleanup run), was pruned as `done` 21s later, and no further event
+  could ever re-register it — harnesses fire SessionStart only at launch, so
+  every later event for the missing id was a silent no-op plus a ghost
+  `hooks.json` record. **Fix (`1334176`): the hook door self-heals — any real
+  event (prompt/stop/tool) on a missing top-level id re-registers it first
+  (fresh idle, mirroring the Start arm: window discovery, env-parent
+  threading, cwd from payload); SessionEnd for an unknown id stays a no-op;
+  `sub:` ids are never implicit-started. Disappearance is now transient —
+  the next real event brings the session back.** Residual edges (parked):
+  the SubEnd arm is not healed (a lone late SubagentStop after its parent
+  was pruned stays a no-op); a heal can re-link under a pruned
+  `AOIDE_SESSION_ID` parent (dangling until the next prune's
+  `resolved_parent` pass); the other three seams (a/c/d above) were not
+  individually confirmed. Repro: track a session, switch, diff
   `stage/sessions.json` + `aoide graph emit` before/after.
 - **[bug] Melete adapter subscribes to nothing.**
   `modules/nucleus/melete-adapter.nix` sets
