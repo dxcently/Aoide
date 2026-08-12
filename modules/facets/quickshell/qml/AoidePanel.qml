@@ -474,12 +474,19 @@ PanelWindow {
                         // nothing; an invisible Column child is excluded from the
                         // layout, so it collapses to zero footprint (no gap) rather
                         // than leaving a hole between Conductor and Terminals.
-                        UsageGadget {
-                            id: usageGadget
-                            width: root.gadgetW
-                            notes: root.notes
-                            visible: hasData
-                        }
+                        //
+                        // REMOVED from the dock 2026-08-12 (khoa): the claude stele
+                        // is out of the column for now. The block below is the
+                        // exact re-enable (the gadget itself is untouched, and
+                        // `hasData` is its own property, so nothing dangles):
+                        //
+                        //   UsageGadget {
+                        //       id: usageGadget
+                        //       width: root.gadgetW
+                        //       notes: root.notes
+                        //       visible: hasData
+                        //   }
+                        //
 
                         // Terminals — the tall shells roster, native height 520,
                         // wired with bridge + shared (which it declares).
