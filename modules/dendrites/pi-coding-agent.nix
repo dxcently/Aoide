@@ -79,6 +79,112 @@
           });
         }
       '';
+
+      # The aoide session bridge: pi's twin of claude's ~/.claude/settings.json
+      # hooks. Every lifecycle event shells out to `aoide graph session hook`
+      # with a canonical claude-shaped payload on stdin — the aoide side reads
+      # it through the pi AgentProfile (hook_event_map, identity normalize, the
+      # pi TranscriptSpec). TUI-only: pi-subagents' child pi runs (`--mode json
+      # -p`, piped stdio) must never register as sibling sessions. A pi running
+      # inside a conducted shell inherits AOIDE_SESSION_ID in this process's
+      # env, and the spawned `aoide` inherits it from us — nesting threads
+      # automatically.
+      home.file.".pi/agent/extensions/aoide-pi-session.ts".text = ''
+        import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+        import { spawn } from "node:child_process";
+
+        // Pipe one canonical claude-shaped hook payload into the aoide door.
+        // Detached + unref'd so a slow door can never hold pi open; a 10s
+        // kill-timer keeps a stuck `aoide` from accumulating one child per
+        // event.
+        function emit(payload: Record<string, unknown>): void {
+          const child = spawn(
+            "aoide",
+            ["graph", "session", "hook", "--agent", "pi"],
+            { stdio: ["pipe", "ignore", "ignore"], detached: true },
+          );
+          child.unref();
+          const timer = setTimeout(() => child.kill("SIGKILL"), 10_000);
+          child.on("close", () => clearTimeout(timer));
+          child.on("error", () => clearTimeout(timer));
+          const stdin = child.stdin;
+          if (stdin) {
+            stdin.on("error", () => {}); // the door may exit before we write
+            stdin.write(JSON.stringify(payload));
+            stdin.end();
+          }
+        }
+
+        // The fields every hook shares; transcript_path lets the aoide side
+        // tail-read the live jsonl without re-deriving its location.
+        function base(ctx: ExtensionContext): Record<string, unknown> {
+          return {
+            session_id: ctx.sessionManager.getSessionId(),
+            cwd: ctx.cwd,
+            transcript_path: ctx.sessionManager.getSessionFile(),
+          };
+        }
+
+        export default function (pi: ExtensionAPI) {
+          // Session ids this process already reported, so a reload/resume
+          // re-fire of the same session never double-reports a Start. A resume
+          // of a DIFFERENT session (new id) is a live session — it reports.
+          const reported = new Set<string>();
+          const tui = (ctx: ExtensionContext) => ctx.mode === "tui";
+
+          pi.on("session_start", (event, ctx) => {
+            if (!tui(ctx)) return;
+            const id = ctx.sessionManager.getSessionId();
+            if (reported.has(id)) return;
+            reported.add(id);
+            emit({ hook_event_name: "SessionStart", ...base(ctx) });
+          });
+
+          // The interactive prompt is the UserPromptSubmit twin: it moves the
+          // session to working and names it (set-once, aoide-side).
+          pi.on("input", (event, ctx) => {
+            if (!tui(ctx) || event.source !== "interactive") return;
+            emit({ hook_event_name: "UserPromptSubmit", user_prompt: event.text, ...base(ctx) });
+          });
+
+          pi.on("tool_execution_start", (event, ctx) => {
+            if (!tui(ctx)) return;
+            emit({
+              hook_event_name: "PreToolUse",
+              tool_name: event.toolName,
+              tool_use_id: event.toolCallId,
+              ...base(ctx),
+            });
+          });
+
+          pi.on("tool_execution_end", (event, ctx) => {
+            if (!tui(ctx)) return;
+            emit({
+              hook_event_name: "PostToolUse",
+              tool_name: event.toolName,
+              tool_use_id: event.toolCallId,
+              ...base(ctx),
+            });
+          });
+
+          // The agent loop finished answering — the turn is over, back at the
+          // prompt (claude's Stop).
+          pi.on("agent_end", (_event, ctx) => {
+            if (!tui(ctx)) return;
+            emit({ hook_event_name: "Stop", ...base(ctx) });
+          });
+
+          // A real quit ends the session; reload/new/resume/fork swap sessions
+          // instead (the successor reports its own Start). Killed processes
+          // (SIGKILL/terminal close) never reach this — the aoide record then
+          // leans on the reaper's pid/window signal, same pre-existing gap as
+          // claude/kimi.
+          pi.on("session_shutdown", (event, ctx) => {
+            if (!tui(ctx) || event.reason !== "quit") return;
+            emit({ hook_event_name: "SessionEnd", ...base(ctx) });
+          });
+        }
+      '';
     };
   };
 }

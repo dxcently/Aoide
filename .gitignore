@@ -3,6 +3,9 @@
 song/stage/
 song/auditions/
 
+# pi-subagents' runtime artifacts (parent-orchestrator runs):
+.pi-subagents/
+
 # Content-pipeline + audit runtime (repo root):
 catalog/
 index/
