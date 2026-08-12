@@ -14,7 +14,7 @@ import Quickshell.Io
 //                  the clef, the inset keyline, the box-drawing frame and the
 //                  entablature frieze all run teal, where the Conductor ran gold.
 //                  The frieze is a Doric TRIGLYPH-AND-METOPE band (grooved blocks
-//                  spaced by flat panels) — not the Conductor's Greek-key meander
+//                  spaced by flat panels) — not the Conductor's solid baton course
 //                  nor the Terminals' Ionic running-wave.
 //   · MUSIC      — each meter is a VOICE, its load spoken as a DYNAMIC marking
 //                  (𝆏𝆏 pp · 𝆏 p · 𝆐 mf · 𝆑 f · 𝆑𝆑 ff): a quiet machine plays

@@ -19,8 +19,8 @@ import Quickshell.Io
 //                  Power murex and the Terminals aegean — plainly its own building.
 //                  Its frieze is a BEAD-AND-REEL astragal (beads alternating with
 //                  paired reels) — a counting-off ornament, fitting a meter of
-//                  consumption; distinct from the Conductor's meander, the Meters'
-//                  triglyph, the Power's egg-and-dart.
+//                  consumption; distinct from the Conductor's baton-and-downbeat,
+//                  the Meters' triglyph, the Power's egg-and-dart.
 //   · MUSIC      — the CLAUDE SPARK ❋ (U+274B, a rayed sunburst — the Anthropic
 //                  mark) crowns it, in place of the old segno. A gold 𝄂 closes the
 //                  score.

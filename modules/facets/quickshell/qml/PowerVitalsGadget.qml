@@ -13,7 +13,7 @@ import Quickshell.Services.UPower
 //                  entablature frieze all run in murex, where the Conductor ran
 //                  gold and the Meters ran aegean. The frieze is an EGG-AND-DART
 //                  ovolo (eggs alternating with darts) — neither the Conductor's
-//                  Greek-key nor the Meters' running wave.
+//                  baton course nor the Meters' running wave.
 //   · MUSIC      — the battery drains toward silence: its charge is a REST glyph
 //                  (𝄽𝄾𝄿𝅀𝅁𝅂 emptier→fuller), full 𝆑, charging 𝄮. The link is a
 //                  SUSTAINED note 𝅗𝅥 while up, a rest 𝄽 when the line goes dead.

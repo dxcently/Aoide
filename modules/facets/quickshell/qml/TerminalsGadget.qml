@@ -24,8 +24,8 @@ import Quickshell.Io
 //
 // DIFFERENT from the Conductor (a separate temple):
 //   · ORDER   — Ionic, not Doric: a volute (scroll) capital + dentil course
-//               instead of the entablature band + Greek-key meander.
-//   · RULE    — egg-and-dart, not the Greek-key meander.
+//               instead of the entablature band + baton course.
+//   · RULE    — egg-and-dart, not the solid baton course.
 //   · SIGNATURE HUE — aegean holoBlue carries the architecture (the Conductor's
 //               gold recedes to a small family nod on the tag).
 //   · COLUMNS — slimmer fluted twin-groove ║ pilasters, not the solid │.
