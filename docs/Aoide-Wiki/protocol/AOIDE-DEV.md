@@ -228,8 +228,10 @@ broad standing brief in the background rather than one page per call.
 Flags raised but not yet closed, so the next agent inherits them. Close a
 flag by resolving it AND deleting its line; add one the moment you raise it.
 
-- **[landed, pending switch] kimi CLI integration via the agent-profile
-  seam — committed as `2a21f80` (2026-08-03), awaiting the gated switch.**
+- **[landed, switched] kimi CLI integration via the agent-profile
+  seam — committed as `2a21f80` (2026-08-03); the gated switch landed
+  2026-08-12 (`392mgwkhf…` toplevel — its `aoide` carries the profile
+  registry, `hooks install`, and the reaper fix).**
   `protocol::agents` `AgentProfile` registry (every harness fact — hook
   event map, permission vocab, subagent tools, model ceilings, transcript
   spec, settings spec, payload normalizer — behind one table; claude
@@ -238,9 +240,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   `TranscriptSpec`; wrapper-of-agent eviction fix. 10 kimi hooks
   live-installed in `~/.kimi-code/config.toml`. Toplevel built green:
   `/nix/store/fp63rfc1ac0lfdiyqmr2knhxi9gnyf52-nixos-system-yomi-strix-26.11.20260723.e2587ca`
-  (verified: its `aoide` carries `hooks install`). **Until the switch, the
-  live systemd reaper runs the OLD binary and will still retire wrapper
-  records (`aoide conduct -- kimi`).** Known gaps (kimi 0.31.1):
+  (verified: its `aoide` carries `hooks install`). Known gaps (kimi 0.31.1):
   `SubagentStop`/`PermissionResult` never fire (sub-nodes close on
   PostToolUse(Agent)); `Stop` doesn't fire on Esc interrupt; kimi sub-nodes
   have no transcript probe. Operator facts: kimi TUI submits on `\r` not
@@ -249,8 +249,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   one unexplained instant-exit at 02:14, unreproduced. Capture log (Step-4
   evidence, deletable): `~/Aoide/state/kimi-hooks.jsonl`. Test-model note:
   use `kimi-code/kimi-for-coding` (K2.7) for e2e — don't burn K3.
-- **[landed, pending switch] pi session tracking via the agent-profile seam — committed as `ca08b73` (2026-08-12), awaiting the gated switch.** `PI_PROFILE` in `protocol::agents` (claude-shaped hook event map, identity normalize, shared model ceiling, `TranscriptSpec` tail-reading pi's own jsonl at `~/.pi/agent/sessions/--<bucket(cwd)>--/<ts>_<sid>.jsonl` for say/title/model/context — bucket preserves dots per pi's own rule, hook-supplied `transcript_path` hint preferred); `aoide hooks install pi` reports `declarative` (new `SettingsFormat::Declarative` — pi's wiring is the dendrite-managed extension, not a settings file); the `aoide-pi-session.ts` extension (`modules/dendrites/pi-coding-agent.nix`) pipes SessionStart/UserPromptSubmit/Pre/PostToolUse/Stop/SessionEnd into the hook door (tui-mode only — pi-subagents' `--mode json -p` children never register; per-process Set dedupes resume/reload; graceful quit ends the session). E2E-verified live on yomi-strix: idle→working→stopped→done, prompt-named, model (`deepseek/deepseek-v4-flash`) + ctx (`⧉ 11k`) tail-read from the transcript. **Until the switch, the live binary errors on `--agent pi` — pi sessions track only after.** At the switch, the extension must be linked by hand (home-manager is NOT auto-activated on yomi-strix; the existing header link is a manual store symlink): `ln -s <new hm-files>/aoide-pi-session.ts ~/.pi/agent/extensions/` (new hm-files: `ky4sl08sl55q9xz5had517wpvc53n62p-home-manager-files`, verified in the 392mgwkhf… toplevel build). Known gaps: killed pi (SIGKILL/terminal close) leaks `working` until the reaper's pid/window signal (same as claude/kimi); settings.json `sessionDir`-only configs (no env var) are a transcript-locate miss; `hooks install pi --capture` is N/A (declarative).
-- **[bug, not diagnosed] Stale `sub:` nodes are never swept.** Subagent nodes whose owning session died without `SessionEnd` (SIGKILL/terminal close) live forever: no pid/window, so the liveness reaper can't touch them and `do_session_end`'s cascade never ran. Two live orphans on yomi-strix (`sub:aadb82a1a3703a655`, `sub:toolu_01876hTep6KStZ8U2X47guYw` — claude, since 07-31/08-01). Fix direction: orphan sweep keyed on parent-session liveness. See [[Session-Graph]].
+- **[landed, switched] pi session tracking via the agent-profile seam — committed as `ca08b73` (2026-08-12); the gated switch landed the same day (`392mgwkhf…` toplevel — its `aoide` resolves `--agent pi`; the home re-link deployed `aoide-pi-session.ts` into `~/.pi/agent/extensions/`).** `PI_PROFILE` in `protocol::agents` (claude-shaped hook event map, identity normalize, shared model ceiling, `TranscriptSpec` tail-reading pi's own jsonl at `~/.pi/agent/sessions/--<bucket(cwd)>--/<ts>_<sid>.jsonl` for say/title/model/context — bucket preserves dots per pi's own rule, hook-supplied `transcript_path` hint preferred); `aoide hooks install pi` reports `declarative` (new `SettingsFormat::Declarative` — pi's wiring is the dendrite-managed extension, not a settings file); the `aoide-pi-session.ts` extension (`modules/dendrites/pi-coding-agent.nix`) pipes SessionStart/UserPromptSubmit/Pre/PostToolUse/Stop/SessionEnd into the hook door (tui-mode only — pi-subagents' `--mode json -p` children never register; per-process Set dedupes resume/reload; graceful quit ends the session). E2E-verified live on yomi-strix: idle→working→stopped→done, prompt-named, model (`deepseek/deepseek-v4-flash`) + ctx (`⧉ 11k`) tail-read from the transcript. Operator facts: extensions hot-reload via `/reload` in the TUI (session_start re-fires with reason `reload`; the fresh instance reports — a pre-existing pi process needs `/reload` or restart to track). Known gaps: killed pi (SIGKILL/terminal close) leaks `working` until the reaper's pid/window signal (same as claude/kimi); settings.json `sessionDir`-only configs (no env var) are a transcript-locate miss; `hooks install pi --capture` is N/A (declarative).
 - **[decision] App-launch exec discipline.** `DesktopEntry.execute()` is used
   for app-launch (Quickshell-native idiom) rather than routing through
   `aoided` (rule #6) — no such verb exists and adding one buys nothing. Open
