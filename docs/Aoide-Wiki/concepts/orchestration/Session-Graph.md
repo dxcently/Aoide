@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-03
+updated: 2026-08-12
 tags: [aoide, graph, session, terminal, agent, cli]
 ---
 
@@ -96,9 +96,11 @@ the registry entry should follow).
   vocabulary: `session-not-found`, `no-window-address`,
   `hyprctl-unavailable`, `hyprctl-failed`, `window-not-found`.
 - **`graph prune`** — drop sessions whose **raw** roster state is `done` (not
-  the merged hook phase) along with their hook records; children of a pruned
-  session get `parentSessionId` cleared (un-orphaned rather than dangling).
-  Everything removed or cleared is reported.
+  the merged hook phase) along with their hook records; any `kind:"subagent"`
+  descendant of a dropped session cascades away with it (see "Liveness
+  reaping" below), and children that survive get `parentSessionId` cleared
+  (un-orphaned rather than dangling). Everything removed or cleared is
+  reported.
 - **`graph send`** (the gated injection door — full semantics in
   [[Conductor-Channel]]) types into a conducted session's control socket;
   `--submit` appends `\n`. One per-harness operator fact: kimi's TUI submits
@@ -137,9 +139,28 @@ left alone: absence of evidence is never evidence of death. The predicate
 a fake `proc_exists`.
 
 Dead sessions are marked `done` (session + hook record) and then run through
-the same `prune_done` path — dropped, orphaned `parentSessionId` links
-cleared, `graph.json` re-staged atomically. `graph reap` never errors on
-"nothing to reap" and never errors on an unreachable compositor.
+the same `prune_done` path — dropped, `graph.json` re-staged atomically.
+`graph reap` never errors on "nothing to reap" and never errors on an
+unreachable compositor.
+
+**Sub-agent cascade.** A `Task`/`Agent`-tool spawn (see [[Agent-Hooking]]'s
+`subagent_tools`) registers its child as a `kind:"subagent"` node. That node
+carries no `pid` and no `windowAddress` — it lives and dies inside its parent
+process, so `is_session_dead` structurally can never fire for one, and no
+liveness signal will ever mark it dead on its own. Its **only** cleanup path
+is cascading out when its owning top-level session does: a clean `graph
+session end` walks `parentSessionId` transitively and drops the whole
+sub-agent subtree, and `prune_done` does the same for anything it is about to
+remove — so every `prune_done` caller inherits the cascade: `graph prune`'s
+done-sweep, `graph reap`'s liveness sweep (above), and the same-window
+duplicate-eviction retirement (`graph session start`'s registration path,
+below). One shared walk (`doomed_subagent_descendants`, fixed-point over
+`parentSessionId`, handles subagent-of-subagent nesting) backs both the
+session-end path and `prune_done`, so a session that dies **abnormally** —
+killed terminal, crashed process, caught by the reap sweep rather than
+exiting through `graph session end` — loses its sub-agent children exactly as
+cleanly as an orderly exit does. No sub-agent node can outlive every
+top-level session that could have owned it.
 
 The same pass also retires **same-window agent duplicates**: a compact/resume
 mints a new `session_id` for a window that already holds a live agent record,
