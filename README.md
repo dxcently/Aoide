@@ -271,7 +271,7 @@ It injects `<text>` into that session's stdin (`--submit` appends Enter). This i
 
 ### `livery` — the note engine
 
-The native Rust engine (`crates/song/src/livery/`, inside the song crate) that owns the authoritative note pipeline: **lint** (validate a rice against the note schema — `rice lint` runs it natively), **resolve** (deref aliases + apply component→palette fallbacks), and **emit** (the stage JSON for Quickshell, hyprctl keyword lines, terminal OSC, and file-template backends) — surfaced as `aoide livery emit|resolve|lint`. Notes are the single immutable seam between the frozen nix layer and the live desktop — facets read `aoide.livery` and nothing else. Formerly a standalone Node package (`pkgs/drachma`, wrapping Style Dictionary): the livery merge ported it into the song crate and removed the Node toolchain.
+The native Rust engine (`crates/song/src/livery/`, inside the song crate) that owns the authoritative note pipeline: **lint** (validate a rice against the note schema — `rice lint` runs it natively), **resolve** (deref aliases + apply component→palette fallbacks), and **emit** (the stage JSON for Quickshell, hyprctl keyword lines, terminal OSC, and file-template backends) — surfaced as `aoide livery emit|resolve|lint`. Notes are the single immutable seam between the frozen nix layer and the live desktop — facets read `aoide.livery` and nothing else.
 
 ### `aoided` + `shellbridge` — the runtime services
 

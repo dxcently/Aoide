@@ -2,7 +2,7 @@
 type: entity
 created: 2026-07-26
 updated: 2026-08-13
-aliases: [drachma, aoide-drachma, aoide-notes, Notes, notes package, note engine]
+aliases: [aoide-notes, Notes, notes package, note engine]
 tags: [aoide, livery, theming, base16]
 ---
 
@@ -16,12 +16,12 @@ runtime seam is `stage/livery.json`. "Notes" survives only as the musical
 image ([[Lexicon]]) — the option, the schema, and every shipped artifact are
 `livery`.
 
-**Formerly `drachma`.** The livery merge (LIVERY-MERGE.md) ported the
-standalone Node engine into native Rust inside `crates/song/src/livery/` and
-renamed the whole surface — option namespace, songbook data files, and the
-live stage contract — in one pass. `drachma` survives as this page's alias
-(`aoide.drachma` kept evaluating via the `mkRenamedOptionModule` alias until
-Phase 4 closed the transition window) and in dated history.
+The livery merge (LIVERY-MERGE.md) ported the
+standalone Node engine into native Rust inside `crates/song/src/livery/`, and
+the engine took the name **livery** across the whole surface — option
+namespace, songbook data files, and the live stage contract — in one pass
+(the previous option namespace kept evaluating via a
+`mkRenamedOptionModule` alias until Phase 4 closed the transition window).
 
 ## The seam between score and performance
 
@@ -30,13 +30,12 @@ frozen into the crystal, sounded at runtime. The container stays W3C
 design-tokens format; livery is Aoide's name for what fills it.
 
 **Why a livery.** The industry term for this layer is *design tokens*, and a
-token stands for a single value — a coin. But the engine dresses *every*
+token stands for a single value. But the engine dresses *every*
 surface — terminal, compositor, GTK, the Quickshell stage, any config file —
-in the one song's identity, and a coin does not clothe a stage. A **livery**
+in the one song's identity, and a token does not clothe a stage. A **livery**
 is the single set of house colours a whole retinue wears in unison, so a
 servant, a ship, and a herald are read at a glance as one household's. One
-word for the values *and* the wearing of them. The old name was the Greek
-coin — kept as an alias, retired as the name. See [[Lexicon#Why the seam is
+word for the values *and* the wearing of them. See [[Lexicon#Why the seam is
 a livery]].
 
 Every facet consumes livery and nothing else. No module reads another
@@ -106,9 +105,8 @@ carrying live.
 
 ## Prior art — the Node engine that was folded in
 
-The engine began as a standalone Node package (`pkgs/drachma`, wrapping
-Style Dictionary, `buildNpmPackage` pname `aoide-drachma`, exposed as
-`packages.drachma` / overlay attr `pkgs.drachma`). The livery merge ported
+The engine began as a standalone Node package wrapping
+Style Dictionary. The livery merge ported
 it into `crates/song/src/livery/` as native Rust and deleted the package —
 no new crate, no Node toolchain. What moved, in place:
 
@@ -132,7 +130,7 @@ split: the emitters only produce bytes; `live::apply_live` /
 ## Verbs
 
 The engine's surface is the `aoide livery` verb group (native, inside the
-CLI's `Invocation`/`Outcome` shell — the old `drachma` binary's
+CLI's `Invocation`/`Outcome` shell — the standalone note CLI's
 subcommands, native):
 
 - **`aoide livery lint [<song>|<path>]`** — validate a note container

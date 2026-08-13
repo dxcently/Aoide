@@ -163,8 +163,8 @@ file path and the `callPackage` signature; the walker never needs the file list.
 
 ### Agent A — the livery engine (native, `crates/song/src/livery/`)
 
-The Node `pkgs/drachma` package was folded into the song crate by the livery
-merge (LIVERY-MERGE.md) and deleted; the engine is now native Rust, one module
+The standalone Node note engine was folded into the song crate by the livery
+merge (LIVERY-MERGE.md); it is now native Rust, one module
 tree inside `crates/song`:
 
 - `livery/schema.rs` — the authoritative v0 validator (the `rice lint` schema;
@@ -175,8 +175,8 @@ tree inside `crates/song`:
   one `Emitter` trait + registry; a new backend is one file + one registry
   line. The stage backend writes `song/stage/livery.json` (Quickshell; atomic
   write — see `CONTRACTS.md §4`).
-- Verbs: `aoide livery lint|resolve|emit <target>` (the old `drachma` binary's
-  surface, native); `rice lint` calls `livery::lint` directly — no binary
+- Verbs: `aoide livery lint|resolve|emit <target>` (the original standalone
+  CLI's surface, native); `rice lint` calls `livery::lint` directly — no binary
   locate, no PATH shell-out.
 
 Build against **note schema v0** (`CONTRACTS.md §1`): palette is

@@ -55,7 +55,7 @@ The command surface itself is unchanged by this shape: **51 leaves**
 |---|---|---|
 | `guide`, `schema` | 2 | real |
 | `rice lint`, `rice preview`, `rice mint` | 3 | real (`lint` runs the native [[livery]] engine) |
-| `livery emit`, `livery resolve`, `livery lint` | 3 | real — the engine's own verb group (the old `drachma` binary's surface, native) |
+| `livery emit`, `livery resolve`, `livery lint` | 3 | real — the engine's own verb group (the standalone note CLI's surface, native) |
 | `rice design status`/`enter`/`exit` | 3 | real |
 | `cover set` | 1 | real |
 | `rice gen`, `rice adopt`, `rice transpose` | 3 | stub (`adopt` gated) |
@@ -188,8 +188,8 @@ shortcut the panel itself registers (`aoide:dock`), not a CLI verb (see
 ## How `rice lint` runs
 
 `rice lint` is real: it runs the **native `livery::lint` engine** inside the
-song crate (the Rust port of the old `drachma lint` — same v0 validator,
-same error strings). No binary locate, no PATH shell-out: the engine is
+song crate (the native Rust validator, ported from the standalone Node
+engine — same v0 schema, same error strings). No binary locate, no PATH shell-out: the engine is
 compiled into `aoide` itself.
 
 ## The second binary — `aoided`

@@ -415,7 +415,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   becomes build-enforced; graduation to (a) a separate repo is a one-line
   input swap + `git filter-repo` when a real external consumer appears.
   Sequencing: AFTER the livery merge (Phase 5) — the merge deleted the
-  cross-package drachma-binary seam, making `pkgs/aoide` self-contained Rust,
+  cross-package note-engine-binary seam, making `pkgs/aoide` self-contained Rust,
   the precondition for extraction. Rewire points mapped: `lib/pkgs.nix`
   discovery must skip a package dir carrying its own `flake.nix`; the overlay,
   `packages.default`, `pkg-aoide`, and `vm-boot` source the input's package.

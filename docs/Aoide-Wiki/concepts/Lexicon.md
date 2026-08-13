@@ -69,22 +69,20 @@ A few terms name the connective tissue rather than either half:
 
 - **conductor** — the ensemble's tool: `aoide conductor`, the TUI that watches the ensemble of running agent terminals and cues between them, with Hyprland as the multiplexer (real windows). The wider **conductor-class** covers every surface with that duty — the Terminal Commander widget, the DAG gadget, the conductor. See [[Terminal-Commander]], [[Session-Graph]].
 - **door** — an entry point into the one dispatch layer: `cli`, `mcp`, `daemon` (and the TUI rides the cli door). Every operation enters through a door and exits into the one audit log. One body, several doors.
-- **livery** — the design tokens AND the engine that dresses every surface in them ([[livery]], native in `crates/song/src/livery/`): one name for the whole token layer. Values and engine are one thing: the tokens are livery, resolved/validated/emitted by livery (`stage/livery.json`, hyprctl, OSC). Formerly the Greek coin `drachma` — kept as an alias, retired as the name.
+- **livery** — the design tokens AND the engine that dresses every surface in them ([[livery]], native in `crates/song/src/livery/`): one name for the whole token layer. Values and engine are one thing: the tokens are livery, resolved/validated/emitted by livery (`stage/livery.json`, hyprctl, OSC).
 - **gate** — the rebuild gate ([[Rebuild-Gate]]): agents propose, the human admits. The single point where the performed half is allowed to re-freeze the crystal.
 - **wiki / vault** — Mneme's memory surfaces: this wiki for design context, the vault for content.
 
 ## Why the seam is a livery
 
-Because it is a **token** layer — and a token was a coin while the layer was
-only a bag of colours. The industry term for this layer is *design tokens*,
-and the container is the W3C design-tokens format (`CONTRACTS.md` §1). The
-first name was the Greek coin — **drachma** — kept now only as an alias and
-in dated history: a coin stands for a single value, but the engine dresses
-*every* surface in the one song's identity, and a coin does not clothe a
+Because it is a **token** layer. The industry term for this layer is *design tokens*,
+and the container is the W3C design-tokens format (`CONTRACTS.md` §1). But a
+token names a single value, and the engine dresses
+*every* surface in the one song's identity — a token does not clothe a
 stage. A **livery** is exactly that: the single set of house colours a whole
 retinue wears in unison, so a servant, a ship, and a herald are read at a
-glance as one household's. It keeps drachma's virtue — one word for the
-values *and* the act of stamping them — while naming the new reach.
+glance as one household's. One word for the
+values *and* the act of stamping them, naming the whole reach.
 
 Which is why the seam needs no musical word — it is not on the music axis:
 

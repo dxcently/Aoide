@@ -39,7 +39,7 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 ## Entities
 
 - [[aoide-cli]] — the `aoide` binary: the CLI trunk (51-command tree incl. `cover set`, `rice mint`, the `livery` group, the `graph` group, `conduct`, and `conductor`), `schema --json` as single source of truth, the stdio MCP façade, structured exit codes, and the `aoided` daemon binary
-- [[livery]] — the design-token layer *and* the engine that stamps it (formerly `drachma`): the immutable seam between nix structure and runtime rendering (schema tiers, the two-fan-out model), native Rust inside `crates/song/src/livery/` — `aoide livery emit|resolve|lint` — writing stage/livery.json, hyprctl, terminal OSC, and file-template outputs
+- [[livery]] — the design-token layer *and* the engine that stamps it: the immutable seam between nix structure and runtime rendering (schema tiers, the two-fan-out model), native Rust inside `crates/song/src/livery/` — `aoide livery emit|resolve|lint` — writing stage/livery.json, hyprctl, terminal OSC, and file-template outputs
 - [[aoided]] — the orchestrator daemon: neutral event stream, policy, lint, audit log, and the gated rebuild pipeline
 - [[shellbridge]] — the daemon-to-desktop bridge: atomic JSON state files out, unix-socket commands in, Hyprland IPC consumed
 - [[Quickshell]] — the QML shell runtime (nine surfaces declared, eight with a live QML body): bar, notification daemon, gadget dock, launcher, OSD, lockscreen, greeter, wallpaper layer, session-graph (declared, no QML body today)
