@@ -12,6 +12,14 @@
 # discovery without deleting it) and that contain a `default.nix`. Each kept
 # `<name>` maps to `pkgs.callPackage ../pkgs/<name> { }`.
 #
+# Self-flaked rule: a package dir that ALSO carries its own `flake.nix` is a
+# self-flaked package consumed as a flake input, not a callPackage target —
+# excluded here (topology (b), AOIDE-DEV §7; see pkgs/aoide/flake.nix). The
+# root flake consumes it as the `aoide` path input and re-sources the same
+# derivation in `packages`, `pkg-aoide`, and the overlays, so there is still
+# exactly one build. The `flake.nix` marker keeps the exclusion structural —
+# no hand-list to forget when a package graduates to its own flake.
+#
 # Naming rule: a package name must NOT shadow an existing nixpkgs attribute.
 # Because these packages are also injected via a nixpkgs overlay
 # (lib/mkHost.nix, lib/vmTest.nix), a name that collides with a stock attribute
@@ -54,7 +62,9 @@ let
   ];
 
   # Directory entries under ../pkgs that are packages: type == "directory",
-  # name not `_`-prefixed (shelving), and containing a default.nix.
+  # name not `_`-prefixed (shelving), containing a default.nix, and NOT
+  # carrying its own flake.nix (self-flaked packages are consumed as flake
+  # inputs, not callPackage targets — see header).
   packageNames =
     let
       entries = builtins.readDir pkgsDir;
@@ -62,7 +72,8 @@ let
         name:
         entries.${name} == "directory"
         && !(lib.hasPrefix "_" name)
-        && builtins.pathExists (pkgsDir + "/${name}/default.nix");
+        && builtins.pathExists (pkgsDir + "/${name}/default.nix")
+        && !(builtins.pathExists (pkgsDir + "/${name}/flake.nix"));
     in
     builtins.filter isPackageDir (builtins.attrNames entries);
 

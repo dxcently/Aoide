@@ -401,7 +401,15 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   `StagingEngine.qml`, `WorkspaceRow.qml`, `dendrites/hyprland.nix`,
   `nucleus/shellbridge.nix`, `hosts/yomi-strix/default.nix:50`. See
   [[livery]], [[Self-Ricing]].
-- **[planned, future direction] Separate Aoide from AoideOS — two flakes.**
+- **[landed, pending switch] Separate Aoide from AoideOS — two flakes.**
+  Phase 5 executed 2026-08-13: `pkgs/aoide/flake.nix` (nixpkgs-only) is
+  consumed as the `aoide` path input; `lib/pkgs.nix` skips self-flaked package
+  dirs; `packages.aoide`/`default`, `pkg-aoide`, and the mkHost/vmTest
+  overlays re-source the input's package. Evidence: yomi-strix toplevel green
+  at
+  `/nix/store/95v47pjvl2ivlxl8dla7vwwly4hwjz98-nixos-system-yomi-strix-26.11.20260723.e2587ca`
+  (`nix flake check` incl. vm-boot passes; `aoide schema --json`
+  byte-identical vs the workspace binary).
   Topology DECIDED 2026-08-13 (three-way agent deliberation, khoa approved):
   (b) in-repo subdir flake `pkgs/aoide/flake.nix` consumed by the root flake
   as a `path:` input, nixpkgs-only — the "no NixOS below `cli`" invariant

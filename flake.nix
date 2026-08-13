@@ -32,6 +32,15 @@
       url = "github:notashelf/nvf";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # The aoide core (CLI + daemon) as a self-flaked package — topology (b) of
+    # AOIDE-DEV §7: pkgs/aoide owns a nixpkgs-only flake of its own and is
+    # consumed here as a path input, NOT discovered by the packages walker
+    # (lib/pkgs.nix skips any package dir carrying its own flake.nix).
+    aoide = {
+      url = "path:./pkgs/aoide";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   # ── Outputs ────────────────────────────────────────────────────────────────
@@ -68,25 +77,34 @@
 
       # ── Packages ───────────────────────────────────────────────────────────
       # Auto-discovered by lib/pkgs.nix: every `pkgs/<name>/default.nix` (not
-      # `_`-shelved) self-registers here as `callPackage ./pkgs/<name>`. Adding a
-      # package is one new folder — this file never changes. `default` = aoide.
+      # `_`-shelved, and without its own flake.nix) self-registers here as
+      # `callPackage ./pkgs/<name>`. Adding a package is one new folder — this
+      # file never changes. `aoide` is the exception: it is self-flaked
+      # (pkgs/aoide/flake.nix) and skipped by the walker — it arrives as the
+      # `aoide` input, and `default` = that input's package.
       # See docs/BUILD.md and CONTRACTS.md §2.
       packages = forAllSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
           discovered = pkgsWalk.discover pkgs;
+          aoide = inputs.aoide.packages.${system}.default;
         in
-        discovered // { default = discovered.aoide; }
+        discovered
+        // {
+          inherit aoide;
+          default = aoide;
+        }
       );
 
       # ── Checks ─────────────────────────────────────────────────────────────
       # The contractual coupling discipline (lib/checks.nix). They pass
       # trivially now (no facets declare surface owners yet) and become real as
-      # Wave-1 facets populate `aoide.surfaces`. Also builds EVERY discovered
-      # package as `pkg-<name>` (auto-generated from lib/pkgs.nix — pkg-aoide,
-      # pkg-melete, pkg-mneme) so `nix flake check` exercises the
-      # packaging contract for the whole set with no coverage gap.
+      # Wave-1 facets populate `aoide.surfaces`. Also builds EVERY package as
+      # `pkg-<name>` — the walked set auto-generated from lib/pkgs.nix
+      # (pkg-melete, pkg-mneme) plus `pkg-aoide` explicit from the `aoide`
+      # input, since the core is self-flaked — so `nix flake check` exercises
+      # the packaging contract for the whole set with no coverage gap.
       checks = forAllSystems (
         system:
         let
@@ -95,8 +113,14 @@
           hostCfg = self.nixosConfigurations.yomi-strix.config;
           # pkg-<name> per DISCOVERED package: the check IS the built package.
           # Reads pkgsWalk.discover directly (not self.packages) so the alias
-          # `default` yields no redundant `pkg-default`.
-          pkgChecks = lib.mapAttrs' (name: drv: lib.nameValuePair "pkg-${name}" drv) (pkgsWalk.discover pkgs);
+          # `default` yields no redundant `pkg-default`. `aoide` is self-flaked
+          # and skipped by the walker, so `pkg-aoide` is explicit — the input's
+          # package, the same derivation `packages.aoide` and the overlays use.
+          pkgChecks =
+            lib.mapAttrs' (name: drv: lib.nameValuePair "pkg-${name}" drv) (pkgsWalk.discover pkgs)
+            // {
+              pkg-aoide = inputs.aoide.packages.${system}.default;
+            };
         in
         pkgChecks
         // {

@@ -6,6 +6,9 @@ song/auditions/
 # pi-subagents' runtime artifacts (parent-orchestrator runs):
 .pi-subagents/
 
+# pi's own runtime dir (conduct sessions):
+.pi/
+
 # Content-pipeline + audit runtime (repo root):
 catalog/
 index/

@@ -41,6 +41,7 @@
   pkgs,
   inputs,
   lib,
+  system ? "x86_64-linux",
 }:
 let
   walk = import ./walk.nix { inherit lib; };
@@ -59,11 +60,14 @@ let
   # The pkgs overlay injecting the discovered packages — now literally the SAME
   # source as mkHost: both import lib/pkgs.nix's overlay, which auto-discovers
   # pkgs/<name> and guards each name against shadowing a nixpkgs attribute.
+  # `aoide` itself is self-flaked (pkgs/aoide/flake.nix) and skipped by the
+  # walker — injected from the `aoide` input, exactly as mkHost does.
   overlayModule =
     { ... }:
     {
       nixpkgs.overlays = [
         (import ./pkgs.nix { inherit lib; }).overlay
+        (_final: _prev: { aoide = inputs.aoide.packages.${system}.default; })
       ];
     };
 

@@ -1,5 +1,21 @@
 {
   "nodes": {
+    "aoide": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "path": "./pkgs/aoide",
+        "type": "path"
+      },
+      "original": {
+        "path": "./pkgs/aoide",
+        "type": "path"
+      },
+      "parent": []
+    },
     "aquamarine": {
       "inputs": {
         "hyprutils": [
@@ -682,6 +698,7 @@
     },
     "root": {
       "inputs": {
+        "aoide": "aoide",
         "home-manager": "home-manager",
         "hyprland": "hyprland",
         "nixpkgs": "nixpkgs_2",

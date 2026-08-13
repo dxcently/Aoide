@@ -11,7 +11,9 @@
 > deleted, Node out of the core, vm-boot green); Phase 3 (rename with the
 > §2.3 dual-write/dual-read compat) reviewed APPROVE. Phase 4 (drop the
 > mirror/fallback/alias + retarget staged reads) is gated on khoa's
-> live-stable confirmation; Phase 5 (subdir flake) follows.
+> live-stable confirmation; Phase 5 (subdir flake) LANDED (2026-08-13):
+> `pkgs/aoide/flake.nix` (nixpkgs-only), root consumes the core as the
+> `aoide` path input (topology (b)); toplevel + `nix flake check` green.
 
 ---
 
