@@ -5,7 +5,7 @@
 # wallpaper, agentWidgets, sessionGraph.
 #
 # Reading discipline (CONTRACTS.md §1):
-#   - Reads ONLY aoide.drachma (palette + component tiers) and aoide.surfaces.
+#   - Reads ONLY aoide.livery (palette + component tiers) and aoide.surfaces.
 #   - Component-tier fallback (null → palette) applied locally, never pushed
 #     back into the option system.
 #   - NEVER reads song/ runtime paths at build time (checks.no-song-read
@@ -24,7 +24,7 @@
 }:
 let
   cfg = config.aoide.facets.quickshell;
-  t = config.aoide.drachma;
+  t = config.aoide.livery;
 
   # Committed songs live here (CONTRACTS.md §5) — versioned score, legitimately
   # walked at build time (checks.no-song-read only bans song/ RUNTIME infixes,
@@ -32,34 +32,41 @@ let
   songbook = ../../../song/songbook;
 
   # ── Active song's committed notes — also a legitimate build-time read ──────
-  # `song/songbook/<name>/drachma.json` is versioned score (checks.no-song-read
+  # `song/songbook/<name>/livery.json` is versioned score (checks.no-song-read
   # only bans song/{stage,auditions,catalog,index}/, never song/songbook/), so
   # naming the ACTIVE song's notes file here is allowed for the same reason
   # `songbook` above is. Path concatenation (not string-interpolating the
   # whole `songbook` dir) so only this one file gets copied into the store.
-  activeSongNotes = songbook + "/${config.aoide.song}/drachma.json";
+  activeSongNotes = songbook + "/${config.aoide.song}/livery.json";
 
   # ── Seed script for `home.activation.aoideSeedStage` (below) ───────────────
   # Reasserts the ACTIVE song's committed notes into the live stage twin
-  # (`song/stage/drachma.json`, CONTRACTS.md §4) on every activation, injecting
+  # (`song/stage/livery.json`, CONTRACTS.md §4) on every activation, injecting
   # the same `"song"` field `aoide rice preview <name>` would (jq's
   # `. + {song: …}`; `-S` sorts keys to match serde_json::Value's BTreeMap
   # ordering) — byte-identical to what `rice preview ${config.aoide.song}`
   # would stage (verified by hand: `jq -S '. + {song:"sonata"}'` against
-  # song/songbook/sonata/drachma.json reproduces the current staged file
+  # song/songbook/sonata/livery.json reproduces the current staged file
   # exactly). Write-temp-then-rename in the SAME directory (so the rename is
-  # atomic) mirrors `shellbridge::atomic_write` (pkgs/aoide/src/shellbridge.rs)
+  # atomic) mirrors `shellbridge::atomic_write` (`aoide_storage::fs::atomic_write`)
   # so a hot-reloading FileView (DrachmaState.qml) never reads a torn file.
-  # The whole thing is one script (not inline `run` commands) so a
-  # `--dry-run` activation either runs it in full or not at all — never a
-  # half-applied mkdir/mktemp/jq/mv sequence.
+  # The canonical write goes to livery.json; the legacy `drachma.json` mirror
+  # is written the same way (LIVERY-MERGE.md §2.3) so a pre-livery reader
+  # still on the old name keeps a valid file. The whole thing is one script
+  # (not inline `run` commands) so a `--dry-run` activation either runs it in
+  # full or not at all — never a half-applied mkdir/mktemp/jq/mv sequence.
   seedStageScript = pkgs.writeShellScript "aoide-seed-stage" ''
     set -euo pipefail
     mkdir -p "$HOME/Aoide/song/stage"
-    tmp=$(mktemp "$HOME/Aoide/song/stage/.drachma.json.XXXXXX")
+    tmp=$(mktemp "$HOME/Aoide/song/stage/.livery.json.XXXXXX")
     ${pkgs.jq}/bin/jq -S '. + {song: $song}' --arg song "${config.aoide.song}" \
       "${activeSongNotes}" > "$tmp"
-    mv -f "$tmp" "$HOME/Aoide/song/stage/drachma.json"
+    mv -f "$tmp" "$HOME/Aoide/song/stage/livery.json"
+    # Legacy mirror (LIVERY-MERGE.md §2.3): same write-temp-then-rename, so a
+    # pre-livery reader still on stage/drachma.json keeps a valid file.
+    tmp2=$(mktemp "$HOME/Aoide/song/stage/.drachma.json.XXXXXX")
+    cp "$HOME/Aoide/song/stage/livery.json" "$tmp2"
+    mv -f "$tmp2" "$HOME/Aoide/song/stage/drachma.json"
   '';
 
   # ── Component-tier fallback helpers ────────────────────────────────────────
@@ -80,7 +87,7 @@ let
   # never the repo's checked-in tree) so the live copy can never be confused
   # with source (modules/facets/quickshell/qml/) or collide with it — this is
   # what CONTRACTS.md §2 and the deploy-path fix this comment accompanies are
-  # about. At runtime Quickshell hot-reloads from song/stage/drachma.json via
+  # about. At runtime Quickshell hot-reloads from song/stage/livery.json via
   # a FileView; the build only installs the structural QML, not the note
   # values themselves.
   #
@@ -197,7 +204,7 @@ in
       '';
 
       # ── Seed the live stage twin from the active song ──────────────────────
-      # `song/stage/drachma.json` is what DrachmaState.qml hot-reloads
+      # `song/stage/livery.json` is what DrachmaState.qml hot-reloads
       # (CONTRACTS.md §4); until now nothing seeded it from the BAKED default,
       # so a host that never ran `aoide rice preview <name>` had a stale/absent
       # stage twin even though the compositor/Stylix/QML tree were all built
@@ -264,8 +271,8 @@ in
           # AoideWallpaper always has the right cover on boot/rebuild — the live
           # stage/cover.json overrides it, but nothing re-seeded it from the
           # song before, so a rebuild lost the background. Null → no env.
-          ++ lib.optionals (config.aoide.drachma.wallpaper != null) [
-            "AOIDE_WALLPAPER=${config.aoide.drachma.wallpaper}"
+          ++ lib.optionals (config.aoide.livery.wallpaper != null) [
+            "AOIDE_WALLPAPER=${config.aoide.livery.wallpaper}"
           ];
           Restart = "on-failure";
           RestartSec = 3;

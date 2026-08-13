@@ -1,16 +1,16 @@
 # modules/facets/compositor/default.nix — Hyprland compositor facet.
 #
 # Wires Hyprland as the NixOS Wayland compositor and applies compositor-side
-# drachma live via hyprctl. Drachma values (gaps, radius, borders, blur)
+# livery live via hyprctl. Livery values (gaps, radius, borders, blur)
 # are baked into the Hyprland config at build time so they take effect on
-# session start; the drachma emitter (pkgs/drachma) can re-dispatch
+# session start; the livery engine (crates/song) can re-dispatch
 # them live via hyprctl during a rehearsal (preview) pass.
 #
 # Scope: LOOK + session plumbing only. Everything host-invariant — keybinds,
 # input devices, tiling layout, misc, behavioural window rules — lives in
 # modules/dendrites/hyprland.nix so a re-rice cannot disturb it. The window
 # rules that remain HERE (kitty opacity/rounding) are appearance, hence
-# drachma's business; see that dendrite's header for the full split.
+# livery's business; see that dendrite's header for the full split.
 #
 # IPC socket: exposes the Hyprland IPC socket path for shellbridge to consume.
 # shellbridge uses it to track windows and dispatch focus commands
@@ -18,7 +18,7 @@
 # flow (concepts/Desktop-Architecture).
 #
 # Reading discipline (CONTRACTS.md §1):
-#   - Reads ONLY aoide.drachma (palette + component tiers).
+#   - Reads ONLY aoide.livery (palette + component tiers).
 #   - Component-tier fallback applied locally.
 #   - NEVER reads song/ runtime paths (checks.no-song-read enforced structurally).
 {
@@ -29,7 +29,7 @@
 }:
 let
   cfg = config.aoide.facets.compositor;
-  t = config.aoide.drachma;
+  t = config.aoide.livery;
 
   # ── Component-tier fallback helpers ────────────────────────────────────────
   # No hex lives here by design (CONTRACTS.md §1/§5): the facet is host- and
@@ -45,7 +45,7 @@ let
 
   # ── Derived geometry values ───────────────────────────────────────────────
   # v0 geometry tier (additive-optional, CONTRACTS.md §1): a song MAY set
-  # aoide.drachma.geometry.*; every field is nullOr and falls back to the
+  # aoide.livery.geometry.*; every field is nullOr and falls back to the
   # opinionated defaults below when unset (component-tier fallback pattern,
   # same as windowBorder/windowBorderInactive above). No song sets geometry
   # today, so these fallbacks ARE the immutable baseline in practice.
@@ -61,11 +61,11 @@ let
   blurSize = if geo.blurSize != null then geo.blurSize else 8;
 
   # ── Hyprland config fragment — notes baked in at build time ──────────────
-  # The note emitter (pkgs/drachma, Agent A) re-runs hyprctl keyword dispatch
+  # The livery emitter (crates/song) re-runs hyprctl keyword dispatch
   # during rehearsal to live-patch these values without a rebuild.
   hyprNoteConfig = ''
     # ── Aoide notes — compositor facet ───────────────────────────────────
-    # Generated from aoide.drachma at build time; live-patched by the drachma
+    # Generated from aoide.livery at build time; live-patched by the livery
     # emitter during rice preview (hyprctl keyword).
 
     general {
@@ -162,9 +162,9 @@ let
   # NOTE: keybinds, input devices, tiling layout, misc, and BEHAVIOURAL window
   # rules are NOT here — they moved to modules/dendrites/hyprland.nix, which
   # owns everything that must survive a re-rice untouched. This facet keeps
-  # only the drachma-derived look above plus the session plumbing below. The
+  # only the livery-derived look above plus the session plumbing below. The
   # appearance rules (kitty opacity/rounding, the aoide-* layerrules) stay
-  # here on purpose: they are drachma's business, not behaviour.
+  # here on purpose: they are livery's business, not behaviour.
 in
 {
   # ── Option: aoide.facets.compositor.enable ────────────────────────────────
@@ -225,8 +225,8 @@ in
           ];
         };
 
-        # Bake the drachma fragment into hyprland.conf. mkBefore (order 500) so
-        # drachma defaults land first; the hyprland dendrite's behaviour block
+        # Bake the livery fragment into hyprland.conf. mkBefore (order 500) so
+        # livery defaults land first; the hyprland dendrite's behaviour block
         # and the screenshot dendrite's binds follow at the default order
         # (1000). One `lines` option, several writers. (The quickshell facet
         # writes nothing here — it autostarts the shell as a systemd user

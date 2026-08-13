@@ -1,8 +1,8 @@
 # lib/vmTest.nix — NixOS integration test: headless boot of the Aoide desktop
 # stack.
 #
-# Exercises the walked module tree (same assembly as mkHost), the aoide +
-# drachma packages, greetd wiring, the aoided + shellbridge user services,
+# Exercises the walked module tree (same assembly as mkHost), the aoide
+# package, greetd wiring, the aoided + shellbridge user services,
 # and the graph commands — without real hardware or external network access.
 #
 # Wired in flake.nix as:
@@ -153,7 +153,7 @@ pkgs.testers.runNixOSTest {
               home-manager.users.khoa.home.stateVersion = lib.mkDefault "25.11";
 
               # ── System packages on PATH ───────────────────────────────────
-              # jq only (JSON validation). aoide + drachma come from the
+              # jq only (JSON validation). aoide comes from the
               # nucleus (modules/nucleus/packages.nix) — the test must exercise
               # the REAL install path, not mask its absence (which it did until
               # the first live switch surfaced the gap).
@@ -176,11 +176,10 @@ pkgs.testers.runNixOSTest {
     # ── 1. multi-user.target reached ────────────────────────────────────────
     machine.wait_for_unit("multi-user.target")
 
-    # ── 2. aoide + drachma on PATH ──────────────────────────────────────────
+    # ── 2. aoide on PATH ────────────────────────────────────────────────────
     machine.succeed("which aoide")
-    machine.succeed("which drachma")
 
-    # `aoide schema --json` must parse and report exactly 47 commands.
+    # `aoide schema --json` must parse and report exactly 51 commands.
     # This is a deliberate drift tripwire: adding or removing a command must
     # consciously update this count (it caught 8 commands that had landed
     # unrecorded — graph wrap/reap/send, conduct, conductor, and the graph session
@@ -190,7 +189,9 @@ pkgs.testers.runNixOSTest {
     # for `rice design status` — design-mode Phase A (read-only;
     # CONTRACTS.md §4's `stage/design.json` entry); most recently bumped by 2
     # for `rice design enter`/`exit` — design-mode Phase B, the write side;
-    # bumped by 1 for `hooks install` — the generic hook-installer verb.
+    # bumped by 1 for `hooks install` — the generic hook-installer verb;
+    # bumped by 3 for `livery emit|resolve|lint` — the native note-engine
+    # verbs (LIVERY-MERGE Phase 1).
     schema_raw = machine.succeed("aoide schema --json")
     schema_doc = json.loads(schema_raw)
     # schema --json emits a JSON Outcome envelope:
@@ -202,8 +203,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 48, (
-        f"expected 48 commands, got {cmd_count}.  "
+    assert cmd_count == 51, (
+        f"expected 51 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

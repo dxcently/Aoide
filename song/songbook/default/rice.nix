@@ -25,14 +25,14 @@
 {
   # Only apply when this host performs song "default". The standard is the
   # guaranteed baseline — a host that names no song performs it. A song sets
-  # ONLY aoide.drachma; never host options or facet/dendrite enables.
+  # ONLY aoide.livery; never host options or facet/dendrite enables.
   config = lib.mkIf (config.aoide.song == "default") {
 
     # ── Palette tier (base16 Catppuccin Mocha) ─────────────────────────────
     # base00 → bg, base05 → fg, base0D → accent, base08 → urgent.
     # These are the defaults declared in options.nix; setting them here makes
     # the intent explicit and gives `rice gen` a concrete starting point.
-    aoide.drachma.palette = {
+    aoide.livery.palette = {
       bg = "#1e1e2e"; # Catppuccin Mocha base (base00)
       fg = "#cdd6f4"; # Catppuccin Mocha text (base05)
       accent = "#89b4fa"; # Catppuccin Mocha blue (base0D)
@@ -43,17 +43,17 @@
     # null means "fall back to palette" — the facets apply the fallback.
     # The default rice uses palette values everywhere (no component overrides),
     # which gives the cleanest baseline for `rice gen` to start from.
-    aoide.drachma.bar = {
+    aoide.livery.bar = {
       bg = null;
       fg = null;
       accent = null;
     };
-    aoide.drachma.notif = {
+    aoide.livery.notif = {
       bg = null;
       fg = null;
       urgent = null;
     };
-    aoide.drachma.window = {
+    aoide.livery.window = {
       border = null;
       borderInactive = null;
     };
@@ -75,6 +75,6 @@
     # deterministic solid-colour PNG from palette.bg, so the baseline stays
     # buildable with no binary asset and a fork carries no art it did not
     # choose. A user sets one with `aoide rice adopt default --cover <path>`.
-    aoide.drachma.wallpaper = null;
+    aoide.livery.wallpaper = null;
   };
 }

@@ -2,7 +2,7 @@
 #
 # Every other module (dendrites, facets) builds against the options
 # declared here. This is versioned in CONTRACTS.md (note schema v0). Facets
-# read ONLY `aoide.drachma` and `aoide.surfaces`; no module reads another
+# read ONLY `aoide.livery` and `aoide.surfaces`; no module reads another
 # module. The coupling discipline is enforced by lib/checks.nix, not by
 # politeness.
 #
@@ -20,7 +20,7 @@ let
 
   # A base16 hex colour, with or without leading '#'. Kept permissive so v0
   # note files stay easy to author; the note engine's `rice lint` is the
-  # authoritative validator (see pkgs/drachma).
+  # authoritative validator (the native livery engine, pkgs/aoide).
   hexColor = types.strMatching "#?[0-9a-fA-F]{6}";
 
   # ── Component override submodules ─────────────────────────────────────────
@@ -186,8 +186,15 @@ let
       };
     };
   };
+
+  # Transition alias (LIVERY-MERGE.md §2.3): an out-of-tree host or a stale
+  # song/songbook/*/rice.nix that still sets `aoide.drachma` keeps evaluating
+  # during the rename window — the alias forwards onto `aoide.livery`. Drop
+  # this in Phase 4 alongside the stage-file fallbacks.
 in
 {
+  imports = [ (lib.mkRenamedOptionModule [ "aoide" "drachma" ] [ "aoide" "livery" ]) ];
+
   options.aoide = {
     enable = mkEnableOption "the Aoide agent-wearable desktop framework";
 
@@ -213,15 +220,16 @@ in
       '';
     };
 
-    # ── Drachma seam (v0 schema) — the ONLY thing facets read ──────────────
-    drachma = mkOption {
+    # ── Livery seam (v0 schema) — the ONLY thing facets read ───────────────
+    livery = mkOption {
       description = ''
-        The v0 drachma schema — the single seam between the frozen nix layer
-        and the live desktop. Facets consume this and nothing else. Drachma IS
-        Aoide's design-token layer: the tokens themselves, named for the coin
-        the mint stamps — "notes" and "drachma" are one thing, not a values/
-        engine split. The container remains the W3C design-tokens format.
-        Versioned as "drachma schema v0" in CONTRACTS.md.
+        The v0 livery schema — the single seam between the frozen nix layer
+        and the live desktop. Facets consume this and nothing else. Livery IS
+        Aoide's design-token layer: the tokens themselves, named for the one
+        set of house colours every surface wears in unison — "notes" and
+        "livery" are one thing, not a values/engine split. The container
+        remains the W3C design-tokens format. Versioned as "livery schema v0"
+        in CONTRACTS.md.
       '';
       default = { };
       type = types.submodule {
@@ -239,7 +247,7 @@ in
               semantics). When set, the Stylix facet bakes this scheme for
               terminals/editors/GTK instead of synthesising one from the
               4-anchor palette. The palette tier still drives the live
-              (stage/drachma.json) side; keep the two in the same key.
+              (stage/livery.json) side; keep the two in the same key.
             '';
           };
           bar = mkOption {

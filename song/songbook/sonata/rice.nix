@@ -12,15 +12,15 @@
 # (sonata's own grammar, a deliberate divergence from the default song's
 # Pantheon wireframe grammar).
 #
-# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.drachma.
-# All drachma values are literal nix expressions (no song/ runtime reads).
+# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.livery.
+# All livery values are literal nix expressions (no song/ runtime reads).
 { lib, config, ... }:
 {
   # Guard: apply only when this host performs "sonata".
   config = lib.mkIf (config.aoide.song == "sonata") {
 
     # ── Palette tier (base16 mapping — the Greek marble register) ───────────
-    aoide.drachma.palette = {
+    aoide.livery.palette = {
       bg = "#f2ebde"; # pale warm marble ground            (base00)
       fg = "#2f2a33"; # plum-charcoal ink                  (base05)
       accent = "#a07414"; # deep Attic GOLD — the chrome accent (base0A)
@@ -40,7 +40,7 @@
     # from a temple's materials — terracotta clay, clay-orange, Attic gold,
     # laurel green, bronze-verdigris, aegean blue, Tyrian/amethyst purple, and
     # a deep bronze. Slots follow the base16 standard.
-    aoide.drachma.base16 = {
+    aoide.livery.base16 = {
       base00 = "#f2ebde"; # lightest bg — pale warm marble (sunlit stone)
       base01 = "#e8dfcc"; # lighter bg (status) — marble in soft shade
       base02 = "#dacdb2"; # selection — aged/weathered marble
@@ -62,12 +62,12 @@
     # ── Component tier (v0) ────────────────────────────────────────────────
     # null → fall back to palette; the key does the work (no hidden overrides
     # to undo before a transposition).
-    aoide.drachma.bar = {
+    aoide.livery.bar = {
       bg = null;
       fg = null;
       accent = null;
     };
-    aoide.drachma.notif = {
+    aoide.livery.notif = {
       bg = null;
       fg = null;
       urgent = null;
@@ -78,7 +78,7 @@
     # to base0C bronze-verdigris, a cool blue-teal that recedes without
     # vanishing into the ground. The window key stays a component-tier note
     # the song owns.
-    aoide.drachma.window = {
+    aoide.livery.window = {
       border = "#a07414"; # base0A Attic gold — active (= palette.accent)
       borderInactive = "#3f867e"; # base0C bronze-verdigris — inactive (cool teal)
     };
@@ -91,6 +91,6 @@
     # Greek theme, not a photograph (khoa). The wallpaper switcher handles photos
     # live; the song's DEFAULT ground is a clean bright marble field, which keeps
     # the light-polarity contrast valid under the now-more-transparent bar.
-    aoide.drachma.wallpaper = null;
+    aoide.livery.wallpaper = null;
   };
 }

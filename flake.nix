@@ -85,7 +85,7 @@
       # trivially now (no facets declare surface owners yet) and become real as
       # Wave-1 facets populate `aoide.surfaces`. Also builds EVERY discovered
       # package as `pkg-<name>` (auto-generated from lib/pkgs.nix — pkg-aoide,
-      # pkg-drachma, pkg-melete, pkg-mneme) so `nix flake check` exercises the
+      # pkg-melete, pkg-mneme) so `nix flake check` exercises the
       # packaging contract for the whole set with no coverage gap.
       checks = forAllSystems (
         system:
@@ -106,7 +106,7 @@
           # host by lib/mkHost.nix); song-shape asserts each is a rice.nix only.
           song-shape = checks.songShape (walk ./song/songbook);
           # VM boot test — boots the Aoide desktop config headless and asserts
-          # the stack comes up (multi-user.target, aoide + drachma on PATH,
+          # the stack comes up (multi-user.target, aoide on PATH,
           # greetd enabled, aoided + shellbridge user services active, graph
           # commands pass).  Requires KVM on the build host.
           vm-boot = import ./lib/vmTest.nix { inherit pkgs inputs lib; };
@@ -114,8 +114,8 @@
       );
 
       # ── Dev shell ──────────────────────────────────────────────────────────
-      # Rust (cargo/rustc) + Node toolchains + nix tools. This is the build
-      # surface Agents A (Node/notes) and B (Rust/CLI) develop in.
+      # Rust (cargo/rustc) + nix tools. This is the build
+      # surface the CLI/daemon agents develop in.
       devShells = forAllSystems (
         system:
         let
@@ -131,8 +131,6 @@
               rustfmt
               clippy
               rust-analyzer
-              # Node — notes package (wraps Style Dictionary)
-              nodejs
               # Nix tooling
               nixfmt
               nil

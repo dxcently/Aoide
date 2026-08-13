@@ -3,12 +3,12 @@
 # Stylix is Aoide's "recording" side (concepts/Notes, entities/Stylix):
 # ONE base16 scheme + fonts/cursor/wallpaper feed Stylix, which themes every
 # nix-manageable target — GTK/Qt, terminal, editors, boot. The live side
-# (stage/drachma.json + hyprctl + OSC) is the notes package's job; this facet is
-# the baked half. Both derive from the same `aoide.drachma`, so preview and
+# (stage/livery.json + hyprctl + OSC) is the notes package's job; this facet is
+# the baked half. Both derive from the same `aoide.livery`, so preview and
 # adopted state cannot diverge ("zero drift").
 #
 # Contract discipline (CONTRACTS.md §2, docs/BUILD.md):
-#   * A facet reads ONLY `aoide.drachma` + `aoide.surfaces`. No other module.
+#   * A facet reads ONLY `aoide.livery` + `aoide.surfaces`. No other module.
 #   * It applies the component-tier null→palette fallback ITSELF (§1) — the
 #     option system stores null; the facet resolves it.
 #   * It reads the `aoide.surfaces` ownership registry and stands down (disables
@@ -27,7 +27,7 @@
 }:
 let
   cfg = config.aoide.facets.stylix;
-  t = config.aoide.drachma;
+  t = config.aoide.livery;
 
   # Stylix rides as a NixOS module only when its input is present (mkHost adds
   # it optionally). Gate on the OPTION being declared — reading `options` (not
@@ -72,7 +72,7 @@ let
   };
 
   # ── base16 scheme ─────────────────────────────────────────────────────────
-  # Preferred source: the song's full base16 note tier (`aoide.drachma.base16`,
+  # Preferred source: the song's full base16 note tier (`aoide.livery.base16`,
   # all 16 slots, base16-standard semantics) — the real scheme, baked verbatim.
   # Fallback: synthesise from the 4-anchor palette (v0 behaviour) so songs
   # that carry no scheme still theme coherently.
@@ -109,7 +109,7 @@ let
   '';
 
   # The cover-art note (CONTRACTS.md §1): a song MAY carry a real wallpaper as a
-  # literal nix path (`aoide.drachma.wallpaper`), which the option system copies to
+  # literal nix path (`aoide.livery.wallpaper`), which the option system copies to
   # the store — this is note data, not a song/ runtime read. When the note is
   # null the facet bakes the deterministic solid-colour fallback above, so the
   # path stays buildable and drift-free either way.
@@ -199,7 +199,7 @@ let
 in
 {
   options.aoide.facets.stylix.enable =
-    lib.mkEnableOption "the Stylix baked-theme facet (base16 fan-out from aoide.drachma)";
+    lib.mkEnableOption "the Stylix baked-theme facet (base16 fan-out from aoide.livery)";
 
   # The baked Stylix settings. Only emitted when the stylix input is present:
   # `lib.optionalAttrs stylixPresent` keeps the `stylix` KEY out of `config`
@@ -216,7 +216,7 @@ in
         # The ONE base16 scheme — the baked fan-out's single source.
         base16Scheme = scheme;
 
-        # Wallpaper: the song's cover-art note (`aoide.drachma.wallpaper`) when it
+        # Wallpaper: the song's cover-art note (`aoide.livery.wallpaper`) when it
         # carries one, else a deterministic solid-colour fallback (from
         # palette.bg). mkDefault keeps it host/rice-overridable. We set this EVEN
         # WHEN quickshell owns the `wallpaper` surface

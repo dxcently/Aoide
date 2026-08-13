@@ -3,12 +3,12 @@
 Referenced by `CONTRACTS.md` §5. Practical steps for authoring/updating a
 song — notes today, plus the two live slots the staging engine resolves.
 
-## Notes (`drachma.json` / `rice.nix`)
+## Notes (`livery.json` / `rice.nix`)
 
 A song's `rice.nix` self-gates on `config.aoide.song == "<name>"` and sets
-**only** `aoide.drachma` (palette + component tiers, optionally `wallpaper`).
+**only** `aoide.livery` (palette + component tiers, optionally `wallpaper`).
 See an existing song (`song/songbook/default/rice.nix`,
-`song/songbook/sonata/rice.nix`) for the shape. `drachma.json` alongside it is
+`song/songbook/sonata/rice.nix`) for the shape. `livery.json` alongside it is
 the same values as a hand/agent-maintained JSON file — kept in sync with
 `rice.nix`, not derived from it.
 
@@ -44,14 +44,33 @@ which song is *active* live with:
 aoide rice preview <name>
 ```
 
-This stages `<name>`'s `drachma.json` (with `song` injected) into
-`song/stage/drachma.json`; `DrachmaState.qml` hot-reloads it, and every
+This stages `<name>`'s `livery.json` (with `song` injected) into
+`song/stage/livery.json`; `DrachmaState.qml` hot-reloads it, and every
 `WidgetSlot` re-resolves against the new `songName` — a song's calendar/
 notifications body swaps with no restart, exactly like its colours do.
 
 An unauthored slot has no fallback for `calendar` (the bar's popout simply
 doesn't open) and falls back to the shared chrome for `notifications` (the
 existing `NotificationCard`).
+
+## Migration — the livery rename (drachma → livery)
+
+The livery merge (LIVERY-MERGE.md) renamed the note engine and its whole
+surface. The schema shape is unchanged (still v0 — no version bump), so this
+is a namespace/file rename, not a content migration:
+
+- **Option namespace:** `aoide.drachma.*` → `aoide.livery.*`. A
+  `lib.mkRenamedOptionModule [ "aoide" "drachma" ] [ "aoide" "livery" ]`
+  alias in `modules/nucleus/options.nix` keeps any out-of-tree host or stale
+  songbook `rice.nix` that still sets `aoide.drachma` evaluating during the
+  transition; drop the alias once it closes.
+- **Songbook data file:** `song/songbook/<song>/drachma.json` →
+  `song/songbook/<song>/livery.json`.
+- **Live stage file:** `song/stage/livery.json` is canonical. During the
+  transition window, writers mirror to `song/stage/drachma.json` and readers
+  fall back to it when `livery.json` is absent, so a running desktop never
+  reads a missing stage file; the mirror + fallback are dropped when the
+  transition closes (Phase 4 of the merge plan).
 
 ## What this playbook does NOT cover
 
