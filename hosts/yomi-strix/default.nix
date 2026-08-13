@@ -47,7 +47,7 @@
   aoide.user = "khoa";
 
   # The song this host performs. Replay any committed song on ANY host with one
-  # line — e.g. `aoide.song = "sonata";` swaps the whole drachma fan-out with
+  # line — e.g. `aoide.song = "sonata";` swaps the whole livery fan-out with
   # zero other edits (song/songbook/<name>/). Default = the shipped standard.
   # "sonata": the light glass key drawn from its own cover.
   aoide.song = "sonata";

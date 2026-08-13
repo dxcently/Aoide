@@ -242,11 +242,11 @@ override is what lets the unit — or a test/smoke run — relocate the stage tr
 The resolved, flattened note values for Quickshell (QML reads this; hot-reload
 at rehearsal). Derived from the same `aoide.livery` as the baked `rice.nix`
 fan-out, so preview and adopted state cannot diverge. `stage/livery.json` is
-the canonical name (the `drachma.json` file was renamed by the livery merge);
-during the transition window, writers also mirror to `stage/drachma.json` and
-readers fall back to it if `livery.json` is absent, so a running desktop never
-reads a missing stage file. The mirror + fallback are dropped once the
-transition closes (LIVERY-MERGE.md Phase 4).
+the canonical name (the stage file was renamed by the livery merge);
+writers mirrored to the legacy name and readers fell back during the
+transition window, so a running desktop never read a missing stage file. The
+mirror + fallback were dropped in Phase 4 of the livery merge —
+`stage/livery.json` is the sole stage note file.
 
 Beyond `aoide rice preview <name>`/`cover set`/other emitters writing this
 live, it is also **seeded from the active song's committed notes on every
@@ -274,7 +274,7 @@ file.
 field (string) — the name `aoide rice preview <name>` was invoked with. Set by
 `handle_rice_preview` (mirrors the `parentSessionId` additive precedent in
 §4's sessions.json). Absent means "no song identity" (a notes file staged some
-other way). `DrachmaState.qml`'s `songName` property reads it to resolve
+other way). `LiveryState.qml`'s `songName` property reads it to resolve
 per-song flavor widgets (§5) — readers must tolerate both forms.
 
 **Additive in v0:** the staged file MAY also carry an optional top-level
@@ -568,16 +568,16 @@ set of "flavor" surfaces — committed files, not nix options:
   `{ "<song>": ["<slot>", …] }`) by generalizing the walk from a fixed slot
   enum to "every file under `widgets/`" — additive, no contract-version
   bump.
-- **Runtime resolution:** `DrachmaState.qml`'s `songName` property (above)
+- **Runtime resolution:** `LiveryState.qml`'s `songName` property (above)
   names the active song; the staging engine (`StagingEngine.qml`) reads the manifest and answers
   "does `<song>` dress `<slot>`"; `WidgetSlot.qml` is the fixed per-slot
   anchor a host surface embeds — it loads the song's file when authored, else
   falls back to shared chrome (or renders nothing, when no fallback exists).
   `aoide rice preview <name>` (§4) drives this live, no rebuild: it stages
-  `song` into `livery.json`, `DrachmaState`'s `songName` updates, and every
+  `song` into `livery.json`, `LiveryState`'s `songName` updates, and every
   `WidgetSlot` re-resolves.
 - **Fixed injected-prop contract:** a loaded widget receives `notes`
-  (`DrachmaState`) and `bridge` (`ShellBridge`) always, plus whatever
+  (`LiveryState`) and `bridge` (`ShellBridge`) always, plus whatever
   slot-specific extras the anchor declares (e.g. notifications' `notification`)
   — **never** nix `config.*`. This does not loosen the song-shape rule above:
   a song's `rice.nix` still sets **ONLY** `aoide.livery` — widgets are

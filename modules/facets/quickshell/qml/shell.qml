@@ -1,11 +1,11 @@
 // shell.qml — Aoide Quickshell root.
 //
 // Entry point for the Quickshell session. Instantiates all surface widgets
-// and wires the shared note loader (DrachmaState) so every widget hot-reloads
-// from song/stage/drachma.json when it changes.
+// and wires the shared note loader (LiveryState) so every widget hot-reloads
+// from song/stage/livery.json when it changes.
 //
 // Communication discipline (CONTRACTS.md / entities/Quickshell):
-//   - Reads state files from song/stage/ (DrachmaState watches drachma.json).
+//   - Reads state files from song/stage/ (LiveryState watches livery.json).
 //   - Issues commands to shellbridge via unix socket (ShellBridge singleton).
 //   - Never speaks MCP or any agent protocol.
 //
@@ -23,7 +23,7 @@ import Quickshell.Wayland
 
 ShellRoot {
     // ── Shared singletons (one instance for the whole session) ─────────────
-    DrachmaState { id: notes }
+    LiveryState { id: notes }
     ShellBridge { id: bridge }
     // The staging engine (CONTRACTS.md §5) — reads the manifest
     // the quickshell facet's build carries into ~/Aoide/run/qml/songs/, resolves
@@ -38,7 +38,7 @@ ShellRoot {
     // the hover-trace link — TerminalManagerGadget writes it on row hover,
     // DagGraphGadget highlights the node whose id matches. Session-scoped, no
     // persistence (v1). QtObject has no default property, so the ListModel is a
-    // named property (the DrachmaState.noteFile idiom).
+    // named property (the LiveryState.noteFile idiom).
     QtObject {
         id: shared
 

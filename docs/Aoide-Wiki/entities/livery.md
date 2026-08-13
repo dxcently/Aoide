@@ -20,8 +20,8 @@ image ([[Lexicon]]) — the option, the schema, and every shipped artifact are
 standalone Node engine into native Rust inside `crates/song/src/livery/` and
 renamed the whole surface — option namespace, songbook data files, and the
 live stage contract — in one pass. `drachma` survives as this page's alias
-(`aoide.drachma` still evaluates during the transition via the
-`mkRenamedOptionModule` alias) and in dated history.
+(`aoide.drachma` kept evaluating via the `mkRenamedOptionModule` alias until
+Phase 4 closed the transition window) and in dated history.
 
 ## The seam between score and performance
 
@@ -62,10 +62,9 @@ facet's `home.activation.aoideSeedStage` reasserts it from the active song's
 committed `song/songbook/<song>/livery.json` on every activation (see
 [[Codebase#Runtime contracts (socket + stage files)]]), so a freshly booted
 host carries a correct stage twin even before any preview runs.
-`stage/livery.json` is canonical; during the transition window writers also
-mirror `stage/drachma.json` and readers fall back to it, so an old reader
-never finds a missing file. The mirror + fallback are dropped when the
-transition closes (LIVERY-MERGE.md Phase 4).
+`stage/livery.json` is canonical; the legacy-mirror write and the fallback
+reads were dropped when Phase 4 closed the transition window
+(LIVERY-MERGE.md).
 
 ## Tier structure
 

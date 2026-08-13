@@ -167,7 +167,7 @@ lib.mkIf config.aoide.enable {
   # Documented here as comments (not as options) because they are live-side
   # constants, not build-time configuration:
   #
-  #   song/stage/drachma.json     — resolved note colours (written by pkgs/drachma)
+  #   song/stage/livery.json     — resolved note colours (written by the native livery engine)
   #   song/stage/sessions.json  — agent session roster (written by shellbridge)
   #   song/stage/hooks.json     — live Claude Code hook states (written by shellbridge)
   #

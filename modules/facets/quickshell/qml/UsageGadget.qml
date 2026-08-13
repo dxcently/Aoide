@@ -25,7 +25,7 @@ import Quickshell.Io
 //                  mark) crowns it, in place of the old segno. A gold 𝄂 closes the
 //                  score.
 //   · TERMINAL   — box-drawing frames the panel; each cap is the dock's shared
-//                  [▓▓░░] shade-glyph gauge (DrachmaState.ctxBar), tinted clay
+//                  [▓▓░░] shade-glyph gauge (LiveryState.ctxBar), tinted clay
 //                  and swung to terracotta past 85% (ctxColor) like every other
 //                  meter in the house.
 //

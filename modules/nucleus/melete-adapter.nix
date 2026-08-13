@@ -84,7 +84,8 @@ lib.mkIf config.aoide.enable {
     };
 
     # ── Structured event → Melete dispatch mapping (skeleton) ───────────────
-    # Documented here; implemented in pkgs/aoide/src/bin/aoide.rs (Agent B).
+    # Documented here; implemented in `pkgs/aoide/crates/cli` (the aoide
+    # binary, `crates/cli/src/bin/aoide.rs`).
     #
     # | aoided event class | Melete action                                  |
     # |--------------------|------------------------------------------------|

@@ -379,29 +379,28 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   `lampGlyph`/`lampColor` — replaces the old mood-face/kaomoji system
   (`MoodFaces`, `kaomojiFor`) and the hover-clear/emphasis machinery
   (`setHover`/`requestHoverClear`/`computeEmph`) wholesale. `ConductorPreview.qml`
-  updated to match: the harness now instantiates real `DrachmaState` +
+  updated to match: the harness now instantiates real `LiveryState` +
   `ShellBridge` instead of a stub palette object, since the new roster reads
   `notes`' real `ctxPercent`/`ctxBar`/`noteColor`/`elapsedSince` helpers.
   Deployed live to `run/qml/` for testing, service is up — but this has not
   yet had the khoa-looks-first vision check (§3) before landing as reviewed
   design. See [[Conductor-Channel]].
-- **[in-progress, merge landing] Livery merge + rename (drachma → livery).**
+- **[landed + switched] Livery merge + rename.**
   Plan: `docs/architecture/LIVERY-MERGE.md`. Phases 1–3 executed and reviewed
   2026-08-13 (native engine in `crates/song/src/livery/` with the
-  stage/hyprctl/osc/file emitter registry; `pkgs/drachma` deleted, Node out of
-  the core; `aoide.drachma` → `aoide.livery` with a `mkRenamedOptionModule`
+  stage/hyprctl/osc/file emitter registry; the old Node package deleted, Node
+  out of the core; the option namespace renamed with a `mkRenamedOptionModule`
   alias; songbook `livery.json`; stage dual-write/dual-read compat live).
-  **Phase 4 is owed:** drop the `stage/drachma.json` mirror + fallback reads +
-  the option alias, AND retarget the staged no-arg reads (`rice.rs`
-  `resolve_rice_notes`, `commands/livery.rs` `resolve_notes`) and
-  `conductor/src/ui.rs:517` off the mirror — gated on khoa confirming the
-  switched desktop is stable across a reboot. Deferred follow-up on record:
-  the `DrachmaState.qml` → `LiveryState.qml` file rename (~12 importers).
-  Comment-only drachma sweep still owed in `qml/shell.qml`,
-  `StagingEngine.qml`, `WorkspaceRow.qml`, `dendrites/hyprland.nix`,
-  `nucleus/shellbridge.nix`, `hosts/yomi-strix/default.nix:50`. See
-  [[livery]], [[Self-Ricing]].
-- **[landed, pending switch] Separate Aoide from AoideOS — two flakes.**
+  **Phase 4 executed 2026-08-13:** the stage mirror write + fallback reads +
+  the option alias are dropped (staged no-arg reads in `rice.rs`
+  `resolve_rice_notes`, `commands/livery.rs` `resolve_notes`, and
+  `conductor/src/ui.rs:517` retargeted to `livery.json`), the QML singleton
+  file rename to `LiveryState.qml` is done, and the comment-only sweep
+  (`qml/shell.qml`, `StagingEngine.qml`, `WorkspaceRow.qml`,
+  `dendrites/hyprland.nix`, `nucleus/shellbridge.nix`,
+  `hosts/yomi-strix/default.nix`) is complete — khoa switched to the Phase-4
+  build 2026-08-13. See [[livery]], [[Self-Ricing]].
+- **[landed + switched] Separate Aoide from AoideOS — two flakes.**
   Phase 5 executed 2026-08-13: `pkgs/aoide/flake.nix` (nixpkgs-only) is
   consumed as the `aoide` path input; `lib/pkgs.nix` skips self-flaked package
   dirs; `packages.aoide`/`default`, `pkg-aoide`, and the mkHost/vmTest

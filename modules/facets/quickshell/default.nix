@@ -49,10 +49,9 @@ let
   # song/songbook/sonata/livery.json reproduces the current staged file
   # exactly). Write-temp-then-rename in the SAME directory (so the rename is
   # atomic) mirrors `shellbridge::atomic_write` (`aoide_storage::fs::atomic_write`)
-  # so a hot-reloading FileView (DrachmaState.qml) never reads a torn file.
-  # The canonical write goes to livery.json; the legacy `drachma.json` mirror
-  # is written the same way (LIVERY-MERGE.md §2.3) so a pre-livery reader
-  # still on the old name keeps a valid file. The whole thing is one script
+  # so a hot-reloading FileView (LiveryState.qml) never reads a torn file.
+  # The write goes to livery.json, the canonical stage note file. The whole
+  # thing is one script
   # (not inline `run` commands) so a `--dry-run` activation either runs it in
   # full or not at all — never a half-applied mkdir/mktemp/jq/mv sequence.
   seedStageScript = pkgs.writeShellScript "aoide-seed-stage" ''
@@ -62,11 +61,6 @@ let
     ${pkgs.jq}/bin/jq -S '. + {song: $song}' --arg song "${config.aoide.song}" \
       "${activeSongNotes}" > "$tmp"
     mv -f "$tmp" "$HOME/Aoide/song/stage/livery.json"
-    # Legacy mirror (LIVERY-MERGE.md §2.3): same write-temp-then-rename, so a
-    # pre-livery reader still on stage/drachma.json keeps a valid file.
-    tmp2=$(mktemp "$HOME/Aoide/song/stage/.drachma.json.XXXXXX")
-    cp "$HOME/Aoide/song/stage/livery.json" "$tmp2"
-    mv -f "$tmp2" "$HOME/Aoide/song/stage/drachma.json"
   '';
 
   # ── Component-tier fallback helpers ────────────────────────────────────────
@@ -204,7 +198,7 @@ in
       '';
 
       # ── Seed the live stage twin from the active song ──────────────────────
-      # `song/stage/livery.json` is what DrachmaState.qml hot-reloads
+      # `song/stage/livery.json` is what LiveryState.qml hot-reloads
       # (CONTRACTS.md §4); until now nothing seeded it from the BAKED default,
       # so a host that never ran `aoide rice preview <name>` had a stale/absent
       # stage twin even though the compositor/Stylix/QML tree were all built

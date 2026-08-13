@@ -38,7 +38,7 @@ ShellRoot {
                 property string holoBlue:      "#345f81"   // aegean
                 property string violet:        "#6f4373"   // murex
 
-                // context-meter helpers — the gadget calls notes.ctx* (DrachmaState
+                // context-meter helpers — the gadget calls notes.ctx* (LiveryState
                 // owns the real ones); mirrored here so the stub renders the meter
                 // instead of throwing. Same math, verbatim.
                 function ctxCeiling(ceiling) { return (ceiling && ceiling > 0) ? ceiling : 200000; }

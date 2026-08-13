@@ -76,7 +76,7 @@ Item {
         return name.indexOf("magic") !== -1 || name.indexOf("scratch") !== -1
     }
     // Resting-state hue — each workspace id gets its own distinct base16 accent
-    // (drachma.noteColor cycles the 8-hue accent spread by id). Active/urgent/
+    // (notes.noteColor cycles the 8-hue accent spread by id). Active/urgent/
     // preview states still override this in the delegate below.
     function wsColor(ws) {
         var id = ws ? (ws.id || 1) : 1
@@ -205,7 +205,7 @@ Item {
 
                 // The SOLID note glyph, parked at this note's pitch on the staff.
                 // Resting → its own base16 accent hue (root.wsColor, one of 8
-                // distinct colours cycled by workspace id — see DrachmaState.
+                // distinct colours cycled by workspace id — see LiveryState.
                 // noteColor); the played note KEEPS its own hue but swells and
                 // rests on a same-hue highlight pill; urgent → glitchPink. A
                 // defining ink outline (paletteFg) rides only the active glyph.

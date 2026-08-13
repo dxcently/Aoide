@@ -5,15 +5,18 @@
 > `drachma` still finds every affected file — the rename surface is enumerated
 > in §2.2.
 >
-> **Status: PHASES 1–3 LANDED (2026-08-13), pending commit + gated switch.**
+> **Status: ALL PHASES LANDED — Phase 4 committed and switched
+> (2026-08-13).**
 > The name is confirmed: **livery** (§7.1). Phase 1 (native engine +
 > registry + goldens) reviewed and coach-fixed; Phase 2 (`pkgs/drachma`
 > deleted, Node out of the core, vm-boot green); Phase 3 (rename with the
-> §2.3 dual-write/dual-read compat) reviewed APPROVE. Phase 4 (drop the
-> mirror/fallback/alias + retarget staged reads) is gated on khoa's
-> live-stable confirmation; Phase 5 (subdir flake) LANDED (2026-08-13):
-> `pkgs/aoide/flake.nix` (nixpkgs-only), root consumes the core as the
-> `aoide` path input (topology (b)); toplevel + `nix flake check` green.
+> §2.3 dual-write/dual-read compat) reviewed APPROVE. **Phase 4 (drop the
+> mirror/fallback/alias + retarget staged reads, `DrachmaState.qml` →
+> `LiveryState.qml`, stale-comment sweep) landed, committed, and switched
+> 2026-08-13**; Phase 5 (subdir
+> flake) LANDED (2026-08-13): `pkgs/aoide/flake.nix` (nixpkgs-only), root
+> consumes the core as the `aoide` path input (topology (b)); toplevel +
+> `nix flake check` green.
 
 ---
 

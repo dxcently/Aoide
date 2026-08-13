@@ -14,7 +14,7 @@
 // torn file), mirroring the execute()-direct precedent AoideLauncher.qml's
 // own header already flags: DesktopEntry.execute() is called straight from
 // QML with no aoided verb in between, and this ledger follows the same
-// no-new-verb idiom for its own side effect. Parsing follows DrachmaState.qml's
+// no-new-verb idiom for its own side effect. Parsing follows LiveryState.qml's
 // FileView idiom: a guarded try/catch degrades a missing/garbage file to an
 // empty map rather than throwing.
 //

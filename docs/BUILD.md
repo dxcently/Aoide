@@ -174,8 +174,7 @@ tree inside `crates/song`:
 - `livery/emit/{stage,hyprctl,osc,file}.rs` — the four pure emitters behind
   one `Emitter` trait + registry; a new backend is one file + one registry
   line. The stage backend writes `song/stage/livery.json` (Quickshell; atomic
-  write — see `CONTRACTS.md §4`; the legacy `drachma.json` name is mirrored
-  during the transition window).
+  write — see `CONTRACTS.md §4`).
 - Verbs: `aoide livery lint|resolve|emit <target>` (the old `drachma` binary's
   surface, native); `rice lint` calls `livery::lint` directly — no binary
   locate, no PATH shell-out.

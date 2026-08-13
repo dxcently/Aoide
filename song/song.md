@@ -12,16 +12,16 @@ is a repo-local map, not a replacement for either.
 song/
 ├── songbook/                   committed score — per-song homes + cross-cutting design memory
 │   ├── default/                 the shipped baseline — MERGE-ONLY, upstream-owned, never adopted-over
-│   │   ├── rice.nix               aoide.drachma.* under `aoide.song == "default"` guard
-│   │   ├── drachma.json           resolved drachma values (Catppuccin Mocha bootstrap)
+│   │   ├── rice.nix               aoide.livery.* under `aoide.song == "default"` guard
+│   │   ├── livery.json            resolved livery values (Catppuccin Mocha bootstrap)
 │   │   ├── design/                house design grammar lives HERE
 │   │   │   ├── pantheon.md          the Pantheon wireframe/glyph grammar every song instantiates
 │   │   │   ├── intent.md            this rice's own design intent
 │   │   │   └── cover-ref.txt        no bundled cover — points at song/covers/ instead
 │   │   └── references/            source stills backing the grammar (screenshots, art-direction)
 │   ├── <name>/                  one song per folder, e.g. sonata (self-registers — no import list)
-│   │   ├── rice.nix                pure nix: sets ONLY aoide.drachma.*, guarded by aoide.song == "<name>"
-│   │   ├── drachma.json            this song's resolved drachma values
+│   │   ├── rice.nix                pure nix: sets ONLY aoide.livery.*, guarded by aoide.song == "<name>"
+│   │   ├── livery.json             this song's resolved livery values
 │   │   ├── palette/                (planned) transpose keys — variants `rice transpose` swaps among
 │   │   ├── sounds/                 (planned) notification + system sounds (chimes dimension)
 │   │   ├── icons/                  (planned) per-song icon overrides
@@ -36,7 +36,7 @@ song/
 ├── covers/                     shared wallpaper library — any song's rice.nix points here by literal path
 │                                  (../../covers/<file>), not a per-song assets/ dir
 ├── stage/                      LIVE runtime state — gitignored, atomic write-temp-then-rename only
-│   ├── drachma.json               fully-resolved drachma (no nulls) — hot-reloaded by DrachmaState.qml
+│   ├── livery.json                fully-resolved livery (no nulls) — hot-reloaded by LiveryState.qml
 │   ├── cover.json                 live wallpaper seed { "path": ... } — read by AoideWallpaper.qml
 │   └── sessions.json / hooks.json / projects.json / graph.json   session-graph state (shellbridge, aoide graph)
 └── auditions/                  (planned) the propose gate for generated-but-unadopted rices — gitignored
@@ -50,21 +50,21 @@ inside that song's `songbook/<name>/` — never a new top-level `song/` dir
 
 ```
 songbook/<song>/rice.nix
-   sets ONLY aoide.drachma.{palette,base16,bar,notif,window,wallpaper}
+   sets ONLY aoide.livery.{palette,base16,bar,notif,window,wallpaper}
    guarded: lib.mkIf (config.aoide.song == "<song>")
         │
-        │  nix build / rebuild bakes the guarded song's drachma
+        │  nix build / rebuild bakes the guarded song's livery
         ▼
-stage/drachma.json  ◄── also: `aoide rice preview` stages this ephemerally
+stage/livery.json   ◄── also: `aoide rice preview` stages this ephemerally
    fully resolved — colours concrete, no null            (CONTRACTS.md §4:
         │                                                  atomic writes only)
         │  FileView watches the file; onFileChanged → reload()
         ▼
-qml/DrachmaState.qml   (singleton — mirrored under modules/facets/quickshell/qml/)
+qml/LiveryState.qml    (singleton — mirrored under modules/facets/quickshell/qml/)
    hot-reload: every widget's binding updates in one pass, no QML restart
         │
         ▼
-every widget reads palette roles off DrachmaState
+every widget reads palette roles off LiveryState
    (paletteBg / paletteFg / paletteAccent / paletteHot / base16 role map)
 
 
@@ -89,17 +89,17 @@ build time — runtime state can never become load-bearing for the build.
 | | writes | reads |
 |---|---|---|
 | **Creation** (`rice gen` → `lint` → `preview` → `adopt`) | `auditions/` (propose), then `songbook/<song>/` on adopt | `songbook/` + that song's `design/` — always, before every `gen` |
-| **Application** (performing an adopted song) | nothing — pure selection | `songbook/<song>/rice.nix` fanned into `stage/drachma.json` at build/preview time |
+| **Application** (performing an adopted song) | nothing — pure selection | `songbook/<song>/rice.nix` fanned into `stage/livery.json` at build/preview time |
 
 The swap is one line, host-agnostic (no other edit needed — a song sets
-only `aoide.drachma`, no host options, no facet toggles):
+only `aoide.livery`, no host options, no facet toggles):
 
 ```nix
 # hosts/<host>/default.nix
 aoide.song = "sonata";
 ```
 
-This re-fans the whole `aoide.drachma` tree for that host. **Replay** =
+This re-fans the whole `aoide.livery` tree for that host. **Replay** =
 same score, new host (this line, elsewhere). **Transpose** = same host,
 new key (`rice transpose <song> <key>`, planned — swaps among that song's
 `palette/` variants).
@@ -120,5 +120,5 @@ is queryable like any other content.
 
 ## Related (wiki)
 
-Song-Anatomy · Self-Ricing · Song-Vocabulary · drachma · Snowflake-Anatomy
+Song-Anatomy · Self-Ricing · Song-Vocabulary · livery · Snowflake-Anatomy
 · Ricing-Protocol

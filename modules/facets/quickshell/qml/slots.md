@@ -20,7 +20,7 @@ Every widget QML file, whatever slot it fills, must follow this shape:
 - **Root is an `Item`.** (`WidgetSlot` sizes itself off the loaded item's
   `implicitWidth`/`implicitHeight`, so a non-`Item` root breaks layout.)
 - **Declares `required property var notes`** — the active song's
-  `DrachmaState`, injected by every anchor unconditionally.
+  `LiveryState`, injected by every anchor unconditionally.
 - **Declares `required property var bridge`** — the `ShellBridge`, injected
   by every anchor unconditionally (`WidgetSlot` guards the fallback path,
   but a song widget is always given this).

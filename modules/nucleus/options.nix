@@ -187,14 +187,8 @@ let
     };
   };
 
-  # Transition alias (LIVERY-MERGE.md §2.3): an out-of-tree host or a stale
-  # song/songbook/*/rice.nix that still sets `aoide.drachma` keeps evaluating
-  # during the rename window — the alias forwards onto `aoide.livery`. Drop
-  # this in Phase 4 alongside the stage-file fallbacks.
 in
 {
-  imports = [ (lib.mkRenamedOptionModule [ "aoide" "drachma" ] [ "aoide" "livery" ]) ];
-
   options.aoide = {
     enable = mkEnableOption "the Aoide agent-wearable desktop framework";
 

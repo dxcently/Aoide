@@ -13,7 +13,7 @@
 //
 // Instantiated per gadget (`MoodFaces { id: faces }`), not wired through
 // shell.qml, because it holds no state: it is a table and four pure lookups.
-// The alternative — threading it down from shell.qml the way DrachmaState is —
+// The alternative — threading it down from shell.qml the way LiveryState is —
 // buys nothing when there is nothing to keep in sync.
 //
 // FRAME AUTHORING RULES

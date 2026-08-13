@@ -37,7 +37,7 @@
 // — the old white legibility outline is dropped, since dark text on the
 // opaque sheet needs no halo (that outline was a relic of the old dark bar
 // and only muddied the type on cream).
-// One restrained STATE accent survives from the song (DrachmaState): the ACTIVE
+// One restrained STATE accent survives from the song (LiveryState): the ACTIVE
 // workspace note-head fills with paletteAccent, the BLOCKED ✎ pulse + low battery
 // go glitchPink, and open/hover toggles (volume) flash paletteAccent.
 // Everything at rest is black.

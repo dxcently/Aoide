@@ -12,7 +12,7 @@
 # different reasons:
 #
 #   LOOK / SHAPE  → modules/facets/compositor/default.nix
-#     Anything derived from `aoide.drachma`: border colours, gaps, rounding,
+#     Anything derived from `aoide.livery`: border colours, gaps, rounding,
 #     blur, the aoide-* layerrules, hyprglass, the kitty opacity/rounding
 #     rules. Re-riced whenever the song changes. That file also owns the
 #     session plumbing (programs.hyprland, the systemd/Wayland env handoff,
@@ -22,20 +22,20 @@
 #     What you want no matter what the desktop looks like: keybinds, input
 #     devices, tiling layout, misc quality-of-life, and behavioural window
 #     rules (float/workspace-assignment/idle — as opposed to the *appearance*
-#     window rules, which are drachma's business and stay in the facet).
+#     window rules, which are livery's business and stay in the facet).
 #     Swapping songs must never disturb any of it.
 #
-# A facet MAY read `aoide.drachma` and is a render surface (CONTRACTS.md §2);
-# this module reads no drachma and renders nothing, so it is a dendrite — the
+# A facet MAY read `aoide.livery` and is a render surface (CONTRACTS.md §2);
+# this module reads no livery and renders nothing, so it is a dendrite — the
 # same shape these binds had in dxflake before the port.
 #
 # ── Ordering inside hyprland.conf ─────────────────────────────────────────────
 # Several modules contribute to one `extraConfig` (a `lines` option, so they
 # concatenate by merge order, NOT by import order):
-#   500  mkBefore  compositor facet    — drachma values first
+#   500  mkBefore  compositor facet    — livery values first
 #   1000 (default) THIS FILE           — behaviour
 #   1000 (default) screenshot dendrite — its own SUPER+S binds
-# Plain (unordered) is deliberate: the drachma block must land first so these
+# Plain (unordered) is deliberate: the livery block must land first so these
 # behaviour keys are never overwritten by it. (The quickshell facet is NOT a
 # writer here — it autostarts the shell as a systemd user service, not an
 # exec-once, so nothing of its lands in hyprland.conf.)
@@ -85,7 +85,7 @@ in
         # ── Tiling layout ─────────────────────────────────────────────────────
         # `layout` is behaviour, so it lives here — while the sibling
         # general{} keys the facet writes (gaps, border_size, col.*_border) are
-        # drachma-derived look. hyprlang merges repeated sections, so both
+        # livery-derived look. hyprlang merges repeated sections, so both
         # blocks coexist; keep the split by KEY, not by section name.
         general {
             layout = dwindle

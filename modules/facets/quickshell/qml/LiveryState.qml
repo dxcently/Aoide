@@ -1,14 +1,11 @@
-// DrachmaState.qml — shared note state, hot-reloaded from stage/livery.json.
+// LiveryState.qml — shared note state, hot-reloaded from stage/livery.json.
 //
 // Singleton: every surface widget binds to properties here. When the note
 // file is atomically replaced (write-temp-then-rename per CONTRACTS.md §4),
 // the FileView fires a change signal and all bindings update in one pass —
-// the full arrangement hot-reloads without a QML restart. The canonical file
-// is livery.json; the legacy drachma.json mirror (LIVERY-MERGE.md §2.3) is
-// the fallback, so a fresh shell that starts before any new write still
-// finds the file the old seed left. The singleton FILE name stays
-// DrachmaState.qml for now — only the stage path constant switched; the QML
-// file rename is deferred.
+// the full arrangement hot-reloads without a QML restart. The canonical
+// file is livery.json, sole source since LIVERY-MERGE Phase 4 dropped the
+// legacy mirror.
 //
 // Note schema v0 (CONTRACTS.md §1): palette + bar.* / notif.* / window.*
 // All values are concrete hex strings (fallbacks already applied by the note
@@ -24,13 +21,8 @@ QtObject {
     // ── Note file path ─────────────────────────────────────────────────────
     // Stage path: ~/Aoide/song/stage/livery.json (gitignored runtime; the nix
     // build never depends on this path — checks.no-song-read enforces that).
-    // The legacy mirror stage/drachma.json (LIVERY-MERGE.md §2.3) is the
-    // fallback: a pre-livery writer/reader set keeps rendering until the
-    // first livery write lands.
     readonly property string notePath:
         Quickshell.env("HOME") + "/Aoide/song/stage/livery.json"
-    readonly property string legacyNotePath:
-        Quickshell.env("HOME") + "/Aoide/song/stage/drachma.json"
 
     // ── Parsed note object ─────────────────────────────────────────────────
     property var raw: ({
@@ -238,15 +230,11 @@ QtObject {
         return "resets in " + m + "m"
     }
 
-    // ── File watcher — atomic hot-reload with legacy fallback ─────────────
+    // ── File watcher — atomic hot-reload ─────────────────────────────────
     // Declared as a property (not a default-child) because QtObject has no
-    // default property — nesting it directly fails to load. The canonical
-    // FileView watches livery.json; the legacy FileView watches the
-    // drachma.json mirror and only supplies `raw` while the canonical file
-    // has not loaded yet (a fresh shell before the first livery write) — once
-    // the canonical loads it is the sole source (Phase 4 drops this watcher
-    // with the mirror).
-    property bool canonicalLoaded: false
+    // default property — nesting it directly fails to load. The FileView
+    // watches livery.json, the sole stage note file since LIVERY-MERGE
+    // Phase 4.
     property FileView noteFile: FileView {
         id: noteFile
         path: root.notePath
@@ -257,29 +245,11 @@ QtObject {
             if (!txt) return
             try {
                 var parsed = JSON.parse(txt)
-                root.canonicalLoaded = true
                 root.raw = parsed
             } catch (e) {
                 console.warn("[aoide/notes] Failed to parse livery.json:", e)
             }
         }
         Component.onCompleted: noteFile.reload()
-    }
-    property FileView legacyNoteFile: FileView {
-        id: legacyNoteFile
-        path: root.legacyNotePath
-        watchChanges: true
-        onFileChanged: legacyNoteFile.reload()
-        onTextChanged: {
-            var txt = legacyNoteFile.text()
-            if (!txt) return
-            try {
-                var parsed = JSON.parse(txt)
-                if (!root.canonicalLoaded) root.raw = parsed
-            } catch (e) {
-                console.warn("[aoide/notes] Failed to parse legacy drachma.json:", e)
-            }
-        }
-        Component.onCompleted: legacyNoteFile.reload()
     }
 }

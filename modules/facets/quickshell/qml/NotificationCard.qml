@@ -16,7 +16,7 @@
 //                genuinely unornamented, which is what makes it read as its
 //                own order rather than a knockoff of the other four).
 //   · SIGNATURE — base0F (rust), the one accentSpread slot none of the four
-//                dock temples claims (DrachmaState.qml's own comment already
+//                dock temples claims (LiveryState.qml's own comment already
 //                calls it "unnamed elsewhere"). Critical urgency overrides
 //                the signature to notifUrgent (terracotta) throughout.
 //   · CROWN    — ❧ (a rotated floral heart / printer's notice-ornament,

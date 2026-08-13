@@ -19,7 +19,7 @@ Communication discipline: Quickshell reads state files from shellbridge and issu
 ## Implementation
 
 The QML skeleton is shipped in `modules/facets/quickshell/qml/`. Two singletons
-carry the shared session state: **`DrachmaState`** watches `stage/livery.json` via a
+carry the shared session state: **`LiveryState`** watches `stage/livery.json` via a
 `FileView` and re-binds every surface's colours in one pass on an atomic
 replace (the hot-reload); **`ShellBridge`** is the unix-socket client — the sole
 outbound channel from QML (`focusSession(address)` → shellbridge → hyprctl), no

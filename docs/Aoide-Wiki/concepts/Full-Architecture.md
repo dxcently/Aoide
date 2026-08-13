@@ -111,7 +111,7 @@ trail but exit 64 today.
   song/stage/livery.json   hyprctl    terminal OSC        hyprland.conf · QML colors ·
           │              keywords   (color inject)      base16 for every nix app
           ▼
-   Quickshell — DrachmaState.qml watches the stage file (hot-reload)
+   Quickshell — LiveryState.qml watches the stage file (hot-reload)
    [[Quickshell]]
       │  ▲
       │  └── reads song/stage/{sessions,hooks,graph}.json (roster + DAG surfaces)
@@ -162,7 +162,7 @@ format; [[livery]] (native Rust in `crates/song/src/livery/`; verbs `lint` /
    └─ osc: terminal color inject        GTK/Qt · terminal · editors
              │                          · browser · boot  (needs rebuild)
              ▼
-   Quickshell hot-reload (DrachmaState.qml)
+   Quickshell hot-reload (LiveryState.qml)
 ```
 
 Rehearsal is the sketch (hot-reloads, no rebuild); recording is the truth
@@ -176,7 +176,7 @@ The baked side is carried by the three facets, all real:
   sessionGraph); QML rsyncs from the store into the gitignored
   `~/Aoide/run/qml/` via home-manager activation (source stays
   `modules/facets/quickshell/qml/`; no `qml/` at the repo root);
-  `DrachmaState.qml` watches the stage file for the live fan-out. Eight of
+  `LiveryState.qml` watches the stage file for the live fan-out. Eight of
   the nine carry a live QML body: `AoideBar.qml` is the bar (its own popouts
   also carry the calendar and now-playing gadgets); `AoideLauncher.qml` is
   the keyboard-driven launcher (`SUPER+SPACE`); `AoideNotifications.qml` +

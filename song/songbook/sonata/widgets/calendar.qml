@@ -12,9 +12,9 @@
 //                date). None of the four dock temples or HERALD's Tuscan
 //                claims it.
 //   · SIGNATURE — `notes.base09`, kiln-fired clay orange — sonata's own
-//                 unclaimed accentSpread slot (DrachmaState.qml's comment
+//                 unclaimed accentSpread slot (LiveryState.qml's comment
 //                 already calls it "unnamed elsewhere", same slot HERALD's
-//                 Tuscan sibling base0F sits beside). No DrachmaState change
+//                 Tuscan sibling base0F sits beside). No LiveryState change
 //                 needed — base09 already resolves with a paletteAccent
 //                 fallback.
 //   · CROWN    — 𝄴 (U+1D134, common-time signature) stands in for a clef,

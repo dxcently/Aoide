@@ -80,7 +80,7 @@ A narrower, sibling mechanism to the make-a-widget loop above: not the agent
 building a *new* capability, but a **song** ([[Song-Anatomy]]) replacing a
 piece of *existing* chrome with its own QML. **The staging engine**
 (`StagingEngine.qml`) resolves the active song's livery tokens
-(`DrachmaState`/`notes`) to per-slot QML; **`WidgetSlot.qml`** is the fixed
+(`LiveryState`/`notes`) to per-slot QML; **`WidgetSlot.qml`** is the fixed
 per-slot anchor a host surface embeds, which asks the engine whether the
 active song dressed that slot and loads its file, or falls back to shared
 chrome. Two slots are live today: `calendar` (`AoideBar`'s calendar popout)
@@ -108,7 +108,7 @@ widget file follows: an `Item` root (`WidgetSlot` sizes off its
 anchor unconditionally, any slot-specific extras declared as their own
 `required property`, and never `config.*`.
 
-Because `DrachmaState.songName` is what `aoide rice preview <name>` stages,
+Because `LiveryState.songName` is what `aoide rice preview <name>` stages,
 switching the previewed song **hot-swaps every `WidgetSlot`'s loaded body
 live — no rebuild, no restart** — the same preview-without-rebuild
 discipline as the rice loop itself ([[Self-Ricing]]), just applied to widget
@@ -117,7 +117,7 @@ set still needs a rebuild (the facet has to know to copy them); swapping
 which already-carried song is active does not.
 
 **Containment invariant** (`CONTRACTS.md §5`): a loaded song widget receives
-only `notes` (`DrachmaState`) and `bridge` (`ShellBridge`), plus whatever
+only `notes` (`LiveryState`) and `bridge` (`ShellBridge`), plus whatever
 slot-specific extras the anchor declares (e.g. notifications' `notification`)
 — never nix `config.*`. This doesn't loosen the song-shape rule elsewhere in
 this page: a song's `rice.nix` still sets only `aoide.livery`; widget bodies

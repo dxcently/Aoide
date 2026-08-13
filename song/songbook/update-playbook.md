@@ -45,7 +45,7 @@ aoide rice preview <name>
 ```
 
 This stages `<name>`'s `livery.json` (with `song` injected) into
-`song/stage/livery.json`; `DrachmaState.qml` hot-reloads it, and every
+`song/stage/livery.json`; `LiveryState.qml` hot-reloads it, and every
 `WidgetSlot` re-resolves against the new `songName` — a song's calendar/
 notifications body swaps with no restart, exactly like its colours do.
 
@@ -53,24 +53,24 @@ An unauthored slot has no fallback for `calendar` (the bar's popout simply
 doesn't open) and falls back to the shared chrome for `notifications` (the
 existing `NotificationCard`).
 
-## Migration — the livery rename (drachma → livery)
+## Migration — the livery rename
 
 The livery merge (LIVERY-MERGE.md) renamed the note engine and its whole
 surface. The schema shape is unchanged (still v0 — no version bump), so this
-is a namespace/file rename, not a content migration:
+was a namespace/file rename, not a content migration:
 
-- **Option namespace:** `aoide.drachma.*` → `aoide.livery.*`. A
-  `lib.mkRenamedOptionModule [ "aoide" "drachma" ] [ "aoide" "livery" ]`
-  alias in `modules/nucleus/options.nix` keeps any out-of-tree host or stale
-  songbook `rice.nix` that still sets `aoide.drachma` evaluating during the
-  transition; drop the alias once it closes.
-- **Songbook data file:** `song/songbook/<song>/drachma.json` →
+- **Option namespace:** the option namespace moved to `aoide.livery.*`. A
+  `lib.mkRenamedOptionModule` alias in `modules/nucleus/options.nix` kept any
+  out-of-tree host or stale songbook `rice.nix` that still set the old name
+  evaluating during the transition; the alias was dropped when Phase 4 closed
+  the window.
+- **Songbook data file:** the per-song note file is now
   `song/songbook/<song>/livery.json`.
 - **Live stage file:** `song/stage/livery.json` is canonical. During the
-  transition window, writers mirror to `song/stage/drachma.json` and readers
-  fall back to it when `livery.json` is absent, so a running desktop never
-  reads a missing stage file; the mirror + fallback are dropped when the
-  transition closes (Phase 4 of the merge plan).
+  transition window writers mirrored to a legacy stage name and readers fell
+  back to it when `livery.json` was absent, so a running desktop never read a
+  missing stage file; the mirror + fallback were dropped when Phase 4 closed
+  the transition window.
 
 ## What this playbook does NOT cover
 

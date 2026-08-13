@@ -593,3 +593,16 @@ The dev workstream landed the livery merge (LIVERY-MERGE.md, Phases 1–3): the 
 - **Docs outside the wiki**: `CONTRACTS.md` (§1/§4/§5 + the stage-file compat note), `AGENTS.md` (#5), `README.md`, `docs/architecture/PACKAGE-LAYOUT.md`, `docs/BUILD.md`, `docs/architecture/aoide-report.html` (+ one changelog ledger line), `song/songbook/update-playbook.md` (+ the migration note).
 
 Pages updated: [[livery]] (renamed entity), SCHEMA.md, Overview.md, `ingest/index.md`, [[Full-Architecture]], [[Codebase]], [[Lexicon]], [[Snowflake-Anatomy]], [[Package-Layout]], [[Song-Anatomy]], [[Song-Vocabulary]], [[Ricing-Protocol]], [[Self-Ricing]], [[aoide-cli]], [[Quickshell]], [[Stylix]], [[shellbridge]], [[Hyprland]], [[Widget-Maker]], [[Widget-Bridge-Contract]], [[Feature-Set]], [[Gadget-Dock]], [[Desktop-Architecture]], [[Session-Graph]], [[Terminal-Commander]], [[Conductor-3D-DAG]], [[Agent-Interface]], [[Fork-and-Run]], [[Governance]], `protocol/AOIDE-DEV.md` (mentions only — §7 flags untouched in structure), `protocol/OPERATIONS/{Assertion,Wikilinks}.md`. No pages added or removed; manifest file count unchanged.
+
+## [2026-08-13] refactor | livery merge Phase 4 — transition window closed (working tree, uncommitted)
+
+The dev workstream executed Phase 4 of the livery merge (LIVERY-MERGE.md): the transition window is closed and the compat scaffolding is gone.
+
+- **Mirror write dropped** — `aoide rice preview` no longer writes `stage/drachma.json` (both the write and its error arm are gone), and the quickshell facet's `aoideSeedStage` seed script writes only `song/stage/livery.json`. `song/stage/drachma.json` (gitignored runtime state) is deleted.
+- **Fallback reads dropped** — the conductor's `stage_notes_path` returns `dir/livery.json` unconditionally (no existence probe); the staged no-arg reads in `rice.rs` `resolve_rice_notes` and `commands/livery.rs` `resolve_notes` retarget to `livery.json`; `conductor/src/ui.rs` status row reads `livery.json`; the QML singleton's legacy FileView fallback is removed.
+- **Option alias dropped** — the `lib.mkRenamedOptionModule [ "aoide" "drachma" ] [ "aoide" "livery" ]` alias is deleted from `modules/nucleus/options.nix`; `aoide.drachma` no longer evaluates.
+- **QML file rename** — `DrachmaState.qml` → `LiveryState.qml` (git mv), including the two code instantiations (`shell.qml`, `ConductorPreview.qml`) and every comment reference across the QML tree.
+- **Comment sweep** — stale `drachma` mentions updated to `livery` across `song/song.md`, the sonata/default design docs, `CONTRACTS.md`, `docs/BUILD.md`, the wiki ([[livery]] transition-window lines to past tense, [[Quickshell]], [[Full-Architecture]], [[Widget-Maker]], `AOIDE-DEV.md` §7 flag → [landed + switched], `.obsidian/workspace.json`), `modules/nucleus/shellbridge.nix`, `modules/dendrites/hyprland.nix`, and `hosts/yomi-strix/default.nix`. `schema --json` changes by exactly one line (the `livery.lint` summary drops its parenthetical).
+- **Dated entries below keep the old spellings** — immutable history, per the 2026-07-27 lint convention; the [[livery]] aliases keep the old names resolving.
+
+Gated: `cargo test --workspace` green; yomi-strix toplevel build green; `nix flake check` incl. vm-boot green; `qs -p shell.qml` loads (LiveryState resolves). Committed and switched 2026-08-13, per house rule 2.

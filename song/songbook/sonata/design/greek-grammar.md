@@ -387,7 +387,7 @@ pose, shared by both pools.
 Each temple has a **preview sibling** (`ConductorPreview`, `TerminalsPreview`,
 `MetersPreview`, `PowerPreview`): a standalone `qs -p` harness that floats just
 that gadget on an overlay surface for a screenshot, carrying a stub gold-marble
-palette (hex values sanctioned here only — they mirror the drachma roles) and
+palette (hex values sanctioned here only — they mirror the livery roles) and
 a stub bridge. The
 roster pair honour `QS_STAGE` to exercise the empty state; Meters/Power read
 the machine's real `/proc` + UPower live. They are development fixtures, not
@@ -541,9 +541,9 @@ speculative code.
   `$out/qml/songs/manifest.json` (`{ "<name>": ["<slot>", …] }`) — ALL songs'
   bodies land on disk at once, which is what makes cross-song live preview
   possible at all.
-- **Runtime resolution:** `DrachmaState.qml`'s `songName` property reads an
+- **Runtime resolution:** `LiveryState.qml`'s `songName` property reads an
   **additive** `song` field `aoide rice preview <name>` now injects into
-  staged `drachma.json` (CONTRACTS.md §4 — no schema version bump; the same
+  staged `livery.json` (CONTRACTS.md §4 — no schema version bump; the same
   additive precedent as `parentSessionId`). The staging engine (`StagingEngine.qml`) reads the
   manifest (`has`/`source`); `WidgetSlot.qml` is the fixed per-slot anchor —
   it resolves the song's file when authored, else falls back to shared chrome
@@ -558,14 +558,14 @@ speculative code.
   shared `NotificationCard` — every card renders via that fallback this pass,
   since no song has authored `widgets/notifications.qml` yet).
 - **Containment:** widget QML is store-copied score, like cover art — at
-  runtime it sees only `DrachmaState` (`notes`) + `ShellBridge` (`bridge`),
+  runtime it sees only `LiveryState` (`notes`) + `ShellBridge` (`bridge`),
   plus a slot's declared extras (`notifications`' `notification`), never nix
   `config.*` — a song stays structurally incapable of leaking host/facet
   options through this surface (CONTRACTS.md §5 holds, unchanged: a song's
-  `rice.nix` still sets **only** `aoide.drachma`).
+  `rice.nix` still sets **only** `aoide.livery`).
 - **Touched:** `modules/facets/quickshell/default.nix`,
   `pkgs/aoide/src/dispatch.rs` (`handle_rice_preview`),
-  `DrachmaState.qml` (new `songName`), the staging engine (`StagingEngine.qml` + `WidgetSlot.qml`)
+  `LiveryState.qml` (new `songName`), the staging engine (`StagingEngine.qml` + `WidgetSlot.qml`)
   (new), `AoideBar.qml`, `AoideNotifications.qml`, `shell.qml`,
   `song/songbook/{default,sonata}/widgets/calendar.qml` (new proof stubs),
   `song/songbook/update-playbook.md` (new). **Confirmed not needed** (as

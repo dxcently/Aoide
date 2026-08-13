@@ -34,7 +34,7 @@ Constants (the tunable seam — all in `GadgetFrame.qml`):
 | `depthOpacity2` | 0.18  | far copy border opacity                  |
 | `depthExtent`   | =off2 | headroom a clipping container must add   |
 
-Border color is always `drachma.paletteAccent`; radius matches the panel (4 for
+Border color is always `livery.paletteAccent`; radius matches the panel (4 for
 gadget frames, 6 for the dock container body).
 
 **Where it lives:**
@@ -149,8 +149,8 @@ The Pantheon effect at full strength:
 
 ## 5. The multicolor field, and the bar in the same grammar
 
-- **base16 through the drachma seam**: the stage drachma carries an optional
-  all-or-nothing `base16` block (drachma-validated). DrachmaState maps four
+- **base16 through the livery seam**: the stage livery carries an optional
+  all-or-nothing `base16` block (livery-validated). LiveryState maps four
   semantic roles from it — `wireCyan` (base0C, structural outlines/leaders),
   `holoBlue` (base0D, depth-stack back copies + link callouts), `violet`
   (base0E, DAG project volumes), `glitchPink` (base08, urgent/glitch) — each

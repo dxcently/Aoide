@@ -18,11 +18,11 @@ photo; the wallpaper switcher handles photos live (see the Iteration Log)
 
 sonata is the light key currently performed on yomi-strix. Any host in the
 fleet performs it with one line — `aoide.song = "sonata";` — and the whole
-`aoide.drachma` fan-out swaps with zero other edits.
+`aoide.livery` fan-out swaps with zero other edits.
 
 ## Host-agnostic by construction
 
-This song sets ONLY `aoide.drachma`. It names no host, enables no facet or
+This song sets ONLY `aoide.livery`. It names no host, enables no facet or
 dendrite, touches no hardware or service, and does not key `stylix.polarity`
 (the stylix facet pins polarity light — a song cannot flip it). The venue
 (host) decides its instruments; sonata carries only the notes. That is exactly
@@ -115,7 +115,7 @@ bare running text.
 
 How the key reads on yomi-strix — sonata's instantiation of its house grammar
 (`design/greek-grammar.md`). The glass alphas are facet/dendrite constants, not
-drachma notes; they are tuned against THIS key and recorded here as its design
+livery notes; they are tuned against THIS key and recorded here as its design
 memory. The colour values below are the re-keyed Greek notes; the drawn shapes
 update when the greek-grammar reskin lands (the palette re-key ships first, the
 widget reskin follows as its blueprint directs):
@@ -204,9 +204,9 @@ text on the wallpaper, so no outline treatment is in use.
   **teal** `#3f867e` (was marble-shade `#e8dfcc`) — the focused window now
   matches the bar's gold chrome, the unfocused window recedes to a cool teal
   instead of near-vanishing into the marble ground. Edited in both
-  `drachma.json` and `rice.nix` (kept in sync). The compositor facet
+  `livery.json` and `rice.nix` (kept in sync). The compositor facet
   (`modules/facets/compositor/default.nix:42-44,72-73`) already derives
-  `col.active_border`/`col.inactive_border` from `aoide.drachma.window.border`/
+  `col.active_border`/`col.inactive_border` from `aoide.livery.window.border`/
   `.borderInactive` (falling back to `palette.accent`/`palette.bg` when a song
   leaves them null) — no compositor-side change was needed, the pipeline just
   picked up the new song-owned notes.
