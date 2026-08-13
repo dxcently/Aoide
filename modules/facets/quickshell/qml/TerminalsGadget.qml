@@ -31,6 +31,13 @@ import Quickshell.Io
 //   · COLUMNS — slimmer fluted twin-groove ║ pilasters, not the solid │.
 //   · FRAME   — scroll-cornered box (╭ ╮ ╰ ╯), echoing the volutes.
 //   · HEADER  — the inscription is centred beneath the capital, temple-front.
+//   · ROWS    — TWO row silhouettes, not one card design: a bare tty stays a
+//               slim ledger line (command · state · vitals · ground); an AGENT
+//               terminal (claude/kimi/pi…) wears a serif nameplate + model
+//               byline and a fixed SCREEN-PANE inset — a prompt line carrying
+//               the live tool plus a three-line transcript preview. Both
+//               silhouettes are constant-height per kind (reserved lanes), so
+//               streaming data never reflows the roster.
 // The one laurel-`paletteHot` crown (the traced session) stays a pantheon-wide
 // signal, identical across temples. The music state colours stay shared too —
 // a "working" note reads the same in every house; only the architecture differs.
@@ -165,15 +172,6 @@ Item {
         if (parts.length <= 4) return p;
         return "…/" + parts.slice(-4).join("/");
     }
-    // a shell prompt — the terminal reads its own cwd (or, lacking one, its window
-    // title) back. Plain untracked terminals often have no stage cwd, so the live
-    // window title stands in.
-    function promptFor(rec) {
-        var where = rec && rec.cwd ? gadget.shortCwd(rec.cwd)
-                                   : (rec && rec.title ? rec.title : "");
-        return (rec && rec.agent ? rec.agent : "sh") + " " + where + " $";
-    }
-
     // ── The windowed roster: filter + de-dupe the stage records ──────────────────
     // One row per real terminal window (de-duped by window address). A record with
     // NO window address yet (a `sub:` node, or an agent hook-registered before its
@@ -592,19 +590,32 @@ Item {
                     }
                 }
 
-                ListView {
-                    id: roster
+                Flickable {
+                    id: flick
                     anchors.fill: parent
                     visible: gadget.rows.length > 0
-                    model: gadget.rows
-                    spacing: 0
-                    boundsBehavior: Flickable.StopAtBounds
                     clip: true
+                    contentWidth: width
+                    contentHeight: playbill.height
+                    boundsBehavior: Flickable.StopAtBounds
+                    flickDeceleration: 3500
 
-                    delegate: Item {
-                        id: row
-                        width: roster.width
-                        // grows to fit name · activity · prompt (52 floor).
+                    Column {
+                        id: playbill
+                        width: flick.width - 6    // slim gutter for the scrollbar
+                        spacing: 3
+
+                        Repeater {
+                            model: gadget.rows
+
+                            delegate: Item {
+                                id: row
+                                required property var modelData
+                                width: parent.width
+                        // TWO constant silhouettes (see the ROWS note in the
+                        // header): a bare tty settles at the 52 floor; an agent
+                        // row adds the fixed screen pane — taller, but just as
+                        // constant. Live data streaming in never moves either.
                         height: Math.max(52, body.implicitHeight + 16)
 
                         // an emph row must have a real sessionId — plain untracked
@@ -615,17 +626,26 @@ Item {
                         property bool working:  gadget.isWorking(modelData.state)
                         property color accent: emph ? notes.paletteHot
                                                     : gadget.stateColor(modelData.state)
+                        // the roster's ONE structural fork: an AGENT terminal
+                        // (claude/kimi/pi… — recKind falls back to agent!="shell")
+                        // vs a bare tty. Agents wear the serif nameplate + model
+                        // byline + screen pane + context meter; bare ttys stay
+                        // slim ledger lines.
+                        readonly property bool agentRow: gadget.isAgentRec(modelData)
                         readonly property string activityText: modelData.activity || ""
-                        // the row's MAIN label: what the terminal is running — the
-                        // foreground command / file being edited (`nvim notes.md`,
-                        // `cargo test`), or the shell/agent process itself when idle
-                        // (`bash`, `claude`). The dir rides below as subtext.
+                        // a BARE tty's main label: the foreground command / file
+                        // being edited (`nvim notes.md`, `cargo test`), or the
+                        // shell process itself when idle (`bash`). An agent row's
+                        // main label is its NAME instead — its activity moves
+                        // into the screen pane's prompt line.
                         readonly property string procText: activityText.length > 0
                                                            ? activityText
                                                            : (modelData.agent || "shell")
-                        // the agent's latest WORDS (transcript tail) — distinct
-                        // from procText (the process). Plain ttys stay silent.
-                        readonly property string sayText: modelData.say || ""
+                        // the agent's latest WORDS (transcript tail), flattened —
+                        // the tail may carry newlines, and the pane's three-line
+                        // budget is spent on wrapped prose, not blank runs.
+                        // Plain ttys stay silent (the daemon never says for them).
+                        readonly property string sayFlat: ("" + (modelData.say || "")).replace(/\s+/g, " ")
                         // the live Hyprland workspace this row sits on — a plain
                         // arabic number tag (NOT a note-glyph); -1 = none yet.
                         readonly property int wsId: (modelData.workspace !== undefined
@@ -647,42 +667,70 @@ Item {
                                                 modelData.workspace !== undefined ? modelData.workspace : -1);
                         }
 
-                        Rectangle {                    // staff ledger line
-                            anchors.bottom: parent.bottom
-                            width: parent.width; height: 1
-                            color: gadget.withA(gadget.sig, 0.28)
-                        }
-                        Rectangle {                    // emphasis / hover wash
-                            anchors.fill: parent; anchors.bottomMargin: 1
-                            color: row.emph ? gadget.withA(notes.paletteHot, 0.10)
-                                            : (hover.containsMouse ? gadget.withA(gadget.sig, 0.09)
-                                                                   : "transparent")
+                        // the row plaque — ground + hairline, the Conductor's
+                        // card idiom carried over at the same weights (fill
+                        // 0.035, hover 0.10, laurel 0.05, awaiting border 0.75)
+                        // but keyed AEGEAN: the hairline is sig-based, one step
+                        // under the screen pane's own 0.30 bezel so the pane —
+                        // the widget's main focus — still sits a breath forward.
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 0
+                            color: hover.containsMouse
+                                   ? gadget.withA(gadget.sig, 0.10)
+                                   : (row.emph ? gadget.withA(notes.paletteHot, 0.05)
+                                               : gadget.withA(notes.paletteFg, 0.035))
+                            border.width: 1
+                            border.color: (row.awaiting || row.needsSudo)
+                                          ? gadget.withA(notes.paletteUrgent, 0.75)
+                                          : gadget.withA(gadget.sig, 0.28)
                         }
                         Rectangle {                    // laurel-green crown (the one standout)
                             anchors.left: parent.left; anchors.top: parent.top
-                            anchors.bottom: parent.bottom; anchors.bottomMargin: 1
+                            anchors.bottom: parent.bottom
                             width: 3; color: notes.paletteHot; visible: row.emph
                         }
 
-                        // the note, hung on a slim fluted twin-groove column
+                        // the note, set in a carved niche on the fluted twin-
+                        // groove column. The grooves are DRAWN (two 2px bars),
+                        // not the 38px ║ glyph: a glyph neither spans a tall
+                        // agent row nor clears the note riding on it — drawn
+                        // flutes run the row's full height on every silhouette
+                        // and break around a reserved niche, so column and note
+                        // never collide (the lamp-box discipline, column-shaped).
                         Item {
                             id: gutter
                             anchors.left: parent.left; anchors.leftMargin: 12
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 26; height: parent.height
-                            Text {
-                                anchors.centerIn: parent
-                                text: "║"
-                                font.family: gadget.faceMono; font.pixelSize: 38
-                                color: row.emph ? gadget.withA(notes.paletteHot, 0.9)
-                                                : gadget.withA(gadget.sig, 0.5)
-                            }
+                            anchors.top: parent.top; anchors.topMargin: 1
+                            anchors.bottom: parent.bottom; anchors.bottomMargin: 1
+                            width: 26
+
+                            // niche centred on the note's optical seat (the -11
+                            // lift below), half-height 13 → a 26px opening.
+                            readonly property real nicheTop: height / 2 - 24
+                            readonly property real nicheBot: height / 2 + 2
+                            // an agent terminal's flute stands a shade
+                            // brighter — the scan-cue for which columns
+                            // hold agents (the traced crown still wins).
+                            readonly property color flute:
+                                row.emph ? gadget.withA(notes.paletteHot, 0.9)
+                                         : gadget.withA(gadget.sig, row.agentRow ? 0.75 : 0.5)
+
+                            Rectangle { x: 9;  y: 0; width: 2; color: gutter.flute
+                                        height: Math.max(0, gutter.nicheTop) }
+                            Rectangle { x: 14; y: 0; width: 2; color: gutter.flute
+                                        height: Math.max(0, gutter.nicheTop) }
+                            Rectangle { x: 9;  y: gutter.nicheBot; width: 2; color: gutter.flute
+                                        height: Math.max(0, gutter.height - gutter.nicheBot) }
+                            Rectangle { x: 14; y: gutter.nicheBot; width: 2; color: gutter.flute
+                                        height: Math.max(0, gutter.height - gutter.nicheBot) }
+
                             Text {
                                 id: noteGlyph
                                 anchors.centerIn: parent
                                 // Noto Music seats the notehead low in a tall em
                                 // box; lift it to sit between the two text lines.
-                                anchors.verticalCenterOffset: -4
+                                anchors.verticalCenterOffset: -11
                                 text: gadget.glyphFor(modelData.state)
                                 font.family: gadget.faceMusic; font.pixelSize: 25
                                 color: row.accent
@@ -705,19 +753,27 @@ Item {
                             Item {
                                 width: parent.width
                                 height: procName.height
-                                Text {                     // the PROCESS / command / file being edited
+                                Text {                     // the MAIN label — two voices: an
+                                                            // agent row wears its NAME carved
+                                                            // in serif (claude, pi — the tool
+                                                            // line lives in the screen pane);
+                                                            // a bare tty keeps the mono
+                                                            // foreground command.
                                     id: procName
                                     anchors.left: parent.left
                                     // the state tag + lock badge claim their space
                                     // FIRST (pinned to the row's right edge below);
-                                    // the process name elides into the rest (a
-                                    // fixed reserve let a long command push either
-                                    // tag off the right edge).
+                                    // the label elides into the rest — the whole
+                                    // left run is the name's now, the model
+                                    // byline moved down to the screen pane's
+                                    // prompt line (idiom cell, not a crowded
+                                    // middle field).
                                     width: Math.max(24, Math.min(implicitWidth,
                                                     body.width - stateTag.slot - sudoBadge.slot))
                                     elide: Text.ElideRight
-                                    text: row.procText
-                                    font.family: gadget.faceMono; font.pixelSize: 14
+                                    text: row.agentRow ? (modelData.agent || "agent") : row.procText
+                                    font.family: row.agentRow ? gadget.faceSerif : gadget.faceMono
+                                    font.pixelSize: 14
                                     font.weight: row.emph ? Font.Bold : Font.Medium
                                     color: notes.paletteFg
                                 }
@@ -764,28 +820,102 @@ Item {
                                     }
                                 }
                             }
-                            // SAY — a claude terminal's latest words, tail-read from
-                            // its transcript by the bridge; dim quoted prose, up to
-                            // two lines. Hidden for plain ttys / a silent agent.
-                            Text {
+                            // ── the SCREEN PANE — agent rows only ─────────────
+                            // The genuine preview: a fixed 60px inset framed as
+                            // the agent's little terminal screen — a hairline
+                            // aegean bezel over a faint wash (radius 0). Line one
+                            // is the PROMPT: a `$` sigil + the live tool/command
+                            // on the tty (the agent process itself when nothing
+                            // is running). Under it, THREE reserved lines of the
+                            // agent's latest words, serif-italic quoted — the
+                            // transcript tail, wrapped, last line eliding. Both
+                            // lanes are FIXED: streaming text fills them, the
+                            // silhouette never moves. A silent agent holds the
+                            // pane with dim placeholders (the stable-silhouette
+                            // law); bare ttys skip the pane entirely (a Column
+                            // skips invisible children) and stay slim.
+                            Rectangle {
+                                id: screenPane
+                                visible: row.agentRow
                                 width: parent.width
-                                visible: row.sayText.length > 0
-                                text: "“" + row.sayText + "”"
-                                wrapMode: Text.WordWrap
-                                maximumLineCount: 2
-                                elide: Text.ElideRight
-                                font.family: gadget.faceSerif; font.italic: true
-                                font.pixelSize: 10
-                                color: gadget.withA(notes.paletteFg, 0.55)
+                                height: 60
+                                radius: 0
+                                color: gadget.withA(gadget.sig, 0.06)
+                                border.width: 1
+                                border.color: row.emph ? gadget.withA(notes.paletteHot, 0.45)
+                                                       : gadget.withA(gadget.sig, 0.30)
+
+                                Text {                     // the prompt sigil
+                                    id: promptSigil
+                                    x: 6; y: 4
+                                    text: "$"
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: gadget.withA(gadget.sig, 0.95)
+                                }
+                                Text {                     // the live tool / command —
+                                                            // flexible left field; narrows
+                                                            // to make room for modelCell
+                                                            // when the model is shown,
+                                                            // widens to fill when it's not.
+                                    anchors.left: promptSigil.right; anchors.leftMargin: 5
+                                    anchors.right: modelCell.visible ? modelCell.left : parent.right
+                                    anchors.rightMargin: 6
+                                    anchors.baseline: promptSigil.baseline
+                                    elide: Text.ElideRight
+                                    text: row.activityText.length > 0
+                                          ? row.activityText
+                                          : (modelData.agent || "agent")
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: gadget.withA(notes.paletteFg,
+                                                        row.activityText.length > 0 ? 0.85 : 0.45)
+                                }
+                                Text {                     // the MODEL — the agent's provenance,
+                                                            // relocated off the crowded identity
+                                                            // line into this idiom slot: a fixed
+                                                            // right cell sharing the prompt line,
+                                                            // baseline-matched to the $ sigil (not
+                                                            // centered against the whole pane). A
+                                                            // middle-elided view of the REAL model
+                                                            // id (never an invented short — pantheon
+                                                            // §4). Always co-occurs with the screen
+                                                            // pane itself (both agent-row-only), so
+                                                            // this can never orphan the display.
+                                    id: modelCell
+                                    visible: row.agentRow && (modelData.model || "").length > 0
+                                    anchors.right: parent.right; anchors.rightMargin: 6
+                                    anchors.baseline: promptSigil.baseline
+                                    width: 100
+                                    horizontalAlignment: Text.AlignRight
+                                    elide: Text.ElideMiddle
+                                    text: modelData.model || ""
+                                    font.family: gadget.faceMono; font.pixelSize: 9
+                                    color: gadget.withA(notes.paletteFg, 0.5)
+                                }
+                                Text {                     // the WORDS — 3 reserved lines
+                                    anchors.left: parent.left; anchors.leftMargin: 6
+                                    anchors.right: parent.right; anchors.rightMargin: 6
+                                    y: 20
+                                    height: 36
+                                    text: row.sayFlat.length > 0 ? "“" + row.sayFlat + "”" : "…"
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 3
+                                    elide: Text.ElideRight
+                                    lineHeight: 12
+                                    lineHeightMode: Text.FixedHeight
+                                    font.family: gadget.faceSerif; font.italic: true
+                                    font.pixelSize: 10
+                                    color: gadget.withA(notes.paletteFg,
+                                                        row.sayFlat.length > 0 ? 0.62 : 0.30)
+                                }
                             }
-                            // TALLY + MOOD — elapsed since the terminal opened, the
-                            // running model, the context-window meter, and the
-                            // Hyprland workspace it sits on, ALL sharing one line
-                            // with the animated mood face: the meta tags pack the
-                            // left (a Row so an invisible tag never leaves a gap),
-                            // the kaomoji stays pinned to the row's right edge —
-                            // same spot it always occupied, now beside its own
-                            // caption instead of astride the cwd path.
+                            // TALLY + MOOD — elapsed since the terminal opened and
+                            // (agent rows) the context-window meter, sharing one
+                            // line with the animated mood face: the meta tags pack
+                            // the left (a Row so an invisible tag never leaves a
+                            // gap), the kaomoji stays pinned to the row's right
+                            // edge. The model byline rode up to the identity line
+                            // and the workspace tag down to the ground line, so
+                            // the meter never fights the face for room.
                             Item {
                                 width: parent.width
                                 height: Math.max(metaRow.implicitHeight, kao.implicitHeight)
@@ -801,21 +931,13 @@ Item {
                                         font.family: gadget.faceMono; font.pixelSize: 11
                                         color: row.emph ? notes.paletteHot : gadget.sig
                                     }
-                                    Text {                     // the running Claude model, when known
-                                        anchors.baseline: elapsedText.baseline
-                                        visible: (modelData.model || "").length > 0
-                                        text: modelData.model || ""
-                                        font.family: gadget.faceMono; font.pixelSize: 10
-                                        color: gadget.withA(gadget.sig, 0.85)
-                                    }
                                     Text {                     // CONTEXT-WINDOW METER — bar + percent +
                                                                 // compact count, in the dock's existing
                                                                 // `[▓░]` ASCII-gauge grammar (AoideBar
                                                                 // battBar / MetersGadget barFill). Zero
                                                                 // footprint until an assistant turn has
                                                                 // produced a usage block: this Row skips
-                                                                // invisible children entirely, same as
-                                                                // the model tag right above it.
+                                                                // invisible children entirely.
                                         id: ctxTag
                                         anchors.baseline: elapsedText.baseline
                                         visible: (modelData.contextTokens || 0) > 0
@@ -825,13 +947,6 @@ Item {
                                         // song accent → paletteUrgent past ~85%, same threshold/
                                         // swap as the sudo badge's urgency grammar.
                                         color: notes.ctxColor(pct, gadget.sig)
-                                    }
-                                    Text {                     // the Hyprland workspace — plain number tag
-                                        anchors.baseline: elapsedText.baseline
-                                        visible: row.wsId >= 0
-                                        text: "ws" + row.wsId
-                                        font.family: gadget.faceMono; font.pixelSize: 10
-                                        color: gadget.withA(gadget.sig, 0.85)
                                     }
                                 }
                                 Text {
@@ -844,6 +959,9 @@ Item {
                                     // Text would drag metaRow's anchor around with
                                     // it every frame.
                                     width: 96
+                                    clip: true                 // a wide animation
+                                                                // frame can't paint
+                                                                // outside its box
                                     horizontalAlignment: Text.AlignRight
                                     // WORKING animates; every resting state holds
                                     // one pose. Terminals have no subagent concept
@@ -880,17 +998,32 @@ Item {
                                     }
                                 }
                             }
-                            // the DIR — the terminal's working directory, as subtext
-                            // (falls back to the window title for a cwd-less tty).
-                            // Alone on its own line now that the meta tags and the
-                            // kaomoji share the line above it.
-                            Text {
-                                id: cwdText
+                            // the GROUND line — WHERE the terminal lives: the cwd
+                            // (falls back to the window title for a cwd-less tty)
+                            // with the Hyprland workspace tag holding the right
+                            // corner, so "where" reads as one line on every row.
+                            Item {
                                 width: parent.width
-                                elide: Text.ElideMiddle
-                                text: gadget.shortCwd(modelData.cwd) || (modelData.title || "")
-                                font.family: gadget.faceMono; font.pixelSize: 10
-                                color: gadget.withA(gadget.sig, 0.95)
+                                height: cwdText.implicitHeight
+                                Text {                     // the Hyprland workspace — plain number tag
+                                    id: wsTag
+                                    anchors.right: parent.right
+                                    anchors.baseline: cwdText.baseline
+                                    visible: row.wsId >= 0
+                                    text: "ws" + row.wsId
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: gadget.withA(gadget.sig, 0.85)
+                                }
+                                Text {
+                                    id: cwdText
+                                    anchors.left: parent.left
+                                    anchors.right: wsTag.visible ? wsTag.left : parent.right
+                                    anchors.rightMargin: wsTag.visible ? 8 : 0
+                                    elide: Text.ElideMiddle
+                                    text: gadget.shortCwd(modelData.cwd) || (modelData.title || "")
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: gadget.withA(gadget.sig, 0.95)
+                                }
                             }
                         }
 
@@ -916,6 +1049,25 @@ Item {
                                     gadget.bridge.focusSession(modelData.sessionId);
                             }
                         }
+
+                            }
+                        }
+                    }
+                }
+
+                // slim aegean scrollbar in the roster gutter — functional
+                // scrolling either way; this is just the visible thumb.
+                Item {
+                    visible: flick.contentHeight > flick.height + 1
+                    anchors.top: flick.top; anchors.bottom: flick.bottom
+                    anchors.right: parent.right; anchors.rightMargin: 3
+                    width: 3
+                    Rectangle { anchors.fill: parent; color: gadget.withA(notes.paletteFg, 0.10) }
+                    Rectangle {
+                        width: parent.width
+                        y: flick.visibleArea.yPosition * parent.height
+                        height: Math.max(20, flick.visibleArea.heightRatio * parent.height)
+                        color: gadget.withA(gadget.sig, 0.75)
                     }
                 }
             }

@@ -32,45 +32,26 @@
 // Subagents hang beneath their nearest non-subagent ancestor (a └ hanger in
 // the gutter), clamped by climbing the parent chain.
 //
-// ── The 5-slot card template (a stable silhouette, not a grab-bag) ─────────
-// A MAIN card always shows the SAME five lines — absent data renders a dim
-// placeholder, never a collapsed slot, so every main plaque holds one
-// silhouette the eye can scan down:
-//   1 IDENTITY  lamp + name/title + kind tag (⟐ sub / ⇄ a2a) + ϟ hook tag ·
-//               wsN corner (main agents only)
-//   2 PROVENANCE the FULL model id (never abbreviated, ElideMiddle; a dim
-//               "—" placeholder when the record lacks one) — the model name
-//               is ALWAYS shown, for subagents too
-//   3 THINKING  a FIXED box (44px = four 10px lines on mains, 22px = two
-//               lines on subs) holding the live voice (▸ activity, else the
-//               italic “say …”, else a ϟ phase placeholder); text wraps and
-//               the LAST line elides — the fixed height IS the reserved
-//               thinking/tool lane, so random tool-usage text popping in
-//               never shifts the card
-//   4 CONTEXT   the house shade-glyph gauge `[▓▓▓▓░░░░░░] 47% · 95k / 1M tok`
-//               — THIS session's OWN window + token usage, never a rollup
-//   5 DIRECTORY the cwd breadcrumb on its own right-anchored line, ElideLeft
-// The right cluster reads right→left and is TOP-anchored in the thinking box:
-// the clipped kaomoji face (116px) ← the elapsed uptime clock (48px, pins the
-// box's top-right corner) ← sudo. Same offsets on every card, one column of
-// clocks, one column of faces.
+// ── The card layout ──────────────────────────────────────────────────────
+// See SessionCard's own header comment (near its declaration, below) for
+// the current per-row layout — kept there and not duplicated here so this
+// section can't drift out of sync with the component again.
 //
 // ── Reserved space (the anchoring law — text AND animations) ───────────────
-// Two animated elements, two reserved side-anchored boxes. The LAMP (the §2
-// contract: ♪ 𝄐 𝄼 𝄽 𝄂 · state colours — working pulses via a scale animation,
-// awaiting breathes via an opacity animation) lives INSIDE a fixed 16px box at
-// the card's top-left; both animations are confined to the box — nothing
-// floats, no layout shift. The KAOMOJI TROUPE lives inside the fixed 116px
-// clipped box at the thinking slot's top-right; its frames swap text, never
-// geometry. The thinking slot itself is a fixed-height reserved lane. Every
-// free-length string elides against a fixed partner: name vs tags, model id
-// middle-out, thinking against the face box, cwd left-elided. Every text
-// anchors to EXACTLY one side (left column left, right column right; flex
-// zones use both anchors + elide) — fixed columns, fixed order, right cluster
-// reads right→left. Hover previews the card's workspace + takes the trace;
-// click → bridge.focusSession (a courier focuses its parent's window). One
-// laurel standout (§5): traced card, else first working. All colour from
-// `notes`; radius 0 everywhere.
+// Two animated elements, two reserved boxes. The LAMP (the §2 contract:
+// ♪ 𝄐 𝄼 𝄽 𝄂 · state colours — working pulses via a scale animation, awaiting
+// breathes via an opacity animation) lives INSIDE a fixed 16px box at the
+// card's top-left; both animations are confined to the box — nothing floats,
+// no layout shift. The KAOMOJI TROUPE lives inside a fixed clipped box in the
+// ground row (116px main / 90px sub); its frames swap text, never geometry.
+// The thinking slot itself is a fixed-height reserved lane. Every free-
+// length string elides against a fixed partner: name vs tags, model/id
+// middle-out, thinking against its own lane, cwd left-elided. Every text
+// anchors to EXACTLY one side (never centred) — fixed columns, fixed order.
+// Hover previews the card's workspace + takes the trace; click →
+// bridge.focusSession (a courier focuses its parent's window). One laurel
+// standout (§5): traced card, else first working. All colour from `notes`;
+// radius 0 everywhere.
 //
 // ── The hooks channel (any-agent) ──────────────────────────────────────────
 // stage/hooks.json — [{ sessionId, phase, updatedAt }] — is agent-agnostic:
@@ -365,18 +346,30 @@ Item {
         tops.sort(byStart)
         for (var kk in kids) kids[kk].sort(byStart)
 
-        // Bucket tops (children ride with their parent) into movements.
+        // Bucket tops (children ride with their parent) into movements. Stamp a
+        // UI-only graph ordinal (`.no`) as we go: TOPS get a running #N in
+        // byStart order — subagents never consume a slot of their own. Each
+        // top's kids instead get that SAME number suffixed by their own
+        // 1-based index under their parent (`N.1`, `N.2`, …), so a subagent
+        // always reads as "hanging off top N", never as its own top-level
+        // agent. Cosmetic and stable within a session, NOT a persisted id;
+        // SessionCard reads it as s.no.
         var buckets = [], ps = _projects || []
         for (i = 0; i < ps.length; i++) buckets.push({ rows: [], items: [] })
         var adrift = { rows: [], items: [] }
+        var seq = 0
         for (i = 0; i < tops.length; i++) {
             var t = tops[i]
             var pi = projectOf(t.cwd)
             var ch = kids[t.sessionId] || []
             var target = (pi >= 0) ? buckets[pi] : adrift
+            t.no = ++seq
             target.rows.push({ s: t, kids: ch })
             target.items.push(t)
-            for (var j = 0; j < ch.length; j++) target.items.push(ch[j])
+            for (var j = 0; j < ch.length; j++) {
+                ch[j].no = t.no + "." + (j + 1)
+                target.items.push(ch[j])
+            }
         }
 
         var gs = [], ord = 0
@@ -669,17 +662,17 @@ Item {
                 // crop a few pixels off from the window's true position
                 // misses it entirely — verify against the staff, not the
                 // spec's x.
-                Text { x: 67; y: 0.6
+                Text { x: 67; y: -5.4
                        text: "3"
                        font.family: temple.faceSerif; font.italic: true
                        font.pixelSize: 9
                        color: temple.withA(temple.signature, 0.9) }
-                Text { x: 111; y: 0.6
+                Text { x: 111; y: -5.4
                        text: "3"
                        font.family: temple.faceSerif; font.italic: true
                        font.pixelSize: 9
                        color: temple.withA(temple.signature, 0.9) }
-                Text { x: 155; y: 0.6
+                Text { x: 155; y: -5.4
                        text: "3"
                        font.family: temple.faceSerif; font.italic: true
                        font.pixelSize: 9
@@ -848,9 +841,23 @@ Item {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked:
-                                    temple.collapsed[movement.g.name || "adrift"]
-                                        = movement.open
+                                onClicked: {
+                                    // Reassign (not mutate) collapsed so the
+                                    // property-change notification actually
+                                    // fires — QML tracks binding deps at the
+                                    // property level, not deep object
+                                    // mutation, so bracket-assigning a key in
+                                    // place left movement.open (and every
+                                    // binding fed by isOpen()) stale until an
+                                    // unrelated rebuild() reassigned groups
+                                    // and forced fresh evaluation.
+                                    var key = movement.g.name || "adrift"
+                                    var next = {}
+                                    for (var k in temple.collapsed)
+                                        next[k] = temple.collapsed[k]
+                                    next[key] = !next[key]
+                                    temple.collapsed = next
+                                }
                             }
                         }
 
@@ -983,11 +990,53 @@ Item {
     }
 
     // ═════ ONE PLAQUE ══════════════════════════════════════════════════════════
-    // A hairline-bordered card on a marble band, standing on its own context
-    // meter. The 5-slot template (main) / 3-4-slot compact (sub) — fixed
-    // heights, one silhouette per kind. Reserved boxes: lamp 16px left,
-    // face 116px right, thinking lane fixed — the anchoring law covers the
-    // animated elements too, nothing floats.
+    // A hairline-bordered card, ONE SURFACE — not zones. The plaque fill/
+    // border and the left pilaster are the card's only chrome; no rectangle
+    // scopes a sub-region beneath them. Six rows, crest to ground:
+    //
+    // 1 · IDENTITY — lamp · agent name (s.agent VERBATIM, no lookup — the
+    // autohook) · ⟐/⇄ kind + ϟ hook tags, and the CATALOGUE CORNER reading
+    // right→left: the #NN graph badge outermost (rebuild()'s ordinal — #NN
+    // main, #NN.k sub — rendered here, never assigned), wsN inside it
+    // (mains only).
+    //
+    // 2 · PROVENANCE — model + real sessionId SHARE one line: model left-
+    // anchored (BOTH kinds by directive — a sub's engine shows too), the
+    // sessionId (dim, middle-elided, never invented-short — pantheon §4) in
+    // a fixed-width cell at the right on mains. The pairing idiom — a
+    // flexible left field elide-truncating against a fixed-width right
+    // cell, one gap, no divider glyph — is the SAME one the ground row uses
+    // below; it's the one device this card repeats instead of a bespoke
+    // layout per row. Subs hide the sessionId cell and the model field
+    // widens to the full row (their identity IS the #NN.k badge, same
+    // width-recovery technique row 1's name already uses when its own
+    // neighbour tags are hidden).
+    //
+    // 3 · VOICE: directive — the » opening command/prompt (set-once title,
+    // never "last"), its own full line — a free-length string with nothing
+    // short enough to pair it with.
+    //
+    // 4 · VOICE: thinking — a FIXED box (4 lines main / 2 sub, full width):
+    // text wraps, the LAST line elides, tool text popping in never shifts
+    // the card. sudo — the one urgent flag — pins to the lane's own top-
+    // right corner when held.
+    //
+    // 5 · PULSE — ctx (this session's OWN context window, NUMBERS ONLY —
+    // no percentage text, no bar glyph; ctxColor severity rides the colour
+    // alone; mains only) and up (elapsed since start, both kinds) SHARE one
+    // line: ctx left, up right-anchored beside it on mains (the same read-
+    // right-to-left corner idiom as the #NN/wsN pair in row 1); subs (no
+    // ctx to share with) left-anchor up alone at the row's usual margin.
+    //
+    // 6 · GROUND — mains close with cwd (ElideLeft keeps the tail) beside
+    // the clipped troupe box — the pairing idiom rows 2 and 5 both copy;
+    // subs close with the troupe alone. Unmoved.
+    //
+    // Fixed slot heights throughout = one stable silhouette per kind, no
+    // jitter as live data streams in; the animated elements ride reserved
+    // boxes (lamp 16px, troupe 116px main / 90px sub) so nothing floats.
+    // No zone-break spacers, no card-level dividers — one Column rhythm,
+    // one container. radius 0; colour only from temple.notes.* roles.
     component SessionCard: Item {
         id: card
 
@@ -1044,6 +1093,31 @@ Item {
             : (sayText !== "" ? sayText
                : (card.hooked ? ("ϟ " + card.cardLiveState) : "…"))
 
+        // ── the identity trinity — graph number · session id · agent name ────
+        // noBadge reads s.no verbatim, stamped in rebuild(): a top-level int
+        // (zero-padded, #01) for a main, or a "parent.k" STRING (#01.2) for a
+        // subagent — it never claims a top-level slot of its own.
+        readonly property string noBadge: {
+            if (!s || s.no === undefined || s.no === null) return "#—"
+            if (card.child) return "#" + s.no
+            return "#" + (s.no < 10 ? "0" + s.no : s.no)
+        }
+        // the agent's OWN name, verbatim — no lookup, no special-casing, so an
+        // agent nobody has registered yet still renders correctly (autohook).
+        readonly property string agentName: (s && s.agent) ? ("" + s.agent) : "agent"
+        // the real sessionId as a dim lowercase callout (`:` → `.`); its Text
+        // middle-elides, so the render is a truncated view of the REAL id, never
+        // an invented short one (pantheon §4).
+        readonly property string idCallout: {
+            var v = (s && s.sessionId) ? ("" + s.sessionId) : ""
+            return v.toLowerCase().replace(/:/g, ".")
+        }
+        // the opening prompt/command — title is set-once on the first
+        // PromptSubmit, so this is the FIRST directive, not necessarily the
+        // latest; labelled with a neutral » caret, never the word "last".
+        readonly property string promptText: (s && s.title)
+            ? ("" + s.title).replace(/\s+/g, " ") : ""
+
         // the plaque ground + hairline (terracotta while awaiting)
         Rectangle {
             anchors.fill: parent
@@ -1072,19 +1146,46 @@ Item {
             anchors.top: parent.top; anchors.topMargin: 5
             spacing: 3
 
-            // ── 1 · IDENTITY — lamp + name + kind tag + ϟ tag · wsN corner ──
+            // ── 1 · IDENTITY — lamp · name · tags ── wsN · #NN ────────────────
+            // The inscription. The graph badge holds the catalogue corner,
+            // outermost, so the name owns the whole left run.
             Item {
                 width: parent.width
-                height: 16
+                height: card.child ? 16 : 20
 
-                Text {                           // workspace tag — fixed corner
+                Text {                           // #NN — the catalogue corner
+                    id: badgeT
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: card.noBadge
+                    font.family: temple.faceMono; font.pixelSize: 10
+                    font.weight: Font.DemiBold
+                    color: card.laurel ? temple.notes.paletteHot
+                                       : temple.withA(temple.signature, 0.95)
+                }
+                Text {                           // workspace tag — inside the corner
                     id: wsT
                     visible: !card.child && card.hasWs
-                    anchors.right: parent.right
+                    anchors.right: badgeT.left; anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
                     text: card.hasWs ? ("ws" + card.s.workspace) : ""
                     font.family: temple.faceMono; font.pixelSize: 9
                     color: temple.withA(temple.notes.holoBlue, 0.9)
+                }
+                Text {                           // state word — the lamp's caption,
+                                                 // same live state + colour source as
+                                                 // the glyph so the two never disagree;
+                                                 // always rendered ("—" fallback) so the
+                                                 // corner slot never jitters.
+                    id: stateWordT
+                    anchors.right: wsT.visible ? wsT.left : badgeT.left
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: card.cardLiveState !== "" ? card.cardLiveState : "—"
+                    font.family: temple.faceSerif; font.italic: true
+                    font.pixelSize: 9
+                    color: temple.withA(temple.lampColor(card.cardLiveState),
+                                        card.cardResting ? 0.55 : 1.0)
                 }
 
                 Item {                           // the reserved lamp box
@@ -1124,17 +1225,18 @@ Item {
                     }
                 }
 
-                Text {                           // name/title — elides vs all tags
+                Text {                           // agent name — the card's name
                     id: nameT
                     anchors.left: lampBox.right; anchors.leftMargin: 5
                     anchors.verticalCenter: parent.verticalCenter
-                    text: temple.rowName(card.s)
+                    text: card.agentName
                     elide: Text.ElideRight
                     width: Math.min(implicitWidth,
-                                    parent.width - 21
+                                    parent.width - 21 - badgeT.implicitWidth - 10
                                     - (kindTag.visible ? kindTag.implicitWidth + 6 : 0)
                                     - (hookTag.visible ? hookTag.implicitWidth + 6 : 0)
-                                    - (wsT.visible ? wsT.implicitWidth + 10 : 0))
+                                    - (wsT.visible ? wsT.implicitWidth + 8 : 0)
+                                    - (stateWordT.implicitWidth + 8))
                     font.family: temple.faceSerif
                     font.pixelSize: card.child ? 12 : 13
                     font.weight: Font.Medium
@@ -1161,72 +1263,102 @@ Item {
                 }
             }
 
-            // ── 2 · PROVENANCE — the FULL model id (a fixed slot, always) ────
-            // Never abbreviated; middle-elided only when it truly must be. The
-            // model NAME is always shown — mains AND subs — a dim "—" holding
-            // the slot when the record lacks one, so the silhouette never
-            // shifts.
-            Text {
-                anchors.left: parent.left; anchors.leftMargin: 21
-                anchors.right: parent.right
-                text: (card.s && card.s.model) ? card.s.model : "—"
-                elide: Text.ElideMiddle
-                font.family: temple.faceMono; font.pixelSize: 9
-                color: temple.withA(temple.notes.paletteFg,
-                                    (card.s && card.s.model) ? 0.55 : 0.3)
+            // ── 2 · PROVENANCE — model · sessionId, SHARING one line ─────────
+            // BOTH kinds show the model (a sub's engine shows too) —
+            // left-anchored, middle-elided against its own edge. Mains pair
+            // it with the real sessionId (dim, middle-elided, never
+            // invented-short — pantheon §4) in a fixed-width cell at the
+            // right; subs hide that cell and the model widens to the full
+            // row (their identity IS the #NN.k badge, so no id callout).
+            // Same flexible-field + fixed-cell idiom the ground row uses.
+            Item {
+                width: parent.width
+                height: 11
+
+                Item {                           // sessionId — fixed cell, mains only
+                    id: idCell
+                    visible: !card.child
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 130; height: parent.height
+
+                    Text {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        horizontalAlignment: Text.AlignRight
+                        text: card.idCallout !== "" ? card.idCallout : "—"
+                        elide: Text.ElideMiddle
+                        font.family: temple.faceMono; font.pixelSize: 9
+                        color: temple.withA(temple.notes.paletteFg,
+                                            card.idCallout !== "" ? 0.4 : 0.28)
+                    }
+                }
+                Text {                           // model — flexible left field
+                    anchors.left: parent.left; anchors.leftMargin: 21
+                    anchors.right: idCell.visible ? idCell.left : parent.right
+                    anchors.rightMargin: idCell.visible ? 8 : 0
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: (card.s && card.s.model) ? card.s.model : "—"
+                    elide: Text.ElideMiddle
+                    font.family: temple.faceMono; font.pixelSize: 9
+                    color: temple.withA(temple.notes.paletteFg,
+                                        (card.s && card.s.model) ? 0.55 : 0.28)
+                }
             }
 
-            // ── 3 · THINKING — a FIXED box (4 lines main / 2 lines sub) ─────
-            // The right cluster is TOP-anchored and reads right→left: face
-            // (116px clipped) ← elapsed uptime clock (48px, pins the corner)
-            // ← sudo. The thinking text wraps inside the fixed height and the
-            // LAST line elides — the reservation is the lane itself, so tool
-            // text popping in never shifts the card.
+            // ── 3 · VOICE: directive — the opening command/prompt, » caret ───
+            // s.title is set-once (first PromptSubmit), so on a long session
+            // this is the OPENING directive, never "last"; its own full line
+            // (free-length string), a dim "—" holds the slot before any turn.
+            Item {
+                width: parent.width
+                height: 14
+
+                Text {
+                    id: promptCaret
+                    visible: card.promptText !== ""
+                    anchors.left: parent.left; anchors.leftMargin: 21
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "»"
+                    font.family: temple.faceMono; font.pixelSize: 11
+                    color: temple.withA(temple.signature, 0.8)
+                }
+                Text {
+                    anchors.left: promptCaret.visible ? promptCaret.right : parent.left
+                    anchors.leftMargin: promptCaret.visible ? 6 : 21
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: card.promptText !== "" ? card.promptText : "—"
+                    elide: Text.ElideRight
+                    font.family: temple.faceMono; font.pixelSize: 10
+                    color: temple.withA(temple.notes.paletteFg,
+                                        card.promptText !== "" ? 0.62 : 0.28)
+                }
+            }
+
+            // ── 4 · VOICE: thinking — the live voice, full width. A FIXED
+            // box (4 lines main / 2 sub): text wraps, the LAST line elides,
+            // tool text popping in never shifts the card. sudo — the one
+            // urgent flag — pins to the lane's own top-right corner when held.
             Item {
                 width: parent.width
                 height: card.child ? 22 : 44
 
-                Item {                           // reserved, clipped troupe box
-                    id: faceBox
-                    anchors.top: parent.top
-                    anchors.right: parent.right
-                    width: 116; height: 17
-                    clip: true
-                    Text {
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: card.faceText
-                        font.family: temple.faceMono; font.pixelSize: 10
-                        color: card.laurel ? temple.notes.paletteHot
-                                           : temple.withA(temple.notes.paletteFg, 0.6)
-                    }
-                }
-                Text {                           // elapsed — the uptime clock,
-                    id: elapsedT                  // pinned top-right of the slot
-                    anchors.top: parent.top
-                    anchors.right: faceBox.left; anchors.rightMargin: 8
-                    width: 48
-                    horizontalAlignment: Text.AlignRight
-                    text: temple.notes.elapsedSince(
-                              card.s ? card.s.startedAt : "", temple.nowMs)
-                    font.family: temple.faceMono; font.pixelSize: 10
-                    color: card.laurel ? temple.notes.paletteHot
-                                       : temple.notes.paletteAccent
-                }
-                Text {                           // sudo — beside the clock
+                Text {                           // sudo — top-right corner
                     id: sudoT
                     visible: card.sudoHeld
                     anchors.top: parent.top
-                    anchors.right: elapsedT.left; anchors.rightMargin: 6
+                    anchors.right: parent.right
                     text: "sudo"
                     font.family: temple.faceMono; font.pixelSize: 9
                     color: temple.notes.paletteUrgent
                 }
-                Text {                           // the thinking — wraps, 4-line
-                    id: thinkT                     // cap with last-line elide
+                Text {                           // the thinking — wraps, last-
+                    id: thinkT                     // line elide, fixed lane
                     anchors.left: parent.left; anchors.leftMargin: 21
-                    anchors.right: sudoT.visible ? sudoT.left : elapsedT.left
-                    anchors.rightMargin: 8
+                    anchors.right: sudoT.visible ? sudoT.left : parent.right
+                    anchors.rightMargin: sudoT.visible ? 6 : 0
                     anchors.top: parent.top
                     height: parent.height
                     verticalAlignment: Text.AlignTop
@@ -1249,49 +1381,121 @@ Item {
                 }
             }
 
-            // ── 4 · CONTEXT — the window + token usage, its own line ─────────
-            // The house [▓▓▓░░░] gauge (notes.ctxBar), filled to THIS session's
-            // OWN window, never a rollup. A main plaque keeps the slot even
-            // before its first turn — a dim "—" — so the silhouette never
-            // shifts; a sub plaque collapses the slot when it has no tokens.
+            // ── 5 · PULSE — ctx · up, SHARING one line ────────────────────────
+            // ctx (this session's OWN context window, NUMBERS ONLY — no
+            // percentage text, no bar glyph; ctxColor severity rides the
+            // colour alone; mains only) left, up (elapsed since start, both
+            // kinds) right-anchored beside it on mains — the same read-
+            // right-to-left corner idiom as row 1's #NN/wsN pair. Subs have
+            // no ctx to share with, so up left-anchors alone at the usual
+            // margin instead of stranding on the right.
             Item {
-                visible: !card.child || card.hasCtx
                 width: parent.width
-                height: 15
+                height: 13
 
-                Text {
+                Text {                           // ctx label — mains only
+                    id: ctxLabel
+                    visible: !card.child
                     anchors.left: parent.left; anchors.leftMargin: 21
-                    anchors.right: parent.right
-                    horizontalAlignment: Text.AlignLeft
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "ctx"
+                    font.family: temple.faceMono; font.pixelSize: 9
+                    color: temple.withA(temple.notes.paletteFg, 0.35)
+                }
+                Text {                           // ctx value — mains only
+                    visible: !card.child
+                    anchors.left: ctxLabel.right; anchors.leftMargin: 6
+                    anchors.right: upLabel.left; anchors.rightMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    elide: Text.ElideRight
                     text: card.hasCtx
-                          ? (temple.notes.ctxBar(card.ctxPct, 10) + " "
-                             + Math.round(card.ctxPct) + "% · "
-                             + temple.notes.ctxCompact(card.s.contextTokens)
+                          ? (temple.notes.ctxCompact(card.s.contextTokens)
                              + (card.s.contextCeiling
                                 ? (" / " + temple.notes.ctxCompact(card.s.contextCeiling))
                                 : "") + " tok")
                           : "—"
-                    elide: Text.ElideRight
                     font.family: temple.faceMono; font.pixelSize: 10
                     color: card.hasCtx
                            ? temple.notes.ctxColor(card.ctxPct, temple.signature)
                            : temple.withA(temple.notes.paletteFg, 0.3)
                 }
+                Text {                           // up label — right corner on
+                    id: upLabel                    // mains, left margin on subs
+                    anchors.left: card.child ? parent.left : undefined
+                    anchors.leftMargin: card.child ? 21 : 0
+                    anchors.right: card.child ? undefined : upValue.left
+                    anchors.rightMargin: card.child ? 0 : 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "up"
+                    font.family: temple.faceMono; font.pixelSize: 9
+                    color: temple.withA(temple.notes.paletteFg, 0.35)
+                }
+                Text {                           // up value — the clock
+                    id: upValue
+                    anchors.left: card.child ? upLabel.right : undefined
+                    anchors.leftMargin: card.child ? 6 : 0
+                    anchors.right: card.child ? undefined : parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: temple.notes.elapsedSince(
+                              card.s ? card.s.startedAt : "", temple.nowMs)
+                    font.family: temple.faceMono
+                    font.pixelSize: 10
+                    color: card.laurel ? temple.notes.paletteHot
+                                       : temple.notes.paletteAccent
+                }
             }
 
-            // ── 5 · DIRECTORY — the cwd breadcrumb, its own line ─────────────
-            // Right-anchored, ElideLeft so the tail always survives; a dim "—"
-            // holds the line on a main card without a cwd. Subs collapse it.
+            // ── 6s · GROUND — SUB ONLY: the troupe alone, right-anchored in
+            // its reserved clipped box.
             Item {
-                visible: !card.child || !!(card.s && card.s.cwd)
+                visible: card.child
                 width: parent.width
-                height: 14
+                height: 15
 
-                Text {
-                    anchors.left: parent.left; anchors.leftMargin: 21
+                Item {                           // reserved, clipped troupe box
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    horizontalAlignment: Text.AlignRight
+                    width: 90; height: 15
+                    clip: true
+                    Text {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: card.faceText
+                        font.family: temple.faceMono; font.pixelSize: 9
+                        color: card.laurel ? temple.notes.paletteHot
+                                           : temple.withA(temple.notes.paletteFg, 0.6)
+                    }
+                }
+            }
+
+            // ── 6m · GROUND — MAIN ONLY, bottom of the card: cwd (left) ── the
+            // animated troupe (right), sharing the card's last line. Unmoved
+            // by directive — the owner keeps the ground where it is.
+            Item {
+                visible: !card.child
+                width: parent.width
+                height: 17
+
+                Item {                           // reserved, clipped troupe box
+                    id: faceBox
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 116; height: 17
+                    clip: true
+                    Text {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: card.faceText
+                        font.family: temple.faceMono; font.pixelSize: 10
+                        color: card.laurel ? temple.notes.paletteHot
+                                           : temple.withA(temple.notes.paletteFg, 0.6)
+                    }
+                }
+                Text {                           // cwd — left-anchored, tail
+                    anchors.left: parent.left; anchors.leftMargin: 21          // kept via ElideLeft
+                    anchors.right: faceBox.left; anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    horizontalAlignment: Text.AlignLeft
                     text: card.s && card.s.cwd
                           ? temple.shortPath(card.s.cwd) : "—"
                     elide: Text.ElideLeft
