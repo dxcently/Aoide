@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-01
+updated: 2026-08-13
 tags: [aoide, architecture, nix, flake, rust, node]
 ---
 
@@ -25,12 +25,12 @@ Outputs, all tolerant of empty layers so eval stays robust:
 
 - `nixosConfigurations.yomi-strix` — assembled by `lib/mkHost.nix`.
 - `packages` — **auto-discovered** by `lib/pkgs.nix` from `pkgs/<name>/default.nix`
-  (`callPackage`, `_`-shelving); currently `{aoide, drachma, melete, mneme}` plus
+  (`callPackage`, `_`-shelving); currently `{aoide, melete, mneme}` plus
   `default` (= aoide). Adding a package is one folder — this file never changes.
 - `checks` — the three coupling assertions, one auto-generated `pkg-<name>` per
-  discovered package (`pkg-aoide`/`pkg-drachma`/`pkg-melete`/`pkg-mneme`), plus
+  discovered package (`pkg-aoide`/`pkg-melete`/`pkg-mneme`), plus
   the `vm-boot` headless boot test (below).
-- `devShells.default` — Rust (cargo/rustc/clippy/rust-analyzer) + `nodejs` + nix
+- `devShells.default` — Rust (cargo/rustc/clippy/rust-analyzer) + nix
   tooling (nixfmt/nil/deadnix/statix).
 - `formatter` — nixfmt.
 
@@ -59,7 +59,7 @@ dir, home-manager and stylix (each added only when its input is present, so a
 minimal eval still works), and the **discovered-packages overlay** from
 `lib/pkgs.nix` — the *same* source the flake's `packages` output and the
 `pkg-<name>` checks read, so nucleus/facet modules reference `pkgs.aoide` /
-`pkgs.drachma` / … without drift. The overlay guards each name against
+… without drift. The overlay guards each name against
 accidentally masking a nixpkgs attribute (a deliberate shadow — Aoide's `melete`
 harness vs the nixpkgs `melete` font — is an `intentionalShadows` exemption). It passes `host`, `inputs`, `username`, `system` as
 `specialArgs`. Each song's `rice.nix` guards itself with
@@ -90,8 +90,8 @@ headless QEMU boot of the whole stack via `pkgs.testers.runNixOSTest`
 home-manager/stylix modules, the pkgs overlay, and mirrored `specialArgs`
 (`host = "vm-test"`, inputs, username, system; `node.pkgsReadOnly = false`
 so the overlay applies) — so the test boots the real assembly, not a
-replica. It asserts: `multi-user.target` reached; `aoide` + `drachma` on
-PATH with `schema --json` reporting exactly 36 commands and `guide` exiting
+replica. It asserts: `multi-user.target` reached; `aoide` on
+PATH with `schema --json` reporting exactly 51 commands and `guide` exiting
 0; greetd enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
 linger active with the `aoided` and `shellbridge` user units finishing
 `Result=success` (the skeleton binaries seed state and exit 0); stage files
@@ -103,7 +103,7 @@ also confirmed in-VM that the unit's `AOIDE_STAGE_DIR` and the binary's
 fallback agree on the same stage path.
 
 **Test scope.** The test node's `systemPackages` carries only `jq`; the real
-install path (`nucleus/packages.nix`) is what puts `aoide` and `drachma` on
+install path (`nucleus/packages.nix`) is what puts `aoide` on
 the box, so the vm-boot PATH assertion (above) verifies the nucleus install
 rather than the test's own scaffolding. **eval green + build green + VM
 green ≠ complete** — a VM test proves only what it does not provide for
@@ -111,7 +111,7 @@ itself.
 
 ## The option contract (`modules/nucleus/options.nix`)
 
-The versioned seam every other module builds against (drachma schema v0,
+The versioned seam every other module builds against (livery schema v0,
 `CONTRACTS.md §1`). It declares options and eval-clean defaults only — it wires
 no behaviour, so an empty config evaluates. The surface:
 
@@ -120,7 +120,7 @@ no behaviour, so an empty config evaluates. The surface:
 - `aoide.song` (str, default `"default"`) — which song this host performs.
   Set once in `hosts/<host>/default.nix`; each song's `rice.nix` guards itself
   with `lib.mkIf (config.aoide.song == "<name>")`. See [[Song-Vocabulary#Replay — any song, any host]].
-- `aoide.drachma` — the v0 drachma schema: closed `palette.{bg,fg,accent,urgent}`
+- `aoide.livery` — the v0 livery schema: closed `palette.{bg,fg,accent,urgent}`
   (base16, permissive hex type) + optional component tiers `bar.*` / `notif.*` /
   `window.*` (each `nullOr` hex, `null` → palette). This is the **only** thing
   facets read.
@@ -150,7 +150,7 @@ unit (`nix-env --profile` set + `switch-to-configuration switch`) and
 activates in about 8 s. The prior dxflake generation stays in the
 systemd-boot menu, so rollback is one boot-menu pick away. Live: greetd
 active, the Hyprland session entry present, NetworkManager, zram, and the
-Strix Halo amdgpu params all in effect; `aoide` + `drachma` + git on PATH
+Strix Halo amdgpu params all in effect; `aoide` + git on PATH
 and flakes enabled. The graphical session (greetd → Hyprland → Quickshell)
 runs as the daily desktop — bar, dock, gadgets, launcher, notifications, and
 wallpaper all live in one process.
@@ -175,7 +175,7 @@ rule declared in both aoided and shellbridge.
 Two **non-service nucleus modules** close baseline gaps, both gated on
 `aoide.enable`:
 
-- **`nucleus/packages.nix`** puts `pkgs.aoide` and `pkgs.drachma` on the
+- **`nucleus/packages.nix`** puts `pkgs.aoide` on the
   **system profile**. The units never needed this (their `ExecStart` lines are
   absolute store paths), but keybinds and interactive sessions invoke by
   name. It also installs **git**, which is load-bearing rather than dev
@@ -190,10 +190,10 @@ Live-side state, all gitignored, none load-bearing for the build:
 - **Socket:** `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` — the one outbound
   channel from QML; adapters and widgets bind exactly this path, never compute
   it.
-- **Stage files** under `song/stage/`: `drachma.json` (resolved drachma colours,
-  written by [[drachma]]'s `rice preview`/`cover set`/other emitters at
+- **Stage files** under `song/stage/`: `livery.json` (resolved livery colours,
+  written by [[livery]]'s `rice preview`/`cover set`/other emitters at
   rehearsal, and reseeded from the active song's committed
-  `song/songbook/<song>/drachma.json` on every activation by
+  `song/songbook/<song>/livery.json` on every activation by
   `home.activation.aoideSeedStage` in `modules/facets/quickshell/default.nix`
   — a write-temp-then-rename script that injects the same `"song"` field
   `rice preview` writes, so a host that boots without ever previewing still
@@ -213,7 +213,7 @@ Live-side state, all gitignored, none load-bearing for the build:
 
 ## Repo-file roles
 
-- **`CONTRACTS.md`** — the five versioned contracts: drachma schema v0, dendrite
+- **`CONTRACTS.md`** — the five versioned contracts: livery schema v0, dendrite
   shape v0, `aoide schema --json` output v0, stage-file formats v0, song shape
   v0 (§5). The `checks` fail a merge that breaks one; bumping a version needs a
   playbook migration.
@@ -228,7 +228,7 @@ Live-side state, all gitignored, none load-bearing for the build:
 ```
 cd ~/Aoide
 nix flake check                                       # both assertions + both packages build
-nix build .#aoide .#drachma                        # the two packages
+nix build .#aoide                                # the package
 nix eval .#nixosConfigurations.yomi-strix.config.system.build.toplevel.drvPath
 cargo test                                             # schema / dispatch / mcp unit tests
 nix build .#checks.x86_64-linux.vm-boot -L             # headless QEMU boot test
@@ -260,10 +260,10 @@ migration.
 
 **Real code paths:** the whole flake/walker/option/checks layer; both packages
 build; `aoide guide`, `aoide schema --json`, `mcp serve --stdio`, and the audit
-log; `rice lint` (delegates to [[drachma]]); the daemon skeleton (audit
+log; `rice lint` (native [[livery]] lint); the daemon skeleton (audit
 append, user gate, default-deny event bus); shellbridge (atomic writer, seeded
 stage files, and a live socket accept loop — `focuswindow`); the melete-adapter skeleton (env-driven
-subscription, metadata-only notification boundary); all three drachma emitters; the
+subscription, metadata-only notification boundary); all four livery emitters; the
 QML shell skeleton; the baked Stylix and compositor fan-outs; and the whole
 `aoide graph` group — 15 subcommands (`view`, `project add/remove/list`,
 `link`, `session start/phase/end/hook`, `wrap`, `send`, `focus`, `prune`,
@@ -289,8 +289,8 @@ obsidian, melete, mneme, firefox, screenshot, and vision — ported from
 [[dxflake]]'s prior rig into Aoide shape. `hyprland` is the host-invariant
 half of the compositor: keybinds, input devices, tiling layout, misc, and
 behavioural window rules, split out so a re-rice cannot disturb them (the
-compositor facet keeps the drachma-derived look and the session plumbing). The `nvf` flake input threads to home-manager via
-`extraSpecialArgs`; the cover-art token (`aoide.drachma.wallpaper` → the shared
+compositor facet keeps the livery-derived look and the session plumbing). The `nvf` flake input threads to home-manager via
+`extraSpecialArgs`; the cover-art token (`aoide.livery.wallpaper` → the shared
 `song/covers/`) backs the shipped wallpapers; Lekton Nerd Font Mono is the stylix
 face. `neovim`'s own `vim.extraPackages` (nvf) also carries `pkgs.rustc`/
 `pkgs.cargo`, scoped to nvim's wrapped PATH only — its built-in rust-analyzer
@@ -305,7 +305,7 @@ dendrites that need it (devtools, fonts).
 verbs — `rice gen/adopt/transpose`, the five-verb `content` pipeline, `make`,
 `update`, `onboard`. Their arg-parsing, schema, gate flag, and audit trail are
 real; only the live-system action is deferred. (`rice preview` is **real** —
-it stages `song/stage/drachma.json` for Quickshell hot-reload
+it stages `song/stage/livery.json` for Quickshell hot-reload
 today; only the hyprctl/OSC dispatch fan-out remains unwired into `preview`
 itself.)
 
@@ -316,7 +316,7 @@ itself.)
 - [[Package-Layout]]
 - [[Session-Graph]]
 - [[aoide-cli]]
-- [[drachma]]
+- [[livery]]
 - [[aoided]]
 - [[shellbridge]]
 - [[dxflake]]

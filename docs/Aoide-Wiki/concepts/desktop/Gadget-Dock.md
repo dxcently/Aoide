@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-30
+updated: 2026-08-13
 tags: [aoide, widget, qml, desktop, gadget]
 ---
 
@@ -77,7 +77,7 @@ Nothing else is part of the canonical dock — the bar's own calendar popout is
 not a dock gadget; its body is resolved per-song by the staging engine
 ([[Widget-Maker#The staging engine — a song overrides desktop chrome]]), not
 hosted here. A fork can add its own gadgets on the same recipe (a frame,
-drachma-only colour, a stage file for data).
+livery-only colour, a stage file for data).
 
 ## Posture — a left-edge panel
 

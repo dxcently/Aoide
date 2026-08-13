@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-07-28
+updated: 2026-08-13
 tags: [aoide, compositor, wayland, hyprland]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -14,7 +14,7 @@ part of the design. (A narrower PTY layer does exist for agent control —
 `aoide conduct`, one PTY per conducted session, purpose-built for
 `graph send` injection, not a general terminal multiplexer — see
 [[shellbridge]], [[Agent-Hooking]].) Its facet (`modules/facets/compositor/`)
-renders live appearance via `hyprctl`, consuming `aoide.drachma` like every
+renders live appearance via `hyprctl`, consuming `aoide.livery` like every
 other facet, and touches nothing else.
 
 shellbridge consumes the Hyprland IPC socket to track windows and dispatch focus commands. The session-jump flow (`hyprctl dispatch focuswindow address:…`) depends on this IPC path.

@@ -5,7 +5,7 @@ created: 2026-07-25
 
 # Aoide — Overview
 
-**Aoide (the core) vs AoideOS (the distribution) — don't conflate the two.** Aoide is the **orchestration core**: the bridges and APIs between the terminal, the shell, the system, and the OS — one interface through which any agent is freely orchestrated for any task, no MCP required. It runs anywhere there is a shell — portable, headless-capable, agent-first — and as of the [[Conductor-Channel|conductor channel]], **every terminal is a conductable, tracked session by default**. AoideOS is the **distribution built on that core**: this repo, the NixOS flake that ADDITIONALLY ships the [[Quickshell]] widget-making toolkit (bar, dock, gadgets, the DAG/conductor surfaces) and the specialized ricer (the song/drachma theming engine, see [[Self-Ricing]] and [[Ricing-Protocol|Ricing Protocol]]). A capability that works with only a shell is "Aoide"; one that needs the desktop/Quickshell/rice is "AoideOS". This wiki documents AoideOS end to end, since the flake is the concrete running instance of the core.
+**Aoide (the core) vs AoideOS (the distribution) — don't conflate the two.** Aoide is the **orchestration core**: the bridges and APIs between the terminal, the shell, the system, and the OS — one interface through which any agent is freely orchestrated for any task, no MCP required. It runs anywhere there is a shell — portable, headless-capable, agent-first — and as of the [[Conductor-Channel|conductor channel]], **every terminal is a conductable, tracked session by default**. AoideOS is the **distribution built on that core**: this repo, the NixOS flake that ADDITIONALLY ships the [[Quickshell]] widget-making toolkit (bar, dock, gadgets, the DAG/conductor surfaces) and the specialized ricer (the song/livery theming engine, see [[Self-Ricing]] and [[Ricing-Protocol|Ricing Protocol]]). A capability that works with only a shell is "Aoide"; one that needs the desktop/Quickshell/rice is "AoideOS". This wiki documents AoideOS end to end, since the flake is the concrete running instance of the core.
 
 **AoideOS** is the agent-agnostic NixOS desktop distribution built on that core — Hyprland compositor, Quickshell shell, an orchestrator daemon, a content pipeline, and a self-ricing engine — that you fork and run. Upstream ships the shape-making machinery (the rice engine, contracts, walker, and management tools) but never the shapes; your fork is your instance, self-updating from upstream and self-configuring to your preferences. The naming thesis: architecture is frozen music — the nix layer is the score, the running desktop is the performance, and a rice is a song the system sings.
 
@@ -15,13 +15,13 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 
 ## Concepts
 
-- [[Full-Architecture]] — the whole-body map: every subsystem, its inputs/outputs, and how the frozen and performed halves meet at the drachma seam
+- [[Full-Architecture]] — the whole-body map: every subsystem, its inputs/outputs, and how the frozen and performed halves meet at the livery seam
 - [[Codebase]] — how the built repo actually works: the flake, the `lib/` walker + overlay, the option contract, the systemd/service map, socket + stage-file contracts, and what is real vs stubbed at the walking-skeleton milestone
 - [[Widget-Maker]] — the core thesis: Aoide as an extensible, declarative widget maker; the coding agent writes new integrations rather than selecting plugins
 - [[Feature-Set]] — what ships in the box (Melete + Mneme integrated) and the exemplar features: messaging bridge, fleet management, scheduled-job widget
 - [[Terminal-Commander]] — the agent-session widget (conductor-class): watch the terminals running agents and jump to any by click or keybind
 - [[Session-Graph]] — the project/session DAG grown from the flat roster: `aoide graph` viewer + management (anchors + spawned edges, prune, liveness-checked focus, atomic graph.json emit) — rendered via `graph view`/`--json` and the `aoide conductor` TUI; the desktop's Conductor gadget gives the at-a-glance agent-tree view instead of a standalone DAG overlay
-- [[Gadget-Dock]] — the agentWidgets surface realized: `AoidePanel.qml`, a left-edge panel holding four core gadgets (Conductor, Terminals, Meters, Power) plus an opt-in Usage stele, colours entirely from drachma — its fore-edge peeks at rest and it opens fully on hot-edge hover or SUPER+G
+- [[Gadget-Dock]] — the agentWidgets surface realized: `AoidePanel.qml`, a left-edge panel holding four core gadgets (Conductor, Terminals, Meters, Power) plus an opt-in Usage stele, colours entirely from livery — its fore-edge peeks at rest and it opens fully on hot-edge hover or SUPER+G
 - [[Lexicon]] — the whole vocabulary in one place: the three original Muses (Aoide · Melete · Mneme), the frozen/performed split, why each word family was selected, and the loop that ties them together
 - [[Snowflake-Anatomy]] — the layered structure of the Aoide flake: nucleus, dendrites, and facets; why Nix's snowflake logo maps to the repo's growth model
 - [[Fork-and-Run]] — the install model: fork upstream, clone to `~/Aoide`, run `aoide onboard`; shared history enables clean upstream merges and upstream contributions
@@ -38,8 +38,8 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 
 ## Entities
 
-- [[aoide-cli]] — the `aoide` binary: the CLI trunk (38-command tree incl. `cover set`, `rice mint`, the `graph` group, `conduct`, and `conductor`), `schema --json` as single source of truth, the stdio MCP façade, structured exit codes, and the `aoided` daemon binary
-- [[drachma]] — the design-token layer *and* the mint that stamps it: the immutable seam between nix structure and runtime rendering (schema tiers, the two-fan-out model), plus the Node package (wrapping Style Dictionary) that lints/resolves/emits the tokens — stage/drachma.json, hyprctl, and terminal OSC
+- [[aoide-cli]] — the `aoide` binary: the CLI trunk (51-command tree incl. `cover set`, `rice mint`, the `livery` group, the `graph` group, `conduct`, and `conductor`), `schema --json` as single source of truth, the stdio MCP façade, structured exit codes, and the `aoided` daemon binary
+- [[livery]] — the design-token layer *and* the engine that stamps it (formerly `drachma`): the immutable seam between nix structure and runtime rendering (schema tiers, the two-fan-out model), native Rust inside `crates/song/src/livery/` — `aoide livery emit|resolve|lint` — writing stage/livery.json, hyprctl, terminal OSC, and file-template outputs
 - [[aoided]] — the orchestrator daemon: neutral event stream, policy, lint, audit log, and the gated rebuild pipeline
 - [[shellbridge]] — the daemon-to-desktop bridge: atomic JSON state files out, unix-socket commands in, Hyprland IPC consumed
 - [[Quickshell]] — the QML shell runtime (nine surfaces declared, eight with a live QML body): bar, notification daemon, gadget dock, launcher, OSD, lockscreen, greeter, wallpaper layer, session-graph (declared, no QML body today)

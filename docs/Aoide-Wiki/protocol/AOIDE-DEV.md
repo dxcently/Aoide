@@ -16,7 +16,7 @@ this fully before touching the repo.
 > command any other; runs anywhere there's a shell, headless included
 > (`conduct`/`graph`/`conductor` in the Rust binary). **AoideOS** = the
 > **NixOS distribution** built on that core, adding the Quickshell
-> widget-maker and drachma/rice theming — that layer is not the core. Aoide
+> widget-maker and livery/rice theming — that layer is not the core. Aoide
 > **integrates and launches** the claude CLI, **Melete** (coding harness), and
 > **Mneme** (knowledge server) via adapters/launchers — it does not vendor
 > their code (`melete aoide …` runs the arrow the other way too). Shell-only
@@ -27,7 +27,7 @@ this fully before touching the repo.
 > confined to `song/` (house rule #1, `AGENTS.md`). You are the *dev agent*:
 > your domain is the whole repo. The *gate* rules still bind you — #2 rebuild
 > is user-gated, #4 forwarded text is untrusted, #5 facets read only
-> `aoide.drachma`, #6 everything flows through `aoided` — the writable-domain
+> `aoide.livery`, #6 everything flows through `aoided` — the writable-domain
 > rule does not.
 
 ---
@@ -113,7 +113,7 @@ sudo <toplevel>/bin/switch-to-configuration switch
 # desktop-only reloads (no full switch needed for QML/hyprctl-live changes)
 hyprctl reload                                  # compositor rules / plugins
 systemctl --user restart aoide-quickshell.service   # bar / dock / gadgets
-aoide rice preview <song>                       # stage drachma.json for hot-reload
+aoide rice preview <song>                       # stage livery.json for hot-reload
 qs -p modules/facets/quickshell/qml/shell.qml   # QML load/parse check
 
 # SHOW the user
@@ -260,7 +260,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
 - **[cleanup] `lib/checks.nix` carries pre-existing nixfmt-1.4.0 drift** —
   formatting-only pass owed. See [[Self-Ricing]].
 - **[bug] `aoide rice preview <name>` derives cover by song-name convention**
-  instead of reading `aoide.drachma.wallpaper`. Mitigated live by
+  instead of reading `aoide.livery.wallpaper`. Mitigated live by
   `AOIDE_WALLPAPER` env baked into the quickshell service; proper fix (preview
   reads the song's wallpaper note) still owed. See [[Self-Ricing]].
 - **[feature, partially resolved] Wallpaper switcher.** `set`/picker UI
@@ -385,16 +385,40 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   Deployed live to `run/qml/` for testing, service is up — but this has not
   yet had the khoa-looks-first vision check (§3) before landing as reviewed
   design. See [[Conductor-Channel]].
+- **[in-progress, merge landing] Livery merge + rename (drachma → livery).**
+  Plan: `docs/architecture/LIVERY-MERGE.md`. Phases 1–3 executed and reviewed
+  2026-08-13 (native engine in `crates/song/src/livery/` with the
+  stage/hyprctl/osc/file emitter registry; `pkgs/drachma` deleted, Node out of
+  the core; `aoide.drachma` → `aoide.livery` with a `mkRenamedOptionModule`
+  alias; songbook `livery.json`; stage dual-write/dual-read compat live).
+  **Phase 4 is owed:** drop the `stage/drachma.json` mirror + fallback reads +
+  the option alias, AND retarget the staged no-arg reads (`rice.rs`
+  `resolve_rice_notes`, `commands/livery.rs` `resolve_notes`) and
+  `conductor/src/ui.rs:517` off the mirror — gated on khoa confirming the
+  switched desktop is stable across a reboot. Deferred follow-up on record:
+  the `DrachmaState.qml` → `LiveryState.qml` file rename (~12 importers).
+  Comment-only drachma sweep still owed in `qml/shell.qml`,
+  `StagingEngine.qml`, `WorkspaceRow.qml`, `dendrites/hyprland.nix`,
+  `nucleus/shellbridge.nix`, `hosts/yomi-strix/default.nix:50`. See
+  [[livery]], [[Self-Ricing]].
 - **[planned, future direction] Separate Aoide from AoideOS — two flakes.**
-  Aoide becomes its own package/flake: CLI + daemon providing agent
-  orchestration (`conduct`/`graph`/`conductor` + `aoided` + the three doors),
-  runnable on any Linux via Nix-the-package-manager, no NixOS required.
-  AoideOS = the NixOS flake built on top, adding Quickshell/rice, consuming
-  the Aoide flake as an input. Matches the crate split in
+  Topology DECIDED 2026-08-13 (three-way agent deliberation, khoa approved):
+  (b) in-repo subdir flake `pkgs/aoide/flake.nix` consumed by the root flake
+  as a `path:` input, nixpkgs-only — the "no NixOS below `cli`" invariant
+  becomes build-enforced; graduation to (a) a separate repo is a one-line
+  input swap + `git filter-repo` when a real external consumer appears.
+  Sequencing: AFTER the livery merge (Phase 5) — the merge deleted the
+  cross-package drachma-binary seam, making `pkgs/aoide` self-contained Rust,
+  the precondition for extraction. Rewire points mapped: `lib/pkgs.nix`
+  discovery must skip a package dir carrying its own `flake.nix`; the overlay,
+  `packages.default`, `pkg-aoide`, and `vm-boot` source the input's package.
+  Still open for khoa: off-NixOS runtime home (stage/state default to
+  `~/Aoide/...`; XDG defaults vs `aoide init`). AoideOS = the NixOS flake
+  built on top, adding Quickshell/rice. Matches the crate split in
   `docs/architecture/PACKAGE-LAYOUT.md`: no NixOS assumption below `cli`;
   `management` host-abstracted (NixOS vs portable nix-profile/home-manager,
   runtime-detected); `song` rices portably; `steward` manages packages
-  through Aoide's own Nix set. Not built. See `docs/architecture/PACKAGE-LAYOUT.md`,
+  through Aoide's own Nix set. See `docs/architecture/PACKAGE-LAYOUT.md`,
   [[Package-Layout]].
 
 ---

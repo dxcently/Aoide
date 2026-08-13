@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-27
-updated: 2026-07-28
+updated: 2026-08-13
 tags: [aoide, design, conductor, dag, tui, pantheon]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -14,7 +14,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 The conductor DAG panel renders the session graph the way Pantheon renders its daemon net (refs: `references/pantheon/art-direction/`, especially the wireframe-cube field still — `3ab9463d-*.png`): **hollow 3D wireframe boxes floating in perspective space**, labels beside their boxes, **lines connecting entities through 3D**, color carrying meaning. Terminal-native, in ratatui.
 
-Color roles (same drachma/base16 contract as the rice):
+Color roles (same livery/base16 contract as the rice):
 
 | element | color | base16 |
 |---|---|---|
@@ -41,7 +41,7 @@ A terminal has no GPU pipeline — but ratatui's `canvas::Canvas` with `Marker::
 
 Constraint: quickshell 0.3.0 ships no terminal-emulator QML component, and the widget discipline is files-not-processes. Three paths:
 
-- **A (recommended, the embedded gadget):** conductor gains `--panel dag --mini` (compact, no idle drift, labels decluttered) and a `--watch --out <file>` frame-writer mode: on graph.json/trace change it renders ONE frame as ANSI text into `song/stage/dagframe.ans` (atomic write). The quickshell DAG gadget FileView-watches that file and renders it through a small `AnsiText` QML component (SGR 16/256-color subset mapped onto drachma colors). The widget stays passive (no process spawning); the frame-writer runs as a tiny user service or under aoided.
+- **A (recommended, the embedded gadget):** conductor gains `--panel dag --mini` (compact, no idle drift, labels decluttered) and a `--watch --out <file>` frame-writer mode: on graph.json/trace change it renders ONE frame as ANSI text into `song/stage/dagframe.ans` (atomic write). The quickshell DAG gadget FileView-watches that file and renders it through a small `AnsiText` QML component (SGR 16/256-color subset mapped onto livery colors). The widget stays passive (no process spawning); the frame-writer runs as a tiny user service or under aoided.
 - **B (the full view, exists today as click-through):** the gadget's click spawns kitty running `aoide conductor` (full TUI, real pty). A `--panel dag` start flag lands the user directly in the 3D view. Optionally a positioned floating kitty (`--class aoide-dagpane` + hyprland windowrule) as a pseudo-embed.
 - **C (blocked):** the DAG embeds the pty directly and the ANSI parser is deleted. **Status:** blocked on a terminal-emulator QML component in Quickshell — absent as of 0.3.0 (the constraint above).
 
@@ -51,7 +51,7 @@ Ship A + B. C supersedes A's parser and depends on nothing but that upstream com
 
 1. `spatial.rs` + unit tests (pure math, no UI).
 2. Canvas braille renderer: boxes/lines/labels/depth-dim, behind a `v` view toggle alongside the current 2D graphview.
-3. Layout + interaction + color roles from stage drachma (base16 tier).
+3. Layout + interaction + color roles from stage livery (base16 tier).
 4. `--mini`, `--once`/`--watch --out` frame modes + the quickshell AnsiText gadget path.
 5. Polish: idle drift, declutter tuning, TestBackend snapshots hardened.
 

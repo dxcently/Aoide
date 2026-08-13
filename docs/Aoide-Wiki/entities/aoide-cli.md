@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-08-03
+updated: 2026-08-13
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
@@ -48,13 +48,14 @@ offline, vendored dependency set unchanged — the same shape as Hermes-agent's
 self-registering tool registry and Claude Code's discrete-tools-behind-a-thin-
 dispatch design.
 
-The command surface itself is unchanged by this shape: **48 leaves**
+The command surface itself is unchanged by this shape: **51 leaves**
 (`aoide schema --json | jq '.commands | length'`):
 
 | Group | Leaves | Real / stub |
 |---|---|---|
 | `guide`, `schema` | 2 | real |
-| `rice lint`, `rice preview`, `rice mint` | 3 | real (`lint` delegates to [[drachma]]) |
+| `rice lint`, `rice preview`, `rice mint` | 3 | real (`lint` runs the native [[livery]] engine) |
+| `livery emit`, `livery resolve`, `livery lint` | 3 | real — the engine's own verb group (the old `drachma` binary's surface, native) |
 | `rice design status`/`enter`/`exit` | 3 | real |
 | `cover set` | 1 | real |
 | `rice gen`, `rice adopt`, `rice transpose` | 3 | stub (`adopt` gated) |
@@ -107,7 +108,7 @@ item, `references/AOIDE-DEV.md` §7).
 `--json`) scaffolds a new committed song — see [[Self-Ricing#Minting a
 song]] for the shape it writes. It validates `name` and `--from` against a
 strict `^[a-z0-9][a-z0-9-]*$` pattern (rejecting path traversal) and escapes
-`$`/quotes when rendering a copied value into `rice.nix`, so a drachma value
+`$`/quotes when rendering a copied value into `rice.nix`, so a livery value
 containing `${…}` can never round-trip into live Nix interpolation.
 
 ### The `graph` group — session/project DAG + the conductor mesh
@@ -177,20 +178,19 @@ shortcut the panel itself registers (`aoide:dock`), not a CLI verb (see
   (`rice.gen`), args/flags become the `inputSchema`, and `tools/call` dispatches
   back into the same handlers the CLI uses.
 - **`stageNotesVersion`** is a top-level field of the schema document (v0),
-  pinning the `song/stage/drachma.json` format alongside the command tree so an
+  pinning the `song/stage/livery.json` format alongside the command tree so an
   agent reads one version for the whole contract.
 - **Single audit log, every door.** Every dispatch — CLI, MCP, or A2A —
   appends a JSON-lines record to the one audit log (`aoide.auditLog`), tagged
   with which door it came through (`Door::Cli` / `Door::Mcp` / `Door::A2a`). No
   door writes a separate log.
 
-## How it finds `drachma`
+## How `rice lint` runs
 
-`rice lint` is real: it shells out to [[drachma]] `lint`. It locates that
-binary in order — explicit `$AOIDE_DRACHMA_BIN`, then a PATH lookup for
-`drachma`.
-Absence is tolerated with a structured error (`notes-binary-unavailable`), never
-a panic — the walking-skeleton contract.
+`rice lint` is real: it runs the **native `livery::lint` engine** inside the
+song crate (the Rust port of the old `drachma lint` — same v0 validator,
+same error strings). No binary locate, no PATH shell-out: the engine is
+compiled into `aoide` itself.
 
 ## The second binary — `aoided`
 
@@ -207,7 +207,7 @@ the log location, else the `aoide.auditLog` default applies.
 - [[Session-Graph]]
 - [[Terminal-Commander]]
 - [[Gadget-Dock]]
-- [[drachma]]
+- [[livery]]
 - [[aoided]]
 - [[shellbridge]]
 - [[Codebase]]

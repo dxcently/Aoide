@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-28
+updated: 2026-08-13
 tags: [aoide, naming, meta, architecture]
 ---
 
@@ -29,7 +29,7 @@ The engraved thesis (after Goethe's *"Architektur ist erstarrte Musik"* — arch
 
 - **The frozen half** — the nix layer. Immutable, crystalline, evaluated. It is the **score**: it determines everything and performs nothing.
 - **The performed half** — the running desktop. Live, hot-reloadable, ephemeral. It is the **performance**: what the score sounds like tonight, at this venue.
-- **The seam** — [[drachma]]. Drachma values are frozen into the crystal at build time *and* sounded live at runtime (`stage/drachma.json`, hyprctl, OSC). Both fan-outs derive from the same `aoide.drachma`, so the baked theme and the live preview cannot drift.
+- **The seam** — [[livery]]. Livery values are frozen into the crystal at build time *and* sounded live at runtime (`stage/livery.json`, hyprctl, OSC). Both fan-outs derive from the same `aoide.livery`, so the baked theme and the live preview cannot drift.
 
 Each half gets its own word family, so you always know which side of the seam a sentence is standing on.
 
@@ -41,7 +41,7 @@ Chosen because Nix's own logo is a snowflake, because crystals grow by **local a
 |---|---|---|
 | **nucleus** | `modules/nucleus/` — daemon, CLI, policy | the seed crystal everything condenses around |
 | **dendrite** | `modules/dendrites/` — opt-in feature branches | crystal branches grow outward by accretion; adding one never reshapes the core |
-| **facet** | `modules/facets/` — render surfaces (quickshell, stylix, compositor) | the crystal's faces — the only planes that catch light (render appearance), each reading only drachma |
+| **facet** | `modules/facets/` — render surfaces (quickshell, stylix, compositor) | the crystal's faces — the only planes that catch light (render appearance), each reading only livery |
 | **walker** | `lib/walk.nix` | walks the tree; every file under a walked dir self-registers, no import lists |
 | **snowflake** | your fork | same physics as upstream, unique instance — the point of [[Fork-and-Run]] |
 
@@ -69,31 +69,38 @@ A few terms name the connective tissue rather than either half:
 
 - **conductor** — the ensemble's tool: `aoide conductor`, the TUI that watches the ensemble of running agent terminals and cues between them, with Hyprland as the multiplexer (real windows). The wider **conductor-class** covers every surface with that duty — the Terminal Commander widget, the DAG gadget, the conductor. See [[Terminal-Commander]], [[Session-Graph]].
 - **door** — an entry point into the one dispatch layer: `cli`, `mcp`, `daemon` (and the TUI rides the cli door). Every operation enters through a door and exits into the one audit log. One body, several doors.
-- **drachma** — the design tokens AND the engine that mints them ([[drachma]], `pkgs/drachma`): the Greek coin, one name for the whole token layer. Values and engine are one thing: the tokens are drachma, resolved/validated/emitted by drachma (`stage/drachma.json`, hyprctl, OSC).
+- **livery** — the design tokens AND the engine that dresses every surface in them ([[livery]], native in `crates/song/src/livery/`): one name for the whole token layer. Values and engine are one thing: the tokens are livery, resolved/validated/emitted by livery (`stage/livery.json`, hyprctl, OSC). Formerly the Greek coin `drachma` — kept as an alias, retired as the name.
 - **gate** — the rebuild gate ([[Rebuild-Gate]]): agents propose, the human admits. The single point where the performed half is allowed to re-freeze the crystal.
 - **wiki / vault** — Mneme's memory surfaces: this wiki for design context, the vault for content.
 
-## Why the seam is a coin
+## Why the seam is a livery
 
-Because it is a **token** layer — and a token is a coin.
-
-The industry term for this layer is *design tokens*, and the container is the W3C design-tokens format (`CONTRACTS.md` §1). A token is a minted thing that stands for value; the Muses are Greek, so the coin is the Greek one: **drachma**.
+Because it is a **token** layer — and a token was a coin while the layer was
+only a bag of colours. The industry term for this layer is *design tokens*,
+and the container is the W3C design-tokens format (`CONTRACTS.md` §1). The
+first name was the Greek coin — **drachma** — kept now only as an alias and
+in dated history: a coin stands for a single value, but the engine dresses
+*every* surface in the one song's identity, and a coin does not clothe a
+stage. A **livery** is exactly that: the single set of house colours a whole
+retinue wears in unison, so a servant, a ship, and a herald are read at a
+glance as one household's. It keeps drachma's virtue — one word for the
+values *and* the act of stamping them — while naming the new reach.
 
 Which is why the seam needs no musical word — it is not on the music axis:
 
-- **The Greek axis** names *who acts* and *what is exchanged* — Aoide, Melete, Mneme, drachma.
+- **The Greek axis** names *who acts* — Aoide, Melete, Mneme.
 - **The music axis** names *what is made and performed* — score, song, key, melody, arrangement, instruments, venue, rehearsal, recording.
 
-drachma sits *with* the Muses — one axis, not a third.
+livery sits at the seam — one axis, not a third.
 
-The coin keeps reading true past the name:
+The name keeps reading true past the rename:
 
-| The coin | The layer |
+| The livery | The layer |
 |---|---|
-| A coin is what both parties accept | Stylix bakes it, [[Quickshell]] reads it, hyprctl and the terminal OSC spend it — one unit of account across the seam. This is the zero-drift guarantee stated in economic terms. |
-| A mint stamps a standard | `pkgs/drachma` validates, resolves, emits; `drachma lint` assays the coin before it circulates. Values and mint share one name because a currency is inseparable from the authority guaranteeing it. |
+| A livery is what the retinue wears in unison | Stylix bakes it, [[Quickshell]] reads it, hyprctl and the terminal OSC carry it — one identity across the seam. This is the zero-drift guarantee. |
+| A livery dresses the retinue | the engine validates, resolves, emits (`aoide livery lint` assays the set before it circulates). Values and engine share one name because a retinue is inseparable from the household that dresses it. |
 | Denomination is tiering | palette → semantic → component: the low tier closed and concrete, the higher tiers referencing it. |
-| Currency travels | a song replays at another venue and the drachma still spends. Value that holds across contexts is the point of both coins and [[Self-Ricing]] replay. |
+| Livery travels | a song replays at another venue and the livery still dresses it. Value that holds across contexts is the point of both liveries and [[Self-Ricing]] replay. |
 
 ## How it all flows
 
@@ -101,8 +108,8 @@ One loop, told in the vocabulary:
 
 1. **Melete practices.** The agent writes — a new song in `song/songbook/`, a new dendrite branch, a new widget. Everything it does enters through a door and lands in the audit log.
 2. **The walker freezes.** The nix layer picks up what was written by accretion — dendrites and songs self-register, no import lists — and the score now contains it.
-3. **Rehearsal sounds it.** Before any rebuild, the live side performs the drachma from `stage/drachma.json` — quickshell surfaces and hyprctl repaint in place. The frozen side is untouched; this is the performance testing the score.
-4. **The gate records it.** If the human admits the rebuild, the rehearsed state is recorded — baked through the stylix facet and the compositor, committed to the fork. Rehearsal and recording derive from the same drachma, so they cannot disagree.
+3. **Rehearsal sounds it.** Before any rebuild, the live side performs the livery from `stage/livery.json` — quickshell surfaces and hyprctl repaint in place. The frozen side is untouched; this is the performance testing the score.
+4. **The gate records it.** If the human admits the rebuild, the rehearsed state is recorded — baked through the stylix facet and the compositor, committed to the fork. Rehearsal and recording derive from the same livery, so they cannot disagree.
 5. **Mneme remembers.** The liner and songbook take the design decisions; the wiki takes the architecture; the next practice session starts from memory instead of from zero.
 6. **Aoide sings.** The desktop is the sum of frozen score and live performance — and the loop starts again, one radial layer at a time.
 
@@ -115,6 +122,6 @@ Because agents read this system as much as humans do. A consistent metaphor is c
 
 - [[Song-Vocabulary]] — the performed half, term by term
 - [[Snowflake-Anatomy]] — the frozen half, layer by layer
-- [[drachma]] — the seam where they meet
+- [[livery]] — the seam where they meet
 - [[Melete]] · [[Mneme]] — the other two Muses
 - [[Governance]] · [[Rebuild-Gate]] — the gate and the policy

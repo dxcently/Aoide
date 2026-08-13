@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-03
+updated: 2026-08-13
 tags: [aoide, widget, terminal, agent, session]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -13,7 +13,7 @@ agents, so you always know what is running where — and can **jump to any of th
 by click or keybind**. Agents spawn terminals faster than a human tracks them;
 the terminal commander is the single pane that herds them. It is also the cleanest
 exemplar of the [[Widget-Maker]] thesis — a watcher + a widget + a keybind, all
-declarative and themed by [[drachma]].
+declarative and themed by [[livery]].
 
 The herdr multiplexer is the prior-art pattern (an external tool — agent-terminal
 herding; not part of the Aoide vocabulary, whose word for this duty is
@@ -137,7 +137,7 @@ so the widget need only *tell the bar which workspace to preview* — no
   `shared.hoveredWorkspace` (a `property int` on shell.qml's shared QtObject,
   the same object that carries `tracedSessionId` for the DAG trace). It threads
   shell → dock → gadget for the *writer* and shell → bar → WorkspaceRow for the
-  *reader* — mirroring how `drachma`/`bridge` are passed. Hover and click coexist
+  *reader* — mirroring how `livery`/`bridge` are passed. Hover and click coexist
   (the HoverHandler never steals the click-to-jump `MouseArea`; the dock's
   panel-wide hover union keeps the drawer open through it). On hover-exit the
   value clears to the sentinel `-1`.
@@ -146,7 +146,7 @@ so the widget need only *tell the bar which workspace to preview* — no
   tint on the note), deliberately a *different kind* of mark from the true active
   workspace's warm-accent swell + filled pill. Both can show at once: if the
   hovered terminal is on the active workspace, the ring simply frames the accent
-  pill. All colour comes from [[drachma]] (`aoide.drachma` roles) — no
+  pill. All colour comes from [[livery]] (`aoide.livery` roles) — no
   hardcoded hex.
 - If a session's window/workspace is not yet resolved (or it is off-screen), its
   `workspace` is `-1` and hovering the row simply highlights nothing — no error.
@@ -171,7 +171,7 @@ Two ways to reach a terminal, both one hop:
 
 It is built the way every integration is ([[Widget-Maker]]): a **dendrite**
 (watcher + shellbridge wiring), a **Quickshell widget** (the roster), and a
-**compositor keybind** — reproducible, drachma-themed, and removable by one flag.
+**compositor keybind** — reproducible, livery-themed, and removable by one flag.
 The agent can extend it (add columns, filters, per-agent actions) on request.
 
 ## Related
@@ -185,5 +185,5 @@ The agent can extend it (add columns, filters, per-agent actions) on request.
 - [[Hyprland]]
 - [[Melete]]
 - [[Feature-Set]]
-- [[drachma]]
+- [[livery]]
 - [[A2A-Door]]

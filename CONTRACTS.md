@@ -12,7 +12,7 @@ land with a migration note in `song/songbook/update-playbook.md`.
 ## 1. Note schema — **v0**
 
 The single seam between the frozen nix layer and the live desktop. Facets read
-`aoide.drachma` and **nothing else**. Declared in `modules/nucleus/options.nix`.
+`aoide.livery` and **nothing else**. Declared in `modules/nucleus/options.nix`.
 
 Notes are Aoide's design-token layer; the container format remains the W3C
 design-tokens format. v0 lives inside the (future) W3C design-tokens container;
@@ -44,16 +44,16 @@ apply the fallback, not the option system.
 | `window.border`         | `palette.accent`  |
 | `window.borderInactive` | `palette.bg`      |
 
-Hex format: `#?[0-9a-fA-F]{6}` (leading `#` optional). The note engine
-(`pkgs/drachma`, Agent A) owns the authoritative `rice lint` validator; the
-option type is a permissive gate only.
+Hex format: `#?[0-9a-fA-F]{6}` (leading `#` optional). The livery engine
+(native Rust, `crates/song/src/livery/`) owns the authoritative `rice lint`
+validator; the option type is a permissive gate only.
 
 ### Geometry tier (v0 optional overrides — `geometry.*`)
 
 Additive-optional (same status as the base16 tier): every field is `nullOr`,
 defaulting to `null`. A notes file with no `geometry` block behaves exactly
 as before — the compositor facet applies the fallback, not the option
-system. Rides `song/stage/drachma.json` for live application: `aoide rice
+system. Rides `song/stage/livery.json` for live application: `aoide rice
 preview` live-applies this tier (plus `window.border`/`borderInactive`) via
 best-effort, guarded `hyprctl keyword` calls — see §4's staged-geometry
 paragraph — in addition to baking the value at build time into
@@ -84,7 +84,7 @@ stylix facet bakes it as the base-context image; `null` bakes the solid-colour
 fallback derived from `palette.bg`.
 
 **Migration to v1:** the update playbook migrates `song/songbook/*/rice.nix`
-and `drachma.json` from v0 to v1 when the design-system workstream lands v1.
+and `livery.json` from v0 to v1 when the design-system workstream lands v1.
 
 ---
 
@@ -117,7 +117,7 @@ Rules:
 - Subfolders under `modules/dendrites/` are grouping only; the walker registers
   every file regardless.
 
-Facets (`modules/facets/`) are the same shape but MAY read `aoide.drachma` and
+Facets (`modules/facets/`) are the same shape but MAY read `aoide.livery` and
 MAY declare `aoide.surfaces.<name>.owner` — they read no other module.
 
 ### Repo shape (the root is closed)
@@ -237,11 +237,16 @@ independently. Precedence: `$AOIDE_STAGE_DIR` when set to an **absolute** path
 never resolved against an arbitrary cwd). On the default layout both agree; the
 override is what lets the unit — or a test/smoke run — relocate the stage tree.
 
-### `song/stage/drachma.json` — **v0**
+### `song/stage/livery.json` — **v0**
 
 The resolved, flattened note values for Quickshell (QML reads this; hot-reload
-at rehearsal). Derived from the same `aoide.drachma` as the baked `rice.nix`
-fan-out, so preview and adopted state cannot diverge.
+at rehearsal). Derived from the same `aoide.livery` as the baked `rice.nix`
+fan-out, so preview and adopted state cannot diverge. `stage/livery.json` is
+the canonical name (the `drachma.json` file was renamed by the livery merge);
+during the transition window, writers also mirror to `stage/drachma.json` and
+readers fall back to it if `livery.json` is absent, so a running desktop never
+reads a missing stage file. The mirror + fallback are dropped once the
+transition closes (LIVERY-MERGE.md Phase 4).
 
 Beyond `aoide rice preview <name>`/`cover set`/other emitters writing this
 live, it is also **seeded from the active song's committed notes on every
@@ -295,7 +300,7 @@ active", the ordinary state; never an error.
   "by": "khoa",
   "intent": "/home/khoa/Aoide/song/songbook/moonlight/design/intent.md",
   "intentPresent": true,
-  "sources": ["stage/drachma.json"],
+  "sources": ["stage/livery.json"],
   "carriedSlots": []
 }
 ```
@@ -306,7 +311,7 @@ widget-carry logic exists yet.
 
 **Honest lifecycle state (Phase B):** Phase A shipped the read-only `aoide
 rice design status`. Phase B added `enter`/`exit` — `aoide rice design enter
-<name>` reuses `rice preview <name>`'s live-apply side effects (drachma.json
+<name>` reuses `rice preview <name>`'s live-apply side effects (livery.json
 hot-reload + best-effort hyprctl geometry/border) and then writes the marker
 via `aoide-storage`'s `save_design_marker`; `aoide rice design exit` clears
 it via `delete_design_marker` (idempotent — exiting with no active session is
@@ -503,7 +508,7 @@ Each song's `rice.nix` **self-gates**, exactly like a dendrite:
 { lib, config, ... }:
 {
   config = lib.mkIf (config.aoide.song == "<name>") {
-    aoide.drachma.palette = { bg = "…"; fg = "…"; accent = "…"; urgent = "…"; };
+    aoide.livery.palette = { bg = "…"; fg = "…"; accent = "…"; urgent = "…"; };
     # component tier (bar/notif/window) — null falls back to palette
   };
 }
@@ -511,7 +516,7 @@ Each song's `rice.nix` **self-gates**, exactly like a dendrite:
 
 ### Rules (host-agnostic discipline)
 
-- A song sets **ONLY `aoide.drachma`** (palette + component tiers) and — later —
+- A song sets **ONLY `aoide.livery`** (palette + component tiers) and — later —
   cover/chime references inside `song/`.
 - A song **NEVER** sets host options (monitors, hardware, services) and
   **NEVER** enables facets or dendrites. Those are the venue's decision.
@@ -531,16 +536,16 @@ the check.
 
 `checks.song-shape` structurally asserts every walked songbook path is a
 `rice.nix` (a song's module entry) — catching a stray `.nix` that could set
-arbitrary host options. The **full** "only defines `aoide.drachma`" invariant is
+arbitrary host options. The **full** "only defines `aoide.livery`" invariant is
 a documented convention here (isolated per-module option-diffing is
 disproportionate for v0; see the `TODO(song-shape v1)` in `lib/checks.nix`).
 
 **Migration to v1:** the update playbook migrates `song/songbook/*/rice.nix`
-and `drachma.json` from v0 to v1 with the drachma schema (§1).
+and `livery.json` from v0 to v1 with the livery schema (§1).
 
 ### Per-song flavor widgets
 
-Beyond `aoide.drachma` notes, a song MAY also carry its own QML for a fixed
+Beyond `aoide.livery` notes, a song MAY also carry its own QML for a fixed
 set of "flavor" surfaces — committed files, not nix options:
 
 - **Convention:** `song/songbook/<name>/widgets/<slot>.qml`. ANY `.qml` file
@@ -569,13 +574,13 @@ set of "flavor" surfaces — committed files, not nix options:
   anchor a host surface embeds — it loads the song's file when authored, else
   falls back to shared chrome (or renders nothing, when no fallback exists).
   `aoide rice preview <name>` (§4) drives this live, no rebuild: it stages
-  `song` into `drachma.json`, `DrachmaState`'s `songName` updates, and every
+  `song` into `livery.json`, `DrachmaState`'s `songName` updates, and every
   `WidgetSlot` re-resolves.
 - **Fixed injected-prop contract:** a loaded widget receives `notes`
   (`DrachmaState`) and `bridge` (`ShellBridge`) always, plus whatever
   slot-specific extras the anchor declares (e.g. notifications' `notification`)
   — **never** nix `config.*`. This does not loosen the song-shape rule above:
-  a song's `rice.nix` still sets **ONLY** `aoide.drachma` — widgets are
+  a song's `rice.nix` still sets **ONLY** `aoide.livery` — widgets are
   committed QML files carried by the build, not nix options, and a widget is
   structurally incapable of reaching host/facet options through this surface.
 - **Playbook:** `song/songbook/update-playbook.md`.
@@ -793,7 +798,7 @@ and needs no playbook migration entry (nothing existing changed shape).
 
 - A contract version is a single integer, tracked in this file's section
   heading (`— v0`).
-- The drachma schema version is also surfaced in `stage/drachma.json`
+- The livery schema version is also surfaced in `stage/livery.json`
   (`schemaVersion`) and in `aoide schema --json` (`schemaVersion`).
 - Bumping any version requires: (1) update this file, (2) add a playbook
   migration, (3) update the corresponding `checks` so the new contract is

@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-12
+updated: 2026-08-13
 tags: [aoide, graph, session, terminal, agent, cli]
 ---
 
@@ -59,7 +59,7 @@ document instead. A sample render:
 
 `graph emit` writes the same resolved document atomically to
 `song/stage/graph.json` — the identical write-temp-then-rename pattern as the
-drachma emitter — so [[Quickshell]] can hot-reload it.
+livery emitter — so [[Quickshell]] can hot-reload it.
 
 The desktop has no standalone DAG-diagram surface today: `graph view`/
 `--json` in the terminal and the `aoide conductor` ratatui TUI (DAG/sessions/

@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-01
+updated: 2026-08-13
 tags: [aoide, rice, agent]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Aoide ships the rice engine as a builtin. The engine provides the loop, the schema, and the preview mechanism. Everything else — the songs, the preferences, the accumulated taste — it learns by doing.
 
-**Status today:** the loop below is the *designed* shape. `rice lint` (delegates to [[drachma]]), `rice preview`, and `rice mint` are implemented. `rice preview` stages `stage/drachma.json`, [[Quickshell]] hot-reloads it live via `FileView`, and geometry + window-border colours apply to the running compositor over `hyprctl` in the same step (terminal-OSC fan-out is not yet wired into it). Beyond a live `rice preview`, `stage/drachma.json` is also reseeded from the active song's committed notes on every activation ([[Codebase#Runtime contracts (socket + stage files)]]), so a host that boots without ever previewing still carries the correct stage twin. `rice gen`, `rice adopt`, and `rice transpose` are declared but not yet implemented (stub, exit `64`) — narrate those as planned, not as a working pipeline.
+**Status today:** the loop below is the *designed* shape. `rice lint` (runs the native [[livery]] engine), `rice preview`, and `rice mint` are implemented. `rice preview` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, and geometry + window-border colours apply to the running compositor over `hyprctl` in the same step (terminal-OSC fan-out is not yet wired into it). Beyond a live `rice preview`, `stage/livery.json` is also reseeded from the active song's committed notes on every activation ([[Codebase#Runtime contracts (socket + stage files)]]), so a host that boots without ever previewing still carries the correct stage twin. `rice gen`, `rice adopt`, and `rice transpose` are declared but not yet implemented (stub, exit `64`) — narrate those as planned, not as a working pipeline.
 
 ## The Rice Loop
 
@@ -18,9 +18,9 @@ Aoide ships the rice engine as a builtin. The engine provides the loop, the sche
 aoide rice gen <prompt|wallpaper>   (planned)
     ↓  reads songbook/ first, always
 aoide rice mint <name> [--from]     (real — scaffolds a new song directly, below)
-rice lint                           (real — drachma schema validation)
+rice lint                           (real — livery schema validation)
     ↓  fail → reject + songbook note
-rice preview                        (real — stages stage/drachma.json + live hyprctl apply)
+rice preview                        (real — stages stage/livery.json + live hyprctl apply)
     ↓  quickshell hot-reload + live geometry/border colours (terminal OSC fan-out planned)
 aoide rice adopt <name>             (planned — User gates this step)
     ↓  committed to song/songbook/<song>/
@@ -36,7 +36,7 @@ new`) scaffolds a new committed song directly, without going through `gen`:
 `song/songbook/<name>/rice.nix` (a self-gating `lib.mkIf (config.aoide.song
 == "<name>")` block copying the `palette`/`window`/`geometry` tiers from
 `--from`, defaulting to `default` — the only `.nix` file the scaffold
-writes, satisfying the song-shape check), a `drachma.json` mirror of the
+writes, satisfying the song-shape check), a `livery.json` mirror of the
 same values, an honest-empty `design/intent.md` pointing at the widget-slot
 catalog and the update playbook rather than fabricating design rationale,
 and `widgets/.gitkeep`. No `hypr/` directory — geometry lives in `rice.nix`
@@ -47,9 +47,9 @@ would.
 
 ## Geometry
 
-A song may set `aoide.drachma.geometry` — gaps, border size, rounding, and
+A song may set `aoide.livery.geometry` — gaps, border size, rounding, and
 blur, every field optional — alongside its palette and window tiers; see
-[[drachma#The geometry tier]] for the field list and the fallback/live-apply
+[[livery#The geometry tier]] for the field list and the fallback/live-apply
 mechanism. A song that sets no geometry performs with the compositor
 facet's own defaults, unchanged.
 
@@ -94,7 +94,7 @@ aoide.song = "sonata";
 
 Songs self-register via the `song/songbook/` walk in `lib/mkHost.nix`; each song's `rice.nix` guards itself with `lib.mkIf (config.aoide.song == "<name>")`. No explicit import list: committing a song makes it available to all hosts. (This walker/registration mechanism is real and shipped — only the CLI verbs that generate/commit songs are stubbed.)
 
-**Replay** is performing an adopted song at a different host. The song carries only drachma (palette + component tiers); the host supplies its own specifics (hardware, monitors) and its own enabled instruments (facets, dendrites). A host lacking an instrument does not sound that part — coverage degrades gracefully through the tiers above.
+**Replay** is performing an adopted song at a different host. The song carries only livery (palette + component tiers); the host supplies its own specifics (hardware, monitors) and its own enabled instruments (facets, dendrites). A host lacking an instrument does not sound that part — coverage degrades gracefully through the tiers above.
 
 **Transpose** vs **replay**: transpose = same venue, new key (new palette). Replay = same score, new venue (different host). Both are one-line operations on an adopted song (`rice transpose` itself is planned; the replay declaration — `aoide.song = "<name>";` — is real).
 
@@ -106,8 +106,8 @@ Each song's `songbook/<song>/palette/` holds its transpose keys — the palette 
 
 ```
 song/songbook/<song>/
-├── rice.nix      pure nix: drachma import + config swaps (wallpaper note points at song/covers/<file>)
-├── drachma.json  drachma values
+├── rice.nix      pure nix: livery import + config swaps (wallpaper note points at song/covers/<file>)
+├── livery.json   livery values
 ├── palette/      transpose keys
 ├── sounds/       chimes / notification audio
 ├── icons/        per-song icon overrides
@@ -122,7 +122,7 @@ Covers themselves live in the shared `song/covers/` library, not per-song — an
 ## Related
 
 - [[Song-Vocabulary]]
-- [[drachma]]
+- [[livery]]
 - [[Content-Pipeline]]
 - [[Snowflake-Anatomy]]
 - [[Stylix]]

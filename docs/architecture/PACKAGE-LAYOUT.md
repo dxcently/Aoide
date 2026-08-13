@@ -82,7 +82,7 @@ for the steward especially):**
 | `tui` (terminal UI library) | **`conductor`** | aoide already has its TUI: `conductor/` (app/ui/graphview/theme). It doubles as the control surface for the steward. |
 | `coding-agent` (the concrete app) | **`cli`** | the `aoide`/`aoided` bins + `commands/` that wire every crate into the two shipped binaries. |
 | *(none)* | **`conduct`** | aoide-unique: the PTY multiplexer + session DAG + hook plumbing. The core that makes every terminal a tracked, conductable session. |
-| *(none)* | **`song`** | aoide-unique: the ricing / design engine (notes → drachma, songs, stage, the Pantheon design language). |
+| *(none)* | **`song`** | aoide-unique: the ricing / design engine (notes → livery, songs, stage, the Pantheon design language). |
 | *(none)* | **`management`** | aoide-unique: the privileged **hands** — rebuild/switch, `rice mint`, hypr control, service/daemon ops, sudo-tracking. |
 
 **Two additions beyond a literal port, both driven by this request:**
@@ -126,7 +126,7 @@ pkgs/aoide/
            audit/        —  self-auditing (checks its work vs canon + contracts)
            skills/       —  packaged procedures (rebuild · mint a song · wire a gadget)
     song/                       # ricing / design engine
-      src/ notes(drachma-locate) · rice · cover · stage · palette
+      src/ livery · notes · rice · cover · stage · palette
            · commands/ (rice*, cover set, rice design — Phase 9)
     management/                 # privileged host-ops — the hands
       src/ hypr · infra · rebuild · service · sudo-track
@@ -151,7 +151,7 @@ pkgs/aoide/
 | **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, migrations, search — plus its CLI verb (`usage`). The steward's `canon` and session memory persist through here. | `graph/session_store.rs`, `song/stage/*`, `state/*`, `commands/usage.rs` | landed (Phase 3a); backend is still file-first (seed → build); commands landed (Phase 9) |
 | **test-support** | Shared test rig (scratch dirs, `EnvSaver`, fixture payloads, the single `env_lock`). **Dev-dependency only** — never a production edge. | `commands/mod.rs::test_support`, root `env_lock` | landed (Phase 9) |
 | **steward** ★ | A system-management agent driven by the conductor. Runs a harness loop; its tools act on the host via `management`/`conduct`/`song`; it remembers design primitives in `canon`; it self-audits against canon + contracts. | *(new)* | skeleton — DEFER (Phase 7) |
-| **song** | The ricing / design engine: locate `drachma`, apply songs, mint palettes, write the stage, the Pantheon design language — plus its CLI verbs (`rice *`, `cover set`). **Rices portably** — applies a song on generic Linux too, not only via Stylix/NixOS modules. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs`, `commands/design.rs` | landed (Phase 5a+5b); commands landed (Phase 9) |
+| **song** | The ricing / design engine: the native livery engine (`src/livery/` — schema · resolve · emit; formerly the Node `drachma` package), apply songs, mint palettes, write the stage, the Pantheon design language — plus its CLI verbs (`rice *`, `livery *`, `cover set`). **Rices portably** — applies a song on generic Linux too, not only via Stylix/NixOS modules. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs`, `commands/design.rs` | landed (Phase 5a+5b); commands landed (Phase 9) |
 | **management** | The privileged hands: rebuild/switch, `rice mint`, hypr control, service/daemon ops, sudo-tracking. **Host-abstracted** — a NixOS backend (nixos-rebuild/modules) and a portable-Nix backend (`nix profile`/home-manager-style) behind one seam, chosen by what the host is. The capabilities the steward's tools invoke. | `hypr.rs`, `commands/infra.rs`(host ops), sudo-track (44c6ec9) | carve-out — DEFERRED out of Phase 5 (no ETA) |
 | **evals** | Eval harness: golden snapshots (existing), agent-behavior evals for the steward, door-contract evals, ricing/design evals. | golden-snapshot tests | elevate — DEFER (Phase 8) |
 | **conductor** | The CLI/TUI surface: session DAG view, roster, and the steward's control panel — plus its one CLI verb (`conductor`). | `crates/conductor/` (app·ui·graphview·theme), `commands/infra.rs`(conductor verb) | landed (Phase 6a+6b); commands landed (Phase 9) |

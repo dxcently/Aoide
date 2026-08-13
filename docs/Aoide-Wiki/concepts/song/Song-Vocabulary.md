@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-07-28
+updated: 2026-08-13
 tags: [aoide, naming, rice]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 The naming thesis, engraved in the design: architecture is frozen music. The nix layer is the score — crystalline, immutable (see [[Snowflake-Anatomy]]) — and the running desktop is the performance. A rice is a song the system sings.
 
-Song vocabulary names the performed half. Snowflake vocabulary names the frozen half. drachma is where they meet: values frozen into the crystal, sounded at runtime.
+Song vocabulary names the performed half. Snowflake vocabulary names the frozen half. livery is where they meet: values frozen into the crystal, sounded at runtime.
 
 ## The Song Map
 
@@ -19,8 +19,8 @@ Every term maps to a literal path inside `song/` (which lives at `~/Aoide/song`;
 | Music term | Meaning | `song/` path |
 |---|---|---|
 | key | palette | `songbook/<song>/palette/` |
-| melody | semantic tier — survives transposition | (tier within drachma) |
-| arrangement | component tier | (tier within drachma) |
+| melody | semantic tier — survives transposition | (tier within livery) |
+| arrangement | component tier | (tier within livery) |
 | instruments | facets — quickshell, compositor, stylix | `modules/facets/` (in the nix tree) |
 | song | rice | `songbook/<song>/` |
 | design | per-song design wiki | `songbook/<song>/design/` |
@@ -30,7 +30,7 @@ Every term maps to a literal path inside `song/` (which lives at `~/Aoide/song`;
 | stage | live preview state (gitignored) | `stage/` |
 | auditions | propose gate (gitignored) | `auditions/` |
 | the standard | shipped default song | `songbook/default/` |
-| rehearsal | preview (`stage/drachma.json`, hot-reload) | — |
+| rehearsal | preview (`stage/livery.json`, hot-reload) | — |
 | recording | adopt — durable, committed, rebuilt | — |
 | venue | host — its own specifics and enabled instruments | `hosts/<host>/` |
 | replay | perform an existing song at a new venue | `aoide.song = "<name>";` in host config |
@@ -50,7 +50,7 @@ A full-orchestration rice addresses all six dimensions:
 | chimes | Notification and system sounds |
 | cover | Wallpaper |
 
-Everything app-side is a [[Stylix]] target — `rice.nix` feeds the scheme once and it fans out to every nix-manageable app. Everything shell-side is a [[Quickshell]] widget — one runtime reading `stage/drachma.json` means nearly the full arrangement hot-reloads at rehearsal.
+Everything app-side is a [[Stylix]] target — `rice.nix` feeds the scheme once and it fans out to every nix-manageable app. Everything shell-side is a [[Quickshell]] widget — one runtime reading `stage/livery.json` means nearly the full arrangement hot-reloads at rehearsal.
 
 ## Replay — any song, any host
 
@@ -64,7 +64,7 @@ aoide.song = "sonata";
 
 Songs self-register like dendrites: `lib/mkHost.nix` walks `song/songbook/` alongside `modules/`. Each song's `rice.nix` guards itself with `lib.mkIf (config.aoide.song == "<name>")`, so only one song activates per host. Committing a song to the fork makes it fleet-available — every host that pulls can perform it.
 
-**The separation of concerns (the point of replay):** the song carries only drachma — palette, component tiers, and its own covers and chimes. It never sets host options, hardware configuration, or which facets and dendrites are enabled. Those remain host responsibilities. A host lacking an instrument simply does not sound that part; coverage degrades gracefully through the [[Self-Ricing]] coverage tiers. Host-agnosticism is a documented song-shape convention in `CONTRACTS.md`.
+**The separation of concerns (the point of replay):** the song carries only livery — palette, component tiers, and its own covers and chimes. It never sets host options, hardware configuration, or which facets and dendrites are enabled. Those remain host responsibilities. A host lacking an instrument simply does not sound that part; coverage degrades gracefully through the [[Self-Ricing]] coverage tiers. Host-agnosticism is a documented song-shape convention in `CONTRACTS.md`.
 
 The `noSongRead` check guards only the runtime dirs (`stage/`, `auditions/`). Committed `song/songbook/**` is versioned score — it is legitimately read at eval and safe for hosts to reference.
 
@@ -73,7 +73,7 @@ The `noSongRead` check guards only the runtime dirs (`stage/`, `auditions/`). Co
 ## Related
 
 - [[Self-Ricing]]
-- [[drachma]]
+- [[livery]]
 - [[Stylix]]
 - [[Snowflake-Anatomy]]
 - [[Fork-and-Run]]

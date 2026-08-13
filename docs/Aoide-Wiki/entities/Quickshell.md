@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-08-01
+updated: 2026-08-13
 tags: [aoide, shell, ui, qml, quickshell]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 The shell and UI runtime for Aoide, written in QML. It renders the complete shell surface: workspaces bar (with agent sessions and connection state), notification daemon (implementing `org.freedesktop.Notifications` natively), agent widgets, launcher, OSD, lockscreen, greeter, and wallpaper layer. This replaces the swaync / rofi / hyprlock / swww zoo with a single runtime.
 
-Quickshell reads `stage/drachma.json` at runtime, so nearly the full arrangement — colors, typography, geometry, shell widgets — hot-reloads during rehearsal (preview) without a rebuild. GTK/Qt targets require app restarts and are adopt-only for preview purposes.
+Quickshell reads `stage/livery.json` at runtime, so nearly the full arrangement — colors, typography, geometry, shell widgets — hot-reloads during rehearsal (preview) without a rebuild. GTK/Qt targets require app restarts and are adopt-only for preview purposes.
 
 Communication discipline: Quickshell reads state files from shellbridge and issues commands via the unix socket. It never speaks an agent protocol or MCP directly.
 
@@ -19,7 +19,7 @@ Communication discipline: Quickshell reads state files from shellbridge and issu
 ## Implementation
 
 The QML skeleton is shipped in `modules/facets/quickshell/qml/`. Two singletons
-carry the shared session state: **`DrachmaState`** watches `stage/drachma.json` via a
+carry the shared session state: **`DrachmaState`** watches `stage/livery.json` via a
 `FileView` and re-binds every surface's colours in one pass on an atomic
 replace (the hot-reload); **`ShellBridge`** is the unix-socket client — the sole
 outbound channel from QML (`focusSession(address)` → shellbridge → hyprctl), no
@@ -27,7 +27,7 @@ MCP/HTTP/shell-exec from QML. `shell.qml` (a `ShellRoot`) instantiates the two
 singletons and the surface widgets (`AoideBar` with the `SessionChip`/
 `WorkspaceRow` session-jump widget, `AoideNotifications` + `NotificationCard`,
 `AoideLauncher`, `AoideOsd`, `AoideLockscreen`, `AoideGreeter`, `AoideWallpaper`)
-— each a stub reading colours from `drachma`, kept in a separate file so [[Melete]]
+— each a stub reading colours from `livery`, kept in a separate file so [[Melete]]
 can swap them independently. The repo root carries no `qml/` directory —
 widget source lives in `modules/facets/quickshell/qml/`, and the facet's
 `home.activation.aoideDeployQml` rsyncs the built config tree (`rsync -a
@@ -38,7 +38,7 @@ previews live without a rebuild, and every activation's rsync reasserts the
 store's build over any such edit — the same "switch is the truth, hot edits
 are the sketch" discipline as every other stage/preview seam. Crucially, `hyprland.conf`
 is owned by home-manager's `wayland.windowManager.hyprland`: the compositor facet
-writes drachma + keybind fragments with `mkBefore`, and the Quickshell facet appends
+writes livery + keybind fragments with `mkBefore`, and the Quickshell facet appends
 its `exec-once` autostart with `mkAfter`, so the two facets compose the one config
 file without collision.
 
@@ -73,7 +73,7 @@ enumerates apps from Quickshell's built-in `DesktopEntries`, filters on a
 prefix-ranked case-insensitive substring as you type, navigates with
 Up/Down + Ctrl+J/K, launches on Enter/click, dismisses on Escape / scrim-click.
 It is a Pantheon pane (`GadgetFrame`, cream Aero glass, `♪` prompt, lowercase
-`launcher.summon` callout), colours strictly from `drachma`.
+`launcher.summon` callout), colours strictly from `livery`.
 
 Two design decisions worth carrying forward:
 
@@ -142,7 +142,7 @@ the shell — no bar, no dock, no wallpaper. See
 - [[Gadget-Dock]]
 - [[shellbridge]]
 - [[Self-Ricing]]
-- [[drachma]]
+- [[livery]]
 - [[Codebase]]
 - [[Hyprland]]
 - [[Widget-Bridge-Contract]]

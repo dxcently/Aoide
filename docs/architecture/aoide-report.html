@@ -221,7 +221,7 @@ flowchart LR
   sb["shellbridge.service<br/>atomic write-then-rename"]:::bridge
   subgraph STAGE["song/stage/*.json — hot-reloaded"]
     direction TB
-    st["sessions · hooks · graph · projects<br/>drachma · cover · grimoire"]:::stage
+    st["sessions · hooks · graph · projects<br/>livery · cover · grimoire"]:::stage
   end
   qs["aoide-quickshell.service<br/>StagingEngine"]:::shell
   subgraph WID["widgets"]
@@ -258,7 +258,7 @@ flowchart LR
 
 deploy:  qml in git ──home.file symlink──► home.activation rsync -a --delete ──► run/qml/ (gitignored)
 truth vs sketch:  `aoide song` + rebuild = bakes hypr.conf + Stylix + deploys qml   (truth)
-                  `aoide rice preview`   = writes stage/drachma.json + hyprctl keyword (sketch, no reload)</pre>
+                  `aoide rice preview`   = writes stage/livery.json + hyprctl keyword (sketch, no reload)</pre>
   </section>
 
   <!-- PLATE III -->
@@ -309,7 +309,7 @@ flowchart TB
     ├── conduct/     PTY multiplexer · session DAG · hook plumbing · reaper · graph*/hooks-install verbs
     ├── client/      A2A outbound (agent add/list/send) · melete adapter
     ├── server/      a2a serve · mcp serve · daemon::run · shellbridge — DI'd, never depends on the trunk
-    ├── song/        drachma lint · live geometry+hyprctl · rice mint/cover/design verbs
+    ├── song/        livery lint · live geometry+hyprctl · rice mint/cover/design verbs
     ├── conductor/   the TUI — app · ui · graphview · theme — DI'd like server
     └── test-support/  dev-only — shared test rig + env_lock (Phase 9)</pre>
   </section>
@@ -432,6 +432,7 @@ flowchart TB
   <section>
     <div class="plate-label"><span class="no">§</span><h2>Recent work</h2><span class="h-line"></span><span>changelog</span></div>
     <div class="clog">
+      <div class="centry"><span class="hash pending">pending</span><span class="msg"><b>livery merge</b> — the drachma note engine (Node, wrapping Style Dictionary) ported natively into <code>crates/song/src/livery/</code> and renamed <b>livery</b>: one <code>Emitter</code> trait + registry with four pure backends (stage / hyprctl / osc / file-template), the <code>aoide livery emit|resolve|lint</code> verb group (51 commands in <code>schema --json</code>), <code>aoide.drachma</code> → <code>aoide.livery</code> behind a <code>mkRenamedOptionModule</code> transition alias, songbook <code>drachma.json</code> → <code>livery.json</code>, and the live stage file renamed <code>stage/livery.json</code> with <code>stage/drachma.json</code> mirrored during the compat window (dropped when the transition closes). <code>pkgs/drachma</code> is deleted; the Node toolchain leaves the core. Schema shape unchanged — still v0, no version bump.</span></div>
       <div class="centry"><span class="hash">ca08b73</span><span class="msg"><b>pi session tracking</b> — the pi coding agent joins the graph as the third <code>AgentProfile</code> (<code>protocol::agents</code>): claude-shaped hook event map, identity normalize, shared model ceiling, and a <code>TranscriptSpec</code> tail-reading pi's own jsonl (<code>~/.pi/agent/sessions/--&lt;bucket(cwd)&gt;--/&lt;ts&gt;_&lt;sid&gt;.jsonl</code>, dots preserved in the bucket) for say/title/model/context tokens. <code>hooks install pi</code> reports declarative — pi's wiring is the dendrite-managed extension (<code>aoide-pi-session.ts</code>, TUI-only so pi-subagents' child runs never register), not a settings file. E2E-verified live: real pi TUI → idle → working (prompt-named) → stopped → done, model + ctx read from the transcript. <small>07b4079 flags the landed-but-unswept state; live binary needs the gated switch before pi sessions track.</small></span></div>
       <div class="centry"><span class="hash">23e945d</span><span class="msg"><b>Kimi CLI's nix package pulled, the agent profile stays</b> — the custom <code>pkgs/kimi-code</code> derivation and its <code>kimi-code.nix</code> dendrite are gone (host wiring in <code>yomi-strix/default.nix</code> too); <code>protocol::agents</code>' <code>kimi</code> <code>AgentProfile</code> entry is untouched. Net effect: aoide still knows how to hook/conduct a Kimi session end-to-end, it just no longer ships a house-built Kimi binary — bring your own.</span></div>
       <div class="centry"><span class="hash">34a587a</span><span class="msg"><b>wiki: Aoide vs. LangChain/LangGraph/LangSmith</b> — a positioning handoff (<code>references/AOIDE-VS-LANGCHAIN-HANDOFF.md</code>): the three-layer comparison table, the <code>steward</code> fork this forces (§2, tied to the still-open Phase 7 call), an open graph-db reframing proposal for the session DAG (§3, discussed not decided), and a stated-intention-only note on the session graph eventually adopting knowledge-graph paradigms — typed entities, semantic (not just structural) edges — rather than a plain process DAG (§4).</span></div>

@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-03
+updated: 2026-08-13
 tags: [aoide, agent, cli]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -65,7 +65,7 @@ Every `aoide` command is designed as an API that happens to be typeable:
 
 - `--json` flag on every command for structured input and output
 - Structured errors with meaningful exit codes
-- Published schemas for all state files (`stage/`, drachma, manifests)
+- Published schemas for all state files (`stage/`, livery, manifests)
 - All operations idempotent; output reports exactly what changed
 
 ## The hooked agents: claude and kimi

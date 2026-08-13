@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-31
+updated: 2026-08-13
 tags: [aoide, features, integration, melete, mneme]
 ---
 
@@ -18,7 +18,7 @@ façade]]). Many capabilities below are Melete's, *surfaced* through AoideOS —
 see the "Provided by" column.
 
 Every integration is a dendrite ([[Snowflake-Anatomy]]): opt-in, flag-toggled,
-themed by [[drachma]], and — where it touches the outside world —
+themed by [[livery]], and — where it touches the outside world —
 `enable = false` by default and behind the [[Governance|gate]].
 
 **A specialized widget maker.** This list is what ships. The *point* of Aoide
@@ -99,7 +99,7 @@ The design surfaces **both** agent schedules and system timers in one place.
 - **System timers:** systemd timers surfaced read-only alongside.
 - **Widget:** a Quickshell **agenda / timers widget** reads a `song/stage/*.json`
   state file and shows pending one-shots, recurring cadences, chained jobs
-  ("waiting on `<id>`"), and system timers — live, themed by drachma.
+  ("waiting on `<id>`"), and system timers — live, themed by livery.
 - **Governance:** scheduled *coding* runs still route their result through the
   rebuild gate; **no background self-updaters** ([[Governance]]).
 - **Surfaced as:** a planned `aoide sched …` verb (list / create / cancel, not
@@ -177,7 +177,7 @@ more]] on demand. Rows marked *(planned)* have no command yet in `aoide schema
 | System timers view *(planned)* | systemd | agenda widget | on (read-only) | — |
 | Vault knowledge | Mneme | pipeline · `aoide …` | via approve gate | approve gate |
 | Autonomous code tasks | Melete | messaging stream · PR | — | rebuild gate |
-| Self-ricing | drachma + facets | `aoide rice` (`lint`/`preview` real; `gen`/`adopt`/`transpose` exit-64 stubs) | on | adopt gate |
+| Self-ricing | livery + facets | `aoide rice` (`lint`/`preview` real; `gen`/`adopt`/`transpose` exit-64 stubs) | on | adopt gate |
 | Agent-session terminal commander | shellbridge + aoided watcher | widget · `aoide graph session` · click/keybind jump | on | — |
 
 ## Related

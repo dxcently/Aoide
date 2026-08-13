@@ -94,11 +94,11 @@ The repo is a **snowflake**: everything lives under `modules/`, walked and self-
 ├── modules/
 │   ├── nucleus/    core: aoided daemon, shellbridge, CLI packaging, options, policy
 │   ├── dendrites/  opt-in features — one tree, shipped + personal branches
-│   └── facets/     render surfaces (read ONLY aoide.drachma): quickshell · compositor · stylix
+│   └── facets/     render surfaces (read ONLY aoide.livery): quickshell · compositor · stylix
 ├── hosts/
 │   ├── common/     cross-machine baseline (which dendrites default ON)
 │   └── <host>/     machine-specific picks (hardware, enabled facets, song)
-├── pkgs/           aoide CLI (Rust) · drachma (Node)
+├── pkgs/           aoide CLI (Rust)
 ├── lib/            the walker + mkHost + checks
 ├── song/           the performed half (rices, songbook, runtime stage/)
 └── flake.nix       inputs + outputs (never edited to add a module)
@@ -147,7 +147,7 @@ The five-line recipe (from `modules/dendrites/_example.nix`, dendrite shape v0 �
 }
 ```
 
-Then enable it with one host line. Growth is additive — new dendrites are new files, so upstream merges stay conflict-free. Rules: guard on `aoide.<name>.enable`; a dendrite never reads another module; facets are the same shape but MAY read `aoide.drachma`.
+Then enable it with one host line. Growth is additive — new dendrites are new files, so upstream merges stay conflict-free. Rules: guard on `aoide.<name>.enable`; a dendrite never reads another module; facets are the same shape but MAY read `aoide.livery`.
 
 **Where things belong** (the walker discovers all four; subfolders are grouping only):
 
@@ -155,7 +155,7 @@ Then enable it with one host line. Growth is additive — new dendrites are new 
 |---|---|---|
 | `modules/nucleus/` | daemon, CLI packaging, the option contract, policy | upstream merge only |
 | `modules/dendrites/` | opt-in features (yours + shipped) | additive — new files freely |
-| `modules/facets/` | render surfaces (read only `aoide.drachma`) | upstream merge only |
+| `modules/facets/` | render surfaces (read only `aoide.livery`) | upstream merge only |
 | `song/songbook/` | committed songs (the agent's writable domain) | agent, gated at rebuild |
 
 ### The fork-and-run model
@@ -201,7 +201,7 @@ Ownership follows radial distance from the nucleus (the snowflake's [mutation po
 | `modules/dendrites/<yours>.nix` | you | Grow new branches freely (new files). |
 | `hosts/` | you, entirely | Hardware, enabled facets/dendrites, song pick. |
 | `song/songbook/` | you (agent-written) | Where self-ricing writes back its songs; gated at rebuild. |
-| `pkgs/aoide` + `pkgs/drachma` | upstream | Don't edit — merge cleanly. |
+| `pkgs/aoide` | upstream | Don't edit — merge cleanly. |
 
 ### Merge hygiene
 
@@ -269,9 +269,9 @@ aoide graph send --id <id> [--submit] [--yes] -- <text>
 
 It injects `<text>` into that session's stdin (`--submit` appends Enter). This is the **one gated injection door**: held **pending** approval by default; it **delivers** on `--yes`, on the global `AOIDE_CONDUCT_AUTOGATE` switch, or when the **sender is the target's parent** (an orchestrator freely commanding a child it spawned — the "freely orchestrated" default). A delivered send auto-renames the node to a one-line form of the text, and **every outcome is audited** (`~/Aoide/log`). `aoide conduct -- <cmd>` wraps any extra agent the same way; `aoide graph wrap -- <cmd>` is the lighter observe-only wrapper (no control socket). The desktop's terminals become a mesh of sessions a conductor speaks into.
 
-### `drachma` — the note engine
+### `livery` — the note engine
 
-The Node package (`pkgs/drachma`, wrapping Style Dictionary — the token engine takes the Greek coin's name) that owns the authoritative note pipeline: **lint** (validate a rice against the note schema — `rice lint` delegates here), **resolve** (apply component→palette fallbacks), and **emit** (write the resolved `song/stage/drachma.json` for Quickshell, plus hyprctl and terminal-OSC targets). Notes are the single immutable seam between the frozen nix layer and the live desktop — facets read `aoide.drachma` and nothing else.
+The native Rust engine (`crates/song/src/livery/`, inside the song crate) that owns the authoritative note pipeline: **lint** (validate a rice against the note schema — `rice lint` runs it natively), **resolve** (deref aliases + apply component→palette fallbacks), and **emit** (the stage JSON for Quickshell, hyprctl keyword lines, terminal OSC, and file-template backends) — surfaced as `aoide livery emit|resolve|lint`. Notes are the single immutable seam between the frozen nix layer and the live desktop — facets read `aoide.livery` and nothing else. Formerly a standalone Node package (`pkgs/drachma`, wrapping Style Dictionary): the livery merge ported it into the song crate and removed the Node toolchain.
 
 ### `aoided` + `shellbridge` — the runtime services
 
@@ -298,17 +298,20 @@ Opt-in: the **`aoide.rebuild`** capability (off by default) grants a dedicated n
 
 `ad` · `adrebuild` · `adupdate` · `adboot` · `adtest` · `adbuild` · `adrollback` · `adcheck` · `adgens` · `adclean` — see [§1](#the-ad-rebuild-family).
 
-### `aoide` subcommands (from `schema --json`, 28)
+### `aoide` subcommands (from `schema --json`, 51)
 
 | Command | Status | Summary |
 |---|---|---|
 | `aoide guide` | real | Print the four-tier agent onboarding (tier map + house rules). |
 | `aoide schema` | real | Emit the versioned machine-readable schema of every command + state file. |
 | `aoide rice gen` | stub | Generate a rice from a prompt or wallpaper (reads `songbook/` first). |
-| `aoide rice lint` | real | Validate a rice against the note schema (delegates to `drachma`). |
-| `aoide rice preview` | stub | Rehearse a rice live (`stage/drachma.json` hot-reload); nothing committed. |
+| `aoide rice lint` | real | Validate a rice against the note schema (native `livery::lint`). |
+| `aoide rice preview` | real | Rehearse a rice live (`stage/livery.json` hot-reload); nothing committed. |
 | `aoide rice adopt` | stub · gated | Commit a previewed rice and propose the gated rebuild. |
 | `aoide rice transpose` | stub | Replay a song in another key (palette) from the song's `songbook/<song>/palette/`. |
+| `aoide livery lint` | real | Validate a note file against the closed v0 schema (the engine's own verb). |
+| `aoide livery resolve` | real | Resolve a note file to the flat, fully-resolved set. |
+| `aoide livery emit` | real | Emit the resolved notes through a backend: stage, hyprctl, osc, or file template. |
 | `aoide content register` | stub | Register a content source folder (points in place; never copies). |
 | `aoide content propose` | stub | Propose a discovered source for admission through the approve gate. |
 | `aoide content approve` | stub · gated | Admit a proposed source (the user admits; non-negotiable gate). |
@@ -364,7 +367,7 @@ Window management (ported from dxflake): `SUPER+RETURN` terminal (kitty) · `SUP
 |---|---|---|
 | Quickshell | `aoide.facets.quickshell.enable` | The QML shell surfaces (bar, dock, launcher, OSD, lock, greeter, wallpaper, graph). |
 | Compositor | `aoide.facets.compositor.enable` | The Hyprland compositor + all hyprctl-level keybind wiring. |
-| Stylix | `aoide.facets.stylix.enable` | Base16 baked-theme fan-out from `aoide.drachma` to every nix-manageable target. |
+| Stylix | `aoide.facets.stylix.enable` | Base16 baked-theme fan-out from `aoide.livery` to every nix-manageable target. |
 
 ### Dendrites (20) — opt-in features
 

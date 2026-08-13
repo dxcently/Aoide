@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-07-31
+updated: 2026-08-13
 tags: [aoide, extensibility, declarative, widget, agent]
 ---
 
@@ -40,7 +40,7 @@ scripts:
   it (flake output, host + vm overlays, and a `pkg-<name>` check) — again no
   hand-list to edit.
 - Its UI is a **Quickshell widget** ([[Quickshell]]) reading `song/stage/*.json`,
-  themed only by [[drachma]].
+  themed only by [[livery]].
 - Its wiring is an **adapter** on the [[aoided]] event stream
   ([[Desktop-Architecture]]).
 - The result is reproducible, diffable, and removed by flipping the same flag —
@@ -58,7 +58,7 @@ Extending the system reuses the rice loop's shape ([[Self-Ricing]]):
   aoide make <intent>        e.g. "show my scheduled jobs" · "bridge notifs to Telegram"
         │  agent writes: dendrite (nix) + widget (QML) + adapter
         ▼
-  lint / checks              contracts + drachma schema + no cross-module reads
+  lint / checks              contracts + livery schema + no cross-module reads
         │ pass
         ▼
   preview                    widget renders live from song/stage/*.json (no rebuild)
@@ -79,7 +79,7 @@ ricing. A bad generation can never reach the running system without the
 A narrower, sibling mechanism to the make-a-widget loop above: not the agent
 building a *new* capability, but a **song** ([[Song-Anatomy]]) replacing a
 piece of *existing* chrome with its own QML. **The staging engine**
-(`StagingEngine.qml`) resolves the active song's drachma tokens
+(`StagingEngine.qml`) resolves the active song's livery tokens
 (`DrachmaState`/`notes`) to per-slot QML; **`WidgetSlot.qml`** is the fixed
 per-slot anchor a host surface embeds, which asks the engine whether the
 active song dressed that slot and loads its file, or falls back to shared
@@ -120,7 +120,7 @@ which already-carried song is active does not.
 only `notes` (`DrachmaState`) and `bridge` (`ShellBridge`), plus whatever
 slot-specific extras the anchor declares (e.g. notifications' `notification`)
 — never nix `config.*`. This doesn't loosen the song-shape rule elsewhere in
-this page: a song's `rice.nix` still sets only `aoide.drachma`; widget bodies
+this page: a song's `rice.nix` still sets only `aoide.livery`; widget bodies
 are committed QML files the build carries, not nix options, so a song widget
 is structurally incapable of reaching host/facet options through this
 surface. `greeter`/`lockscreen`/`osd`/`nowPlaying` remain unbuilt slots — no

@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-07-28
+updated: 2026-08-13
 tags: [aoide, theming, base16, stylix, nix]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Base16-driven whole-system theming; Aoide's "baked fan-out" engine. `rice.nix` feeds a single scheme into Stylix — `base16Scheme`, fonts, cursor, and wallpaper — and Stylix propagates it to every nix-manageable target: terminal, GTK/Qt, icons, cursor, editors, browser, and boot.
 
-Stylix is the recording side of the two-fan-out model. `stage/drachma.json` is the rehearsal side. Both derive from the same drachma source, so preview and adopted state cannot diverge.
+Stylix is the recording side of the two-fan-out model. `stage/livery.json` is the rehearsal side. Both derive from the same livery source, so preview and adopted state cannot diverge.
 
 Surface ownership is enforced: the Quickshell facet declares which surfaces it owns, and Stylix's options disable derive from that declaration. The flake's `checks` assert that no surface has two owners, catching overlap at eval time rather than at runtime.
 
@@ -40,7 +40,7 @@ surface-adjacent slots) — a provisional derivation.
 synthesis with a real 16-colour derivation.
 
 That said, songs may also supply the full sixteen slots directly as
-`aoide.drachma.base16` (bypassing synthesis) — the `sonata` song does,
+`aoide.livery.base16` (bypassing synthesis) — the `sonata` song does,
 keyed by hand from its wallpaper; see
 [[Ricing-Protocol|the Ricing Protocol]].
 
@@ -62,6 +62,6 @@ flipping it is cheap — the discipline that makes it *look* right everywhere
 - [[Self-Ricing]]
 - [[Quickshell]]
 - [[Codebase]]
-- [[drachma]]
+- [[livery]]
 - [[Ricing-Protocol|Ricing Protocol]]
 - [[Song-Anatomy]] — the songbook where the house grammar and per-song design memory live

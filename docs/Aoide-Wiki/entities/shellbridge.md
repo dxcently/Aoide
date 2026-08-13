@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-07-28
+updated: 2026-08-13
 tags: [aoide, bridge, ipc, desktop]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -22,7 +22,7 @@ shellbridge runs as the `shellbridge` systemd user service via `aoide
 shellbridge --run` — a sub-command of the [[aoide-cli]] binary. Its socket path
 is a hard contract, never computed independently: `$XDG_RUNTIME_DIR/aoide/
 shellbridge.sock` (the unit's `RuntimeDirectory=aoide` creates the directory).
-It publishes two atomically-written stage files besides `drachma.json`:
+It publishes two atomically-written stage files besides `livery.json`:
 `song/stage/sessions.json` (the agent session roster — `{ sessionId, agent,
 windowAddress, cwd, state, startedAt }`, backing the [[Terminal-Commander]]
 session-jump) and `song/stage/hooks.json` (live Claude Code hook phases —

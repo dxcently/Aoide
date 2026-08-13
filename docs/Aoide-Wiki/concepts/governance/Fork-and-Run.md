@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-07-28
+updated: 2026-08-13
 tags: [aoide, onboarding, deployment]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -50,7 +50,7 @@ That is the complete install, by design — no dotfile manager, no separate boot
 
 Merge hygiene is enforced by a merge-base divergence lint inside `aoide update` plus a commit-hook warning on edits to inherited files. Path guards are not used; provenance is the mechanism.
 
-Contract-breaking changes (drachma schema, dendrite shape, stage file formats) are versioned in `CONTRACTS.md`. `aoide update` detects contract bumps and routes them through the update playbook before the rebuild can discover them.
+Contract-breaking changes (livery schema, dendrite shape, stage file formats) are versioned in `CONTRACTS.md`. `aoide update` detects contract bumps and routes them through the update playbook before the rebuild can discover them.
 
 ## Related
 

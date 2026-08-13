@@ -9,7 +9,7 @@ Every reference to another page in this wiki must use `[[wikilink]]` syntax. Pla
 A wiki is standalone, so every page name is unique within it — prefer the bare name:
 
 ```
-[[drachma]]
+[[livery]]
 [[aoided]]
 [[Overview]]
 ```

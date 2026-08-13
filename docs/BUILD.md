@@ -22,7 +22,7 @@ no import list. To add a module, drop a file in the right layer:
 
 - `modules/nucleus/` — core, applies unconditionally (no `mkIf`).
 - `modules/dendrites/` — opt-in features, guarded on a flag.
-- `modules/facets/` — render surfaces, read `aoide.drachma` only.
+- `modules/facets/` — render surfaces, read `aoide.livery` only.
 
 **Shelving opt-out:** any path containing `/_` is skipped. Prefix a
 work-in-progress file (`_wip.nix`) or dir (`_scratch/`) with `_` to hide it.
@@ -39,10 +39,10 @@ none of them except your own dendrite/facet flags.
 | `aoide.enable`                 | bool                         | framework master switch |
 | `aoide.song`                   | str (default `"default"`)    | the song this host performs; names a `song/songbook/<name>/` (or the shipped standard) |
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` fork |
-| `aoide.drachma.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
-| `aoide.drachma.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
-| `aoide.drachma.notif.{bg,fg,urgent}` | nullOr hex              | component override; null → palette |
-| `aoide.drachma.window.{border,borderInactive}` | nullOr hex     | component override; null → palette |
+| `aoide.livery.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
+| `aoide.livery.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
+| `aoide.livery.notif.{bg,fg,urgent}` | nullOr hex              | component override; null → palette |
+| `aoide.livery.window.{border,borderInactive}` | nullOr hex     | component override; null → palette |
 | `aoide.surfaces.<name>.owner`  | str                          | surface-ownership registry |
 | `aoide.mcp.enable`             | bool (default false)         | MCP façade toggle |
 | `aoide.auditLog`               | str (default `/home/<user>/Aoide/log`) | single audit log |
@@ -75,14 +75,14 @@ hosts.
 
 ## Authoring a facet (Wave 1 — render surfaces)
 
-A facet renders appearance. It reads **only** `aoide.drachma`, and if it owns a
+A facet renders appearance. It reads **only** `aoide.livery`, and if it owns a
 surface it declares that in `aoide.surfaces`. Apply component fallbacks yourself.
 
 ```nix
 # modules/facets/quickshell/default.nix
 { config, lib, ... }:
 let
-  t = config.aoide.drachma;
+  t = config.aoide.livery;
   # component-tier fallback: null → palette (see CONTRACTS.md §1)
   barBg = if t.bar.bg != null then t.bar.bg else t.palette.bg;
 in
@@ -122,7 +122,7 @@ self-gates on `aoide.song`:
 { lib, config, ... }:
 {
   config = lib.mkIf (config.aoide.song == "moonlight") {
-    aoide.drachma.palette = { bg = "#0b1021"; fg = "#c8d3f5"; accent = "#82aaff"; urgent = "#ff757f"; };
+    aoide.livery.palette = { bg = "#0b1021"; fg = "#c8d3f5"; accent = "#82aaff"; urgent = "#ff757f"; };
     # component tier (bar/notif/window) — null falls back to palette
   };
 }
@@ -132,7 +132,7 @@ Replay it on any host with **one line** in `hosts/<host>/default.nix`:
 `aoide.song = "moonlight";`. Naming no song performs song `"default"` — the
 shipped standard (`song/songbook/default/rice.nix`).
 
-**Host-agnostic rules (CONTRACTS.md §5):** a song sets ONLY `aoide.drachma` (and,
+**Host-agnostic rules (CONTRACTS.md §5):** a song sets ONLY `aoide.livery` (and,
 later, cover/chime refs inside `song/`). It NEVER sets host options (monitors,
 hardware, services) and NEVER enables facets/dendrites — those are the venue's.
 Note values are literal nix; a song never reads `song/` runtime paths. The
@@ -158,25 +158,30 @@ clash — a deliberate shadow is an `intentionalShadows` exemption in
 `lib/pkgs.nix`); a non-standard build arg goes through `lib/pkgs.nix`'s
 documented `//` escape hatch. See `CONTRACTS.md §2`.
 
-The four current packages replace their `default.nix` **in place** — keep the
+The current packages replace their `default.nix` **in place** — keep the
 file path and the `callPackage` signature; the walker never needs the file list.
 
-### Agent A — note engine (`pkgs/drachma/`) — Node / Style Dictionary
+### Agent A — the livery engine (native, `crates/song/src/livery/`)
 
-Provide:
+The Node `pkgs/drachma` package was folded into the song crate by the livery
+merge (LIVERY-MERGE.md) and deleted; the engine is now native Rust, one module
+tree inside `crates/song`:
 
-- `pkgs/drachma/default.nix` — a `callPackage`-able derivation
-  (`buildNpmPackage { pname = "aoide-drachma"; … }`). Add `nodejs` /
-  `style-dictionary` as build inputs there; do **not** edit `flake.nix`.
-- `pkgs/drachma/package.json`, lockfile, and source — the resolver (tiered:
-  palette → semantic → component), the `rice lint` schema validator, and the
-  three live-side emitters:
-  - `song/stage/drachma.json` (Quickshell; atomic write — see `CONTRACTS.md §4`),
-  - `hyprctl` dispatcher (compositor properties),
-  - terminal OSC sequences (color injection).
-- Wrap Style Dictionary and the W3C design-tokens format; do not reimplement a
-  resolver. Build against **note schema v0** (`CONTRACTS.md §1`): palette is
-  base16-closed; component tier is `bar.*` / `notif.*` / `window.*`.
+- `livery/schema.rs` — the authoritative v0 validator (the `rice lint` schema;
+  ported from `schema.js` with the exact error strings preserved).
+- `livery/resolve.rs` — the flat resolver: `{group.key}` alias deref
+  (cycle-guarded) + the component null → palette fallback.
+- `livery/emit/{stage,hyprctl,osc,file}.rs` — the four pure emitters behind
+  one `Emitter` trait + registry; a new backend is one file + one registry
+  line. The stage backend writes `song/stage/livery.json` (Quickshell; atomic
+  write — see `CONTRACTS.md §4`; the legacy `drachma.json` name is mirrored
+  during the transition window).
+- Verbs: `aoide livery lint|resolve|emit <target>` (the old `drachma` binary's
+  surface, native); `rice lint` calls `livery::lint` directly — no binary
+  locate, no PATH shell-out.
+
+Build against **note schema v0** (`CONTRACTS.md §1`): palette is
+base16-closed; component tier is `bar.*` / `notif.*` / `window.*`.
 
 ### Agent B — CLI + daemon (`pkgs/aoide/`) — Rust
 
@@ -239,7 +244,7 @@ session records) are contract §4.
 - `song-shape` — every walked `song/songbook/**` path is a `rice.nix`
   (host-agnostic song discipline; CONTRACTS.md §5).
 - `pkg-<name>` — one auto-generated check per discovered package builds it
-  (currently `pkg-aoide`, `pkg-drachma`, `pkg-melete`, `pkg-mneme`). Generated
+  (currently `pkg-aoide`, `pkg-melete`, `pkg-mneme`). Generated
   by `lib/pkgs.nix`, so a new `pkgs/<name>/` gains its check with no edit here.
 
 Run `nix flake check` before every commit.

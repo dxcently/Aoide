@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-07-28
+updated: 2026-08-13
 tags: [aoide, desktop, compositor]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -27,7 +27,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 | Greeter | Login greeter |
 | Wallpaper layer | Managed wallpaper display |
 
-No mako, swaync, rofi, or hyprlock — Quickshell holds the entire role. Styling comes exclusively from drachma; structural patterns draw from unixporn canon (quickshell/ags bars, swaync-style centers, anyrun launchers) but are never copied directly.
+No mako, swaync, rofi, or hyprlock — Quickshell holds the entire role. Styling comes exclusively from livery; structural patterns draw from unixporn canon (quickshell/ags bars, swaync-style centers, anyrun launchers) but are never copied directly.
 
 ## Bridge: shellbridge
 

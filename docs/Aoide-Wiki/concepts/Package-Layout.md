@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-01
-updated: 2026-08-02
+updated: 2026-08-13
 tags: [aoide, architecture, rust, cli, crate, blueprint]
 ---
 
@@ -54,7 +54,7 @@ Two things go beyond a literal pi port, both driven by aoide's own shape:
 | `tui` (terminal UI library) | **`conductor`** | aoide already has its TUI: `conductor/` (app/ui/graphview/theme), doubling as the steward's control surface |
 | `coding-agent` (the concrete app) | **`cli`** | the `aoide`/`aoided` bins + `commands/` wiring every crate into the two shipped binaries |
 | *(none)* | **`conduct`** | aoide-unique: the PTY multiplexer + session DAG + hook plumbing — the core that makes every terminal a tracked, [[Conductor-Channel|conductable]] session |
-| *(none)* | **`song`** | aoide-unique: the ricing/design engine — notes → drachma, songs, stage, the Pantheon design language ([[Self-Ricing]], [[Song-Vocabulary]]) |
+| *(none)* | **`song`** | aoide-unique: the ricing/design engine — notes → livery, songs, stage, the Pantheon design language ([[Self-Ricing]], [[Song-Vocabulary]]) |
 | *(none)* | **`management`** | aoide-unique: the privileged **hands** — rebuild/switch, `rice mint`, hypr control, service/daemon ops, sudo-tracking ([[Rebuild-Gate]]) |
 
 ## Target crate tree
@@ -82,7 +82,7 @@ pkgs/aoide/
            audit/        —  self-auditing (checks its work vs canon + contracts)
            skills/       —  packaged procedures (rebuild · mint a song · wire a gadget)
     song/                       # ricing / design engine
-      src/ notes(drachma-locate) · rice · cover · stage · palette
+      src/ livery · notes · rice · cover · stage · palette
     management/                 # privileged host-ops — the hands
       src/ hypr · infra · rebuild · service · sudo-track
     evals/               ★NEW   # eval harness
@@ -111,7 +111,7 @@ wait — see the phased-migration table below for why.
 | **client** | Outbound: the A2A client registry + send, the melete adapter (neutral-event consumer), transports — drives external agents and speaks to `aoided`. | `a2a.rs`(client half), `adapter.rs`, `commands/a2a.rs` | landed |
 | **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, migrations, search. The steward's `canon` and session memory persist through here. | `graph/session_store.rs`, `song/stage/*`, `state/*` | landed; backend is still file-first (seed → build) |
 | **steward** ★ | A system-management agent driven by the conductor. Runs a harness loop; its tools act on the host via `management`/`conduct`/`song`; it remembers design primitives in `canon`; it self-audits against canon + contracts. | *(new)* | skeleton — defer |
-| **song** | The ricing/design engine: locate `drachma`, apply songs, mint palettes, write the stage, the Pantheon design language. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs` | landed |
+| **song** | The ricing/design engine: the native livery engine (`livery/` — schema · resolve · emit, formerly the Node `drachma` package), apply songs, mint palettes, write the stage, the Pantheon design language. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs` | landed |
 | **management** | The privileged hands: rebuild/switch, `rice mint`, hypr control, service/daemon ops, sudo-tracking — the capabilities the steward's tools invoke. | `hypr.rs`, `commands/infra.rs`(host ops), sudo-track | carve-out — deferred out of Phase 5, no ETA |
 | **evals** | Eval harness: golden snapshots (existing), agent-behavior evals for the steward, door-contract evals, ricing/design evals. | golden-snapshot tests | elevate — defer |
 | **conductor** | The CLI/TUI surface: session DAG view, roster, and the steward's control panel. | `crates/conductor/` (app·ui·graphview·theme) | landed |
