@@ -22,6 +22,7 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 - [[Terminal-Commander]] — the agent-session widget (conductor-class): watch the terminals running agents and jump to any by click or keybind
 - [[Session-Graph]] — the project/session DAG grown from the flat roster: `aoide graph` viewer + management (anchors + spawned edges, prune, liveness-checked focus, atomic graph.json emit) — rendered via `graph view`/`--json` and the `aoide conductor` TUI; the desktop's Conductor gadget gives the at-a-glance agent-tree view instead of a standalone DAG overlay
 - [[Gadget-Dock]] — the agentWidgets surface realized: `AoidePanel.qml`, a left-edge panel holding four core gadgets (Conductor, Terminals, Meters, Power) plus an opt-in Usage stele, colours entirely from livery — its fore-edge peeks at rest and it opens fully on hot-edge hover or SUPER+G
+- [[Controls]] — the day-to-day reference: the `ad*` rebuild aliases, compositor keybinds, bar cell interactions, and shell QoL aliases
 - [[Lexicon]] — the whole vocabulary in one place: the three original Muses (Aoide · Melete · Mneme), the frozen/performed split, why each word family was selected, and the loop that ties them together
 - [[Snowflake-Anatomy]] — the layered structure of the Aoide flake: nucleus, dendrites, and facets; why Nix's snowflake logo maps to the repo's growth model
 - [[Fork-and-Run]] — the install model: fork upstream, clone to `~/Aoide`, run `aoide onboard`; shared history enables clean upstream merges and upstream contributions

@@ -61,3 +61,4 @@ A click in the bar widget reaches the correct terminal window in one hop, with n
 - [[aoided]]
 - [[Agent-Interface]]
 - [[Terminal-Commander]]
+- [[Controls]]
