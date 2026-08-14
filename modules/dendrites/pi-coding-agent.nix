@@ -116,12 +116,25 @@
         }
 
         // The fields every hook shares; transcript_path lets the aoide side
-        // tail-read the live jsonl without re-deriving its location.
+        // tail-read the live jsonl without re-deriving its location. pid is
+        // THIS process's real pid — the aoide door prefers it over its own
+        // terminal-ancestry walk, so a pi that dies inside a still-open
+        // terminal still trips the reaper's /proc liveness signal (the
+        // terminal's pid would outlive it and strand the record forever).
+        // context_ceiling is the ACTIVE MODEL's context-window size straight
+        // from pi's own model catalog (getContextUsage) — the aoide side
+        // prefers it over its built-in catalog, so a custom/provider model
+        // never gets a guessed ceiling. Absent when unknown (right after
+        // compaction) — omitted, never zero.
         function base(ctx: ExtensionContext): Record<string, unknown> {
+          const usage = ctx.getContextUsage();
+          const ceiling = usage ? usage.contextWindow : undefined;
           return {
             session_id: ctx.sessionManager.getSessionId(),
             cwd: ctx.cwd,
+            pid: process.pid,
             transcript_path: ctx.sessionManager.getSessionFile(),
+            ...(ceiling ? { context_ceiling: ceiling } : {}),
           };
         }
 
