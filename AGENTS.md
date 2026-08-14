@@ -31,8 +31,17 @@ passthrough routes through the same trunk.
   tool list generates from it (see `CONTRACTS.md §3`).
 
 Rice loop (the headline): `aoide rice gen <prompt|wallpaper>` → `rice lint` →
-`rice preview` (rehearsal, nothing committed) → `rice adopt <name>` (**user
-gates this**) → commit + gated rebuild (recording).
+`rice stage` (hot-load live, nothing committed) → `rice adopt <name>` (**user
+gates this**) → commit + gated rebuild (recording). (`rice preview`/`rice
+mint`/`rice new` no longer exist — `rice stage`/`rice compose` are the only
+spellings; the CLI carries no internal aliases.)
+
+**Staging vs declarative mode.** `rice stage`/`cover set` only write while
+staging is UNLOCKED. `aoide rice mode status` reports the current mode
+(**declarative is the default** — nothing has ever unlocked staging); if
+either refuses with `declarative-mode-locked`, run `aoide rice mode stage
+[<name>]` first. `aoide rice mode declarative [<name>]` locks back up when
+you're done iterating.
 
 **Conducting — commanding other sessions (the core default).** Every terminal
 runs its shell under `aoide conduct`, so it is a conductable, tracked session: it
