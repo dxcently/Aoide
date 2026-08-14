@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-07-28
+updated: 2026-08-14
 aliases: [Melete daemon, melete.service]
 tags: [aoide, melete, agent, coding-agent, harness, integration]
 ---
@@ -85,7 +85,7 @@ missing.
 
 - **The extension engine.** Melete is why Aoide is a [[Widget-Maker]]: ask for an
   integration and Melete writes the dendrite (nix) + widget (QML) + adapter, then
-  previews and — on your approval — adopts it. Same gated loop as [[Self-Ricing]].
+  stages and — on your approval — adopts it. Same gated loop as [[Self-Ricing]].
 - **On the event spine.** A `melete-adapter` consumes [[aoided]]'s neutral event
   stream and translates events into job dispatch ([[Desktop-Architecture]]). It
   runs as the `aoide-melete-adapter` systemd user unit via `aoide adapter melete

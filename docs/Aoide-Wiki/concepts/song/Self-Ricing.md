@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-13
+updated: 2026-08-14
 tags: [aoide, rice, agent]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -10,29 +10,28 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Aoide ships the rice engine as a builtin. The engine provides the loop, the schema, and the preview mechanism. Everything else — the songs, the preferences, the accumulated taste — it learns by doing.
 
-**Status today:** the loop below is the *designed* shape. `rice lint` (runs the native [[livery]] engine), `rice preview`, and `rice mint` are implemented. `rice preview` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, and geometry + window-border colours apply to the running compositor over `hyprctl` in the same step (terminal-OSC fan-out is not yet wired into it). Beyond a live `rice preview`, `stage/livery.json` is also reseeded from the active song's committed notes on every activation ([[Codebase#Runtime contracts (socket + stage files)]]), so a host that boots without ever previewing still carries the correct stage twin. `rice gen`, `rice adopt`, and `rice transpose` are declared but not yet implemented (stub, exit `64`) — narrate those as planned, not as a working pipeline.
+**Status today:** the loop below is the *designed* shape. `rice lint` (runs the native [[livery]] engine), `rice stage`, and `rice compose` are implemented. `rice stage` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, and geometry + window-border colours apply to the running compositor over `hyprctl` in the same step (terminal-OSC fan-out is not yet wired into it) — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, `stage/livery.json` is also reseeded from the active song's committed notes on every activation ([[Codebase#Runtime contracts (socket + stage files)]]), so a host that boots without ever staging still carries the correct stage twin. `rice gen`, `rice adopt`, and `rice transpose` are declared but not yet implemented (stub, exit `64`) — narrate those as planned, not as a working pipeline.
 
 ## The Rice Loop
 
 ```
 aoide rice gen <prompt|wallpaper>   (planned)
     ↓  reads songbook/ first, always
-aoide rice mint <name> [--from]     (real — scaffolds a new song directly, below)
+aoide rice compose <name> [--from]  (real — scaffolds a new song directly, below)
 rice lint                           (real — livery schema validation)
     ↓  fail → reject + songbook note
-rice preview                        (real — stages stage/livery.json + live hyprctl apply)
+rice stage                          (real — stages stage/livery.json + live hyprctl apply; refuses while `rice mode declarative` is locked)
     ↓  quickshell hot-reload + live geometry/border colours (terminal OSC fan-out planned)
 aoide rice adopt <name>             (planned — User gates this step)
     ↓  committed to song/songbook/<song>/
     ↓  gated rebuild
 ```
 
-Preview is the sketch — a live compositor call, no rebuild; `aoide.song` selecting a song and rebuilding is the truth — it bakes `hyprland.conf` (geometry, borders), themes every nix-manageable app via [[Stylix]], assembles and deploys the song's widgets, and sets the host's boot default. GTK/Qt surfaces require app restarts and are adopt-only, accepted by design.
+Staging is the sketch — a live compositor call, no rebuild; `aoide.song` selecting a song and rebuilding is the truth — it bakes `hyprland.conf` (geometry, borders), themes every nix-manageable app via [[Stylix]], assembles and deploys the song's widgets, and sets the host's boot default. GTK/Qt surfaces require app restarts and are adopt-only, accepted by design.
 
-## Minting a song
+## Composing a song
 
-`aoide rice mint <name> [--from <song>] [--force] [--json]` (alias `rice
-new`) scaffolds a new committed song directly, without going through `gen`:
+`aoide rice compose <name> [--from <song>] [--force] [--json]` scaffolds a new committed song directly, without going through `gen`:
 `song/songbook/<name>/rice.nix` (a self-gating `lib.mkIf (config.aoide.song
 == "<name>")` block copying the `palette`/`window`/`geometry` tiers from
 `--from`, defaulting to `default` — the only `.nix` file the scaffold
@@ -44,6 +43,46 @@ alongside palette and window, not as a separate tier of files. Because it is
 an ordinary schema command (`gated: false`, in `schema --json` and the MCP
 tool list), an agent can bootstrap a song through the same door a human
 would.
+
+## Staging vs Declarative Mode
+
+`rice stage` and `cover set` are the only two writers of `stage/livery.json`
+and `stage/cover.json` anywhere in the codebase. `stage/mode.json` — a
+gitignored runtime stage-file, the same category as `stage/design.json` —
+records which of two modes currently owns those writes:
+
+- **`staging`** — hot-load unlocked; `rice stage`/`cover set` write live.
+- **`declarative`** — nix/home-manager is the only writer; `rice stage`/
+  `cover set` refuse outright with a `declarative-mode-locked` error naming
+  `rice mode stage` as the way to unlock. An absent `stage/mode.json` reads
+  as `declarative` — the safe default, since nothing has ever unlocked
+  staging writes.
+
+`aoide rice mode status` reports the current mode plus, in `staging`, which
+song/draft it is pointed at and since when. `aoide rice mode stage
+[<name>]` unlocks staging; given a name, it also stages that song
+immediately, combining unlock-and-stage into one call. `aoide rice mode
+declarative [<name>]` locks staging; given a name, it re-pins
+`stage/livery.json` to that song's committed notes first and only writes
+the lock marker after that write succeeds, so the re-pin can never trip the
+lock it is about to set — this works even from the unmarked default state.
+Called with no name, it locks whatever is already staged as-is: a freeze,
+not a re-derivation of the staged truth.
+
+The enforcement lives at the two write entrypoints only —
+`handle_rice_stage_entry` in `crates/song/src/commands/rice.rs`,
+`handle_cover_set_entry` in `crates/song/src/commands/cover.rs` — with no
+background reconciler watching `stage/mode.json`. `rice stage` and `cover
+set` are the only two places in the codebase that ever write those two
+stage files, so guarding their entrypoints closes every path a drift could
+take; [[aoided]] itself is still a one-shot skeleton with no event loop.
+
+`rice design enter`/`exit` (the separate design-mode marker,
+`stage/design.json`) calls the same underlying staging logic `rice stage`
+does, guard-free — it is not gated by `rice mode`. The two markers are
+independent: entering design mode neither reads nor writes
+`stage/mode.json`, and staging mode neither reads nor writes
+`stage/design.json`.
 
 ## Geometry
 
@@ -123,6 +162,7 @@ Covers themselves live in the shared `song/covers/` library, not per-song — an
 
 - [[Song-Vocabulary]]
 - [[livery]]
+- [[aoided]]
 - [[Content-Pipeline]]
 - [[Snowflake-Anatomy]]
 - [[Stylix]]

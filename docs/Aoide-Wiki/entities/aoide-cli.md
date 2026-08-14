@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-08-13
+updated: 2026-08-14
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
@@ -25,7 +25,7 @@ the build is offline.*
 summary, args, flags, `gated`, `implemented`, a `handler: fn(&Invocation) ->
 Outcome`, an `available` check) plus the `cmd!`/`arg!`/`flag!` macros that
 build one. Each command group under `pkgs/aoide/src/commands/`
-(`meta.rs`, `rice.rs`, `design.rs`, `cover.rs`, `stubs.rs`, `graph.rs`,
+(`meta.rs`, `rice.rs`, `design.rs`, `mode.rs`, `cover.rs`, `stubs.rs`, `graph.rs`,
 `infra.rs`, `a2a.rs`, `usage.rs`, `hooks.rs`) owns a
 `register(&mut Registry)` function that inserts its own entries;
 `commands/mod.rs::all()` assembles the full registry in the historical
@@ -48,15 +48,16 @@ offline, vendored dependency set unchanged — the same shape as Hermes-agent's
 self-registering tool registry and Claude Code's discrete-tools-behind-a-thin-
 dispatch design.
 
-The command surface itself is unchanged by this shape: **51 leaves**
+The command surface itself is unchanged by this shape: **54 leaves**
 (`aoide schema --json | jq '.commands | length'`):
 
 | Group | Leaves | Real / stub |
 |---|---|---|
 | `guide`, `schema` | 2 | real |
-| `rice lint`, `rice preview`, `rice mint` | 3 | real (`lint` runs the native [[livery]] engine) |
+| `rice lint`, `rice stage`, `rice compose` | 3 | real (`lint` runs the native [[livery]] engine) |
 | `livery emit`, `livery resolve`, `livery lint` | 3 | real — the engine's own verb group (the standalone note CLI's surface, native) |
 | `rice design status`/`enter`/`exit` | 3 | real |
+| `rice mode status`/`stage`/`declarative` | 3 | real |
 | `cover set` | 1 | real |
 | `rice gen`, `rice adopt`, `rice transpose` | 3 | stub (`adopt` gated) |
 | `content register/propose/ingest/query` | 4 | stub |
@@ -102,14 +103,25 @@ then-rename pattern as every other stage file) from either an absolute cover
 path or a bare name resolved against `song/covers/`, hot-swapping the live
 wallpaper. It is the CLI-verb slice of the wallpaper-switcher work; the
 quickshell picker surface and a `list`/`next` verb pair remain unbuilt (open
-item, `references/AOIDE-DEV.md` §7).
+item, `references/AOIDE-DEV.md` §7). Like `rice stage`, it refuses with a
+`declarative-mode-locked` error while `rice mode declarative` is locked —
+see [[Self-Ricing#Staging vs Declarative Mode]].
 
-**`rice mint <name>`** (alias `rice new`; `--from <song>` · `--force` ·
-`--json`) scaffolds a new committed song — see [[Self-Ricing#Minting a
-song]] for the shape it writes. It validates `name` and `--from` against a
-strict `^[a-z0-9][a-z0-9-]*$` pattern (rejecting path traversal) and escapes
+**`rice compose <name>`** (`--from <song>` · `--force` · `--json`)
+scaffolds a new committed song — see [[Self-Ricing#Composing a song]] for
+the shape it writes. It validates `name` and `--from` against a strict
+`^[a-z0-9][a-z0-9-]*$` pattern (rejecting path traversal) and escapes
 `$`/quotes when rendering a copied value into `rice.nix`, so a livery value
 containing `${…}` can never round-trip into live Nix interpolation.
+
+**`rice mode status`/`stage`/`declarative`** is the staging/declarative
+mode toggle around `stage/mode.json` — `status` reports the current mode,
+`stage [<name>]` unlocks `rice stage`/`cover set` (optionally staging a
+song in the same call), `declarative [<name>]` locks them again
+(optionally re-pinning `stage/livery.json` to a song's committed notes
+first). See [[Self-Ricing#Staging vs Declarative Mode]] for the mechanism
+and why entrypoint guards, not a background reconciler, are the
+enforcement.
 
 ### The `graph` group — session/project DAG + the conductor mesh
 
@@ -163,6 +175,11 @@ shortcut the panel itself registers (`aoide:dock`), not a CLI verb (see
 
 ## Contract-level conventions
 
+- **One spelling per command, no internal aliases.** Every command has
+  exactly one name; a retired spelling (e.g. the pre-rename `rice preview`/
+  `rice mint`, or the once-aliased `rice new`) becomes a plain unknown
+  command, resolved the same as a typo — never a parse-time alias to a
+  canonical path. The parser carries no alias table.
 - **`--json` everywhere.** A hand-rolled parser (no clap, to keep the offline
   cargo lock tiny) reads argv against the schema, so the parser and the schema
   can never disagree about what commands exist. Every outcome renders as either

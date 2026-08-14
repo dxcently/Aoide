@@ -113,7 +113,7 @@ sudo <toplevel>/bin/switch-to-configuration switch
 # desktop-only reloads (no full switch needed for QML/hyprctl-live changes)
 hyprctl reload                                  # compositor rules / plugins
 systemctl --user restart aoide-quickshell.service   # bar / dock / gadgets
-aoide rice preview <song>                       # stage livery.json for hot-reload
+aoide rice stage <song>                         # stage livery.json for hot-reload
 qs -p modules/facets/quickshell/qml/shell.qml   # QML load/parse check
 
 # SHOW the user
@@ -125,7 +125,13 @@ grim out.png ; grim -g "0,0 1920x60" bar.png    # full + crops → read them bac
   the built toplevel and hand it over.
 - **Smallest reload that proves the change.** QML → quickshell restart;
   compositor rule → `hyprctl reload`; Stylix/base16/kitty → nix-baked, needs
-  a rebuild. Values staged via `rice preview` hot-reload without a rebuild.
+  a rebuild. Values staged via `rice stage` hot-reload without a rebuild.
+- **Staging can be locked.** `rice stage`/`cover set` refuse with
+  `declarative-mode-locked` while `aoide rice mode status` reports
+  `declarative` (the default — nothing has unlocked staging yet). Run
+  `aoide rice mode stage [<song>]` first to unlock; `aoide rice mode
+  declarative [<song>]` locks it back. See
+  [[Self-Ricing#Staging vs Declarative Mode]].
 - **Always look.** Screenshot, read it back, judge coherence (light/dark
   polarity, bar↔terminal↔gadget agreement) *before* showing the user — the
   [[Ricing-Protocol|Ricing Protocol]] vision check, for any visual change.
@@ -259,9 +265,9 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   [[Quickshell]].
 - **[cleanup] `lib/checks.nix` carries pre-existing nixfmt-1.4.0 drift** —
   formatting-only pass owed. See [[Self-Ricing]].
-- **[bug] `aoide rice preview <name>` derives cover by song-name convention**
+- **[bug] `aoide rice stage <name>` derives cover by song-name convention**
   instead of reading `aoide.livery.wallpaper`. Mitigated live by
-  `AOIDE_WALLPAPER` env baked into the quickshell service; proper fix (preview
+  `AOIDE_WALLPAPER` env baked into the quickshell service; proper fix (stage
   reads the song's wallpaper note) still owed. See [[Self-Ricing]].
 - **[feature, partially resolved] Wallpaper switcher.** `set`/picker UI
   shipped; still owed: `list`/`next` verbs (only `set` exists), crossfade
@@ -296,11 +302,12 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   dropped, adapter forwards nothing. Fix: reconcile env values to the
   parser's vocabulary (or widen the parser). See [[Melete]].
 - **[bug] `lib/vmTest.nix` command-count assertion is stale** — asserts
-  `cmd_count == 28`, CLI now exposes 36 (`aoide schema --json`). Bump the
-  assertion or make it non-brittle. See [[Codebase]].
+  `cmd_count == 51`, CLI now exposes 54 (`aoide schema --json`, since the
+  `rice mode` toggle landed, `e1b24b1`). Bump the assertion or make it
+  non-brittle. See [[Codebase]].
 - **[docs] `README.md` (repo root) lags the wiki.** Known stale points: shipped
   song is `sonata` not `hero`; launcher trigger is `aoide:launcher` not the
-  old CLI-stub form; command count is 36 (three gated) not 28; `rice preview`
+  old CLI-stub form; command count is 36 (three gated) not 28; `rice stage`
   is real not planned; `aoide.rebuild` has no `options.nix` option yet.
   Reconcile alongside any songbook-touching pass.
 - **[limitation, by design] Window→session listener can't resolve a
@@ -359,7 +366,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   derived from content — low priority. See [[Quickshell]].
 - **[open] Per-song flavor widgets.** `calendar`/`notifications` slots are
   built and live (`StagingEngine.qml`/`WidgetSlot.qml`, hot-swaps via `aoide
-  rice preview <name>`). `greeter`/`lockscreen`/`osd`/`nowPlaying` remain
+  rice stage <name>`). `greeter`/`lockscreen`/`osd`/`nowPlaying` remain
   unbuilt — no host anchor, no trigger/data source yet. See
   `song/songbook/update-playbook.md`, `CONTRACTS.md` §5, [[Gadget-Dock]],
   [[Quickshell]].
@@ -438,7 +445,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
 | Activate (gated) | `nix-env --set` + `switch-to-configuration switch` |
 | Reload compositor | `hyprctl reload` |
 | Reload shell | `systemctl --user restart aoide-quickshell.service` |
-| Stage a song live | `aoide rice preview <song>` |
+| Stage a song live | `aoide rice stage <song>` |
 | Check QML loads | `qs -p …/shell.qml` |
 | Show the user | `grim` → read the PNG back → judge → send |
 | Command a session | `aoide graph send --id <id> [--submit] [--yes] -- <text>` |

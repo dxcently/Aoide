@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-13
+updated: 2026-08-14
 tags: [aoide, extensibility, declarative, widget, agent]
 ---
 
@@ -108,9 +108,9 @@ widget file follows: an `Item` root (`WidgetSlot` sizes off its
 anchor unconditionally, any slot-specific extras declared as their own
 `required property`, and never `config.*`.
 
-Because `LiveryState.songName` is what `aoide rice preview <name>` stages,
-switching the previewed song **hot-swaps every `WidgetSlot`'s loaded body
-live — no rebuild, no restart** — the same preview-without-rebuild
+Because `LiveryState.songName` is what `aoide rice stage <name>` stages,
+switching the staged song **hot-swaps every `WidgetSlot`'s loaded body
+live — no rebuild, no restart** — the same stage-without-rebuild
 discipline as the rice loop itself ([[Self-Ricing]]), just applied to widget
 bodies instead of colour. Adding a *new* song's widget files to the carried
 set still needs a rebuild (the facet has to know to copy them); swapping

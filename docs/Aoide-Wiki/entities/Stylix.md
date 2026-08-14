@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-08-13
+updated: 2026-08-14
 tags: [aoide, theming, base16, stylix, nix]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -16,7 +16,7 @@ Surface ownership is enforced: the Quickshell facet declares which surfaces it o
 
 GTK/Qt live preview is accepted as adopt-only (app restarts required).
 
-**Status:** `rice preview --gallery` — sample apps restarted under a preview env — is specified; not built.
+**Status:** `rice stage --gallery` — sample apps restarted under a preview env — is specified; not built.
 
 ## Implementation
 

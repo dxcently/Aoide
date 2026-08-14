@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-08-13
+updated: 2026-08-14
 aliases: [aoide-notes, Notes, notes package, note engine]
 tags: [aoide, livery, theming, base16]
 ---
@@ -54,13 +54,14 @@ Stylix (plus fonts, cursor, wallpaper) and Stylix themes every nix-manageable
 target — GTK/Qt, terminal, editors, browser, boot. The engine keeps only the
 live side.
 
-Because both fan-outs derive from the same livery values, preview state and
+Because both fan-outs derive from the same livery values, staged state and
 adopted state cannot diverge. This is the "zero drift" guarantee. Beyond
-`rice preview`/`cover set` writing `stage/livery.json` live, the quickshell
+`rice stage`/`cover set` writing `stage/livery.json` live (while `rice mode
+staging` allows it — see [[Self-Ricing#Staging vs Declarative Mode]]), the quickshell
 facet's `home.activation.aoideSeedStage` reasserts it from the active song's
 committed `song/songbook/<song>/livery.json` on every activation (see
 [[Codebase#Runtime contracts (socket + stage files)]]), so a freshly booted
-host carries a correct stage twin even before any preview runs.
+host carries a correct stage twin even before `rice stage` ever runs.
 `stage/livery.json` is canonical; the legacy-mirror write and the fallback
 reads were dropped when Phase 4 closed the transition window
 (LIVERY-MERGE.md).
@@ -91,14 +92,14 @@ only carried through `stage/livery.json` alongside the palette/component
 values for `aoide`'s own live-apply seam (below); the staged schema version
 stays `"0"`, the same additive-optional posture as the base16 block.
 
-Preview applies geometry and the window-border colours to the running
-compositor directly: `aoide rice preview` builds one `hyprctl --batch`
+Staging applies geometry and the window-border colours to the running
+compositor directly: `aoide rice stage` builds one `hyprctl --batch`
 `keyword` list, in a fixed order (gaps → border size → border colours →
 rounding → blur), emitting a keyword only for a field that actually resolves
 — an unset geometry field is skipped, not defaulted, so the call never fights
 a host's baked config or a user's own live tweak. The call is a no-op off
 Hyprland (guarded on `HYPRLAND_INSTANCE_SIGNATURE`) and never fails the
-preview outcome. It never runs `hyprctl reload` — every field it touches is
+staging outcome. It never runs `hyprctl reload` — every field it touches is
 live-settable via `keyword`, and a reload would re-read the baked
 `hyprland.conf` from disk, discarding whatever else the compositor is
 carrying live.
@@ -123,7 +124,7 @@ no new crate, no Node toolchain. What moved, in place:
 
 The resolver is the same fallback the nix facets apply independently for the
 baked side ([[Stylix]], compositor) — identical rules, so both fan-outs agree
-and preview and adopted state cannot diverge. Pure emit vs. host apply stays
+and staged and adopted state cannot diverge. Pure emit vs. host apply stays
 split: the emitters only produce bytes; `live::apply_live` /
 `shellbridge::atomic_write` are the effectful half.
 

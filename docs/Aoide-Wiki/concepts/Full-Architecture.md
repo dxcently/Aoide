@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-13
+updated: 2026-08-14
 tags: [aoide, architecture, desktop, livery, pipeline]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -40,7 +40,7 @@ marked on one of three rungs:
 - **Stubbed** — the mutating CLI verbs (`rice gen/adopt/transpose`,
   `content *`, `make`, `update`, `onboard`) parse, audit, and exit 64 with a
   structured not-implemented payload; only the live action is deferred.
-  (`rice lint` and `rice preview` are real — see [[Self-Ricing]].)
+  (`rice lint` and `rice stage` are real — see [[Self-Ricing]].)
 - **Future** — v1 livery tiers, the functional rice loop (`gen`/`adopt`/
   `transpose`), the network-exposed Aoide connector.
 
@@ -201,11 +201,13 @@ real flake checks.
 
 ## The rice loop — where the agent writes
 
-The self-ricing lifecycle overlays the map above: it produces livery, previews
+The self-ricing lifecycle overlays the map above: it produces livery, stages
 through the live fan-out, and only commits through the gate. See
 [[Self-Ricing]]. Today `gen`, `adopt`, and `transpose` are exit-64 stubs;
-`rice lint` (native `livery::lint`) and `rice preview` (stages
-`song/stage/livery.json` for Quickshell hot-reload) are real.
+`rice lint` (native `livery::lint`) and `rice stage` (stages
+`song/stage/livery.json` for Quickshell hot-reload) are real. `rice stage`
+refuses with `declarative-mode-locked` while `rice mode declarative` is
+locked (the default) — see [[Self-Ricing#Staging vs Declarative Mode]].
 
 ```
   aoide rice gen <prompt|wallpaper>
@@ -214,8 +216,8 @@ through the live fan-out, and only commits through the gate. See
   rice lint   ──fail──►  reject + songbook note
         │ pass
         ▼
-  rice preview   ──►  song/stage/livery.json  ──►  Quickshell hot-reload
-        │              (hyprctl/OSC dispatch not yet wired into preview)
+  rice stage   ──►  song/stage/livery.json  ──►  Quickshell hot-reload
+        │              (hyprctl/OSC dispatch not yet wired into stage)
         │                                         (REHEARSAL — nothing committed)
         ▼
   aoide rice adopt <name>   ◄─── User gates this step
@@ -283,8 +285,9 @@ This is shipped code: the Rust crate ([[aoide-cli]]) installs two binaries,
 `aoide` and `aoided`. `aoide schema --json` is the machine-readable source of
 truth; the stdio MCP façade (`aoide mcp serve --stdio`) generates its tool list
 from it, and the [[A2A-Door]]'s AgentCard is derived from the same schema — all
-one-to-one. The tree holds **51 commands** — real (40): `guide`,
-`schema`, `rice lint`, `rice preview`, `rice mint`, `cover set`, `mcp serve`,
+one-to-one. The tree holds **54 commands** — real (43): `guide`,
+`schema`, `rice lint`, `rice stage`, `rice compose`, the 3-verb `rice mode`
+group (`status`/`stage`/`declarative`), `cover set`, `mcp serve`,
 `daemon`, `shellbridge`, `conduct`, `conductor`, `adapter melete`, the 3-verb
 `livery` group (`lint`/`resolve`/`emit` — the native note engine), the 5-verb
 `a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`), `usage`, and

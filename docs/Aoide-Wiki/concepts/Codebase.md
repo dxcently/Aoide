@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-13
+updated: 2026-08-14
 tags: [aoide, architecture, nix, flake, rust, node]
 ---
 
@@ -91,7 +91,8 @@ home-manager/stylix modules, the pkgs overlay, and mirrored `specialArgs`
 (`host = "vm-test"`, inputs, username, system; `node.pkgsReadOnly = false`
 so the overlay applies) — so the test boots the real assembly, not a
 replica. It asserts: `multi-user.target` reached; `aoide` on
-PATH with `schema --json` reporting exactly 51 commands and `guide` exiting
+PATH with `schema --json` reporting exactly 51 commands (a hardcoded figure
+now behind the 54-command tree — [[AOIDE-DEV]] §7) and `guide` exiting
 0; greetd enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
 linger active with the `aoided` and `shellbridge` user units finishing
 `Result=success` (the skeleton binaries seed state and exit 0); stage files
@@ -191,13 +192,17 @@ Live-side state, all gitignored, none load-bearing for the build:
   channel from QML; adapters and widgets bind exactly this path, never compute
   it.
 - **Stage files** under `song/stage/`: `livery.json` (resolved livery colours,
-  written by [[livery]]'s `rice preview`/`cover set`/other emitters at
-  rehearsal, and reseeded from the active song's committed
+  written by [[livery]]'s `rice stage`/`cover set`/other emitters at
+  rehearsal — both refuse under `rice mode declarative`, see
+  [[Self-Ricing#Staging vs Declarative Mode]] — and reseeded from the active
+  song's committed
   `song/songbook/<song>/livery.json` on every activation by
   `home.activation.aoideSeedStage` in `modules/facets/quickshell/default.nix`
   — a write-temp-then-rename script that injects the same `"song"` field
-  `rice preview` writes, so a host that boots without ever previewing still
-  carries a correct live stage twin from the baked default), `sessions.json` (agent session roster, written by
+  `rice stage` writes, so a host that boots without ever staging still
+  carries a correct live stage twin from the baked default), `mode.json`
+  (the staging/declarative mode marker — absent reads as `declarative`),
+  `sessions.json` (agent session roster, written by
   [[shellbridge]]; records may carry an additive optional `parentSessionId`),
   `hooks.json` (live Claude Code hook phases), `projects.json` (the project
   registry, kept by `aoide graph project`), and `graph.json` (the resolved
@@ -304,9 +309,9 @@ dendrites that need it (devtools, fonts).
 **Structured not-implemented stubs (exit 64, 11 total):** the mutating CLI
 verbs — `rice gen/adopt/transpose`, the five-verb `content` pipeline, `make`,
 `update`, `onboard`. Their arg-parsing, schema, gate flag, and audit trail are
-real; only the live-system action is deferred. (`rice preview` is **real** —
+real; only the live-system action is deferred. (`rice stage` is **real** —
 it stages `song/stage/livery.json` for Quickshell hot-reload
-today; only the hyprctl/OSC dispatch fan-out remains unwired into `preview`
+today; only the hyprctl/OSC dispatch fan-out remains unwired into `stage`
 itself.)
 
 ## Related
