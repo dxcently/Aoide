@@ -700,15 +700,27 @@ Item {
     // fallback: the old song-blind CalendarGadget was retired, so an
     // unauthored calendar slot simply doesn't open (gated below on
     // stagingEngine.has(...), not just calShown) rather than popping an empty
-    // frame.
-    BarPopout {
-        notes: root.notes
+    // frame. Hosted BARE via StelePopout (khoa's 2026-07-31 standing
+    // direction, AudioColonnade precedent): the sonata calendar is now a
+    // self-framed papyrus stele drawing all its own chrome — wrapping it in
+    // BarPopout's GadgetFrame bay double-framed it (the Π order-mark goes
+    // dormant with the bay, like Α Β Γ Δ Θ Ω before it). The widget carries
+    // its own unfurl reveal off Window.visible; BarPopout's `reveal` seam
+    // stays behind for any frame-hosted popout that wants it.
+    // Hosted on SteleLayerPopout — the ONE bar popout on its own layer
+    // surface (namespace "aoide-calendar") instead of an xdg_popup of
+    // aoide-bar (khoa, 2026-08-13): the papyrus sheet cuts a transparent
+    // window over its day grid that must show the desktop CRISPLY, and
+    // aoide-bar's blur_popups layerrule frosts every xdg_popup with no
+    // per-popup opt-out (popups carry no namespace). The other popouts stay
+    // StelePopout/xdg_popup with their frost. Left-pinning comes free — the
+    // layer surface is anchored top-left and grows rightward on the
+    // compact↔expanded morph, the same twitch-free hang the old
+    // anchorEdges/anchorGravity override bought (see SteleLayerPopout.qml).
+    SteleLayerPopout {
         cell: clockText
-        title: "calendar.sheet"
         shown: root.calShown && root.stagingEngine.has(root.notes.songName, "calendar")
-        reveal: true
         WidgetSlot {
-            width: parent.width
             notes: root.notes
             bridge: root.bridge
             stagingEngine: root.stagingEngine

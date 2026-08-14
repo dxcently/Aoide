@@ -26,9 +26,20 @@ PopupWindow {
     property bool shown: false
     default property alias content: host.data
 
+    // Anchor override (additive; defaults preserve the centered hang all
+    // existing hosts get). A host whose stele RESIZES while open — the
+    // calendar's compact↔expanded scroll morph is the first — pins the
+    // popup's left edge (edges Bottom|Left, gravity Bottom|Right) instead:
+    // a centered xdg_popup is re-centered by the compositor on every width
+    // change, one frame behind the resize, which visibly twitches the popup
+    // mid-morph (live-verified); an edge-pinned popup grows away from its
+    // fixed edge with no repositioning at all.
+    property int anchorEdges: Edges.Bottom
+    property int anchorGravity: Edges.Bottom
+
     anchor.item: cell
-    anchor.edges: Edges.Bottom
-    anchor.gravity: Edges.Bottom
+    anchor.edges: anchorEdges
+    anchor.gravity: anchorGravity
 
     visible: shown
     color: "transparent"

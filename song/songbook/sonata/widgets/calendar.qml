@@ -1,49 +1,212 @@
 // calendar.qml — sonata/Greek-marble "calendar" flavor widget: the COMPOSITE
-// temple, the invented SIXTH order.
+// order carried on a PAPYRUS SCROLL — a self-framed stele that unrolls.
 //
-// khoa, 2026-07-31: full rewrite of the proof-stub month grid into the real
-// "fuller calendar, scroll-open" pass. Joins the dock's four temples
-// (song/songbook/sonata/design/greek-grammar.md §4) as a fifth surface with
-// its own order, the same way NotificationCard invented Tuscan for HERALD:
+// khoa, 2026-08-13 (round six, same day): the chrome turns with the
+// material — controls that pointed sideways at a sheet that moves
+// vertically now point along the roll.
 //
-//   · ORDER    — COMPOSITE, the sixth classical order (a Corinthian capital's
-//                acanthus fused with an Ionic volute) — fitting for a
-//                calendar, which fuses two readings itself (a grid AND a
-//                date). None of the four dock temples or HERALD's Tuscan
-//                claims it.
-//   · SIGNATURE — `notes.base09`, kiln-fired clay orange — sonata's own
-//                 unclaimed accentSpread slot (LiveryState.qml's comment
-//                 already calls it "unnamed elsewhere", same slot HERALD's
-//                 Tuscan sibling base0F sits beside). No LiveryState change
-//                 needed — base09 already resolves with a paletteAccent
-//                 fallback.
-//   · CROWN    — 𝄴 (U+1D134, common-time signature) stands in for a clef,
-//                the same "no clef fits" move as Power's ϟ and HERALD's ❧ —
-//                a calendar keeps time, not pitch.
-//   · FRIEZE   — a Canvas-drawn Vitruvian wave-scroll (running-dog): a band
-//                of connected spiral curls, genuinely distinct from the
-//                dock's meander / volute+dentil+egg-and-dart / triglyph-
-//                metope / egg-and-dart-ovolo friezes.
-//   · LAUREL   — today's cell only (`paletteHot` fill, `paletteBg` numeral);
-//                no laurel while browsing another month (`monthOffset !== 0`).
+// ── Round-six additions ─────────────────────────────────────────────────
 //
-// A librarian pass should add this Composite row to greek-grammar.md §4's
-// table later (out of scope here — same interim-record precedent
-// NotificationCard's own header sets for Tuscan).
+// GUILLEMETS ROTATED, NOT REPLACED. The nav arrows were ‹ ›/« » — designed
+// when paging swapped in place, horizontal glyphs over now-vertical
+// motion. Recon over the alternatives (all render-tested at size): native
+// serif wedges ˄ ˅ are modifier-letter small, superscript-floating — weak
+// targets; the CJK vertical forms ︿ ﹀ ︽ ︾ are the true vertical
+// guillemets but arrive sans-weight and full-width via Noto Sans CJK
+// fallback, overwhelming the serif line. So the SAME glyphs rotate 90°:
+// identical strokes, identical single=month/double=year and clay/hover
+// distinction, zero new fallback dependence — the guillemets simply
+// turned with the material. PREV POINTS UP (earlier days are wound into
+// the top roller — and wheel-up already pages backward), next points
+// down. Rotated Texts ride fixed wrapper Items, because a rotated Text's
+// layout box does not rotate with it.
 //
-// ── The "fuller calendar" mechanic ──────────────────────────────────────
-// A FIXED 42-cell (6×7) grid, wheel-paged by month (`monthOffset`, no
-// ListView/PathView) — always 6 rows, so the popup height never changes
-// across months (no ragged corners, no resize). Leading/trailing cells
-// outside the viewed month show the adjacent month's days at 0.3 opacity.
-// `implicitHeight` is a FIXED constant (summed below), not `childrenRect`,
-// because BarPopout sizes its window off this and month-paging must not
-// jiggle the popup.
+// THE TOGGLE TAG HINTS ITS DIRECTION: [ ἔτος ⌄ ] unrolls downward,
+// [ μήν ⌃ ] rolls back up — mono wedges U+2303/2304, native in
+// JetBrainsMono NF. The bottom roller stays the wordless handle. The
+// rest of the chrome was audited and left alone: the wheels are
+// invisible, the block-click's motion is the mode morph, the tally's
+// "wound ±" is temporal not spatial, and the rollers/frieze/𝄂 are
+// physics and ornament, not controls.
 //
-// Fixed injected-prop contract: `notes` + `bridge` (bridge unused — declared
-// per the contract, same as before).
+// khoa, 2026-08-13 (round five, same day, retained): paging learns what
+// the toggle already knew — a scroll MOVES. Month and year paging now
+// unscroll vertically instead of swapping in place.
+//
+// ── Round-five additions ────────────────────────────────────────────────
+//
+// PAGING = UNSCROLLING. Every paging gesture (‹ ›, « », all three wheels,
+// the month/year home-clicks) routes through page(delta), which turns the
+// data swap into material motion on the SAME body-layer slide idiom as
+// the mode morph: grabToImage snapshots the body's current face into
+// pageGhost (one Image — no duplicated delegates, no second model), the
+// data swaps beneath it, and a single pageShift slide moves ghost and
+// live layer in lockstep through bodyRegion's clip — forward in time
+// pulls new days up from the bottom roll, backward rolls them down from
+// the top, matching the hung-rotulus physics of the open-unfurl. 220ms
+// OutCubic, painted motion only — the window never moves (sizing
+// discipline untouched). Re-paging mid-slide swaps data under the running
+// motion (a fast wheel reads as fast scrolling, never queues); paging
+// mid-morph or a failed grab degrades to the old instant swap. The
+// expanded block-click keeps its direct jump — the mode morph is that
+// transition's motion.
+//
+// khoa, 2026-08-13 (round four, same day, retained): the expanded year
+// grows a spine and a memento — numerals return beside the moons, ISO
+// weeks rail every mini-grid, and the closing barline counts what
+// remains of the year.
+//
+// ── Round-four additions ────────────────────────────────────────────────
+//
+// NUMERAL + MOON TOGETHER (expanded). Round three's replace-the-numeral
+// treatment is retired by direction: every mini-cell keeps its day number
+// and phase days carry the emoji as a 7px top-right corner mark — the
+// compact grid's almanac idiom at mini scale. At 15×11 the two only
+// coexist off-axis, so mini-grid numerals sit LEFT-ANCHORED (column
+// alignment held; a centered digit puts its shoulder under the moon).
+//
+// WEEK RAIL (expanded). Each month block gains the compact gutter's ISO
+// weeks — dim mono numerals down a 12px rail, numbered by each row's
+// Thursday (same Sunday-first apology as round two), silenced by opacity
+// (never `visible:` — the Row must hold the slot) on rows carrying no day
+// of the month. Costs width: expandedSheetW 390 → 412, block spacing
+// 14 → 8 — the one geometry move this round; the toggle still steps
+// between per-mode constants, discipline intact.
+//
+// MEMENTO MORI (expanded only, by direction — the memento belongs to the
+// year laid out whole, not the working month). Two DISTINCT pieces, not a
+// sentence: the phrase "memento mori" in the ἡμερολόγιον answer-line
+// italic at the year's lower left, answered across the line by the
+// counter — "N days · M weeks left", mono figures in dim clay — at the
+// lower right. The row lives INSIDE the expanded body layer (not the
+// chrome), so it arrives and leaves with the year morph for free and
+// cannot exist in compact; expandedBodyH 406 → 424 pays for it. Counted
+// from the REAL today (root.now → Dec 31), not the browsed year — a
+// memento reads your days, not the scroll's. The closing 𝄂 rule stays an
+// empty stave; the Metonic tally stays untouched.
+//
+// khoa, 2026-08-13 (round three, same day, retained): the moon appears — all
+// EIGHT phases, drawn from the SAME mean-lunation lattice the Attic year
+// already runs on, inscribed as the real color moon-phase emoji.
+//
+// ── Round-three additions ───────────────────────────────────────────────
+//
+// PHASE GLYPHS (U+1F311–1F318, EMOJI presentation — a SANCTIONED COLOR
+// EXCEPTION). The first pass chose text presentation (+U+FE0E): the moon
+// emoji are absent from all three declared faces (fc-list verified), bare
+// they fall back to Noto Color Emoji — fixed-color, deaf to `color:` —
+// while FE0E resolves them to DejaVu Sans monochrome, which recolors in
+// notes.* ink and stays legible at 9px (all render-verified side-by-side,
+// including against ●◐○◑ and the Nerd Font PUA weather moons). The owner
+// then overrode, explicitly: real emoji. So the phase marks are the ONE
+// glyph family wearing fixed color outside the notes.* roles — scoped
+// strictly to this family, everything else on the sheet still inks from
+// notes.*. Should color emoji ever leave the rig, the FE0E monochrome set
+// (aegean, ink-is-shadow polarity) is the documented fallback.
+//
+// EIGHTHS. monthPhases() divides each lunation at k + q/8, q 0..7 — new,
+// waxing crescent, first quarter, waxing gibbous, full, waning gibbous,
+// last quarter, waning crescent — the same Meeus mean lattice, so q0
+// still lands exactly where the Attic months open, and the same ±1-day
+// honesty as the noumeniai (the intermediate eighths are midpoints of
+// mean anomaly, not almanac events; day-level is all they claim).
+//
+// PLACEMENT. A mark lands roughly every 3.7 days (~8 a month). Compact
+// grid (26×17 cells): every phase day carries the emoji in the cell's
+// top-right corner; the numeral KEEPS its role ink — with 8 phases a
+// tinted numeral would drown the Sunday rubric, the emoji alone is the
+// mark, and the round-two noumenia box stays retired (noumenia IS the new
+// moon; the mark now shows the phase). Expanded mini-grids (15×11 cells):
+// the emoji REPLACES the numeral on phase days (grid position still dates
+// it; corner marks don't fit at that size). Today's laurel outranks a
+// phase mark in both modes, as it outranked the box.
+//
+// khoa, 2026-08-13 (round two, same day, retained): the scroll learns to unroll FURTHER —
+// a compact month view and an expanded LUNISOLAR year view share one sheet.
+// Round-one architecture unchanged: self-framed stele hosted bare via
+// StelePopout (the 2026-07-31 standing direction; GadgetFrame's bay retired
+// for this popout, Π order-mark dormant like Α Β Γ Δ Θ Ω before it).
+//
+// The order (held; see round-one header block below for the full account):
+//   · ORDER COMPOSITE — the volute order; voluta = "rolled", the scroll in
+//     stone. · SIGNATURE clay `notes.base09` as the RUBRIC (red-ochre ink of
+//     the fasti; the "unclaimed slot" claim stays DEAD — AudioColonnade and
+//     UsageGadget also wear base09, collision still open for adjudication).
+//     · CROWN 𝄴. · FRIEZE Vitruvian wave-scroll. · RUBRIC Sunday Κ + Sunday
+//     numerals in clay. · LAUREL today's cell only.
+//
+// ── Round-two additions ─────────────────────────────────────────────────
+//
+// WEEK NUMBERS (compact grid gutter). ISO 8601 numbering — BUT the grid stays
+// Sunday-first: the Greek weekday names themselves are Sunday-first ordinals
+// (Δευτέρα/Τρίτη/Τετάρτη/Πέμπτη = "2nd/3rd/4th/5th day", Κυριακή being day
+// one), so a Monday-first grid would contradict the very letters heading it.
+// Each row is numbered by its THURSDAY's ISO week — self-consistent, since
+// ISO 8601 defines a week's number AS its Thursday's week; on a Sunday-first
+// row that covers 6 of 7 days (only the leading Sunday belongs to the prior
+// ISO week). Dim caption ink; the row holding today sits a step brighter.
+//
+// GRANDER. Larger stele (sheet 244→256 wide, day cells 24×16→26×17, margins
+// 12), crown 𝄴 grown to 24px, KALENDAE at 15px/looser tracking answered by a
+// small italic ἡμερολόγιον (the AoidePanel "AOIDE ⁄ ᾠδή" bilingual-inscription
+// idiom), and the rollers gain their UMBILICUS: the axle rod + end knob
+// (cornua) real scrolls wound onto, protruding past the spiral ends.
+//
+// THE EXPANDED LUNISOLAR YEAR (toggle). The Attic civil calendar was
+// lunisolar: 12 lunar months beginning at each noumenia (new-moon day), the
+// year opening at the first new moon after the summer solstice, kept against
+// the sun by intercalating a second Poseideon (Ποσειδεών β′) in embolismic
+// years — regularized by Meton of Athens' 19-year cycle (432 BC), whose
+// "golden number" survives in the computus. The expanded sheet is that
+// structure made layout: a SOLAR frame (3×4 Gregorian month blocks) carrying
+// LUNAR content — each block marks its computed noumenia day(s) with an
+// aegean box (holoBlue = the information role; the moon over the Aegean) and
+// inscribes the Attic month that BEGINS there (computed, not decorative: the
+// labels roll over at the real lunations, Ποσειδεών β′ appears of its own
+// accord in embolismic years, and Ἑκατομβαιών lands mid-summer). The footer
+// tally reads the Metonic position ("meton N of 19 · 12/13 months").
+// Compact mode carries the same noumenia box on its big grid.
+//   Moon arithmetic is MEAN-LUNATION (Meeus: JDE 2451550.09766 + 29.530588861k)
+//   — day-level, ±1 day vs true phase (verified against the 2026 lunations:
+//   11 of 12 exact, Aug one day late). A rice widget, not an ephemeris.
+//   Solstice approximated June 21. Noumenia dated in UTC.
+//   Toggle affordances: the [ ἔτος ]/[ μήν ] tag centered in the nav row, or
+//   grab the BOTTOM ROLLER itself (the rod you'd pull to unroll more).
+//   Clicking a month block in the expanded year jumps the compact view to it.
+//
+// BOTH ROLLERS ANIMATE on the toggle, and the content moves with them. One
+// `modeFrac` drives the whole morph through the SAME pipeline as the open-
+// unfurl: sheet width and target height interpolate (both rollers visibly
+// lengthen; the bottom one travels), and the two body layers slide/fade
+// under the sheet's clip — compact rising into the top roll as the year
+// unrolls in beneath it, reversed on re-roll — so it reads as material
+// feeding through the rolls, not a panel resize. The open-unfurl itself is
+// unchanged (top pinned under the bar, bottom unrolls — a hung rotulus).
+//
+// ── Sizing discipline (amended, deliberately) ───────────────────────────
+// implicitWidth/implicitHeight are constants WITHIN a mode — month/year
+// paging never resizes the window, and the open-unfurl animates painted
+// heights only. The compact↔expanded toggle is the one sanctioned window
+// resize, and it STEPS rather than animates the window (sequenced around
+// the morph — see the remap note at toggleMode) while every visible
+// surface (sheet, rollers, content) animates as paint. StelePopout tracks
+// the stepped implicit sizes through its live bindings (body.width/
+// implicitHeight via WidgetSlot); its one change this pass is the additive
+// anchorEdges/anchorGravity override AoideBar uses to pin this popup's
+// left edge (a centered popup re-centers on every resize, visibly).
+//
+// khoa, 2026-08-13 (round one, retained): self-framed stele per StelePopout's
+// standing direction after live recon confirmed genuine double-framing under
+// GadgetFrame (two captions, two closures, glass losing the numerals over
+// dark windows). Fixed injected-prop contract: `notes` + `bridge` only
+// (bridge unused). Qt's Window.visible attached NEVER flips under
+// quickshell's proxy windows (verified); QsWindow.window.visible is the real
+// open/close edge. A librarian pass should carry the Composite/scroll row
+// into greek-grammar.md §4, the Π dormancy into §1, and now this lunisolar
+// expansion into the §4 row (interim-record precedent: NotificationCard).
 
 import QtQuick
+import Quickshell   // QsWindow attached — the open/close edge (see header)
 
 Item {
     id: root
@@ -55,19 +218,102 @@ Item {
     readonly property string faceMono:  "JetBrainsMono Nerd Font"
     readonly property string faceMusic: "Noto Music"
     readonly property color clay: notes.base09
+    readonly property color ink: notes.paletteFg
+    readonly property color aegean: notes.holoBlue   // the moon's information hue
 
     function withA(cstr, a) {
         var c = Qt.color(cstr)
         return Qt.rgba(c.r, c.g, c.b, a)
     }
 
-    // ── Fixed size — summed from the content below, NOT childrenRect (the
-    // popup window must not resize as monthOffset pages or the reveal
-    // animation plays) ──────────────────────────────────────────────────
-    implicitWidth: 248
-    implicitHeight: 229   // 15 top-frame + 20 header + 10 frieze + 14 weekday
-                           // + 106 grid (6*16 + 5*2) + 16 tally + 18 bottom-frame
-                           // + 6*5 column spacing = 229
+    // ── Mode: compact month ↔ expanded lunisolar year ────────────────────
+    // The toggle is SEQUENCED around the popup-window resize: Hyprland
+    // re-maps an xdg_popup on the first resize of a visible popup and plays
+    // its popup animation over the remap (~0.25s vanish/fade — measured;
+    // anchor-mode-independent). So the window never resizes DURING the
+    // morph: expanding grows the window first (the one-time flicker lands
+    // on a static compact image, position held by the left pin), then
+    // unrolls inside the stable surface; collapsing rolls up first, then
+    // snaps the window down around the static compact image. Re-toggling
+    // while in flight is absorbed.
+    property bool expanded: false
+    property real modeFrac: 0            // 0 compact … 1 expanded (animated)
+    function toggleMode() {
+        if (modeAnim.running || resizeGuard.running) return
+        root.expanded = !root.expanded
+        modeAnim.to = root.expanded ? 1 : 0
+        if (root.expanded) {
+            root.winW = root.expandedWinW      // window out first…
+            root.winH = root.expandedWinH
+            resizeGuard.restart()              // …morph after the remap settles
+        } else {
+            modeAnim.restart()                 // roll up inside the big window
+        }
+    }
+    Timer {
+        id: resizeGuard
+        interval: 300
+        onTriggered: modeAnim.restart()
+    }
+    NumberAnimation {
+        id: modeAnim
+        target: root; property: "modeFrac"
+        duration: 340; easing.type: Easing.InOutCubic
+        onStopped: if (!root.expanded && root.modeFrac === 0) {
+            root.winW = root.compactWinW       // …window in last
+            root.winH = root.compactWinH
+        }
+    }
+    function lerp(a, b) { return a + (b - a) * root.modeFrac }
+
+    // ── Fixed geometry — constants per mode, interpolated by modeFrac.
+    // Window size changes ONLY on the toggle (the sanctioned resize); paging
+    // and the open-unfurl never move it ──────────────────────────────────
+    readonly property int protrusion: 18           // roller overhang past the sheet
+    readonly property int compactSheetW: 256
+    readonly property int expandedSheetW: 412   // 3×(12 rail + 111 grid + 1) + 2×8 + 24
+    readonly property int compactBodyH: 130        // caps 14 + 4 + grid 112
+    readonly property int expandedBodyH: 424       // 4×97 blocks + 4×6 gaps + memento 12
+    readonly property int chromeH: 148             // 24 margins + crown 26 + answer 12
+                                                   // + frieze 10 + nav 20 + tally 18
+                                                   // + close 14 + 6×4 spacing
+    readonly property int sheetW: Math.round(lerp(compactSheetW, expandedSheetW))
+    readonly property int bodyH: Math.round(lerp(compactBodyH, expandedBodyH))
+    readonly property int modeSheetH: chromeH + bodyH
+    readonly property int rollerH: 16
+    readonly property int sheetY: 15
+
+    // The WINDOW size is stepped by the sequenced toggle above (never
+    // animated per frame — see the remap note there); the PAINTED sheet and
+    // rollers are what lerp. The host's left pin (StelePopout anchorEdges/
+    // anchorGravity override, set by AoideBar) keeps the popup's position
+    // fixed through the two window steps, so they read as nothing at all —
+    // a centered popup would visibly re-center on each (live-verified).
+    readonly property int compactWinW: compactSheetW + 2 * protrusion    // 292
+    readonly property int compactWinH: sheetY + chromeH + compactBodyH + rollerH + 1  // 310
+    readonly property int expandedWinW: expandedSheetW + 2 * protrusion  // 448
+    readonly property int expandedWinH: sheetY + chromeH + expandedBodyH + rollerH + 1  // 586
+    property int winW: compactSheetW + 2 * protrusion
+    property int winH: sheetY + chromeH + compactBodyH + rollerH + 1
+    implicitWidth: winW
+    implicitHeight: winH
+
+    // ── Unfurl — the popout opens (painted heights only; no window resize).
+    // Qt's Window.visible attached never flips under quickshell's proxy
+    // windows (verified live); QsWindow.window is quickshell's own door to
+    // the real PopupWindow/PanelWindow, whose `visible` tracks open/close ──
+    property real unfurl: 1
+    readonly property int rolledH: 26
+    readonly property int sheetVisH: Math.round(rolledH + (modeSheetH - rolledH) * unfurl)
+    NumberAnimation {
+        id: unfurlAnim
+        target: root; property: "unfurl"
+        from: 0; to: 1; duration: 260; easing.type: Easing.OutCubic
+    }
+    readonly property var qsWin: QsWindow.window
+    readonly property bool winShown: !!(qsWin && qsWin.visible)
+    onWinShownChanged: if (winShown) unfurlAnim.restart()
+    Component.onCompleted: if (winShown) unfurlAnim.restart()
 
     property date now: new Date()
     Timer {
@@ -77,9 +323,44 @@ Item {
         onTriggered: root.now = new Date()
     }
 
-    // ── Month paging state — wheel over the grid, ‹/› click targets, or
-    // click the month name to reset to today ───────────────────────────
+    // ── Paging state — months are the unit; a year page is ±12 ───────────
+    // Paging UNSCROLLS (round-five note): page() grabs the body's current
+    // face into pageGhost, swaps the data, then one pageShift slide moves
+    // ghost and live layer together through bodyRegion's clip — forward
+    // pulls new days up from the bottom roll, backward rolls them down
+    // from the top. Re-paging mid-slide swaps under the running motion
+    // (wheel stays responsive); a failed grab degrades to an instant swap.
     property int monthOffset: 0
+    property real pageShift: 0
+    property int pageDir: 1
+    property var pageGrab: null          // holds the grab: its url dies with it
+    function page(delta) {
+        if (delta === 0) return
+        if (pageAnim.running || modeAnim.running || resizeGuard.running) {
+            root.monthOffset += delta
+            return
+        }
+        var dir = delta > 0 ? 1 : -1
+        var ok = bodyRegion.grabToImage(function(result) {
+            root.pageGrab = result
+            pageGhost.source = result.url
+            root.pageDir = dir
+            root.monthOffset += delta
+            root.pageShift = dir * root.bodyH
+            pageAnim.restart()
+        })
+        if (!ok) root.monthOffset += delta
+    }
+    NumberAnimation {
+        id: pageAnim
+        target: root; property: "pageShift"
+        to: 0; duration: 220; easing.type: Easing.OutCubic
+        onStopped: {
+            root.pageShift = 0
+            pageGhost.source = ""
+            root.pageGrab = null
+        }
+    }
     readonly property date viewedDate:
         new Date(root.now.getFullYear(), root.now.getMonth() + root.monthOffset, 1)
     readonly property int viewYear: viewedDate.getFullYear()
@@ -93,6 +374,106 @@ Item {
     readonly property int daysInMonth: new Date(viewYear, viewMonth + 1, 0).getDate()
     readonly property int firstWeekday: new Date(viewYear, viewMonth, 1).getDay()
     readonly property int daysInPrevMonth: new Date(viewYear, viewMonth, 0).getDate()
+    readonly property int todayRow:
+        Math.floor((firstWeekday + today - 1) / 7)   // meaningful only at monthOffset 0
+
+    // The year's remainder, counted from the REAL today (a memento reads
+    // your days, not the scroll's): Dec 31 minus now, whole days.
+    readonly property int daysLeft:
+        Math.round((Date.UTC(now.getFullYear(), 11, 31)
+                    - Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
+                   / 86400000)
+    readonly property int weeksLeft: Math.floor(daysLeft / 7)
+
+    // ── ISO 8601 week of a date — a week is numbered by its Thursday ─────
+    function isoWeek(y, m, day) {
+        var d = new Date(Date.UTC(y, m, day))
+        var dn = (d.getUTCDay() + 6) % 7             // Mon=0
+        d.setUTCDate(d.getUTCDate() - dn + 3)        // this week's Thursday
+        var jan4 = new Date(Date.UTC(d.getUTCFullYear(), 0, 4))
+        var jn = (jan4.getUTCDay() + 6) % 7
+        var week1Thu = new Date(Date.UTC(d.getUTCFullYear(), 0, 4 - jn + 3))
+        return 1 + Math.round((d.getTime() - week1Thu.getTime()) / 604800000)
+    }
+
+    // ── Mean-lunation moon + the Attic lunisolar year (see header note) ──
+    readonly property real synodic: 29.530588861
+    readonly property real nmEpoch: 2451550.09766    // JDE, mean NM of 2000 Jan 6
+    readonly property var atticNames: ["Ἑκατομβαιών", "Μεταγειτνιών", "Βοηδρομιών",
+        "Πυανεψιών", "Μαιμακτηριών", "Ποσειδεών", "Γαμηλιών", "Ἀνθεστηριών",
+        "Ἐλαφηβολιών", "Μουνιχιών", "Θαργηλιών", "Σκιροφοριών"]
+
+    function jdOf(d) { return d.getTime() / 86400000 + 2440587.5 }
+
+    // The Attic year opening after year y's summer solstice: its lunation
+    // start-JDs and month names — 13 entries (Ποσειδεών β′ intercalated after
+    // Poseideon) when 13 new moons fall before the next solstice.
+    function atticYear(y) {
+        var sol = jdOf(new Date(Date.UTC(y, 5, 21)))
+        var solNext = jdOf(new Date(Date.UTC(y + 1, 5, 21)))
+        var k = Math.ceil((sol - root.nmEpoch) / root.synodic)
+        var starts = []
+        for (var j = k; root.nmEpoch + root.synodic * j < solNext; j++)
+            starts.push(root.nmEpoch + root.synodic * j)
+        var names = []
+        for (var i = 0; i < starts.length; i++) {
+            if (starts.length === 13) {
+                if (i < 6) names.push(root.atticNames[i])
+                else if (i === 6) names.push("Ποσειδεών β′")
+                else names.push(root.atticNames[i - 1])
+            } else {
+                names.push(root.atticNames[i])
+            }
+        }
+        return { starts: starts, names: names }
+    }
+    readonly property var atticPrev: atticYear(viewYear - 1)   // covers Jan–Jun
+    readonly property var atticCur: atticYear(viewYear)        // covers Jul–Dec
+    readonly property int goldenNumber: ((viewYear % 19) + 19) % 19 + 1
+
+    // Noumeniai falling inside Gregorian (y, m): [{day, name}]
+    function monthMoons(y, m) {
+        var out = []
+        var years = [root.atticPrev, root.atticCur]
+        for (var a = 0; a < 2; a++) {
+            var ay = years[a]
+            for (var i = 0; i < ay.starts.length; i++) {
+                var d = new Date((ay.starts[i] - 2440587.5) * 86400000)
+                if (d.getUTCFullYear() === y && d.getUTCMonth() === m)
+                    out.push({ day: d.getUTCDate(), name: ay.names[i] })
+            }
+        }
+        return out
+    }
+    // Phase days inside Gregorian (y, m): [{day, q}], q 0..7 = the eight
+    // phases at k + q/8 synodic (new, waxing crescent, first quarter,
+    // waxing gibbous, full, waning gibbous, last quarter, waning crescent)
+    // on the same mean lattice as the noumeniai, so q0 lands exactly where
+    // the Attic months open. Dated in UTC like everything lunar here.
+    function monthPhases(y, m) {
+        var first = jdOf(new Date(Date.UTC(y, m, 1)))
+        var next = jdOf(new Date(Date.UTC(y, m + 1, 1)))
+        var out = []
+        for (var k = Math.floor((first - root.nmEpoch) / root.synodic) - 1;
+             root.nmEpoch + root.synodic * k < next; k++)
+            for (var q = 0; q < 8; q++) {
+                var d = new Date((root.nmEpoch + root.synodic * (k + q / 8)
+                                  - 2440587.5) * 86400000)
+                if (d.getUTCFullYear() === y && d.getUTCMonth() === m)
+                    out.push({ day: d.getUTCDate(), q: q })
+            }
+        return out
+    }
+    // the real color moon emoji — the sanctioned color exception (header)
+    readonly property var phaseGlyphs:
+        ["\u{1F311}", "\u{1F312}", "\u{1F313}", "\u{1F314}",
+         "\u{1F315}", "\u{1F316}", "\u{1F317}", "\u{1F318}"]
+    readonly property var viewPhases: monthPhases(viewYear, viewMonth)
+    function phaseOf(dayNum) {
+        for (var i = 0; i < root.viewPhases.length; i++)
+            if (root.viewPhases[i].day === dayNum) return root.viewPhases[i].q
+        return -1
+    }
 
     function kaomojiFor() {
         if (root.monthOffset === 0) return "( ´ ▽ ` )"
@@ -100,313 +481,811 @@ Item {
         return "(☆ ≧▽≦)"
     }
 
-    Column {
-        id: mainColumn
-        width: parent.width
-        spacing: 5
+    // Tally: compact — day count at home, distance wound while browsing;
+    // expanded — the Metonic position of the Attic year opening in viewYear.
+    function tallyText() {
+        if (root.expanded)
+            return "meton " + root.goldenNumber + " of 19 · "
+                 + root.atticCur.starts.length + " months"
+        if (root.monthOffset === 0) return "day " + root.today + " of " + root.daysInMonth
+        var a = Math.abs(root.monthOffset)
+        var y = Math.floor(a / 12), m = a % 12
+        var d = (y > 0 ? y + "y" : "") + (y > 0 && m > 0 ? " " : "") + (m > 0 ? m + "m" : "")
+        return "wound " + (root.monthOffset < 0 ? "-" : "+") + d
+    }
 
-        // ── TUI top frame: ┌─┤ 𝄴 kalendae ├──────────┐ ────────────────
-        Item {
-            width: parent.width
-            height: 15
-            Row {
-                id: tfL
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 0
+    // ── Cast shadow — shared stele idiom; rides the reveal edge. Drawn as
+    // the visible L only (right + bottom strips), NOT the old full shifted
+    // rect: that rect underlapped the whole sheet, and now that the sheet
+    // carries a transparent window over the day grid, an underlapping
+    // shadow would tint the window's clear view of the desktop (khoa,
+    // 2026-08-13, the opacity correction pass). Union is pixel-identical
+    // to what the old rect showed around an opaque sheet ─────────────────
+    Rectangle {   // right strip
+        x: sheet.x + sheet.width
+        y: sheet.y + 5
+        width: 4
+        height: sheet.height
+        radius: 0
+        color: root.withA(root.ink, 0.22)
+    }
+    Rectangle {   // bottom strip (right strip owns the 4×5 corner overlap)
+        x: sheet.x + 4
+        y: sheet.y + sheet.height
+        width: sheet.width - 4
+        height: 5
+        radius: 0
+        color: root.withA(root.ink, 0.22)
+    }
+
+    // ── The sheet — fully opaque papyrus again (khoa, 2026-08-13, second
+    // correction the same day: the transparent window over bodyRegion made
+    // the day-grid numerals compete with whatever sat behind the popup —
+    // live read was "the middle section where the numbers are should be
+    // opaque". Back to a flat paletteBg fill, matching every other stele in
+    // this family. The SteleLayerPopout hosting change (its own
+    // "aoide-calendar" layer namespace, escaping aoide-bar's blur_popups
+    // rule) stays — that was a real fix independent of this fill question,
+    // it just no longer has anything to prove through a hole) ────────────
+    Rectangle {
+        id: sheet
+        x: root.protrusion
+        y: root.sheetY
+        width: root.sheetW
+        height: root.sheetVisH
+        radius: 0
+        color: root.notes.paletteBg
+        border.color: root.ink
+        border.width: 2
+        clip: true
+
+        // inset keyline — the rubric hue
+        Rectangle {
+            anchors.fill: parent; anchors.margins: 4
+            radius: 0; color: "transparent"
+            border.color: root.withA(root.clay, 0.8); border.width: 1
+        }
+
+        Column {
+            id: mainColumn
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: 12
+            spacing: 4
+
+            // ── Crown row: 𝄴 + KALENDAE carved serif + [ fasti ] tag ─────
+            Item {
+                width: parent.width
+                height: 26
                 Text {
-                    text: "┌─┤ "
-                    font.family: root.faceMono; font.pixelSize: 11
-                    color: root.clay
-                }
-                Text {
+                    id: crown
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
                     text: "𝄴"
-                    font.family: root.faceMusic; font.pixelSize: 13
+                    font.family: root.faceMusic
+                    font.pixelSize: 24
                     color: root.clay
                 }
                 Text {
-                    text: " kalendae ├"
-                    font.family: root.faceMono; font.pixelSize: 11
-                    color: root.clay
-                }
-            }
-            Text {
-                id: tfR
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: "┐"
-                font.family: root.faceMono; font.pixelSize: 11
-                color: root.clay
-            }
-            Rectangle {
-                anchors.left: tfL.right; anchors.right: tfR.left
-                anchors.leftMargin: 2; anchors.rightMargin: 2
-                anchors.verticalCenter: parent.verticalCenter
-                height: 1; color: root.withA(root.clay, 0.55)
-            }
-        }
-
-        // ── Header row: ‹ month year › — click month/year resets to today ──
-        Item {
-            width: parent.width
-            height: 20
-
-            Text {
-                id: prevArrow
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                text: "‹"
-                color: root.clay
-                font.family: root.faceSerif
-                font.pixelSize: 16
-                font.bold: true
-                MouseArea {
-                    anchors.fill: parent
-                    anchors.margins: -4
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.monthOffset -= 1
-                }
-            }
-            Row {
-                id: monthYearRow
-                anchors.centerIn: parent
-                spacing: 5
-                Text {
+                    anchors.left: crown.right; anchors.leftMargin: 9
                     anchors.verticalCenter: parent.verticalCenter
-                    text: root.monthNames[root.viewMonth]
-                    color: root.notes.paletteFg
+                    text: "KALENDAE"
                     font.family: root.faceSerif
-                    font.pixelSize: 14
-                    font.bold: true
+                    font.pixelSize: 15
+                    font.weight: Font.DemiBold
+                    font.letterSpacing: 4
+                    color: root.ink
                 }
                 Text {
+                    anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "" + root.viewYear
-                    color: root.notes.paletteAccent
-                    font.family: root.faceSerif
-                    font.pixelSize: 14
-                    font.bold: true
+                    text: "[ fasti ]"
+                    font.family: root.faceMono
+                    font.pixelSize: 10
+                    color: root.withA(root.clay, 0.9)
                 }
             }
-            // Click target sits OUTSIDE monthYearRow (a Row): a MouseArea
-            // using anchors.fill would conflict with Row's own x-axis
-            // management if nested inside it, so it's a sibling here instead,
-            // anchored to the Row's bounds — this parent Item isn't a
-            // positioner, so that's unrestricted.
-            MouseArea {
-                anchors.left: monthYearRow.left; anchors.right: monthYearRow.right
-                anchors.top: monthYearRow.top; anchors.bottom: monthYearRow.bottom
-                anchors.margins: -4
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.monthOffset = 0
-            }
-            Text {
-                id: nextArrow
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: "›"
-                color: root.clay
-                font.family: root.faceSerif
-                font.pixelSize: 16
-                font.bold: true
-                MouseArea {
-                    anchors.fill: parent
-                    anchors.margins: -4
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.monthOffset += 1
-                }
-            }
-        }
 
-        // ── Frieze — a Canvas-drawn Vitruvian wave-scroll (running-dog) ────
-        Canvas {
-            id: frieze
-            width: parent.width
-            height: 10
-            onWidthChanged: requestPaint()
-            onPaint: {
-                var ctx = getContext("2d")
-                ctx.reset()
-                ctx.clearRect(0, 0, width, height)
-                ctx.strokeStyle = root.clay
-                ctx.lineWidth = 1.3
-                var unit = 18
-                var midY = height / 2
-                var maxR = height * 0.42
-                var n = Math.ceil(width / unit) + 1
-                for (var i = 0; i < n; i++) {
-                    var cx = i * unit + unit * 0.35
-                    // one 1.5-turn spiral curl
-                    ctx.beginPath()
-                    var steps = 24
-                    for (var s = 0; s <= steps; s++) {
-                        var t = s / steps
-                        var ang = t * Math.PI * 3          // 1.5 turns = 540deg
-                        var r = maxR * (1 - t)
-                        var x = cx + r * Math.cos(ang)
-                        var y = midY + r * Math.sin(ang) * 0.6
-                        if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+            // ── The answer line — AoidePanel's bilingual-inscription idiom
+            // (AOIDE ⁄ ᾠδή): the carved Latin name answered in small Greek ──
+            Item {
+                width: parent.width
+                height: 12
+                Text {
+                    anchors.left: parent.left; anchors.leftMargin: 33
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "ἡμερολόγιον"
+                    font.family: root.faceSerif
+                    font.pixelSize: 10
+                    font.italic: true
+                    color: root.withA(root.ink, 0.5)
+                }
+            }
+
+            // ── Frieze — Vitruvian wave-scroll (the roll's curl, running) ─
+            Canvas {
+                id: frieze
+                width: parent.width
+                height: 10
+                onWidthChanged: requestPaint()
+                onPaint: {
+                    var ctx = getContext("2d")
+                    ctx.reset()
+                    ctx.clearRect(0, 0, width, height)
+                    ctx.strokeStyle = root.clay
+                    ctx.lineWidth = 1.3
+                    var unit = 18
+                    var midY = height / 2
+                    var maxR = height * 0.42
+                    var n = Math.ceil(width / unit) + 1
+                    for (var i = 0; i < n; i++) {
+                        var cx = i * unit + unit * 0.35
+                        ctx.beginPath()
+                        var steps = 24
+                        for (var s = 0; s <= steps; s++) {
+                            var t = s / steps
+                            var ang = t * Math.PI * 3          // 1.5 turns
+                            var r = maxR * (1 - t)
+                            var x = cx + r * Math.cos(ang)
+                            var y = midY + r * Math.sin(ang) * 0.6
+                            if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+                        }
+                        ctx.stroke()
+                        ctx.beginPath()
+                        ctx.moveTo(cx + maxR, midY)
+                        ctx.lineTo((i + 1) * unit + unit * 0.35 - maxR, midY)
+                        ctx.stroke()
                     }
-                    ctx.stroke()
-                    // tangent connector to the next unit's curl
-                    var outerX = cx + maxR
-                    var nextCx = (i + 1) * unit + unit * 0.35
-                    var nextOuterX = nextCx - maxR
-                    ctx.beginPath()
-                    ctx.moveTo(outerX, midY)
-                    ctx.lineTo(nextOuterX, midY)
-                    ctx.stroke()
                 }
             }
-        }
 
-        // ── Weekday caps — Greek-initial letters, clay ink ──────────────────
-        Row {
-            anchors.horizontalCenter: parent.horizontalCenter
-            height: 14
-            spacing: 2
-            Repeater {
-                model: root.dayLetters
-                delegate: Text {
-                    required property var modelData
-                    width: 24
-                    horizontalAlignment: Text.AlignHCenter
-                    text: modelData
+            // ── Nav row: ‹ month › (compact only) · [ ἔτος / μήν ] toggle ·
+            // « year ». Single chevrons page the MONTH, double the YEAR ────
+            Item {
+                width: parent.width
+                height: 20
+
+                // The guillemets TURNED WITH THE MATERIAL (round-six note):
+                // prev points UP the roll (earlier days wound in the top
+                // roller), next points DOWN. Rotated Texts ride wrapper
+                // Items — a rotated Text's layout box does not rotate.
+                Row {
+                    id: monthCluster
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 5
+                    opacity: 1 - root.modeFrac
+                    visible: root.modeFrac < 0.999
+                    enabled: !root.expanded
+                    Item {
+                        width: 12; height: 18
+                        anchors.verticalCenter: parent.verticalCenter
+                        Text {
+                            anchors.centerIn: parent
+                            rotation: 90
+                            text: "‹"
+                            color: root.clay
+                            opacity: mPrevMa.containsMouse ? 1.0 : 0.7
+                            font.family: root.faceSerif
+                            font.pixelSize: 16
+                            font.bold: true
+                        }
+                        MouseArea {
+                            id: mPrevMa
+                            anchors.fill: parent; anchors.margins: -3
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.page(-1)
+                        }
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: root.monthNames[root.viewMonth]
+                        color: root.ink
+                        font.family: root.faceSerif
+                        font.pixelSize: 14
+                        font.bold: true
+                        MouseArea {
+                            anchors.fill: parent; anchors.margins: -3
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.page(-root.monthOffset)
+                        }
+                    }
+                    Item {
+                        width: 12; height: 18
+                        anchors.verticalCenter: parent.verticalCenter
+                        Text {
+                            anchors.centerIn: parent
+                            rotation: 90
+                            text: "›"
+                            color: root.clay
+                            opacity: mNextMa.containsMouse ? 1.0 : 0.7
+                            font.family: root.faceSerif
+                            font.pixelSize: 16
+                            font.bold: true
+                        }
+                        MouseArea {
+                            id: mNextMa
+                            anchors.fill: parent; anchors.margins: -3
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.page(1)
+                        }
+                    }
+                }
+
+                // The mode toggle — [ ἔτος ⌄ ] unrolls the year downward,
+                // [ μήν ⌃ ] rolls back up. The bottom roller is the other
+                // handle; the wedges point where the material will go.
+                Text {
+                    anchors.centerIn: parent
+                    text: root.expanded ? "[ μήν ⌃ ]" : "[ ἔτος ⌄ ]"
+                    font.family: root.faceMono
+                    font.pixelSize: 10
                     color: root.clay
-                    font.family: root.faceSerif
-                    font.pixelSize: 12
-                    font.bold: true
+                    opacity: togMa.containsMouse ? 1.0 : 0.75
+                    MouseArea {
+                        id: togMa
+                        anchors.fill: parent; anchors.margins: -5
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleMode()
+                    }
+                }
+
+                Row {
+                    id: yearCluster
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 4
+                    Item {
+                        width: 13; height: 18
+                        anchors.verticalCenter: parent.verticalCenter
+                        Text {
+                            anchors.centerIn: parent
+                            rotation: 90
+                            text: "«"
+                            color: root.clay
+                            opacity: yPrevMa.containsMouse ? 1.0 : 0.7
+                            font.family: root.faceSerif
+                            font.pixelSize: 15
+                            font.bold: true
+                        }
+                        MouseArea {
+                            id: yPrevMa
+                            anchors.fill: parent; anchors.margins: -3
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.page(-12)
+                        }
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "" + root.viewYear
+                        color: root.notes.paletteAccent
+                        font.family: root.faceSerif
+                        font.pixelSize: 14
+                        font.bold: true
+                        MouseArea {
+                            anchors.fill: parent; anchors.margins: -3
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.page(-root.monthOffset)
+                        }
+                    }
+                    Item {
+                        width: 13; height: 18
+                        anchors.verticalCenter: parent.verticalCenter
+                        Text {
+                            anchors.centerIn: parent
+                            rotation: 90
+                            text: "»"
+                            color: root.clay
+                            opacity: yNextMa.containsMouse ? 1.0 : 0.7
+                            font.family: root.faceSerif
+                            font.pixelSize: 15
+                            font.bold: true
+                        }
+                        MouseArea {
+                            id: yNextMa
+                            anchors.fill: parent; anchors.margins: -3
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.page(12)
+                        }
+                    }
+                }
+
+                MouseArea {
+                    anchors.left: yearCluster.left; anchors.right: yearCluster.right
+                    anchors.top: yearCluster.top; anchors.bottom: yearCluster.bottom
+                    anchors.margins: -4
+                    acceptedButtons: Qt.NoButton
+                    onWheel: {
+                        root.page((wheel.angleDelta.y > 0) ? -12 : 12)
+                        wheel.accepted = true
+                    }
                 }
             }
-        }
 
-        // ── The fixed 42-cell (6×7) grid — wheel over it pages months ──────
-        // The wheel MouseArea is a SIBLING of the grid Column (not nested
-        // inside it) — a Column positions every child it owns, so a
-        // MouseArea child there would be laid out as a 7th "row" and wreck
-        // both the fixed 6-row grid and the fixed implicitHeight math above.
-        Item {
-            id: gridWrap
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: grid.width
-            height: grid.height
+            // ── The BODY REGION — its height IS the mode morph; the two
+            // layers slide under the sheet's clip so the toggle reads as
+            // material feeding through the rolls, not a reflow ────────────
+            Item {
+                id: bodyRegion
+                width: parent.width
+                height: root.bodyH
+                clip: true
 
-            Column {
-                id: grid
-                spacing: 2
+                // the outgoing sheet face — a one-frame grab that slides
+                // out in lockstep with the live layer sliding in, so the
+                // page turn reads as continuous material (round-five note)
+                Image {
+                    id: pageGhost
+                    x: 0
+                    y: Math.round(root.pageShift) - root.pageDir * root.bodyH
+                    width: bodyRegion.width
+                    height: root.bodyH
+                    visible: source != "" && root.pageShift !== 0
+                }
 
-                Repeater {
-                    model: 6
-                    delegate: Row {
-                        required property int index
-                        readonly property int weekIdx: index
+                // ══ COMPACT: week-number gutter + weekday caps + month grid
+                Column {
+                    id: compactBody
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    y: Math.round(-24 * root.modeFrac + root.pageShift)
+                    spacing: 4
+                    opacity: Math.max(0, 1 - root.modeFrac * 2.2)
+                    visible: opacity > 0.01
+
+                    // caps row — leading spacer over the week-number gutter;
+                    // dim ink caps, Sunday's Κ in rubric clay
+                    Row {
+                        height: 14
                         spacing: 2
-
+                        Item { width: 20; height: 1 }
                         Repeater {
-                            model: 7
-                            delegate: Rectangle {
+                            model: root.dayLetters
+                            delegate: Text {
+                                required property var modelData
                                 required property int index
-                                readonly property int cellIdx: parent.weekIdx * 7 + index
-                                readonly property int dayOffset: cellIdx - root.firstWeekday + 1
-                                readonly property bool isPrev: dayOffset < 1
-                                readonly property bool isNext: dayOffset > root.daysInMonth
-                                readonly property bool isCurrent: !isPrev && !isNext
-                                readonly property int dayNum:
-                                    isPrev ? (root.daysInPrevMonth + dayOffset)
-                                           : (isNext ? (dayOffset - root.daysInMonth) : dayOffset)
-                                readonly property bool isToday:
-                                    root.monthOffset === 0 && isCurrent && dayNum === root.today
+                                width: 26
+                                horizontalAlignment: Text.AlignHCenter
+                                text: modelData
+                                color: index === 0 ? root.clay : root.withA(root.ink, 0.6)
+                                font.family: root.faceSerif
+                                font.pixelSize: 12
+                                font.bold: true
+                            }
+                        }
+                    }
 
-                                width: 24
-                                height: 16
-                                radius: 0
-                                color: isToday ? root.notes.paletteHot : "transparent"
+                    // the fixed 42-cell grid, ISO week numbers in the gutter
+                    Item {
+                        id: gridWrap
+                        width: grid.width
+                        height: grid.height
 
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: parent.dayNum
-                                    color: parent.isToday ? root.notes.paletteBg
-                                           : (parent.isCurrent ? root.notes.paletteFg
-                                                                : root.withA(root.notes.paletteFg, 0.3))
-                                    font.family: root.faceSerif
-                                    font.pixelSize: 11
-                                    font.bold: parent.isToday
+                        Column {
+                            id: grid
+                            spacing: 2
+
+                            Repeater {
+                                model: 6
+                                delegate: Row {
+                                    id: weekRow
+                                    required property int index
+                                    readonly property int weekIdx: index
+                                    readonly property bool holdsToday:
+                                        root.monthOffset === 0 && index === root.todayRow
+                                    spacing: 2
+
+                                    // ISO week number — informational gutter
+                                    // caption, numbered by the row's Thursday
+                                    Text {
+                                        width: 20
+                                        height: 17
+                                        horizontalAlignment: Text.AlignRight
+                                        verticalAlignment: Text.AlignVCenter
+                                        rightPadding: 3
+                                        text: root.isoWeek(root.viewYear, root.viewMonth,
+                                            weekRow.weekIdx * 7 + 4 - root.firstWeekday + 1)
+                                        color: root.withA(root.ink, weekRow.holdsToday ? 0.65 : 0.32)
+                                        font.family: root.faceMono
+                                        font.pixelSize: 8
+                                    }
+
+                                    Repeater {
+                                        model: 7
+                                        delegate: Rectangle {
+                                            required property int index
+                                            readonly property int cellIdx: weekRow.weekIdx * 7 + index
+                                            readonly property int dayOffset: cellIdx - root.firstWeekday + 1
+                                            readonly property bool isPrev: dayOffset < 1
+                                            readonly property bool isNext: dayOffset > root.daysInMonth
+                                            readonly property bool isCurrent: !isPrev && !isNext
+                                            readonly property bool isSunday: index === 0
+                                            readonly property int dayNum:
+                                                isPrev ? (root.daysInPrevMonth + dayOffset)
+                                                       : (isNext ? (dayOffset - root.daysInMonth) : dayOffset)
+                                            readonly property bool isToday:
+                                                root.monthOffset === 0 && isCurrent && dayNum === root.today
+                                            readonly property int phaseQ:
+                                                (isCurrent && !isToday) ? root.phaseOf(dayNum) : -1
+
+                                            width: 26
+                                            height: 17
+                                            radius: 0
+                                            color: isToday ? root.notes.paletteHot : "transparent"
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: parent.dayNum
+                                                color: parent.isToday ? root.notes.paletteBg
+                                                       : (parent.isCurrent
+                                                           ? (parent.isSunday ? root.withA(root.clay, 0.95) : root.ink)
+                                                           : root.withA(root.ink, 0.3))
+                                                font.family: root.faceSerif
+                                                font.pixelSize: 12
+                                                font.bold: parent.isToday
+                                            }
+                                            // the phase itself, corner-inscribed —
+                                            // color emoji by sanction; aegean is
+                                            // the monochrome-fallback ink (header)
+                                            Text {
+                                                visible: parent.phaseQ >= 0
+                                                anchors.top: parent.top
+                                                anchors.right: parent.right
+                                                anchors.topMargin: -2
+                                                text: parent.phaseQ >= 0
+                                                      ? root.phaseGlyphs[parent.phaseQ] : ""
+                                                font.family: root.faceSerif
+                                                font.pixelSize: 9
+                                                color: root.aegean
+                                            }
+                                        }
+                                    }
                                 }
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            anchors.margins: -4
+                            acceptedButtons: Qt.NoButton
+                            // wheel pages months; Shift+wheel pages years
+                            onWheel: {
+                                var step = (wheel.modifiers & Qt.ShiftModifier) ? 12 : 1
+                                root.page((wheel.angleDelta.y > 0) ? -step : step)
+                                wheel.accepted = true
                             }
                         }
                     }
                 }
+
+                // ══ EXPANDED: the lunisolar year — 3×4 solar blocks, lunar
+                // noumenia marks, computed Attic month inscriptions ════════
+                Column {
+                    id: expandedBody
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    y: Math.round(-40 * (1 - root.modeFrac) + root.pageShift)
+                    spacing: 6
+                    opacity: Math.max(0, root.modeFrac * 2.2 - 1.2)
+                    visible: opacity > 0.01
+
+                    Repeater {
+                        model: 4
+                        delegate: Row {
+                            required property int index
+                            readonly property int rowIdx: index
+                            spacing: 8
+
+                            Repeater {
+                                model: 3
+                                delegate: Item {
+                                    id: block
+                                    required property int index
+                                    readonly property int m: parent.rowIdx * 3 + index
+                                    readonly property var moons: root.monthMoons(root.viewYear, m)
+                                    readonly property var phases: root.monthPhases(root.viewYear, m)
+                                    readonly property int firstWd: new Date(root.viewYear, m, 1).getDay()
+                                    readonly property int dcount: new Date(root.viewYear, m + 1, 0).getDate()
+                                    readonly property bool isViewed: m === root.viewMonth
+                                    readonly property bool holdsToday:
+                                        root.viewYear === root.now.getFullYear() && m === root.now.getMonth()
+
+                                    width: 124        // 12 week rail + 1 + 7×15 cells + 6×1
+                                    height: 97
+
+                                    Column {
+                                        anchors.fill: parent
+                                        spacing: 2
+
+                                        // Gregorian month name — gold marks the
+                                        // month the compact view sits on
+                                        Text {
+                                            height: 12
+                                            text: root.monthNames[block.m]
+                                            color: block.isViewed ? root.notes.paletteAccent : root.ink
+                                            font.family: root.faceSerif
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                        }
+
+                                        // The Attic month BEGINNING at this
+                                        // block's noumenia (computed) — aegean,
+                                        // the lunar information layer
+                                        Text {
+                                            height: 10
+                                            text: block.moons.length > 0 ? block.moons[0].name : ""
+                                            color: root.withA(root.aegean, 0.85)
+                                            font.family: root.faceSerif
+                                            font.pixelSize: 9
+                                            font.italic: true
+                                        }
+
+                                        // mini day grid — fixed 6×7, Sunday-first
+                                        Column {
+                                            spacing: 1
+                                            Repeater {
+                                                model: 6
+                                                delegate: Row {
+                                                    required property int index
+                                                    readonly property int wIdx: index
+                                                    spacing: 1
+
+                                                    // ISO week rail — the compact
+                                                    // gutter at mini scale, silent
+                                                    // (opacity, not visible: the
+                                                    // Row must hold its slot) on
+                                                    // rows with no day of the month
+                                                    Text {
+                                                        width: 12
+                                                        height: 11
+                                                        horizontalAlignment: Text.AlignRight
+                                                        verticalAlignment: Text.AlignVCenter
+                                                        rightPadding: 2
+                                                        opacity: (parent.wIdx * 7 - block.firstWd + 1 <= block.dcount) ? 1 : 0
+                                                        text: root.isoWeek(root.viewYear, block.m,
+                                                            parent.wIdx * 7 + 4 - block.firstWd + 1)
+                                                        color: root.withA(root.ink, 0.32)
+                                                        font.family: root.faceMono
+                                                        font.pixelSize: 7
+                                                    }
+
+                                                    Repeater {
+                                                        model: 7
+                                                        delegate: Rectangle {
+                                                            required property int index
+                                                            readonly property int dayN:
+                                                                parent.wIdx * 7 + index - block.firstWd + 1
+                                                            readonly property bool inMonth:
+                                                                dayN >= 1 && dayN <= block.dcount
+                                                            readonly property bool isToday:
+                                                                block.holdsToday && inMonth && dayN === root.today
+                                                            // which phase (if any) marks this day
+                                                            readonly property int phaseQ: {
+                                                                if (!inMonth || isToday) return -1
+                                                                for (var i = 0; i < block.phases.length; i++)
+                                                                    if (block.phases[i].day === dayN)
+                                                                        return block.phases[i].q
+                                                                return -1
+                                                            }
+                                                            width: 15
+                                                            height: 11
+                                                            radius: 0
+                                                            color: isToday ? root.notes.paletteHot : "transparent"
+                                                            // numeral kept, LEFT-anchored — centered
+                                                            // digits put their shoulder under the
+                                                            // corner moon (round-four header note)
+                                                            Text {
+                                                                anchors.left: parent.left
+                                                                anchors.leftMargin: 1
+                                                                anchors.verticalCenter: parent.verticalCenter
+                                                                text: parent.inMonth ? parent.dayN : ""
+                                                                color: parent.isToday ? root.notes.paletteBg
+                                                                       : (index === 0 ? root.withA(root.clay, 0.8)
+                                                                                      : root.withA(root.ink, 0.8))
+                                                                font.family: root.faceSerif
+                                                                font.pixelSize: 8
+                                                                font.bold: parent.isToday
+                                                            }
+                                                            // the phase, corner-inscribed at mini
+                                                            // scale — color emoji by sanction,
+                                                            // aegean the monochrome-fallback ink
+                                                            Text {
+                                                                visible: parent.phaseQ >= 0
+                                                                anchors.top: parent.top
+                                                                anchors.right: parent.right
+                                                                anchors.topMargin: -2
+                                                                text: parent.phaseQ >= 0
+                                                                      ? root.phaseGlyphs[parent.phaseQ] : ""
+                                                                font.family: root.faceSerif
+                                                                font.pixelSize: 7
+                                                                color: root.aegean
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // click a block → compact view of that month
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            root.monthOffset =
+                                                (root.viewYear - root.now.getFullYear()) * 12
+                                                + (block.m - root.now.getMonth())
+                                            root.toggleMode()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ── memento mori — two pieces, phrase answered by
+                    // counter across the year's last line (round-four
+                    // header note); lives in this body layer, so it can
+                    // only ever exist in the expanded year ──────────────
+                    Item {
+                        width: 3 * 124 + 2 * 8   // the block rows' width — not
+                                                 // parent.width (binding loop:
+                                                 // the Column sizes from us)
+                        height: 12
+                        Text {
+                            anchors.left: parent.left
+                            anchors.bottom: parent.bottom
+                            text: "memento mori"
+                            font.family: root.faceSerif
+                            font.pixelSize: 8
+                            font.italic: true
+                            color: root.withA(root.ink, 0.5)
+                        }
+                        Text {
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            text: root.daysLeft + " days · " + root.weeksLeft + " weeks left"
+                            font.family: root.faceMono
+                            font.pixelSize: 8
+                            color: root.withA(root.clay, 0.9)
+                        }
+                    }
+                }
+
+                // wheel anywhere over the year pages ±1 year
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.NoButton
+                    enabled: root.expanded
+                    onWheel: {
+                        root.page((wheel.angleDelta.y > 0) ? -12 : 12)
+                        wheel.accepted = true
+                    }
+                }
             }
 
-            MouseArea {
-                anchors.fill: parent
-                anchors.margins: -4
-                // Wheel pages months — up (positive angleDelta.y) steps back,
-                // down steps forward.
-                onWheel: {
-                    root.monthOffset += (wheel.angleDelta.y > 0) ? -1 : 1
-                    wheel.accepted = true
+            // ── Tally ledger: day count / distance / Metonic position ────
+            Item {
+                width: parent.width
+                height: 18
+                Rectangle {
+                    anchors.top: parent.top
+                    anchors.left: parent.left; anchors.right: parent.right
+                    height: 1; color: root.withA(root.clay, 0.3)
+                }
+                Text {
+                    anchors.left: parent.left
+                    anchors.bottom: parent.bottom
+                    text: root.tallyText()
+                    color: root.notes.paletteAccent
+                    font.family: root.faceMono
+                    font.pixelSize: 11
+                    font.bold: true
+                }
+                Text {
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    width: 96
+                    horizontalAlignment: Text.AlignRight
+                    text: root.kaomojiFor()
+                    font.family: root.faceMono
+                    font.pixelSize: 12
+                    color: root.withA(root.clay, 0.9)
+                }
+            }
+
+            // ── Closing rule — the score still ends on the 𝄂 barline ─────
+            Item {
+                width: parent.width
+                height: 14
+                Text {
+                    id: closeBar
+                    anchors.right: parent.right; anchors.rightMargin: 2
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "𝄂"
+                    font.family: root.faceMusic; font.pixelSize: 16
+                    color: root.notes.paletteAccent
+                }
+                Rectangle {
+                    anchors.left: parent.left; anchors.right: closeBar.left
+                    anchors.rightMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: 1; color: root.withA(root.clay, 0.55)
                 }
             }
         }
+    }
 
-        // ── Tally line: day N of M, kaomoji reads the browse state ──────────
-        Item {
-            width: parent.width
-            height: 16
-            Text {
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                text: "day " + root.today + " of " + root.daysInMonth
-                color: root.notes.paletteAccent
-                font.family: root.faceMono
-                font.pixelSize: 11
-                font.bold: true
+    // ── The rollers — wound papyrus, Canvas linework: 2-turn spiral ends,
+    // umbilicus axle + knob (cornua) protruding past them, tangent cylinder
+    // lines, a faint wound-layer seam. Both lengthen with the mode morph;
+    // the bottom one travels the unfurl and is a grab-handle for the toggle ─
+    component Roller: Canvas {
+        // Rollers lerp with the SHEET (painted morph), not the stepped
+        // window — left-pinned with it, lengthening rightward as it grows.
+        width: root.sheetW + 2 * root.protrusion
+        height: 16
+        onWidthChanged: requestPaint()
+        onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            ctx.clearRect(0, 0, width, height)
+            ctx.lineWidth = 1.3
+            var midY = height / 2
+            var r = 6.5
+            var lcx = 11, rcx = width - 11
+            ctx.strokeStyle = root.clay
+            // end spirals — the rolled sheet seen end-on
+            var ends = [lcx, rcx]
+            for (var e = 0; e < 2; e++) {
+                ctx.beginPath()
+                var steps = 32
+                for (var s = 0; s <= steps; s++) {
+                    var t = s / steps
+                    var ang = t * Math.PI * 4              // 2 turns
+                    var rr = r * (1 - t * 0.92)
+                    var x = ends[e] + rr * Math.cos(ang)
+                    var y = midY + rr * Math.sin(ang) * 0.92
+                    if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+                }
+                ctx.stroke()
             }
-            Text {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                width: 96
-                horizontalAlignment: Text.AlignRight
-                text: root.kaomojiFor()
-                font.family: root.faceMono
-                font.pixelSize: 12
-                color: root.withA(root.clay, 0.9)
-            }
+            // umbilicus — the axle rod + end knob (cornua) past each spiral
+            ctx.beginPath()
+            ctx.moveTo(lcx - r, midY); ctx.lineTo(2.5, midY)
+            ctx.moveTo(rcx + r, midY); ctx.lineTo(width - 2.5, midY)
+            ctx.moveTo(2.5, midY - 3); ctx.lineTo(2.5, midY + 3)
+            ctx.moveTo(width - 2.5, midY - 3); ctx.lineTo(width - 2.5, midY + 3)
+            ctx.stroke()
+            // cylinder silhouette — tangent to the spiral circles
+            var off = 3.2
+            var tx = Math.sqrt(r * r - off * off)
+            ctx.beginPath()
+            ctx.moveTo(lcx + tx, midY - off); ctx.lineTo(rcx - tx, midY - off)
+            ctx.moveTo(lcx + tx, midY + off); ctx.lineTo(rcx - tx, midY + off)
+            ctx.stroke()
+            // wound-layer seam — one faint inner line
+            ctx.strokeStyle = root.withA(root.clay, 0.3)
+            ctx.beginPath()
+            ctx.moveTo(lcx + r, midY); ctx.lineTo(rcx - r, midY)
+            ctx.stroke()
         }
+    }
 
-        // ── TUI bottom frame: └─────────── 𝄂 ┘ — closes on the barline ────
-        Item {
-            width: parent.width
-            height: 18
-            Text {
-                id: ffL
-                anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                text: "└"
-                font.family: root.faceMono; font.pixelSize: 11
-                color: root.clay
-            }
-            Text {
-                id: ffCorner
-                anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                text: "┘"
-                font.family: root.faceMono; font.pixelSize: 11
-                color: root.clay
-            }
-            Text {
-                id: ffBar
-                anchors.right: ffCorner.left; anchors.rightMargin: 4
-                anchors.verticalCenter: parent.verticalCenter
-                text: "𝄂"
-                font.family: root.faceMusic; font.pixelSize: 16
-                color: root.notes.paletteAccent
-            }
-            Rectangle {
-                anchors.left: ffL.right; anchors.right: ffBar.left
-                anchors.leftMargin: 2; anchors.rightMargin: 6
-                anchors.verticalCenter: parent.verticalCenter
-                height: 1; color: root.withA(root.clay, 0.55)
-            }
+    Roller { y: 0 }
+    Roller {
+        id: bottomRoller
+        y: root.sheetY + root.sheetVisH - 1
+        // the rod as a handle — pull it to unroll the year / roll it back
+        MouseArea {
+            anchors.fill: parent
+            anchors.margins: -2
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.toggleMode()
         }
     }
 }

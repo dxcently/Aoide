@@ -105,6 +105,16 @@ let
     # blur_popups extends the glass to the bar's PopupWindow children (the
     # gadget popouts) — same 0.5x snake_case rework spelling as ignore_alpha.
     layerrule = blur_popups on, match:namespace aoide-bar
+    # aoide-calendar: the calendar popout rides its OWN layer surface
+    # (SteleLayerPopout — not an xdg_popup of aoide-bar) precisely so
+    # blur_popups above cannot reach it: its papyrus sheet keeps an opaque
+    # marble frame but cuts a transparent window over the day grid, and that
+    # window must show the desktop CRISPLY (khoa, 2026-08-13: "no blur").
+    # An unmatched layer namespace gets no blur by default — this rule pins
+    # the exclusion EXPLICITLY so a future blanket layer rule can't silently
+    # frost it. Deliberately absent from the hyprglass namespaces below for
+    # the same reason.
+    layerrule = blur off, match:namespace aoide-calendar
 
     # hyprglass (pkgs/hyprglass, loaded via the HM plugins list below):
     # Liquid Glass on the quickshell surfaces, ON TOP of the blur+gloss —
