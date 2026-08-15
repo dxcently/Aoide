@@ -31,7 +31,7 @@ That is the complete install, by design — no dotfile manager, no separate boot
 
 `aoide onboard` is designed to be idempotent, running through these steps:
 
-1. Generate `hosts/<hostname>/` from the clone template; create `song/` runtime dirs (gitignored).
+1. Generate `hosts/<hostname>/` from the shelved skeletons (`hosts/_desktop`, `_laptop`, or `_server` — `_mac` is the forward-looking darwin one, pending the `mkHost` class seam); create `song/` runtime dirs (gitignored).
 2. Install the shipped standard rice + wallpaper as the active baseline; link `~/song` → `~/Aoide/song`.
 3. Confirm the upstream remote (the clone already tracks it as `origin`); offer adding a personal remote for backup/fleet sync.
 4. Seed `songbook/` with starter files and the update playbook.

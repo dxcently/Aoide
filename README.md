@@ -112,9 +112,11 @@ cd ~/Aoide
 
 # 2. Add a host: one line in flake.nix's nixosConfigurations, e.g.
 #      nixosConfigurations.<host> = mkHost "<host>";
-#    then create hosts/<host>/default.nix importing hosts/common
-#    (copy hosts/yomi-strix/default.nix as the template; a committed
-#    hardware.nix is imported guardedly if present).
+#    then create hosts/<host>/default.nix importing hosts/common —
+#    start from a shelved skeleton (hosts/_desktop, _laptop, or _server;
+#    _mac is the forward-looking darwin one, pending the mkHost class
+#    seam) or copy hosts/yomi-strix/, the living reference. A committed
+#    hardware.nix is imported guardedly if present.
 
 # 3. Build + switch
 sudo nixos-rebuild switch --flake .#<host>

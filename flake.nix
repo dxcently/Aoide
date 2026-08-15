@@ -71,6 +71,10 @@
     in
     {
       # ── NixOS configurations ───────────────────────────────────────────────
+      # One line per host. Shelved skeletons live at hosts/_{desktop,laptop,
+      # server,mac} — copy one to hosts/<name>/, register it here, done (the
+      # `_mac` one is forward-looking: it needs the darwin class seam in
+      # lib/mkHost.nix first). yomi-strix remains the living reference host.
       nixosConfigurations = {
         yomi-strix = mkHost "yomi-strix";
       };
