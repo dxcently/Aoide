@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-14
+updated: 2026-08-15
 tags: [aoide, extensibility, declarative, widget, agent]
 ---
 
@@ -137,6 +137,20 @@ rice loop itself ([[Self-Ricing]]), just applied to widget bodies instead of
 colour. Adding a *new* song's widget files to the carried set still needs a
 rebuild (the facet has to know to copy them); swapping which already-carried
 song is active does not.
+
+That's the *song-switch* case — a pointer swap onto an already-carried body,
+which never needed a restart. Editing the *content* of an already-carried
+widget file (the same song stays staged, its `widgets/<slot>.qml` changes) is
+a separate case: it used to require a manual `systemctl --user restart
+aoide-quickshell.service`, because Quickshell's built-in file watcher doesn't
+track `Qt.createComponent`-loaded QML at all ([[Quickshell]]). `aoide rice
+stage` now closes that gap too — it re-syncs the changed widget file into
+`run/qml/songs/<name>/` and, if that sync actually changed something, triggers
+`AoideIpc.qml`'s `Quickshell.reload(false)` via `aoide shell reload` under the
+hood, rebuilding the whole scene fresh so the edit renders without a restart
+(the same IPC hot-reload mechanism described in [[Quickshell]]). The "new
+song's widget files still need a rebuild" caveat above is untouched by
+this — that's the Nix build carrying new files into the store, not rendering.
 
 **Containment invariant** (`CONTRACTS.md §5`): a loaded song widget receives
 only `notes` (`LiveryState`) and `bridge` (`ShellBridge`), plus whatever

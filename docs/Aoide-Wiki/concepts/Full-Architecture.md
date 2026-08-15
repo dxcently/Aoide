@@ -299,7 +299,7 @@ This is shipped code: the Rust crate ([[aoide-cli]]) installs two binaries,
 `aoide` and `aoided`. `aoide schema --json` is the machine-readable source of
 truth; the stdio MCP façade (`aoide mcp serve --stdio`) generates its tool list
 from it, and the [[A2A-Door]]'s AgentCard is derived from the same schema — all
-one-to-one. The tree holds **59 commands** — real (49): `guide`,
+one-to-one. The tree holds **60 commands** — real (50): `guide`,
 `schema`, `rice lint`, `rice stage`, `rice compose`, the 3-verb `rice draft`
 group (`save`/`list`/`drop`), the 4-verb `rice mode`
 group (`status`/`stage`/`declarative`/`draft`), `cover set`, `mcp serve`,
@@ -308,7 +308,10 @@ group (`status`/`stage`/`declarative`/`draft`), `cover set`, `mcp serve`,
 `a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`), the
 5-verb `peer` group (`peer add/list/remove/pull/status` — cross-device peer
 federation, [[Peer-Federation]]), `usage`,
-`hooks install`, and the 15-verb `graph` group (the
+`hooks install`, the `shell reload` group (the Quickshell IPC hot-reload
+trigger — rebuilds the whole scene from `shell.qml` in-process, picking up
+dynamically-loaded widget/facet QML the file watcher can't track), and the
+15-verb `graph` group (the
 [[Session-Graph]] DAG viewer + management layer over projects and sessions,
 incl. `graph send`/`wrap`/`reap`, all real); stubs (10, exit 64):
 `rice declare/transpose`, the 5-verb `content` group, `make`, `update`,

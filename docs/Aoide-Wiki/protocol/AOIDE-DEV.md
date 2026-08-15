@@ -154,7 +154,10 @@ grim out.png ; grim -g "0,0 1920x60" bar.png    # full + crops → read them bac
   deployed tree is `run/qml/` (writable working copies) — NOT
   `modules/facets/quickshell/qml/` and NOT `~/Aoide/qml/`.** Sync only the
   files you changed (`cp modules/facets/quickshell/qml/<f> run/qml/<f>` then
-  `systemctl --user restart aoide-quickshell.service`); leave files another
+  `aoide shell reload`, which now replaces the old
+  `systemctl --user restart aoide-quickshell.service` step — a Quickshell
+  IPC call (`quickshell ipc call shell reload`) that rebuilds the whole
+  scene in-process, no systemd restart); leave files another
   agent is mid-editing untouched (shared-worktree discipline, §5). **This
   manual `cp` is now UNNECESSARY specifically for SONG widget bodies**
   (`song/songbook/<song>/widgets/*.qml`) — `aoide rice stage <song>` syncs
@@ -330,8 +333,9 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
 - ~~**[bug] `lib/vmTest.nix` command-count assertion is stale**~~ **closed**:
   fixed alongside the `rice design` cut / `rice draft` add / `rice gen`
   removal pass (khoa 2026-08-14), then bumped again for the `peer`
-  group (§7 below) — asserts `cmd_count == 59` now, matching
-  `aoide schema --json`. See [[Codebase]].
+  group (§7 below), then again for the new `shell reload` command
+  (Quickshell IPC hot-reload trigger) — asserts `cmd_count == 60` now,
+  matching `aoide schema --json`. See [[Codebase]].
 - **[docs] `README.md` (repo root) lags the wiki.** Known stale points: shipped
   song is `sonata` not `hero`; launcher trigger is `aoide:launcher` not the
   old CLI-stub form; command count is 36 (three gated) not 28; `rice stage`
@@ -476,7 +480,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
 | Build the system | `nix build .#nixosConfigurations.yomi-strix.…toplevel` |
 | Activate (gated) | `nix-env --set` + `switch-to-configuration switch` |
 | Reload compositor | `hyprctl reload` |
-| Reload shell | `systemctl --user restart aoide-quickshell.service` |
+| Reload shell | `aoide shell reload` (or `systemctl --user restart aoide-quickshell.service`) |
 | Stage a song live | `aoide rice stage <song>` |
 | Check QML loads | `qs -p …/shell.qml` |
 | Show the user | `grim` → read the PNG back → judge → send |

@@ -25,6 +25,9 @@ ShellRoot {
     // ── Shared singletons (one instance for the whole session) ─────────────
     LiveryState { id: notes }
     ShellBridge { id: bridge }
+    // `aoide shell reload`'s IPC target (crates/song/src/ipc.rs) — no
+    // properties, wired for its side effect (Quickshell.reload) alone.
+    AoideIpc { id: ipc }
     // The staging engine (CONTRACTS.md §5) — reads the manifest
     // the quickshell facet's build carries into ~/Aoide/run/qml/songs/, resolves
     // WidgetSlot's "does the active song dress this slot" / "where's its QML".

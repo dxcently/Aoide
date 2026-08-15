@@ -48,7 +48,7 @@ offline, vendored dependency set unchanged — the same shape as Hermes-agent's
 self-registering tool registry and Claude Code's discrete-tools-behind-a-thin-
 dispatch design.
 
-The command surface itself is unchanged by this shape: **59 leaves**
+The command surface itself is unchanged by this shape: **60 leaves**
 (`aoide schema --json | jq '.commands | length'`):
 
 | Group | Leaves | Real / stub |
@@ -72,6 +72,7 @@ The command surface itself is unchanged by this shape: **59 leaves**
 | `peer add/list/remove/pull/status` | 5 | real (same-network federation — `CONTRACTS.md` §7) |
 | `usage` | 1 | real |
 | `hooks install` | 1 | real |
+| `shell reload` | 1 | real — Quickshell IPC hot-reload trigger (`CONTRACTS.md` §5) |
 
 The **`a2a`** group is the [[A2A-Door]] — the third door onto aoide. `a2a
 serve` raises the A2A (Agent2Agent) JSON-RPC/HTTP server (a discoverable

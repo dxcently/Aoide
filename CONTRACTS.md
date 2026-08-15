@@ -648,7 +648,11 @@ set of "flavor" surfaces — committed files, not nix options:
   regenerates that song's `run/qml/songs/manifest.json` entry, so an edit
   to an EXISTING widget file reaches Quickshell's own file-watcher live too.
   A brand-new slot file still needs a service restart to be discovered
-  (the manifest is only read at startup).
+  (the manifest is only read at startup) — **may no longer require a
+  restart** now that `aoide shell reload` (Quickshell IPC hot-reload
+  trigger) rebuilds the whole scene fresh from `shell.qml`, which should
+  also re-read `manifest.json`; unconfirmed against a live instance, don't
+  rely on this until verified.
 - **Fixed injected-prop contract:** a loaded widget receives `notes`
   (`LiveryState`) and `bridge` (`ShellBridge`) always, plus whatever
   slot-specific extras the anchor declares (e.g. notifications' `notification`)

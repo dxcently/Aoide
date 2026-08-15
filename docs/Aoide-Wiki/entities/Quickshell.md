@@ -45,6 +45,51 @@ writes livery + keybind fragments with `mkBefore`, and the Quickshell facet appe
 its `exec-once` autostart with `mkAfter`, so the two facets compose the one config
 file without collision.
 
+### IPC hot-reload — closing the dynamic-load gap
+
+`LiveryState`'s `FileView` watch (above) covers exactly one tier:
+`stage/livery.json`. Quickshell's own built-in file watcher — the thing that
+would otherwise auto-reload on any QML edit — only tracks files reached
+through a static `import` statement; every song/facet widget loads
+dynamically via `Qt.createComponent(url)` (`WidgetSlot`/`SurfaceSlot`, see
+[[Widget-Maker]]), which that watcher never sees. Facet-owned QML unreachable
+by static import sits in the same blind spot — `shell.qml`, `ShellBridge.qml`,
+`StagingEngine.qml`, `WidgetSlot.qml`, `SurfaceSlot.qml`. In practice this
+meant editing an existing widget body (or any of those facet files) never
+rendered until a full `systemctl --user restart aoide-quickshell.service` —
+found via live debugging.
+
+`AoideIpc.qml` closes it: a `Quickshell.Io.IpcHandler` singleton
+(`target: "shell"`, one exposed `function reload(): void { Quickshell.reload(false) }`),
+instantiated in `shell.qml` alongside `notes`/`bridge`/`stagingEngine`/`shared`
+— no properties of its own, wired purely for the side effect. `quickshell ipc
+call shell reload` invokes it from outside the process; `aoide shell reload`
+(`crates/song/src/commands/shell.rs`, `crates/song/src/ipc.rs`) shells out to
+exactly that call, no-oping to a reported (never fatal) `not-running` status
+when `aoide-quickshell.service` isn't up.
+
+`Quickshell.reload(hard: bool)` (`rootwrapper.cpp`'s `reloadGraph()`) is not a
+selective "reload what changed" call — it always tears down and rebuilds the
+entire scene fresh from `shell.qml`, re-executing every dynamic load along the
+way, closer to an in-process restart than a targeted patch. `hard` only
+decides whether `PersistentProperties`-marked state survives the rebuild;
+this codebase declares none, so `hard:true` and `hard:false` are currently
+observably identical — `AoideIpc.qml` passes `false` to match Quickshell's own
+built-in auto-reload-on-static-file-change path (`onWatchedFilesChanged()`
+also calls `reload(false)`), not because soft matters yet. One consequence
+worth carrying forward: a reload resets *all* non-persistent QML state (tray
+open/closed, calendar selection, any in-memory session data) exactly like a
+restart does — it's just faster, and skips cycling the systemd unit and
+re-registering windows with the compositor.
+
+`aoide rice stage` (`crates/song/src/commands/rice.rs`) auto-triggers this
+after `sync_song_widgets` reports actually-changed widget files — the
+palette/notes tier is already covered by `LiveryState`'s own watch, so a
+re-stage with no widget-body changes never reloads. Whether this also closes
+the *separate* gap of a brand-new widget file needing a restart to be
+discovered at all is unconfirmed — untested against a live instance as of
+landing.
+
 ### Notification card — three-tier reading order
 
 The per-card body (`song/songbook/sonata/widgets/notifications.qml`, the
