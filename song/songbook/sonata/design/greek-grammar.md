@@ -54,6 +54,13 @@ The music glyphs are **inscriptions carved into the stone**, not replaced:
   `𝄢` bass (Terminals), `𝄡` alto (Meters) — and Power crowns with the Greek
   koppa `ϟ`, a letter that reads as Zeus's lightning, standing in where no clef
   fits.
+- the crown convention outlives the (dormant, per above) dock temples: two of
+  the actually-live per-song flavor widgets crown themselves the same way.
+  `widgets/notifications.qml` crowns with `❧` (a rotated floral
+  notice-ornament, U+2767) — "the same way Power's `ϟ` does when no clef fits
+  — a herald has no voice range to notate," in the widget's own words.
+  `widgets/calendar.qml` crowns with `𝄴` beside its carved "KALENDAE" label.
+  Both render on screen today; none of the dock clefs above currently do.
 - where a meander frieze and a musical seam would both appear, the musical seam
   wins (it carries meaning); the meander yields.
 
@@ -109,6 +116,21 @@ Which Greek hue plays which `notes` role (full derivation in
 **Restraint (the core rule):** laurel leaf-green `hot` is the single traced
 colour; everything else rests dim. The multicolour field is ROLES, not
 decoration.
+
+**The structural cap, still enforced, no longer written down here.** A ≤0.5-
+alpha ceiling on `wireCyan`'s STRUCTURAL use (never the hue itself — a hue
+can still appear at full strength as, say, a stele's signature colour) was
+once an explicit invariant in this file's own §5, before the 2026-08-14
+retcon; `design/intent.md`'s iteration log is the only place that still
+records it existed. It is still live in the actual widget code: every
+current structural `wireCyan` read sits at exactly 0.35 —
+`widgets/powermenu.qml`'s "ΕΞΟΔΟΣ" title rule and its own header's rationale
+for the LOGOUT stele's signature hue ("the ≤0.5-alpha cap binds the
+STRUCTURAL role, not the hue... stays ≤0.35"), and `widgets/launcher.qml`'s
+Grimoire page's inner illuminated border. Both widgets restate the ceiling in
+their own header comments independently of each other and of this file.
+Restated here since this file no longer does — see `design/widget-structure.md`
+§8 for the full per-role breakdown against live widget code.
 
 ---
 
