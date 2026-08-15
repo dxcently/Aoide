@@ -98,11 +98,17 @@ ShellRoot {
     }
 
     // ── Bar (top edge, exclusive — reserves its height) ────────────────────
+    // Whole-content slot (CONTRACTS.md §5, slots.md): the PanelWindow itself
+    // — layer, namespace, exclusive-zone reservation — stays facet-owned;
+    // only its CONTENT is the per-song `bar` widget, loaded through
+    // WidgetSlot like calendar/notifications. The song fully owns its own
+    // footprint now: implicitHeight/exclusiveZone read back from the loaded
+    // item's own implicitHeight rather than a facet-pinned constant.
     PanelWindow {
         id: barWin
         anchors { top: true; left: true; right: true }
-        implicitHeight: bar.implicitHeight
-        exclusiveZone: bar.stripHeight
+        implicitHeight: barSlot.implicitHeight
+        exclusiveZone: barSlot.implicitHeight
         color: "transparent"
         WlrLayershell.layer: WlrLayer.Top
         // Distinct namespace → target of the compositor facet's glass
@@ -110,13 +116,26 @@ ShellRoot {
         // "namespace waybar" posture, aoide-native name).
         WlrLayershell.namespace: "aoide-bar"
 
-        AoideBar {
-            id: bar
+        WidgetSlot {
+            id: barSlot
             anchors.fill: parent
             notes: notes
             bridge: bridge
-            shared: shared
             stagingEngine: stagingEngine
+            slot: "bar"
+            // stagingEngine is ALSO threaded as an extra (beyond the
+            // anchor's own required stagingEngine above) because the loaded
+            // bar widget needs its own handle to resolve its embedded
+            // calendar WidgetSlot — two separate reads of the same
+            // singleton, not a conflict. `powermenu` is the powermenu
+            // slot's live item (declared below with the overlay surfaces —
+            // QML resolves id references regardless of order, the
+            // clipboard→launcher precedent).
+            extraProps: ({
+                shared: shared,
+                powermenu: powermenuSlot.item,
+                stagingEngine: stagingEngine
+            })
         }
     }
 
@@ -134,12 +153,37 @@ ShellRoot {
 
     // ── Overlay surfaces — each owns its own PanelWindow internally, wired
     // to notes/bridge only. Hidden/dormant until summoned/triggered.
-    //   - AoideLauncher        : SUPER+Space launcher (bridge-toggled)
-    //   - AoideWallpaperPicker : SUPER+W wallpaper switcher (global-shortcut)
-    //   - AoideNotifications   : org.freedesktop.Notifications popup stack,
-    //                            bottom-right (live whenever a notification exists)
+    //   - launcher (SurfaceSlot) : SUPER+Space launcher (bridge-toggled),
+    //                              song/songbook/sonata/widgets/launcher.qml
+    //   - powermenu (SurfaceSlot): the powermenu (bar clef 𝄞 → powermenu.toggle()),
+    //                              song/songbook/sonata/widgets/powermenu.qml
+    //   - AoideWallpaperPicker   : SUPER+W wallpaper switcher (global-shortcut)
+    //   - AoideNotifications     : org.freedesktop.Notifications popup stack,
+    //                              bottom-right (live whenever a notification exists)
     AoideClipboard { id: clipboard }
-    AoideLauncher { notes: notes; bridge: bridge; clipboard: clipboard }
+    // The Grimoire's usage ledger — stays in the facet (a data seam, not
+    // chrome, CONTRACTS.md §4), injected into the launcher slot as an extra.
+    GrimoireLedger { id: ledger }
+    // powermenu/launcher: window-owning slots (SurfaceSlot, not WidgetSlot —
+    // each roots its own PanelWindow). `.item` is the loaded song widget's
+    // live handle, resolved through the baseline chain (sonata is the
+    // floor, so `.item` is only null if sonata itself somehow lacks the
+    // file — shouldn't happen once these slots are populated).
+    SurfaceSlot {
+        id: powermenuSlot
+        slot: "powermenu"
+        notes: notes
+        bridge: bridge
+        stagingEngine: stagingEngine
+    }
+    SurfaceSlot {
+        id: launcherSlot
+        slot: "launcher"
+        notes: notes
+        bridge: bridge
+        stagingEngine: stagingEngine
+        extraProps: ({ clipboard: clipboard, ledger: ledger })
+    }
     AoideWallpaperPicker { notes: notes }
     AoideNotifications { notes: notes; bridge: bridge; stagingEngine: stagingEngine }
 }

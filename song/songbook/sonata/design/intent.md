@@ -4,12 +4,15 @@
 **Palette:** a Greek marble key — pale warm-marble ground, plum-charcoal ink,
 deep Attic-gold chrome accent, terracotta urgent, a true laurel leaf-green
 one-hot blaze; aegean blue steps back to a preview/information role
-**Grammar:** `design/greek-grammar.md` — sonata's typographic-Greek house
-grammar (columns, meanders, pediments), a deliberate divergence from the default
-song's Pantheon wireframe grammar
+**Grammar:** `design/greek-grammar.md` — sonata's house grammar: capital-Greek
+order-marks per surface, the state-glyph contract shared verbatim with
+`theme.rs`, and the role→hue palette below. A deliberate divergence from the
+Pantheon wireframe grammar the retired `default` song once drew (kept as
+historical reference at `docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`)
 **Cover:** none — the wallpaper note is `null`, so the stylix facet bakes a
-deterministic **bright-marble field** from `palette.bg` (`#f2ebde`), the same
-mechanism `song/songbook/default/rice.nix` uses. Colours fit the theme, not a
+deterministic **bright-marble field** from `palette.bg` (`#f2ebde`) — the
+same null-wallpaper-to-solid mechanism the stylix facet applies to any song
+with no cover note. Colours fit the theme, not a
 photo; the wallpaper switcher handles photos live (see the Iteration Log)
 
 ---
@@ -117,8 +120,9 @@ How the key reads on yomi-strix — sonata's instantiation of its house grammar
 (`design/greek-grammar.md`). The glass alphas are facet/dendrite constants, not
 livery notes; they are tuned against THIS key and recorded here as its design
 memory. The colour values below are the re-keyed Greek notes; the drawn shapes
-update when the greek-grammar reskin lands (the palette re-key ships first, the
-widget reskin follows as its blueprint directs):
+are each songbook widget's (`bar`/`calendar`/`launcher`/`notifications`/
+`powermenu`.qml) own concern now — each documents its own chrome in its own
+file header rather than a shared cross-cutting blueprint:
 
 | Surface | Element | Value |
 |---|---|---|
@@ -150,8 +154,10 @@ text on the wallpaper, so no outline treatment is in use.
 - 2026-07-29: bar sheet and popout glass lowered 0.62/0.60 → 0.45/0.45
   (khoa: a more transparent strip; the hyprglass blur carries legibility).
   Current surface elements recorded above; rice design memory now lives
-  per-song (this file), with the house grammar in the default rice's
-  `design/pantheon.md`.
+  per-song (this file). [2026-08-14: the house grammar this once pointed at
+  (the default rice's `design/pantheon.md`) is retired along with `default`
+  itself — historical reference now at
+  `docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`.]
 - 2026-07-29: **RE-KEYED to the Greek register** (khoa-approved). The light
   dusk key drawn from `yuki-sonata.png` (pale peach-cream ground `#f4e9e2`,
   plum-ink `#3b2f3a`, dusk slate-blue accent `#5a6f9c`, crimson-ember urgent
@@ -167,7 +173,12 @@ text on the wallpaper, so no outline treatment is in use.
   still points at `yuki-sonata.png` (covers/ is out of this re-key's scope); a
   Greek cover is a follow-up. The musical state-glyph contract (`♪ 𝄐 𝄽 𝄂 ·`,
   from `pkgs/aoide/src/conductor/theme.rs`) is untouched — the Greek forms frame it,
-  never replace it.
+  never replace it. [2026-08-14: greek-grammar.md's motif vocabulary (columns,
+  meander, entablature/pediment/stylobate) and its §4 widget-by-widget
+  blueprint were cut outright in a retcon pass — khoa's call, not a further
+  drift. The grammar's surviving scope is the order-marks (§1), the
+  state-glyph contract (§2), and the role→hue palette (§3); each songbook
+  widget's own file header is its design record now, not a shared blueprint.]
 - 2026-07-29: Fable review GO-WITH-TWEAKS. Applied at palette level: (a) the
   one-hot laurel `hot`/`base0B` brightened `#5f7a37` → `#6b8b33` so the green
   blaze out-reads the teal verdigris structural role on warm marble by hue, not

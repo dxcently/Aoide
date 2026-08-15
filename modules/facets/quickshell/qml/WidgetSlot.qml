@@ -1,11 +1,13 @@
-// WidgetSlot.qml — the fixed per-slot anchor: song override, shared fallback.
+// WidgetSlot.qml — the fixed per-slot anchor: song override, baseline
+// fallback, shared fallback.
 //
 // One WidgetSlot sits wherever a host surface (AoideBar's calendar popout,
 // AoideNotifications' card repeater, …) wants to let the active song replace
-// a piece of chrome with its own QML. It asks the staging engine whether the active
-// song (`notes.songName`) authored `slot`; if so it loads that store-copied
-// file, else it falls back to the shared `fallback` Component (or renders
-// nothing when no fallback is given, e.g. the calendar popout).
+// a piece of chrome with its own QML. It asks the staging engine to resolve
+// `slot` against a baseline-fallback chain (CONTRACTS.md §5): the active
+// song (`notes.songName`) if it authored the slot, else sonata (the shipped
+// baseline every song can fall back to), else the anchor's own facet-side
+// `fallback` Component, else nothing.
 //
 // Fixed injected-prop contract (CONTRACTS.md §5 containment): whatever loads
 // — song override or fallback — receives `notes` always, `bridge` only when
@@ -39,17 +41,23 @@ Item {
 
     // Reactive off notes.songName (so live `aoide rice preview <name>` swaps
     // the loaded widget with no restart) and off stagingEngine.manifest (so a
-    // rebuild's new manifest is picked up).
-    readonly property bool songProvides: stagingEngine.has(notes.songName, slot)
+    // rebuild's new manifest is picked up). Resolves through the baseline
+    // chain (CONTRACTS.md §5): the active song if it authored `slot`, else
+    // sonata (the baseline), else "" — an empty resolvedSong means neither
+    // the active song nor the baseline provide it, so `_rebuild` falls
+    // through to the facet-side `fallback` Component.
+    readonly property string resolvedSong: stagingEngine.resolveSong(notes.songName, slot)
+    readonly property bool songProvides: resolvedSong !== ""
 
-    // The resolved song-widget URL, or "" when no song provides this slot.
-    // Rebuild keys off THIS, not just `songProvides` — two different songs
-    // can both provide the same slot (`songProvides` stays true→true across
-    // a preview switch between them), so a bool-only trigger would silently
-    // keep rendering the FIRST song's widget forever. Reacting to the actual
-    // resolved path catches that case too.
+    // The resolved widget URL, or "" when no song (active or baseline)
+    // provides this slot. Rebuild keys off THIS, not just `songProvides` —
+    // two different songs can both provide the same slot (`songProvides`
+    // stays true→true across a preview switch, or across the active song
+    // falling through to the baseline), so a bool-only trigger would
+    // silently keep rendering the FIRST resolved widget forever. Reacting to
+    // the actual resolved path catches that case too.
     readonly property string resolvedSource:
-        songProvides ? stagingEngine.source(notes.songName, slot) : ""
+        songProvides ? stagingEngine.source(resolvedSong, slot) : ""
 
     property Item _item: null
 
@@ -71,7 +79,7 @@ Item {
             root._item = null
         }
         if (root.songProvides) {
-            var comp = Qt.createComponent(root.stagingEngine.source(root.notes.songName, root.slot))
+            var comp = Qt.createComponent(root.stagingEngine.source(root.resolvedSong, root.slot))
             root._create(comp, root._songProps())
         } else if (root.fallback) {
             root._create(root.fallback, root._fallbackProps())

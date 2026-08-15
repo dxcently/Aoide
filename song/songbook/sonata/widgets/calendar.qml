@@ -201,9 +201,11 @@
 // dark windows). Fixed injected-prop contract: `notes` + `bridge` only
 // (bridge unused). Qt's Window.visible attached NEVER flips under
 // quickshell's proxy windows (verified); QsWindow.window.visible is the real
-// open/close edge. A librarian pass should carry the Composite/scroll row
-// into greek-grammar.md §4, the Π dormancy into §1, and now this lunisolar
-// expansion into the §4 row (interim-record precedent: NotificationCard).
+// open/close edge. [2026-08-14: greek-grammar.md's §4 widget-by-widget map
+// was cut outright in a retcon pass — there's no longer a shared section to
+// carry the Composite/scroll row or the lunisolar expansion into; this
+// header is this widget's design record now. The Π dormancy this note
+// flagged is folded into greek-grammar.md §1 as part of that same pass.]
 
 import QtQuick
 import Quickshell   // QsWindow attached — the open/close edge (see header)

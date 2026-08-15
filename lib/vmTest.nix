@@ -125,7 +125,7 @@ pkgs.testers.runNixOSTest {
               # ── Aoide flags ─────────────────────────────────────────────
               aoide.enable = true;
               aoide.user = "khoa";
-              aoide.song = "default";
+              aoide.song = "sonata";
 
               # Compositor kept: wires greetd so the unit exists + is enabled.
               aoide.facets.compositor.enable = true;
@@ -183,19 +183,29 @@ pkgs.testers.runNixOSTest {
     # ── 2. aoide on PATH ────────────────────────────────────────────────────
     machine.succeed("which aoide")
 
-    # `aoide schema --json` must parse and report exactly 51 commands.
+    # `aoide schema --json` must parse and report exactly 54 commands.
     # This is a deliberate drift tripwire: adding or removing a command must
     # consciously update this count (it caught 8 commands that had landed
     # unrecorded — graph wrap/reap/send, conduct, conductor, and the graph session
     # write-verbs; bumped by 4 for the a2a serve / agent add|list|remove stubs
     # (CONTRACTS.md §6); bumped by 1 for `usage` (CONTRACTS.md §4); bumped by 1
-    # for `a2a agent send` — the Phase D client-side drive verb; bumped by 1
-    # for `rice design status` — design-mode Phase A (read-only;
-    # CONTRACTS.md §4's `stage/design.json` entry); most recently bumped by 2
-    # for `rice design enter`/`exit` — design-mode Phase B, the write side;
+    # for `a2a agent send` — the Phase D client-side drive verb;
     # bumped by 1 for `hooks install` — the generic hook-installer verb;
     # bumped by 3 for `livery emit|resolve|lint` — the native note-engine
-    # verbs (LIVERY-MERGE Phase 1).
+    # verbs (LIVERY-MERGE Phase 1); bumped by 3 for `rice mode
+    # status|stage|declarative` — the staging/declarative mode toggle
+    # (reached 54, but this count was never bumped for it until now);
+    # bumped by −3 for deleting a since-removed `rice design status/enter/exit`
+    # group outright — it added nothing mechanically over `rice mode stage`
+    # and was cut clean (landed at 51); bumped by 4 for a since-reworked `rice
+    # draft save|list|stage|drop` — the durable-scratch-snapshot group (reached
+    # 55); bumped by −1 for cutting `rice gen` outright — a speculative
+    # prompt/wallpaper generator that was never built and had no design behind
+    # it, not left as a permanent stub (landed at 54); net unchanged (−1, +1)
+    # for replacing `rice draft stage` (copy-based) with `rice mode draft` —
+    # symlink-routes stage/livery.json into a saved draft instead of
+    # snapshotting into/out of it, superseding the copy-based verb outright
+    # (no-internal-aliases rule) — still 54.
     schema_raw = machine.succeed("aoide schema --json")
     schema_doc = json.loads(schema_raw)
     # schema --json emits a JSON Outcome envelope:
@@ -207,8 +217,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 51, (
-        f"expected 51 commands, got {cmd_count}.  "
+    assert cmd_count == 54, (
+        f"expected 54 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

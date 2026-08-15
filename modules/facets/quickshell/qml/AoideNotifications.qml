@@ -8,14 +8,16 @@
 // original top-right placement).
 //
 // This is core SHARED shell chrome (like the bar/launcher/wallpaper) — wired
-// into shell.qml exactly like AoideLauncher/AoideWallpaperPicker. The per-card
-// BODY is now a per-song flavor-widget slot (CONTRACTS.md §5, "notifications"):
-// each card renders through WidgetSlot, which loads the active song's own
-// `widgets/notifications.qml` when it authored one, else falls back to the
-// shared NotificationCard below — this pass ships no song-authored
-// notifications.qml, so every card renders via that shared fallback (the
-// override anchor is wired now; a future song dropping the file needs zero
-// further code change here).
+// into shell.qml exactly like AoideWallpaperPicker. The per-card
+// BODY is a per-song flavor-widget slot (CONTRACTS.md §5, "notifications"):
+// each card renders through WidgetSlot, which resolves the baseline-fallback
+// chain — the active song's own `widgets/notifications.qml` when it authored
+// one, else sonata's (`song/songbook/sonata/widgets/notifications.qml`, the
+// shipped baseline every song falls back to). No facet-side Component
+// fallback is wired here anymore: sonata's own file covers what used to be
+// this file's inline shared card, so a song that hasn't authored its own
+// notifications still renders sonata's — a song dropping its own file needs
+// zero further code change here.
 //
 // ── API grounding (real, not guessed) ───────────────────────────────────────
 // Quickshell ships this module as a compiled plugin; its QML surface is
@@ -56,13 +58,6 @@ PanelWindow {
     required property var notes
     required property var bridge
     required property var stagingEngine
-
-    // Shared fallback when the active song hasn't authored a "notifications"
-    // widgets/notifications.qml — the existing Tuscan-stele card, unchanged.
-    Component {
-        id: notifCardComp
-        NotificationCard {}
-    }
 
     // ── The D-Bus notification server ───────────────────────────────────────
     // Capability flags tell senders what we actually render: plain body text
@@ -170,7 +165,6 @@ PanelWindow {
                 stagingEngine: root.stagingEngine
                 slot: "notifications"
                 extraProps: ({ "notification": modelData })
-                fallback: notifCardComp
             }
         }
     }

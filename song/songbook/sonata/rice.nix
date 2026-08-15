@@ -85,8 +85,8 @@
 
     # ── Cover-art note ─────────────────────────────────────────────────────
     # null → the stylix facet bakes a DETERMINISTIC bright-marble solid from
-    # palette.bg (#f2ebde), exactly the mechanism song/songbook/default/rice.nix
-    # uses (its wallpaper is null → solid from its own base00). The retired
+    # palette.bg (#f2ebde) — the same null-wallpaper-to-solid mechanism the
+    # stylix facet applies to any song with no cover note. The retired
     # covers/yuki-sonata.png reference is dropped: sonata's colours fit the
     # Greek theme, not a photograph (khoa). The wallpaper switcher handles photos
     # live; the song's DEFAULT ground is a clean bright marble field, which keeps

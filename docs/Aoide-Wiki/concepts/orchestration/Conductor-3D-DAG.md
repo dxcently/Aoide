@@ -57,4 +57,4 @@ Ship A + B. C supersedes A's parser and depends on nothing but that upstream com
 
 Risks: braille legibility at gadget sizes (mitigate: mini mode drops to fewer, larger boxes); label overlap (declutter rule); none performance-shaped (dozens of nodes, redraw on change only).
 
-*Related: the Pantheon grammar (`song/songbook/default/design/pantheon.md`) — the rice-side language this must rhyme with — [[Song-Anatomy]], entities/aoide-cli, CONTRACTS.md exit codes/door discipline (unchanged by this work).*
+*Related: the Pantheon grammar (`docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md` — historical reference, the retired `default` song's design language) — the rice-side language this once rhymed with — [[Song-Anatomy]], entities/aoide-cli, CONTRACTS.md exit codes/door discipline (unchanged by this work).*

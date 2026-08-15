@@ -98,10 +98,15 @@ let
     # the dock (it is a Pantheon pane too). Blur + ignore_alpha so its cream
     # glass frosts over whatever window it covers and its transparent scrim/edges
     # don't render as a grey blur stripe.
+    # aoide-powermenu: the Exodos powermenu (AoideExodos.qml) — the same
+    # summoned-overlay glass recipe as the launcher: its full-screen ink scrim
+    # and translucent steles frost over the desktop behind.
     layerrule = blur on, match:namespace aoide-dock
     layerrule = blur on, match:namespace aoide-launcher
+    layerrule = blur on, match:namespace aoide-powermenu
     layerrule = ignore_alpha 0.05, match:namespace aoide-dock
     layerrule = ignore_alpha 0.05, match:namespace aoide-launcher
+    layerrule = ignore_alpha 0.05, match:namespace aoide-powermenu
     # blur_popups extends the glass to the bar's PopupWindow children (the
     # gadget popouts) — same 0.5x snake_case rework spelling as ignore_alpha.
     layerrule = blur_popups on, match:namespace aoide-bar
@@ -139,7 +144,7 @@ let
         }
         layers {
             enabled = 1
-            namespaces = aoide-dock, aoide-launcher
+            namespaces = aoide-dock, aoide-launcher, aoide-powermenu
             preset = glass
         }
     }

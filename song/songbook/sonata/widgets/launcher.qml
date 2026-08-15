@@ -1,4 +1,11 @@
-// AoideLauncher.qml — the app launcher (surface #3, "launcher").
+// launcher.qml — sonata's "launcher" slot (was AoideLauncher.qml, moved out
+// of the facet as of the widget-slot expansion, CONTRACTS.md §5). Hosted by
+// `SurfaceSlot`, not `WidgetSlot` — this root is a `PanelWindow`, not an
+// `Item`; it owns its own layer, namespace, keyboard focus, and
+// GlobalShortcut, which travels with the slot (see
+// modules/facets/quickshell/qml/slots.md). Extras: `clipboard` (the
+// AoideClipboard instance, unchanged) and `ledger` (GrimoireLedger — stays
+// in the facet, injected here, see below).
 //
 // Quickshell-native application launcher — replaces rofi. A summoned overlay:
 // hidden by default, it drops onto the OVERLAY layer with an EXCLUSIVE keyboard
@@ -67,11 +74,13 @@
 //     exactly the old whole-spread turn).
 //
 // ── The ledger — `song/stage/grimoire.json` (CONTRACTS.md §4) ──────────────
-// `GrimoireLedger.qml`, instantiated below as a plain child object (not a
-// shell.qml singleton — nothing else needs launch-frequency data). Every
-// successful launch calls `ledger.record`; page one — MOST SUMMONED — reads
-// it back ranked. Cold start shows an HONEST sparse state (khoa's decision):
-// real ranked entries first, a kaomoji filler line, never padded filler.
+// `GrimoireLedger.qml` stays in the facet (a data seam, not chrome) and is
+// injected here as the `ledger` extra — shell.qml instantiates the ONE
+// instance and hands it to this slot's SurfaceSlot, the same way `clipboard`
+// arrives. Every successful launch calls `ledger.record`; page one — MOST
+// SUMMONED — reads it back ranked. Cold start shows an HONEST sparse state
+// (khoa's decision): real ranked entries first, a kaomoji filler line, never
+// padded filler.
 //
 // ── Chapters ─────────────────────────────────────────────────────────────
 // Page one is always the frequency index (an index, not a move); every other
@@ -91,6 +100,9 @@ PanelWindow {
     required property var notes
     required property var bridge
     required property var clipboard
+    // The Grimoire's usage ledger — stays in the facet, injected as an extra
+    // (see the ledger header note above); no longer instantiated locally.
+    required property var ledger
 
     // ── Type voices (the Conductor family) ─────────────────────────────────
     readonly property string faceSerif: "Noto Serif"                // carved marble
@@ -132,9 +144,6 @@ PanelWindow {
         "🔍(´･ω･`)", "(´･ω･`)🔍", "🔎(´･ω･`)", "(´･_･`)",
         "(´･ω･`?)", "🔍(￣ω￣)", "(￢_￢)🔍", "(＾▽＾)🔍"
     ]
-
-    // ── The ledger (frequency chapter's data source) ────────────────────────
-    GrimoireLedger { id: ledger }
 
     // ── Visibility gate + the book-opening summon ───────────────────────────
     // `shown` is the logical toggle; `fold` (0 shut .. 1 open) is the animated

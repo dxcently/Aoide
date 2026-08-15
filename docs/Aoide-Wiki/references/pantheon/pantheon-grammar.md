@@ -1,9 +1,21 @@
-# Pantheon Grammar — the house design language
+# Pantheon Grammar — the retired `default` song's design language
 
-**Rice:** default (The Standard) — the shipped baseline owns the house grammar.
-**Scope:** cross-cutting visual language every song instantiates in its own
-key. A song's *current* instantiation is recorded in that song's
-`design/intent.md` (sonata: `song/songbook/sonata/design/intent.md`).
+**Status (2026-08-14): historical reference, not a live grammar.** This
+page was `song/songbook/default/design/pantheon.md` — the design memory of
+the `default` song, which owned the house grammar back when `default` was
+the shipped standard. `default` has since been retired outright (renamed to
+`sonata`, which draws its own, deliberately divergent grammar — see
+`song/songbook/sonata/design/greek-grammar.md`). Nothing in the live tree
+instantiates this grammar anymore; it is kept here, relocated out of
+`song/songbook/` (which no longer has a `default/` to hold it), as source
+material for whoever picks up the wireframe-depth idiom again. The full
+`default` song history — `rice.nix`, `livery.json`, iteration log — is
+git-recoverable, not deleted.
+
+**Original scope** (as authored): cross-cutting visual language every song
+instantiated in its own key. A song's *current* instantiation was recorded
+in that song's `design/intent.md` (sonata: `song/songbook/sonata/design/
+intent.md`).
 **Source stills:** `docs/Aoide-Wiki/references/pantheon/*.png` — outlined
 volumes drawn with lines, 3D read from stacked offset outline copies,
 translucent panes with lowercase callout labels on angled leaders, and ONE
@@ -217,7 +229,7 @@ behind every layer):
   a gentle Aero defocus fade) and the rounding rule.
 - The exact alpha values are facet constants tuned against the performed
   key and recorded in that song's `design/intent.md` (the vision-check in
-  the [Ricing Protocol](../../../../docs/Aoide-Wiki/songbook/Ricing-Protocol.md)
+  the [Ricing Protocol](../../concepts/song/Ricing-Protocol.md)
   is what keeps them honest).
 
 ---

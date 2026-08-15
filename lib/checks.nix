@@ -51,10 +51,15 @@ let
   # Asserts that no walked module path lives under a `song/` RUNTIME dir. The
   # ban is scoped to ephemeral runtime state (stage/ · auditions/ · catalog/ ·
   # index/) — `stage/` can never become load-bearing for the frozen half. It
-  # deliberately does NOT list `song/songbook/`: committed songs there are
-  # VERSIONED SCORE, legitimately walked at eval by lib/mkHost.nix (each song's
-  # rice.nix self-gates on `aoide.song`). Walking the songbook therefore never
-  # trips this check — only runtime infixes offend.
+  # deliberately does NOT list `song/songbook/` wholesale: committed songs
+  # there are VERSIONED SCORE, legitimately walked at eval by lib/mkHost.nix
+  # (each song's rice.nix self-gates on `aoide.song`). Walking the songbook
+  # therefore never trips this check on its own — EXCEPT the `drafts/`
+  # subfolder nested inside each song (`song/songbook/<name>/drafts/`,
+  # `rice draft save`'s scratch tree): that one runtime dir sits INSIDE an
+  # otherwise-legitimate songbook path, so a flat infix can't name it (the
+  # song name varies) — matched by regex instead, scoped tightly to just the
+  # `drafts/` subfolder, never the songbook entry itself.
   noSongRead =
     modulePaths:
     let
@@ -64,8 +69,13 @@ let
         "/song/catalog/"
         "/song/index/"
       ];
+      isSongDraft = s: builtins.match ".*/song/songbook/[^/]+/drafts/.*" s != null;
       offenders = builtins.filter (
-        p: let s = toString p; in builtins.any (needle: lib.hasInfix needle s) runtimeInfixes
+        p:
+        let
+          s = toString p;
+        in
+        builtins.any (needle: lib.hasInfix needle s) runtimeInfixes || isSongDraft s
       ) modulePaths;
     in
     assertCheck "no-song-read" (offenders == [ ])

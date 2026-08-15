@@ -27,6 +27,15 @@ QtObject {
     readonly property string manifestPath:
         Quickshell.env("HOME") + "/Aoide/run/qml/songs/manifest.json"
 
+    // The baseline-fallback floor (CONTRACTS.md §5): when the ACTIVE song
+    // doesn't dress a slot, resolution falls back to this song before
+    // falling back further to the anchor's own facet-side `fallback`
+    // Component. Mirrors `aoide.song`'s own default
+    // (`modules/nucleus/options.nix`) — sonata is the shipped, guaranteed-
+    // present baseline, so it's the correct floor to catch every other song's
+    // gaps.
+    readonly property string baselineSong: "sonata"
+
     // { "<song>": ["<slot>", …], … } — empty until the first successful parse.
     property var manifest: ({})
 
@@ -58,5 +67,16 @@ QtObject {
     // is true; callers gate on that first.
     function source(song, slot) {
         return Qt.resolvedUrl("songs/" + song + "/" + slot + ".qml")
+    }
+
+    // ── Baseline-fallback resolution (CONTRACTS.md §5) ──────────────────────
+    // Resolve <slot> to the song that actually authors it: <song> itself if
+    // it dresses the slot, else the baseline (sonata) if IT dresses the
+    // slot, else "" (no song provides it — the caller falls back further to
+    // its own facet-side `fallback` Component, or renders nothing).
+    function resolveSong(song, slot) {
+        if (root.has(song, slot)) return song
+        if (root.has(root.baselineSong, slot)) return root.baselineSong
+        return ""
     }
 }

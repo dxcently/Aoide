@@ -91,8 +91,8 @@ home-manager/stylix modules, the pkgs overlay, and mirrored `specialArgs`
 (`host = "vm-test"`, inputs, username, system; `node.pkgsReadOnly = false`
 so the overlay applies) — so the test boots the real assembly, not a
 replica. It asserts: `multi-user.target` reached; `aoide` on
-PATH with `schema --json` reporting exactly 51 commands (a hardcoded figure
-now behind the 54-command tree — [[AOIDE-DEV]] §7) and `guide` exiting
+PATH with `schema --json` reporting exactly 54 commands (a hardcoded
+drift-tripwire figure, [[AOIDE-DEV]] §7) and `guide` exiting
 0; greetd enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
 linger active with the `aoided` and `shellbridge` user units finishing
 `Result=success` (the skeleton binaries seed state and exit 0); stage files
@@ -118,7 +118,7 @@ no behaviour, so an empty config evaluates. The surface:
 
 - `aoide.enable` (master switch), `aoide.user` (default `"khoa"`, owner of the
   `~/Aoide` fork).
-- `aoide.song` (str, default `"default"`) — which song this host performs.
+- `aoide.song` (str, default `"sonata"`) — which song this host performs.
   Set once in `hosts/<host>/default.nix`; each song's `rice.nix` guards itself
   with `lib.mkIf (config.aoide.song == "<name>")`. See [[Song-Vocabulary#Replay — any song, any host]].
 - `aoide.livery` — the v0 livery schema: closed `palette.{bg,fg,accent,urgent}`
@@ -306,13 +306,15 @@ NowPlaying/Power/Calendar gadgets. Baseline dendrites default on in
 `hosts/common` via `mkDefault`; `allowUnfree` is carried mkIf-scoped by the two
 dendrites that need it (devtools, fonts).
 
-**Structured not-implemented stubs (exit 64, 11 total):** the mutating CLI
-verbs — `rice gen/adopt/transpose`, the five-verb `content` pipeline, `make`,
+**Structured not-implemented stubs (exit 64, 10 total):** the mutating CLI
+verbs — `rice declare/transpose`, the five-verb `content` pipeline, `make`,
 `update`, `onboard`. Their arg-parsing, schema, gate flag, and audit trail are
-real; only the live-system action is deferred. (`rice stage` is **real** —
-it stages `song/stage/livery.json` for Quickshell hot-reload
-today; only the hyprctl/OSC dispatch fan-out remains unwired into `stage`
-itself.)
+real; only the live-system action is deferred. (`rice stage`/`rice compose`/
+the `rice draft` group are **real** — `rice stage` stages
+`song/stage/livery.json` for Quickshell hot-reload today; only the
+hyprctl/OSC dispatch fan-out remains unwired into `stage` itself. There is
+no `rice gen` — a speculative prompt/wallpaper generator that was cut
+outright rather than left as a stub with no design behind it.)
 
 ## Related
 

@@ -59,7 +59,7 @@ The full map lives in [[Song-Vocabulary]]; the logic of the family here. A **ric
 | cover | wallpaper | chimes | notification/system sounds |
 | liner | per-song design notes | songbook | cross-cutting design memory |
 | rehearsal | live preview (stage) | recording | adopted, committed, rebuilt |
-| repertoire | committed songs, collectively | the standard | the shipped default song |
+| repertoire | committed songs, collectively | the standard | the shipped standard song (`sonata`) |
 | replay | same song, new venue | transpose | same song, new key |
 | stage | live state (gitignored) | auditions | the propose gate |
 

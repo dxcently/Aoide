@@ -1,9 +1,15 @@
 // GrimoireLedger.qml — the Grimoire's own usage ledger.
 //
-// A plain QtObject instantiated INSIDE AoideLauncher.qml (NOT a shell.qml
-// singleton — nothing else needs to read launch-frequency data). Tracks how
-// often each .desktop entry is launched so the Grimoire's frequency chapter
-// ("most commonly opened") can rank real usage instead of guessing.
+// A plain QtObject, instantiated by shell.qml and injected into the
+// "launcher" slot as the `ledger` extra (as of the widget-slot expansion,
+// CONTRACTS.md §5 — the launcher itself, `song/songbook/sonata/widgets/
+// launcher.qml`, moved out of the facet, but this ledger stays: it's a data
+// seam that owns `song/stage/grimoire.json`, not chrome, so launch-frequency
+// history stays song-agnostic rather than moving with the song). NOT a
+// per-widget singleton either — nothing else needs to read launch-frequency
+// data. Tracks how often each .desktop entry is launched so the Grimoire's
+// frequency chapter ("most commonly opened") can rank real usage instead of
+// guessing.
 //
 // ── The file (CONTRACTS.md §4) ──────────────────────────────────────────────
 // `~/Aoide/song/stage/grimoire.json` — gitignored runtime, v0 schema:
@@ -11,7 +17,7 @@
 //     "launches": { "<desktop-entry-id>": { "count": N, "lastAt": "<iso8601>" } } }
 // Written directly by this QML (`atomicWrites: true` on the FileView — a
 // write-temp-then-rename, so a hot-reload or a crash mid-write never reads a
-// torn file), mirroring the execute()-direct precedent AoideLauncher.qml's
+// torn file), mirroring the execute()-direct precedent launcher.qml's
 // own header already flags: DesktopEntry.execute() is called straight from
 // QML with no aoided verb in between, and this ledger follows the same
 // no-new-verb idiom for its own side effect. Parsing follows LiveryState.qml's

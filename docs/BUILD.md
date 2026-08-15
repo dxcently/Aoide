@@ -37,7 +37,7 @@ none of them except your own dendrite/facet flags.
 | Option                         | Type                         | Notes |
 | ------------------------------ | ---------------------------- | ----- |
 | `aoide.enable`                 | bool                         | framework master switch |
-| `aoide.song`                   | str (default `"default"`)    | the song this host performs; names a `song/songbook/<name>/` (or the shipped standard) |
+| `aoide.song`                   | str (default `"sonata"`)     | the song this host performs; names a `song/songbook/<name>/` (or the shipped standard) |
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` fork |
 | `aoide.livery.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
 | `aoide.livery.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
@@ -129,8 +129,8 @@ self-gates on `aoide.song`:
 ```
 
 Replay it on any host with **one line** in `hosts/<host>/default.nix`:
-`aoide.song = "moonlight";`. Naming no song performs song `"default"` — the
-shipped standard (`song/songbook/default/rice.nix`).
+`aoide.song = "moonlight";`. Naming no song performs song `"sonata"` — the
+shipped standard (`song/songbook/sonata/rice.nix`).
 
 **Host-agnostic rules (CONTRACTS.md §5):** a song sets ONLY `aoide.livery` (and,
 later, cover/chime refs inside `song/`). It NEVER sets host options (monitors,

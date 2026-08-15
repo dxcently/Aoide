@@ -37,12 +37,14 @@ marked on one of three rungs:
   contract, the livery plumbing, the CLI trunk + MCP façade, the daemon and
   bridge skeletons, the three facets, song replay, the launcher, the gadget
   dock.
-- **Stubbed** — the mutating CLI verbs (`rice gen/adopt/transpose`,
+- **Stubbed** — the mutating CLI verbs (`rice declare/transpose`,
   `content *`, `make`, `update`, `onboard`) parse, audit, and exit 64 with a
   structured not-implemented payload; only the live action is deferred.
-  (`rice lint` and `rice stage` are real — see [[Self-Ricing]].)
-- **Future** — v1 livery tiers, the functional rice loop (`gen`/`adopt`/
-  `transpose`), the network-exposed Aoide connector.
+  (`rice lint`/`rice stage`/`rice compose`/the `rice draft` group are real —
+  see [[Self-Ricing]]. There is no `rice gen`: cut outright, not stubbed —
+  see [[aoide-cli]].)
+- **Future** — v1 livery tiers, `rice declare`/`rice transpose` (still
+  stubs), the network-exposed Aoide connector.
 
 The repo is deliberately **local-only** for now: no git remote, so [[Melete]]
 fleet registration and its code-task flow wait until one exists. File-level
@@ -133,7 +135,7 @@ draws.
 | -------------------- | ---------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
 | [[Agent-Interface]]  | agent commands; `aoide schema --json`          | dispatched operations; structured `--json` results  | implemented (27 real verbs, 11 exit 64)    |
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`~/Aoide/log`); default-deny event bus   | implemented (skeleton)                     |
-| [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped default | `song/songbook/<song>/`; songbook append; preview   | stubbed (`rice lint`/`preview` real)        |
+| [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; preview   | stubbed (`rice lint`/`preview` real)        |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all verbs exit 64)                |
 | [[livery]]           | `aoide.livery` (palette + component tiers)     | `song/stage/livery.json`; baked facets + Stylix     | implemented (v0)                           |
 | [[shellbridge]]      | unix-socket commands; Hyprland IPC             | atomic JSON in `song/stage/`; `hyprctl` dispatch    | implemented (accept loop live: `focuswindow`) |
@@ -167,7 +169,7 @@ format; [[livery]] (native Rust in `crates/song/src/livery/`; verbs `lint` /
 
 Rehearsal is the sketch (hot-reloads, no rebuild); recording is the truth
 (durable, requires the gated rebuild). GTK/Qt surfaces need an app restart and
-are adopt-only.
+are declare-only.
 
 The baked side is carried by the three facets, all real:
 
@@ -202,25 +204,34 @@ real flake checks.
 ## The rice loop — where the agent writes
 
 The self-ricing lifecycle overlays the map above: it produces livery, stages
-through the live fan-out, and only commits through the gate. See
-[[Self-Ricing]]. Today `gen`, `adopt`, and `transpose` are exit-64 stubs;
-`rice lint` (native `livery::lint`) and `rice stage` (stages
-`song/stage/livery.json` for Quickshell hot-reload) are real. `rice stage`
-refuses with `declarative-mode-locked` while `rice mode declarative` is
-locked (the default) — see [[Self-Ricing#Staging vs Declarative Mode]].
+through the live fan-out, drafts let it iterate without committing, and only
+`declare` commits through the gate. See [[Self-Ricing]]. Today `declare` and
+`transpose` are exit-64 stubs; `rice lint` (native `livery::lint`), `rice
+stage`, `rice compose`, and the `rice draft`/`rice mode` groups are real.
+There is no `rice gen` — cut outright, not stubbed. `rice stage` refuses
+with `declarative-mode-locked` while `rice mode declarative` is locked (the
+default) — see [[Self-Ricing#Staging vs Declarative Mode]].
 
 ```
-  aoide rice gen <prompt|wallpaper>
-        │   reads song/songbook/ (cross-cutting + the song's own design/) FIRST
+  aoide rice compose <name> [--from <song>]
+        │   scaffolds a new song, reading song/songbook/ (cross-cutting +
+        │   the song's own design/) FIRST
+        ▼
+  rice mode stage <name>   ──►  song/stage/livery.json  ──►  Quickshell hot-reload
+        │              (hyprctl/OSC dispatch not yet wired into stage)
+        ▼              (REHEARSAL — nothing committed)
+  edit the song's files
         ▼
   rice lint   ──fail──►  reject + songbook note
         │ pass
         ▼
-  rice stage   ──►  song/stage/livery.json  ──►  Quickshell hot-reload
-        │              (hyprctl/OSC dispatch not yet wired into stage)
-        │                                         (REHEARSAL — nothing committed)
+  rice mode draft <draft-name>   ──►  ROUTES song/stage/livery.json (symlink) into
+        │   song/songbook/<song>/drafts/<draft-name>/livery.json — forks it from
+        │   the current stage if new. Every further write (rice stage, a hand-edit)
+        │   lands DIRECTLY in the draft file; no save step. Not committed —
+        │   durable scratch; switch with another `rice mode draft <name>`.
         ▼
-  aoide rice adopt <name>   ◄─── User gates this step
+  aoide rice declare <name>   ◄─── User gates this step
         │
         ▼
   commit to song/songbook/<song>/   ──►  gated rebuild   ──►  RECORDING
@@ -232,19 +243,21 @@ locked (the default) — see [[Self-Ricing#Staging vs Declarative Mode]].
 `song/` is the agent's **only** writable domain.
 
 **Song replay is implemented.** `aoide.song` (nucleus option, default
-`"default"`) selects the song a host performs; `lib/mkHost.nix` walks
+`"sonata"`) selects the song a host performs; `lib/mkHost.nix` walks
 `song/songbook/` exactly as it walks `modules/`, so a committed song
 self-registers and self-gates on `config.aoide.song == "<name>"` — the same
-discipline as a dendrite. The shipped standard is song `"default"` at
-`song/songbook/default/` (the songbook's one upstream-owned, merge-only song). The song carries **livery only**; the host is the
+discipline as a dendrite. The shipped standard is song `"sonata"` at
+`song/songbook/sonata/` — upstream-owned and evolving, exactly like any
+other upstream-owned tree (nucleus, facets): upstream MAY still update or
+iterate on it. Every OTHER song — anything composed via `rice compose`
+under a different name — is fork-owned; upstream never touches it, an
+absolute guarantee unchanged by `sonata` being both shipped and actively
+iterated. The song carries **livery only**; the host is the
 venue — its specifics and which instruments (facets, dendrites) are enabled.
 Replay = same song, new venue (one line in `hosts/<host>/default.nix`);
 transpose = new key, same venue. The `song-shape` check asserts every walked
-songbook file is a `rice.nix`; song shape v0 is `CONTRACTS.md §5`. The
-example is `song/songbook/sonata` (the selected light key): flip yomi-strix's
-one line to another song and the whole livery fan-out swaps (e.g. the shipped
-`default` Mocha bg `#1e1e2e` → sonata peach-cream `#f4e9e2`). Full replay treatment:
-[[Song-Vocabulary#Replay — any song, any host]].
+songbook file is a `rice.nix`; song shape v0 is `CONTRACTS.md §5`. Full
+replay treatment: [[Song-Vocabulary#Replay — any song, any host]].
 
 Inherited structure (nucleus, facets) changes by upstream merge only; new
 dendrite branches are additive. Mutation policy is encoded as radial distance
@@ -285,17 +298,19 @@ This is shipped code: the Rust crate ([[aoide-cli]]) installs two binaries,
 `aoide` and `aoided`. `aoide schema --json` is the machine-readable source of
 truth; the stdio MCP façade (`aoide mcp serve --stdio`) generates its tool list
 from it, and the [[A2A-Door]]'s AgentCard is derived from the same schema — all
-one-to-one. The tree holds **54 commands** — real (43): `guide`,
-`schema`, `rice lint`, `rice stage`, `rice compose`, the 3-verb `rice mode`
-group (`status`/`stage`/`declarative`), `cover set`, `mcp serve`,
+one-to-one. The tree holds **54 commands** — real (44): `guide`,
+`schema`, `rice lint`, `rice stage`, `rice compose`, the 3-verb `rice draft`
+group (`save`/`list`/`drop`), the 4-verb `rice mode`
+group (`status`/`stage`/`declarative`/`draft`), `cover set`, `mcp serve`,
 `daemon`, `shellbridge`, `conduct`, `conductor`, `adapter melete`, the 3-verb
 `livery` group (`lint`/`resolve`/`emit` — the native note engine), the 5-verb
-`a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`), `usage`, and
-the 15-verb `graph` group (the
+`a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`), `usage`,
+`hooks install`, and the 15-verb `graph` group (the
 [[Session-Graph]] DAG viewer + management layer over projects and sessions,
-incl. `graph send`/`wrap`/`reap`, all real); stubs (11, exit 64):
-`rice gen/adopt/transpose`, the 5-verb `content` group, `make`, `update`,
-`onboard`. Exit codes are contractual: 0 ok, 1 error, 2 usage, 64
+incl. `graph send`/`wrap`/`reap`, all real); stubs (10, exit 64):
+`rice declare/transpose`, the 5-verb `content` group, `make`, `update`,
+`onboard`. There is no `rice gen` — cut outright (khoa 2026-08-14), not left
+as a stub. Exit codes are contractual: 0 ok, 1 error, 2 usage, 64
 not-implemented.
 
 On the host, the plane runs as systemd user units, all from the nucleus:
@@ -351,7 +366,7 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 ├── pkgs/            aoide/ (Rust: aoide + aoided; one crate today — a pi-
 │                    style single-charter crate split is a target blueprint,
 │                    not yet built, see [[Package-Layout]])
-├── song/            songbook/{default,sonata}/ — rice.nix · livery.json ·
+├── song/            songbook/sonata/ (shipped standard) — rice.nix · livery.json ·
 │                    palette/ · sounds/ · icons/ · widgets/ · design/ (per song);
 │                    covers/ — shared wallpaper library, referenced by rice.nix;
 │                    stage/ + auditions/ runtime (gitignored)

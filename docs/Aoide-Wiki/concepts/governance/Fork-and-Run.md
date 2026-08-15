@@ -31,14 +31,14 @@ That is the complete install, by design — no dotfile manager, no separate boot
 `aoide onboard` is designed to be idempotent, running through these steps:
 
 1. Generate `hosts/<hostname>/` from the fork template; create `song/` runtime dirs (gitignored).
-2. Install the shipped default rice + wallpaper as the active baseline; link `~/song` → `~/Aoide/song`.
+2. Install the shipped standard rice + wallpaper as the active baseline; link `~/song` → `~/Aoide/song`.
 3. Set the upstream remote so `aoide update` has a target.
 4. Seed `songbook/` with starter files and the update playbook.
 5. Write `AGENTS.md` to its well-known path; print the four-tier agent guide.
 6. Detect `claude` CLI; offer the stdio MCP registration line and spawn-wrapper install. Other agents get shell instructions.
 7. Offer integration toggles: Mneme source registration, Obsidian (off by default).
 8. Walk an approve-gate demo: register a scratch folder, watch it flow discover → propose → approve → query.
-9. Run `aoide rice stage` on the shipped default to verify the live loop.
+9. Run `aoide rice stage` on the shipped standard to verify the live loop.
 
 **Done-state check**: bar shows agent session + connection state; a notification round-trips agent → center; `aoide schema --json` validates.
 

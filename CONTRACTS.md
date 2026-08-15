@@ -254,6 +254,14 @@ activation** (`home.activation.aoideSeedStage`,
 `modules/facets/quickshell/default.nix`) — so a host that boots without ever
 running `rice preview` still has a correct live stage twin from boot.
 
+**Additive in v0:** this path MAY be a SYMLINK rather than a plain file —
+`rice mode draft <name>` (§4's `stage/mode.json` entry) routes it into a
+saved `song/songbook/<song>/drafts/<name>/livery.json`. Readers never need
+to care (following a symlink is transparent to any read); writers going
+through `aoide_storage::fs::atomic_write` transparently write through it
+too. `rice mode stage`/`rice mode declarative` remove the symlink (leaving
+a plain real file) whenever they run.
+
 ```json
 {
   "schemaVersion": "0",
@@ -286,41 +294,89 @@ tier). `aoide rice preview` reads it (alongside `window.border`/
 block, or a missing/null field within it, is skipped rather than defaulted;
 readers must tolerate both forms.
 
-### `song/stage/design.json` — **v0**
+### `song/stage/mode.json` — **v0**
 
-The active "design mode" marker — the fact that a particular song is being
-actively iterated on right now, for other tooling to read (concepts/
-Self-Ricing's design-mode extension). Absent means "no design session
-active", the ordinary state; never an error.
+Which of THREE modes the rice system is in — concepts/Self-Ricing's
+mode-toggle extension (`RiceMode`: `Staging | Declarative | Draft`). Absent
+means `declarative` — the safe default, since nothing has ever unlocked
+staging writes; never an error.
+
+- **`staging`** — hot-load unlocked: `rice stage`/`cover set` write live, as
+  plain real files.
+- **`declarative`** — nix/home-manager is the only writer; staging writers
+  refuse.
+- **`draft`** — `stage/livery.json` is a SYMLINK routed into
+  `song/songbook/<song>/drafts/<name>/livery.json` via `rice mode draft
+  <name>`. `rice stage`/`cover set` still write normally — neither is
+  symlink-aware; the routing is transparent (see below).
 
 ```json
 {
-  "song": "moonlight",
-  "enteredAt": "2026-08-02T00:00:00Z",
-  "by": "khoa",
-  "intent": "/home/khoa/Aoide/song/songbook/moonlight/design/intent.md",
-  "intentPresent": true,
-  "sources": ["stage/livery.json"],
-  "carriedSlots": []
+  "mode": "draft",
+  "song": "sonata",
+  "draft": "neon-night",
+  "since": "2026-08-14T00:00:00Z"
 }
 ```
 
-`by` is optional (omitted, not `null`, when absent — the `SessionRecord`/
-`A2aAgent` Option convention). `carriedSlots` is **always `[]` today** — no
-widget-carry logic exists yet.
+`song`/`draft`/`since` are optional (omitted, not `null`, when absent — the
+`SessionRecord`/`A2aAgent` Option convention). `song` names the song a
+`staging`- or `draft`-mode session is pointed at. `draft` is `Some(name)`
+**if and only if** `mode == "draft"` — every other mode always carries
+`draft` absent; nothing in the codebase ever sets one without the other.
+`rice mode draft <name>` sets both together on entry; `rice mode stage`/
+`rice mode declarative` both clear `draft` (and tear the routing symlink
+down) whenever they transition OUT of `draft` mode. `rice draft drop
+<name>` refuses rather than clearing this field, if `<name>` is the
+currently-routed draft (see below). Nothing else branches on `draft` — it
+is purely observational, surfaced by `rice mode status`. `since` is when the
+current mode was entered.
 
-**Honest lifecycle state (Phase B):** Phase A shipped the read-only `aoide
-rice design status`. Phase B added `enter`/`exit` — `aoide rice design enter
-<name>` reuses `rice preview <name>`'s live-apply side effects (livery.json
-hot-reload + best-effort hyprctl geometry/border) and then writes the marker
-via `aoide-storage`'s `save_design_marker`; `aoide rice design exit` clears
-it via `delete_design_marker` (idempotent — exiting with no active session is
-`ok`, not an error). `exit` touches ONLY `stage/design.json`: it never writes
-`run/qml/` or any song file, so a live sketch left behind by a design session
-stays exactly as it was until the next `preview`/`enter` resets it.
-`carriedSlots` stays `[]` — Phase C (widget live-carry into
-`run/qml/songs/`) hasn't landed yet, and neither has a `sync` verb (Phase D)
-to push shared-tree edits back out.
+### `song/songbook/<song>/drafts/<name>/` — **v0**
+
+A saved rice-draft: a scratch snapshot for iterating on more than one live
+variant of a song without declaring any of them (concepts/Self-Ricing's
+draft extension). Nested under the song it varies — `<song>` is always
+resolved off the CURRENT stage, never a free-floating namespace, because a
+draft is fundamentally a variation of an ALREADY COMPOSED song.
+
+```
+song/songbook/sonata/drafts/neon-night/
+├── livery.json   a real file — the draft's own content
+└── cover.json    snapshot of stage/cover.json, ONLY if the stage had one
+                   at fork/save time (cover.json is NEVER symlinked/routed —
+                   only livery.json is)
+```
+
+No metadata file: the draft name is the directory name, the base song is
+the directory it's nested under, and saved-at is `livery.json`'s mtime.
+Gitignored (`song/songbook/*/drafts/`, same category as `song/stage/`) and
+banned from nix-eval reads (`lib/checks.nix`'s `noSongRead` — matched by
+regex, `.*/song/songbook/[^/]+/drafts/.*`, since the runtime dir nests at a
+variable depth a flat infix can't name) — a draft is durable scratch,
+**never committed or declared truth**; that distinction from
+`song/songbook/<name>/`'s own committed files is the entire point.
+
+**Reached by ROUTING, not copying.** `rice mode draft <name>` (§4's
+`stage/mode.json` entry) points `stage/livery.json` at a SYMLINK into the
+draft's own `livery.json` — forking it from whatever's currently in the
+stage first if the name is new, reusing the SAME write `rice draft save`
+performs. From then on, every writer of `stage/livery.json` (`rice stage`,
+a hand-edit, Quickshell's own FileView reload) transparently lands in the
+draft file, because `aoide_storage::fs::atomic_write` resolves and writes
+through a symlink at its destination rather than letting POSIX `rename()`
+replace it — general behavior in that one function, not draft-specific.
+
+`rice draft save <name>` is a SEPARATE, mode-independent verb: it forks
+whatever's currently live (reading transparently through a routing symlink
+if one is active) into a new-or-updated draft snapshot without switching
+modes — upserting (re-saving an existing name overwrites its `livery.json`
+and, if the current stage no longer carries a cover, removes a stale
+`cover.json`). `rice draft drop <name>` deletes a draft outright; a missing
+name is an error, not idempotent-silent, and dropping the CURRENTLY-ROUTED
+draft is refused (`draft-is-live`) rather than silently also tearing down
+the routing and falling back to `staging` — switch modes first
+(`rice mode stage`/`rice mode declarative`), then drop it.
 
 ### `song/stage/sessions.json` / `hooks.json` — **v0**
 
@@ -491,8 +547,17 @@ replays any committed song with **one line**:
 aoide.song = "moonlight";
 ```
 
-Naming no song performs song `"default"` — the shipped standard
-(`song/songbook/default/rice.nix`), the guaranteed-present baseline.
+Naming no song performs song `"sonata"` — the shipped standard
+(`song/songbook/sonata/rice.nix`), the guaranteed-present baseline.
+**Renamed (2026-08-14):** the shipped standard song was `default`;
+`song/songbook/default/` is now retired outright (its Pantheon design
+grammar relocated to
+`docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`, its recorded
+aesthetic distilled into `song/songbook/learnings.md` — the rest is
+git-recoverable history, not deleted knowledge). No shape change, no version
+bump: `aoide.song`'s default and every "shipped baseline" reference in this
+section simply name `sonata` now. Full dated entry:
+`docs/Aoide-Wiki/ingest/log.md`.
 
 ### Self-registration (dendrite discipline)
 
@@ -584,6 +649,43 @@ set of "flavor" surfaces — committed files, not nix options:
   committed QML files carried by the build, not nix options, and a widget is
   structurally incapable of reaching host/facet options through this surface.
 - **Playbook:** `song/songbook/update-playbook.md`.
+
+**Additive (2026-08-14) — baseline-fallback resolution:**
+`StagingEngine.resolveSong(song, slot)` resolves a slot through a floor, not
+just the one song: the active song's own file if it authored the slot, else
+**sonata**'s (mirrors `aoide.song`'s own default — the shipped baseline
+every song can fall back to), else `""` (the anchor's own facet-side
+`fallback` Component, when it has one, or nothing). `WidgetSlot.resolvedSource`
+keys off the RESOLVED song, not a bool, so a live song-switch between two
+songs that both provide a slot re-triggers correctly instead of silently
+sticking to whichever song loaded first.
+
+**Additive (2026-08-14) — `SurfaceSlot`, for slots that own their own
+window:** `WidgetSlot` is an `Item` — it can't host a widget whose root IS a
+`PanelWindow` (its own layer, namespace, keyboard focus, `GlobalShortcut`; a
+`PanelWindow` can't be parented into a layout the way an `Item` can).
+`SurfaceSlot.qml` is the non-visual `QtObject` anchor for these slots: the
+same `resolveSong` → `Qt.createComponent` → `Component.createObject(null,
+props)` mechanism `WidgetSlot` uses, exposing the live instance as `.item`
+for the host to call directly (e.g. the bar's clef calling
+`.item.toggle()`). A slot's catalog entry in `slots.md` documents which
+anchor kind hosts it — a slot that roots a `PanelWindow` also documents its
+WlrLayershell namespace there, since the compositor facet's glass
+layerrules match on it; that contract travels with the slot.
+
+**Additive (2026-08-14) — helper files:** a widget needing its own helper
+components (e.g. the bar's `WorkspaceRow.qml`) drops them alongside it under
+the same song's `widgets/` dir, with an UPPERCASE filename — QML's own
+type-file convention (only an uppercase-first name is a valid QML type)
+marks these as helpers, never independently a slot. The build now copies
+the WHOLE `widgets/` dir per song (not file-by-file), but still only
+manifests top-level LOWERCASE-KEBAB `.qml` files as slots; `.gitkeep` is
+always skipped. Manifest shape unchanged.
+
+None of this loosens the fixed injected-prop rule above: every extra these
+additions introduce (`shared`, the powermenu slot's `.item` handle,
+`clipboard`, `ledger`) is a runtime QML object handle, same as
+`notification` before it — never nix `config.*`.
 
 ---
 
@@ -758,6 +860,40 @@ is **untrusted data** crossing aoided's boundary, exactly like an MCP call:
 it is never executed, only routed through the same dispatcher, gate, and
 audit log every other door uses. The A2A door adds no new trust tier.
 
+**Amendment (2026-08-14): non-loopback `message/send` is gated, not
+auto-delivered.** Landed alongside §7 (peer federation) as the one
+must-fix precondition for that feature: the moment binding the A2A door to a
+real network address becomes something people actually do (§7's whole
+point), the INJECT path's previous unconditional auto-delivery becomes an
+open pipe — any reachable caller could inject text into any local
+conductable session with zero approval. Fixed in `a2a.rs::do_inject` /
+`message_send`:
+
+- The connection's ORIGIN (`TcpStream::peer_addr()` — not any
+  client-supplied field, so it can't be spoofed) is classified as
+  **loopback**, a resolved **remote** address, or **unknown** (`peer_addr()`
+  failed — fails SAFE, treated as remote/unmatched).
+- **Loopback is UNCHANGED**: still auto-delivers exactly as before this
+  amendment (hard regression requirement — this fix touches ONLY the
+  non-loopback path).
+- A **remote** origin auto-delivers ONLY when it matches a peer explicitly
+  marked `"autogate": true` in `state/peers.json` (§7 below) — the
+  cross-device analogue of `graph send`'s local "sender is the target's own
+  parent" autogate rule. An unmarked/unknown remote sender is held
+  **pending**, reusing `graph send`'s EXISTING `pending.json` queue
+  machinery verbatim (`conduct::graph::send::session_send`'s own gate — no
+  second pending-queue implementation). The synchronous JSON-RPC response
+  reports the Task as `submitted` (A2A can't block a request on a human's
+  approval); `tasks/get`/the SSE stream reflect the session's real state
+  once/if a human approves it and it delivers.
+- Every outcome (queued / auto-delivered-via-autogate / normal
+  loopback-delivered / error) audits through the SAME `Door::A2a` → single
+  audit log path every other door outcome already uses — no second logging
+  path.
+- Spawn's admission model is **unchanged** by this amendment — it was
+  already rebuild-time-only (`aoide.a2a.spawnAgent`, never client-chosen);
+  the gap being closed here was specific to Inject's unconditional `--yes`.
+
 ### Session-DAG integration (client side)
 
 An external A2A agent, once registered (`aoide a2a agent add <url>`), folds
@@ -791,6 +927,180 @@ execution, above) all run. The CLIENT side is now **real** too (Phase D):
 (§4) and `a2a agent send` drives a registered agent. This section is
 **additive**: it introduces a new contract, carries no version bump to §1–§5,
 and needs no playbook migration entry (nothing existing changed shape).
+
+---
+
+## 7. Peer federation door — **v0** (2026-08-14)
+
+Aoide-to-aoide federation: one aoide instance can register ANOTHER aoide
+instance as a **peer** by URL and pull its resolved session graph into its
+own, folded in as a subtree. Built on §6's existing A2A door — ONE new
+JSON-RPC method (`aoide/graphSummary`), a client-side peer registry +
+per-peer pull cache, and an additive fold in the same `build_graph`
+function §6's `kind:"a2a"` fold already uses.
+
+**Melete-optional**: this federation works standalone; nothing in it
+references or requires Melete. A Melete-side consumer (a Rune polling skill,
+first-class `graph_view` rendering) is separate, independently-owned work,
+not part of this contract.
+
+**Topology-blind by design**: a peer is addressed by a plain URL — the
+protocol carries no notion of "same LAN" vs. "tailnet" vs. "the internet".
+The house runs Tailscale (peers addressed by tailnet MagicDNS hostname in
+practice), but nothing here is tailnet-specific: any reachable URL works the
+same way. WAN/NAT-traversal/relay reachability for peers that are NOT on the
+same network is explicitly **out of scope for v0** — a later, separate
+contract amendment, not designed or assumed here.
+
+### `state/peers.json` — **v0**
+
+The peer registry: OTHER aoide instances this one has registered by URL
+(`aoide peer add <name> <url>`). Lives in the gitignored root-runtime
+`state/` dir (§2, state-dir resolution as in §4's `state/a2a-agents.json`
+entry) — **not** `song/stage/`, a deliberate divergence from an earlier
+draft of this contract that sketched `song/stage/peers.json`: a peer roster
+is account/global external-registry state, exactly like the sibling
+`state/a2a-agents.json` (§4) it mirrors byte-for-byte in shape/discipline,
+not song-scoped rehearsal state. Written atomically
+(`aoide_storage::peer_store`); **additive/tolerate-missing** — an absent
+file is simply "no peers registered", never an error; readers round-trip
+fields they do not know.
+
+```json
+{
+  "schemaVersion": "0",
+  "peers": [
+    { "name": "yomi-strix", "url": "http://yomi-strix:8710/", "autogate": false, "addedAt": "2026-08-14T00:00:00Z" }
+  ]
+}
+```
+
+`autogate` (bool, default `false`) is the cross-device analogue of `graph
+send`'s local "sender is the target's own parent" rule (§6's amendment
+above): a peer marked `true` here has its INBOUND `message/send` auto-deliver
+without the pending queue, even though its connection is non-loopback. An
+unmarked/unknown sender is never autogated.
+
+`aoide peer add <name> <url> [--autogate]` verifies the peer FIRST — fetches
+its `/.well-known/agent-card.json` (mirroring `a2a agent add`'s
+verification-before-registering pattern exactly) — and only registers on
+success; a peer that fails the fetch is never added. Unlike `a2a agent
+add`'s upsert-replace-on-readd, **a duplicate `name` is rejected cleanly**
+(CONTRACTS.md's own judgment-call divergence: a peer's local nickname should
+never be silently repointed at a different URL by a second `add`). `aoide
+peer remove <name>` deregisters; a **missing name is an error**, not
+idempotent-silent — following `rice draft drop <name>`'s precedent (§4) over
+`a2a agent remove`'s tolerate-missing stance, a deliberate choice called out
+here since the two existing verbs this one could have mirrored disagree.
+`aoide peer list` enumerates the registry.
+
+### `state/peer-cache/<name>.json` — **v0**
+
+One peer's last-PULLED `aoide/graphSummary` response, written by `aoide peer
+pull [<name>]`. Sibling of `state/peers.json` (same dir family, same
+state-dir resolution). **Additive/tolerate-missing**: no file means "never
+pulled".
+
+```json
+{
+  "schemaVersion": "0",
+  "name": "yomi-strix",
+  "instance": { "name": "yomi-strix", "url": "http://yomi-strix:8710/", "emittedAt": "2026-08-14T00:05:00Z" },
+  "graph": { "schemaVersion": "0", "nodes": [], "edges": [] },
+  "fetchedAt": "2026-08-14T00:05:03Z",
+  "stale": false,
+  "lastError": null
+}
+```
+
+`instance`/`graph`/`fetchedAt` are the peer's own response from its LAST
+SUCCESSFUL pull — verbatim (`graph` is that peer's own resolved
+`graph.json` v0 document, §4's shape, unmodified). A FAILED pull
+(unreachable, timeout, non-200, malformed body) never deletes this file or
+clears these fields: it sets `stale: true` and `lastError` to a short
+reason, preserving the last-known-good `instance`/`graph` — one peer being
+down must never blank it out of the fold, and `peer pull` pulling several
+peers must never let one failure abort the others (each peer's outcome is
+independent). `aoide peer status` reports each peer's `fresh` /
+`stale` / `never-pulled` classification (below) plus `fetchedAt`/`lastError`.
+
+**Freshness TTL**: a named constant,
+`aoide_storage::peer_store::PEER_CACHE_TTL_SECS` (5 minutes) — NOT a magic
+number re-typed at each call site. A cache entry is `fresh` when `stale ==
+false` AND `fetchedAt` is within the TTL of now; otherwise `stale`
+(covers both an explicit failure mark and a plain TTL expiry — `peer
+status`/the graph fold use the identical classification, so they can never
+disagree).
+
+### `aoide/graphSummary` — new A2A JSON-RPC method (§6 door)
+
+One new method on the EXISTING A2A JSON-RPC/HTTP door (§6) — no new
+transport, no new server. Takes no params; unknown-method callers still get
+the standard `-32601` (confirmed unaffected — this method simply joins the
+existing dispatch table in `a2a.rs::handle_jsonrpc`).
+
+```json
+{ "schemaVersion": "0",
+  "instance": { "name": "yomi-strix", "url": "http://yomi-strix:8710/", "emittedAt": "2026-08-14T00:05:00Z" },
+  "graph": { "schemaVersion": "0", "nodes": [ /* … */ ], "edges": [ /* … */ ] } }
+```
+
+`instance.name` resolves `--peer-name` flag → `AOIDE_A2A_PEER_NAME` env → the
+OS hostname → the literal `"aoide"`, mirroring `resolve_bind_port`/
+`resolve_spawn_agent`'s precedence discipline exactly (`a2a::resolve_peer_name`,
+new `--peer-name` flag on `a2a serve`). `instance.url` is this instance's own
+advertised URL (`http://<bind>:<port>/`, the same string the AgentCard's own
+`url` field carries). `graph` is EXACTLY what `aoide graph view --json` /
+`graph emit` resolve (`aoide_conduct::graph::resolve_graph_document`, the
+SAME function both those verbs and this method call) — no second graph
+vocabulary is invented for the wire.
+
+### The `peer:*` node-id convention (graph fold)
+
+`build_graph` (`aoide-conduct::graph::doc`, the same function that already
+folds registered §6 `kind:"a2a"` agents in as opaque root nodes) ADDITIVELY
+folds each registered peer in as a root node, one level richer than the a2a
+fold: `{ id: "peer:<name>", kind: "peer", name, url, state, children? }`.
+
+- A **fresh** cache (see the TTL rule above) contributes `state: "fresh"`
+  plus `children: { nodes, graph's edges }` — the peer's OWN
+  already-resolved subtree, nested VERBATIM, never flattened into this
+  document's own top-level `nodes`/`edges` (unlike the a2a fold's one opaque
+  node, this folds in a peer's whole graph one level richer — so a peer's
+  ids can never collide with a local id or another peer's).
+- A **stale or never-pulled** peer still surfaces immediately (visible the
+  moment `peer add` runs, before any pull ever succeeds) with `state:
+  "stale"` and NO `children` — never a crash, never a silently-dropped peer.
+  `error` carries the last pull failure's reason when present.
+
+Local graph verbs (`graph focus`/`prune`/`reap`/`link`) keep ignoring
+`peer:*` ids exactly as they already ignore `a2a:*` ids today — confirmed by
+test (`conduct::graph::verbs::tests::local_only_verbs_ignore_peer_ids_exactly_like_a2a_ids_today`),
+not just assumed to generalize: none of those verbs read `peer_store` (or
+`a2a_store`) at all, they operate purely on `sessions.json`'s
+`SessionRecord`s, so a `peer:*`/`a2a:*` id is simply never a session id they
+could ever match.
+
+### CLI surface
+
+`aoide peer add <name> <url> [--autogate]` / `list` / `remove <name>` / `pull
+[<name>]` / `status` — registered as their own command group, directly after
+`a2a agent add/list/remove/send` in `schema --json`'s order (nothing
+existing reorders). `peer pull` with no name pulls EVERY registered peer;
+with a name, just that one.
+
+### Status
+
+Real: the registry, the cache, `aoide/graphSummary`, the CLI verbs, and the
+graph fold all run. **Out of scope for v0** (explicitly, not an oversight):
+WAN/NAT-traversal/relay reachability for peers not on the same network;
+Melete-side consumption (a polling Rune skill, first-class `graph_view`
+rendering) — both are later, separately-directed work. This section is
+**additive**: it introduces `state/peers.json` + `state/peer-cache/`, the
+`aoide/graphSummary` method, and the `peer:*` node-id convention, and amends
+§6's `message/send` gating behavior (dated above) — no version bump to
+§1–§6, no playbook migration entry (nothing existing changed shape beyond
+the called-out §6 amendment).
 
 ---
 

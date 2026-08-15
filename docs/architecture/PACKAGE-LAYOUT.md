@@ -127,7 +127,7 @@ pkgs/aoide/
            skills/       —  packaged procedures (rebuild · mint a song · wire a gadget)
     song/                       # ricing / design engine
       src/ livery · notes · rice · cover · stage · palette
-           · commands/ (rice*, cover set, rice design — Phase 9)
+           · commands/ (rice*, cover set — Phase 9)
     management/                 # privileged host-ops — the hands
       src/ hypr · infra · rebuild · service · sudo-track
     evals/               ★NEW   # eval harness
@@ -151,7 +151,7 @@ pkgs/aoide/
 | **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, migrations, search — plus its CLI verb (`usage`). The steward's `canon` and session memory persist through here. | `graph/session_store.rs`, `song/stage/*`, `state/*`, `commands/usage.rs` | landed (Phase 3a); backend is still file-first (seed → build); commands landed (Phase 9) |
 | **test-support** | Shared test rig (scratch dirs, `EnvSaver`, fixture payloads, the single `env_lock`). **Dev-dependency only** — never a production edge. | `commands/mod.rs::test_support`, root `env_lock` | landed (Phase 9) |
 | **steward** ★ | A system-management agent driven by the conductor. Runs a harness loop; its tools act on the host via `management`/`conduct`/`song`; it remembers design primitives in `canon`; it self-audits against canon + contracts. | *(new)* | skeleton — DEFER (Phase 7) |
-| **song** | The ricing / design engine: the native livery engine (`src/livery/` — schema · resolve · emit; formerly a standalone Node package), apply songs, mint palettes, write the stage, the Pantheon design language — plus its CLI verbs (`rice *`, `livery *`, `cover set`). **Rices portably** — applies a song on generic Linux too, not only via Stylix/NixOS modules. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs`, `commands/design.rs` | landed (Phase 5a+5b); commands landed (Phase 9) |
+| **song** | The ricing / design engine: the native livery engine (`src/livery/` — schema · resolve · emit; formerly a standalone Node package), apply songs, mint palettes, write the stage, the Pantheon design language — plus its CLI verbs (`rice *`, `livery *`, `cover set`). **Rices portably** — applies a song on generic Linux too, not only via Stylix/NixOS modules. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs` | landed (Phase 5a+5b); commands landed (Phase 9) |
 | **management** | The privileged hands: rebuild/switch, `rice mint`, hypr control, service/daemon ops, sudo-tracking. **Host-abstracted** — a NixOS backend (nixos-rebuild/modules) and a portable-Nix backend (`nix profile`/home-manager-style) behind one seam, chosen by what the host is. The capabilities the steward's tools invoke. | `hypr.rs`, `commands/infra.rs`(host ops), sudo-track (44c6ec9) | carve-out — DEFERRED out of Phase 5 (no ETA) |
 | **evals** | Eval harness: golden snapshots (existing), agent-behavior evals for the steward, door-contract evals, ricing/design evals. | golden-snapshot tests | elevate — DEFER (Phase 8) |
 | **conductor** | The CLI/TUI surface: session DAG view, roster, and the steward's control panel — plus its one CLI verb (`conductor`). | `crates/conductor/` (app·ui·graphview·theme), `commands/infra.rs`(conductor verb) | landed (Phase 6a+6b); commands landed (Phase 9) |
@@ -175,7 +175,7 @@ The headline new package. What it is and is not:
   acts under the same audit + gate every door obeys.
 - **`canon` — memory of design primitives.** The user has a design language
   (Pantheon stele grammar, shade-glyph meters, box-drawing frames, palette-driven
-  signatures, `gadgetW = 360`, light-only vision-check, Greek-key meander …). The
+  signatures, `gadgetW = 360`, light-only vision-check …). The
   canon persists these as structured primitives so the steward *re-applies* them
   instead of re-deriving them each pass. It is the durable form of the design
   notes in `~/.claude` memory + the wiki design-language pages, owned by the

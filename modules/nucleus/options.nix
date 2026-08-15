@@ -195,7 +195,7 @@ in
     # ── Song selection — the replay seam ───────────────────────────────────
     # The song (rice) this host performs. A song is host-agnostic: ANY host in
     # the fleet replays any committed song by naming it here — one line, no
-    # other edits. The shipped standard is song "default"; committed songs live
+    # other edits. The shipped standard is song "sonata"; committed songs live
     # under song/songbook/<name>/ and self-gate on `aoide.song == "<name>"`
     # (same self-registration discipline as dendrites — see CONTRACTS.md §5).
     #
@@ -204,10 +204,10 @@ in
     # never set host options or enable facets/dendrites.
     song = mkOption {
       type = types.str;
-      default = "default";
+      default = "sonata";
       example = "moonlight";
       description = ''
-        The song (rice) this host performs. Defaults to "default" — the shipped
+        The song (rice) this host performs. Defaults to "sonata" — the shipped
         standard baseline, guaranteed present. Set to a committed song name
         (a folder under song/songbook/<name>/) to replay it on this host;
         the notes fan-out swaps with zero other edits.

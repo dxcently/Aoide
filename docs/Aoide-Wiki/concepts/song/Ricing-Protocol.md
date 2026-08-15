@@ -34,8 +34,9 @@ check whenever a rice or song changes.
 > The worked examples below (the `sonata` opacity numbers, the derivation
 > notes) are shown here to make the *protocol* legible — they are illustrations
 > of what the songbook records, **mirrored** from the song agent's domain, not
-> this page's to own. The songbook holds that memory now: the house design
-> grammar is the default rice's (`song/songbook/default/design/pantheon.md`),
+> this page's to own. The songbook holds that memory now: the cross-cutting
+> house grammar the retired `default` song once owned lives on only as
+> historical reference (`docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`),
 > and `song/songbook/sonata/design/intent.md` states the shipped key (the
 > light dusk key read from `song/covers/yuki-sonata.png`, region by region,
 > with computed contrast and the current surface elements). `song/` is the
@@ -63,10 +64,10 @@ job ends up hard-coding colours in six different files that drift apart.
   **cloud-gold** highlight, the **cool-sky cyan-teal**, the **plum-mauve** cloud
   and the **warm rust** of the deep shadow fill the rest of the ramp. The cover
   lives in the shared `song/covers/` library any song references by literal
-  path. **Status:** `aoide rice gen` — the automated
-  form of this step (see [[aoide-cli]]) — is a stub; no automated derivation
-  exists in code. Creation is a human/agent reading the source image and
-  writing the sixteen slots by hand, once, in one file.
+  path. **Status:** there is no automated derivation of a base16 key from a
+  wallpaper — no `rice gen` was ever built (cut outright, not left as a
+  stub — see [[aoide-cli]]). Creation is a human/agent reading the source
+  image and writing the sixteen slots by hand, once, in one file.
 - **Application** is [[Stylix]]'s job, and only Stylix's: one `base16Scheme`
   feeds every nix-manageable target (terminal, GTK/Qt, icons, cursor,
   editors, browser, boot) automatically. On the Quickshell side, the same
@@ -113,7 +114,8 @@ Two things to look at, side by side, on the live desktop:
    rounds; a stray rounded corner reads as a surface that missed the grammar.
 2. **Widget colours match the bar.** Every gadget, popout, and dock surface
    pulls from the same `aoide.livery.*` roles the bar uses (the house
-   grammar's glyph/role palette, recorded in the default rice's design memory
+   grammar's glyph/role palette, recorded historically in the retired
+   `default` song's design memory — now `references/pantheon/pantheon-grammar.md`
    — see [[Song-Anatomy]] — `wireCyan`, `holoBlue`, `violet`, `glitchPink`,
    `paletteAccent`/`paletteHot`). A widget that
    *looks* subtly off (a slightly different cream, an accent that reads as a
@@ -134,5 +136,5 @@ facet reading another module, a surface with two owners); it cannot catch
 - [[Song-Vocabulary]] — key/song/cover vocabulary this protocol operates on.
 - [[Song-Anatomy]] — where the songbook and per-song design memory live under
   `song/`.
-- [[Self-Ricing]] — the songbook write-back loop and the creation step's
-  automation (`rice gen`).
+- [[Self-Ricing]] — the songbook write-back loop, and the drafts mechanism
+  for iterating on a key before it's declared.

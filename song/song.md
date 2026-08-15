@@ -11,14 +11,8 @@ is a repo-local map, not a replacement for either.
 ```
 song/
 ├── songbook/                   committed score — per-song homes + cross-cutting design memory
-│   ├── default/                 the shipped baseline — MERGE-ONLY, upstream-owned, never adopted-over
-│   │   ├── rice.nix               aoide.livery.* under `aoide.song == "default"` guard
-│   │   ├── livery.json            resolved livery values (Catppuccin Mocha bootstrap)
-│   │   ├── design/                house design grammar lives HERE
-│   │   │   ├── pantheon.md          the Pantheon wireframe/glyph grammar every song instantiates
-│   │   │   ├── intent.md            this rice's own design intent
-│   │   │   └── cover-ref.txt        no bundled cover — points at song/covers/ instead
-│   │   └── references/            source stills backing the grammar (screenshots, art-direction)
+│   │                              (sonata, the shipped baseline, is upstream-owned + evolving, like
+│   │                              nucleus/facets; every OTHER song is fork-owned, never adopted-over)
 │   ├── <name>/                  one song per folder, e.g. sonata (self-registers — no import list)
 │   │   ├── rice.nix                pure nix: sets ONLY aoide.livery.*, guarded by aoide.song == "<name>"
 │   │   ├── livery.json             this song's resolved livery values
@@ -88,7 +82,7 @@ build time — runtime state can never become load-bearing for the build.
 
 | | writes | reads |
 |---|---|---|
-| **Creation** (`rice gen` → `lint` → `preview` → `adopt`) | `auditions/` (propose), then `songbook/<song>/` on adopt | `songbook/` + that song's `design/` — always, before every `gen` |
+| **Creation** (`compose` → `mode stage` → `lint` → `draft save` → `declare`) | `auditions/` (propose), then `songbook/<song>/` on declare | `songbook/` + that song's `design/` — always, before iterating |
 | **Application** (performing an adopted song) | nothing — pure selection | `songbook/<song>/rice.nix` fanned into `stage/livery.json` at build/preview time |
 
 The swap is one line, host-agnostic (no other edit needed — a song sets
@@ -106,10 +100,11 @@ new key (`rice transpose <song> <key>`, planned — swaps among that song's
 
 ## Design memory — where it lives
 
-- **House grammar** (cross-cutting, every song instantiates it):
-  `songbook/default/design/pantheon.md` — the Pantheon wireframe-depth +
-  glyph grammar. Owned by the default rice because the default rice is the
-  one thing every song shares.
+- **House grammar** (cross-cutting, formerly instantiated by every song):
+  retired along with the `default` song that owned it — kept as historical
+  reference at `docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`,
+  outside the songbook entirely. `sonata` (the shipped baseline now) draws
+  its own grammar instead: `songbook/sonata/design/greek-grammar.md`.
 - **Per-song current state** (this song's key, contrast, surface-element
   values, iteration log): `songbook/<name>/design/intent.md`, e.g.
   `songbook/sonata/design/intent.md`.

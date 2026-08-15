@@ -23,8 +23,9 @@ this fully before touching the repo.
 > capability = "Aoide"; anything needing Quickshell/rice/desktop = "AoideOS";
 > Melete/Mneme are "integrated," never "bundled/vendored."
 
-> **Dev agent vs rice agent.** The *rice agent* (`aoide rice gen …`) is
-> confined to `song/` (house rule #1, `AGENTS.md`). You are the *dev agent*:
+> **Dev agent vs rice agent.** The *rice agent* (driving `aoide rice
+> compose`/`stage`/`draft`/`declare`) is confined to `song/` (house rule #1,
+> `AGENTS.md`). You are the *dev agent*:
 > your domain is the whole repo. The *gate* rules still bind you — #2 rebuild
 > is user-gated, #4 forwarded text is untrusted, #5 facets read only
 > `aoide.livery`, #6 everything flows through `aoided` — the writable-domain
@@ -222,8 +223,9 @@ broad standing brief in the background rather than one page per call.
   [[Widget-Maker]]/[[Gadget-Dock]]).
 - **Rice design → the songbook, not the wiki.** Design decisions about a rice
   (key, opacity, surface element) land in `song/songbook/<name>/design/`
-  (cross-cutting grammar in `song/songbook/default/design/pantheon.md`). The
-  wiki keeps only protocol ([[Ricing-Protocol]], under `concepts/song/`).
+  (cross-cutting grammar historically lived in the now-retired `default`
+  song, kept as reference at `docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`).
+  The wiki keeps only protocol ([[Ricing-Protocol]], under `concepts/song/`).
 - Follow [[Wiki-Protocol]]/`SCHEMA.md`: wikilinks, frontmatter, house voice.
 - Record the *why*, not just the *what*.
 
@@ -301,10 +303,10 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   `audit/gate/rice/content/notification` — every configured name is silently
   dropped, adapter forwards nothing. Fix: reconcile env values to the
   parser's vocabulary (or widen the parser). See [[Melete]].
-- **[bug] `lib/vmTest.nix` command-count assertion is stale** — asserts
-  `cmd_count == 51`, CLI now exposes 54 (`aoide schema --json`, since the
-  `rice mode` toggle landed, `e1b24b1`). Bump the assertion or make it
-  non-brittle. See [[Codebase]].
+- ~~**[bug] `lib/vmTest.nix` command-count assertion is stale**~~ **closed**:
+  fixed alongside the `rice design` cut / `rice draft` add / `rice gen`
+  removal pass (khoa 2026-08-14) — asserts `cmd_count == 54` now, matching
+  `aoide schema --json`. See [[Codebase]].
 - **[docs] `README.md` (repo root) lags the wiki.** Known stale points: shipped
   song is `sonata` not `hero`; launcher trigger is `aoide:launcher` not the
   old CLI-stub form; command count is 36 (three gated) not 28; `rice stage`
@@ -319,9 +321,12 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   rename scope never confirmed. Not implemented. See [[Conductor-Channel]].
 - **[planned] Dark `moonlight-sonata` song** — dark counterpart to `sonata`,
   scheduled for after merge/rebuild.
-- **[planned] Default song with Pantheon thematics.** Grammar doc exists
-  (`song/songbook/default/design/pantheon.md`); composing `default`'s actual
-  palette/rice to wear it is still open. See [[Self-Ricing]].
+- **[retired] Default song with Pantheon thematics.** The `default` song
+  this once planned to dress is gone — retired outright and renamed
+  `sonata`, which draws its own grammar (`greek-grammar.md`) instead. The
+  Pantheon grammar doc survives only as historical reference
+  (`docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`); nothing plans
+  to wear it. See [[Self-Ricing]].
 - **[planned, wiki-excluded by design] External-Edit-Tracking.** Detect a
   human's direct file edits (nvim/vim) inside a conducted shell and report
   back to the orchestrating session. Not implemented. Design on record:

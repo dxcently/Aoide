@@ -1,10 +1,18 @@
-// NotificationCard.qml — one popup notification, as a Tuscan temple stele.
+// notifications.qml — sonata's "notifications" slot: one popup notification,
+// as a Tuscan temple stele. Lives here (not the facet) as of the widget-slot
+// expansion (CONTRACTS.md §5) — sonata is the baseline-fallback floor every
+// song resolves to when it hasn't authored its own `notifications.qml`, so
+// this file IS the shared default now, not a separate facet-side Component.
+// Fixed slot contract: `notes`/`bridge` always, `notification` (the tracked
+// Notification model item) as this slot's one extra — see
+// modules/facets/quickshell/qml/slots.md.
 //
 // khoa, 2026-07-30: rebuilt off the wallpaper-picker-style glass card (v1) to
 // actually join the PANTHEON family — the same marble-stele grammar
-// ConductorGadget/TerminalsGadget/MetersGadget/PowerVitalsGadget wear (see
-// song/songbook/sonata/design/greek-grammar.md §4 "The four temples"), with
-// its own FIFTH order rather than copying one of theirs:
+// ConductorGadget/TerminalsGadget/MetersGadget/PowerVitalsGadget wear (that
+// shared body-chrome convention lives in each of those files' own headers
+// now, not a cross-cutting grammar section), with its own FIFTH order rather
+// than copying one of theirs:
 //
 //   · ORDER    — TUSCAN, the plainest of the five classical orders (Doric,
 //                Ionic, Corinthian, Tuscan, Composite — the temples above
@@ -60,6 +68,7 @@ Item {
     id: root
 
     required property var notes
+    required property var bridge         // ShellBridge — unused here, part of the fixed slot contract
     required property var notification   // qs::service::notifications::Notification
 
     readonly property bool isCritical:

@@ -2,6 +2,9 @@
 # Performed-half live state:
 song/stage/
 song/auditions/
+# Per-song scratch drafts (song/songbook/<song>/drafts/) — nested under the
+# song they vary, never committed/declared truth (that's the whole point).
+song/songbook/*/drafts/
 
 # pi-subagents' runtime artifacts (parent-orchestrator runs):
 .pi-subagents/

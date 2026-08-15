@@ -25,7 +25,7 @@ the build is offline.*
 summary, args, flags, `gated`, `implemented`, a `handler: fn(&Invocation) ->
 Outcome`, an `available` check) plus the `cmd!`/`arg!`/`flag!` macros that
 build one. Each command group under `pkgs/aoide/src/commands/`
-(`meta.rs`, `rice.rs`, `design.rs`, `mode.rs`, `cover.rs`, `stubs.rs`, `graph.rs`,
+(`meta.rs`, `rice.rs`, `draft.rs`, `mode.rs`, `cover.rs`, `stubs.rs`, `graph.rs`,
 `infra.rs`, `a2a.rs`, `usage.rs`, `hooks.rs`) owns a
 `register(&mut Registry)` function that inserts its own entries;
 `commands/mod.rs::all()` assembles the full registry in the historical
@@ -55,11 +55,11 @@ The command surface itself is unchanged by this shape: **54 leaves**
 |---|---|---|
 | `guide`, `schema` | 2 | real |
 | `rice lint`, `rice stage`, `rice compose` | 3 | real (`lint` runs the native [[livery]] engine) |
+| `rice draft save/list/drop` | 3 | real |
 | `livery emit`, `livery resolve`, `livery lint` | 3 | real — the engine's own verb group (the standalone note CLI's surface, native) |
-| `rice design status`/`enter`/`exit` | 3 | real |
-| `rice mode status`/`stage`/`declarative` | 3 | real |
+| `rice mode status`/`stage`/`declarative`/`draft` | 4 | real |
 | `cover set` | 1 | real |
-| `rice gen`, `rice adopt`, `rice transpose` | 3 | stub (`adopt` gated) |
+| `rice declare`, `rice transpose` | 2 | stub (`declare` gated) |
 | `content register/propose/ingest/query` | 4 | stub |
 | `content approve` | 1 | stub, gated |
 | `make` ([[Widget-Maker]] entry), `onboard` | 2 | stub |
@@ -93,7 +93,7 @@ See [[Agent-Hooking]].
 A stub returns a structured `Outcome` with status `not-implemented` (exit
 `64`), never a crash — arg-parsing, the schema entry, the audit-log append,
 and the gate flag are all real code paths regardless; only the live-system
-action is deferred. Exactly three commands carry `gated: true` (`rice adopt`,
+action is deferred. Exactly three commands carry `gated: true` (`rice declare`,
 `content approve`, `update`), marked so both doors surface the user rebuild
 gate uniformly — nothing here admits a rebuild, which is structurally the
 user's action ([[Rebuild-Gate]], [[Governance]]).
@@ -114,14 +114,35 @@ the shape it writes. It validates `name` and `--from` against a strict
 `$`/quotes when rendering a copied value into `rice.nix`, so a livery value
 containing `${…}` can never round-trip into live Nix interpolation.
 
-**`rice mode status`/`stage`/`declarative`** is the staging/declarative
-mode toggle around `stage/mode.json` — `status` reports the current mode,
-`stage [<name>]` unlocks `rice stage`/`cover set` (optionally staging a
-song in the same call), `declarative [<name>]` locks them again
-(optionally re-pinning `stage/livery.json` to a song's committed notes
-first). See [[Self-Ricing#Staging vs Declarative Mode]] for the mechanism
-and why entrypoint guards, not a background reconciler, are the
-enforcement.
+**`rice mode status`/`stage`/`declarative`/`draft`** is the three-way mode
+toggle (`RiceMode`: `staging | declarative | draft`) around
+`stage/mode.json` — `status` reports the current mode, `stage [<name>]`
+unlocks `rice stage`/`cover set` and ALWAYS means plain declared content
+(optionally staging a song in the same call; also leaves `draft` mode if
+currently in it), `declarative [<name>]` re-pins `stage/livery.json` to the
+resolved song's committed notes (given a name, or the current stage's own
+song when none is given) and locks — discarding whatever unsaved live edits
+sat in the stage, unless nothing was resolvable to re-pin from (also leaves
+`draft` mode the same way `stage` does). `draft <name>` routes
+`stage/livery.json` into `songbook/<song>/drafts/<name>/livery.json` via a
+symlink (forking it from the current stage first if the name is new). See
+[[Self-Ricing#Staging vs Declarative Mode]] and
+[[Self-Ricing#Drafts — durable scratch, reached by ROUTING not copying]]
+for the mechanism and why entrypoint guards, not a background reconciler,
+are the enforcement.
+
+**`rice draft save`/`list`/`drop`** manage saved drafts, nested under the
+song they vary (`song/songbook/<song>/drafts/<name>/`) — never committed or
+declared truth, gitignored, and banned from nix-eval reads. Reaching a
+draft LIVE is `rice mode draft <name>`'s job (above), not this group's —
+`save` is an independent, mode-agnostic fork of whatever's currently live
+into a new/updated snapshot; `list [<song>]` enumerates saved drafts (all
+songs, or one); `drop <name>` deletes one (missing name errors — not
+idempotent-silent; refuses instead of dropping the currently-routed draft).
+There used to be a fourth verb, `stage <name>` (copy-based) — superseded by
+`rice mode draft`'s symlink routing and removed (no-internal-aliases rule:
+keeping both would be two spellings of "go live with this draft"). See
+[[Self-Ricing#Drafts — durable scratch, reached by ROUTING not copying]].
 
 ### The `graph` group — session/project DAG + the conductor mesh
 
@@ -192,7 +213,7 @@ shortcut the panel itself registers (`aoide:dock`), not a CLI verb (see
   external tooling and the MCP tool list parse it directly. The MCP door
   (`mcp serve --stdio`) is a minimal dependency-free JSON-RPC 2.0 server over
   newline-delimited stdio: each command becomes one tool named by its dotted path
-  (`rice.gen`), args/flags become the `inputSchema`, and `tools/call` dispatches
+  (`rice.lint`), args/flags become the `inputSchema`, and `tools/call` dispatches
   back into the same handlers the CLI uses.
 - **`stageNotesVersion`** is a top-level field of the schema document (v0),
   pinning the `song/stage/livery.json` format alongside the command tree so an

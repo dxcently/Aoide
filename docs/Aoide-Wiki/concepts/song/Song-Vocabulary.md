@@ -29,7 +29,7 @@ Every term maps to a literal path inside `song/` (which lives at `~/Aoide/song`;
 | chimes | notification + system sounds | `songbook/<song>/sounds/` |
 | stage | live preview state (gitignored) | `stage/` |
 | auditions | propose gate (gitignored) | `auditions/` |
-| the standard | shipped default song | `songbook/default/` |
+| the standard | shipped standard song | `songbook/sonata/` |
 | rehearsal | preview (`stage/livery.json`, hot-reload) | — |
 | recording | adopt — durable, committed, rebuilt | — |
 | venue | host — its own specifics and enabled instruments | `hosts/<host>/` |

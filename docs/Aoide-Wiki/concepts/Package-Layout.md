@@ -140,8 +140,8 @@ specifies:
   obeys ([[Governance]]).
 - **`canon` — memory of design primitives.** The user has a design language
   (the Pantheon stele grammar, shade-glyph meters, box-drawing frames,
-  palette-driven signatures, `gadgetW = 360`, light-only vision-check, the
-  Greek-key meander, …). `canon` persists these as structured primitives so
+  palette-driven signatures, `gadgetW = 360`, light-only vision-check, …).
+  `canon` persists these as structured primitives so
   the steward *re-applies* them instead of re-deriving them each pass. It is
   the durable form of the design notes that live in `~/.claude` memory and
   this wiki's design-language pages today, owned by the steward and consulted

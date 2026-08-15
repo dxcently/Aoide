@@ -7,7 +7,7 @@ song — notes today, plus the two live slots the staging engine resolves.
 
 A song's `rice.nix` self-gates on `config.aoide.song == "<name>"` and sets
 **only** `aoide.livery` (palette + component tiers, optionally `wallpaper`).
-See an existing song (`song/songbook/default/rice.nix`,
+See an existing song (`song/songbook/sonata/rice.nix`,
 `song/songbook/sonata/rice.nix`) for the shape. `livery.json` alongside it is
 the same values as a hand/agent-maintained JSON file — kept in sync with
 `rice.nix`, not derived from it.

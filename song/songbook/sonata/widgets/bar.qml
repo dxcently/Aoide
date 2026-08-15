@@ -1,4 +1,22 @@
-// AoideBar.qml — THE MEASURE. A clean-slate redesign in the SONG vein.
+// bar.qml — sonata's "bar" slot (was AoideBar.qml, moved out of the facet
+// as of the widget-slot expansion, CONTRACTS.md §5). THE MEASURE — a
+// clean-slate redesign in the SONG vein.
+//
+// Whole-content slot, hosted by `WidgetSlot`, not `SurfaceSlot` — the bar's
+// `PanelWindow` stays in the facet (shell.qml); only its CONTENT is this
+// per-song widget. The song fully owns its own footprint: the facet reads
+// this file's `implicitHeight` back and binds the `PanelWindow`'s own
+// `implicitHeight`/`exclusiveZone` to it (see shell.qml), rather than the
+// facet pinning a fixed height. Extras this file needs beyond the universal
+// `notes`/`bridge`: `stagingEngine` (so its own embedded calendar
+// `WidgetSlot` can resolve), `powermenu` (the powermenu slot's live
+// `.item`, for the clef), `shared` (session state, optional).
+// `WorkspaceRow.qml` travels alongside this file as a helper component
+// (uppercase filename — carried by the build, never independently
+// resolvable as a slot). `StelePopout`/`BarPopout`/`SteleLayerPopout`/
+// `WidgetSlot`/`AudioColonnade` stay in the facet as shared, reusable
+// popout-hosting chrome (not bar-specific content) — reached via the
+// `import "../.."` below.
 //
 // Aoide is the muse of song, so the bar is one bar of music. The old
 // architectural grammar (the Pantheon entablature — keystone, colonnade wings,
@@ -23,10 +41,13 @@
 // Drawn structure (staff lines, barlines, playhead) carries the geometry; glyphs
 // (clef, rests, note-marks) carry the ornament. It should read as sheet music.
 //
-// Geometry seam preserved: stripHeight stays 36 and the window's exclusiveZone
-// stays 36 (shell.qml untouched), so windows never move. Everything is drawn
-// INSIDE the 36px strip — no apron, no taller transparent surface (that scar,
-// the wallpaper-bleed under a hairline, stays closed); the clef is sized to fit.
+// Geometry: `stripHeight` (36) is this song's own choice, read back by the
+// facet rather than pinned by it (see the widget-slot note above) — the
+// number happens to stay 36 for now, but the MECHANISM is dynamic, so a
+// future song's `bar.qml` is free to pick a different footprint. Everything
+// is drawn INSIDE the strip — no apron, no taller transparent surface (that
+// scar, the wallpaper-bleed under a hairline, stays closed); the clef is
+// sized to fit.
 //
 // Colour: the MUSIC SHEET — rendered as a flat, fully OPAQUE strip of
 // manuscript paper, no glass and no gloss. The page fill is notes.paletteBg
@@ -56,26 +77,318 @@ import Quickshell.Io
 import Quickshell.Hyprland
 import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
+// Reaches the facet's shared, reusable popout-hosting chrome (WidgetSlot,
+// StelePopout, BarPopout, SteleLayerPopout, AudioColonnade) — none of it is
+// bar-specific content, so it stays in the facet rather than moving here.
+// Deployed-tree relative path: this file lands at $out/qml/songs/sonata/
+// bar.qml, so two levels up ($out/qml/songs/ → $out/qml/) is the facet's
+// own qml/ root (modules/facets/quickshell/default.nix's build walk fixes
+// that depth by construction — see its own comment on the songs/ copy).
+import "../.."
 
 Item {
     id: root
 
-    // ── Note + bridge dependencies (injected by shell.qml) ────────────────
+    // ── WorkspaceRow — inlined, not a sibling file ──────────────────────────
+    // Was WorkspaceRow.qml, a sibling helper file. Quickshell's dynamic
+    // Component.createObject(url) loading (how WidgetSlot loads this whole
+    // bar.qml) does not reliably grant a loaded file visibility into custom
+    // types in its own directory — neither the implicit same-directory rule
+    // nor a top-level file-scoped `component` (that specifically hit "Syntax
+    // error" here, unlike GlassPage's NESTED placement below, which is why
+    // this is nested the same way GlassPage is in launcher.qml, not floated
+    // above the root the way a first attempt at this tried) resolved it
+    // (confirmed live: calendar.qml, which references no custom sibling
+    // type, loads fine through the identical path; bar.qml failed with
+    // "WorkspaceRow is not a type" either way it was tried). Declared as a
+    // locally-nested `component` instead — sidesteps cross-file resolution
+    // entirely since it's just one file being read, and matches the one
+    // proven-working precedent in this codebase.
+    //
+    // The melody: workspaces as SOLID NOTE GLYPHS on the staff. Clean-slate
+// redesign in the SONG vein (the entablature colonnade is gone). The bar is
+// one measure of music; the workspaces are the notes written on it. Each
+// live Hyprland workspace is a SOLID (filled) musical note, one distinct
+// glyph per workspace id:
+//     ws 1 → ♩   ws 2 → ♪   ws 3 → ♫   ws 4 → ♬   ws 5 → 𝅘𝅥𝅮   ws 6 → 𝅘𝅥𝅯
+//     (ids past the set repeat the run; magic → 𝅘𝅥𝅱, scratch → 𝄋 ride the ledger)
+// Pitch (staff degree) rises with id. The SELECTED workspace swells, fills
+// with its own hue, and rests on a soft accent highlight-pill. Resting notes
+// each carry their own hue (notes.noteColor cycles the 8-slot base16 accent
+// spread); urgent workspaces PULSE in glitchPink, overriding the resting hue.
+// Clicking a note activates its workspace (Hyprland activate(), no shell-out).
+// Colour comes ONLY from the notes singleton, save one sanctioned literal:
+// the white outline on the selected glyph, for separation.
+component WorkspaceRow: Item {
+    id: root
+    required property var notes
+
+    // ── Hover-preview bridge (concepts/Terminal-Commander) ─────────────────
+    // shell.qml's shared QtObject. When the gadget-dock terminal roster is
+    // hovered, TerminalManagerGadget writes that session's Hyprland workspace id
+    // to `shared.hoveredWorkspace`; we render a DISTINCT preview highlight on the
+    // matching note glyph — a cool holoBlue RING (+ glyph tint), clearly NOT the
+    // warm accent swell+pill of the truly-active workspace. -1 = nothing hovered.
+    // Optional/null-safe: hosted without `shared`, the preview simply never fires.
+    property var shared: null
+    readonly property int hoveredWs: shared ? shared.hoveredWorkspace : -1
+    // Index in wsList of the previewed workspace (-1 when none / not live). No
+    // real Hyprland workspace carries id -1, so the sentinel naturally misses.
+    readonly property int hoveredIndex: {
+        var vs = root.wsList
+        for (var i = 0; i < vs.length; i++)
+            if (vs[i] && vs[i].id === root.hoveredWs) return i
+        return -1
+    }
+
+    // ── Geometry: solid notes on a five-line staff ─────────────────────────
+    readonly property int cellW: 22        // horizontal slot per note
+    readonly property int cellGap: 3
+    readonly property real halfStep: 1.6   // line→space; a full staff line is 2×
+    readonly property int restSize: 15     // resting note glyph
+    readonly property int activeSize: 19   // the played note swells
+
+    implicitWidth: cellRow.implicitWidth
+    implicitHeight: 30
+
+    // ── The solid-note vocabulary — DISTINCT filled glyph per workspace id ──
+    // All heads are SOLID (filled); the run repeats past its length. Specials
+    // keep their own marks and perch above the staff on a ledger.
+    readonly property var noteGlyphs: ["♩", "♪", "♫", "♬", "𝅘𝅥𝅮", "𝅘𝅥𝅯"]
+    function wsGlyph(ws) {
+        if (!ws) return "♩"
+        var name = ("" + (ws.name || "")).toLowerCase()
+        if (name.indexOf("magic") !== -1) return "𝅘𝅥𝅱"
+        if (name.indexOf("scratch") !== -1) return "𝄋"
+        var id = ws.id || 1
+        return root.noteGlyphs[(id - 1) % root.noteGlyphs.length]
+    }
+    function wsSpecial(ws) {
+        var name = ws ? ("" + (ws.name || "")).toLowerCase() : ""
+        return name.indexOf("magic") !== -1 || name.indexOf("scratch") !== -1
+    }
+    // Resting-state hue — each workspace id gets its own distinct base16 accent
+    // (notes.noteColor cycles the 8-hue accent spread by id). Active/urgent/
+    // preview states still override this in the delegate below.
+    function wsColor(ws) {
+        var id = ws ? (ws.id || 1) : 1
+        return root.notes.noteColor(id)
+    }
+    // Staff degree → vertical offset (up is negative y). Specials ride high on
+    // a ledger; regular ids wrap through a 7-degree scale centred on the staff.
+    function pitchOffset(ws) {
+        if (wsSpecial(ws)) return -5 * root.halfStep          // above the top line
+        var id = ws ? (ws.id || 1) : 1
+        var deg = ((id - 1) % 7) - 3                          // -3 … +3
+        return -deg * root.halfStep
+    }
+
+    // Sorted live workspaces (by id) — ObjectModel exposes `.values`.
+    readonly property var wsList: {
+        var vs = (Hyprland.workspaces && Hyprland.workspaces.values)
+                 ? Hyprland.workspaces.values.slice() : []
+        vs.sort(function (a, b) { return (a.id || 0) - (b.id || 0) })
+        return vs
+    }
+
+    // Index of the focused note (drives the highlight-pill); -1 when none.
+    readonly property int activeIndex: {
+        var vs = root.wsList
+        for (var i = 0; i < vs.length; i++)
+            if (vs[i] && (vs[i].active || vs[i].focused)) return i
+        return -1
+    }
+
+    // Selected-workspace colour = that workspace's OWN per-id hue (not a uniform
+    // gold), so the highlight-pill and the swelled note read in the workspace's
+    // own colour, just emphasised. Falls back to the accent when nothing's active.
+    readonly property color activeColor:
+        (root.activeIndex >= 0 && root.wsList[root.activeIndex])
+        ? root.notes.noteColor(root.wsList[root.activeIndex].id)
+        : root.notes.paletteAccent
+
+    // ── The highlight-pill — a soft accent glow that eases under the played
+    // note (the old playhead re-cast). Declared before the notes so it sits
+    // behind them, reinforcing which workspace is selected.
+    Rectangle {
+        id: highlight
+        visible: root.activeIndex >= 0
+        z: 0
+        width: root.cellW - 2
+        height: 22
+        // Fully rounded on the short axis — an actual pill, which is what the
+        // name promised and the square-cornered block never read as.
+        radius: width / 2
+        color: root.activeColor
+        opacity: 0.20
+        anchors.verticalCenter: parent.verticalCenter
+        x: root.activeIndex >= 0
+           ? root.activeIndex * (root.cellW + root.cellGap) + (root.cellW - width) / 2
+           : 0
+        Behavior on x {
+            NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+        }
+    }
+
+    // ── The preview RING — the hover-preview highlight (distinct from active).
+    // A hollow holoBlue outline that eases under the workspace the hovered
+    // terminal lives on. Deliberately a DIFFERENT KIND of mark from the active
+    // pill (hollow cool ring vs solid warm accent fill), so both can show at
+    // once — if the previewed ws IS the active one, the ring simply frames the
+    // accent pill and reads sensibly. Border-only, input-inert. Colour: notes.
+    Rectangle {
+        id: previewRing
+        visible: root.hoveredIndex >= 0
+        z: 0
+        width: root.cellW
+        height: 24
+        radius: width / 2      // matches the active pill's curve, one size out
+        color: "transparent"
+        border.color: root.notes.paletteAccent
+        border.width: 2
+        opacity: 0.85
+        anchors.verticalCenter: parent.verticalCenter
+        x: root.hoveredIndex >= 0
+           ? root.hoveredIndex * (root.cellW + root.cellGap) + (root.cellW - width) / 2
+           : 0
+        Behavior on x {
+            NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+        }
+    }
+
+    Row {
+        id: cellRow
+        z: 1
+        spacing: root.cellGap
+        anchors.verticalCenter: parent.verticalCenter
+
+        Repeater {
+            model: root.wsList
+            delegate: Item {
+                id: cell
+                required property var modelData
+                required property int index
+                readonly property bool isActive: root.activeIndex === cell.index
+                readonly property bool isUrgent: cell.modelData && cell.modelData.urgent
+                // Previewed (a hovered terminal lives here) but NOT the active
+                // ws — the note tints holoBlue to echo the ring. Active/urgent
+                // both outrank the preview tint (they carry live meaning).
+                readonly property bool isPreview: root.hoveredIndex === cell.index && !cell.isActive
+                // Mouse-hover: previews this workspace as the selection target.
+                readonly property bool isHovered: cellMouse.containsMouse
+
+                width: root.cellW
+                height: root.height
+
+                // Hover-select pill — mousing a note previews it in the PRIMARY
+                // gold (khoa): a soft gold underlay behind the glyph so you see
+                // which workspace a click will jump to. Distinct from the active
+                // note (its own hue + white outline). Declared before the glyph
+                // so it renders behind it.
+                Rectangle {
+                    visible: cell.isHovered && !cell.isActive
+                    anchors.centerIn: parent
+                    width: root.cellW - 2
+                    height: 22
+                    radius: width / 2   // same pill as the active/preview marks
+                    color: root.notes.paletteAccent
+                    opacity: 0.18
+                }
+
+                // The SOLID note glyph, parked at this note's pitch on the staff.
+                // Resting → its own base16 accent hue (root.wsColor, one of 8
+                // distinct colours cycled by workspace id — see LiveryState.
+                // noteColor); the played note KEEPS its own hue but swells and
+                // rests on a same-hue highlight pill; urgent → glitchPink. A
+                // defining ink outline (paletteFg) rides only the active glyph.
+                Text {
+                    id: noteGlyph
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    y: (cell.height - height) / 2 + root.pitchOffset(cell.modelData)
+                    text: root.wsGlyph(cell.modelData)
+                    color: cell.isActive ? root.wsColor(cell.modelData)
+                          : (cell.isUrgent ? root.notes.glitchPink
+                                           : (cell.isHovered ? root.notes.paletteAccent
+                                                             : (cell.isPreview ? root.notes.paletteAccent
+                                                                               : root.wsColor(cell.modelData))))
+                    // Selected note = its OWN hue, swelled + pilled + given a
+                    // WHITE outline (khoa) so it reads as highlighted against the
+                    // opaque marble bar without changing its colour.
+                    style: cell.isActive ? Text.Outline : Text.Normal
+                    styleColor: Qt.rgba(1, 1, 1, 0.9)
+                    font.family: "monospace"
+                    font.pixelSize: cell.isActive ? root.activeSize : root.restSize
+                    font.bold: true
+                    Behavior on color { ColorAnimation { duration: 150 } }
+                    Behavior on font.pixelSize {
+                        NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+                    }
+                }
+
+                // Urgent pulse (blink_red homage) — breathes the whole note.
+                // alwaysRunToEnd: the last keyframe returns opacity to 1.0, so
+                // when urgency clears mid-cycle the note settles fully opaque
+                // instead of sticking dim.
+                SequentialAnimation on opacity {
+                    running: cell.isUrgent
+                    loops: Animation.Infinite
+                    alwaysRunToEnd: true
+                    NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
+                    NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
+                }
+
+                MouseArea {
+                    id: cellMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        if (cell.modelData && cell.modelData.activate)
+                            cell.modelData.activate()
+                    }
+                }
+            }
+        }
+    }
+    }
+
+    // ── Note + bridge dependencies (injected by WidgetSlot) ────────────────
     required property var notes
     required property var bridge
-    // The staging engine (StagingEngine singleton) — the calendar
-    // popout below asks it whether the active song dresses the "calendar"
-    // slot before opening.
+    // The staging engine (StagingEngine singleton, injected as an extra —
+    // it isn't part of WidgetSlot's universal notes/bridge contract) — the
+    // calendar popout below asks it whether the active song (or, through
+    // the baseline chain, sonata) dresses the "calendar" slot before
+    // opening, and the popout's own embedded WidgetSlot needs the same
+    // engine handle to resolve.
     required property var stagingEngine
+    // The Exodos powermenu (AoideExodos instance, injected by shell.qml the
+    // same way the launcher receives the clipboard). The clef toggles it
+    // directly — the old `{ cmd: "powermenu" }` bridge line was a dead end
+    // (shellbridge never parsed that verb).
+    required property var powermenu
     // Shared session state (shell.qml's QtObject). Threaded through so the
     // centre WorkspaceRow can read `shared.hoveredWorkspace` — the gadget-dock
     // hover-preview bridge (concepts/Terminal-Commander). Optional/null-safe so
     // a standalone bar load never errors.
     property var shared: null
 
-    // The strip is 36px; the PanelWindow reserves exactly this. Everything is
-    // painted within it — the clef included — so no apron is needed and the
-    // exclusiveZone stays 36 (windows do not jump).
+    // WidgetSlot (the host) sizes ITSELF off this item's implicitWidth/
+    // Height, which is exactly backwards for a whole-width surface like the
+    // bar: nothing anchors this Item to the window's width the way the old
+    // declarative `AoideBar { anchors.fill: parent }` in shell.qml used to.
+    // Bind width to the QML `parent` directly instead — under
+    // `Component.createObject(root, props)` (WidgetSlot's mechanism), this
+    // item's `parent` IS the WidgetSlot instance, and shell.qml anchors
+    // THAT to fill the bar's PanelWindow — so this resolves to the real
+    // window width once wired. `implicitHeight` stays this song's own
+    // number (see the geometry note above); only width follows the host.
+    width: parent ? parent.width : implicitWidth
+
+    // The strip is 36px; the PanelWindow reserves exactly this — read back
+    // dynamically now (shell.qml binds its exclusiveZone/implicitHeight off
+    // this value), not pinned by the facet. Everything is painted within it
+    // — the clef included — so no apron is needed (windows do not jump).
     readonly property int stripHeight: 36
     implicitHeight: stripHeight
 
@@ -419,9 +732,11 @@ Item {
         MouseArea {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
-            // Generic command through the existing bridge sender (shellbridge
-            // routes it) — no new IPC machinery invented.
-            onClicked: root.bridge.sendCommand({ cmd: "powermenu" })
+            // Direct toggle on the injected AoideExodos instance — the same
+            // sibling-reference idiom as launcher↔clipboard. (The old
+            // `sendCommand({ cmd: "powermenu" })` went nowhere: shellbridge's
+            // parser never knew that verb.)
+            onClicked: if (root.powermenu) root.powermenu.toggle()
         }
     }
 
@@ -697,10 +1012,16 @@ Item {
     }
 
     // Calendar — a per-song flavor-widget slot (CONTRACTS.md §5). No shared
-    // fallback: the old song-blind CalendarGadget was retired, so an
-    // unauthored calendar slot simply doesn't open (gated below on
-    // stagingEngine.has(...), not just calShown) rather than popping an empty
-    // frame. Hosted BARE via StelePopout (khoa's 2026-07-31 standing
+    // fallback: the old song-blind CalendarGadget was retired, so a slot
+    // NEITHER the active song NOR the baseline (sonata) provide simply
+    // doesn't open (gated below on `resolveSong(...) !== ""`, not just
+    // calShown) rather than popping an empty frame. Gating on the resolved
+    // baseline chain — not the raw `has(activeSong, ...)` check this used
+    // before the widget-slot expansion — matters now: a song that doesn't
+    // author its own calendar.qml still gets sonata's via the WidgetSlot
+    // below, so the popout must open for that case too, not just when the
+    // active song directly authors it. Hosted BARE via StelePopout (khoa's
+    // 2026-07-31 standing
     // direction, AudioColonnade precedent): the sonata calendar is now a
     // self-framed papyrus stele drawing all its own chrome — wrapping it in
     // BarPopout's GadgetFrame bay double-framed it (the Π order-mark goes
@@ -719,7 +1040,7 @@ Item {
     // anchorEdges/anchorGravity override bought (see SteleLayerPopout.qml).
     SteleLayerPopout {
         cell: clockText
-        shown: root.calShown && root.stagingEngine.has(root.notes.songName, "calendar")
+        shown: root.calShown && root.stagingEngine.resolveSong(root.notes.songName, "calendar") !== ""
         WidgetSlot {
             notes: root.notes
             bridge: root.bridge

@@ -32,11 +32,14 @@ gitignored and created on demand.
 Only `stage/` and `auditions/` are gitignored — those two are the whole runtime
 surface; everything else under `song/` is versioned score.
 
-> **The shipped default song lives in the songbook like any other.**
-> `aoide.song`'s default, `"default"`, is `song/songbook/default/`. It is the
-> songbook's one **merge-only** song — upstream-owned by git merge-base, not by
-> path ([[Governance]]) — so an agent adopts *new* songs alongside it but never
-> overwrites it, and a bad generation can never replace the shipped look.
+> **The shipped standard song lives in the songbook like any other.**
+> `aoide.song`'s default, `"sonata"`, is `song/songbook/sonata/`. It is
+> upstream-owned and evolving — like any other upstream-owned tree (nucleus,
+> facets), upstream MAY still update or iterate on it, by git merge-base, not
+> by path ([[Governance]]). Every OTHER song — anything composed via
+> `rice compose` under a different name — is fork-owned instead: an agent
+> adopts *new* songs alongside the standard but upstream never overwrites
+> them, and a bad generation can never replace what you've composed.
 
 ## Committed score — the versioned half
 
@@ -65,14 +68,16 @@ holds:
 
 Alongside the per-song folders, the songbook root holds the memory that
 crosses every song: `learnings.md`, `preferences.md`, `update-playbook.md`
-(the schema-migration playbook). The agent reads these before every `rice gen`
-and appends after every adopt/reject — the write-back that is the "self" in
-[[Self-Ricing]].
+(the schema-migration playbook). The agent reads these before every
+iteration and appends after every declare/reject — the write-back that is
+the "self" in [[Self-Ricing]].
 
-Rice design memory lives in the songbook, per song: the house design grammar
-is the default rice's — `song/songbook/default/design/pantheon.md` — and each
-song's current design elements live in its own `design/intent.md` (sonata's
+Rice design memory lives in the songbook, per song: each song's current
+design elements live in its own `design/intent.md` (sonata's
 records the key, the glass values, and the surface elements as performed).
+The cross-cutting Pantheon grammar the retired `default` song once owned is
+no longer live in any song's design folder — kept as historical reference at
+`docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`.
 The wiki carries only the protocol ([[Ricing-Protocol|Ricing Protocol]], in
 `concepts/song/`) — design content about a rice goes to that rice's `design/`
 folder in the repo, not the wiki.
@@ -112,8 +117,7 @@ demand.
 ```
 ~/Aoide/song/
 ├── songbook/            committed songs + cross-cutting design memory
-│   ├── default/          the shipped baseline (merge-only)
-│   ├── sonata/          the LIGHT dusk key, keyed from song/covers/yuki-sonata.png (selected)
+│   ├── sonata/          the shipped standard — upstream-owned, evolving; the LIGHT dusk key, keyed from song/covers/yuki-sonata.png (selected)
 │   │   ├── rice.nix · livery.json
 │   │   ├── palette/ · sounds/ · icons/ · widgets/ · design/
 │   ├── learnings.md · preferences.md · update-playbook.md   ← sparse today

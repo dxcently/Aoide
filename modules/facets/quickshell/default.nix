@@ -89,18 +89,32 @@ let
   # Beyond the shared, song-blind QML tree above, this also carries per-song
   # widget QML from song/songbook/*/widgets/ — versioned score, not runtime —
   # for EVERY committed song at once, so a live `aoide rice preview <name>`
-  # can hot-swap a widget's BODY (not just its colours) with no rebuild. ANY
-  # QML file a song drops under its widgets/ dir becomes a slot named for its
-  # basename; a song's other files (outside widgets/) are ignored. A
-  # generated manifest.json records which songs authored which slots, so
-  # runtime QML (the staging engine, StagingEngine.qml) can check availability without probing the
-  # filesystem per-frame. The wired-slot catalog (which slots an anchor
-  # actually resolves at runtime) lives in qml/slots.md, not here.
+  # can hot-swap a widget's BODY (not just its colours) with no rebuild. The
+  # WHOLE widgets/ dir is carried (helper components + asset subdirs travel
+  # with the slot file that needs them), but only top-level LOWERCASE-KEBAB
+  # `.qml` files become slots, named for their basename; an UPPERCASE-first
+  # filename is a helper component (QML's own type-file convention — only an
+  # uppercase-first name is a valid QML type), carried but never
+  # independently a slot; `.gitkeep` is always skipped. A song's other files
+  # (outside widgets/) are ignored. A generated manifest.json records which
+  # songs authored which slots, so runtime QML (the staging engine,
+  # StagingEngine.qml) can check availability without probing the filesystem
+  # per-frame. The wired-slot catalog (which slots an anchor actually
+  # resolves at runtime) lives in qml/slots.md, not here.
   quickshellConfig = pkgs.runCommand "aoide-quickshell-config" { nativeBuildInputs = [ pkgs.jq ]; } ''
     mkdir -p "$out/qml"
     cp -r ${./qml}/. "$out/qml/"
 
     # ── Carry over per-song flavor widgets + manifest ──────────────────────
+    # Copy the WHOLE widgets/ dir per song (bring any helper .qml/asset
+    # subdirs along — a multi-file widget like sonata's bar.qml needs its
+    # WorkspaceRow.qml helper sitting right beside it), but only MANIFEST
+    # top-level lowercase-kebab .qml files as slots. A file starting
+    # uppercase is a helper component (QML's own type-file convention: only
+    # an uppercase-first filename is a valid QML type name) — carried to
+    # disk so the slot file's relative imports resolve, but never
+    # independently resolvable as a slot itself. `.gitkeep` (present so an
+    # empty widgets/ dir survives git) is always skipped.
     mkdir -p "$out/qml/songs"
     manifest="$out/qml/songs/manifest.json"
     echo '{}' > "$manifest"
@@ -108,11 +122,20 @@ let
       name=$(basename "$d")
       slots=""
       if [ -d "$d/widgets" ]; then
-        for f in "$d/widgets/"*.qml; do
+        mkdir -p "$out/qml/songs/$name"
+        cp -r "$d/widgets/." "$out/qml/songs/$name/"
+        for f in "$d/widgets/"*; do
           [ -e "$f" ] || continue
-          slot=$(basename "$f" .qml)
-          mkdir -p "$out/qml/songs/$name"
-          cp "$f" "$out/qml/songs/$name/$slot.qml"
+          base=$(basename "$f")
+          case "$base" in
+            .gitkeep) continue ;;
+          esac
+          # lowercase-kebab .qml only: starts with [a-z0-9], ends .qml.
+          case "$base" in
+            [a-z0-9]*.qml) ;;
+            *) continue ;;
+          esac
+          slot=$(basename "$base" .qml)
           slots="$slots $slot"
         done
       fi
