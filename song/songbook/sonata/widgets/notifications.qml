@@ -412,9 +412,20 @@ Item {
                         id: actBtn
                         required property var modelData
                         required property int index
-                        // the FIRST action is this temple's one laurel standout
-                        // (the launcher crowns its selected row the same way)
-                        readonly property bool laurel: actBtn.index === 0
+                        // Spec senders (kitty always, for OSC-9/99 forwarding)
+                        // attach the implicit "default" action — the click-
+                        // anywhere activation, not a real button. Never render
+                        // it: live it showed as an empty outlined button under
+                        // the context.
+                        readonly property bool isDefault:
+                            actBtn.modelData && actBtn.modelData.identifier === "default"
+                        visible: !actBtn.isDefault
+                        // the FIRST real action is this temple's one laurel
+                        // standout (the launcher crowns its selected row the
+                        // same way)
+                        readonly property bool laurel:
+                            actBtn.index === 0 || (actBtn.index === 1 && actBtn.modelData
+                                && actBtn.modelData.identifier === "default")
                         radius: 0
                         color: root.withA(actBtn.laurel ? root.notes.paletteHot : root.notes.paletteAccent, 0.16)
                         border.width: 1
