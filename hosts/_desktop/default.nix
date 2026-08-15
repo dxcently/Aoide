@@ -48,6 +48,7 @@
   aoide.vision.enable = true; # grim/slurp for agents
   aoide.clipboard.enable = true; # cliphist history + QML picker
   aoide.audio.enable = true; # PipeWire + WirePlumber
+  aoide.networkmanager.enable = true; # nm-connection-editor + nm-applet
 
   # Opt-in dendrites (browse modules/dendrites/; aoide.mcp.enable stays false
   # — house policy):

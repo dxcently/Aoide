@@ -39,6 +39,7 @@
   aoide.vision.enable = true;
   aoide.clipboard.enable = true;
   aoide.audio.enable = true;
+  aoide.networkmanager.enable = true;
 
   # Opt-in dendrites:
   aoide.firefox.enable = true;

@@ -76,6 +76,10 @@
   # Audio backend (PipeWire + WirePlumber) — real volume control for the bar.
   aoide.audio.enable = true;
 
+  # NetworkManager applet (nm-connection-editor + nm-applet; NM itself is the
+  # venue's own `networking.networkmanager.enable` above).
+  aoide.networkmanager.enable = true;
+
   # Shipped dendrites (off unless wanted; aoide.mcp.enable stays false — house policy).
   aoide.obsidian.enable = true;
   aoide.firefox.enable = true;
