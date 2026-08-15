@@ -41,6 +41,13 @@ surface embeds a `WidgetSlot` anchor for that exact slot name (see the
 table below). Dropping a file for a slot no anchor names yet is inert —
 carried to disk, never loaded.
 
+`aoide rice stage` now hot-syncs an edited **existing** song widget file
+(and any helper/asset files alongside it) into `run/qml/songs/<song>/`
+live, no rebuild — Quickshell's own file-watcher picks the edit up. A
+**brand-new** slot file still needs `systemctl --user restart
+aoide-quickshell.service` to be discovered (`manifest.json` is only read at
+startup) — unchanged limitation.
+
 Every widget QML file, whatever slot it fills, must follow this shape:
 
 - **Root is an `Item`.** (`WidgetSlot` sizes itself off the loaded item's

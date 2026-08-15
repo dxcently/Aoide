@@ -168,6 +168,18 @@ and `stage/cover.json` anywhere in the codebase (unaffected by which of
   for the full mechanism. `rice stage`/`cover set` still write normally —
   they carry zero awareness that routing exists.
 
+`rice stage` doesn't only hot-load the palette/notes tier any more —
+it also syncs the song's widget QML **bodies**
+(`song/songbook/<name>/widgets/*.qml`) into the live runtime tree
+(`run/qml/songs/<name>/`, `crate::widgets` in `crates/song/`), so an edit to
+an EXISTING widget file reaches the desktop through Quickshell's own
+file-watcher, no rebuild. This rides the same mode gate as everything
+else in this section — locked under `declarative`, allowed under
+`staging`/`draft` — so there is no separate lock to reason about. A
+brand-new widget file is the one thing this doesn't cover: `manifest.json`
+is only read at Quickshell startup, so a new slot still needs a
+`systemctl --user restart aoide-quickshell.service` to be discovered.
+
 `aoide rice mode status` reports the current mode plus, in `staging`/
 `draft`, which song (and, in `draft`, which draft) it is pointed at and
 since when. `aoide rice mode stage [<name>]` unlocks staging AND leaves

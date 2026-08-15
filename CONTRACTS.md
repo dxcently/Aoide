@@ -640,7 +640,15 @@ set of "flavor" surfaces — committed files, not nix options:
   falls back to shared chrome (or renders nothing, when no fallback exists).
   `aoide rice preview <name>` (§4) drives this live, no rebuild: it stages
   `song` into `livery.json`, `LiveryState`'s `songName` updates, and every
-  `WidgetSlot` re-resolves.
+  `WidgetSlot` re-resolves. **Additive (2026-08-15) — widget bodies ride the
+  same call:** `rice stage`/`preview` also syncs the song's whole
+  `widgets/` tree into `run/qml/songs/<name>/` (`crate::widgets` in
+  `crates/song/`, byte-compared so an unchanged file is never rewritten —
+  avoids flicker/reload of every widget on a palette-only stage) and
+  regenerates that song's `run/qml/songs/manifest.json` entry, so an edit
+  to an EXISTING widget file reaches Quickshell's own file-watcher live too.
+  A brand-new slot file still needs a service restart to be discovered
+  (the manifest is only read at startup).
 - **Fixed injected-prop contract:** a loaded widget receives `notes`
   (`LiveryState`) and `bridge` (`ShellBridge`) always, plus whatever
   slot-specific extras the anchor declares (e.g. notifications' `notification`)

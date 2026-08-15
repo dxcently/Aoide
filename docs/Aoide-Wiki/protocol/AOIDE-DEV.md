@@ -155,7 +155,13 @@ grim out.png ; grim -g "0,0 1920x60" bar.png    # full + crops → read them bac
   `modules/facets/quickshell/qml/` and NOT `~/Aoide/qml/`.** Sync only the
   files you changed (`cp modules/facets/quickshell/qml/<f> run/qml/<f>` then
   `systemctl --user restart aoide-quickshell.service`); leave files another
-  agent is mid-editing untouched (shared-worktree discipline, §5).
+  agent is mid-editing untouched (shared-worktree discipline, §5). **This
+  manual `cp` is now UNNECESSARY specifically for SONG widget bodies**
+  (`song/songbook/<song>/widgets/*.qml`) — `aoide rice stage <song>` syncs
+  those into `run/qml/songs/<song>/` itself, live, no manual copy or
+  restart (CONTRACTS.md §5). It is still required for FACET-owned QML
+  (`shell.qml`, `StagingEngine.qml`, `WidgetSlot.qml`, `SurfaceSlot.qml`,
+  etc.) — this feature doesn't touch that tree.
 
 ### Living report — status lives in the HTML artifact, not chat
 
