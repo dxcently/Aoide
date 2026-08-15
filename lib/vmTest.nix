@@ -205,7 +205,9 @@ pkgs.testers.runNixOSTest {
     # for replacing `rice draft stage` (copy-based) with `rice mode draft` —
     # symlink-routes stage/livery.json into a saved draft instead of
     # snapshotting into/out of it, superseding the copy-based verb outright
-    # (no-internal-aliases rule) — still 54.
+    # (no-internal-aliases rule) — landed at 54; bumped by 5 for the new
+    # `peer add|list|remove|pull|status` group (cross-device peer federation,
+    # CONTRACTS.md §7) — now 59.
     schema_raw = machine.succeed("aoide schema --json")
     schema_doc = json.loads(schema_raw)
     # schema --json emits a JSON Outcome envelope:
@@ -217,8 +219,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 54, (
-        f"expected 54 commands, got {cmd_count}.  "
+    assert cmd_count == 59, (
+        f"expected 59 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

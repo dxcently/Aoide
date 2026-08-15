@@ -198,6 +198,23 @@ symlink at its destination rather than letting POSIX `rename()` replace
 it) — general behavior, not draft-specific, since every stage-file writer
 in the codebase routes through that one function.
 
+Every `rice mode stage` unlock also runs a best-effort stray-process sweep
+(`pkgs/aoide/crates/song/src/reap.rs`) before it does anything else, so
+unlocking staging always starts from a known-clean process slate rather
+than just flipping a marker. It kills three specific leftovers a prior
+hot-load/preview session can strand: a `quickshell`/`qs -p <file>`
+screenshot-harness process whose `<file>` ends `Preview.qml`
+(`CalendarPreview.qml`, `ExodosPreview.qml`, …); a second live
+`quickshell -p …/shell.qml` process that isn't the one
+`aoide-quickshell.service` is tracking (two would fight over the same
+layer-shell namespaces); and any `hyprlock` process at all — if this code
+can run interactively, the box isn't actually locked, so a live `hyprlock`
+here is always stale. The sweep is best-effort and never fatal to the
+unlock: an unreadable `/proc` entry, a process that races away mid-sweep, or
+a `kill` that fails is skipped, never propagated — this is hygiene, not a
+precondition staging must pass. It runs only on `rice mode stage`'s unlock,
+not on `rice mode declarative`/`rice mode draft`.
+
 ## Geometry
 
 A song may set `aoide.livery.geometry` — gaps, border size, rounding, and

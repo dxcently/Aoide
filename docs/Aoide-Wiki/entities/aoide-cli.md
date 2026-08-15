@@ -48,7 +48,7 @@ offline, vendored dependency set unchanged — the same shape as Hermes-agent's
 self-registering tool registry and Claude Code's discrete-tools-behind-a-thin-
 dispatch design.
 
-The command surface itself is unchanged by this shape: **54 leaves**
+The command surface itself is unchanged by this shape: **59 leaves**
 (`aoide schema --json | jq '.commands | length'`):
 
 | Group | Leaves | Real / stub |
@@ -69,6 +69,7 @@ The command surface itself is unchanged by this shape: **54 leaves**
 | `conduct` | 1 | real |
 | `conductor` | 1 | real |
 | `a2a serve`, `a2a agent add/list/remove/send` | 5 | real |
+| `peer add/list/remove/pull/status` | 5 | real (same-network federation — `CONTRACTS.md` §7) |
 | `usage` | 1 | real |
 | `hooks install` | 1 | real |
 
@@ -173,6 +174,40 @@ terminal; its five failure reasons are `session-not-found` /
 `no-window-address` / `hyprctl-unavailable` / `hyprctl-failed` /
 `window-not-found`.
 
+### The `peer` group — aoide-to-aoide federation
+
+`add <name> <url> [--autogate]` / `list` / `remove <name>` / `pull [<name>]`
+/ `status` register OTHER aoide instances as **peers** and fold their
+resolved session graphs into this instance's own — the newest door onto
+aoide, built entirely on top of the existing [[A2A-Door]] rather than a new
+transport (`aoide/graphSummary`, one new JSON-RPC method on the same
+server). See [[Peer-Federation]] for the full mechanism (registry/cache
+shapes, the `peer:*` graph-fold convention, and the non-loopback
+pending-gate amendment `message/send` picked up alongside it). Same-network
+only today — real, integration-tested
+(`pkgs/aoide/crates/cli/tests/peer_connectivity.rs` proves two live
+`a2a::serve()` instances talking peer-to-peer end to end) —
+WAN/NAT-traversal reachability for a peer NOT on the same network is out of
+scope for this v0.
+
+- **`peer add`** — verifies the peer FIRST (fetches its AgentCard, mirroring
+  `a2a agent add`'s verification-before-registering pattern) and only
+  registers on success; a duplicate `name` is rejected rather than
+  repointed, unlike `a2a agent add`'s upsert-on-readd.
+- **`peer remove`** — a missing name is an error, not idempotent-silent
+  (`rice draft drop`'s precedent, a deliberate divergence from `a2a agent
+  remove`'s tolerate-missing stance); also drops that peer's cache file.
+- **`peer pull`** — with no name, pulls EVERY registered peer; one peer
+  being unreachable never aborts the others, and a failed pull marks the
+  cache `stale` with a reason rather than deleting it, so a transient outage
+  never blanks a peer out of the graph fold.
+- **`peer status`** — each peer's `fresh`/`stale`/`never-pulled`
+  classification (the same one the graph fold itself uses, so the two can
+  never disagree) plus `fetchedAt`/`lastError`.
+
+Registered directly after `a2a agent add/list/remove/send` in `schema
+--json`'s order — nothing existing reorders.
+
 ### `conduct` and `conductor`
 
 The two are deliberately distinct parts of speech. **`conduct`** is the verb —
@@ -242,6 +277,7 @@ the log location, else the `aoide.auditLog` default applies.
 
 - [[Agent-Interface]]
 - [[A2A-Door]]
+- [[Peer-Federation]]
 - [[Session-Graph]]
 - [[Terminal-Commander]]
 - [[Gadget-Dock]]

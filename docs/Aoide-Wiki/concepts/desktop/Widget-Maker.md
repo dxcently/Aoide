@@ -80,13 +80,32 @@ A narrower, sibling mechanism to the make-a-widget loop above: not the agent
 building a *new* capability, but a **song** ([[Song-Anatomy]]) replacing a
 piece of *existing* chrome with its own QML. **The staging engine**
 (`StagingEngine.qml`) resolves the active song's livery tokens
-(`LiveryState`/`notes`) to per-slot QML; **`WidgetSlot.qml`** is the fixed
-per-slot anchor a host surface embeds, which asks the engine whether the
-active song dressed that slot and loads its file, or falls back to shared
-chrome. Two slots are live today: `calendar` (`AoideBar`'s calendar popout)
-and `notifications` (`AoideNotifications`'s per-card repeater, falling back
-to the shared `NotificationCard` when a song hasn't authored one — true of
-every song so far).
+(`LiveryState`/`notes`) to per-slot QML; a host surface embeds one of two
+fixed per-slot anchors, which asks the engine whether the active song
+dressed that slot and loads its file, or falls back to shared chrome:
+
+- **`WidgetSlot.qml`** — an `Item`. Sizes itself off the loaded child and
+  parents it into an existing layout (a popout body, a repeater delegate,
+  …), for a slot whose widget root is an ordinary `Item`.
+- **`SurfaceSlot.qml`** — a non-visual `QtObject`. For a slot whose root IS
+  its own `PanelWindow` — its own Overlay layer surface, own WlrLayershell
+  namespace, own keyboard focus, own `GlobalShortcut`. Does no visual
+  parenting/sizing; it resolves and creates the widget and exposes the live
+  instance as `.item` for the host to call directly (e.g. the bar's clef
+  calling `.toggle()` on the powermenu slot's live instance).
+
+Both anchors build the widget the same way —
+`Qt.createComponent` → `Component.createObject(parent, initialProperties)`,
+never a declarative `Loader` — because QML resolves `required property` at
+OBJECT CREATION time, and a `Loader` only lets you assign properties after
+the item has already loaded, too late to satisfy a `required` one. Both
+resolve through the SAME baseline-fallback chain (`StagingEngine.resolveSong`,
+`CONTRACTS.md §5`): the active song's own file if it authored the slot, else
+**sonata's** (the shipped baseline every song falls back to), else —
+`WidgetSlot` only — the anchor's own facet-side `fallback` Component, else
+nothing. `SurfaceSlot` has no facet-side fallback: sonata's file IS the
+floor, since a window-owning slot moves as one whole unit with nothing left
+behind in the facet to fall back to.
 
 A song authors a slot by dropping `songbook/<name>/widgets/<slot>.qml`
 ([[Song-Anatomy]]) — the build imposes no fixed slot enum: the quickshell
@@ -95,36 +114,40 @@ into `$out/qml/songs/<name>/<slot>.qml`, keyed by filename, alongside a
 generated `manifest.json` (`{song: [slots]}`) the engine reads to answer
 `has(song, slot)` / `source(song, slot)`. Being carried is not being
 rendered, though: a slot only shows on screen once a host surface embeds a
-`WidgetSlot` anchor naming that exact slot — presence is the host's call
-(which surfaces exist to be dressed), which variant fills an enabled slot is
-the song's (via the manifest). Two anchors are wired today: `calendar`
-(`AoideBar`'s calendar popout) and `notifications` (`AoideNotifications`'s
-per-card repeater, falling back to the shared `NotificationCard` when a song
-hasn't authored one — true of every song so far). The catalog of which slot
-names have a wired anchor, and what extra properties each anchor passes,
-lives in `modules/facets/quickshell/qml/slots.md`, alongside the shape every
-widget file follows: an `Item` root (`WidgetSlot` sizes off its
-`implicit*`), `required property var notes`/`bridge` injected by every
-anchor unconditionally, any slot-specific extras declared as their own
-`required property`, and never `config.*`.
+`WidgetSlot` or `SurfaceSlot` anchor naming that exact slot — presence is
+the host's call (which surfaces exist to be dressed), which variant fills an
+enabled slot is the song's (via the manifest). Five slots are wired today:
+`calendar`, `notifications`, and `bar` via `WidgetSlot`; `powermenu`
+(internally "Exodos" — `song/songbook/sonata/widgets/powermenu.qml`,
+screenshotted standalone via `ExodosPreview.qml`) and `launcher` via
+`SurfaceSlot`. The full catalog — which slot names have a wired anchor,
+which anchor kind, what extra properties each anchor passes, and the
+WlrLayershell namespace each `SurfaceSlot` window carries — lives in
+`modules/facets/quickshell/qml/slots.md`, alongside the shape every widget
+file follows: an `Item` root for a `WidgetSlot` widget (sized off its
+`implicit*`; a `SurfaceSlot` widget's root is a `PanelWindow` instead),
+`required property var notes`/`bridge` injected by every anchor
+unconditionally, any slot-specific extras declared as their own `required
+property`, and never `config.*`.
 
 Because `LiveryState.songName` is what `aoide rice stage <name>` stages,
-switching the staged song **hot-swaps every `WidgetSlot`'s loaded body
-live — no rebuild, no restart** — the same stage-without-rebuild
-discipline as the rice loop itself ([[Self-Ricing]]), just applied to widget
-bodies instead of colour. Adding a *new* song's widget files to the carried
-set still needs a rebuild (the facet has to know to copy them); swapping
-which already-carried song is active does not.
+switching the staged song **hot-swaps every anchor's loaded body live — no
+rebuild, no restart** — the same stage-without-rebuild discipline as the
+rice loop itself ([[Self-Ricing]]), just applied to widget bodies instead of
+colour. Adding a *new* song's widget files to the carried set still needs a
+rebuild (the facet has to know to copy them); swapping which already-carried
+song is active does not.
 
 **Containment invariant** (`CONTRACTS.md §5`): a loaded song widget receives
 only `notes` (`LiveryState`) and `bridge` (`ShellBridge`), plus whatever
-slot-specific extras the anchor declares (e.g. notifications' `notification`)
-— never nix `config.*`. This doesn't loosen the song-shape rule elsewhere in
-this page: a song's `rice.nix` still sets only `aoide.livery`; widget bodies
-are committed QML files the build carries, not nix options, so a song widget
-is structurally incapable of reaching host/facet options through this
-surface. `greeter`/`lockscreen`/`osd`/`nowPlaying` remain unbuilt slots — no
-host anchor exists for them yet.
+slot-specific extras the anchor declares (e.g. notifications' `notification`,
+launcher's `clipboard`/`ledger`) — never nix `config.*`. This doesn't loosen
+the song-shape rule elsewhere in this page: a song's `rice.nix` still sets
+only `aoide.livery`; widget bodies are committed QML files the build
+carries, not nix options, so a song widget is structurally incapable of
+reaching host/facet options through this surface. `greeter`/`lockscreen`/
+`osd`/`nowPlaying` remain unbuilt slots — no host anchor exists for them
+yet.
 
 ## What this makes Aoide
 

@@ -100,7 +100,8 @@ to **rebuild time** instead.
 - **Admitted at rebuild time.** Enabling the door (`aoide.a2a.enable`) and
   setting the spawn target (`aoide.a2a.spawnAgent`) are nix options, so both go
   through the normal [[Rebuild-Gate|rebuild gate]] — turning them on is the
-  user's admission, made once at rebuild, not per request.
+  user's admission, made once at rebuild, not per request. This holds
+  unconditionally for a **loopback** caller.
 - **Bounded per request.** A `message/send` spawn runs **only** the configured
   `spawnAgent` executable — the client names the prompt, never the command. If
   `spawnAgent` is empty (the default), spawning is unavailable and the door
@@ -108,12 +109,25 @@ to **rebuild time** instead.
   session already running under aoide's conductor, the same door `graph send`
   uses. A forwarded A2A message is **data**, routed through the dispatcher, never
   executed — the A2A door adds no new trust tier.
+- **Non-loopback callers are gated at request time.** `message/send`
+  classifies the caller's address first (`a2a::classify_origin` →
+  `PeerOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`). A `Loopback`
+  caller keeps the rebuild-time-only admission above, unchanged. A `Remote`
+  caller instead falls back to the same interactive pending-approval queue
+  `graph send` uses — auto-delivering only when the sender's address matches
+  a peer registered with `autogate: true` in `state/peers.json`
+  ([[Peer-Federation]]); an `Unknown` origin (the address couldn't be read
+  at all) is never auto-delivered, failing safe like an unmatched `Remote`.
+  This is the one interactive per-request gate the wire otherwise lacks —
+  added for [[Peer-Federation|peer federation]]'s non-loopback case, which
+  the original loopback-only design didn't need to cover.
 - **Audited.** Every inject, spawn, and error writes to the single audit log as
   `Door::A2a`, the same log every other door writes. Loopback by default.
 
 ## Related
 
 - [[Agent-Interface]]
+- [[Peer-Federation]] — the aoide-to-aoide door built on top of this one
 - [[Governance]]
 - [[Session-Graph]]
 - [[Conductor-Channel]]

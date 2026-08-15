@@ -88,6 +88,7 @@ concepts/orchestration/Agent-Interface.md
 concepts/orchestration/Conductor-3D-DAG.md
 concepts/orchestration/Conductor-Channel.md
 concepts/orchestration/Content-Pipeline.md
+concepts/orchestration/Peer-Federation.md
 concepts/orchestration/Session-Graph.md
 concepts/orchestration/Terminal-Commander.md
 concepts/song/Ricing-Protocol.md

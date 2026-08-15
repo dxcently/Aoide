@@ -313,7 +313,8 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   parser's vocabulary (or widen the parser). See [[Melete]].
 - ~~**[bug] `lib/vmTest.nix` command-count assertion is stale**~~ **closed**:
   fixed alongside the `rice design` cut / `rice draft` add / `rice gen`
-  removal pass (khoa 2026-08-14) — asserts `cmd_count == 54` now, matching
+  removal pass (khoa 2026-08-14), then bumped again for the `peer`
+  group (§7 below) — asserts `cmd_count == 59` now, matching
   `aoide schema --json`. See [[Codebase]].
 - **[docs] `README.md` (repo root) lags the wiki.** Known stale points: shipped
   song is `sonata` not `hero`; launcher trigger is `aoide:launcher` not the
@@ -377,12 +378,14 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   ruled empty pages, `4b56ae6` Greek/Roman/English numeral+text balance) —
   verify pushed to origin. Book height (621) is still a magic number, not
   derived from content — low priority. See [[Quickshell]].
-- **[open] Per-song flavor widgets.** `calendar`/`notifications` slots are
-  built and live (`StagingEngine.qml`/`WidgetSlot.qml`, hot-swaps via `aoide
-  rice stage <name>`). `greeter`/`lockscreen`/`osd`/`nowPlaying` remain
-  unbuilt — no host anchor, no trigger/data source yet. See
-  `song/songbook/update-playbook.md`, `CONTRACTS.md` §5, [[Gadget-Dock]],
-  [[Quickshell]].
+- **[open] Per-song flavor widgets.** `calendar`/`notifications`/`bar`
+  slots (`WidgetSlot`) and `powermenu`/`launcher` slots (`SurfaceSlot`,
+  window-owning) are built and live (`StagingEngine.qml`, hot-swaps via
+  `aoide rice stage <name>`) — see `modules/facets/quickshell/qml/slots.md`
+  for the wired-slot catalog. `greeter`/`lockscreen`/`osd`/`nowPlaying`
+  remain unbuilt — no host anchor, no trigger/data source yet. See
+  `song/songbook/update-playbook.md`, `CONTRACTS.md` §5, [[Widget-Maker]],
+  [[Gadget-Dock]], [[Quickshell]].
 - **[plan, not started] Conductor/Terminals: dedupe rows, name by cwd, show
   `say`.** Partially landed with the Phase 9 crate split: the reaper is
   extracted (`pkgs/aoide/crates/conduct/src/reap.rs`) and
