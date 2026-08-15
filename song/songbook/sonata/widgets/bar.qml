@@ -36,7 +36,9 @@
 //               (WorkspaceRow) — the melody of the measure, flanked by barlines.
 //   RIGHT     : the expression marks — ♫ volume, 𝄾 battery (rests: the battery
 //               empties into silence), 𝆹 network link — each hover/scroll/click
-//               live, with popouts. Closed by a final barline 𝄂.
+//               live, with popouts — then a system tray: a fermata toggle
+//               (𝄐 held closed / 𝄑 open) that pops a framed tray of the SNI
+//               icons under the strip (BarPopout). Closed by a final barline 𝄂.
 //
 // Drawn structure (staff lines, barlines, playhead) carries the geometry; glyphs
 // (clef, rests, note-marks) carry the ornament. It should read as sheet music.
@@ -68,6 +70,7 @@
 //   - Pipewire   → default sink volume / muted.
 //   - UPower     → display-device battery.
 //   - Network    → /proc/net/route via FileView (files-not-processes rule).
+//   - SystemTray → StatusNotifier items (the collapsible tray).
 //   - Sessions   → song/stage/sessions.json + hooks.json via FileView.
 
 import QtQuick
@@ -77,6 +80,7 @@ import Quickshell.Io
 import Quickshell.Hyprland
 import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
+import Quickshell.Services.SystemTray
 // Reaches the facet's shared, reusable popout-hosting chrome (WidgetSlot,
 // StelePopout, BarPopout, SteleLayerPopout, AudioColonnade) — none of it is
 // bar-specific content, so it stays in the facet rather than moving here.
@@ -646,6 +650,14 @@ component WorkspaceRow: Item {
     property bool battShown: false     // battery hover popout
     property bool calShown: false      // calendar click popout (song widget slot)
 
+    // ── System tray (StatusNotifier) — popup ───────────────────────────────
+    // A fermata toggle in the right stave opens/closes the tray popout (the
+    // BarPopout in the POPOUTS section below, hung under the toggle cell).
+    // Starts closed; the toggle only appears once at least one item has
+    // registered (no empty fermata on a fresh session).
+    property bool trayOpen: false
+    readonly property int trayCount: SystemTray.items ? SystemTray.items.values.length : 0
+
     // ══ MUSICAL GEOMETRY ═══════════════════════════════════════════════════
     // The staff sits at the strip's vertical midline; five lines a staffGap
     // apart. Content is written on the staff, so every cell centres on it.
@@ -937,6 +949,28 @@ component WorkspaceRow: Item {
             font.pixelSize: 14
         }
 
+        // ── System tray — the fermata toggle ───────────────────────────────
+        // 𝄐 (fermata, notes held) when closed, 𝄑 (fermata below) when open.
+        // Click toggles the tray POPOUT (BarPopout below, hung under this
+        // cell) — the held SNI icons live in the popup, not on the staff.
+        // Written in black ink like the other resting marks; an open toggle
+        // takes the accent, matching the volume-cell open/hover convention.
+        Text {
+            id: trayToggle
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.trayCount > 0
+            text: root.trayOpen ? "𝄑" : "𝄐"
+            color: root.trayOpen ? root.notes.paletteAccent : root.notes.paletteFg
+            font.family: "monospace"
+            font.pixelSize: 14
+            font.bold: true
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.trayOpen = !root.trayOpen
+            }
+        }
+
         // The final barline — thin + thick black rules, closing the measure (𝄂).
         Row {
             anchors.verticalCenter: parent.verticalCenter
@@ -1007,6 +1041,70 @@ component WorkspaceRow: Item {
                 opacity: 0.75
                 font.family: "monospace"
                 font.pixelSize: 11
+            }
+        }
+    }
+
+    // System tray — the held-notes popout, opened by the fermata toggle in
+    // the right stave. Standard BarPopout chrome (the same framed glass bay
+    // the battery popout wears); the body is a Flow of SNI icons — hover gets
+    // the soft accent pill, left click activates, right click is the item's
+    // secondary action. (This quickshell rev has no tertiaryActivate —
+    // checked plugins.qmltypes.)
+    BarPopout {
+        notes: root.notes
+        cell: trayToggle
+        title: "tray.held"
+        popoutWidth: 200
+        shown: root.trayOpen && root.trayCount > 0
+        Flow {
+            width: parent.width
+            spacing: 6
+            padding: 8
+            Repeater {
+                model: SystemTray.items
+                delegate: Item {
+                    id: trayCell
+                    required property var modelData
+                    width: 26
+                    height: 26
+
+                    // Hover preview pill — the workspace-note idiom.
+                    Rectangle {
+                        visible: trayMouse.containsMouse
+                        anchors.centerIn: parent
+                        width: 24
+                        height: 24
+                        radius: 12
+                        color: root.notes.paletteAccent
+                        opacity: 0.18
+                    }
+
+                    Image {
+                        anchors.centerIn: parent
+                        width: 18
+                        height: 18
+                        sourceSize: Qt.size(18, 18)
+                        source: trayCell.modelData ? trayCell.modelData.icon : ""
+                        smooth: true
+                        mipmap: true
+                    }
+
+                    MouseArea {
+                        id: trayMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: function (mouse) {
+                            if (!trayCell.modelData) return
+                            if (mouse.button === Qt.RightButton)
+                                trayCell.modelData.secondaryActivate()
+                            else
+                                trayCell.modelData.activate()
+                        }
+                    }
+                }
             }
         }
     }
