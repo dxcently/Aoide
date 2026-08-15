@@ -133,6 +133,16 @@ grim out.png ; grim -g "0,0 1920x60" bar.png    # full + crops → read them bac
   `aoide rice mode stage [<song>]` first to unlock; `aoide rice mode
   declarative [<song>]` locks it back. See
   [[Self-Ricing#Staging vs Declarative Mode]].
+- **Edit a rice's live state through mode verbs — never by hand.**
+  `song/stage/livery.json` and the `song/songbook/<song>/drafts/*` targets it
+  can symlink to are CLI-owned: hand-writing them directly bypasses the
+  declarative lock check and the draft routing (a draft only receives writes
+  because `rice mode draft <name>` pointed the stage path at it). Go through
+  `aoide rice mode stage/draft/declarative`, `rice stage`, or `cover set` —
+  never `Write`/`Edit` the stage JSON itself. A song's own
+  `song/songbook/<song>/widgets/*.qml` (versioned score, not runtime state) is
+  always fair game to edit directly. See AGENTS.md's rice loop and
+  [[Self-Ricing#Drafts — durable scratch, reached by ROUTING not copying]].
 - **Always look.** Screenshot, read it back, judge coherence (light/dark
   polarity, bar↔terminal↔gadget agreement) *before* showing the user — the
   [[Ricing-Protocol|Ricing Protocol]] vision check, for any visual change.
