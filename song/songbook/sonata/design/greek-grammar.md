@@ -111,3 +111,26 @@ colour; everything else rests dim. The multicolour field is ROLES, not
 decoration.
 
 ---
+
+## 4. The herald tiers — notification card reading order
+
+The notifications card (the Tuscan fifth order, `widgets/notifications.qml`)
+renders three differentiated tiers, top to bottom, so program and message
+never run together:
+
+1. **Program title** — the box-drawing top frame `┌─┤ <parent> ├───┐`,
+   resolved smartly: desktop-entry id (stripped of `.desktop`) first, then
+   appName, then "notice". Terminal-forwarded OSC-9 notifications (kimi via
+   kitty) carry the forwarder as appName — the real program is not in the
+   payload.
+2. **Notification title** — bold serif, full ink. A "Title: message" summary
+   with an empty body (the OSC-9 mash shape) splits generically at the first
+   ": " (multi-word head only, 6–59 chars) into title + context.
+3. **Context** — smaller, dimmer (0.85), indented behind a 1px signature
+   hairline flush with the title's left edge. The cut rule between the
+   program frame and the title is the entablature/shaft boundary of the
+   stele; the Tuscan frieze above the frame stays the only ornament.
+
+Rhythm: frame → cut → title → context gaps hold one tempo; the `[ notify ]`
+tag is ghosted (0.55) so the HERALD wordmark owns the entablature band.
+Card width 360 (stack and card together).
