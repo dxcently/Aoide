@@ -136,7 +136,7 @@ host anchor exists for them yet.
   its taste in self-ricing: by doing, then writing it down declaratively.
 - **Always describable** — because every extension is declarative Nix under
   `modules/`, the whole machine — look *and* capability — is one reproducible
-  fork you can merge, diff, and roll back.
+  clone you can merge, diff, and roll back.
 
 ## Related
 

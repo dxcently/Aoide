@@ -1,5 +1,5 @@
 {
-  description = "Aoide — a dendritic auto-discovery NixOS framework: an agent-wearable desktop you fork and run.";
+  description = "Aoide — a dendritic auto-discovery NixOS framework: an agent-wearable desktop you clone and run.";
 
   # ── Inputs ─────────────────────────────────────────────────────────────────
   # Pre-declared for all waves. Later waves ADD files in their own dirs and

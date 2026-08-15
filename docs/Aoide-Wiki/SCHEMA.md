@@ -20,7 +20,7 @@ Aoide-Wiki/
     orchestration/   ← agent sessions, the graph, the conductor channel, the conductor
     desktop/         ← the Quickshell/Hyprland desktop surfaces
     song/            ← the performed half — song anatomy, vocabulary, self-ricing, ricing protocol
-    governance/      ← the rebuild gate, fork model, wiki protocol
+    governance/      ← the rebuild gate, clone-and-run, wiki protocol
     (root)           ← cross-cutting: Codebase, Full-Architecture, Snowflake-Anatomy, Lexicon
   entities/        ← named things (components, tools, hosts)
   ingest/
@@ -79,7 +79,7 @@ concepts/desktop/Feature-Set.md
 concepts/desktop/Gadget-Dock.md
 concepts/desktop/Widget-Bridge-Contract.md
 concepts/desktop/Widget-Maker.md
-concepts/governance/Fork-and-Run.md
+concepts/governance/Clone-and-Run.md
 concepts/governance/Governance.md
 concepts/governance/Rebuild-Gate.md
 concepts/governance/Wiki-Protocol.md

@@ -2,7 +2,7 @@
 
 **Aoide (the core) vs AoideOS (the distribution) — don't conflate the two.** *Aoide* is the **orchestration core**: the bridges and APIs between the terminal, the shell, the system, and the OS — one interface through which agents are freely orchestrated for any task. Any agent with a shell is fully capable, no MCP required; **every terminal is a conductable, tracked session by default**, so a central agent can speak into any other running session (see [Conducting](#conducting--every-terminal-is-a-tracked-session)). The core runs anywhere there is a shell — portable, headless-capable, agent-first. *AoideOS* is the **distribution built on that core**: the NixOS flake that ADDITIONALLY ships the Quickshell widget-making toolkit (bar, dock, gadgets, the DAG/conductor surfaces) and the specialized ricer (the song/notes theming engine). Aoide is the engine; AoideOS is the desktop around it — a capability that works with only a shell is "Aoide", one that is desktop/Quickshell/rice is "AoideOS".
 
-**AoideOS** is the agent-wearable NixOS desktop distribution — Hyprland compositor, Quickshell shell, an orchestrator daemon (`aoided`), a content pipeline, and a self-ricing engine — built on the shell-only Aoide core, that you **fork and run**, not install. Its naming thesis in one line: architecture is frozen music — the nix layer is the score, the running desktop is the performance, a rice is a song the system sings. The Aoide·Melete·Mneme naming is a three-Muses theme: Aoide is the *song* (this repo), [Melete](#melete--the-doer) is *practice* (the coding harness), [Mneme](#mneme--the-door) is *memory* (the knowledge vault) — the other two are independently-owned systems Aoide **integrates and launches**, never vendors.
+**AoideOS** is the agent-wearable NixOS desktop distribution — Hyprland compositor, Quickshell shell, an orchestrator daemon (`aoided`), a content pipeline, and a self-ricing engine — built on the shell-only Aoide core, that you **clone and run**, not install. Its naming thesis in one line: architecture is frozen music — the nix layer is the score, the running desktop is the performance, a rice is a song the system sings. The Aoide·Melete·Mneme naming is a three-Muses theme: Aoide is the *song* (this repo), [Melete](#melete--the-doer) is *practice* (the coding harness), [Mneme](#mneme--the-door) is *memory* (the knowledge vault) — the other two are independently-owned systems Aoide **integrates and launches**, never vendors.
 
 > Status — walking skeleton. The desktop, the flake, the `graph` group, the daemon, and the theming fan-out are **real and running live** (yomi-strix is switched onto this flake). A handful of verbs (`rice declare`/`transpose`, the `content` group, `make`, `update`, `onboard`) are **structured stubs** that return exit `64` (`not-implemented`) with the right shape — the trunk is wired, the muscle is being grown. See [`aoide-cli`](docs/Aoide-Wiki/entities/aoide-cli.md) for exactly which.
 
@@ -101,13 +101,13 @@ An independently-owned vault API serving a folder of notes over MCP — read, wr
 
 ## 4. Install (Nix flakes)
 
-Aoide is a framework you **fork**, not a package you install — the upstream repo ships the shape-making machinery (engine, contracts, walker, facets) but never the shapes themselves. Your fork is your instance, and shared git history means upstream improvements arrive as an ordinary merge.
+Aoide is a framework you **clone and run**, not a package you install — the upstream repo ships the shape-making machinery (engine, contracts, walker, facets) but never the shapes themselves. Your clone is your instance, and shared git history means upstream improvements arrive as an ordinary merge. A remote fork is optional — for backup, fleet sync, or contributing back.
 
 **Prerequisites:** a NixOS box with flakes enabled (`nix.settings.experimental-features = [ "nix-command" "flakes" ];` in your existing config, or `experimental-features = nix-command flakes` in `/etc/nix/nix.conf`).
 
 ```sh
-# 1. Fork this repo on your git host, then clone your fork
-git clone <your-fork-url> ~/Aoide
+# 1. Clone upstream (add your own remote later only if you want one)
+git clone <upstream-url> ~/Aoide
 cd ~/Aoide
 
 # 2. Add a host: one line in flake.nix's nixosConfigurations, e.g.
@@ -120,7 +120,7 @@ cd ~/Aoide
 sudo nixos-rebuild switch --flake .#<host>
 ```
 
-From then on the flake ships its own rebuild aliases (`adbuild`/`adtest`/`adrebuild`/…) for the everyday loop — see [Controls](docs/Aoide-Wiki/concepts/desktop/Controls.md). `aoide onboard` is the specified one-shot version of steps 2–3 (generate the host, seed `song/`, print the agent guide) but is a stub today (exit `64`) — drive it by hand with the steps above meanwhile. Full onboarding narrative, done-state checks, and self-update: [Fork and Run](docs/Aoide-Wiki/concepts/governance/Fork-and-Run.md).
+From then on the flake ships its own rebuild aliases (`adbuild`/`adtest`/`adrebuild`/…) for the everyday loop — see [Controls](docs/Aoide-Wiki/concepts/desktop/Controls.md). `aoide onboard` is the specified one-shot version of steps 2–3 (generate the host, seed `song/`, print the agent guide) but is a stub today (exit `64`) — drive it by hand with the steps above meanwhile. Full onboarding narrative, done-state checks, and self-update: [Clone and Run](docs/Aoide-Wiki/concepts/governance/Clone-and-Run.md).
 
 ---
 
@@ -131,7 +131,7 @@ Two axes move independently, and neither has a background updater — house poli
 - **Dependency versions** are yours to bump on any schedule: `adupdate` (`nh os switch --update`) rewrites `flake.lock` and switches in one step.
 - **The framework itself** is upstream's shape, pulled in by merge: `git fetch upstream && git merge upstream/main`, then `adcheck && adrebuild`. `aoide update` is the eventual guided path for this (fetch, merge framework paths, run checks, detect contract bumps, propose the rebuild) — a stub today.
 
-→ [Fork and Run § Self-Update](docs/Aoide-Wiki/concepts/governance/Fork-and-Run.md#self-update), [Governance](docs/Aoide-Wiki/concepts/governance/Governance.md).
+→ [Clone and Run § Self-Update](docs/Aoide-Wiki/concepts/governance/Clone-and-Run.md#self-update), [Governance](docs/Aoide-Wiki/concepts/governance/Governance.md).
 
 ---
 

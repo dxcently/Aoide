@@ -21,4 +21,4 @@ A dendritic auto-discovery NixOS flake at github.com/dxcently/dxflake. It serves
 ## Related
 
 - [[Snowflake-Anatomy]]
-- [[Fork-and-Run]]
+- [[Clone-and-Run]]

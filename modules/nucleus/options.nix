@@ -386,7 +386,7 @@ in
     user = mkOption {
       type = types.str;
       default = "khoa";
-      description = "The primary user whose home hosts the ~/Aoide fork.";
+      description = "The primary user whose home hosts the ~/Aoide clone.";
     };
   };
 

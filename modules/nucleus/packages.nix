@@ -20,7 +20,7 @@
     environment.systemPackages = [
       pkgs.aoide
       # git is load-bearing, not dev comfort: nix flake operations on the
-      # user's Aoide fork require it (found live on first switch — dxflake's
+      # user's Aoide clone require it (found live on first switch — dxflake's
       # nucleus had carried it, and the "essentials only" port cut it).
       pkgs.git
     ];

@@ -62,7 +62,7 @@ Replaying a committed song on another host is a single declaration in that host'
 aoide.song = "sonata";
 ```
 
-Songs self-register like dendrites: `lib/mkHost.nix` walks `song/songbook/` alongside `modules/`. Each song's `rice.nix` guards itself with `lib.mkIf (config.aoide.song == "<name>")`, so only one song activates per host. Committing a song to the fork makes it fleet-available — every host that pulls can perform it.
+Songs self-register like dendrites: `lib/mkHost.nix` walks `song/songbook/` alongside `modules/`. Each song's `rice.nix` guards itself with `lib.mkIf (config.aoide.song == "<name>")`, so only one song activates per host. Committing a song to the clone makes it fleet-available — every host that pulls can perform it.
 
 **The separation of concerns (the point of replay):** the song carries only livery — palette, component tiers, and its own covers and chimes. It never sets host options, hardware configuration, or which facets and dendrites are enabled. Those remain host responsibilities. A host lacking an instrument simply does not sound that part; coverage degrades gracefully through the [[Self-Ricing]] coverage tiers. Host-agnosticism is a documented song-shape convention in `CONTRACTS.md`.
 
@@ -76,5 +76,5 @@ The `noSongRead` check guards only the runtime dirs (`stage/`, `auditions/`). Co
 - [[livery]]
 - [[Stylix]]
 - [[Snowflake-Anatomy]]
-- [[Fork-and-Run]]
+- [[Clone-and-Run]]
 - [[Ricing-Protocol|Ricing Protocol]] — the creation/application split and the light/dark vision-check

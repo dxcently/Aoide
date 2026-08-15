@@ -236,6 +236,14 @@ broad standing brief in the background rather than one page per call.
 Flags raised but not yet closed, so the next agent inherits them. Close a
 flag by resolving it AND deleting its line; add one the moment you raise it.
 
+- **[landed, docs-only] Fork-and-Run retired → Clone-and-Run.** Your clone is
+  your instance; a remote fork is now optional (backup, fleet sync,
+  contributing back), not a prerequisite. `concepts/governance/Fork-and-Run.md`
+  → `Clone-and-Run.md` (`git mv`) and the model-mention sweep landed across
+  wiki/README/flake description/`onboard` stub summary (2026-08-14). Residual:
+  the live report artifact (`claude.ai/code/artifact/f4df295c…`) still says
+  "fork and run" until its next republish — the repo copy
+  (`docs/architecture/aoide-report.html`) is already updated.
 - **[landed, switched] kimi CLI integration via the agent-profile
   seam — committed as `2a21f80` (2026-08-03); the gated switch landed
   2026-08-12 (`392mgwkhf…` toplevel — its `aoide` carries the profile

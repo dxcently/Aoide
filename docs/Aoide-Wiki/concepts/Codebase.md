@@ -117,7 +117,7 @@ The versioned seam every other module builds against (livery schema v0,
 no behaviour, so an empty config evaluates. The surface:
 
 - `aoide.enable` (master switch), `aoide.user` (default `"khoa"`, owner of the
-  `~/Aoide` fork).
+  `~/Aoide` clone).
 - `aoide.song` (str, default `"sonata"`) — which song this host performs.
   Set once in `hosts/<host>/default.nix`; each song's `rice.nix` guards itself
   with `lib.mkIf (config.aoide.song == "<name>")`. See [[Song-Vocabulary#Replay — any song, any host]].
@@ -180,7 +180,7 @@ Two **non-service nucleus modules** close baseline gaps, both gated on
   **system profile**. The units never needed this (their `ExecStart` lines are
   absolute store paths), but keybinds and interactive sessions invoke by
   name. It also installs **git**, which is load-bearing rather than dev
-  comfort: nix flake operations on the user's own fork require it.
+  comfort: nix flake operations on the user's own clone require it.
 - **`nucleus/nix.nix`** enables the `nix-command` + `flakes` experimental
   features, required for the flake-native system to evaluate itself.
 

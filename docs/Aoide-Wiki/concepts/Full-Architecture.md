@@ -250,7 +250,7 @@ discipline as a dendrite. The shipped standard is song `"sonata"` at
 `song/songbook/sonata/` — upstream-owned and evolving, exactly like any
 other upstream-owned tree (nucleus, facets): upstream MAY still update or
 iterate on it. Every OTHER song — anything composed via `rice compose`
-under a different name — is fork-owned; upstream never touches it, an
+under a different name — is clone-owned; upstream never touches it, an
 absolute guarantee unchanged by `sonata` being both shipped and actively
 iterated. The song carries **livery only**; the host is the
 venue — its specifics and which instruments (facets, dendrites) are enabled.

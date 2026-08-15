@@ -7,7 +7,7 @@ tags: [aoide, features, integration, melete, mneme]
 
 # Feature Set — Batteries Included
 
-What a fresh **AoideOS** fork comes with. AoideOS wires the whole
+What a fresh **AoideOS** clone comes with. AoideOS wires the whole
 personal-computing stack together — the desktop
 ([[Desktop-Architecture]]) and orchestrator ([[aoided]]) it **owns**, plus the
 independently-owned coding harness **[[Melete]]** and knowledge server

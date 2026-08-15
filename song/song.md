@@ -12,7 +12,7 @@ is a repo-local map, not a replacement for either.
 song/
 ├── songbook/                   committed score — per-song homes + cross-cutting design memory
 │   │                              (sonata, the shipped baseline, is upstream-owned + evolving, like
-│   │                              nucleus/facets; every OTHER song is fork-owned, never adopted-over)
+│   │                              nucleus/facets; every OTHER song is clone-owned, never adopted-over)
 │   ├── <name>/                  one song per folder, e.g. sonata (self-registers — no import list)
 │   │   ├── rice.nix                pure nix: sets ONLY aoide.livery.*, guarded by aoide.song == "<name>"
 │   │   ├── livery.json             this song's resolved livery values

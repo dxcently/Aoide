@@ -129,7 +129,7 @@ specifies:
   edits in a repo.
 - **Distro-agnostic by construction.** The steward manages packages, themes,
   and services through Aoide's *own* Nix-managed world via `management`'s
-  backend seam — so its capabilities are identical whether it's forked onto
+  backend seam — so its capabilities are identical whether it's cloned onto
   NixOS or a generic Nix-on-Arch/Debian/Fedora host. It never assumes NixOS;
   "self-ricing, agent-conducting, anywhere Nix runs" is the steward's
   operating envelope.

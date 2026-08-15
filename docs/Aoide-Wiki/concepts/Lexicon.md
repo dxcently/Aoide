@@ -43,7 +43,7 @@ Chosen because Nix's own logo is a snowflake, because crystals grow by **local a
 | **dendrite** | `modules/dendrites/` — opt-in feature branches | crystal branches grow outward by accretion; adding one never reshapes the core |
 | **facet** | `modules/facets/` — render surfaces (quickshell, stylix, compositor) | the crystal's faces — the only planes that catch light (render appearance), each reading only livery |
 | **walker** | `lib/walk.nix` | walks the tree; every file under a walked dir self-registers, no import lists |
-| **snowflake** | your fork | same physics as upstream, unique instance — the point of [[Fork-and-Run]] |
+| **snowflake** | your clone | same physics as upstream, unique instance — the point of [[Clone-and-Run]] |
 
 Radial distance from the nucleus encodes the mutation policy ([[Governance]]): the closer to the center, the more it belongs to upstream; the farther out, the more it is yours.
 
@@ -107,7 +107,7 @@ One loop, told in the vocabulary:
 1. **Melete practices.** The agent writes — a new song in `song/songbook/`, a new dendrite branch, a new widget. Everything it does enters through a door and lands in the audit log.
 2. **The walker freezes.** The nix layer picks up what was written by accretion — dendrites and songs self-register, no import lists — and the score now contains it.
 3. **Rehearsal sounds it.** Before any rebuild, the live side performs the livery from `stage/livery.json` — quickshell surfaces and hyprctl repaint in place. The frozen side is untouched; this is the performance testing the score.
-4. **The gate records it.** If the human admits the rebuild, the rehearsed state is recorded — baked through the stylix facet and the compositor, committed to the fork. Rehearsal and recording derive from the same livery, so they cannot disagree.
+4. **The gate records it.** If the human admits the rebuild, the rehearsed state is recorded — baked through the stylix facet and the compositor, committed to the clone. Rehearsal and recording derive from the same livery, so they cannot disagree.
 5. **Mneme remembers.** The liner and songbook take the design decisions; the wiki takes the architecture; the next practice session starts from memory instead of from zero.
 6. **Aoide sings.** The desktop is the sum of frozen score and live performance — and the loop starts again, one radial layer at a time.
 

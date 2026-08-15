@@ -38,7 +38,7 @@ none of them except your own dendrite/facet flags.
 | ------------------------------ | ---------------------------- | ----- |
 | `aoide.enable`                 | bool                         | framework master switch |
 | `aoide.song`                   | str (default `"sonata"`)     | the song this host performs; names a `song/songbook/<name>/` (or the shipped standard) |
-| `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` fork |
+| `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` clone |
 | `aoide.livery.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
 | `aoide.livery.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
 | `aoide.livery.notif.{bg,fg,urgent}` | nullOr hex              | component override; null → palette |

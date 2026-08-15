@@ -76,7 +76,7 @@ agent-tree view instead of a literal graph diagram ([[Session-Graph]]).
 Nothing else is part of the canonical dock — the bar's own calendar popout is
 not a dock gadget; its body is resolved per-song by the staging engine
 ([[Widget-Maker#The staging engine — a song overrides desktop chrome]]), not
-hosted here. A fork can add its own gadgets on the same recipe (a frame,
+hosted here. A clone can add its own gadgets on the same recipe (a frame,
 livery-only colour, a stage file for data).
 
 ## Posture — a left-edge panel

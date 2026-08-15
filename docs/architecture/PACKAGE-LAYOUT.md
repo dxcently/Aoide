@@ -37,7 +37,7 @@ invariant structural rather than conventional.
 
 > **Aoide** — *she scores her own stage, conducts every agent on it, and travels
 > light.* A **self-ricing, agent-conducting** environment distributed as a single
-> **flake**: fork it onto any Linux and Nix provisions its own world. **NixOS
+> **flake**: clone it onto any Linux and Nix provisions its own world. **NixOS
 > optional, never required** — that distro is *AoideOS*; this is the muse herself.
 
 This crate split is the *how* for a load-bearing goal: **Aoide-the-core ships as
@@ -64,7 +64,7 @@ for the steward especially):**
   base16 surfaces + reloading Quickshell) so *self-ricing* holds off-NixOS.
 - **The `steward` manages packages via Nix, not the distro's.** Its tools
   install/pin/upgrade through Aoide's own Nix-managed set — the same on Fedora as
-  on NixOS — so the agent's capabilities are identical everywhere it's forked.
+  on NixOS — so the agent's capabilities are identical everywhere it's cloned.
 - **`conduct`/`server`/`client`/`protocol`/`storage` are already OS-neutral**
   (std + Linux syscalls + files); the split just keeps them that way.
 
@@ -166,7 +166,7 @@ The headline new package. What it is and is not:
   watch the session DAG. Its tools are `management` verbs, not file edits in a repo.
 - **Distro-agnostic by construction.** The steward manages packages, themes, and
   services through Aoide's *own* Nix-managed world via `management`'s backend
-  seam — so its capabilities are identical whether it's forked onto NixOS or a
+  seam — so its capabilities are identical whether it's cloned onto NixOS or a
   generic Nix-on-Arch/Debian/Fedora host. It never assumes NixOS; "self-ricing,
   agent-conducting, anywhere Nix runs" is the steward's operating envelope.
 - **Conductor-driven.** It is invoked and steered through the conductor CLI/TUI

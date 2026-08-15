@@ -37,7 +37,7 @@ surface; everything else under `song/` is versioned score.
 > upstream-owned and evolving — like any other upstream-owned tree (nucleus,
 > facets), upstream MAY still update or iterate on it, by git merge-base, not
 > by path ([[Governance]]). Every OTHER song — anything composed via
-> `rice compose` under a different name — is fork-owned instead: an agent
+> `rice compose` under a different name — is clone-owned instead: an agent
 > adopts *new* songs alongside the standard but upstream never overwrites
 > them, and a bad generation can never replace what you've composed.
 

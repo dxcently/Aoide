@@ -240,7 +240,7 @@ The discipline is already in use: the retired `default` song's declared aestheti
 
 ## Declare, Select, Replay
 
-**Declare** (planned) commits a staged rice to `song/songbook/<song>/` — it becomes durable, versioned fleet-available score. Every host that pulls the fork can then perform it.
+**Declare** (planned) commits a staged rice to `song/songbook/<song>/` — it becomes durable, versioned fleet-available score. Every host that pulls the clone can then perform it.
 
 **`aoide.song`** is the per-host selector (str, default `"sonata"`). A single line in `hosts/<host>/default.nix` selects which song the host performs:
 

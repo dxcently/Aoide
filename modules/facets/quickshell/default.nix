@@ -248,7 +248,7 @@ in
       #     graphical-session.target, WAYLAND_DISPLAY/HYPRLAND_INSTANCE_SIGNATURE
       #     imported) has fired, so Quickshell inherits a valid Wayland env.
       # ConditionPathExists guards the shell entry so the unit fails cleanly
-      # (not crash-loops) if the QML tree hasn't landed in the fork yet. That
+      # (not crash-loops) if the QML tree hasn't landed in the clone yet. That
       # guard only checks *existence*, though — a shell.qml that exists but
       # fails to load (a QML parse/load error, or an ExecStart pointed elsewhere
       # by a stray drop-in) still exits 255 and, under Restart=on-failure, would
