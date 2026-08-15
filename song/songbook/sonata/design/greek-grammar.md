@@ -133,4 +133,6 @@ never run together:
 
 Rhythm: frame → cut → title → context gaps hold one tempo; the `[ notify ]`
 tag is ghosted (0.55) so the HERALD wordmark owns the entablature band.
-Card width 360 (stack and card together).
+Card width 360 (stack and card together). The ledger's right-hand ink is a
+live arrival clock (HH:MM, refreshed while the card lives); the urgency word
+appears only in the bottom frame label — nothing reads twice.

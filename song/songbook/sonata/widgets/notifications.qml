@@ -42,7 +42,7 @@
 // inset signature keyline, a cast shadow, a carved-serif crown + name, a box-
 // drawing TUI frame top AND bottom (closing 𝄂 barline in gold), a kaomoji
 // reading the notification's urgency on a ledger line, gold ink for the one
-// short word-tally, radius 0 throughout. Colors ONLY from notes.
+// short arrival-time tally, radius 0 throughout. Colors ONLY from notes.
 //
 // Lifecycle: owns its own auto-dismiss timer and a `closeNotification()`
 // helper that calls expire()/dismiss() WITHOUT touching `tracked` at all —
@@ -163,6 +163,23 @@ Item {
         var idx = root.splitAt()
         return idx > 0 ? s.slice(idx + 2) : ""
     }
+
+    // arrival clock — the ledger's right-hand ink; refreshed so a
+    // persistent critical card never shows a stale time
+    property string clockText: "00:00"
+    function timeNow() {
+        var d = new Date()
+        var h = d.getHours(), m = d.getMinutes()
+        return (h < 10 ? "0" + h : h) + ":" + (m < 10 ? "0" + m : m)
+    }
+    Timer {
+        id: clockTicker
+        interval: 30000
+        repeat: true
+        running: true
+        onTriggered: root.clockText = root.timeNow()
+    }
+    Component.onCompleted: root.clockText = root.timeNow()
 
     width: 360
     implicitHeight: stele.height + 5   // +5 clears the cast shadow's overhang
@@ -460,7 +477,10 @@ Item {
                 }
             }
 
-            // ── ledger line: kaomoji + urgency word in gold ──────────────
+            // ── ledger line: kaomoji + arrival time in gold ──────────────
+            // (the urgency word lives in the bottom frame label; the ledger's
+            // right-hand ink is the live arrival clock instead — no duplicate
+            // 'normal', and a persistent critical card keeps honest time)
             Item {
                 width: parent.width
                 height: 18
@@ -479,7 +499,7 @@ Item {
                 Text {
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
-                    text: root.urgencyWord()
+                    text: root.clockText
                     font.family: root.faceMono
                     font.pixelSize: 10
                     color: root.isCritical ? root.notes.notifUrgent : root.notes.paletteAccent
