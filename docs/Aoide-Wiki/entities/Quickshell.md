@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-08-13
+updated: 2026-08-15
 tags: [aoide, shell, ui, qml, quickshell]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -25,7 +25,10 @@ replace (the hot-reload); **`ShellBridge`** is the unix-socket client — the so
 outbound channel from QML (`focusSession(address)` → shellbridge → hyprctl), no
 MCP/HTTP/shell-exec from QML. `shell.qml` (a `ShellRoot`) instantiates the two
 singletons and the surface widgets (`AoideBar` with the `SessionChip`/
-`WorkspaceRow` session-jump widget, `AoideNotifications` + `NotificationCard`,
+`WorkspaceRow` session-jump widget, `AoideNotifications` — the notification
+stack + D-Bus server, its per-card body resolved through `WidgetSlot` to the
+active song's `widgets/notifications.qml` (sonata's is the shipped baseline —
+see [[Widget-Maker]]),
 `AoideLauncher`, `AoideOsd`, `AoideLockscreen`, `AoideGreeter`, `AoideWallpaper`)
 — each a stub reading colours from `livery`, kept in a separate file so [[Melete]]
 can swap them independently. The repo root carries no `qml/` directory —
@@ -41,6 +44,29 @@ is owned by home-manager's `wayland.windowManager.hyprland`: the compositor face
 writes livery + keybind fragments with `mkBefore`, and the Quickshell facet appends
 its `exec-once` autostart with `mkAfter`, so the two facets compose the one config
 file without collision.
+
+### Notification card — three-tier reading order
+
+The per-card body (`song/songbook/sonata/widgets/notifications.qml`, the
+shipped baseline every song falls back to) reads the `Notification` payload
+into three differentiated tiers, top to bottom: the **program title** (a
+box-drawing frame), the notification's own **title** (bold serif), and the
+**context** (dimmer, indented behind a signature hairline). The program title
+resolves `desktopEntry` (`.desktop` suffix stripped) → `appName` → `"notice"`,
+capped at 28 characters. When a notification's body is empty and its summary
+is a `Title: message` join — multi-word head, 6–59 characters, first `": "` —
+the summary splits into title and context. The join shape is what terminal-
+forwarded OSC-9 notifications produce (kimi emits `ESC ] 9 ; title: body`;
+kitty's OSC 9 handler forwards the whole string as the title with `app_name`
+set to `kitty`, the forwarder — the real program is not in the payload).
+The card never renders a notification's implicit `default` action
+(`identifier == "default"`), which spec senders like kitty attach to every
+forwarded OSC-9/99 notification as the click-anywhere activation — it
+showed up live as an empty outlined button. Real action buttons render as
+before, with the laurel standout fill on the first real one. The ledger
+line's right-hand ink is a live arrival clock (HH:MM, gold, refreshed every
+30s while the card lives), and the urgency word appears only in the bottom
+frame label — the duplicate urgency word is gone.
 
 ## The registry — nine declared, eight with a live body
 

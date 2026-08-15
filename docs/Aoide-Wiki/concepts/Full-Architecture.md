@@ -181,8 +181,9 @@ The baked side is carried by the three facets, all real:
   `LiveryState.qml` watches the stage file for the live fan-out. Eight of
   the nine carry a live QML body: `AoideBar.qml` is the bar (its own popouts
   also carry the calendar and now-playing gadgets); `AoideLauncher.qml` is
-  the keyboard-driven launcher (`SUPER+SPACE`); `AoideNotifications.qml` +
-  `NotificationCard.qml` are the notification daemon (actions/inline-reply
+  the keyboard-driven launcher (`SUPER+SPACE`); `AoideNotifications.qml` is
+  the notification daemon — stack + D-Bus server, per-card body resolved
+  through `WidgetSlot` to the song's `widgets/notifications.qml` (actions/inline-reply
   spike still pending); agentWidgets is the [[Gadget-Dock]] — `AoidePanel.qml`
   holding four core gadgets (Conductor, Terminals, Meters, Power) plus an
   opt-in Usage stele, a left-edge panel that peeks its fore-edge and opens

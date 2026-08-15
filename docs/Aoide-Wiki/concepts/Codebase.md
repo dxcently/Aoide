@@ -279,7 +279,8 @@ tests across the crate (above). The QML tree's non-stub surfaces: the
 [[Gadget-Dock]] files (`AoidePanel.qml`, `GadgetFrame.qml`,
 `ConductorGadget.qml`, `TerminalsGadget.qml`, `MetersGadget.qml`,
 `PowerVitalsGadget.qml`), `AoideLauncher.qml` (the launcher), and
-`AoideNotifications.qml`/`NotificationCard.qml` (the notification daemon) —
+`AoideNotifications.qml` (the notification daemon — per-card body from the
+song's `widgets/notifications.qml`) —
 across the facet's nine `owner = "quickshell"` surfaces (bar, notifications,
 launcher, osd, lockscreen, greeter, wallpaper, agentWidgets, sessionGraph; see
 [[Full-Architecture]]). `sessionGraph` is declared but has no QML body today
