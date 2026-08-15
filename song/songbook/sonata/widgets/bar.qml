@@ -37,8 +37,9 @@
 //   RIGHT     : the expression marks — ♫ volume, 𝄾 battery (rests: the battery
 //               empties into silence), 𝆹 network link — each hover/scroll/click
 //               live, with popouts — then a system tray: a fermata toggle
-//               (𝄐 held closed / 𝄑 open) that pops a framed tray of the SNI
-//               icons under the strip (BarPopout). Closed by a final barline 𝄂.
+//               (𝄐 closed / 𝄑 open — the hold, turned toward the popout)
+//               that pops the held SNI icons in a plain BarPopout bay
+//               under the strip. Closed by a final barline 𝄂.
 //
 // Drawn structure (staff lines, barlines, playhead) carries the geometry; glyphs
 // (clef, rests, note-marks) carry the ornament. It should read as sheet music.
@@ -607,6 +608,53 @@ component WorkspaceRow: Item {
         return "off"
     }
 
+    // ── Rice mode vocabulary (Aoide-native — notes.riceMode) ───────────────
+    // The rice engine's edit-state, one of exactly three strings (storage::
+    // mode's RiceMode, lowercase on the wire, hot from stage/mode.json via
+    // LiveryState): is this manuscript under the pen right now?
+    //   declarative → || decl — the measure is CLOSED. Live writes refused;
+    //     what's true is what the last home-manager switch baked. Plain
+    //     ASCII double bar reads as "finished and published" without
+    //     touching the font's Unicode fallback chain at all. Resting ink,
+    //     dimmed — the safe default should recede, not glow. (NOT 𝄽: the
+    //     idle rest already works two jobs on this strip — mute + net-down —
+    //     a third would let "𝄽 decl" sit two cells from "𝄽 off". TWO glyphs
+    //     were tried and rejected here after live testing this session: 𝄂
+    //     U+1D102 renders as a bare "|" fallback, and ‖ U+2016 — despite
+    //     being common General Punctuation, not a rare SMP symbol — STILL
+    //     rendered wrong (a stray "/") on this font stack. Lesson sharpened
+    //     past the trayToggle scar: it's not just rare SMP glyphs that need
+    //     live verification before trusting them, ANY non-ASCII glyph does,
+    //     on this stack. Plain "||" sidesteps the whole fallback chain.)
+    //   staging     → ♪ stage — the measure is OPEN, a note under the pen:
+    //     hot-load unlocked, rice stage/cover set write the live desktop.
+    //     Gold — the bar's open/active register (open toggles, the active
+    //     workspace) AND the state tier's own working→gold partnering
+    //     (grammar §2): the engine is literally in its working state.
+    //   draft       → 𝄋 draft — dal segno: stage writes route through a
+    //     saved mark (a draft snapshot), never the committed song. Aegean
+    //     holoBlue — the PREVIEW register (the workspace hover-ring's
+    //     "a copy, not the real thing"), distinct from both resting ink
+    //     and live gold. Not urgent: no mode is an alarm.
+    // Unknown strings fall through to the declarative row — the same
+    // safe-default reading LiveryState and mode.rs apply to an absent or
+    // corrupt marker.
+    function modeGlyph(m) {
+        if (m === "staging") return "♪"
+        if (m === "draft")   return "𝄋"
+        return "||"
+    }
+    function modeWord(m) {
+        if (m === "staging") return "stage"
+        if (m === "draft")   return "draft"
+        return "decl"
+    }
+    function modeColor(m) {
+        if (m === "staging") return root.notes.paletteAccent
+        if (m === "draft")   return root.notes.holoBlue
+        return root.notes.paletteFg
+    }
+
     // ── Window title (Hyprland active toplevel) with kaomoji empty-rewrite ──
     // A small songbook of music kaomoji combos; the empty-title rewrite picks
     // one at RANDOM, re-rolled each time the active window changes, so an empty
@@ -623,7 +671,7 @@ component WorkspaceRow: Item {
     function rollKaomoji() {
         root.kaomojiIdx = Math.floor(Math.random() * root.kaomojiSet.length)
     }
-    Component.onCompleted: rollKaomoji()
+    Component.onCompleted: { rollKaomoji(); _recountTray() }
     // Re-roll on every active-window change — so landing on an empty workspace
     // shows a freshly-random face (it's only displayed when the title is empty).
     Connections {
@@ -651,12 +699,43 @@ component WorkspaceRow: Item {
     property bool calShown: false      // calendar click popout (song widget slot)
 
     // ── System tray (StatusNotifier) — popup ───────────────────────────────
-    // A fermata toggle in the right stave opens/closes the tray popout (the
+    // The fermata toggle in the right stave opens/closes the tray popout (the
     // BarPopout in the POPOUTS section below, hung under the toggle cell).
     // Starts closed; the toggle only appears once at least one item has
-    // registered (no empty fermata on a fresh session).
+    // registered (no empty popout on a fresh session).
     property bool trayOpen: false
-    readonly property int trayCount: SystemTray.items ? SystemTray.items.values.length : 0
+    // trayCount is a hand-maintained count, NOT a declarative binding on
+    // SystemTray.items.values.length — confirmed live (console-probe on the
+    // running desktop) that a plain `.values.length` binding DOES actually
+    // stay reactive across insert/remove here, so that wasn't the bug this
+    // was first written to fix. Kept anyway as the more robust idiom: model
+    // list signals (onObjectInsertedPost/onObjectRemovedPost) are a firmer
+    // contract than trusting a derived property's dependency capture on a
+    // JS array snapshot, and it already matches SurfaceSlot._manifestWatch's
+    // pattern elsewhere in this codebase for the same class of problem.
+    // SystemTray.onItemRegistered/onItemUnregistered are plain METHODS in
+    // the qmltypes, not signals — a Connections handler on them would
+    // compile and silently never fire; don't reach for those instead.
+    //
+    // The actual bug (root-caused with pixel-diff screenshots, not a guess):
+    // the toggle Text below had font.bold: true. This system's monospace
+    // bold face has no glyph for U+1D110/U+1D111 (the fermata pair) and
+    // Quickshell renders that as fully invisible — confirmed by forcing
+    // `visible: true` unconditionally and still seeing zero pixel change,
+    // then removing font.bold and immediately seeing the glyph render. The
+    // toggle was reachable and correctly gated the whole time; it was
+    // rendering nothing.
+    property int trayCount: 0
+    function _recountTray() {
+        var vals = SystemTray.items ? SystemTray.items.values : null
+        trayCount = vals ? vals.length : 0
+        if (trayCount === 0) trayOpen = false   // no stuck-open empty popout
+    }
+    Connections {
+        target: SystemTray.items
+        function onObjectInsertedPost(obj, index) { root._recountTray() }
+        function onObjectRemovedPost(obj, index) { root._recountTray() }
+    }
 
     // ══ MUSICAL GEOMETRY ═══════════════════════════════════════════════════
     // The staff sits at the strip's vertical midline; five lines a staffGap
@@ -859,6 +938,43 @@ component WorkspaceRow: Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: 10
 
+        // Rice mode — Aoide-native: the manuscript's own edit-state, read
+        // live off notes.riceMode (stage/mode.json). LEADS the right stave,
+        // apart from the hardware expression marks (vol/mic/batt/net) that
+        // follow — song-state before instrument-state, mirroring how the ✎N
+        // Aoide cell leads the left stave. It also keeps the 𝄂 glyph far
+        // from the DRAWN final barline closing this Row, so the strip never
+        // shows two adjacent closing marks. A CONTROL, not just a status mark
+        // (khoa, 2026-08-15): click is a two-way toggle — staging locks to
+        // declarative; declarative OR draft unlocks back to staging — sent
+        // through root.bridge.toggleRiceMode(), never a direct write from
+        // QML. Glyph + word + colour per mode: root.modeGlyph's comment
+        // carries the mapping.
+        // NO font.bold — 𝄂 (U+1D102) is an SMP musical symbol this file has
+        // only ever DRAWN (as rules), never rendered as text, and the bold
+        // monospace face silently drops rare SMP glyphs (the fermata scar on
+        // trayToggle below); regular weight is the verified-safe rendering.
+        // If 𝄂 fails visual check even regular, fall back to 𝄽.
+        Text {
+            id: modeText
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.modeGlyph(root.notes.riceMode) + " " +
+                  root.modeWord(root.notes.riceMode)
+            color: root.modeColor(root.notes.riceMode)
+            // Declarative — locked, at rest, the ~always state — recedes
+            // like the net cell's dead-link register; both unlocked modes
+            // read at full strength (they're the news).
+            opacity: root.notes.riceMode === "declarative" ? 0.55 : 1.0
+            font.family: "monospace"
+            font.pixelSize: 14
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.bridge.toggleRiceMode()
+            }
+        }
+
         // Volume (OUTPUT) — scroll = adjust, click = mute, hover = the colonnade
         // popout (shared with mic). Attic-gold ink; hover feedback is
         // opacity + underline (the base is already the accent).
@@ -950,11 +1066,22 @@ component WorkspaceRow: Item {
         }
 
         // ── System tray — the fermata toggle ───────────────────────────────
-        // 𝄐 (fermata, notes held) when closed, 𝄑 (fermata below) when open.
-        // Click toggles the tray POPOUT (BarPopout below, hung under this
-        // cell) — the held SNI icons live in the popup, not on the staff.
-        // Written in black ink like the other resting marks; an open toggle
-        // takes the accent, matching the volume-cell open/hover convention.
+        // 𝄐 (U+1D110, fermata — the HOLD mark) at rest; 𝄑 (U+1D111,
+        // fermata below) while open, the hold turned toward the popout
+        // hanging under it. A fermata holds a note, and the popout's token
+        // is `tray.held` — glyph and token say the same word. (The state
+        // tier reads 𝄐 as "awaiting" (grammar §2), but the bar already
+        // lets one glyph serve two registers — 𝄽 is the tier's idle AND
+        // the mute/net-down rest on this strip — so the hold reading
+        // stands here.) Click toggles the tray POPOUT (BarPopout below,
+        // hung under this cell) — the held SNI icons live in the popup,
+        // not on the staff. Resting ink like its neighbours; an open
+        // toggle takes the accent, the volume-cell open/hover convention.
+        // NO font.bold — this exact pair's own scar: U+1D110/U+1D111 are
+        // rare SMP musical symbols this stack's bold monospace face
+        // renders as fully INVISIBLE (pixel-diff-confirmed; the full
+        // account lives on the trayCount comment above). Regular weight
+        // is the verified-safe rendering — do not re-add bold here.
         Text {
             id: trayToggle
             anchors.verticalCenter: parent.verticalCenter
@@ -963,7 +1090,6 @@ component WorkspaceRow: Item {
             color: root.trayOpen ? root.notes.paletteAccent : root.notes.paletteFg
             font.family: "monospace"
             font.pixelSize: 14
-            font.bold: true
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
@@ -1045,69 +1171,14 @@ component WorkspaceRow: Item {
         }
     }
 
-    // System tray — the held-notes popout, opened by the fermata toggle in
-    // the right stave. Standard BarPopout chrome (the same framed glass bay
-    // the battery popout wears); the body is a Flow of SNI icons — hover gets
-    // the soft accent pill, left click activates, right click is the item's
-    // secondary action. (This quickshell rev has no tertiaryActivate —
-    // checked plugins.qmltypes.)
-    BarPopout {
-        notes: root.notes
-        cell: trayToggle
-        title: "tray.held"
-        popoutWidth: 200
-        shown: root.trayOpen && root.trayCount > 0
-        Flow {
-            width: parent.width
-            spacing: 6
-            padding: 8
-            Repeater {
-                model: SystemTray.items
-                delegate: Item {
-                    id: trayCell
-                    required property var modelData
-                    width: 26
-                    height: 26
-
-                    // Hover preview pill — the workspace-note idiom.
-                    Rectangle {
-                        visible: trayMouse.containsMouse
-                        anchors.centerIn: parent
-                        width: 24
-                        height: 24
-                        radius: 12
-                        color: root.notes.paletteAccent
-                        opacity: 0.18
-                    }
-
-                    Image {
-                        anchors.centerIn: parent
-                        width: 18
-                        height: 18
-                        sourceSize: Qt.size(18, 18)
-                        source: trayCell.modelData ? trayCell.modelData.icon : ""
-                        smooth: true
-                        mipmap: true
-                    }
-
-                    MouseArea {
-                        id: trayMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        acceptedButtons: Qt.LeftButton | Qt.RightButton
-                        onClicked: function (mouse) {
-                            if (!trayCell.modelData) return
-                            if (mouse.button === Qt.RightButton)
-                                trayCell.modelData.secondaryActivate()
-                            else
-                                trayCell.modelData.activate()
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // System tray popout — deliberately EMPTY (khoa, 2026-08-15: torn out
+    // wholesale for a from-scratch redesign after three iterations that
+    // didn't land — bare-tablet, bare-icon-row, icon+name-row all gone, no
+    // trace kept). The toggle above still opens/closes (`root.trayOpen`) and
+    // still counts live items (`root.trayCount`/`_recountTray()`), so
+    // clicking it currently does nothing visible — that's expected until
+    // the next pass fills this back in. See CONTRACTS.md §5 / BarPopout for
+    // the chrome any replacement body hangs off (`cell: trayToggle`).
 
     // Calendar — a per-song flavor-widget slot (CONTRACTS.md §5). No shared
     // fallback: the old song-blind CalendarGadget was retired, so a slot

@@ -252,4 +252,35 @@ QtObject {
         }
         Component.onCompleted: noteFile.reload()
     }
+
+    // ── Rice mode — hot-reloaded from stage/mode.json ──────────────────────
+    // `aoide rice mode {stage,declarative,draft}` (storage::mode, RiceMode)
+    // writes this file on every mode change; the background reconciler
+    // touches it too. Same FileView-hot-reload idiom as notePath above, kept
+    // as a SEPARATE file/watcher since mode.json and livery.json are written
+    // independently by different code paths. Default mirrors Rust's own
+    // `impl Default for RiceMode` (declarative) so an absent/unparseable
+    // file reads as the safe, non-mutating mode rather than a false
+    // "staging".
+    readonly property string modePath:
+        Quickshell.env("HOME") + "/Aoide/song/stage/mode.json"
+    property var modeRaw: ({ "mode": "declarative" })
+    readonly property string riceMode: modeRaw.mode ? modeRaw.mode : "declarative"
+
+    property FileView modeFile: FileView {
+        id: modeFile
+        path: root.modePath
+        watchChanges: true
+        onFileChanged: modeFile.reload()
+        onTextChanged: {
+            var txt = modeFile.text()
+            if (!txt) return
+            try {
+                root.modeRaw = JSON.parse(txt)
+            } catch (e) {
+                console.warn("[aoide/notes] Failed to parse mode.json:", e)
+            }
+        }
+        Component.onCompleted: modeFile.reload()
+    }
 }

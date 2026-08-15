@@ -54,6 +54,17 @@ QtObject {
         })
     }
 
+    // ── Rice-mode toggle ───────────────────────────────────────────────────
+    // Backs the bar's mode cell (bar.qml, rightContent's modeText). A click
+    // is a two-way toggle, not a picker: no payload — the daemon reads
+    // stage/mode.json itself and decides staging⇄declarative (see
+    // shellbridge.rs's dispatch_rice_mode_toggle).
+    function toggleRiceMode() {
+        sendCommand({
+            cmd: "ricemode"
+        })
+    }
+
     // ── Generic command sender ─────────────────────────────────────────────
     // Writes one newline-delimited JSON line to the shellbridge socket. If the
     // socket is up, it goes out immediately; otherwise the line is queued and
