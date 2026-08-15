@@ -100,7 +100,71 @@ Item {
         return "( ・ω・)ノ"                         // attentive, on the case
     }
 
-    width: 340
+    // ── Smart payload reading ────────────────────────────────────────────
+    // Senders arrive in two shapes:
+    //   1. Proper freedesktop: appName + summary (title) + body (message).
+    //   2. Terminal-forwarded OSC-9 (kimi via kitty): the WHOLE
+    //      "Title: message" string lands in `summary`, `body` is empty,
+    //      and appName is the forwarder ("kitty"), not the real program.
+    // These helpers are generic — they read whatever shape arrived, for
+    // any program, nothing is kimi-specific:
+    //   - parentTitle(): desktop-entry id first (file-ish ids like
+    //     "firefox.desktop" read worse than "firefox"), then appName,
+    //     then the old "notice" floor.
+    //   - titleText()/contextText(): when the body is empty, split a
+    //     "Title: message" summary at its first ": " so the notif's own
+    //     title and its message render as two differentiated tiers
+    //     instead of one mashed line. The split only fires when the part
+    //     before the colon reads like a real multi-word title ("Re:",
+    //     "12:30" and single-word app names are left alone).
+    function strippedEntry(e) {
+        var s = (e || "").trim()
+        if (s.slice(-8) === ".desktop") s = s.slice(0, -8)
+        return s
+    }
+    function parentTitle() {
+        var n = root.notification
+        if (!n) return "notice"
+        var d = strippedEntry(n.desktopEntry)
+        if (d.length > 0) {
+            return d.length > 28 ? d.slice(0, 27) + "…" : d
+        }
+        var a = (n.appName || "").trim()
+        if (a.length > 0) {
+            return a.length > 28 ? a.slice(0, 27) + "…" : a
+        }
+        return "notice"
+    }
+    function splitAt() {
+        var n = root.notification
+        if (!n) return -1
+        var s = (n.summary || "").trim()
+        if (s.length === 0) return -1
+        var b = (n.body || "").trim()
+        if (b.length > 0) return -1          // body already carries the message
+        var idx = s.indexOf(": ")
+        if (idx <= 5 || idx >= 60) return -1 // too short/too long to be a title
+        if (s.slice(0, idx).indexOf(" ") <= 0) return -1 // single word — not a title
+        return idx
+    }
+    function titleText() {
+        var n = root.notification
+        if (!n) return ""
+        var s = (n.summary || "").trim()
+        var idx = root.splitAt()
+        return idx > 0 ? s.slice(0, idx) : s
+    }
+    function contextText() {
+        var n = root.notification
+        if (!n) return ""
+        var b = (n.body || "").trim()
+        if (b.length > 0) return b
+        var s = (n.summary || "").trim()
+        var idx = root.splitAt()
+        return idx > 0 ? s.slice(idx + 2) : ""
+    }
+
+    width: 360
     implicitHeight: stele.height + 5   // +5 clears the cast shadow's overhang
 
     // ── Auto-dismiss (freedesktop notification-spec semantics) ─────────────
@@ -234,7 +298,7 @@ Item {
                     text: "[ notify ]"
                     font.family: root.faceMono
                     font.pixelSize: 10
-                    color: root.withA(root.signature, 0.9)
+                    color: root.withA(root.signature, 0.55)
                 }
             }
 
@@ -255,8 +319,7 @@ Item {
                 Text {
                     id: tfL
                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                    text: "┌─┤ " + ((root.notification && root.notification.appName)
-                                     ? root.notification.appName : "notice") + " ├"
+                    text: "┌─┤ " + root.parentTitle() + " ├"
                     font.family: root.faceMono; font.pixelSize: 11
                     color: root.withA(root.signature, 0.95)
                 }
@@ -269,17 +332,39 @@ Item {
                 }
                 Rectangle {
                     anchors.left: tfL.right; anchors.right: tfR.left
-                    anchors.leftMargin: 2; anchors.rightMargin: 2
+                    anchors.leftMargin: 1; anchors.rightMargin: 1
                     anchors.verticalCenter: parent.verticalCenter
-                    height: 1; color: root.withA(root.signature, 0.55)
+                    height: 1; color: root.withA(root.signature, 0.8)
                 }
             }
 
-            // ── Summary (bold/prominent) + body (optional) ───────────────
+            // ── Title/message cut — one plain rule cleaves the program-
+            // name frame (the title) from the message below it, the way a
+            // sender's own toast separates its header from its body. The
+            // Tuscan frieze above stays the entablature's ornament; this
+            // lower rule is the entablature/shaft boundary of the stele ──
+            Item {
+                width: parent.width
+                height: 9
+                Rectangle {
+                    anchors.top: parent.top; anchors.topMargin: 1
+                    width: parent.width; height: 1
+                    color: root.withA(root.signature, 0.55)
+                }
+            }
+
+            // ── Title / context — two differentiated tiers ────────────────
+            // titleText()/contextText() above split the mashed OSC-9 shape
+            // ("Title: message" in summary, empty body) so the notif's own
+            // title and its message render separately, like the sender's own
+            // toast. The title is the bold serif carve; the context sits
+            // below it, smaller, dimmer, indented behind a faint signature
+            // hairline — same voice, clearly second.
             Text {
                 width: parent.width
-                text: root.notification ? root.notification.summary : ""
+                text: root.titleText()
                 textFormat: Text.PlainText
+                visible: text.length > 0
                 color: root.isCritical ? root.notes.notifUrgent : root.notes.notifFg
                 font.family: root.faceSerif
                 font.bold: true
@@ -287,15 +372,30 @@ Item {
                 wrapMode: Text.WordWrap
                 topPadding: 2
             }
-            Text {
+            Item {
                 width: parent.width
-                text: root.notification ? root.notification.body : ""
-                textFormat: Text.PlainText
-                visible: text.length > 0
-                color: root.notes.notifFg
-                opacity: 0.85
-                font.pixelSize: 12
-                wrapMode: Text.WordWrap
+                visible: contextLabel.text.length > 0
+                height: contextLabel.implicitHeight + 5
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.top: contextLabel.top
+                    anchors.bottom: contextLabel.bottom
+                    width: 1
+                    color: root.withA(root.signature, 0.45)
+                }
+                Text {
+                    id: contextLabel
+                    anchors.top: parent.top; anchors.topMargin: 5
+                    anchors.left: parent.left; anchors.leftMargin: 10
+                    anchors.right: parent.right
+                    text: root.contextText()
+                    textFormat: Text.PlainText
+                    color: root.notes.notifFg
+                    opacity: 0.85
+                    font.pixelSize: 12
+                    lineHeight: 1.3
+                    wrapMode: Text.WordWrap
+                }
             }
 
             // ── Actions — each a clickable button; invoke() alone (it closes

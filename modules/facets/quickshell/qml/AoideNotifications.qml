@@ -147,12 +147,12 @@ PanelWindow {
     WlrLayershell.namespace: "aoide-notifications"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
-    implicitWidth: 340
+    implicitWidth: 360
     implicitHeight: Math.max(1, stack.implicitHeight)
 
     Column {
         id: stack
-        width: 340
+        width: 360
         spacing: 8
 
         Repeater {
