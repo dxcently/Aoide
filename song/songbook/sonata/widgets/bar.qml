@@ -94,6 +94,51 @@
 //     package is added by the quickshell facet — it is that facet's widget
 //     that needs it.
 //
+// khoa, 2026-08-16 — THE CUE BECOMES A CONTROL, AND THE PILLARS GET ROSTERS.
+// Three changes, all of them reversing or extending a decision from the day
+// before:
+//   · THE CUE IS REACHABLE. The 2026-08-15 build shed `audioBodyHover`, so
+//     `audioCueShown` read the BAR CELL only and the card vanished the instant
+//     the pointer left the cell — it could be looked at and never entered.
+//     Restored as two latches (`cueBodyHover` for the card's own body,
+//     `cueHotRow` for the voice rows) behind a 220ms grace `Timer`. ONE
+//     `MouseArea` at the cue's root feeds both: anything that accepts hover
+//     there was measured swallowing every nested row's hover, and a
+//     `HoverHandler` did not compose any better, so the row band is resolved
+//     ARITHMETICALLY from the pointer position instead. Its
+//     `anchors.topMargin: -4` reaches past the stele to claim StelePopout's
+//     4px host gap — between the cell's bottom edge and the stele's top edge
+//     lie 4px of popup surface owned by no item, and a pointer that pauses
+//     there outlives any grace. Both notes are recorded on the component
+//     itself with what was measured.
+//   · MUTE MOVES INTO THE CUE, AND MIDDLE-CLICK IS WITHDRAWN. Each voice row
+//     is now clickable — out and in toggle mute, bt toggles adapter power
+//     (this file's own colonnade already holds that powered-down and silenced
+//     are one idea and draws them as one shape). Yesterday's middle-click on
+//     the bar cell existed for exactly one reason — left-click had just been
+//     taken by "open" and mute could not be allowed to cost a surface plus
+//     two clicks. It no longer costs that: the cue is already on screen
+//     whenever the pointer is on the cell, it now STAYS on screen, and one
+//     click on the row does it, for all THREE voices instead of two. A second
+//     invisible path to a verb that is now drawn on screen is not a shortcut,
+//     it is a thing that rots, so `Qt.MiddleButton` is gone from both cells
+//     and `mmb · mute` is gone from the ledger with it — the line now reads
+//     `click · silence`, which describes a gesture the surface it is printed
+//     on actually has.
+//   · THE COLONNADE'S PILLARS GET ROSTERS. Each bay carries a plinth chip
+//     naming its current channel, and the chip opens a picker over the porch.
+//     VOL lists sinks, MIC lists sources, BT lists bluez devices. Grounded on
+//     the compiled quickshell-service-pipewire.qmltypes: `defaultAudioSink`
+//     and `defaultAudioSource` are `isReadonly: true`, but the file also
+//     declares `preferredDefaultAudioSink` / `preferredDefaultAudioSource`
+//     with `write: "setDefaultConfiguredAudioSink"` /
+//     `"setDefaultConfiguredAudioSource"` — i.e. the default IS settable
+//     natively, and no `pactl set-default-sink` shell-out is needed. That is
+//     the whole switch. The roster itself comes off `Pipewire.nodes`, filtered
+//     by `PwNodeType.Audio` with `isStream` excluded, and the BT roster off
+//     `Bluetooth.devices` with `connect()`/`disconnect()` (the only verbs that
+//     module has — see the 2026-08-15 grounding on the seam below).
+//
 // Data sources (unchanged real Quickshell services — the plumbing survives):
 //   - Hyprland   → workspaces (WorkspaceRow) + active window title.
 //   - Pipewire   → default sink/source volume / muted, and the bluez node's
@@ -519,6 +564,88 @@ component WorkspaceRow: Item {
         if (srcAudio) srcAudio.muted = !srcAudio.muted
     }
 
+    // ── Channel rosters — what the colonnade's pillar dropdowns list ───────
+    // khoa, 2026-08-16. GROUNDED AGAINST quickshell-service-pipewire.qmltypes,
+    // which settles the question the previous pass left open. `defaultAudioSink`
+    // and `defaultAudioSource` are declared `isReadonly: true` — but the same
+    // Component also declares:
+    //
+    //     Property { name: "preferredDefaultAudioSink"
+    //                read:  "defaultConfiguredAudioSink"
+    //                write: "setDefaultConfiguredAudioSink" … }
+    //     Property { name: "preferredDefaultAudioSource"
+    //                read:  "defaultConfiguredAudioSource"
+    //                write: "setDefaultConfiguredAudioSource" … }
+    //
+    // with no `isReadonly`. So the default output and input ARE settable from
+    // QML, and switching them needs no `pactl set-default-sink` and no
+    // shell-out at all — unlike the bluez profile write one section down,
+    // which has no native setter in either module and is the only thing here
+    // that still leaves the process. Reads native, writes native: this seam
+    // never touches a shell.
+    //
+    // The roster itself comes off `Pipewire.nodes`, which the same file gives
+    // as an UntypedObjectModel of PwNode; each node carries `isSink`,
+    // `isStream`, `nickname`/`description`/`name` and a `type` in
+    // `PwNodeType::Flags`. Streams are applications, not devices, so they are
+    // excluded; the `PwNodeType.Audio` bit excludes video nodes.
+    property int pwEpoch: 0
+    Connections {
+        target: Pipewire.nodes
+        function onObjectInsertedPost(obj, index) { root.pwEpoch++ }
+        function onObjectRemovedPost(obj, index) { root.pwEpoch++ }
+    }
+    function nodeLabel(n) {
+        var s = "" + (n.nickname || n.description || n.name || "")
+        return s.length > 0 ? s : "node " + n.id
+    }
+    // The gloss beside the name: the node name's own tail, which is where
+    // ALSA puts the port ("analog-stereo", "hdmi-stereo-extra1"). It answers
+    // "which one is this" when two devices share a nickname.
+    function nodeGloss(n) {
+        var s = "" + (n.name || "")
+        var dot = s.lastIndexOf(".")
+        var tail = dot >= 0 ? s.substring(dot + 1) : s
+        if (tail.length === 0) return ""
+        return tail.length > 18 ? tail.substring(0, 17) + "…" : tail
+    }
+    function pwRoster(wantSink) {
+        var epoch = root.pwEpoch          // the dependency that re-runs this
+        var out = []
+        if (!Pipewire.ready) return out
+        var vals = (Pipewire.nodes && Pipewire.nodes.values)
+                   ? Pipewire.nodes.values : []
+        var cur = wantSink ? Pipewire.defaultAudioSink : Pipewire.defaultAudioSource
+        for (var i = 0; i < vals.length; i++) {
+            var n = vals[i]
+            if (!n || n.isStream) continue
+            if (!(n.type & PwNodeType.Audio)) continue
+            if (n.isSink !== wantSink) continue
+            out.push({ key: "" + n.id,
+                       name: root.nodeLabel(n),
+                       gloss: root.nodeGloss(n),
+                       current: cur !== null && cur !== undefined && cur.id === n.id })
+        }
+        return out
+    }
+    readonly property var sinkRoster: pwRoster(true)
+    readonly property var sourceRoster: pwRoster(false)
+    function pwNodeById(key) {
+        var vals = (Pipewire.nodes && Pipewire.nodes.values)
+                   ? Pipewire.nodes.values : []
+        for (var i = 0; i < vals.length; i++)
+            if (vals[i] && ("" + vals[i].id) === ("" + key)) return vals[i]
+        return null
+    }
+    function pickSink(key) {
+        var n = root.pwNodeById(key)
+        if (n) Pipewire.preferredDefaultAudioSink = n
+    }
+    function pickSource(key) {
+        var n = root.pwNodeById(key)
+        if (n) Pipewire.preferredDefaultAudioSource = n
+    }
+
     // ── Bluetooth helpers (Quickshell.Bluetooth → bluez) ───────────────────
     // The third audio voice. `Bluetooth` is the bluez singleton; with bluez
     // down (or no adapter) `defaultAdapter` is null and every derived read
@@ -555,6 +682,10 @@ component WorkspaceRow: Item {
         if (s.length <= n) return s
         return s.substring(0, n - 1) + "…"
     }
+    // Bumped alongside the connected-device rescan so the ROSTER re-reads on
+    // the same edges: the model is silent on a connect, so without this the
+    // dropdown would show a device's old state until something else moved.
+    property int btEpoch: 0
     function _rescanBt() {
         var vals = (Bluetooth.devices && Bluetooth.devices.values)
                    ? Bluetooth.devices.values : []
@@ -563,6 +694,38 @@ component WorkspaceRow: Item {
             if (vals[i] && vals[i].connected) { found = vals[i]; break }
         }
         btDev = found
+        btEpoch++
+    }
+    // The BT bay's roster. `Quickshell.Bluetooth`'s BluetoothDevice gives only
+    // connect/disconnect/pair/cancelPair/forget (checked against
+    // quickshell-bluetooth.qmltypes — see the grounding note above), so
+    // selecting a row can only mean "connect this, or drop it if it is already
+    // connected". Pairing is left to blueman; this is a switch, not a manager.
+    readonly property var btRoster: {
+        var epoch = root.btEpoch
+        var out = []
+        var vals = (Bluetooth.devices && Bluetooth.devices.values)
+                   ? Bluetooth.devices.values : []
+        for (var i = 0; i < vals.length; i++) {
+            var d = vals[i]
+            if (!d) continue
+            out.push({ key: "" + d.address,
+                       name: "" + (d.deviceName || d.name || d.address),
+                       gloss: d.connected ? "connected"
+                            : (d.paired ? "paired" : "seen"),
+                       current: d.connected === true })
+        }
+        return out
+    }
+    function pickBtDevice(key) {
+        var vals = (Bluetooth.devices && Bluetooth.devices.values)
+                   ? Bluetooth.devices.values : []
+        for (var i = 0; i < vals.length; i++) {
+            var d = vals[i]
+            if (!d || ("" + d.address) !== ("" + key)) continue
+            if (d.connected) d.disconnect(); else d.connect()
+            return
+        }
     }
     Connections {
         target: Bluetooth
@@ -863,12 +1026,57 @@ component WorkspaceRow: Item {
     //              (`audioOpen`), the same toggle idiom the tray fermata and
     //              the calendar already use on this strip.
     // The cue stands down while the colonnade is open, so the two never stack.
+    //
+    // khoa, 2026-08-16: the cue RETAINS on its own body again. Yesterday's
+    // build derived `audioCueShown` from the bar cell alone, which made the
+    // card unreachable — leaving the cell to go to it was what closed it.
+    // Three latches now feed one grace timer:
+    //   · `volCellHover`/`micCellHover` — the bar cells (unchanged)
+    //   · `cueBodyHover`  — set by the ONE MouseArea at the cue's root, which
+    //                       is the card's only hit-testing authority for a
+    //                       measured reason recorded on the component itself.
+    //                       Its `anchors.topMargin: -4` reaches past the
+    //                       stele's own bounds to claim StelePopout's 4px host
+    //                       gap, the strip of popup between the cell and this
+    //                       card that belongs to no item.
+    //   · `cueHotRow`     — which voice row the pointer is on, as an INDEX and
+    //                       not a bool: two rows racing on enter/exit order
+    //                       can settle a shared bool false with the pointer
+    //                       still inside one of them. An index only ever
+    //                       clears itself (`if (cueHotRow === row)`), so the
+    //                       order cannot corrupt it. It doubles as the
+    //                       row-hover read, so no row needs its own.
+    // Each latch has exactly ONE writer, which is what makes the union safe.
+    // `cueGrace` (220ms) covers the frame where every latch is momentarily
+    // false mid-handoff. Opening the colonnade drops the cue immediately
+    // rather than through the grace, so the two never overlap even for 220ms.
     property bool volCellHover: false  // pointer over the vol cell
     property bool micCellHover: false  // pointer over the mic cell
+    property bool cueBodyHover: false  // pointer inside the cue stele's body
+    property int  cueHotRow: -1        // voice row under the pointer (-1 none)
     property bool audioOpen: false     // the colonnade — click-latched
     readonly property bool audioCellHover: volCellHover || micCellHover
-    readonly property bool audioCueShown: audioCellHover && !audioOpen
-    readonly property bool audioShown: audioCellHover || audioOpen
+    readonly property bool cueRetain: cueBodyHover || cueHotRow >= 0
+    readonly property bool cueWanted: (audioCellHover || cueRetain) && !audioOpen
+    property bool audioCueShown: false
+    onCueWantedChanged: {
+        if (cueWanted) { cueGrace.stop(); audioCueShown = true }
+        else cueGrace.restart()
+    }
+    onAudioOpenChanged: {
+        if (audioOpen) {
+            cueGrace.stop()
+            cueBodyHover = false
+            cueHotRow = -1
+            audioCueShown = false
+        }
+    }
+    Timer {
+        id: cueGrace
+        interval: 220
+        onTriggered: if (!root.cueWanted) root.audioCueShown = false
+    }
+    readonly property bool audioShown: audioCellHover || cueRetain || audioOpen
     property bool battShown: false     // battery hover popout
     property bool calShown: false      // calendar click popout (song widget slot)
 
@@ -1149,21 +1357,20 @@ component WorkspaceRow: Item {
             }
         }
 
-        // Volume (OUTPUT) — scroll = adjust, LEFT-click = open the colonnade,
-        // MIDDLE-click = mute, hover = the cue readout. Attic-gold ink; hover
-        // feedback is opacity + underline (the base is already the accent).
+        // Volume (OUTPUT) — scroll = adjust, click = open the colonnade,
+        // hover = the cue readout. Attic-gold ink; hover feedback is opacity
+        // + underline (the base is already the accent).
         //
-        // khoa, 2026-08-15 — WHERE MUTE WENT. Left-click had to become "open",
-        // so mute moved to the middle button rather than to a right-click
-        // context menu (nothing on this strip has one, and inventing one for a
-        // single verb is a second interaction system) or to the colonnade
-        // alone (mute is an everyday action; two clicks and a surface for it
-        // is a regression). Middle-click cannot be hit by accident and is the
-        // status-bar convention for a cell's secondary verb. It is not a
-        // hidden gesture: the cue stele that appears under the pointer prints
-        // `mmb · mute` in its ledger, so the affordance is on screen at the
-        // exact moment the pointer is on the cell. The colonnade's own
-        // per-column click still mutes too — that path is unchanged.
+        // khoa, 2026-08-16 — MIDDLE-CLICK WITHDRAWN. The 2026-08-15 build put
+        // mute on the middle button here because left-click had just become
+        // "open" and mute could not be allowed to cost a surface plus two
+        // clicks. That premise is gone: the cue now stays open when entered
+        // and every voice row on it is a one-click mute, so the cost is a
+        // hover the pointer is already making plus one click — and it covers
+        // bluetooth too, which middle-click never did. What was left was a
+        // gesture with no mark on the cell, advertised only by a ledger line
+        // on a DIFFERENT widget; both are gone. The colonnade's own per-column
+        // click still mutes, unchanged.
         Text {
             id: volText
             anchors.verticalCenter: parent.verticalCenter
@@ -1179,13 +1386,9 @@ component WorkspaceRow: Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                acceptedButtons: Qt.LeftButton | Qt.MiddleButton
                 onEntered: root.volCellHover = true
                 onExited: root.volCellHover = false
-                onClicked: function (mouse) {
-                    if (mouse.button === Qt.MiddleButton) root.volToggleMute()
-                    else root.audioOpen = !root.audioOpen
-                }
+                onClicked: root.audioOpen = !root.audioOpen
                 onWheel: {
                     root.volAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
                     wheel.accepted = true
@@ -1194,8 +1397,9 @@ component WorkspaceRow: Item {
         }
 
         // Microphone (INPUT) — the cool aegean voice, paired beside the vol cell.
-        // Same gesture set as the vol cell: scroll = capture gain, LEFT-click =
-        // open the colonnade, MIDDLE-click = mute, hover = the cue readout.
+        // Same gesture set as the vol cell: scroll = capture gain, click = open
+        // the colonnade, hover = the cue readout (mute lives on the cue's own
+        // `in` row as of 2026-08-16 — see the vol cell's note above).
         // ● recording dot when live; a 𝄽 rest when muted (mirrors the vol cell).
         Text {
             id: micText
@@ -1212,13 +1416,9 @@ component WorkspaceRow: Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                acceptedButtons: Qt.LeftButton | Qt.MiddleButton
                 onEntered: root.micCellHover = true
                 onExited: root.micCellHover = false
-                onClicked: function (mouse) {
-                    if (mouse.button === Qt.MiddleButton) root.micToggleMute()
-                    else root.audioOpen = !root.audioOpen
-                }
+                onClicked: root.audioOpen = !root.audioOpen
                 onWheel: {
                     root.micAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
                     wheel.accepted = true
@@ -1314,8 +1514,15 @@ component WorkspaceRow: Item {
     // shows current output volume, mic status and bluetooth status, and stops
     // there. In manuscript terms that is a CUE STAFF — the small stave a
     // copyist writes above a part so the player can see what the other voices
-    // are doing without reading their parts. Informational by definition;
-    // nothing on it is clickable.
+    // are doing without reading their parts.
+    //
+    // khoa, 2026-08-16: it is no longer read-only. A copyist's cue staff also
+    // carries the TACET marks — where a voice falls silent — and that is the
+    // one verb this card grows: clicking a voice row silences it (mute for
+    // out/in, adapter power for bt). Nothing else on it is clickable, and the
+    // full control surface is still the colonnade one click away. It also
+    // RETAINS on its own body now (see the popout-state block above); the
+    // 2026-08-15 build could be looked at but never entered.
     //
     //   · ORDER   — the eleven parts (making-a-widget.md §1) at their floor
     //               sizes. A glance card is still a stele; there is no
@@ -1360,7 +1567,23 @@ component WorkspaceRow: Item {
         property string chip: ""          // shown instead of a meter
         property string value: ""
 
+        // khoa, 2026-08-16 — the row is a CONTROL now. It carries no MouseArea
+        // of its own: the cue's single root MouseArea resolves which row the
+        // pointer is in and calls `picked()` (the note there records why).
+        // `row` is this voice's index in that scheme; `topInCue` is the top
+        // edge it publishes for the hit test, derived from its own position so
+        // the drawing and the hit band cannot drift apart. `hushed` is the
+        // silenced state; `actionable` gates both click and hover for a voice
+        // with nothing behind it.
+        property int row: -1
+        property bool actionable: false
+        property bool hushed: false
+        signal picked()
+
+        readonly property real topInCue: voice.y + (voice.parent ? voice.parent.y : 0)
+        readonly property bool hot: root.cueHotRow === voice.row && voice.actionable
         readonly property color ink: voice.notes ? voice.notes.paletteFg : "#000000"
+        readonly property color urgent: voice.notes ? voice.notes.paletteUrgent : "#000000"
         readonly property real rowAlpha: live ? 1.0 : 0.4
         function withA(cstr, a) {
             var c = Qt.color(cstr)
@@ -1369,6 +1592,28 @@ component WorkspaceRow: Item {
 
         width: parent ? parent.width : 0
         height: 16
+
+        // The hover ground — a faint wash of the row's own hue, so hover only
+        // PROMOTES what is already drawn (making-a-widget.md §4). Declared
+        // first so it sits behind the row's type.
+        Rectangle {
+            anchors.fill: parent
+            anchors.leftMargin: -3; anchors.rightMargin: -3
+            radius: 0
+            color: voice.hot ? voice.withA(voice.hue, 0.13) : "transparent"
+            Behavior on color { ColorAnimation { duration: 150 } }
+        }
+        // The hush mark — a 1px rule struck through a silenced row, in
+        // terracotta, so the state reads from the SHAPE with the colour
+        // removed (the colonnade encodes the same state as a broken column).
+        Rectangle {
+            anchors.left: parent.left; anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: 1
+            height: 1
+            visible: voice.hushed
+            color: voice.withA(voice.urgent, 0.75)
+        }
 
         Text {
             id: vGlyph
@@ -1389,7 +1634,7 @@ component WorkspaceRow: Item {
             text: voice.name
             font.family: "Noto Serif"; font.pixelSize: 11
             font.letterSpacing: 1
-            color: voice.withA(voice.ink, 0.85 * voice.rowAlpha)
+            color: voice.withA(voice.ink, (voice.hot ? 1.0 : 0.85) * voice.rowAlpha)
         }
         // the gauge — one hairline track, one fill, no box (the opacity
         // ladder does the separating; making-a-widget.md §3)
@@ -1428,7 +1673,8 @@ component WorkspaceRow: Item {
             anchors.verticalCenter: parent.verticalCenter
             text: voice.value
             font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 11
-            color: voice.withA(voice.hue, voice.rowAlpha)
+            color: voice.hushed ? voice.urgent
+                                : voice.withA(voice.hue, voice.rowAlpha)
         }
     }
 
@@ -1454,6 +1700,21 @@ component WorkspaceRow: Item {
             if (root.volPct >= 85) return "♪(´▽｀)"
             return "( ･ω･)ﾉ"
         }
+        // The three voice rows, in the order they are drawn — the index the
+        // hit test speaks in, and the index each row carries as `row`.
+        function voices() { return [voiceOut, voiceIn, voiceBt] }
+        // Which voice row a pointer Y (in this root's coordinates) falls in,
+        // or -1. Skips a voice with nothing behind it, so a dead row is not
+        // merely inert but untargetable.
+        function rowAt(y) {
+            var vs = cue.voices()
+            for (var i = 0; i < vs.length; i++) {
+                var v = vs[i]
+                if (!v.actionable) continue
+                if (y >= v.topInCue && y < v.topInCue + v.height) return i
+            }
+            return -1
+        }
         function sinkName() {
             var n = Pipewire.defaultAudioSink
             var s = n ? ("" + (n.nickname || n.description || n.name || "")) : ""
@@ -1463,6 +1724,71 @@ component WorkspaceRow: Item {
 
         width: 206
         implicitHeight: stele.height + 5      // +5 clears the cast shadow
+
+        // ── THE RETENTION LATCHES · ONE HIT-TESTING AUTHORITY ───────────────
+        // Everything the pointer does to this card goes through this single
+        // MouseArea: it holds the card open, it claims StelePopout's host gap,
+        // it decides which voice row is hot, and it dispatches the click. That
+        // is not tidiness, it is what the measurements on 2026-08-16 left
+        // standing. Arrangements were built and read off screen through a live
+        // state print in this ledger:
+        //   1. a filling MouseArea here PLUS a MouseArea per row — the root
+        //      took every hover: `cueHotRow` read -1 at every pointer position
+        //      down the card, and switching this one object's `hoverEnabled`
+        //      off (nothing else changed) made the rows light immediately.
+        //      Whatever accepts hover at this root gets it before a MouseArea
+        //      nested inside the stele does.
+        //   2. a `HoverHandler` here instead of the MouseArea, on the
+        //      expectation that a handler composes with descendant MouseAreas
+        //      rather than competing with them — the rows stayed dark, so it
+        //      does not help.
+        //   3. a 4px MouseArea anchored `bottom: parent.top` to claim the host
+        //      gap — it latched true on entry and never received its exit, and
+        //      read hovered at every depth down the card. An item lying wholly
+        //      outside its parent's bounds gets its enter and not its leave.
+        // So: one object, no nesting, no handler. The row band is resolved
+        // ARITHMETICALLY from the pointer position, which needs no event
+        // delivery to a nested item at all. Each voice publishes its own top
+        // edge (`topInCue`) rather than the numbers being restated here, so
+        // moving a band in the Column cannot desynchronise the hit test from
+        // the drawing.
+        //
+        // WHAT WAS NOT VERIFIED BY POINTING AT IT, and why: this rig has no
+        // input synthesis, and `hyprctl dispatch movecursor` — which is what
+        // drove every reading above — WARPS the cursor without generating a
+        // pointer motion event inside a surface the pointer is already in.
+        // Proved directly: warping off the vol cell to another cell on the
+        // same bar surface leaves the vol cell still underlined, i.e. its
+        // hover never cleared. So enter/leave ACROSS surfaces is testable
+        // here and motion WITHIN one is not, which is why the cell-to-card
+        // handoff below is proven and the per-row hover wash is not. It is
+        // also the reason this design is preferred over per-row MouseAreas
+        // even though both work under a real pointer: one item that owns both
+        // the hover and the press has no delivery question left to get wrong.
+        //
+        // `topMargin: -4` claims the host gap: StelePopout parents its child
+        // at `anchors.topMargin: 4`, so 4px of popup surface sit ABOVE this
+        // stele, directly under the bar cell the pointer is leaving, belonging
+        // to no item — left unclaimed, a pointer that PAUSES there outlives
+        // the grace timer and the card closes under it with nothing left to
+        // reopen it. The cost of that margin is that `mouseY` is 4px ahead of
+        // this root's own coordinates, which is why `rowAt` is handed
+        // `mouseY - 4` and not `mouseY`.
+        MouseArea {
+            id: cueMa
+            anchors.fill: parent
+            anchors.topMargin: -4
+            hoverEnabled: true
+            cursorShape: root.cueHotRow >= 0 ? Qt.PointingHandCursor
+                                             : Qt.ArrowCursor
+            onEntered: { root.cueBodyHover = true; root.cueHotRow = cue.rowAt(mouseY - 4) }
+            onPositionChanged: root.cueHotRow = cue.rowAt(mouseY - 4)
+            onExited: { root.cueBodyHover = false; root.cueHotRow = -1 }
+            onClicked: {
+                var r = cue.rowAt(mouseY - 4)
+                if (r >= 0) cue.voices()[r].picked()
+            }
+        }
 
         // cast shadow ───────────────────────────────────────────────────────
         Rectangle {
@@ -1567,8 +1893,15 @@ component WorkspaceRow: Item {
                 }
 
                 // ── THE BODY — the three voices ────────────────────────────
+                // khoa, 2026-08-16 — each row is a one-click silencer now:
+                // out and in toggle mute, bt toggles adapter power. Powered
+                // down and silenced are ONE state in this widget's grammar
+                // (the colonnade draws both as the same broken column), so a
+                // single word covers all three in the ledger below.
                 CueVoice {
+                    id: voiceOut
                     notes: cue.notes
+                    row: 0
                     glyph: root.volMuted ? "𝄽" : root.volIcon(root.volPct)
                     glyphFace: cue.faceMusic
                     name: "out"
@@ -1577,9 +1910,14 @@ component WorkspaceRow: Item {
                     meter: root.volAvail && !root.volMuted
                     pct: root.volPct
                     value: !root.volAvail ? "—" : (root.volMuted ? "muted" : root.volPct + "%")
+                    actionable: root.volAvail
+                    hushed: root.volAvail && root.volMuted
+                    onPicked: root.volToggleMute()
                 }
                 CueVoice {
+                    id: voiceIn
                     notes: cue.notes
+                    row: 1
                     glyph: root.micMuted ? "𝄽" : "●"
                     glyphFace: root.micMuted ? cue.faceMusic : cue.faceMono
                     name: "in"
@@ -1588,10 +1926,15 @@ component WorkspaceRow: Item {
                     meter: root.micAvail && !root.micMuted
                     pct: root.micPct
                     value: !root.micAvail ? "—" : (root.micMuted ? "muted" : root.micPct + "%")
+                    actionable: root.micAvail
+                    hushed: root.micAvail && root.micMuted
+                    onPicked: root.micToggleMute()
                 }
                 CueVoice {
+                    id: voiceBt
                     glyph: ""                       // nf-fa-bluetooth
                     notes: cue.notes
+                    row: 2
                     glyphFace: cue.faceMono
                     name: "bt"
                     hue: cue.notes.wireCyan
@@ -1601,6 +1944,9 @@ component WorkspaceRow: Item {
                     value: !root.btAvail ? "—"
                          : (!root.btOn ? "off"
                          : (root.btConnected ? root.btShortName(12) : "on"))
+                    actionable: root.btAvail
+                    hushed: root.btAvail && !root.btOn
+                    onPicked: root.btTogglePower()
                 }
 
                 // ── ledger line ────────────────────────────────────────────
@@ -1619,7 +1965,13 @@ component WorkspaceRow: Item {
                     }
                     Text {
                         anchors.right: parent.right; anchors.bottom: parent.bottom
-                        text: "mmb · mute"
+                        // khoa, 2026-08-16: was `mmb · mute`, which advertised
+                        // a gesture on a DIFFERENT widget (the bar cell). That
+                        // gesture is withdrawn and this line now names the one
+                        // this card actually has. "silence" and not "mute"
+                        // because the bt row cuts power rather than muting, and
+                        // this widget already treats the two as one state.
+                        text: "click · silence"
                         font.family: cue.faceMono; font.pixelSize: 9
                         color: cue.withA(cue.ink, 0.5)
                     }
@@ -1702,6 +2054,12 @@ component WorkspaceRow: Item {
             btConnected: root.btConnected
             btName: root.btName
             btProfile: root.btProfile
+            sinkRoster: root.sinkRoster
+            sourceRoster: root.sourceRoster
+            btRoster: root.btRoster
+            onPickSink: function(k) { root.pickSink(k) }
+            onPickSource: function(k) { root.pickSource(k) }
+            onPickBt: function(k) { root.pickBtDevice(k) }
             onOutToggle: root.volToggleMute()
             onOutAdjust: function(d) { root.volAdjust(d) }
             onInToggle: root.micToggleMute()

@@ -81,10 +81,59 @@ import QtQuick
 //               anywhere else and does not grow one). The host runs
 //               pavucontrol; this file only signals.
 //
-// NOT VERIFIED HERE: no bluetooth adapter is up on yomi-strix (bluez is not
-// enabled in the nix modules), so the connected/A2DP/HSP renders above were
-// driven from fabricated props through the bar, not from the live service.
-// Only the no-adapter register has been seen coming off real bluez.
+// khoa, 2026-08-16 — EVERY BAY GETS ITS ROSTER. "Which channel is this, and
+// let me change it" was the one question the porch could not answer: it drew
+// how loud the output was and never which output. Two parts, and no new
+// chrome family for either:
+//
+//   · THE PLINTH — a course of three drawn chips under the tallies, one per
+//     bay, each naming its bay's current channel. It is the calendar's
+//     `[ ἔτος ⌄ ]` control verbatim (hairline border, radius 0, a faint
+//     signature fill on hover, a wedge pointing where the material will go),
+//     tripled and set on the stylobate's own line, because that file already
+//     settled that a CONTROL in this house has a pressable edge while a tag
+//     is only ever letters. Read at rest, it answers the question without
+//     being opened, which was half the ask.
+//   · THE PICKER — pressing a chip swaps the porch's middle for that bay's
+//     list. It does not drop DOWN out of the pillar: three 84px popups hung
+//     under three bays would overlap each other, escape the stele, or be too
+//     narrow to hold a device name, and this file has no floating-panel
+//     vocabulary to borrow for them. Instead the bay OPENS — the columns fade
+//     out and the list takes exactly the rect they occupied, captioned by the
+//     stele's existing top frame (`♪ levels` becomes `♪ vol · sinks`). Three
+//     structural consequences fall out for free: only one bay can be open
+//     (`openBay` is a single int), the list can never overlap another bay
+//     because it replaces all three, and it can never escape the stele
+//     because it is anchored inside the porch. The architrave stays lit above
+//     it with the open bay's inscription at full ink and the other two
+//     stepped back, so the list never loses which pillar it came from.
+//     Rows are `launcher.qml`'s manuscript row — margin mark, serif name,
+//     mono gloss, hairline rule — with the CURRENT entry marked by that bay's
+//     own hue, the same "filled in the bay's hue means this one is live"
+//     language the lit drum and the rising fill already speak.
+//
+// The porch widened 320 → 352 (colW 72 → 84) for exactly one reason: a chip
+// 72px wide elides a real sink name to about "SN6186 An…", and a control that
+// cannot show its own answer is not worth the line it costs.
+//
+// The write is NATIVE, and that is a correction to what this file assumed in
+// August: `quickshell-service-pipewire.qmltypes` marks `defaultAudioSink` and
+// `defaultAudioSource` `isReadonly: true`, but declares alongside them
+// `preferredDefaultAudioSink` and `preferredDefaultAudioSource` carrying
+// `write: "setDefaultConfiguredAudioSink"` / `"setDefaultConfiguredAudioSource"`.
+// So switching the default output or input needs no `pactl set-default-sink`
+// and no shell-out at all. Only the bluez A2DP↔HSP profile still leaves QML,
+// for the reason recorded above — that one has no native setter anywhere in
+// either module. This file holds neither seam; it emits the intent and the
+// bar performs it.
+//
+// NOT VERIFIED HERE: the connected / A2DP / HSP / device-list renders are
+// driven from fabricated props through AudioColonnadePreview, never from the
+// live service. yomi-strix now HAS a powered bluez adapter, but the running
+// Quickshell was started before bluetooth came up and its `Bluetooth`
+// singleton reports no default adapter, so the bar still feeds this file the
+// no-adapter register and only that register has been seen coming off real
+// bluez. The sink and source rosters ARE live.
 //
 // House rules: every colour from `notes` roles (zero hex); radius 0; no
 // QtQuick.Layouts (plain Item/Row/anchors — the documented sizing-loop hazard).
@@ -120,12 +169,32 @@ Item {
     signal btToggle()                     // power the adapter on/off
     signal btPick(string profile)         // "a2dp" | "hsp"
     signal openMixer()                    // the [ mixer ] tag → pavucontrol
+
+    // ── The rosters — one per bay, supplied by the bar ──────────────────────
+    // Each entry is plain data, never a live service object:
+    //   { key: string, name: string, gloss: string, current: bool }
+    // `key` is opaque here — a PipeWire node id for the two audio bays, a
+    // bluez address for the third — and travels back out untouched in the
+    // pick signals. The bar owns every service handle; this file is handed
+    // rows to draw and hands back which one was pressed, which is the same
+    // seam the level controls already use.
+    property var sinkRoster: []
+    property var sourceRoster: []
+    property var btRoster: []
+    signal pickSink(string key)           // → Pipewire.preferredDefaultAudioSink
+    signal pickSource(string key)         // → Pipewire.preferredDefaultAudioSource
+    signal pickBt(string key)             // → BluetoothDevice connect/disconnect
+
+    // Which bay's roster is open: -1 none, 0 MIC, 1 VOL, 2 BT. A single int
+    // is the whole no-overlap guarantee — two bays cannot be open at once
+    // because there is nowhere to store that.
+    property int openBay: -1
     // Popout-retention: true while the pointer is over any column. Kept for
     // hosts that hover-retain; the bar's colonnade is CLICK-latched as of
     // 2026-08-15 and no longer reads it.
     readonly property bool hovered: micCol.hovering || volCol.hovering || btCol.hovering
 
-    width: 320
+    width: 352
     implicitHeight: stele.height + 5      // +5 clears the cast shadow's overhang
 
     // type voices — shared across the pantheon
@@ -165,11 +234,57 @@ Item {
         return t.substring(0, n - 1) + "…"
     }
 
-    // colonnade geometry — one place, so architrave/shafts/tally stay aligned.
-    // TRISTYLE as of 2026-08-15 (was distyle): 3 * 72 + 2 * 26 = 268 inside a
-    // 298px content width, leaving a 15px inset the stylobate's widest step
+    // ── The open bay, resolved four ways ────────────────────────────────────
+    // One switch each rather than four parallel arrays, so adding a bay is a
+    // line in each and nothing can fall out of step silently.
+    function bayRoster(b) {
+        if (b === 0) return root.sourceRoster
+        if (b === 1) return root.sinkRoster
+        if (b === 2) return root.btRoster
+        return []
+    }
+    function bayHue(b) {
+        if (b === 0) return root.notes.holoBlue        // aegean — the input
+        if (b === 1) return root.notes.paletteAccent   // Attic gold — output
+        if (b === 2) return root.notes.wireCyan        // teal — bluetooth
+        return root.ink
+    }
+    // What the stele's own top frame says while this bay is open. The bay's
+    // own word, plural, because the frame is captioning a LIST.
+    function bayWord(b) {
+        if (b === 0) return "in · sources"
+        if (b === 1) return "out · sinks"
+        if (b === 2) return "bt · devices"
+        return "levels"
+    }
+    // The line a bay's chip carries at rest: the current entry's name, or the
+    // honest absence. The bt bay counts instead of naming, because its tally
+    // one line above already names the connected device and nothing in this
+    // house reads twice.
+    function bayChipText(b) {
+        var list = root.bayRoster(b)
+        if (b === 2) {
+            if (!root.btAvail) return "no adapter"
+            if (list.length === 0) return "none paired"
+            return list.length + (list.length === 1 ? " device" : " devices")
+        }
+        for (var i = 0; i < list.length; i++)
+            if (list[i].current) return root.shortName(list[i].name, 13)
+        return list.length > 0 ? "none set" : "—"
+    }
+    function pickInBay(b, key) {
+        if (b === 0) root.pickSource(key)
+        else if (b === 1) root.pickSink(key)
+        else if (b === 2) root.pickBt(key)
+        root.openBay = -1
+    }
+
+    // colonnade geometry — one place, so architrave/shafts/tally/plinth stay
+    // aligned. TRISTYLE as of 2026-08-15 (was distyle); widened 2026-08-16 so
+    // a plinth chip can hold a real channel name: 3 * 84 + 2 * 26 = 304 inside
+    // a 330px content width, leaving a 13px inset the stylobate's widest step
     // (inset - 9) still clears.
-    readonly property int colW: 72
+    readonly property int colW: 84
     readonly property int bayGap: 26
     readonly property int shaftW: 24
     readonly property int pierW: 34          // the bluetooth pier — wider, it
@@ -643,7 +758,9 @@ Item {
                 Text {
                     id: tfL
                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                    text: "┌─┤ ♪ levels ├"
+                    // The frame label IS the picker's caption — an open bay
+                    // renames this band rather than growing a second one.
+                    text: "┌─┤ ♪ " + root.bayWord(root.openBay) + " ├"
                     font.family: root.faceMono; font.pixelSize: 11
                     color: root.withA(root.sig, 0.95)
                 }
@@ -661,11 +778,14 @@ Item {
                 }
             }
 
-            // ══ THE PORCH — architrave · two columns · stylobate · tallies ══
+            // ══ THE PORCH — architrave · columns · stylobate · tallies · plinth
+            // 150 → 168 on 2026-08-16: the plinth course of chips is the only
+            // band added, and it is added rather than squeezed out of the
+            // existing ones so the vertical rhythm above it is untouched.
             Item {
                 id: porch
                 width: parent.width
-                height: 150
+                height: 168
 
                 // shared architrave beam carrying the MIC / VOL inscriptions
                 Item {
@@ -679,28 +799,31 @@ Item {
                         anchors.leftMargin: architrave.inset; anchors.rightMargin: architrave.inset
                         height: 1; color: root.withA(root.ink, 0.3)
                     }
+                    // The inscriptions stay lit while a picker is open below
+                    // them — that is what keeps the list attached to a
+                    // PILLAR. The open bay holds full ink and the other two
+                    // step back one rung of the ladder, which is the whole
+                    // "which one did this come from" signal: no arrow, no
+                    // tether, one opacity step (making-a-widget.md §3).
                     Row {
                         anchors.top: parent.top; anchors.topMargin: 3
                         anchors.horizontalCenter: parent.horizontalCenter
                         spacing: root.bayGap
-                        Text {
+                        component Inscription : Text {
+                            property int bay: -1
+                            property bool avail: true
+                            readonly property bool dimmed: root.openBay >= 0
+                                                           && root.openBay !== bay
                             width: root.colW; horizontalAlignment: Text.AlignHCenter
-                            text: "MIC"; font.family: root.faceSerif; font.pixelSize: 12
+                            font.family: root.faceSerif; font.pixelSize: 12
                             font.weight: Font.DemiBold; font.letterSpacing: 3
-                            color: root.inAvail ? root.ink : root.withA(root.ink, 0.4)
+                            color: !avail ? root.withA(root.ink, 0.4)
+                                 : (dimmed ? root.withA(root.ink, 0.35) : root.ink)
+                            Behavior on color { ColorAnimation { duration: 150 } }
                         }
-                        Text {
-                            width: root.colW; horizontalAlignment: Text.AlignHCenter
-                            text: "VOL"; font.family: root.faceSerif; font.pixelSize: 12
-                            font.weight: Font.DemiBold; font.letterSpacing: 3
-                            color: root.outAvail ? root.ink : root.withA(root.ink, 0.4)
-                        }
-                        Text {
-                            width: root.colW; horizontalAlignment: Text.AlignHCenter
-                            text: "BT"; font.family: root.faceSerif; font.pixelSize: 12
-                            font.weight: Font.DemiBold; font.letterSpacing: 3
-                            color: root.btAvail ? root.ink : root.withA(root.ink, 0.4)
-                        }
+                        Inscription { text: "MIC"; bay: 0; avail: root.inAvail }
+                        Inscription { text: "VOL"; bay: 1; avail: root.outAvail }
+                        Inscription { text: "BT";  bay: 2; avail: root.btAvail }
                     }
                     Rectangle {                               // architrave (the carried beam)
                         anchors.bottom: parent.bottom
@@ -709,6 +832,21 @@ Item {
                         height: 1.5; color: root.withA(root.ink, 0.5)
                     }
                 }
+
+                // ── THE PORCH PROPER — what an open bay trades away ──────────
+                // Columns, stylobate and tallies ride one Item so the picker
+                // can take their exact rect. Cross-faded rather than switched:
+                // `visible` is driven off the opacity so a faded-out porch
+                // stops taking clicks, and the columns' own MouseAreas go with
+                // it (nothing behind the picker is reachable while it is up).
+                Item {
+                    id: porchBody
+                    anchors.top: architrave.bottom
+                    anchors.bottom: plinthRow.top
+                    anchors.left: parent.left; anchors.right: parent.right
+                    opacity: root.openBay >= 0 ? 0 : 1
+                    visible: opacity > 0.01
+                    Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
 
                 // the shared stepped stylobate the columns stand on
                 Item {
@@ -731,9 +869,9 @@ Item {
                     }
                 }
 
-                // the two columns, between architrave and stylobate
+                // the three columns, between architrave and stylobate
                 Row {
-                    anchors.top: architrave.bottom; anchors.bottom: stylo.top
+                    anchors.top: parent.top; anchors.bottom: stylo.top
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: root.bayGap
                     Colonna {
@@ -814,6 +952,216 @@ Item {
                              : (!root.btOn ? root.notes.paletteUrgent
                              : (root.btConnected ? root.notes.wireCyan : root.ink))
                     }
+                }
+                }   // ── end porchBody ────────────────────────────────────────
+
+                // ══ THE PICKER — the open bay's roster, in the porch's rect ══
+                // Anchored to the same band `porchBody` occupies, so it can
+                // neither overlap another bay (there is no other bay while it
+                // is up) nor escape the stele. Rows are launcher.qml's
+                // manuscript row: a margin mark, a serif name, a mono gloss
+                // and a hairline rule, with the CURRENT entry marked in the
+                // bay's own hue — the same "filled in the bay's hue is the
+                // live one" language the lit drum and the rising fill speak.
+                Item {
+                    id: picker
+                    anchors.top: architrave.bottom; anchors.topMargin: 2
+                    anchors.bottom: plinthRow.top; anchors.bottomMargin: 2
+                    anchors.left: parent.left; anchors.right: parent.right
+                    anchors.leftMargin: 2; anchors.rightMargin: 2
+                    opacity: root.openBay >= 0 ? 1 : 0
+                    visible: opacity > 0.01
+                    Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+
+                    readonly property color hue: root.bayHue(root.openBay)
+                    readonly property var rows: root.bayRoster(root.openBay)
+
+                    // A ListView and not a Column: a machine can carry more
+                    // sinks than this band has room for, and a clipped Column
+                    // would simply hide them. Fixed height, fixed delegate
+                    // height, no footer — the contentHeight loop recorded in
+                    // hazards.md needs a footer or a self-referential size to
+                    // bite, and this has neither.
+                    ListView {
+                        id: rosterView
+                        // Inset to the architrave's own inset, so the rows'
+                        // rules run the same width as the cornice above and
+                        // the stylobate below rather than edge to edge — the
+                        // list sits INSIDE the porch's measure, not across it.
+                        readonly property real inset:
+                            (parent.width - (root.colW * 3 + root.bayGap * 2)) / 2
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: parent.width - 2 * inset
+                        // Height from the ROW COUNT, never from contentHeight:
+                        // sizing a view off its own contentHeight is the loop
+                        // recorded in hazards.md §2. Centred when the roster is
+                        // shorter than the band, so a two-entry list does not
+                        // hang off the architrave over a void.
+                        height: Math.min(picker.rows.length * 21, parent.height)
+                        y: Math.max(0, (parent.height - height) / 2)
+                        clip: true
+                        model: picker.rows
+                        boundsBehavior: Flickable.StopAtBounds
+                        delegate: Item {
+                            id: entry
+                            required property var modelData
+                            required property int index
+                            width: rosterView.width
+                            height: 21
+                            readonly property bool current: modelData
+                                                            && modelData.current === true
+                            readonly property bool hot: entryMa.containsMouse
+
+                            Text {                              // the margin mark
+                                id: entryMark
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.verticalCenterOffset: -1
+                                width: 13
+                                horizontalAlignment: Text.AlignHCenter
+                                text: entry.current ? "♪" : "·"
+                                font.family: root.faceMusic
+                                font.pixelSize: entry.current ? 13 : 11
+                                color: entry.current ? picker.hue
+                                                     : root.withA(root.ink, 0.3)
+                            }
+                            Text {                              // who
+                                id: entryName
+                                anchors.left: entryMark.right; anchors.leftMargin: 5
+                                anchors.right: entryGloss.left; anchors.rightMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.verticalCenterOffset: -1
+                                elide: Text.ElideRight
+                                text: entry.modelData ? ("" + entry.modelData.name) : ""
+                                font.family: root.faceSerif
+                                font.pixelSize: 11
+                                font.weight: entry.current ? Font.DemiBold : Font.Normal
+                                color: (entry.current || entry.hot)
+                                       ? root.ink : root.withA(root.ink, 0.85)
+                            }
+                            Text {                              // how
+                                id: entryGloss
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.verticalCenterOffset: -1
+                                text: entry.modelData ? ("" + entry.modelData.gloss) : ""
+                                font.family: root.faceMono
+                                font.pixelSize: 8
+                                font.letterSpacing: 1
+                                color: root.withA(root.ink, 0.45)
+                            }
+                            Rectangle {                         // the rule
+                                anchors.left: parent.left; anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                height: entry.current ? 2 : 1
+                                color: entry.current ? picker.hue
+                                     : root.withA(entry.hot ? picker.hue : root.ink,
+                                                  entry.hot ? 0.6 : 0.13)
+                                Behavior on color { ColorAnimation { duration: 150 } }
+                            }
+                            MouseArea {
+                                id: entryMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.pickInBay(root.openBay,
+                                                          "" + entry.modelData.key)
+                            }
+                        }
+                    }
+
+                    // The honest empty. A bay with nothing to offer says so
+                    // rather than opening onto a blank band.
+                    Text {
+                        anchors.centerIn: parent
+                        visible: picker.rows.length === 0
+                        text: root.openBay === 2 && !root.btAvail
+                              ? "no adapter" : "nothing to choose"
+                        font.family: root.faceSerif; font.pixelSize: 11
+                        font.italic: true
+                        color: root.withA(root.ink, 0.4)
+                    }
+                }
+
+                // ══ THE PLINTH — one chip per bay, naming its channel ════════
+                // calendar.qml's `[ ἔτος ⌄ ]` control, tripled: a DRAWN chip
+                // (hairline edge, radius 0, faint fill on hover) because that
+                // file settled that a control in this house has a pressable
+                // edge while a tag is only ever letters. At rest the edge is
+                // ink and only the wedge carries the bay's hue; the OPEN chip
+                // takes the hue outright, which is the one thing on this
+                // course wearing colour at a time.
+                Row {
+                    id: plinthRow
+                    anchors.bottom: parent.bottom
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: root.bayGap
+                    component Chip : Rectangle {
+                        id: chip
+                        property int bay: -1
+                        // A chip is live when its bay has a ROSTER, not when
+                        // the bay has an active channel — the case that forced
+                        // this apart was a machine with a capture device and
+                        // no default source set: the MIC column ghosts out
+                        // correctly, and gating the chip on the same flag
+                        // disabled the one control that could have set one.
+                        // The bt chip is always live, because "no adapter" is
+                        // an answer and you find it by opening the thing.
+                        readonly property bool avail: chip.bay === 2
+                                                      || root.bayRoster(chip.bay).length > 0
+                        readonly property bool open: root.openBay === chip.bay
+                        readonly property color hue: root.bayHue(chip.bay)
+                        width: root.colW
+                        height: 15
+                        radius: 0
+                        color: !chip.avail ? "transparent"
+                             : chip.open ? root.withA(chip.hue, 0.16)
+                             : (chipMa.containsMouse ? root.withA(chip.hue, 0.10)
+                                                     : "transparent")
+                        border.width: 1
+                        border.color: !chip.avail ? root.withA(root.ink, 0.18)
+                                    : chip.open ? chip.hue
+                                    : root.withA(root.ink,
+                                                 chipMa.containsMouse ? 0.6 : 0.32)
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                        Behavior on border.color { ColorAnimation { duration: 150 } }
+
+                        Text {
+                            id: chipWedge
+                            anchors.right: parent.right; anchors.rightMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            // ⌄ / ⌃ are calendar.qml's own pair, already
+                            // rendering live on this desktop at this face —
+                            // a proven glyph reused, not a new one adopted.
+                            text: chip.open ? "⌃" : "⌄"
+                            font.family: root.faceMono; font.pixelSize: 9
+                            color: chip.avail ? root.withA(chip.hue, chip.open ? 1.0 : 0.8)
+                                              : root.withA(root.ink, 0.25)
+                        }
+                        Text {
+                            anchors.left: parent.left; anchors.leftMargin: 5
+                            anchors.right: chipWedge.left; anchors.rightMargin: 3
+                            anchors.verticalCenter: parent.verticalCenter
+                            elide: Text.ElideRight
+                            text: root.bayChipText(chip.bay)
+                            font.family: root.faceMono; font.pixelSize: 8
+                            color: !chip.avail ? root.withA(root.ink, 0.3)
+                                 : (chip.open || chipMa.containsMouse)
+                                   ? root.ink : root.withA(root.ink, 0.72)
+                        }
+                        MouseArea {
+                            id: chipMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            enabled: chip.avail
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.openBay = chip.open ? -1 : chip.bay
+                        }
+                    }
+                    Chip { bay: 0 }
+                    Chip { bay: 1 }
+                    Chip { bay: 2 }          // the bt chip stays live with no
+                                             // adapter: it is how you find out
                 }
             }
 

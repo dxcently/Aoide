@@ -17,8 +17,8 @@ ShellRoot {
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.namespace: "aoide-audio-preview"
         anchors { top: true; left: true }
-        implicitWidth: 740        // two 320-wide tristyle steles + the gap
-        implicitHeight: 380
+        implicitWidth: 800        // two 352-wide tristyle steles + the gap
+        implicitHeight: 440
 
         property var stub: QtObject {
             property string paletteBg:     "#f2ebde"
@@ -32,6 +32,23 @@ ShellRoot {
             property string base09:        "#c06a35"   // amber       — the stele's signature
         }
 
+        // Fabricated rosters — this harness has no PipeWire or bluez behind
+        // it. They exist so the plinth chips have a name to carry and the
+        // picker has rows to draw; nothing here was read off a service.
+        readonly property var sinks: [
+            { key: "1", name: "SN6186 Analog", gloss: "analog-stereo", current: true },
+            { key: "2", name: "24G1WG4",       gloss: "hdmi-stereo",   current: false },
+            { key: "3", name: "WH-1000XM4",    gloss: "bluez-output",  current: false }
+        ]
+        readonly property var sources: [
+            { key: "4", name: "SN6186 Analog", gloss: "analog-stereo", current: true }
+        ]
+        readonly property var devices: [
+            { key: "a", name: "WH-1000XM4",  gloss: "connected", current: true },
+            { key: "b", name: "MX Master 3", gloss: "paired",    current: false },
+            { key: "c", name: "Pixel Buds",  gloss: "seen",      current: false }
+        ]
+
         Row {
             anchors.centerIn: parent
             spacing: 34
@@ -42,12 +59,20 @@ ShellRoot {
                 inPct: 100;  inMuted: false; inAvail: true
                 btAvail: true; btOn: true; btConnected: true
                 btName: "WH-1000XM4"; btProfile: "a2dp"
+                sinkRoster: win.sinks
+                sourceRoster: win.sources
+                btRoster: win.devices
             }
-            AudioColonnade {                          // muted mic → broken column
-                notes: win.stub                       // · bt powered down → ruin
+            AudioColonnade {                          // the BT bay OPEN, with a
+                notes: win.stub                       // fabricated device roster
                 outPct: 40;  outMuted: false; outAvail: true
                 inPct: 65;   inMuted: true;  inAvail: true
-                btAvail: true; btOn: false
+                btAvail: true; btOn: true; btConnected: true
+                btName: "WH-1000XM4"; btProfile: "a2dp"
+                sinkRoster: win.sinks
+                sourceRoster: win.sources
+                btRoster: win.devices
+                openBay: 2
             }
         }
     }
