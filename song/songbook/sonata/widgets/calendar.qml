@@ -1,7 +1,66 @@
 // calendar.qml — sonata/Greek-marble "calendar" flavor widget: the COMPOSITE
 // order carried on a PAPYRUS SCROLL — a self-framed stele that unrolls.
 //
-// khoa, 2026-08-13 (round six, same day): the chrome turns with the
+// khoa, 2026-08-15 (round seven): the nav row was over-subscribed and the
+// expanded year was under-sized — the mode control moves to a band that
+// fits it, and the year's mini-grids grow to the compact grid's own
+// proportions.
+//
+// ── Round-seven additions ───────────────────────────────────────────────
+//
+// THE TOGGLE LEAVES THE NAV ROW (overturns round six's placement AND its
+// bracket-tag form; reason below). Measured on this font stack with
+// TextMetrics, not estimated — Noto Serif 14 DemiBold: "September" 76.95,
+// "November" 74.28, "December" 72.30; "2026" 31.63; "[ ἔτος ⌄ ]" 60.00 at
+// JetBrainsMono NF 10. The compact nav row is 232 wide (256 sheet − 2×12).
+// TEXT ALONE is 77 + 32 + 60 = 169 of that — 73% — leaving 63px for four
+// arrow wrappers and every gap between three groups. At the shipped sizes
+// monthCluster reached x≈111 while the parent-centered toggle spanned
+// 86–146: 25px of overlapping PAINT, and their MouseAreas (−3 on the name,
+// −5 on the toggle) overlapped by 33px, so a click near the seam was
+// ambiguous — the next-month ‹ was drawn entirely UNDER the toggle (live
+// capture). No arrangement of three groups clears 232: centered-in-the-gap
+// wants 76 and the gap is 55; tightening both clusters AND right-anchoring
+// the toggle still lands ~21px over. So the row now keeps only what it is
+// FOR — month paging left, year paging right, 55px of clear air between
+// them at the worst name — and the mode control takes the answer line's
+// void, which was 60% empty in compact and emptier still in the year.
+//
+// IT IS NOW A DRAWN CHIP, not a [ token ]. Right-anchored as bare text it
+// stacked under [ fasti ] as a second mono bracket label in the same hue
+// (captured, rejected); the fix is SHAPE, not another position — a 62×20
+// hairline box, radius 0, clay border 0.55 → 0.9 with a 0.16 clay fill on
+// hover: notifications.qml's action-button idiom. [ token ] stays the
+// grammar for a TAG (identity, no hit region); a control gets a pressable
+// edge. Cost: the answer line 12 → 20, so the chip's hit box (62×20,
+// MouseArea −5 → 72×30) is no smaller than the old bare text's 70×30 —
+// chromeH 148 → 156 with it, the ONE compact number this round moves, and
+// it moves for the hit target. The fixed chip width also means the
+// ἔτος/μήν swap no longer changes the control's footprint mid-morph.
+//
+// THE EXPANDED YEAR SCALES UP (by direction — "the indv months are too
+// small"). 7–8px type was below reading size. One coherent step, taken by
+// moving the mini grid ONTO the compact grid's proportions rather than
+// inventing new ones:
+//     cell 15×11 → 22×16     numeral 8 → 11      phase mark 7 → 8
+//     rail 12w/7px → 16w/9px                     block 124×97 → 177×137
+//     Gregorian 11 → 13      Attic 9 → 11        memento 8 → 10
+//     block gap 8 → 12       row gap 6 → 8       block inner spacing 2 → 3
+//     expandedSheetW 412 → 579      expandedBodyH 424 → 596
+//     expandedWinW  448 → 615       expandedWinH  586 → 784
+// 615×784 hangs off the clock cell well inside 1920×1080 against the bar's
+// 36px reserve (live-verified: layer surface at 40,40 measuring 621×792,
+// nothing clipped). Compact is untouched by this half — 256/130 stand.
+//
+// NUMERALS RETURN TO CENTER (retires round four's left-anchoring, which was
+// forced by the 15×11 cell and is no longer true at 22×16). With an 8px
+// moon the mini cell is the compact 26×17 / 12 / 9 recipe to within a
+// pixel, and centering is precisely what makes a corner moon read: kept
+// left-anchored at the new width, the moon drifts to the middle of its own
+// cell and lands nearer the NEXT day's numeral than its own (captured, then
+// fixed). Round four's note is retired, not merely stale.
+//
+// khoa, 2026-08-13 (round six, same day, retained): the chrome turns with the
 // material — controls that pointed sideways at a sheet that moves
 // vertically now point along the roll.
 //
@@ -23,7 +82,10 @@
 //
 // THE TOGGLE TAG HINTS ITS DIRECTION: [ ἔτος ⌄ ] unrolls downward,
 // [ μήν ⌃ ] rolls back up — mono wedges U+2303/2304, native in
-// JetBrainsMono NF. The bottom roller stays the wordless handle. The
+// JetBrainsMono NF. [ROUND SEVEN: the wedges and their direction hold, but
+// the tag left this row for the answer line and became a drawn chip — the
+// row could not hold three groups. See the round-seven block above.]
+// The bottom roller stays the wordless handle. The
 // rest of the chrome was audited and left alone: the wheels are
 // invisible, the block-click's motion is the mode morph, the tally's
 // "wound ±" is temporal not spatial, and the rollers/frieze/𝄂 are
@@ -64,6 +126,9 @@
 // compact grid's almanac idiom at mini scale. At 15×11 the two only
 // coexist off-axis, so mini-grid numerals sit LEFT-ANCHORED (column
 // alignment held; a centered digit puts its shoulder under the moon).
+// [ROUND SEVEN: retired. The cell is 22×16 with an 8px moon now, and at
+// that size left-anchoring is what breaks the read — numerals are centered
+// again. See the round-seven block above.]
 //
 // WEEK RAIL (expanded). Each month block gains the compact gutter's ISO
 // weeks — dim mono numerals down a 12px rail, numbered by each row's
@@ -273,10 +338,10 @@ Item {
     // and the open-unfurl never move it ──────────────────────────────────
     readonly property int protrusion: 18           // roller overhang past the sheet
     readonly property int compactSheetW: 256
-    readonly property int expandedSheetW: 412   // 3×(12 rail + 111 grid + 1) + 2×8 + 24
+    readonly property int expandedSheetW: 579   // 3×(16 rail + 160 grid + 1) + 2×12 + 24
     readonly property int compactBodyH: 130        // caps 14 + 4 + grid 112
-    readonly property int expandedBodyH: 424       // 4×97 blocks + 4×6 gaps + memento 12
-    readonly property int chromeH: 148             // 24 margins + crown 26 + answer 12
+    readonly property int expandedBodyH: 596       // 4×137 blocks + 4×8 gaps + memento 16
+    readonly property int chromeH: 156             // 24 margins + crown 26 + answer 20
                                                    // + frieze 10 + nav 20 + tally 18
                                                    // + close 14 + 6×4 spacing
     readonly property int sheetW: Math.round(lerp(compactSheetW, expandedSheetW))
@@ -292,9 +357,9 @@ Item {
     // fixed through the two window steps, so they read as nothing at all —
     // a centered popup would visibly re-center on each (live-verified).
     readonly property int compactWinW: compactSheetW + 2 * protrusion    // 292
-    readonly property int compactWinH: sheetY + chromeH + compactBodyH + rollerH + 1  // 310
-    readonly property int expandedWinW: expandedSheetW + 2 * protrusion  // 448
-    readonly property int expandedWinH: sheetY + chromeH + expandedBodyH + rollerH + 1  // 586
+    readonly property int compactWinH: sheetY + chromeH + compactBodyH + rollerH + 1  // 318
+    readonly property int expandedWinW: expandedSheetW + 2 * protrusion  // 615
+    readonly property int expandedWinH: sheetY + chromeH + expandedBodyH + rollerH + 1  // 784
     property int winW: compactSheetW + 2 * protrusion
     property int winH: sheetY + chromeH + compactBodyH + rollerH + 1
     implicitWidth: winW
@@ -590,11 +655,14 @@ Item {
             }
 
             // ── The answer line — AoidePanel's bilingual-inscription idiom
-            // (AOIDE ⁄ ᾠδή): the carved Latin name answered in small Greek ──
+            // (AOIDE ⁄ ᾠδή): the carved Latin name answered in small Greek —
+            // and, since round seven, the MODE LINE: the inscription names
+            // the sheet, the toggle names which sheet you are looking at ──
             Item {
                 width: parent.width
-                height: 12
+                height: 20
                 Text {
+                    id: answerGreek
                     anchors.left: parent.left; anchors.leftMargin: 33
                     anchors.verticalCenter: parent.verticalCenter
                     text: "ἡμερολόγιον"
@@ -602,6 +670,40 @@ Item {
                     font.pixelSize: 10
                     font.italic: true
                     color: root.withA(root.ink, 0.5)
+                }
+
+                // The mode toggle — ἔτος ⌄ unrolls the year downward, μήν ⌃
+                // rolls back up. The bottom roller is the other handle; the
+                // wedges point where the material will go. The DRAWN chip
+                // (notifications.qml's action-button idiom: hairline border,
+                // radius 0, a faint signature fill on hover) is what tells it
+                // apart from [ fasti ] one line above — a control has a
+                // pressable edge, a tag is only ever letters.
+                Rectangle {
+                    id: modeToggle
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 62
+                    height: 20
+                    radius: 0
+                    color: togMa.containsMouse ? root.withA(root.clay, 0.16) : "transparent"
+                    border.width: 1
+                    border.color: root.withA(root.clay, togMa.containsMouse ? 0.9 : 0.55)
+                    Text {
+                        anchors.centerIn: parent
+                        text: root.expanded ? "μήν ⌃" : "ἔτος ⌄"
+                        font.family: root.faceMono
+                        font.pixelSize: 10
+                        color: root.clay
+                        opacity: togMa.containsMouse ? 1.0 : 0.85
+                    }
+                    MouseArea {
+                        id: togMa
+                        anchors.fill: parent; anchors.margins: -5
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleMode()
+                    }
                 }
             }
 
@@ -714,25 +816,6 @@ Item {
                             cursorShape: Qt.PointingHandCursor
                             onClicked: root.page(1)
                         }
-                    }
-                }
-
-                // The mode toggle — [ ἔτος ⌄ ] unrolls the year downward,
-                // [ μήν ⌃ ] rolls back up. The bottom roller is the other
-                // handle; the wedges point where the material will go.
-                Text {
-                    anchors.centerIn: parent
-                    text: root.expanded ? "[ μήν ⌃ ]" : "[ ἔτος ⌄ ]"
-                    font.family: root.faceMono
-                    font.pixelSize: 10
-                    color: root.clay
-                    opacity: togMa.containsMouse ? 1.0 : 0.75
-                    MouseArea {
-                        id: togMa
-                        anchors.fill: parent; anchors.margins: -5
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.toggleMode()
                     }
                 }
 
@@ -971,7 +1054,7 @@ Item {
                     id: expandedBody
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: Math.round(-40 * (1 - root.modeFrac) + root.pageShift)
-                    spacing: 6
+                    spacing: 8
                     opacity: Math.max(0, root.modeFrac * 2.2 - 1.2)
                     visible: opacity > 0.01
 
@@ -980,7 +1063,7 @@ Item {
                         delegate: Row {
                             required property int index
                             readonly property int rowIdx: index
-                            spacing: 8
+                            spacing: 12
 
                             Repeater {
                                 model: 3
@@ -996,21 +1079,21 @@ Item {
                                     readonly property bool holdsToday:
                                         root.viewYear === root.now.getFullYear() && m === root.now.getMonth()
 
-                                    width: 124        // 12 week rail + 1 + 7×15 cells + 6×1
-                                    height: 97
+                                    width: 177        // 16 week rail + 1 + 7×22 cells + 6×1
+                                    height: 137       // name 16 + attic 14 + grid 101 + 2×3
 
                                     Column {
                                         anchors.fill: parent
-                                        spacing: 2
+                                        spacing: 3
 
                                         // Gregorian month name — gold marks the
                                         // month the compact view sits on
                                         Text {
-                                            height: 12
+                                            height: 16
                                             text: root.monthNames[block.m]
                                             color: block.isViewed ? root.notes.paletteAccent : root.ink
                                             font.family: root.faceSerif
-                                            font.pixelSize: 11
+                                            font.pixelSize: 13
                                             font.bold: true
                                         }
 
@@ -1018,17 +1101,17 @@ Item {
                                         // block's noumenia (computed) — aegean,
                                         // the lunar information layer
                                         Text {
-                                            height: 10
+                                            height: 14
                                             text: block.moons.length > 0 ? block.moons[0].name : ""
                                             color: root.withA(root.aegean, 0.85)
                                             font.family: root.faceSerif
-                                            font.pixelSize: 9
+                                            font.pixelSize: 11
                                             font.italic: true
                                         }
 
                                         // mini day grid — fixed 6×7, Sunday-first
                                         Column {
-                                            spacing: 1
+                                            spacing: 1      // 6×16 + 5×1 = 101
                                             Repeater {
                                                 model: 6
                                                 delegate: Row {
@@ -1042,17 +1125,17 @@ Item {
                                                     // Row must hold its slot) on
                                                     // rows with no day of the month
                                                     Text {
-                                                        width: 12
-                                                        height: 11
+                                                        width: 16
+                                                        height: 16
                                                         horizontalAlignment: Text.AlignRight
                                                         verticalAlignment: Text.AlignVCenter
-                                                        rightPadding: 2
+                                                        rightPadding: 3
                                                         opacity: (parent.wIdx * 7 - block.firstWd + 1 <= block.dcount) ? 1 : 0
                                                         text: root.isoWeek(root.viewYear, block.m,
                                                             parent.wIdx * 7 + 4 - block.firstWd + 1)
                                                         color: root.withA(root.ink, 0.32)
                                                         font.family: root.faceMono
-                                                        font.pixelSize: 7
+                                                        font.pixelSize: 9
                                                     }
 
                                                     Repeater {
@@ -1073,23 +1156,26 @@ Item {
                                                                         return block.phases[i].q
                                                                 return -1
                                                             }
-                                                            width: 15
-                                                            height: 11
+                                                            width: 22
+                                                            height: 16
                                                             radius: 0
                                                             color: isToday ? root.notes.paletteHot : "transparent"
-                                                            // numeral kept, LEFT-anchored — centered
-                                                            // digits put their shoulder under the
-                                                            // corner moon (round-four header note)
+                                                            // numeral CENTERED — round four's
+                                                            // left-anchoring was forced by the old
+                                                            // 15×11 cell; at 22×16 with an 8px moon
+                                                            // this is the compact grid's proven
+                                                            // proportion (26×17 / 12 / 9), and
+                                                            // centering is what keeps a corner moon
+                                                            // nearer its OWN numeral than the next
+                                                            // one's (round-seven header note)
                                                             Text {
-                                                                anchors.left: parent.left
-                                                                anchors.leftMargin: 1
-                                                                anchors.verticalCenter: parent.verticalCenter
+                                                                anchors.centerIn: parent
                                                                 text: parent.inMonth ? parent.dayN : ""
                                                                 color: parent.isToday ? root.notes.paletteBg
                                                                        : (index === 0 ? root.withA(root.clay, 0.8)
                                                                                       : root.withA(root.ink, 0.8))
                                                                 font.family: root.faceSerif
-                                                                font.pixelSize: 8
+                                                                font.pixelSize: 11
                                                                 font.bold: parent.isToday
                                                             }
                                                             // the phase, corner-inscribed at mini
@@ -1103,7 +1189,7 @@ Item {
                                                                 text: parent.phaseQ >= 0
                                                                       ? root.phaseGlyphs[parent.phaseQ] : ""
                                                                 font.family: root.faceSerif
-                                                                font.pixelSize: 7
+                                                                font.pixelSize: 8
                                                                 color: root.aegean
                                                             }
                                                         }
@@ -1134,16 +1220,16 @@ Item {
                     // header note); lives in this body layer, so it can
                     // only ever exist in the expanded year ──────────────
                     Item {
-                        width: 3 * 124 + 2 * 8   // the block rows' width — not
+                        width: 3 * 177 + 2 * 12  // the block rows' width — not
                                                  // parent.width (binding loop:
                                                  // the Column sizes from us)
-                        height: 12
+                        height: 16
                         Text {
                             anchors.left: parent.left
                             anchors.bottom: parent.bottom
                             text: "memento mori"
                             font.family: root.faceSerif
-                            font.pixelSize: 8
+                            font.pixelSize: 10
                             font.italic: true
                             color: root.withA(root.ink, 0.5)
                         }
@@ -1152,7 +1238,7 @@ Item {
                             anchors.bottom: parent.bottom
                             text: root.daysLeft + " days · " + root.weeksLeft + " weeks left"
                             font.family: root.faceMono
-                            font.pixelSize: 8
+                            font.pixelSize: 10
                             color: root.withA(root.clay, 0.9)
                         }
                     }
