@@ -215,22 +215,36 @@ component WorkspaceRow: Item {
     // ── The highlight-pill — a soft accent glow that eases under the played
     // note (the old playhead re-cast). Declared before the notes so it sits
     // behind them, reinforcing which workspace is selected.
+    //
+    // khoa, 2026-08-16: verticalCenterOffset added — every note glyph is
+    // shifted off WorkspaceRow's own centre by pitchOffset(ws) (its staff
+    // degree; "Pitch (staff degree) rises with id" above), but this mark
+    // had none, so it only ever lined up with whichever workspace's id
+    // happened to resolve pitchOffset to 0 and visibly drifted off every
+    // other note (confirmed live: a circle centred a full staff-space above
+    // where the actual glyph sat). Matching the SAME offset the active
+    // note's own glyph uses keeps the two locked together regardless of id.
     Rectangle {
         id: highlight
         visible: root.activeIndex >= 0
         z: 0
-        width: root.cellW - 2
+        width: 22
         height: 22
-        // Fully rounded on the short axis — an actual pill, which is what the
-        // name promised and the square-cornered block never read as.
+        // Equal width/height so radius: width/2 rounds both axes fully —
+        // a true circle, not a stadium-shaped pill.
         radius: width / 2
         color: root.activeColor
         opacity: 0.20
         anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenterOffset:
+            root.activeIndex >= 0 ? root.pitchOffset(root.wsList[root.activeIndex]) : 0
         x: root.activeIndex >= 0
            ? root.activeIndex * (root.cellW + root.cellGap) + (root.cellW - width) / 2
            : 0
         Behavior on x {
+            NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+        }
+        Behavior on anchors.verticalCenterOffset {
             NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
         }
     }
@@ -241,22 +255,29 @@ component WorkspaceRow: Item {
     // pill (hollow cool ring vs solid warm accent fill), so both can show at
     // once — if the previewed ws IS the active one, the ring simply frames the
     // accent pill and reads sensibly. Border-only, input-inert. Colour: notes.
+    // Same pitchOffset-tracking fix as `highlight` above, keyed to the
+    // HOVERED workspace instead of the active one.
     Rectangle {
         id: previewRing
         visible: root.hoveredIndex >= 0
         z: 0
-        width: root.cellW
+        width: 24
         height: 24
-        radius: width / 2      // matches the active pill's curve, one size out
+        radius: width / 2      // matches the active circle's curve, one size out
         color: "transparent"
         border.color: root.notes.paletteAccent
         border.width: 2
         opacity: 0.85
         anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenterOffset:
+            root.hoveredIndex >= 0 ? root.pitchOffset(root.wsList[root.hoveredIndex]) : 0
         x: root.hoveredIndex >= 0
            ? root.hoveredIndex * (root.cellW + root.cellGap) + (root.cellW - width) / 2
            : 0
         Behavior on x {
+            NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+        }
+        Behavior on anchors.verticalCenterOffset {
             NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
         }
     }
@@ -293,9 +314,13 @@ component WorkspaceRow: Item {
                 Rectangle {
                     visible: cell.isHovered && !cell.isActive
                     anchors.centerIn: parent
-                    width: root.cellW - 2
+                    // Same pitchOffset-tracking fix as `highlight`/`previewRing`
+                    // above — this cell's own note sits at its own staff degree,
+                    // not cell's plain centre.
+                    anchors.verticalCenterOffset: root.pitchOffset(cell.modelData)
+                    width: 22
                     height: 22
-                    radius: width / 2   // same pill as the active/preview marks
+                    radius: width / 2   // same circle as the active/preview marks
                     color: root.notes.paletteAccent
                     opacity: 0.18
                 }
