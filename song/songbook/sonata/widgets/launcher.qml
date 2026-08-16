@@ -86,6 +86,31 @@
 // Page one is always the frequency index (an index, not a move); every other
 // spread is the alphabet, `pageSize` entries at a time. The chapter hue tints
 // that spread's running headers and its thumb tab.
+//
+// ── `root.notes` is safe to reach for; do NOT null-guard it ───────────────
+// (khoa, 2026-08-15) Every hot reload used to dump ~66-79 lines of
+// "TypeError: Cannot read property 'notes' of null" into the journal, all of
+// them pointing at this file — 1984 in six hours. Read the message
+// precisely: the null is `root` ITSELF, not `root.notes`. (In
+// `root.withA(root.notes.x, a)` QV4 evaluates the call's ARGUMENTS before
+// looking up the callee, so a null `root` surfaces on `.notes`, not on
+// `.withA` — the message names the argument, not the receiver.)
+//
+// Traced live with lifecycle probes: the burst is TEARDOWN, not construction.
+// It began on the log line immediately after this root's
+// `Component.onDestruction` fired, and construction was silent every time.
+// The cause was NOT here at all — `SurfaceSlot.qml` was rebuilding this slot
+// twice per reload, building a whole spare Grimoire and then `destroy()`ing
+// it while the engine was live, which nulls the `root` id in this file's
+// context and re-evaluates all 65 `root.notes.*` bindings at once. Fixed at
+// that seam (SurfaceSlot's `_builtSource` idempotence guard); measured
+// afterwards at one construction per reload and zero warnings across 19
+// consecutive reloads.
+//
+// The lesson for this file: `root.notes` is a required property injected at
+// creation and is live for the whole life of the surface. If these warnings
+// ever come back, the defect is in whatever is destroying this window, not
+// in the bindings — do not paper over it with 65 `root.notes &&` guards.
 
 import QtQuick
 import QtQuick.Effects

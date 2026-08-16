@@ -68,6 +68,35 @@ QtObject {
     // successful create, and again whenever resolution comes up empty.
     property var item: null
 
+    // ── What the live `item` was built from — the idempotence key ──────────
+    // (khoa, 2026-08-15) FOUR separate triggers re-enter `_rebuild()` on
+    // every single reload, in this order (traced live, one full reload):
+    //   extraProps → onCompleted → resolvedSource → manifestChanged
+    // The first two land while `stagingEngine.manifest` is still `{}`, so
+    // they only log "no song provides slot". The third builds the surface.
+    // The FOURTH — the belt-and-suspenders manifest watch below — then found
+    // `item` already SET and unconditionally tore it down and built a second,
+    // identical one. Every reload therefore constructed and destroyed a whole
+    // spare PanelWindow.
+    //
+    // That spare destroy is what floods the journal. `item.destroy()` deletes
+    // the window while the QML engine is fully live, which nulls the `root`
+    // id inside the loaded widget's own context and re-evaluates every
+    // binding that captured it — `launcher.qml` alone has 65 `root.notes.*`
+    // bindings, so one spare destroy = a ~66-79-line burst of
+    // "TypeError: Cannot read property 'notes' of null" (@songs/sonata/
+    // launcher.qml, 1984 of them in six hours). `powermenu.qml` is the same
+    // shape and stays quiet only because it is fully static — no Repeater or
+    // ListView delegates to re-evaluate on the way down.
+    //
+    // So the fix is not a null guard in the widget: it is not rebuilding what
+    // did not change. A trigger whose source AND extras match what `item` was
+    // already built from now returns without touching it. A GENUINE change
+    // (live `aoide rice preview <song>`, a new extra) still rebuilds — the
+    // manifest watch keeps doing the job it was added for.
+    property string _builtSource: ""
+    property var _builtExtras: ({})
+
     onResolvedSourceChanged: _rebuild()
     onExtraPropsChanged: _rebuild()
     Component.onCompleted: _rebuild()
@@ -90,16 +119,41 @@ QtObject {
     }
 
     function _rebuild() {
+        // Idempotent (see `_builtSource` above): the live surface already came
+        // from exactly this source and these extras, so there is nothing to
+        // rebuild — and tearing it down to build an identical one is what
+        // floods the journal.
+        if (root.item && root.resolvedSource === root._builtSource
+                && root._sameExtras(root.extraProps)) return
         if (root.item) {
             root.item.destroy()
             root.item = null
         }
+        root._builtSource = root.resolvedSource
+        root._builtExtras = root.extraProps
         if (root.songProvides) {
             var comp = Qt.createComponent(root.resolvedSource)
             root._create(comp)
         } else {
             console.warn("[aoide/surfaceslot] no song (active or baseline) provides slot", root.slot)
         }
+    }
+
+    // Shallow value compare, not identity: `extraProps` is declared in
+    // shell.qml as an object LITERAL binding (`({ clipboard: …, ledger: … })`),
+    // so every re-evaluation hands over a brand-new JS object holding the very
+    // same instances. Comparing by identity would call that a change and
+    // rebuild forever.
+    function _sameExtras(next) {
+        var prev = root._builtExtras
+        if (!prev || !next) return prev === next
+        var kn = Object.keys(next)
+        var kp = Object.keys(prev)
+        if (kn.length !== kp.length) return false
+        for (var i = 0; i < kn.length; i++) {
+            if (next[kn[i]] !== prev[kn[i]]) return false
+        }
+        return true
     }
 
     function _props() {
