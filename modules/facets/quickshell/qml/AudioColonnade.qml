@@ -38,6 +38,54 @@ import QtQuick
 //               with fallen rubble at its foot — a ruined-temple column, legible
 //               as "silenced" from the silhouette alone. No slash, no ghost fill.
 //
+// khoa, 2026-08-15 — a THIRD BAY: BLUETOOTH. The porch goes distyle → TRISTYLE
+// (width 268 → 320; colW 70 → 72, bayGap 30 → 26, so 3*72 + 2*26 = 268 still
+// leaves a 15px inset the stylobate's widest step clears). The bar's audio
+// cells stopped hover-opening this stele on the same date — it is now
+// CLICK-latched, and hovering gets a separate small cue readout in bar.qml —
+// so `hovered` is kept but no longer load-bearing for that host.
+//
+//   · ORDER   — the third voice takes the third classical order, CORINTHIAN
+//               (concave abacus, flaring kalathos bell, two tiers of acanthus
+//               tips, corner helices). Doric cushion / Ionic volutes /
+//               Corinthian leaves: the three bays are told apart by capital
+//               alone, colour removed — the same test the first two passed.
+//   · PIER    — its shaft is WIDER than its neighbours (`pierW` 34 vs
+//               `shaftW` 24) because it carries an inscription per drum. A
+//               shaft is built of stacked drums; here the stack is exactly
+//               TWO, jointed, and which drum is LIT is the mode. One box, one
+//               joint — not two boxes (khoa's sketch is a single divided box).
+//   · HUE     — `wireCyan` (base0C teal), NOT `holoBlue`: aegean is already
+//               the MIC bay's role in this same stele, and a role does one job
+//               (making-a-widget.md §2). The gold VOL bay sits between the two
+//               cool bays, so they never abut. Its two reads — the lit drum
+//               and the device name in the tally — serve ONE state, which is
+//               the house's rule for spending a second hue.
+//   · STATES  — power is the base state, profile the refinement:
+//                 no adapter        → `avail` false: ghosted pier, tally "—"
+//                 adapter powered off → RUIN, the same broken-column
+//                                     silhouette a muted channel wears, tally
+//                                     "OFF" in terracotta. Powered-down and
+//                                     silenced are the same idea, so they get
+//                                     the same shape.
+//                 on, nothing bound → intact pier, both drums carved but
+//                                     inert (ink 0.32), tally "ON"
+//                 bound in A2DP     → upper drum fills teal, inscription
+//                                     reversed out in ground colour
+//                 bound in HSP      → lower drum fills, tally carries the
+//                                     device's own name instead of "ON"
+//               The tally never repeats what the drums say: drums = which
+//               profile, tally = who (or, with nobody bound, the power word).
+//   · MIXER   — `[ mixer ]` in the ledger, the house's own bracket-token
+//               vocabulary rather than a button (this stele has no button
+//               anywhere else and does not grow one). The host runs
+//               pavucontrol; this file only signals.
+//
+// NOT VERIFIED HERE: no bluetooth adapter is up on yomi-strix (bluez is not
+// enabled in the nix modules), so the connected/A2DP/HSP renders above were
+// driven from fabricated props through the bar, not from the live service.
+// Only the no-adapter register has been seen coming off real bluez.
+//
 // House rules: every colour from `notes` roles (zero hex); radius 0; no
 // QtQuick.Layouts (plain Item/Row/anchors — the documented sizing-loop hazard).
 Item {
@@ -53,15 +101,31 @@ Item {
     property bool inMuted: false
     property bool inAvail: false
 
+    // ── The BLUETOOTH bay — power as the base state, profile once connected ─
+    // btAvail  : an adapter exists at all (bluez up + hardware present)
+    // btOn     : the adapter is powered
+    // btConnected / btName : a device is connected, and who it is
+    // btProfile: "a2dp" | "hsp" | "" (connected but profile not yet resolved)
+    property bool btAvail: false
+    property bool btOn: false
+    property bool btConnected: false
+    property string btName: ""
+    property string btProfile: ""
+
     // ── Control intents, handled by the bar (which owns the sink/source) ────
     signal outToggle()
     signal outAdjust(int delta)
     signal inToggle()
     signal inAdjust(int delta)
-    // Popout-retention: true while the pointer is over either column.
-    readonly property bool hovered: micCol.hovering || volCol.hovering
+    signal btToggle()                     // power the adapter on/off
+    signal btPick(string profile)         // "a2dp" | "hsp"
+    signal openMixer()                    // the [ mixer ] tag → pavucontrol
+    // Popout-retention: true while the pointer is over any column. Kept for
+    // hosts that hover-retain; the bar's colonnade is CLICK-latched as of
+    // 2026-08-15 and no longer reads it.
+    readonly property bool hovered: micCol.hovering || volCol.hovering || btCol.hovering
 
-    width: 268
+    width: 320
     implicitHeight: stele.height + 5      // +5 clears the cast shadow's overhang
 
     // type voices — shared across the pantheon
@@ -91,31 +155,67 @@ Item {
         var mutedCount = (outMuted ? 1 : 0) + (inMuted ? 1 : 0)
         if (mutedCount === 2) return "(-_- )"                 // both hushed
         if (mutedCount === 1) return "( ･_･)"                 // one silenced
+        if (btConnected) return "♪( ˘ω˘ )"                    // bound, listening
         if (Math.max(outPct, inPct) >= 85) return "♪(´▽｀)"   // loud & lively
         return "( ･ω･)ﾉ"                                      // attentive
     }
+    function shortName(s, n) {
+        var t = "" + s
+        if (t.length <= n) return t
+        return t.substring(0, n - 1) + "…"
+    }
 
-    // colonnade geometry — one place, so architrave/shafts/tally stay aligned
-    readonly property int colW: 70
-    readonly property int bayGap: 30
+    // colonnade geometry — one place, so architrave/shafts/tally stay aligned.
+    // TRISTYLE as of 2026-08-15 (was distyle): 3 * 72 + 2 * 26 = 268 inside a
+    // 298px content width, leaving a 15px inset the stylobate's widest step
+    // (inset - 9) still clears.
+    readonly property int colW: 72
+    readonly property int bayGap: 26
     readonly property int shaftW: 24
+    readonly property int pierW: 34          // the bluetooth pier — wider, it
+                                             // carries an inscription per drum
     readonly property real breakFrac: 0.52   // where a muted column snaps
 
     // ══ ONE COLUMN — capital + fluted shaft, or a broken ruin when muted ══════
     component Colonna : Item {
         id: col
-        property string order: "doric"       // "doric" | "ionic"
+        property string order: "doric"       // "doric" | "ionic" | "corinthian"
         property int pct: 0
         property bool muted: false
         property bool avail: true
         property color fillHue: root.notes.paletteAccent
         property alias hovering: hoverMa.containsMouse
+        property real shaftWidth: root.shaftW
         signal toggle()
         signal adjust(int delta)
+
+        // ── DRUM MODE — the shaft is built of two inscribed drums instead of
+        //    being a rising meter. Used by the bluetooth pier: the drums are
+        //    the A2DP ↔ headset switch. `drumsLive` false leaves them carved
+        //    but inert (adapter on, nothing connected), which is how the pier
+        //    still reads as a pier with no device to switch.
+        property bool drums: false
+        property var drumLabels: []          // top-to-bottom
+        property int activeDrum: -1
+        property bool drumsLive: false
+        signal drumPicked(int index)
 
         readonly property bool broken: muted && avail
         readonly property real frac: avail ? Math.max(0, Math.min(1, pct / 100)) : 0
         readonly property color liveHue: !avail ? root.withA(root.ink, 0.22) : fillHue
+
+        // The full-bay catcher is declared FIRST so the drums' own MouseAreas
+        // (declared later, inside the shaft) win the hit test — the house rule
+        // from notifications.qml's click-anywhere-dismiss.
+        MouseArea {
+            id: hoverMa
+            anchors.fill: parent
+            hoverEnabled: true
+            enabled: col.avail
+            cursorShape: Qt.PointingHandCursor
+            onClicked: col.toggle()
+            onWheel: { col.adjust(wheel.angleDelta.y > 0 ? 2 : -2); wheel.accepted = true }
+        }
 
         // ── the capital — order-specific; GONE when the column is broken ────
         Canvas {
@@ -128,8 +228,10 @@ Item {
             readonly property color stroke: col.avail ? root.withA(root.ink, 0.85)
                                                       : root.withA(root.ink, 0.4)
             readonly property string ord: col.order
+            readonly property real sw: col.shaftWidth
             onStrokeChanged: requestPaint()
             onOrdChanged: requestPaint()
+            onSwChanged: requestPaint()
             onVisibleChanged: requestPaint()
             onWidthChanged: requestPaint()
             onPaint: {
@@ -138,8 +240,49 @@ Item {
                 if (!visible) return
                 ctx.strokeStyle = stroke
                 var cx = width / 2
-                var shaftHalf = root.shaftW / 2
-                if (ord === "ionic") {
+                var shaftHalf = col.shaftWidth / 2
+                if (ord === "corinthian") {
+                    // Corinthian — a CONCAVE abacus over a flaring kalathos
+                    // bell, two rows of acanthus tips rising off the neck, and
+                    // a small helix scroll tucked under each abacus corner.
+                    // The ornate order for the ornate voice; told apart from
+                    // Doric's plain cushion and Ionic's two big volutes by the
+                    // leaf course alone, colour removed.
+                    var kH = shaftHalf + 11
+                    ctx.lineWidth = 1.2
+                    ctx.beginPath()                                  // abacus slab,
+                    ctx.moveTo(cx - kH, 1)                           // concave front
+                    ctx.lineTo(cx + kH, 1)
+                    ctx.moveTo(cx - kH, 3.2)
+                    ctx.quadraticCurveTo(cx, 5.2, cx + kH, 3.2)
+                    ctx.stroke()
+                    ctx.beginPath()                                  // the kalathos —
+                    ctx.moveTo(cx - shaftHalf, height - 1)           // a flaring bell
+                    ctx.bezierCurveTo(cx - shaftHalf - 1, height - 6,
+                                      cx - kH + 1, 8, cx - kH + 1, 4.4)
+                    ctx.moveTo(cx + shaftHalf, height - 1)
+                    ctx.bezierCurveTo(cx + shaftHalf + 1, height - 6,
+                                      cx + kH - 1, 8, cx + kH - 1, 4.4)
+                    ctx.stroke()
+                    ctx.lineWidth = 1.0
+                    ctx.beginPath()                                  // corner helices,
+                    ctx.arc(cx - kH + 3.2, 6.6, 1.9, 0, 2 * Math.PI) // tucked under
+                    ctx.moveTo(cx + kH - 1.3, 6.6)                   // the abacus
+                    ctx.arc(cx + kH - 3.2, 6.6, 1.9, 0, 2 * Math.PI)
+                    ctx.stroke()
+                    ctx.beginPath()                                  // acanthus, two
+                    for (var a = -1; a <= 1; a++) {                   // tiers of tips
+                        var lx = cx + a * (shaftHalf * 0.62)
+                        ctx.moveTo(lx - 2.4, height - 1)
+                        ctx.quadraticCurveTo(lx, height - 9, lx + 2.4, height - 1)
+                    }
+                    for (var b = -1; b <= 1; b += 2) {
+                        var ux = cx + b * (shaftHalf * 0.31)
+                        ctx.moveTo(ux - 2.2, height - 5)
+                        ctx.quadraticCurveTo(ux, height - 11.5, ux + 2.2, height - 5)
+                    }
+                    ctx.stroke()
+                } else if (ord === "ionic") {
                     // Ionic — an abacus over two volute scrolls joined by an ovolo
                     ctx.lineWidth = 1.8
                     var abacusHalf = shaftHalf + 9
@@ -193,14 +336,14 @@ Item {
             anchors.topMargin: col.broken ? 0 : capital.height + 1
             anchors.bottom: parent.bottom
             anchors.horizontalCenter: parent.horizontalCenter
-            width: root.shaftW
+            width: col.shaftWidth
             readonly property real neck: 6
             readonly property real innerH: height - 2 - neck
 
             // ── INTACT shaft (unmuted): track · rising fill · flutes · neck ──
             Item {
                 anchors.fill: parent
-                visible: !col.broken
+                visible: !col.broken && !col.drums
 
                 Rectangle {                                   // unlit stone track
                     anchors.fill: parent; radius: 0
@@ -238,6 +381,70 @@ Item {
                         var ny = Math.round(shaftBox.neck) + 0.5
                         ctx.beginPath(); ctx.moveTo(1.5, ny); ctx.lineTo(width - 1.5, ny); ctx.stroke()
                     }
+                }
+            }
+
+            // ── DRUM shaft: two inscribed drums instead of a rising meter ───
+            //    A real shaft is built of stacked drums; here the stack is
+            //    exactly two, and which one is LIT is the mode. The lit drum
+            //    fills in the column's hue with its inscription reversed out
+            //    in ground colour — the same "one fill, one hue" move the
+            //    calendar spends on today's cell — so the mode reads from the
+            //    silhouette with the colour removed.
+            Item {
+                id: drumStack
+                anchors.fill: parent
+                visible: col.drums && !col.broken
+
+                Rectangle {                             // the pier's own stone —
+                    anchors.fill: parent                // ONE box, jointed, not
+                    radius: 0                           // two stacked boxes
+                    color: root.withA(root.ink, 0.09)
+                    border.width: 1
+                    border.color: root.withA(root.ink, col.avail ? 0.5 : 0.25)
+                }
+                Repeater {
+                    model: col.drumLabels
+                    delegate: Item {
+                        id: drum
+                        required property int index
+                        required property var modelData
+                        width: drumStack.width
+                        height: drumStack.height / 2
+                        y: index * (drumStack.height / 2)
+                        readonly property bool lit: col.drumsLive && col.activeDrum === index
+
+                        Rectangle {                     // the lit face
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            radius: 0
+                            color: drum.lit ? root.withA(col.liveHue, 0.9) : "transparent"
+                            Behavior on color { ColorAnimation { duration: 150 } }
+                        }
+                        Text {                          // the inscription
+                            anchors.centerIn: parent
+                            text: "" + drum.modelData
+                            font.family: root.faceMono
+                            font.pixelSize: 9
+                            font.letterSpacing: 1
+                            color: drum.lit ? root.notes.paletteBg
+                                            : root.withA(root.ink,
+                                                  !col.avail ? 0.25
+                                                : (col.drumsLive ? 0.8 : 0.32))
+                        }
+                        MouseArea {                     // wins over hoverMa
+                            anchors.fill: parent
+                            enabled: col.drumsLive
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: col.drumPicked(drum.index)
+                        }
+                    }
+                }
+                Rectangle {                             // the drum joint
+                    anchors.left: parent.left; anchors.right: parent.right
+                    y: Math.round(parent.height / 2)
+                    height: 1
+                    color: root.withA(root.ink, col.avail ? 0.5 : 0.25)
                 }
             }
 
@@ -345,15 +552,6 @@ Item {
             }
         }
 
-        MouseArea {
-            id: hoverMa
-            anchors.fill: parent
-            hoverEnabled: true
-            enabled: col.avail
-            cursorShape: Qt.PointingHandCursor
-            onClicked: col.toggle()
-            onWheel: { col.adjust(wheel.angleDelta.y > 0 ? 2 : -2); wheel.accepted = true }
-        }
     }
 
     // cast shadow — shared pantheon idiom ───────────────────────────────────
@@ -474,7 +672,7 @@ Item {
                     id: architrave
                     anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
                     height: 22
-                    readonly property real inset: (parent.width - (root.colW * 2 + root.bayGap)) / 2
+                    readonly property real inset: (parent.width - (root.colW * 3 + root.bayGap * 2)) / 2
                     Rectangle {                               // cornice (top rule)
                         anchors.top: parent.top
                         anchors.left: parent.left; anchors.right: parent.right
@@ -497,6 +695,12 @@ Item {
                             font.weight: Font.DemiBold; font.letterSpacing: 3
                             color: root.outAvail ? root.ink : root.withA(root.ink, 0.4)
                         }
+                        Text {
+                            width: root.colW; horizontalAlignment: Text.AlignHCenter
+                            text: "BT"; font.family: root.faceSerif; font.pixelSize: 12
+                            font.weight: Font.DemiBold; font.letterSpacing: 3
+                            color: root.btAvail ? root.ink : root.withA(root.ink, 0.4)
+                        }
                     }
                     Rectangle {                               // architrave (the carried beam)
                         anchors.bottom: parent.bottom
@@ -512,7 +716,7 @@ Item {
                     anchors.bottom: tallyRow.top; anchors.bottomMargin: 3
                     anchors.left: parent.left; anchors.right: parent.right
                     height: 8
-                    readonly property real inset: (parent.width - (root.colW * 2 + root.bayGap)) / 2
+                    readonly property real inset: (parent.width - (root.colW * 3 + root.bayGap * 2)) / 2
                     Rectangle {
                         anchors.top: parent.top
                         anchors.left: parent.left; anchors.right: parent.right
@@ -550,6 +754,26 @@ Item {
                         onToggle: root.outToggle()
                         onAdjust: function(d) { root.outAdjust(d) }
                     }
+                    // The BLUETOOTH pier — the third voice. Power is the base
+                    // state (dark adapter = a RUINED column, the same broken
+                    // silhouette a muted channel wears), and a connected device
+                    // lights one of the two drums: the A2DP ↔ headset switch.
+                    Colonna {
+                        id: btCol
+                        width: root.colW; height: parent.height
+                        order: "corinthian"
+                        shaftWidth: root.pierW
+                        avail: root.btAvail
+                        muted: root.btAvail && !root.btOn      // powered down = ruin
+                        fillHue: root.notes.wireCyan           // teal — the third cool voice
+                        drums: true
+                        drumLabels: ["A2DP", "HSP"]
+                        drumsLive: root.btConnected
+                        activeDrum: root.btProfile === "a2dp" ? 0
+                                  : (root.btProfile === "hsp" ? 1 : -1)
+                        onToggle: root.btToggle()
+                        onDrumPicked: function(i) { root.btPick(i === 0 ? "a2dp" : "hsp") }
+                    }
                 }
 
                 // the tally row — level percent / MUTED / absent, under each column
@@ -573,6 +797,23 @@ Item {
                     }
                     Tally { pct: root.inPct;  muted: root.inMuted;  avail: root.inAvail }
                     Tally { pct: root.outPct; muted: root.outMuted; avail: root.outAvail }
+                    // The bluetooth tally reads WHO, not how loud — the drums
+                    // above already carry the profile, so this never repeats
+                    // it. With no device bound it falls back to the power word.
+                    Text {
+                        width: root.colW; horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
+                        text: !root.btAvail ? "—"
+                            : (!root.btOn ? "OFF"
+                            : (root.btConnected ? root.shortName(root.btName, 10) : "ON"))
+                        font.family: root.btConnected ? root.faceMono : root.faceSerif
+                        font.pixelSize: root.btConnected ? 10 : 11
+                        font.letterSpacing: root.btConnected ? 0 : 3
+                        font.weight: root.btConnected ? Font.Normal : Font.DemiBold
+                        color: !root.btAvail ? root.withA(root.ink, 0.4)
+                             : (!root.btOn ? root.notes.paletteUrgent
+                             : (root.btConnected ? root.notes.wireCyan : root.ink))
+                    }
                 }
             }
 
@@ -591,10 +832,32 @@ Item {
                     color: root.withA(root.sig, 0.9)
                 }
                 Text {
-                    anchors.right: parent.right; anchors.bottom: parent.bottom
+                    id: hint
+                    anchors.right: mixerTag.left; anchors.rightMargin: 10
+                    anchors.bottom: parent.bottom
                     text: "scroll · set   click · mute"
                     font.family: root.faceMono; font.pixelSize: 9
                     color: root.withA(root.ink, 0.5)
+                }
+                // The mixer door — the one control in this stele that leaves
+                // it. A [ token ] in the house's own bracket vocabulary, not a
+                // button: the stele has no button anywhere else and does not
+                // grow one now.
+                Text {
+                    id: mixerTag
+                    anchors.right: parent.right; anchors.bottom: parent.bottom
+                    text: "[ mixer ]"
+                    font.family: root.faceMono; font.pixelSize: 10
+                    font.underline: mixerMa.containsMouse
+                    color: mixerMa.containsMouse ? root.sig : root.withA(root.sig, 0.85)
+                    MouseArea {
+                        id: mixerMa
+                        anchors.fill: parent
+                        anchors.margins: -3
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.openMixer()
+                    }
                 }
             }
 

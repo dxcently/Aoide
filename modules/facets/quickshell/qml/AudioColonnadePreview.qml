@@ -17,7 +17,7 @@ ShellRoot {
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.namespace: "aoide-audio-preview"
         anchors { top: true; left: true }
-        implicitWidth: 640
+        implicitWidth: 740        // two 320-wide tristyle steles + the gap
         implicitHeight: 380
 
         property var stub: QtObject {
@@ -37,14 +37,17 @@ ShellRoot {
             spacing: 34
 
             AudioColonnade {                          // live: vol 86 · mic 100
-                notes: win.stub
+                notes: win.stub                       // · bt bound in A2DP
                 outPct: 86;  outMuted: false; outAvail: true
                 inPct: 100;  inMuted: false; inAvail: true
+                btAvail: true; btOn: true; btConnected: true
+                btName: "WH-1000XM4"; btProfile: "a2dp"
             }
             AudioColonnade {                          // muted mic → broken column
-                notes: win.stub
+                notes: win.stub                       // · bt powered down → ruin
                 outPct: 40;  outMuted: false; outAvail: true
                 inPct: 65;   inMuted: true;  inAvail: true
+                btAvail: true; btOn: false
             }
         }
     }

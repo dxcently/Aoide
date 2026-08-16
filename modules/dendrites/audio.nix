@@ -22,5 +22,12 @@
       pulse.enable = true;
       wireplumber.enable = true;
     };
+    # Bluetooth audio is audio hardware, so it is enabled here beside PipeWire
+    # rather than in the widget facet: bluez is what makes WirePlumber create
+    # the bluez5 nodes the bar's colonnade reads (its BT bay renders a "no
+    # adapter" state until this lands). The hardware is present and unblocked
+    # on yomi-strix (`rfkill` shows hci0, neither soft- nor hard-blocked);
+    # nothing was ever running the stack.
+    hardware.bluetooth.enable = true;
   };
 }

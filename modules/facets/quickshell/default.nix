@@ -186,6 +186,14 @@ in
     # (flake.nix wires inputs.quickshell for exactly this).
     environment.systemPackages = [
       quickshellPkg
+      # The colonnade's `[ mixer ]` tag launches pavucontrol, and its bluetooth
+      # bay writes the A2DP ↔ headset profile with `pactl set-card-profile`
+      # (neither Quickshell.Bluetooth nor Quickshell.Services.Pipewire exposes
+      # a card profile — checked against both modules' compiled qmltypes).
+      # Both live here rather than in the audio dendrite because it is THIS
+      # facet's widget that shells out to them.
+      pkgs.pavucontrol
+      pkgs.pulseaudio # for `pactl` only; pipewire-pulse remains the server
     ];
 
     # ── Deploy QML config tree into run/qml/ (rsync, not a symlink tree) ────

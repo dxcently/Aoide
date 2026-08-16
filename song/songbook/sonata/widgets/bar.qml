@@ -38,8 +38,8 @@
 //               empties into silence), 𝆹 network link — each hover/scroll/click
 //               live, with popouts — then a system tray: a fermata toggle
 //               (𝄐 closed / 𝄑 open — the hold, turned toward the popout)
-//               that pops the held SNI icons in a plain BarPopout bay
-//               under the strip. Closed by a final barline 𝄂.
+//               that pops the held SNI items as a self-framed stele
+//               (StelePopout) under the strip. Closed by a final barline 𝄂.
 //
 // Drawn structure (staff lines, barlines, playhead) carries the geometry; glyphs
 // (clef, rests, note-marks) carry the ornament. It should read as sheet music.
@@ -66,9 +66,39 @@
 // go glitchPink, and open/hover toggles (volume) flash paletteAccent.
 // Everything at rest is black.
 //
+// khoa, 2026-08-15 — THE AUDIO CELLS SPLIT IN TWO. Hovering an audio cell used
+// to open the whole colonnade; it now opens a small CUE stele (the `AudioCue`
+// component below) reading out output volume, mic status and bluetooth status,
+// and nothing more. The colonnade moved to CLICK, latched on `audioOpen` — the
+// same toggle idiom the tray fermata already uses on this strip. Four
+// consequences, all decided rather than inherited:
+//   · MUTE moved to MIDDLE-CLICK on either audio cell, since left-click is
+//     now "open". Not a right-click context menu (nothing on this strip has
+//     one, and one verb does not justify inventing that system) and not
+//     "it's inside the colonnade" alone (mute is an everyday action; making
+//     it cost a surface plus two clicks is a regression). The cue prints
+//     `mmb · mute` in its own ledger, so the gesture is on screen exactly
+//     when the pointer is on the cell. The colonnade's per-column click
+//     still mutes as well — that path is untouched.
+//   · BLUETOOTH is now a real seam here (`Quickshell.Bluetooth`) and feeds
+//     the colonnade's third bay. Grounding, and why the profile write is the
+//     one thing that leaves QML, is on the seam itself.
+//   · The CUE is a self-framed stele hosted bare through StelePopout, not the
+//     BarPopout/GadgetFrame the battery gauge one cell over still wears —
+//     that host is documented as legacy, "not the default for something new"
+//     (widget-structure.md §4), and wrapping a self-framed stele in it
+//     double-frames (live-confirmed on the calendar). It is the precedent for
+//     the BEHAVIOUR of a small hover readout, not for its chrome.
+//   · `[ mixer ]` in the colonnade's ledger launches pavucontrol through
+//     `Quickshell.execDetached` (AoideClipboard's argv-only idiom). The
+//     package is added by the quickshell facet — it is that facet's widget
+//     that needs it.
+//
 // Data sources (unchanged real Quickshell services — the plumbing survives):
 //   - Hyprland   → workspaces (WorkspaceRow) + active window title.
-//   - Pipewire   → default sink volume / muted.
+//   - Pipewire   → default sink/source volume / muted, and the bluez node's
+//                  own `api.bluez5.profile` property (the profile READ).
+//   - Bluetooth  → bluez adapter power + connected device (Quickshell 0.3.0).
 //   - UPower     → display-device battery.
 //   - Network    → /proc/net/route via FileView (files-not-processes rule).
 //   - SystemTray → StatusNotifier items (the collapsible tray).
@@ -79,6 +109,7 @@ import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
+import Quickshell.Bluetooth
 import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
 import Quickshell.Services.SystemTray
@@ -488,6 +519,116 @@ component WorkspaceRow: Item {
         if (srcAudio) srcAudio.muted = !srcAudio.muted
     }
 
+    // ── Bluetooth helpers (Quickshell.Bluetooth → bluez) ───────────────────
+    // The third audio voice. `Bluetooth` is the bluez singleton; with bluez
+    // down (or no adapter) `defaultAdapter` is null and every derived read
+    // below degrades to the "no adapter" register — live-verified on
+    // yomi-strix, where `hardware.bluetooth` is not enabled yet and
+    // `systemctl is-active bluetooth` returns inactive.
+    //
+    // GROUNDED AGAINST THE COMPILED TYPES (quickshell-bluetooth.qmltypes,
+    // Quickshell 0.3.0): BluetoothAdapter carries name/enabled/state/
+    // discovering/devices; BluetoothDevice carries address/name/deviceName/
+    // state/connected/paired/battery + connect()/disconnect()/pair()/forget().
+    // There is NO profile property and NO profile method anywhere in that
+    // module, and Quickshell.Services.Pipewire's own qmltypes expose only
+    // nodes/links/linkGroups — no card and no profile object. So the A2DP ↔
+    // headset switch CANNOT be driven natively; the write is the one place
+    // this seam leaves QML (`Quickshell.execDetached`, the AoideClipboard
+    // idiom), while the READ stays native off the PipeWire node's own
+    // properties. Reads from services, side effects through a process — the
+    // files-not-processes rule kept intact.
+    readonly property var btAdapter: Bluetooth.defaultAdapter
+    readonly property bool btAvail: btAdapter !== null
+    readonly property bool btOn: btAvail && btAdapter.enabled
+
+    // The connected device, hand-maintained. `Bluetooth.devices` only inserts
+    // and removes on pairing changes — a device merely CONNECTING mutates the
+    // existing object, so a plain `.values` binding would never re-fire (the
+    // same class of problem the tray's `_recountTray()` solves below).
+    property var btDev: null
+    readonly property bool btConnected: btDev !== null
+    readonly property string btName: btDev
+        ? ("" + (btDev.name || btDev.deviceName || "device")) : ""
+    function btShortName(n) {
+        var s = "" + btName
+        if (s.length <= n) return s
+        return s.substring(0, n - 1) + "…"
+    }
+    function _rescanBt() {
+        var vals = (Bluetooth.devices && Bluetooth.devices.values)
+                   ? Bluetooth.devices.values : []
+        var found = null
+        for (var i = 0; i < vals.length; i++) {
+            if (vals[i] && vals[i].connected) { found = vals[i]; break }
+        }
+        btDev = found
+    }
+    Connections {
+        target: Bluetooth
+        function onDefaultAdapterChanged() { root._rescanBt() }
+    }
+    Connections {
+        target: Bluetooth.devices
+        function onObjectInsertedPost(obj, index) { root._rescanBt() }
+        function onObjectRemovedPost(obj, index) { root._rescanBt() }
+    }
+    // Per-device connect/disconnect edge. Zero-size invisible watchers — the
+    // model itself is silent on a connect, so each device is watched directly.
+    Repeater {
+        model: Bluetooth.devices
+        delegate: Item {
+            required property var modelData
+            width: 0; height: 0; visible: false
+            readonly property bool conn: modelData ? modelData.connected : false
+            onConnChanged: root._rescanBt()
+            Component.onCompleted: root._rescanBt()
+        }
+    }
+
+    // Active profile, read NATIVELY off the PipeWire node PipeWire itself
+    // publishes for the bluez card: module-bluez5 stamps `api.bluez5.profile`
+    // onto every node it creates ("a2dp-sink" / "headset-head-unit"). The node
+    // name is the fallback probe. Both nodes are already tracked by the
+    // PwObjectTracker above, which is what makes `.properties` bind at all.
+    function _btProfileOf(node) {
+        if (!node) return ""
+        var p = node.properties
+        var v = p ? ("" + (p["api.bluez5.profile"] || "")) : ""
+        if (v === "") v = "" + (node.name || "")
+        v = v.toLowerCase()
+        if (v.indexOf("a2dp") >= 0) return "a2dp"
+        if (v.indexOf("headset") >= 0 || v.indexOf("hfp") >= 0
+            || v.indexOf("hsp") >= 0) return "hsp"
+        return ""
+    }
+    readonly property string btProfile: {
+        if (!btConnected) return ""
+        var a = _btProfileOf(Pipewire.defaultAudioSink)
+        if (a !== "") return a
+        return _btProfileOf(Pipewire.defaultAudioSource)
+    }
+
+    function btTogglePower() {
+        if (btAdapter) btAdapter.enabled = !btAdapter.enabled
+    }
+    // The one shell-out in this seam (see the grounding note above). The card
+    // name is PulseAudio/PipeWire's own stable convention: `bluez_card.` plus
+    // the device address with ':' → '_'. UNVERIFIED on this rig — no adapter
+    // is up here; verify with `pactl list cards short` once bluez runs.
+    function btPickProfile(p) {
+        if (!btDev || !btDev.address) return
+        var card = "bluez_card." + ("" + btDev.address).replace(/:/g, "_")
+        Quickshell.execDetached(["pactl", "set-card-profile", card,
+                                 p === "hsp" ? "headset-head-unit" : "a2dp-sink"])
+    }
+
+    // The mixer button in the colonnade's ledger. Detached, argv form — never
+    // a constructed shell string (AoideClipboard.copyById's rule).
+    function openMixer() {
+        Quickshell.execDetached(["pavucontrol"])
+    }
+
     // ── Battery helpers (UPower) ───────────────────────────────────────────
     readonly property var battDev: UPower.displayDevice
     readonly property bool battAvail: battDev && battDev.isLaptopBattery && battDev.isPresent
@@ -713,13 +854,21 @@ component WorkspaceRow: Item {
     }
 
     // ── Popout visibility state ─────────────────────────────────────────────
-    // The audio popout (the two-column colonnade) is shared: it opens while the
-    // pointer is over the ♪ vol cell, the ● mic cell, OR the popout body itself
-    // (so its columns can be clicked/scrolled without it closing under you).
+    // khoa, 2026-08-15: hover no longer opens the colonnade. The audio cells
+    // split into TWO surfaces, the way the manuscript splits a cue staff from
+    // the part it glosses:
+    //   · HOVER  → the CUE — a small self-framed stele reading out vol, mic
+    //              and bluetooth. Informational, never interactive.
+    //   · CLICK  → the COLONNADE — the full three-bay porch, click-LATCHED
+    //              (`audioOpen`), the same toggle idiom the tray fermata and
+    //              the calendar already use on this strip.
+    // The cue stands down while the colonnade is open, so the two never stack.
     property bool volCellHover: false  // pointer over the vol cell
     property bool micCellHover: false  // pointer over the mic cell
-    property bool audioBodyHover: false // pointer inside the colonnade popout
-    readonly property bool audioShown: volCellHover || micCellHover || audioBodyHover
+    property bool audioOpen: false     // the colonnade — click-latched
+    readonly property bool audioCellHover: volCellHover || micCellHover
+    readonly property bool audioCueShown: audioCellHover && !audioOpen
+    readonly property bool audioShown: audioCellHover || audioOpen
     property bool battShown: false     // battery hover popout
     property bool calShown: false      // calendar click popout (song widget slot)
 
@@ -1000,9 +1149,21 @@ component WorkspaceRow: Item {
             }
         }
 
-        // Volume (OUTPUT) — scroll = adjust, click = mute, hover = the colonnade
-        // popout (shared with mic). Attic-gold ink; hover feedback is
-        // opacity + underline (the base is already the accent).
+        // Volume (OUTPUT) — scroll = adjust, LEFT-click = open the colonnade,
+        // MIDDLE-click = mute, hover = the cue readout. Attic-gold ink; hover
+        // feedback is opacity + underline (the base is already the accent).
+        //
+        // khoa, 2026-08-15 — WHERE MUTE WENT. Left-click had to become "open",
+        // so mute moved to the middle button rather than to a right-click
+        // context menu (nothing on this strip has one, and inventing one for a
+        // single verb is a second interaction system) or to the colonnade
+        // alone (mute is an everyday action; two clicks and a surface for it
+        // is a regression). Middle-click cannot be hit by accident and is the
+        // status-bar convention for a cell's secondary verb. It is not a
+        // hidden gesture: the cue stele that appears under the pointer prints
+        // `mmb · mute` in its ledger, so the affordance is on screen at the
+        // exact moment the pointer is on the cell. The colonnade's own
+        // per-column click still mutes too — that path is unchanged.
         Text {
             id: volText
             anchors.verticalCenter: parent.verticalCenter
@@ -1018,9 +1179,13 @@ component WorkspaceRow: Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
+                acceptedButtons: Qt.LeftButton | Qt.MiddleButton
                 onEntered: root.volCellHover = true
                 onExited: root.volCellHover = false
-                onClicked: root.volToggleMute()
+                onClicked: function (mouse) {
+                    if (mouse.button === Qt.MiddleButton) root.volToggleMute()
+                    else root.audioOpen = !root.audioOpen
+                }
                 onWheel: {
                     root.volAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
                     wheel.accepted = true
@@ -1029,7 +1194,8 @@ component WorkspaceRow: Item {
         }
 
         // Microphone (INPUT) — the cool aegean voice, paired beside the vol cell.
-        // scroll = adjust capture gain, click = mute, hover = the shared popout.
+        // Same gesture set as the vol cell: scroll = capture gain, LEFT-click =
+        // open the colonnade, MIDDLE-click = mute, hover = the cue readout.
         // ● recording dot when live; a 𝄽 rest when muted (mirrors the vol cell).
         Text {
             id: micText
@@ -1046,9 +1212,13 @@ component WorkspaceRow: Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
+                acceptedButtons: Qt.LeftButton | Qt.MiddleButton
                 onEntered: root.micCellHover = true
                 onExited: root.micCellHover = false
-                onClicked: root.micToggleMute()
+                onClicked: function (mouse) {
+                    if (mouse.button === Qt.MiddleButton) root.micToggleMute()
+                    else root.audioOpen = !root.audioOpen
+                }
                 onWheel: {
                     root.micAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
                     wheel.accepted = true
@@ -1139,18 +1309,386 @@ component WorkspaceRow: Item {
         }
     }
 
+    // ══ THE CUE — the audio hover readout ══════════════════════════════════
+    // khoa, 2026-08-15: hovering an audio cell must NOT open the widget; it
+    // shows current output volume, mic status and bluetooth status, and stops
+    // there. In manuscript terms that is a CUE STAFF — the small stave a
+    // copyist writes above a part so the player can see what the other voices
+    // are doing without reading their parts. Informational by definition;
+    // nothing on it is clickable.
+    //
+    //   · ORDER   — the eleven parts (making-a-widget.md §1) at their floor
+    //               sizes. A glance card is still a stele; there is no
+    //               "tooltip" family in this house and this does not invent
+    //               one. Width 206, three body rows, no porch.
+    //   · SIGNATURE — base09 amber, DELIBERATELY the same signature the
+    //               colonnade wears: these are the same widget's two faces
+    //               (glance and control), and a second hue would read as a
+    //               second temple. Nothing else on the strip claims amber.
+    //   · CROWN   — ♪ a single note, the small cue-note; the colonnade's ♫ is
+    //               the beamed pair (two voices), so the crowns say which is
+    //               the glance and which is the full score.
+    //   · FRIEZE  — a CUE-STAFF course: three ruled hairlines at the same 3px
+    //               pitch as the bar's own staff, stepped down the ladder
+    //               (0.8 / 0.5 / 0.3). The bar it hangs off, shrunk.
+    //   · LIVE FIGURE — the closing frame names the actual sink being
+    //               controlled (`Pipewire.defaultAudioSink.nickname`), which
+    //               appears nowhere else on this desktop.
+    //
+    // Every glyph here was charset-checked against the exact declared face
+    // before use (hazards.md §1): ♪ ♩ ♫ ♬ 𝄽 𝄂 are Noto Music; ● and the
+    // bluetooth mark U+F293 are JetBrainsMono Nerd Font. The generic
+    // "monospace" alias the bar's own cells use — the face behind all three
+    // recorded glyph failures — is not used anywhere in this component.
+    // ── ONE CUE ROW — glyph · name · gauge or chip · value ─────────────────
+    // A SIBLING of AudioCue, not a member of it: Quickshell's QML engine
+    // rejects a `component` declared inside another `component` outright —
+    // "Nested inline components are not supported", hit live on this file at
+    // the first load of this build. Helper components nest inside an OBJECT
+    // (launcher.qml's GlassPage lives inside its `book` Item) but never
+    // inside another inline component.
+    component CueVoice: Item {
+        id: voice
+        property var notes
+        property string glyph: ""
+        property string glyphFace: "Noto Music"
+        property string name: ""
+        property color hue: voice.notes ? voice.notes.paletteFg : "#000000"
+        property bool live: true          // false → the whole row recedes
+        property bool meter: false
+        property int pct: 0
+        property string chip: ""          // shown instead of a meter
+        property string value: ""
+
+        readonly property color ink: voice.notes ? voice.notes.paletteFg : "#000000"
+        readonly property real rowAlpha: live ? 1.0 : 0.4
+        function withA(cstr, a) {
+            var c = Qt.color(cstr)
+            return Qt.rgba(c.r, c.g, c.b, a)
+        }
+
+        width: parent ? parent.width : 0
+        height: 16
+
+        Text {
+            id: vGlyph
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            width: 15
+            horizontalAlignment: Text.AlignHCenter
+            text: voice.glyph
+            font.family: voice.glyphFace
+            font.pixelSize: 13
+            color: voice.hue
+            opacity: voice.rowAlpha
+        }
+        Text {
+            id: vName
+            anchors.left: vGlyph.right; anchors.leftMargin: 5
+            anchors.verticalCenter: parent.verticalCenter
+            text: voice.name
+            font.family: "Noto Serif"; font.pixelSize: 11
+            font.letterSpacing: 1
+            color: voice.withA(voice.ink, 0.85 * voice.rowAlpha)
+        }
+        // the gauge — one hairline track, one fill, no box (the opacity
+        // ladder does the separating; making-a-widget.md §3)
+        Item {
+            id: vGauge
+            anchors.left: vName.right; anchors.leftMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            width: 58; height: 5
+            visible: voice.meter
+            Rectangle {
+                anchors.fill: parent; radius: 0
+                color: voice.withA(voice.ink, 0.09)
+                border.width: 1
+                border.color: voice.withA(voice.ink, 0.35 * voice.rowAlpha)
+            }
+            Rectangle {
+                anchors.left: parent.left; anchors.top: parent.top
+                anchors.bottom: parent.bottom; anchors.margins: 1
+                width: (parent.width - 2) * Math.max(0, Math.min(1, voice.pct / 100))
+                radius: 0
+                color: voice.withA(voice.hue, 0.9 * voice.rowAlpha)
+                Behavior on width { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+            }
+        }
+        Text {                            // the chip — the bt row's profile
+            anchors.left: vName.right; anchors.leftMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !voice.meter && voice.chip.length > 0
+            text: voice.chip
+            font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 8
+            font.letterSpacing: 1
+            color: voice.withA(voice.ink, 0.55)
+        }
+        Text {
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: voice.value
+            font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 11
+            color: voice.withA(voice.hue, voice.rowAlpha)
+        }
+    }
+
+    component AudioCue: Item {
+        id: cue
+
+        required property var notes
+
+        readonly property string faceSerif: "Noto Serif"
+        readonly property string faceMono:  "JetBrainsMono Nerd Font"
+        readonly property string faceMusic: "Noto Music"
+        readonly property color sig: cue.notes.base09
+        readonly property color ink: cue.notes.paletteFg
+
+        function withA(cstr, a) {
+            var c = Qt.color(cstr)
+            return Qt.rgba(c.r, c.g, c.b, a)
+        }
+        function kaomojiFor() {
+            if (root.volMuted && root.micMuted) return "(-_- )"
+            if (root.volMuted) return "( ･_･)"
+            if (root.btConnected) return "♪( ˘ω˘ )"
+            if (root.volPct >= 85) return "♪(´▽｀)"
+            return "( ･ω･)ﾉ"
+        }
+        function sinkName() {
+            var n = Pipewire.defaultAudioSink
+            var s = n ? ("" + (n.nickname || n.description || n.name || "")) : ""
+            if (s.length === 0) return "no sink"
+            return s.length > 16 ? s.substring(0, 15) + "…" : s
+        }
+
+        width: 206
+        implicitHeight: stele.height + 5      // +5 clears the cast shadow
+
+        // cast shadow ───────────────────────────────────────────────────────
+        Rectangle {
+            anchors.fill: stele
+            anchors.leftMargin: 4; anchors.topMargin: 5
+            anchors.rightMargin: -4; anchors.bottomMargin: -5
+            radius: 0
+            color: cue.withA(cue.ink, 0.22)
+        }
+
+        Rectangle {
+            id: stele
+            width: parent.width
+            anchors.top: parent.top
+            radius: 0
+            color: cue.notes.paletteBg
+            border.color: cue.ink
+            border.width: 2
+            height: body.implicitHeight + 20
+
+            Rectangle {                                   // inset amber keyline
+                anchors.fill: parent; anchors.margins: 4
+                radius: 0; color: "transparent"
+                border.color: cue.sig; border.width: 1
+            }
+
+            Column {
+                id: body
+                anchors { left: parent.left; right: parent.right; top: parent.top }
+                anchors.margins: 10
+                spacing: 4
+
+                // ── ENTABLATURE ────────────────────────────────────────────
+                Item {
+                    width: parent.width; height: 22
+                    Text {
+                        id: cueCrown
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.verticalCenterOffset: -1
+                        text: "♪"; font.family: cue.faceMusic; font.pixelSize: 20
+                        color: cue.sig
+                    }
+                    Text {
+                        anchors.left: cueCrown.right; anchors.leftMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "CUE"
+                        font.family: cue.faceSerif; font.pixelSize: 13
+                        font.weight: Font.DemiBold; font.letterSpacing: 3
+                        color: cue.ink
+                    }
+                    Text {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "[ ossia ]"
+                        font.family: cue.faceMono; font.pixelSize: 10
+                        color: cue.withA(cue.sig, 0.9)
+                    }
+                }
+
+                // ── FRIEZE — a cue-staff course, three ruled lines ──────────
+                Canvas {
+                    id: cueFrieze
+                    width: parent.width; height: 10
+                    onWidthChanged: requestPaint()
+                    onPaint: {
+                        var ctx = getContext("2d")
+                        ctx.reset(); ctx.clearRect(0, 0, width, height)
+                        var alphas = [0.75, 0.45, 0.28]
+                        ctx.lineWidth = 1
+                        for (var i = 0; i < 3; i++) {
+                            ctx.strokeStyle = cue.withA(cue.sig, alphas[i])
+                            var y = 1.5 + i * 4
+                            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke()
+                        }
+                    }
+                }
+
+                // ── box-drawing top frame ──────────────────────────────────
+                Item {
+                    width: parent.width; height: 15
+                    Text {
+                        id: cueTfL
+                        anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                        text: "┌─┤ now ├"
+                        font.family: cue.faceMono; font.pixelSize: 11
+                        color: cue.withA(cue.sig, 0.95)
+                    }
+                    Text {
+                        id: cueTfR
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                        text: "┐"; font.family: cue.faceMono; font.pixelSize: 11
+                        color: cue.withA(cue.sig, 0.95)
+                    }
+                    Rectangle {
+                        anchors.left: cueTfL.right; anchors.right: cueTfR.left
+                        anchors.leftMargin: 2; anchors.rightMargin: 2
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.verticalCenterOffset: 1
+                        height: 1; color: cue.withA(cue.sig, 0.55)
+                    }
+                }
+
+                // ── THE BODY — the three voices ────────────────────────────
+                CueVoice {
+                    notes: cue.notes
+                    glyph: root.volMuted ? "𝄽" : root.volIcon(root.volPct)
+                    glyphFace: cue.faceMusic
+                    name: "out"
+                    hue: cue.notes.paletteAccent
+                    live: root.volAvail
+                    meter: root.volAvail && !root.volMuted
+                    pct: root.volPct
+                    value: !root.volAvail ? "—" : (root.volMuted ? "muted" : root.volPct + "%")
+                }
+                CueVoice {
+                    notes: cue.notes
+                    glyph: root.micMuted ? "𝄽" : "●"
+                    glyphFace: root.micMuted ? cue.faceMusic : cue.faceMono
+                    name: "in"
+                    hue: cue.notes.holoBlue
+                    live: root.micAvail
+                    meter: root.micAvail && !root.micMuted
+                    pct: root.micPct
+                    value: !root.micAvail ? "—" : (root.micMuted ? "muted" : root.micPct + "%")
+                }
+                CueVoice {
+                    glyph: ""                       // nf-fa-bluetooth
+                    notes: cue.notes
+                    glyphFace: cue.faceMono
+                    name: "bt"
+                    hue: cue.notes.wireCyan
+                    live: root.btAvail && root.btOn
+                    chip: root.btProfile === "a2dp" ? "a2dp"
+                        : (root.btProfile === "hsp" ? "hsp" : "")
+                    value: !root.btAvail ? "—"
+                         : (!root.btOn ? "off"
+                         : (root.btConnected ? root.btShortName(12) : "on"))
+                }
+
+                // ── ledger line ────────────────────────────────────────────
+                Item {
+                    width: parent.width; height: 16
+                    Rectangle {
+                        anchors.top: parent.top
+                        anchors.left: parent.left; anchors.right: parent.right
+                        height: 1; color: cue.withA(cue.sig, 0.3)
+                    }
+                    Text {
+                        anchors.left: parent.left; anchors.bottom: parent.bottom
+                        text: cue.kaomojiFor()
+                        font.pixelSize: 11
+                        color: cue.withA(cue.sig, 0.9)
+                    }
+                    Text {
+                        anchors.right: parent.right; anchors.bottom: parent.bottom
+                        text: "mmb · mute"
+                        font.family: cue.faceMono; font.pixelSize: 9
+                        color: cue.withA(cue.ink, 0.5)
+                    }
+                }
+
+                // ── closing frame — the live sink, ending on 𝄂 in gold ─────
+                Item {
+                    width: parent.width; height: 16
+                    Text {
+                        id: cueFfL
+                        anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                        text: "└─┤ " + cue.sinkName() + " ├"
+                        font.family: cue.faceMono; font.pixelSize: 10
+                        color: cue.withA(cue.ink, 0.8)
+                    }
+                    Text {
+                        id: cueFfCorner
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                        text: "┘"; font.family: cue.faceMono; font.pixelSize: 11
+                        color: cue.withA(cue.sig, 0.95)
+                    }
+                    Text {
+                        id: cueFfBar
+                        anchors.right: cueFfCorner.left; anchors.rightMargin: 4
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "𝄂"; font.family: cue.faceMusic; font.pixelSize: 15
+                        color: cue.notes.paletteAccent
+                    }
+                    Rectangle {
+                        anchors.left: cueFfL.right; anchors.right: cueFfBar.left
+                        anchors.leftMargin: 2; anchors.rightMargin: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.verticalCenterOffset: 1
+                        height: 1; color: cue.withA(cue.sig, 0.55)
+                    }
+                }
+            }
+        }
+    }
+
     // ══ POPOUTS — real PopupWindows under their bar cells (BarPopout) ══════
     // Each is its own xdg_popup with GadgetFrame chrome (glass via blur_popups).
     // The cell ids above (volText/battText) anchor them. Meters/power/clock
     // popouts moved to the AoideAgentWidgets dock (bottom-seated frames).
 
-    // Audio control — the two-column colonnade (MIC + VOL), a self-framed marble
-    // stele hosted BARE (StelePopout, no GadgetFrame — it draws its own chrome).
-    // Shared popout hung under the vol cell, opened by hovering EITHER audio cell
-    // (or the body, so its columns can be clicked/scrolled without it closing).
+    // The CUE — the hover readout. A small self-framed stele (the eleven parts
+    // at their floor sizes, making-a-widget.md §1) hung under the vol cell,
+    // reading out the three voices and nothing else. Hosted BARE through
+    // StelePopout, per khoa's 2026-07-31 standing direction — NOT the
+    // BarPopout/GadgetFrame the battery gauge still wears one cell over: that
+    // host supplies its own pediment and closure, which would double-frame a
+    // stele (live-confirmed on the calendar). The battery's BarPopout is the
+    // house's remaining legacy host, explicitly "not the default for something
+    // new" (widget-structure.md §4), so it is precedent for the BEHAVIOUR
+    // (a small hover readout beside a bar cell) and not for the CHROME.
     StelePopout {
         cell: volText
-        shown: root.audioShown && (root.volAvail || root.micAvail)
+        shown: root.audioCueShown && (root.volAvail || root.micAvail)
+        AudioCue { notes: root.notes }
+    }
+
+    // Audio control — the three-bay colonnade (MIC · VOL · BT), a self-framed
+    // marble stele hosted BARE (StelePopout, no GadgetFrame — it draws its own
+    // chrome). CLICK-latched as of 2026-08-15: opened by clicking either audio
+    // cell, closed by clicking it again. It no longer hover-retains, so the
+    // body's `hovered` read is no longer wired to anything here.
+    StelePopout {
+        cell: volText
+        shown: root.audioOpen && (root.volAvail || root.micAvail)
         AudioColonnade {
             notes: root.notes
             outPct: root.volPct
@@ -1159,11 +1697,18 @@ component WorkspaceRow: Item {
             inPct: root.micPct
             inMuted: root.micMuted
             inAvail: root.micAvail
+            btAvail: root.btAvail
+            btOn: root.btOn
+            btConnected: root.btConnected
+            btName: root.btName
+            btProfile: root.btProfile
             onOutToggle: root.volToggleMute()
             onOutAdjust: function(d) { root.volAdjust(d) }
             onInToggle: root.micToggleMute()
             onInAdjust: function(d) { root.micAdjust(d) }
-            onHoveredChanged: root.audioBodyHover = hovered
+            onBtToggle: root.btTogglePower()
+            onBtPick: function(p) { root.btPickProfile(p) }
+            onOpenMixer: root.openMixer()
         }
     }
 
@@ -1196,14 +1741,378 @@ component WorkspaceRow: Item {
         }
     }
 
-    // System tray popout — deliberately EMPTY (khoa, 2026-08-15: torn out
-    // wholesale for a from-scratch redesign after three iterations that
-    // didn't land — bare-tablet, bare-icon-row, icon+name-row all gone, no
-    // trace kept). The toggle above still opens/closes (`root.trayOpen`) and
-    // still counts live items (`root.trayCount`/`_recountTray()`), so
-    // clicking it currently does nothing visible — that's expected until
-    // the next pass fills this back in. See CONTRACTS.md §5 / BarPopout for
-    // the chrome any replacement body hangs off (`cell: trayToggle`).
+    // ── System tray — the held items, a self-framed marble stele ───────────
+    // Toggled by the fermata cell above (root.trayOpen); force-closed at zero
+    // items by _recountTray(). Hosted BARE via StelePopout — khoa's 2026-07-31
+    // standing direction for new bar popouts (StelePopout.qml's own header);
+    // the torn-out first build's BarPopout bay would double-frame a
+    // self-framed stele (live-confirmed on the calendar).
+    //
+    //   · ORDER     — the shared eleven-part stele at the shared sizes
+    //                 (design/making-a-widget.md §1); the body is one
+    //                 manuscript-ruled line per held item — the launcher's
+    //                 row idiom (hairline rule, margin dot, icon, serif name,
+    //                 mono gloss), no invented layout system.
+    //   · SIGNATURE — verdigris (notes.wireCyan): the one role no popout
+    //                 stele wears as its own (rust took notifications, amber
+    //                 took audio + calendar). Full strength is legal as a
+    //                 signature — the 0.5 alpha cap binds the STRUCTURAL
+    //                 role, not the hue (design/greek-grammar.md §5).
+    //   · CROWN     — 𝄋 segno, the return-sign, standing in where no clef
+    //                 fits. Deliberately NOT 𝄐: the fermata is the toggle's
+    //                 glyph, and 𝄐 serves THIS stele as the awaiting mark on
+    //                 an attention row (state contract, greek-grammar.md §3)
+    //                 — two registers of one glyph may not collide in one
+    //                 place. 𝄋 already renders live in this file's workspace
+    //                 row (the scratch workspace).
+    //   · FRIEZE    — a fermata course: repeated hold-marks (arc over dot),
+    //                 Canvas, 10px, lineWidth 1.2, in the signature — the
+    //                 popout's token (`tray.held`) made ornament, the one
+    //                 place the concept shows.
+    //   · STATES    — hover is the ONE laurel: rule 1px to 2px + margin
+    //                 mark · to ♪ (two reads, one state, the launcher's
+    //                 selection). Status.NeedsAttention is the awaiting
+    //                 treatment: 𝄐 mark + terracotta title + Bold + the
+    //                 600ms 0.35/1.0 pulse — weight and motion carry the
+    //                 state with colour removed.
+    //
+    // Wiring, grounded: the Repeater binds SystemTray.items (the ObjectModel)
+    // directly, never a .values.slice() copy (design/hazards.md §4). Left
+    // click → activate(), right → secondaryActivate(); this Quickshell rev
+    // exposes no tertiaryActivate. modelData.icon is already an image URL,
+    // rendered straight in an Image. Every rare glyph rides a NAMED face at
+    // REGULAR weight — the fermata pair's bold-monospace invisibility scar
+    // is documented on the toggle above.
+    StelePopout {
+        cell: trayToggle
+        shown: root.trayOpen && root.trayCount > 0
+
+        Item {
+            id: tstele
+            width: 300
+            implicitHeight: trayBody.height + 5   // +5 clears the cast shadow
+
+            // type voices — shared across the pantheon (greek-grammar.md §1)
+            readonly property string faceSerif: "Noto Serif"
+            readonly property string faceMono:  "JetBrainsMono Nerd Font"
+            readonly property string faceMusic: "Noto Music"
+
+            // this stele's signature — VERDIGRIS (wireCyan)
+            readonly property color sig: root.notes.wireCyan
+            readonly property color ink: root.notes.paletteFg
+
+            function withA(cstr, a) {
+                var c = Qt.color(cstr)
+                return Qt.rgba(c.r, c.g, c.b, a)
+            }
+            // one mood face reading the whole court, keyed on the live count
+            // (kana/punctuation atoms MoodFaces already proves safe)
+            function kaomojiFor() {
+                if (root.trayCount >= 4) return "(˘ω˘ )"      // a full retinue, at ease
+                if (root.trayCount >= 2) return "( ･ω･)ノ"    // a few attendants, alert
+                return "( ･_･)ノ"                              // the lone attendant
+            }
+
+            // cast shadow — shared pantheon idiom
+            Rectangle {
+                anchors.fill: trayBody
+                anchors.leftMargin: 4; anchors.topMargin: 5
+                anchors.rightMargin: -4; anchors.bottomMargin: -5
+                radius: 0
+                color: tstele.withA(tstele.ink, 0.22)
+            }
+
+            // the stele — opaque marble body, 2px ink border, inset keyline
+            Rectangle {
+                id: trayBody
+                width: parent.width
+                anchors.top: parent.top
+                radius: 0
+                color: root.notes.paletteBg
+                border.color: tstele.ink
+                border.width: 2
+                height: trayContent.implicitHeight + 20
+
+                Rectangle {                        // inset verdigris keyline
+                    anchors.fill: parent; anchors.margins: 4
+                    radius: 0; color: "transparent"
+                    border.color: tstele.sig; border.width: 1
+                }
+
+                Column {
+                    id: trayContent
+                    anchors { left: parent.left; right: parent.right; top: parent.top }
+                    anchors.margins: 10
+                    spacing: 4
+
+                    // ── ENTABLATURE: crown + carved name + protocol tag ─────
+                    Item {
+                        width: parent.width; height: 24
+                        Text {
+                            id: trayCrown
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "𝄋"
+                            font.family: tstele.faceMusic
+                            font.pixelSize: 22
+                            color: tstele.sig
+                        }
+                        Text {
+                            anchors.left: trayCrown.right; anchors.leftMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "RETINUE"
+                            font.family: tstele.faceSerif
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
+                            font.letterSpacing: 3
+                            color: tstele.ink
+                        }
+                        Text {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "[ sni ]"
+                            font.family: tstele.faceMono
+                            font.pixelSize: 10
+                            color: tstele.withA(tstele.sig, 0.9)
+                        }
+                    }
+
+                    // ── the fermata course — repeated hold-marks, verdigris ──
+                    Canvas {
+                        width: parent.width; height: 10
+                        readonly property color tone: tstele.withA(tstele.sig, 0.85)
+                        onToneChanged: requestPaint()
+                        onWidthChanged: requestPaint()
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.reset(); ctx.clearRect(0, 0, width, height)
+                            ctx.strokeStyle = tone
+                            ctx.fillStyle = tone
+                            ctx.lineWidth = 1.2
+                            var cy = height - 2, period = 14
+                            for (var x = 7; x < width - 7; x += period) {
+                                ctx.beginPath()
+                                ctx.arc(x, cy, 4.4, Math.PI, 2 * Math.PI)  // the hold's arc
+                                ctx.stroke()
+                                ctx.beginPath()
+                                ctx.arc(x, cy - 1.4, 1.1, 0, 2 * Math.PI)  // the dot beneath
+                                ctx.fill()
+                            }
+                        }
+                    }
+
+                    // ── box-drawing top frame — the popout's token ──────────
+                    Item {
+                        width: parent.width; height: 15
+                        Text {
+                            id: trayTfL
+                            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                            text: "┌─┤ tray.held ├"
+                            font.family: tstele.faceMono; font.pixelSize: 11
+                            color: tstele.withA(tstele.sig, 0.95)
+                        }
+                        Text {
+                            id: trayTfR
+                            anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                            text: "┐"; font.family: tstele.faceMono; font.pixelSize: 11
+                            color: tstele.withA(tstele.sig, 0.95)
+                        }
+                        Rectangle {
+                            anchors.left: trayTfL.right; anchors.right: trayTfR.left
+                            anchors.leftMargin: 2; anchors.rightMargin: 2
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: 1
+                            height: 1; color: tstele.withA(tstele.sig, 0.55)
+                        }
+                    }
+
+                    // ── THE BODY — one manuscript-ruled line per held item ──
+                    Column {
+                        width: parent.width
+                        Repeater {
+                            model: SystemTray.items
+                            delegate: Item {
+                                id: trayRow
+                                required property var modelData
+                                width: parent ? parent.width : 0
+                                height: 34
+
+                                readonly property bool attn:
+                                    trayRow.modelData
+                                    && trayRow.modelData.status === Status.NeedsAttention
+                                readonly property bool hovered: rowMa.containsMouse
+
+                                // Data shaping (the notification card's rule:
+                                // go get the tiers) — title falls back to the
+                                // item id; the gloss is the first of tooltip
+                                // title/description/id that adds NEW ink, so
+                                // nothing reads twice.
+                                readonly property string label: {
+                                    var m = trayRow.modelData
+                                    var t = (m && m.title) ? ("" + m.title).trim() : ""
+                                    if (t.length > 0) return t
+                                    var i = (m && m.id) ? ("" + m.id).trim() : ""
+                                    return i.length > 0 ? i : "item"
+                                }
+                                readonly property string gloss: {
+                                    var m = trayRow.modelData
+                                    if (!m) return ""
+                                    var cands = [m.tooltipTitle, m.tooltipDescription, m.id]
+                                    for (var k = 0; k < cands.length; k++) {
+                                        var s = cands[k] ? ("" + cands[k]).trim() : ""
+                                        if (s.length > 0 && s !== trayRow.label) return s
+                                    }
+                                    return ""
+                                }
+
+                                // the ruling — ignites laurel on hover
+                                Rectangle {
+                                    anchors.left: parent.left; anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: trayRow.hovered ? 2 : 1
+                                    color: trayRow.hovered ? root.notes.paletteHot
+                                                           : tstele.withA(tstele.ink, 0.13)
+                                    Behavior on color { ColorAnimation { duration: 150 } }
+                                }
+
+                                Row {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.verticalCenterOffset: -1
+                                    spacing: 8
+
+                                    Text {   // margin mark: · rest / ♪ hover / 𝄐 attention
+                                        id: rowMark
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 14
+                                        horizontalAlignment: Text.AlignHCenter
+                                        text: trayRow.attn ? "𝄐"
+                                              : trayRow.hovered ? "♪" : "·"
+                                        font.family: tstele.faceMusic
+                                        font.pixelSize: trayRow.hovered && !trayRow.attn ? 15 : 13
+                                        color: trayRow.attn ? root.notes.paletteUrgent
+                                               : trayRow.hovered ? root.notes.paletteHot
+                                               : tstele.withA(tstele.ink, 0.3)
+                                        SequentialAnimation on opacity {
+                                            running: trayRow.attn
+                                            loops: Animation.Infinite
+                                            alwaysRunToEnd: true
+                                            NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
+                                            NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
+                                        }
+                                    }
+                                    Image {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 20; height: 20
+                                        sourceSize.width: 20; sourceSize.height: 20
+                                        fillMode: Image.PreserveAspectFit
+                                        source: (trayRow.modelData && trayRow.modelData.icon)
+                                                ? trayRow.modelData.icon : ""
+                                    }
+                                    Text {
+                                        id: rowName
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: trayRow.label
+                                        color: trayRow.attn ? root.notes.paletteUrgent
+                                                            : tstele.ink
+                                        opacity: trayRow.hovered ? 1.0 : 0.88
+                                        font.family: tstele.faceSerif
+                                        font.pixelSize: 14
+                                        font.weight: (trayRow.attn || trayRow.hovered)
+                                                     ? Font.Bold : Font.Medium
+                                        elide: Text.ElideRight
+                                        width: Math.min(implicitWidth, parent.width * 0.55)
+                                    }
+                                    Text {   // informational gloss — aegean, never chrome
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.verticalCenterOffset: 1
+                                        visible: trayRow.gloss.length > 0
+                                        text: trayRow.gloss
+                                        color: tstele.withA(root.notes.holoBlue, 0.8)
+                                        font.family: tstele.faceMono
+                                        font.pixelSize: 10
+                                        elide: Text.ElideRight
+                                        width: Math.max(0, parent.width - rowMark.width
+                                                        - 20 - rowName.width - 24)
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: rowMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: function(mouse) {
+                                        if (!trayRow.modelData) return
+                                        if (mouse.button === Qt.RightButton)
+                                            trayRow.modelData.secondaryActivate()
+                                        else
+                                            trayRow.modelData.activate()
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ── ledger: kaomoji + the interaction hint ──────────────
+                    Item {
+                        width: parent.width; height: 16
+                        Rectangle {
+                            anchors.top: parent.top
+                            anchors.left: parent.left; anchors.right: parent.right
+                            height: 1; color: tstele.withA(tstele.sig, 0.3)
+                        }
+                        Text {
+                            anchors.left: parent.left; anchors.bottom: parent.bottom
+                            text: tstele.kaomojiFor()
+                            font.pixelSize: 11
+                            color: tstele.withA(tstele.sig, 0.9)
+                        }
+                        Text {
+                            anchors.right: parent.right; anchors.bottom: parent.bottom
+                            text: "click · open   right · menu"
+                            font.family: tstele.faceMono; font.pixelSize: 9
+                            color: tstele.withA(tstele.ink, 0.5)
+                        }
+                    }
+
+                    // ── box-drawing bottom frame — live count, closing 𝄂 ────
+                    Item {
+                        width: parent.width; height: 18
+                        Text {
+                            id: trayFfL
+                            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                            text: "└─┤ " + root.trayCount + " held ├"
+                            font.family: tstele.faceMono; font.pixelSize: 11
+                            color: tstele.withA(tstele.ink, 0.8)
+                        }
+                        Text {
+                            id: trayFfCorner
+                            anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                            text: "┘"; font.family: tstele.faceMono; font.pixelSize: 11
+                            color: tstele.withA(tstele.sig, 0.95)
+                        }
+                        Text {
+                            id: trayFfBar
+                            anchors.right: trayFfCorner.left; anchors.rightMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "𝄂"; font.family: tstele.faceMusic; font.pixelSize: 16
+                            color: root.notes.paletteAccent
+                        }
+                        Rectangle {
+                            anchors.left: trayFfL.right; anchors.right: trayFfBar.left
+                            anchors.leftMargin: 2; anchors.rightMargin: 6
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: 1
+                            height: 1; color: tstele.withA(tstele.sig, 0.55)
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Calendar — a per-song flavor-widget slot (CONTRACTS.md §5). No shared
     // fallback: the old song-blind CalendarGadget was retired, so a slot
