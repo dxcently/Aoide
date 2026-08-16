@@ -193,10 +193,30 @@ more robust idiom, not a fix for a broken binding.)
 - **Anything drawn below the bar inside the bar `Item` is clipped by the layer
   surface and never renders** (the v1 popouts' silent failure). A popout must
   be a real `PopupWindow` — its own surface, free to extend past the strip.
-- **Hyprland re-maps an `xdg_popup` on the first resize of a visible popup**
-  and plays its popup animation over the remap (~0.25s vanish/fade, measured,
-  anchor-mode-independent). `calendar.qml` sequences its window resize around
-  the morph so the flicker lands on a static image.
+- **The xdg_popup resize REMAP no longer reproduces** (re-measured 2026-08-16,
+  Hyprland 0.56.0). The recorded behaviour was: Hyprland re-maps an xdg_popup
+  on the first resize of a visible popup and plays its popup animation over the
+  remap (~0.25s vanish/fade, anchor-mode-independent). Driven again live with
+  `grim` bursts at ~60ms/frame — a probe resized the colonnade's popup 8 times
+  over 120 frames, plus a separate single first-resize-after-map — **zero
+  frames showed the popup absent**; the frame means clustered on exactly the
+  two widths with one transitional frame per resize. `calendar.qml`'s 300ms
+  `resizeGuard` was written against the old behaviour and is retired; the
+  ordering it carried survives for a different, still-live reason (below).
+- **A surface must never be SMALLER than the paint it hosts mid-morph, and on
+  a frosted popup it must never be LARGER either.** Both halves measured on
+  2026-08-16 and they point opposite ways depending on the surface:
+  animating a surface size per frame leaves it a frame behind the paint for
+  the whole morph, so the trailing edge (border, cast shadow) shimmers in and
+  out of clip — which is why `calendar.qml` steps its layer surface out first
+  and in last around a lerped sheet. But the colonnade is a *frosted*
+  xdg_popup, and there `blur_popups` renders any surface area the opaque stele
+  does not cover as a blank glass rectangle — a stepped surface hung a 148px
+  frosted band under the stele for the full 340ms, in both directions
+  (captured), while binding `implicitHeight` straight to the painted height
+  was clean. Transparent-and-unblurred wants the step; frosted wants the
+  track. `MorphState` owns the state and the ordering and NOT the window
+  precisely so both are expressible.
 - **A centred `xdg_popup` is re-centred by the compositor on every width
   change, one frame behind the resize** — a visible twitch mid-morph
   (live-verified). Pin an edge (`anchorEdges`/`anchorGravity`) for anything

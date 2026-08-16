@@ -646,6 +646,117 @@ component WorkspaceRow: Item {
         if (n) Pipewire.preferredDefaultAudioSource = n
     }
 
+    // ── THE VOICES — per-application streams, the colonnade's naos payload ──
+    // The nodes the three rosters above deliberately SKIP (`isStream`). The
+    // `PwNodeType.Flags` enum carries AudioOutStream/AudioInStream directly, so
+    // the direction is read off the type rather than guessed from isSink:
+    // a playback stream feeds a sink and a capture stream drains a source, and
+    // `isSink` means the opposite thing on each. (Grounded in
+    // quickshell-service-pipewire.qmltypes: PwNodeType::Flag lists Untracked,
+    // Audio, Video, Stream, Source, Sink, AudioSink, AudioSource, AudioDuplex,
+    // AudioOutStream, AudioInStream, VideoSource, VideoSink.)
+    //
+    // Their `.audio` sub-object is the same seam the sink and source use, and
+    // it has the same requirement: a node must be TRACKED or `.audio` never
+    // binds (hazards.md §5). The tracker below carries the whole stream set,
+    // so it grows and shrinks with the applications.
+    readonly property var streamNodes: {
+        var epoch = root.pwEpoch
+        var out = []
+        if (!Pipewire.ready) return out
+        var vals = (Pipewire.nodes && Pipewire.nodes.values)
+                   ? Pipewire.nodes.values : []
+        for (var i = 0; i < vals.length; i++) {
+            var n = vals[i]
+            if (!n || !n.isStream) continue
+            if (!(n.type & PwNodeType.Audio)) continue
+            out.push(n)
+        }
+        return out
+    }
+    PwObjectTracker { objects: root.streamNodes }
+
+    // The application's own name, then what it is playing. PipeWire stamps
+    // `application.name` on every stream a client opens and `media.name` on
+    // what is going through it, so the pair reads as "who · what" with no
+    // shaping needed; the node's description is the fallback for a stream
+    // that carries neither (some ALSA-compat clients).
+    function streamLabel(n) {
+        var p = n.properties || ({})
+        var s = "" + (p["application.name"] || "")
+        if (s.length === 0) s = "" + (n.description || "")
+        if (s.length === 0) s = "" + (n.name || ("node " + n.id))
+        return s
+    }
+    function streamGloss(n) {
+        var p = n.properties || ({})
+        var s = "" + (p["media.name"] || "")
+        if (s.length === 0) s = "" + (p["media.role"] || "")
+        if (s.length === 0) s = ""
+        return s.length > 18 ? s.substring(0, 17) + "…" : s
+    }
+    // MONITORS ARE NOT VOICES, and the filter for them is `ready` — measured,
+    // not assumed. Opening pavucontrol adds five `Stream/Input/Audio` nodes
+    // named "PulseAudio Volume Control", one peak meter per bar it draws; they
+    // outnumbered the three real applications in the naos five to three (live
+    // capture, 2026-08-16). PipeWire does stamp `stream.monitor: true` on each
+    // (confirmed in `pw-dump`), but Quickshell never surfaces it: with all
+    // eight nodes handed to the tracker below, the three real streams report
+    // `ready: true` and a full ~40-key `properties` map, while all five
+    // monitors report `ready: false` and `properties: {}`, stably, still empty
+    // 15s later (logged from this binding). So `stream.monitor` is not
+    // readable here and the honest rule is the one that IS: a node whose
+    // properties have not bound cannot be named, classified or explained, so
+    // it does not get a row. The `stream.monitor` test stays underneath it as
+    // the semantic filter, for the day such a node does bind.
+    //
+    // This also cannot move up into `streamNodes`: `.properties` does not bind
+    // until a node is TRACKED (hazards.md §5) and the tracker is fed from that
+    // list, so filtering there would ask a node a question it is not yet
+    // answering. The tracker takes every audio stream; the roster is where
+    // they drop out.
+    readonly property var streamRoster: {
+        var out = []
+        var vals = root.streamNodes
+        for (var i = 0; i < vals.length; i++) {
+            var n = vals[i]
+            if (!n.ready) continue
+            var props = n.properties || ({})
+            if (("" + props["stream.monitor"]) === "true") continue
+            var a = n.audio
+            out.push({ key: "" + n.id,
+                       name: root.streamLabel(n),
+                       gloss: root.streamGloss(n),
+                       pct: a ? Math.round(a.volume * 100) : 0,
+                       muted: a ? a.muted === true : false,
+                       // AudioOutStream/AudioInStream are COMPOSITE flags, so
+                       // the test is equality on the masked bits, not `!== 0`.
+                       // Read off the live graph 2026-08-16: AudioOutStream is
+                       // 21 (Audio 1 | Stream 4 | Sink 16), AudioInStream is 13
+                       // (Audio 1 | Stream 4 | Source 8) — they share bits 1
+                       // and 4, so `(13 & 21) !== 0` is 5 and a capture stream
+                       // reads as playback. That is not theoretical: a live
+                       // `parec` client filed itself under `playback` while the
+                       // `recording` register said "nothing is recording"
+                       // (captured, then fixed).
+                       out: (n.type & PwNodeType.AudioOutStream)
+                            === PwNodeType.AudioOutStream })
+        }
+        return out
+    }
+    function streamToggle(key) {
+        var n = root.pwNodeById(key)
+        if (n && n.audio) n.audio.muted = !n.audio.muted
+    }
+    function streamAdjust(key, deltaPct) {
+        var n = root.pwNodeById(key)
+        if (!n || !n.audio) return
+        var v = n.audio.volume + deltaPct / 100
+        if (v < 0) v = 0
+        if (v > 1) v = 1
+        n.audio.volume = v
+    }
+
     // ── Bluetooth helpers (Quickshell.Bluetooth → bluez) ───────────────────
     // The third audio voice. `Bluetooth` is the bluez singleton; with bluez
     // down (or no adapter) `defaultAdapter` is null and every derived read
@@ -1389,7 +1500,7 @@ component WorkspaceRow: Item {
                 onEntered: root.volCellHover = true
                 onExited: root.volCellHover = false
                 onClicked: root.audioOpen = !root.audioOpen
-                onWheel: {
+                onWheel: function(wheel) {
                     root.volAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
                     wheel.accepted = true
                 }
@@ -1419,7 +1530,7 @@ component WorkspaceRow: Item {
                 onEntered: root.micCellHover = true
                 onExited: root.micCellHover = false
                 onClicked: root.audioOpen = !root.audioOpen
-                onWheel: {
+                onWheel: function(wheel) {
                     root.micAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
                     wheel.accepted = true
                 }
@@ -1527,11 +1638,16 @@ component WorkspaceRow: Item {
     //   · ORDER   — the eleven parts (making-a-widget.md §1) at their floor
     //               sizes. A glance card is still a stele; there is no
     //               "tooltip" family in this house and this does not invent
-    //               one. Width 206, three body rows, no porch.
-    //   · SIGNATURE — base09 amber, DELIBERATELY the same signature the
-    //               colonnade wears: these are the same widget's two faces
-    //               (glance and control), and a second hue would read as a
-    //               second temple. Nothing else on the strip claims amber.
+    //               one. Width 217 (206 + the margin-mark column added
+    //               2026-08-16), three body rows, no porch.
+    //   · SIGNATURE — MUREX `notes.violet` (base0E), DELIBERATELY the same
+    //               signature the colonnade wears: these are the same widget's
+    //               two faces (glance and control), and a second hue would read
+    //               as a second temple. It moved WITH the colonnade on
+    //               2026-08-16 (base09 amber → murex, so the audio family stops
+    //               sharing the calendar's clay) — the full derivation lives in
+    //               AudioColonnade.qml's SIGNATURE note; the rule here is only
+    //               that the two faces move together, always.
     //   · CROWN   — ♪ a single note, the small cue-note; the colonnade's ♫ is
     //               the beamed pair (two voices), so the crowns say which is
     //               the glance and which is the full score.
@@ -1615,9 +1731,31 @@ component WorkspaceRow: Item {
             color: voice.withA(voice.urgent, 0.75)
         }
 
+        // THE MARGIN MARK — the row's own "this line is a target". Added
+        // 2026-08-16: at rest the only thing announcing that these rows were
+        // pressable was the ledger's hint line and a cursor change, and a card
+        // that gained a second gesture (the wheel) needs its affordances more,
+        // not less. It is the manuscript row's margin column verbatim, the one
+        // the colonnade's picker and naos rows already carry — which also
+        // visually binds the cue's rows to theirs, the two faces sharing one
+        // hand. Only an ACTIONABLE row gets one: a dead row is not merely
+        // inert, it is untargetable, and it should not advertise otherwise.
+        Text {
+            id: vMark
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: -1
+            width: 11
+            horizontalAlignment: Text.AlignHCenter
+            text: voice.actionable ? "·" : ""
+            font.family: "Noto Music"
+            font.pixelSize: voice.hot ? 13 : 11
+            color: voice.withA(voice.hue, voice.hot ? 1.0 : 0.3)
+            Behavior on color { ColorAnimation { duration: 150 } }
+        }
         Text {
             id: vGlyph
-            anchors.left: parent.left
+            anchors.left: vMark.right
             anchors.verticalCenter: parent.verticalCenter
             width: 15
             horizontalAlignment: Text.AlignHCenter
@@ -1686,7 +1824,7 @@ component WorkspaceRow: Item {
         readonly property string faceSerif: "Noto Serif"
         readonly property string faceMono:  "JetBrainsMono Nerd Font"
         readonly property string faceMusic: "Noto Music"
-        readonly property color sig: cue.notes.base09
+        readonly property color sig: cue.notes.violet
         readonly property color ink: cue.notes.paletteFg
 
         function withA(cstr, a) {
@@ -1722,7 +1860,7 @@ component WorkspaceRow: Item {
             return s.length > 16 ? s.substring(0, 15) + "…" : s
         }
 
-        width: 206
+        width: 217                            // 206 + the 11px margin-mark column
         implicitHeight: stele.height + 5      // +5 clears the cast shadow
 
         // ── THE RETENTION LATCHES · ONE HIT-TESTING AUTHORITY ───────────────
@@ -1787,6 +1925,24 @@ component WorkspaceRow: Item {
             onClicked: {
                 var r = cue.rowAt(mouseY - 4)
                 if (r >= 0) cue.voices()[r].picked()
+            }
+            // khoa, 2026-08-16 — the cue takes the WHEEL too. It rides this
+            // same single object rather than a handler per row: the row is
+            // already resolved arithmetically by the call `onClicked` uses, so
+            // a wheel handler inside a row would reintroduce exactly the
+            // nested-delivery problem the four rounds above eliminated. ±2 is
+            // the bar cells' own step, not a new one.
+            //
+            // The bt row is left ALONE rather than swallowed: there is nothing
+            // sensible to scroll on a power toggle, and eating the gesture
+            // there would mean the wheel silently does nothing over a third of
+            // the card with no way to tell that apart from a broken handler.
+            // Unaccepted, it falls through to whatever is behind.
+            onWheel: function(wheel) {
+                var r = cue.rowAt(mouseY - 4)
+                if (r === 0) { root.volAdjust(wheel.angleDelta.y > 0 ? 2 : -2); wheel.accepted = true }
+                else if (r === 1) { root.micAdjust(wheel.angleDelta.y > 0 ? 2 : -2); wheel.accepted = true }
+                else wheel.accepted = false
             }
         }
 
@@ -1938,7 +2094,13 @@ component WorkspaceRow: Item {
                     glyphFace: cue.faceMono
                     name: "bt"
                     hue: cue.notes.wireCyan
-                    live: root.btAvail && root.btOn
+                    // `live` is the UNAVAILABLE treatment (the row recedes to
+                    // 0.4, §9), and a powered-DOWN adapter is not unavailable —
+                    // it is the one row whose click matters most, since the
+                    // click is what powers it on. So only "no adapter" recedes;
+                    // the off state is already carried by the terracotta value
+                    // and needs no second telling.
+                    live: root.btAvail
                     chip: root.btProfile === "a2dp" ? "a2dp"
                         : (root.btProfile === "hsp" ? "hsp" : "")
                     value: !root.btAvail ? "—"
@@ -1971,8 +2133,14 @@ component WorkspaceRow: Item {
                         // this card actually has. "silence" and not "mute"
                         // because the bt row cuts power rather than muting, and
                         // this widget already treats the two as one state.
-                        text: "click · silence"
-                        font.family: cue.faceMono; font.pixelSize: 9
+                        // Two verbs as of the wheel landing, in the colonnade
+                        // ledger's own `scroll · set   click · mute` form.
+                        text: "scroll · set  click · silence"
+                        // 9 → 8: two verbs do not fit beside the kaomoji at 9
+                        // in a 217-wide card (they touched — captured). A hint
+                        // is an informational layer, where the 7–9 micro tier
+                        // is legal; nothing you came to read lives here.
+                        font.family: cue.faceMono; font.pixelSize: 8
                         color: cue.withA(cue.ink, 0.5)
                     }
                 }
@@ -2041,6 +2209,15 @@ component WorkspaceRow: Item {
     StelePopout {
         cell: volText
         shown: root.audioOpen && (root.volAvail || root.micAvail)
+        // The colonnade RESIZES while open now (porch ↔ parthenon), so it takes
+        // the anchor override StelePopout's header describes. It grows DOWNWARD
+        // only — the width never changes — so the pin is about the horizontal
+        // edge staying put across the two height steps rather than about the
+        // width twitch: this cell sits near the right screen edge, so the
+        // popup hangs from its RIGHT edge and opens leftward (edges
+        // Bottom|Right, gravity Bottom|Left) instead of being re-centred.
+        anchorEdges: Edges.Bottom | Edges.Right
+        anchorGravity: Edges.Bottom | Edges.Left
         AudioColonnade {
             notes: root.notes
             outPct: root.volPct
@@ -2057,6 +2234,9 @@ component WorkspaceRow: Item {
             sinkRoster: root.sinkRoster
             sourceRoster: root.sourceRoster
             btRoster: root.btRoster
+            streamRoster: root.streamRoster
+            onStreamToggle: function(k) { root.streamToggle(k) }
+            onStreamAdjust: function(k, d) { root.streamAdjust(k, d) }
             onPickSink: function(k) { root.pickSink(k) }
             onPickSource: function(k) { root.pickSource(k) }
             onPickBt: function(k) { root.pickBtDevice(k) }

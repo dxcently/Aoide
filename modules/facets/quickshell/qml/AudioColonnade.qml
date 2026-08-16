@@ -24,11 +24,32 @@ import QtQuick
 //                   echoing the aegean Ionic Terminals temple. The cool input.
 //                 – VOL → DORIC, Attic gold (`paletteAccent`): a plain echinus
 //                   capital, echoing the gold Doric Conductor. The warm output.
-//   · SIGNATURE (chrome hue) — base09 amber: the accentSpread slot none of the
-//               dock temples claims (Notification took base0F rust). The two
-//               columns already spend gold + aegean on their fills, so the
-//               stele's own chrome (crown, keyline, frieze, TUI frame) wears
-//               amber to read as the porch's own house, not either column's.
+//   · SIGNATURE (chrome hue) — MUREX `notes.violet` (base0E) as of 2026-08-16,
+//               by direction ("make the audio widget main color diff from the
+//               calendar widget"); it was base09 amber, which the calendar also
+//               wears. The reasoning that picked amber still stands and is what
+//               narrowed the replacement: the chrome must not read as any of
+//               this widget's own VOICES, so gold (output), aegean (input) and
+//               teal (bt) were disqualified, laurel is the one-hot blaze, and
+//               base0F rust is both notifications' and — measured — the same
+//               orange-brown family as the calendar's clay (1.49:1), so it
+//               would not have answered the ask. Murex is the only remaining
+//               slot, and it is an upgrade rather than a survivor: 6.50:1
+//               against this marble where amber managed 3.31:1, which lifts
+//               the frame text and `[ pipewire ]` above the 4.5:1 AA bar they
+//               were under; and amber sat 1.07:1 from the gold Doric fill it
+//               was drawn beside, near-isoluminant in the same warm family.
+//               Tyrian murex is the dedication dye — the temple's ribbon, not
+//               any voice's. base0E is also PowerVitals' dock signature; the
+//               share is cross-FAMILY and stands, flagged, because a signature
+//               tells apart steles of the same family and the bar-popout family
+//               is now unique (calendar clay, audio murex, notifications rust).
+//               Two reads were checked on screen because their luminance
+//               ratios are close and only hue separates them: the terracotta
+//               hushed row (1.39:1) and the aegean recording gauge (1.14:1) —
+//               both read cleanly against murex chrome (captured). The frieze
+//               dropped 0.85 → 0.7 after looking: at the old alpha the bead
+//               course out-read its own crown.
 //   · CROWN   — ♫ a beamed pair of notes (two voices) in place of a clef, the
 //               way Power's ϟ / Notification's ❧ stand in where no clef fits.
 //   · FRIEZE  — a bead-and-reel (astragal) course: round beads spaced by reels,
@@ -135,6 +156,55 @@ import QtQuick
 // no-adapter register and only that register has been seen coming off real
 // bluez. The sink and source rosters ARE live.
 //
+// khoa, 2026-08-16 — THE PARTHENON. "A separate channel mixer you can open —
+// expand the audio widget like the calendar into a bigger parthenon with all
+// mixing channels and audio options", then: "additional tabs for playback,
+// recording, output devices and input devices" (pavucontrol's four, plus a
+// fifth for bt — see REGISTERS below). The morph itself is not this file's:
+// it runs on the shared `MorphState`, the facet component the calendar's
+// compact↔expanded scroll also runs on now.
+//
+//   · IT GROWS DOWN, AND THE PORCH STAYS. The expanded state is this same
+//     stele's part 9 grown, not a second widget: one crown, one wordmark, one
+//     [ pipewire ], one frieze, and the ten chrome parts above and below the
+//     body untouched. The three pillars persist — the compact bay-swap existed
+//     only because the porch's box was the sole room a closed stele had, and
+//     the parthenon has a room, so the trade goes with the constraint that
+//     forced it. Hiding the master meters during the one activity that moves
+//     them would be backwards anyway. Width is fixed at 352 in both modes: a
+//     centred xdg_popup is re-centred by the compositor on every WIDTH change,
+//     and a height-only step never asks it to.
+//   · REGISTERS — five drawn chips on a course under the plinth, the
+//     calendar's `[ ἔτος ⌄ ]` control a second time. All five read at rest;
+//     the stele's existing top frame renames itself to echo the sounding one
+//     (`♪ levels` → `♪ playback`), which is the band that already renamed for
+//     an open bay. A caption ALONE was rejected: it shows the current register
+//     and hides the other four, and identity behind interaction is the failure
+//     this desktop has already paid for once. 5 × 56 + 4 × 6 = 304, the porch's
+//     own measure to the pixel.
+//   · TWO ROW SPECIES, and no third. Streams have a level and a mute, so
+//     playback/recording wear the cue's row (mark · name · gloss · gauge ·
+//     figure; click silences, wheel adjusts). Devices are a CHOICE, so
+//     outputs/inputs/bt wear the picker's row (mark · name · gloss · rule;
+//     click selects, the current one marked in the voice's hue) — the very
+//     same `DeviceRow` the compact bay picker now uses, so the two faces
+//     cannot disagree about which channel is current. A row carrying both a
+//     gauge and a selection mark would be a species with no precedent here.
+//   · STREAMS ARE NEVER PILLARS. A pillar exists in this file only if its
+//     capital tells it apart with the colour removed, and the classical
+//     inventory holds five orders total; per-app streams are unbounded and
+//     transient. They are occupants of the temple, not its architecture.
+//   · AUDIO OPTIONS resolved to what was already here rather than a new
+//     toolbar: the plinth chips (which channel each bay is on) persist into
+//     the expanded face and now ROUTE to their register instead of fading the
+//     porch, and `[ mixer ]` keeps its ledger [ token ] — the one door that
+//     leaves the widget, and khoa asked for it explicitly. No gear, no
+//     slider-with-thumb: a level is a fill and the wheel sets it, everywhere.
+//   · THE LIVE FIGURES follow the mode. The naos control carries the voice
+//     count (`3 voices ⌄`), so it is the control, the label and the figure at
+//     once; and the closing frame stops repeating the tallies once the naos is
+//     up, changing to the one number nothing else says — how many are hushed.
+//
 // House rules: every colour from `notes` roles (zero hex); radius 0; no
 // QtQuick.Layouts (plain Item/Row/anchors — the documented sizing-loop hazard).
 Item {
@@ -185,6 +255,17 @@ Item {
     signal pickSource(string key)         // → Pipewire.preferredDefaultAudioSource
     signal pickBt(string key)             // → BluetoothDevice connect/disconnect
 
+    // ── THE VOICES — per-application PipeWire streams, the naos's payload ───
+    // Same seam as the rosters: plain data in, an opaque key back out.
+    //   { key: string, name: string, gloss: string, pct: int, muted: bool,
+    //     out: bool }        out=true a playback stream, false a capture one
+    // These are the nodes the three rosters deliberately EXCLUDE (`isStream`),
+    // because a stream is an occupant, not a device — and, by the same
+    // argument, not a pillar either (see the naos note in the header).
+    property var streamRoster: []
+    signal streamToggle(string key)       // click a row → mute that stream
+    signal streamAdjust(string key, int delta)   // wheel a row → set its level
+
     // Which bay's roster is open: -1 none, 0 MIC, 1 VOL, 2 BT. A single int
     // is the whole no-overlap guarantee — two bays cannot be open at once
     // because there is nowhere to store that.
@@ -194,6 +275,116 @@ Item {
     // 2026-08-15 and no longer reads it.
     readonly property bool hovered: micCol.hovering || volCol.hovering || btCol.hovering
 
+    // ── PORCH ↔ PARTHENON — the morph, on the shared MorphState ─────────────
+    // The width NEVER changes: a centred xdg_popup is re-centred by the
+    // compositor on every width change, one frame behind the resize
+    // (hazards.md §4, re-captured live 2026-08-16 — the one transitional frame
+    // per resize is a WIDTH artifact and is absent from a height-only step).
+    // So the temple grows DOWNWARD: the porch stays exactly where it was and
+    // the interior is revealed beneath it.
+    //
+    // THIS STELE DELIBERATELY WIRES NEITHER OF MorphState's STEP HOOKS, and
+    // that is the opposite of what calendar.qml does with the same object.
+    // Measured, both ways, on this popup (2026-08-16):
+    //   · STEPPED (the calendar's discipline — surface jumps to the open size
+    //     first, paint lerps inside it): the surface is larger than the stele
+    //     for the whole 340ms, and on a FROSTED xdg_popup the uncovered area
+    //     is not nothing — `blur_popups` frosts it, so a blank glass rectangle
+    //     up to 148px tall hangs under the stele for the length of the morph,
+    //     in both directions. Captured.
+    //   · TRACKING (implicitHeight bound straight to the painted height):
+    //     clean. The stele is opaque and fills its surface exactly, so there
+    //     is never an uncovered region to frost; captured across a full
+    //     collapse with the border, ledger and closing frame riding down
+    //     intact frame by frame and no artifact at the trailing edge.
+    // The calendar's surface is transparent and unblurred (its own layer
+    // namespace, `blur off`), so ITS overhang is genuinely invisible and
+    // stepping is free there. Same primitive, opposite window handling — which
+    // is exactly why MorphState owns the state and the ORDER and not the
+    // window.
+    MorphState {
+        id: mode
+        // `openBay` is the COMPACT mechanism and only that: it exists because
+        // the porch's own box was the only room the closed stele had. The
+        // parthenon has a room, so expanding closes any open bay and the
+        // pillars stay standing — a register never trades the façade away.
+        // Expanding always lands on `playback`, so the naos never opens empty
+        // of a reason.
+        onExpandedChanged: { root.openBay = -1; root.register = 0 }
+    }
+    readonly property int naosH: mode.lerpInt(0, root.naosOpenH)
+
+    // ── THE REGISTERS — which rank of pipes is sounding ─────────────────────
+    // An organ's register selects which rank speaks; this stele's pipes are
+    // literally columns, so the word costs nothing and renames a course that
+    // was already going to be chips. Five of them, khoa 2026-08-16:
+    //   0 playback  · per-app OUTPUT streams   (gold — the output voice)
+    //   1 recording · per-app INPUT streams    (aegean — the input voice)
+    //   2 outputs   · sinks                    (gold)
+    //   3 inputs    · sources                  (aegean)
+    //   4 bt        · paired bluetooth devices (teal)
+    // The bt register is the fifth because pairing is not sink selection: a
+    // connected headset does appear under `outputs` as a bluez sink, but
+    // connecting it is a different verb, and with the pillars persisting the
+    // bt roster would otherwise have no way in from the expanded face.
+    //
+    // TWO ROW SPECIES, not one. Registers 0–1 are STREAMS: they have a level
+    // and a mute, so they wear the cue's row — mark · name · gloss · gauge ·
+    // figure, click silences, wheel adjusts. Registers 2–4 are DEVICES: they
+    // are a CHOICE, not a level, so they wear the picker's row — mark · name ·
+    // gloss · rule, click selects, the current one marked in the voice's hue.
+    // Both already existed in this file; a row carrying both a gauge and a
+    // selection mark would be a third species with no precedent.
+    property int register: 0
+    readonly property var playbackRows: {
+        var out = [], list = root.streamRoster || []
+        for (var i = 0; i < list.length; i++)
+            if (list[i] && list[i].out !== false) out.push(list[i])
+        return out
+    }
+    readonly property var recordingRows: {
+        var out = [], list = root.streamRoster || []
+        for (var i = 0; i < list.length; i++)
+            if (list[i] && list[i].out === false) out.push(list[i])
+        return out
+    }
+    function registerRows(r) {
+        if (r === 0) return root.playbackRows
+        if (r === 1) return root.recordingRows
+        if (r === 2) return root.sinkRoster
+        if (r === 3) return root.sourceRoster
+        if (r === 4) return root.btRoster
+        return []
+    }
+    function registerIsStream(r) { return r === 0 || r === 1 }
+    function registerWord(r) {
+        if (r === 0) return "playback"
+        if (r === 1) return "recording"
+        if (r === 2) return "outputs"
+        if (r === 3) return "inputs"
+        if (r === 4) return "bt"
+        return ""
+    }
+    // One hue per VOICE, carried across both of that voice's registers — the
+    // same single job gold already does for the VOL fill, its plinth chip and
+    // its picker's current row.
+    function registerHue(r) {
+        if (r === 1 || r === 3) return root.notes.holoBlue      // aegean — in
+        if (r === 4) return root.notes.wireCyan                 // teal — bt
+        return root.notes.paletteAccent                         // gold — out
+    }
+    // What the stele's own top frame says. One band captions the body: the
+    // porch's word closed, the open bay's word while a bay is open, the
+    // sounding register's word once the naos is up.
+    function frameWord() {
+        if (mode.expanded) return root.registerWord(root.register)
+        return root.bayWord(root.openBay)
+    }
+    // The bay a plinth chip routes to once the naos is open — the same control
+    // meaning ("show me this bay's choices") in the room that now has space
+    // for the answer.
+    function bayRegister(b) { return b === 1 ? 2 : (b === 0 ? 3 : 4) }
+
     width: 352
     implicitHeight: stele.height + 5      // +5 clears the cast shadow's overhang
 
@@ -202,8 +393,8 @@ Item {
     readonly property string faceMono:  "JetBrainsMono Nerd Font"   // the terminal
     readonly property string faceMusic: "Noto Music"                // notation
 
-    // this stele's signature — AMBER (base09), the porch's own chrome hue
-    readonly property color sig: notes.base09
+    // this stele's signature — MUREX (base0E). See the header's SIGNATURE note.
+    readonly property color sig: notes.violet
     readonly property color ink: notes.paletteFg
 
     function withA(cstr, a) {
@@ -220,8 +411,15 @@ Item {
         return Qt.rgba(w.r, w.g, w.b, a)
     }
     // one mood face reading the whole box (kana/punct proven safe by MoodFaces)
+    // ONE mood face reading the whole box, extended rather than joined by a
+    // second one when the naos opened: with the interior showing, the room's
+    // own state outranks the two shafts, because that is what you are looking
+    // at. Every glyph stays inside the kana/punct vocabulary MoodFaces proves
+    // safe on this stack.
     function kaomojiFor() {
         var mutedCount = (outMuted ? 1 : 0) + (inMuted ? 1 : 0)
+        if (mode.expanded && voiceCount === 0) return "( ･ - ･ )"   // an empty room
+        if (mode.expanded && hushedCount > 0) return "( >ω<)"       // some hushed
         if (mutedCount === 2) return "(-_- )"                 // both hushed
         if (mutedCount === 1) return "( ･_･)"                 // one silenced
         if (btConnected) return "♪( ˘ω˘ )"                    // bound, listening
@@ -278,6 +476,15 @@ Item {
         else if (b === 2) root.pickBt(key)
         root.openBay = -1
     }
+    // The same three writes from the naos. It does NOT close the register
+    // afterwards the way a bay closes: the compact picker is a detour off the
+    // porch and wants to end, while a register is a place you are standing in
+    // and expect to still be standing in after you pick.
+    function pickInRegister(r, key) {
+        if (r === 2) root.pickSink(key)
+        else if (r === 3) root.pickSource(key)
+        else if (r === 4) root.pickBt(key)
+    }
 
     // colonnade geometry — one place, so architrave/shafts/tally/plinth stay
     // aligned. TRISTYLE as of 2026-08-15 (was distyle); widened 2026-08-16 so
@@ -290,6 +497,27 @@ Item {
     readonly property int pierW: 34          // the bluetooth pier — wider, it
                                              // carries an inscription per drum
     readonly property real breakFrac: 0.52   // where a muted column snaps
+
+    // ── naos geometry — the interior, revealed under the porch ──────────────
+    // The porch band is untouched at 168; the naos is what grows beneath it.
+    // Six slots is the cap: at 20px a seventh row costs another 20 of a popup
+    // that already hangs 465 off a 36px bar, and a machine with more than six
+    // things making noise has `[ mixer ]` for it. Past six the list scrolls.
+    readonly property int porchH: 168
+    readonly property int rowH: 20               // one manuscript row, both species
+    readonly property int voiceSlots: 6
+    readonly property int regChipW: 56           // 5 * 56 + 4 * 6 = 304, the porch's
+    readonly property int regGap: 6              // own measure to the pixel
+    readonly property int naosOpenH: 4 + 1 + 4 + 15 + 4
+                                    + root.voiceSlots * root.rowH
+    readonly property int voiceCount: root.streamRoster ? root.streamRoster.length : 0
+    readonly property int hushedCount: {
+        var list = root.streamRoster || []
+        var n = 0
+        for (var i = 0; i < list.length; i++)
+            if (list[i] && list[i].muted === true) n++
+        return n
+    }
 
     // ══ ONE COLUMN — capital + fluted shaft, or a broken ruin when muted ══════
     component Colonna : Item {
@@ -329,7 +557,10 @@ Item {
             enabled: col.avail
             cursorShape: Qt.PointingHandCursor
             onClicked: col.toggle()
-            onWheel: { col.adjust(wheel.angleDelta.y > 0 ? 2 : -2); wheel.accepted = true }
+            onWheel: function(wheel) {
+                col.adjust(wheel.angleDelta.y > 0 ? 2 : -2)
+                wheel.accepted = true
+            }
         }
 
         // ── the capital — order-specific; GONE when the column is broken ────
@@ -669,6 +900,199 @@ Item {
 
     }
 
+    // ══ ONE DEVICE — a choosable channel, as a manuscript row ════════════════
+    // launcher.qml's row: margin mark · serif name · mono gloss · hairline
+    // rule, with the CURRENT entry marked in the voice's own hue — the same
+    // "filled in the bay's hue is the live one" language the lit drum and the
+    // rising fill already speak. Shared verbatim by the compact bay picker and
+    // the naos's three device registers, so `current` can only ever come from
+    // one place and the two faces cannot disagree about it.
+    component DeviceRow : Item {
+        id: entry
+        required property var modelData
+        property color hue: root.ink
+        signal picked(string key)
+
+        readonly property bool current: entry.modelData
+                                        && entry.modelData.current === true
+        readonly property bool hot: entryMa.containsMouse
+
+        Text {                                   // the margin mark
+            id: entryMark
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: -1
+            width: 13
+            horizontalAlignment: Text.AlignHCenter
+            text: entry.current ? "♪" : "·"
+            font.family: root.faceMusic
+            font.pixelSize: entry.current ? 13 : 11
+            color: entry.current ? entry.hue : root.withA(root.ink, 0.3)
+        }
+        Text {                                   // who
+            id: entryName
+            anchors.left: entryMark.right; anchors.leftMargin: 5
+            anchors.right: entryGloss.left; anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: -1
+            elide: Text.ElideRight
+            text: entry.modelData ? ("" + entry.modelData.name) : ""
+            font.family: root.faceSerif
+            font.pixelSize: 11
+            font.weight: entry.current ? Font.DemiBold : Font.Normal
+            color: (entry.current || entry.hot) ? root.ink
+                                                : root.withA(root.ink, 0.85)
+        }
+        Text {                                   // how
+            id: entryGloss
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: -1
+            text: entry.modelData ? ("" + entry.modelData.gloss) : ""
+            font.family: root.faceMono
+            font.pixelSize: 8
+            font.letterSpacing: 1
+            color: root.withA(root.ink, 0.45)
+        }
+        Rectangle {                              // the rule
+            anchors.left: parent.left; anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: entry.current ? 2 : 1
+            color: entry.current ? entry.hue
+                 : root.withA(entry.hot ? entry.hue : root.ink,
+                              entry.hot ? 0.6 : 0.13)
+            Behavior on color { ColorAnimation { duration: 150 } }
+        }
+        MouseArea {
+            id: entryMa
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: entry.picked(entry.modelData ? ("" + entry.modelData.key) : "")
+        }
+    }
+
+    // ══ ONE VOICE — a per-application stream, as a manuscript row ════════════
+    // launcher.qml's row, which the picker already borrowed, with the cue's
+    // hairline gauge spliced in between the gloss and the figure. Declared at
+    // the ROOT's level and not inside another component — Quickshell's engine
+    // rejects a nested inline component outright ("Nested inline components are
+    // not supported", hit live in bar.qml).
+    //
+    // The margin mark is the STATE, not a selection: `♪` while the voice
+    // sounds, `𝄽` — the rest — when it is hushed, which is the grammar's own
+    // muted treatment (a rest glyph in place of the value) moved to the margin
+    // so the figure can keep saying how loud it WOULD be. No laurel anywhere:
+    // a mixer has no one selected row, and inventing one to spend the blaze on
+    // would be backwards.
+    component VoiceRow : Item {
+        id: voice
+        required property var modelData
+        readonly property string vkey:  voice.modelData ? ("" + voice.modelData.key) : ""
+        readonly property string vname: voice.modelData ? ("" + voice.modelData.name) : ""
+        readonly property string vgloss: voice.modelData ? ("" + voice.modelData.gloss) : ""
+        readonly property int  vpct:   voice.modelData ? (voice.modelData.pct | 0) : 0
+        readonly property bool vmuted: voice.modelData && voice.modelData.muted === true
+        readonly property bool vout:   !voice.modelData || voice.modelData.out !== false
+        // Each row wears its own bay's hue, so a capture stream reads as
+        // belonging to the aegean MIC pillar and a playback one to the gold
+        // VOL pillar without a word being spent on which it is.
+        readonly property color hue: voice.vout ? root.notes.paletteAccent
+                                                : root.notes.holoBlue
+        readonly property bool hot: voiceMa.containsMouse
+
+        Text {                                   // the margin mark — the state
+            id: vMark
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: -1
+            width: 13
+            horizontalAlignment: Text.AlignHCenter
+            text: voice.vmuted ? "𝄽" : "♪"
+            font.family: root.faceMusic
+            font.pixelSize: voice.vmuted ? 12 : 13
+            color: voice.vmuted ? root.notes.paletteUrgent
+                                : root.withA(voice.hue, voice.hot ? 1.0 : 0.8)
+        }
+        Text {                                   // who
+            id: vName
+            anchors.left: vMark.right; anchors.leftMargin: 5
+            anchors.right: vGloss.left; anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: -1
+            elide: Text.ElideRight
+            text: voice.vname
+            font.family: root.faceSerif; font.pixelSize: 11
+            color: root.withA(root.ink, voice.hot ? 1.0 : 0.85)
+        }
+        Text {                                   // what it is playing
+            id: vGloss
+            anchors.right: vGauge.left; anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: -1
+            width: 72
+            horizontalAlignment: Text.AlignRight
+            elide: Text.ElideRight
+            text: voice.vgloss
+            font.family: root.faceMono; font.pixelSize: 8
+            font.letterSpacing: 1
+            color: root.withA(root.ink, 0.45)
+        }
+        Item {                                   // the gauge — the cue's own
+            id: vGauge                           // hairline track, no box
+            anchors.right: vValue.left; anchors.rightMargin: 6
+            anchors.verticalCenter: parent.verticalCenter
+            width: 46; height: 5
+            Rectangle {
+                anchors.fill: parent; radius: 0
+                color: root.withA(root.ink, 0.09)
+                border.width: 1
+                border.color: root.withA(root.ink, 0.35)
+            }
+            Rectangle {
+                anchors.left: parent.left; anchors.top: parent.top
+                anchors.bottom: parent.bottom; anchors.margins: 1
+                width: (parent.width - 2) * Math.max(0, Math.min(1, voice.vpct / 100))
+                radius: 0
+                color: voice.vmuted ? root.withA(root.ink, 0.28)
+                                    : root.withA(voice.hue, 0.9)
+                Behavior on width { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                Behavior on color { ColorAnimation { duration: 150 } }
+            }
+        }
+        Text {                                   // the figure
+            id: vValue
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: -1
+            width: 32
+            horizontalAlignment: Text.AlignRight
+            text: voice.vpct + "%"
+            font.family: root.faceMono; font.pixelSize: 10
+            color: voice.vmuted ? root.notes.paletteUrgent
+                                : root.withA(root.ink, voice.hot ? 1.0 : 0.8)
+        }
+        Rectangle {                              // the rule — hover promotes it
+            anchors.left: parent.left; anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 1
+            color: root.withA(voice.hot ? voice.hue : root.ink,
+                              voice.hot ? 0.6 : 0.13)
+            Behavior on color { ColorAnimation { duration: 150 } }
+        }
+        MouseArea {
+            id: voiceMa
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.streamToggle(voice.vkey)
+            onWheel: function(wheel) {
+                root.streamAdjust(voice.vkey, wheel.angleDelta.y > 0 ? 2 : -2)
+                wheel.accepted = true
+            }
+        }
+    }
+
     // cast shadow — shared pantheon idiom ───────────────────────────────────
     Rectangle {
         anchors.fill: stele
@@ -735,8 +1159,12 @@ Item {
                 onPaint: {
                     var ctx = getContext("2d")
                     ctx.reset(); ctx.clearRect(0, 0, width, height)
-                    ctx.strokeStyle = root.withA(root.sig, 0.85)
-                    ctx.fillStyle = root.withA(root.sig, 0.85)
+                    // 0.85 → 0.7, one rung down the ladder, and only after
+                    // looking: murex carries roughly twice amber's contrast on
+                    // this marble, and at the old alpha the bead course was the
+                    // loudest thing on the stele — it out-read its own crown.
+                    ctx.strokeStyle = root.withA(root.sig, 0.7)
+                    ctx.fillStyle = root.withA(root.sig, 0.7)
                     ctx.lineWidth = 1
                     var cy = height / 2, period = 13
                     for (var x = 3; x < width - 3; x += period) {
@@ -760,7 +1188,7 @@ Item {
                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                     // The frame label IS the picker's caption — an open bay
                     // renames this band rather than growing a second one.
-                    text: "┌─┤ ♪ " + root.bayWord(root.openBay) + " ├"
+                    text: "┌─┤ ♪ " + root.frameWord() + " ├"
                     font.family: root.faceMono; font.pixelSize: 11
                     color: root.withA(root.sig, 0.95)
                 }
@@ -770,22 +1198,64 @@ Item {
                     text: "┐"; font.family: root.faceMono; font.pixelSize: 11
                     color: root.withA(root.sig, 0.95)
                 }
+                // THE NAOS CONTROL — the one thing on this stele that changes
+                // its size, so it gets the pressable edge a control has in this
+                // house and a tag never does (calendar.qml's `[ ἔτος ⌄ ]`
+                // argument, and the same drawn chip the plinth already wears).
+                // It carries the live voice count as well as the verb, so it is
+                // ALSO this stele's per-app figure and the word "voices"
+                // appears exactly once on the surface — the naos captions its
+                // rows by their SOURCE (`♪ apps`), the way a notification card
+                // captions itself with the program that sent it.
                 Rectangle {
-                    anchors.left: tfL.right; anchors.right: tfR.left
-                    anchors.leftMargin: 2; anchors.rightMargin: 2
+                    id: naosChip
+                    anchors.right: tfR.left; anchors.rightMargin: 2
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 72; height: 15
+                    radius: 0
+                    color: naosMa.containsMouse ? root.withA(root.sig, 0.16)
+                         : (mode.expanded ? root.withA(root.sig, 0.10) : "transparent")
+                    border.width: 1
+                    border.color: root.withA(root.sig,
+                                             naosMa.containsMouse ? 0.9
+                                           : (mode.expanded ? 0.75 : 0.45))
+                    Behavior on color { ColorAnimation { duration: 150 } }
+                    Behavior on border.color { ColorAnimation { duration: 150 } }
+                    Text {
+                        anchors.centerIn: parent
+                        // ⌄ / ⌃ are calendar.qml's own pair, already rendering
+                        // live at this face — a proven glyph reused.
+                        text: root.voiceCount + " voices " + (mode.expanded ? "⌃" : "⌄")
+                        font.family: root.faceMono; font.pixelSize: 9
+                        color: root.sig
+                        opacity: naosMa.containsMouse ? 1.0 : 0.85
+                    }
+                    MouseArea {
+                        id: naosMa
+                        anchors.fill: parent; anchors.margins: -3
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: mode.toggle()
+                    }
+                }
+                Rectangle {
+                    anchors.left: tfL.right; anchors.right: naosChip.left
+                    anchors.leftMargin: 2; anchors.rightMargin: 5
                     anchors.verticalCenter: parent.verticalCenter; anchors.verticalCenterOffset: 1
                     height: 1; color: root.withA(root.sig, 0.55)
                 }
             }
 
-            // ══ THE PORCH — architrave · columns · stylobate · tallies · plinth
-            // 150 → 168 on 2026-08-16: the plinth course of chips is the only
-            // band added, and it is added rather than squeezed out of the
-            // existing ones so the vertical rhythm above it is untouched.
+            // ══ THE TEMPLE — the porch, and under it the naos it opens onto ══
+            // ONE band in the content Column, not two, deliberately: a second
+            // band whose height lerps from 0 would pop the Column's 4px spacing
+            // in at the first frame of the morph, and nothing in this house
+            // jumps. So the porch keeps its fixed 168 measured from the TOP of
+            // this band, and the band's own height is what grows.
             Item {
                 id: porch
                 width: parent.width
-                height: 168
+                height: root.porchH + root.naosH
 
                 // shared architrave beam carrying the MIC / VOL inscriptions
                 Item {
@@ -814,11 +1284,21 @@ Item {
                             property bool avail: true
                             readonly property bool dimmed: root.openBay >= 0
                                                            && root.openBay !== bay
+                            readonly property bool open: root.openBay === bay
                             width: root.colW; horizontalAlignment: Text.AlignHCenter
                             font.family: root.faceSerif; font.pixelSize: 12
                             font.weight: Font.DemiBold; font.letterSpacing: 3
-                            color: !avail ? root.withA(root.ink, 0.4)
-                                 : (dimmed ? root.withA(root.ink, 0.35) : root.ink)
+                            // OPEN OUTRANKS UNAVAILABLE (2026-08-16). It used
+                            // to be the other way round, and the bay that most
+                            // needs the roster is exactly the unavailable one:
+                            // with no default source set on this rig, opening
+                            // MIC lit NO pillar — 0.4 against the other two's
+                            // 0.35 is not a distinction — under a frame that
+                            // claimed "in · sources". The band's whole job is
+                            // to say which pillar the list came from.
+                            color: open ? root.ink
+                                 : (!avail ? root.withA(root.ink, 0.4)
+                                 : (dimmed ? root.withA(root.ink, 0.35) : root.ink))
                             Behavior on color { ColorAnimation { duration: 150 } }
                         }
                         Inscription { text: "MIC"; bay: 0; avail: root.inAvail }
@@ -839,19 +1319,17 @@ Item {
                 // `visible` is driven off the opacity so a faded-out porch
                 // stops taking clicks, and the columns' own MouseAreas go with
                 // it (nothing behind the picker is reachable while it is up).
-                Item {
-                    id: porchBody
-                    anchors.top: architrave.bottom
-                    anchors.bottom: plinthRow.top
-                    anchors.left: parent.left; anchors.right: parent.right
-                    opacity: root.openBay >= 0 ? 0 : 1
-                    visible: opacity > 0.01
-                    Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
-
-                // the shared stepped stylobate the columns stand on
+                // ── THE FLOOR STAYS (2026-08-16) — the stepped stylobate is
+                // hoisted OUT of porchBody so it survives an open bay. It used
+                // to fade with the columns, and the picker then floated in a
+                // floorless room between the beam above and the chips below;
+                // a temple's floor does not leave with its columns. Position is
+                // a plain binding rather than an anchor because its reference
+                // (tallyRow) is now a grandchild, not a sibling — the geometry
+                // is unchanged to the pixel.
                 Item {
                     id: stylo
-                    anchors.bottom: tallyRow.top; anchors.bottomMargin: 3
+                    y: porchBody.y + tallyRow.y - height - 3
                     anchors.left: parent.left; anchors.right: parent.right
                     height: 8
                     readonly property real inset: (parent.width - (root.colW * 3 + root.bayGap * 2)) / 2
@@ -869,10 +1347,22 @@ Item {
                     }
                 }
 
+                Item {
+                    id: porchBody
+                    anchors.top: architrave.bottom
+                    anchors.bottom: plinthRow.top
+                    anchors.left: parent.left; anchors.right: parent.right
+                    opacity: root.openBay >= 0 ? 0 : 1
+                    visible: opacity > 0.01
+                    Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+
                 // the three columns, between architrave and stylobate
                 Row {
-                    anchors.top: parent.top; anchors.bottom: stylo.top
+                    anchors.top: parent.top
                     anchors.horizontalCenter: parent.horizontalCenter
+                    // stylo is now this Row's UNCLE, not its sibling, so the
+                    // shafts take its top as a height rather than an anchor.
+                    height: Math.max(0, stylo.y - porchBody.y)
                     spacing: root.bayGap
                     Colonna {
                         id: micCol
@@ -975,6 +1465,32 @@ Item {
 
                     readonly property color hue: root.bayHue(root.openBay)
                     readonly property var rows: root.bayRoster(root.openBay)
+                    readonly property int slots: Math.max(0, Math.floor((height - 4) / root.rowH))
+
+                    // BLANK MANUSCRIPT RULING under the unfilled slots — the
+                    // launcher's sparse-state idiom at the ladder's bottom rung
+                    // (0.13, greek-grammar.md §7). Before it, a one-entry
+                    // roster was a single row floating in ~118px of bare marble
+                    // and read as breakage rather than as room to spare. Drawn
+                    // BEHIND the list, and the list is top-anchored now instead
+                    // of centred, so rows hang from the beam that captions them.
+                    Column {
+                        anchors.top: parent.top; anchors.topMargin: 2
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: rosterView.width
+                        Repeater {
+                            model: picker.slots
+                            delegate: Item {
+                                width: rosterView.width; height: root.rowH
+                                Rectangle {
+                                    anchors.left: parent.left; anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: 1
+                                    color: root.withA(root.ink, 0.13)
+                                }
+                            }
+                        }
+                    }
 
                     // A ListView and not a Column: a machine can carry more
                     // sinks than this band has room for, and a clipped Column
@@ -994,92 +1510,48 @@ Item {
                         width: parent.width - 2 * inset
                         // Height from the ROW COUNT, never from contentHeight:
                         // sizing a view off its own contentHeight is the loop
-                        // recorded in hazards.md §2. Centred when the roster is
-                        // shorter than the band, so a two-entry list does not
-                        // hang off the architrave over a void.
-                        height: Math.min(picker.rows.length * 21, parent.height)
-                        y: Math.max(0, (parent.height - height) / 2)
+                        // recorded in hazards.md §2. TOP-anchored (was centred):
+                        // the rows hang from the architrave that captions them,
+                        // and the ruled slots below carry the rest of the band.
+                        height: Math.min(picker.rows.length * root.rowH,
+                                         picker.slots * root.rowH)
+                        y: 2
                         clip: true
                         model: picker.rows
                         boundsBehavior: Flickable.StopAtBounds
-                        delegate: Item {
-                            id: entry
-                            required property var modelData
-                            required property int index
+                        delegate: DeviceRow {
                             width: rosterView.width
-                            height: 21
-                            readonly property bool current: modelData
-                                                            && modelData.current === true
-                            readonly property bool hot: entryMa.containsMouse
-
-                            Text {                              // the margin mark
-                                id: entryMark
-                                anchors.left: parent.left
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.verticalCenterOffset: -1
-                                width: 13
-                                horizontalAlignment: Text.AlignHCenter
-                                text: entry.current ? "♪" : "·"
-                                font.family: root.faceMusic
-                                font.pixelSize: entry.current ? 13 : 11
-                                color: entry.current ? picker.hue
-                                                     : root.withA(root.ink, 0.3)
-                            }
-                            Text {                              // who
-                                id: entryName
-                                anchors.left: entryMark.right; anchors.leftMargin: 5
-                                anchors.right: entryGloss.left; anchors.rightMargin: 8
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.verticalCenterOffset: -1
-                                elide: Text.ElideRight
-                                text: entry.modelData ? ("" + entry.modelData.name) : ""
-                                font.family: root.faceSerif
-                                font.pixelSize: 11
-                                font.weight: entry.current ? Font.DemiBold : Font.Normal
-                                color: (entry.current || entry.hot)
-                                       ? root.ink : root.withA(root.ink, 0.85)
-                            }
-                            Text {                              // how
-                                id: entryGloss
-                                anchors.right: parent.right
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.verticalCenterOffset: -1
-                                text: entry.modelData ? ("" + entry.modelData.gloss) : ""
-                                font.family: root.faceMono
-                                font.pixelSize: 8
-                                font.letterSpacing: 1
-                                color: root.withA(root.ink, 0.45)
-                            }
-                            Rectangle {                         // the rule
-                                anchors.left: parent.left; anchors.right: parent.right
-                                anchors.bottom: parent.bottom
-                                height: entry.current ? 2 : 1
-                                color: entry.current ? picker.hue
-                                     : root.withA(entry.hot ? picker.hue : root.ink,
-                                                  entry.hot ? 0.6 : 0.13)
-                                Behavior on color { ColorAnimation { duration: 150 } }
-                            }
-                            MouseArea {
-                                id: entryMa
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.pickInBay(root.openBay,
-                                                          "" + entry.modelData.key)
-                            }
+                            height: root.rowH
+                            hue: picker.hue
+                            onPicked: function(k) { root.pickInBay(root.openBay, k) }
                         }
                     }
 
-                    // The honest empty. A bay with nothing to offer says so
-                    // rather than opening onto a blank band.
-                    Text {
+                    // The honest empty, now in the house's own register: the
+                    // ITALIC line is the Greek answer-line and nothing else
+                    // (greek-grammar.md §6), so the italic keeps `οὐδέν` and
+                    // the English that has to be legible drops to a mono gloss
+                    // beneath it — the bilingual inscription idiom (§10),
+                    // not a second font decision.
+                    Column {
                         anchors.centerIn: parent
+                        spacing: 3
                         visible: picker.rows.length === 0
-                        text: root.openBay === 2 && !root.btAvail
-                              ? "no adapter" : "nothing to choose"
-                        font.family: root.faceSerif; font.pixelSize: 11
-                        font.italic: true
-                        color: root.withA(root.ink, 0.4)
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: "οὐδέν"
+                            font.family: root.faceSerif; font.pixelSize: 12
+                            font.italic: true
+                            color: root.withA(root.ink, 0.5)
+                        }
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: root.openBay === 2 && !root.btAvail
+                                  ? "no adapter" : "nothing to choose"
+                            font.family: root.faceMono; font.pixelSize: 8
+                            font.letterSpacing: 1
+                            color: root.withA(root.ink, 0.35)
+                        }
                     }
                 }
 
@@ -1093,7 +1565,10 @@ Item {
                 // course wearing colour at a time.
                 Row {
                     id: plinthRow
-                    anchors.bottom: parent.bottom
+                    // Measured from the TOP of the band, not its bottom: this
+                    // band grows downward now and the plinth belongs to the
+                    // porch, not to whatever is revealed beneath it.
+                    y: root.porchH - height
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: root.bayGap
                     component Chip : Rectangle {
@@ -1109,7 +1584,13 @@ Item {
                         // an answer and you find it by opening the thing.
                         readonly property bool avail: chip.bay === 2
                                                       || root.bayRoster(chip.bay).length > 0
-                        readonly property bool open: root.openBay === chip.bay
+                        // Open means "this bay's choices are showing", which is
+                        // the picker while the stele is closed and the matching
+                        // REGISTER once the naos is up — same control, same
+                        // meaning, the room it points into is what changed.
+                        readonly property bool open: mode.expanded
+                            ? root.register === root.bayRegister(chip.bay)
+                            : root.openBay === chip.bay
                         readonly property color hue: root.bayHue(chip.bay)
                         width: root.colW
                         height: 15
@@ -1155,13 +1636,216 @@ Item {
                             hoverEnabled: true
                             enabled: chip.avail
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: root.openBay = chip.open ? -1 : chip.bay
+                            onClicked: {
+                                if (mode.expanded)
+                                    root.register = root.bayRegister(chip.bay)
+                                else
+                                    root.openBay = chip.open ? -1 : chip.bay
+                            }
                         }
                     }
                     Chip { bay: 0 }
                     Chip { bay: 1 }
                     Chip { bay: 2 }          // the bt chip stays live with no
                                              // adapter: it is how you find out
+                }
+
+                // ══ THE NAOS — the interior, under the porch's own floor ═════
+                // Revealed downward by the naos chip in the top frame. It is
+                // NOT a second widget and it does not repeat one part of the
+                // stele: no crown, no wordmark, no second frieze — the ten
+                // chrome parts above and below it are untouched and the porch
+                // itself stays exactly where it was. What grows is part 9.
+                //
+                // Nothing in here becomes a pillar. A pillar exists in this
+                // file only if its capital tells it apart with the colour
+                // removed, and the classical inventory holds five orders in
+                // total — streams are unbounded, transient occupants of the
+                // temple, not its architecture, and a device list is a choice.
+                // So both species are manuscript ROWS, the vocabulary the
+                // picker already borrowed from launcher.qml.
+                Item {
+                    id: naos
+                    y: root.porchH
+                    anchors.left: parent.left; anchors.right: parent.right
+                    height: root.naosH
+                    clip: true                       // the paint is revealed
+                    // Late fade, calendar.qml's own two-layer curve: the room
+                    // is dark until it is most of the way open, so the rows
+                    // never read as sliding out from under the plinth.
+                    opacity: Math.max(0, Math.min(1, mode.frac * 2.2 - 0.6))
+
+                    readonly property real inset:
+                        (parent.width - (root.colW * 3 + root.bayGap * 2)) / 2
+                    readonly property var rows: root.registerRows(root.register)
+                    readonly property bool streams: root.registerIsStream(root.register)
+                    readonly property color hue: root.registerHue(root.register)
+                    readonly property int listY: 4 + 1 + 4 + 15 + 4
+
+                    // the divider — the house's default 1px rule (§8 idiom 1),
+                    // the ledger's own edge. No label: the register course
+                    // right below names every register at rest and the stele's
+                    // top frame echoes the sounding one, so a third naming
+                    // would be the third reading of the same word.
+                    Rectangle {
+                        y: 4
+                        anchors.left: parent.left; anchors.right: parent.right
+                        height: 1; color: root.withA(root.sig, 0.3)
+                    }
+
+                    // ── THE REGISTER COURSE — five drawn chips ───────────────
+                    // The plinth's own control verbatim, one course down. All
+                    // five read at rest, which is the whole reason this is a
+                    // course of chips and not the top frame's caption alone: a
+                    // caption shows the current register and hides the other
+                    // four, and identity behind interaction is the failure this
+                    // house has already paid for once. 5 * 56 + 4 * 6 = 304 —
+                    // the porch's own measure, so the course lines up with the
+                    // plinth above it and the rows below it.
+                    Row {
+                        id: registerRow
+                        y: 4 + 1 + 4
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        spacing: root.regGap
+                        component Reg : Rectangle {
+                            id: reg
+                            property int index: -1
+                            readonly property bool open: root.register === reg.index
+                            readonly property color hue: root.registerHue(reg.index)
+                            readonly property int count: root.registerRows(reg.index).length
+                            width: root.regChipW
+                            height: 15
+                            radius: 0
+                            color: reg.open ? root.withA(reg.hue, 0.16)
+                                 : (regMa.containsMouse ? root.withA(reg.hue, 0.10)
+                                                        : "transparent")
+                            border.width: 1
+                            border.color: reg.open ? reg.hue
+                                        : root.withA(root.ink,
+                                                     regMa.containsMouse ? 0.6 : 0.32)
+                            Behavior on color { ColorAnimation { duration: 150 } }
+                            Behavior on border.color { ColorAnimation { duration: 150 } }
+                            Text {
+                                anchors.centerIn: parent
+                                text: root.registerWord(reg.index)
+                                font.family: root.faceMono; font.pixelSize: 8
+                                color: (reg.open || regMa.containsMouse)
+                                       ? root.ink : root.withA(root.ink, 0.72)
+                            }
+                            MouseArea {
+                                id: regMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.register = reg.index
+                            }
+                        }
+                        Reg { index: 0 }
+                        Reg { index: 1 }
+                        Reg { index: 2 }
+                        Reg { index: 3 }
+                        Reg { index: 4 }
+                    }
+
+                    // blank manuscript ruling for every slot, filled or not —
+                    // the same sparse-state rung the picker now stands on, so
+                    // an empty register reads as a ruled ledger awaiting
+                    // entries rather than as a void.
+                    Column {
+                        y: naos.listY
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: parent.width - 2 * naos.inset
+                        Repeater {
+                            model: root.voiceSlots
+                            delegate: Item {
+                                width: parent.width; height: root.rowH
+                                Rectangle {
+                                    anchors.left: parent.left; anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: 1
+                                    color: root.withA(root.ink, 0.13)
+                                }
+                            }
+                        }
+                    }
+
+                    // ── the two row species, cross-faded on the register ─────
+                    // Two views rather than one polymorphic delegate: the row
+                    // shapes genuinely differ on their right-hand side, and a
+                    // Loader per row to switch between them would cost more
+                    // than a second view that is simply not visible. 150ms
+                    // OutCubic, the same crossfade the bay open/close uses —
+                    // registers have no material continuity to dramatize.
+                    //
+                    // Height off the ROW COUNT, never contentHeight
+                    // (hazards.md §2), no footer, no scrollbar: past six slots
+                    // it wheel-scrolls inside its own clip, the way every
+                    // other list in this house pages rather than growing
+                    // chrome.
+                    ListView {
+                        id: voiceView
+                        y: naos.listY
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: parent.width - 2 * naos.inset
+                        height: Math.min(naos.rows.length, root.voiceSlots) * root.rowH
+                        clip: true
+                        model: naos.streams ? naos.rows : []
+                        opacity: naos.streams ? 1 : 0
+                        visible: opacity > 0.01
+                        Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                        boundsBehavior: Flickable.StopAtBounds
+                        delegate: VoiceRow {
+                            width: voiceView.width
+                            height: root.rowH
+                        }
+                    }
+                    ListView {
+                        id: deviceView
+                        y: naos.listY
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: parent.width - 2 * naos.inset
+                        height: Math.min(naos.rows.length, root.voiceSlots) * root.rowH
+                        clip: true
+                        model: naos.streams ? [] : naos.rows
+                        opacity: naos.streams ? 0 : 1
+                        visible: opacity > 0.01
+                        Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                        boundsBehavior: Flickable.StopAtBounds
+                        delegate: DeviceRow {
+                            width: deviceView.width
+                            height: root.rowH
+                            hue: naos.hue
+                            onPicked: function(k) { root.pickInRegister(root.register, k) }
+                        }
+                    }
+
+                    // the honest empty — the Greek answer-line, glossed. A
+                    // mixer with nothing playing says so in the house's own
+                    // register rather than opening onto blank marble.
+                    Column {
+                        x: naos.inset
+                        y: naos.listY + (root.voiceSlots * root.rowH) / 2 - 16
+                        width: parent.width - 2 * naos.inset
+                        spacing: 3
+                        visible: naos.rows.length === 0
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: naos.streams ? "σιγή" : "οὐδέν"
+                            font.family: root.faceSerif; font.pixelSize: 12
+                            font.italic: true
+                            color: root.withA(root.ink, 0.5)
+                        }
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: root.register === 0 ? "nothing is playing"
+                                : root.register === 1 ? "nothing is recording"
+                                : root.register === 4 && !root.btAvail ? "no adapter"
+                                : "nothing to choose"
+                            font.family: root.faceMono; font.pixelSize: 8
+                            font.letterSpacing: 1
+                            color: root.withA(root.ink, 0.35)
+                        }
+                    }
                 }
             }
 
@@ -1183,6 +1867,9 @@ Item {
                     id: hint
                     anchors.right: mixerTag.left; anchors.rightMargin: 10
                     anchors.bottom: parent.bottom
+                    // The verbs are the same on a shaft and on a voice row,
+                    // which is why the naos needed no gesture vocabulary of
+                    // its own — this one line still names both.
                     text: "scroll · set   click · mute"
                     font.family: root.faceMono; font.pixelSize: 9
                     color: root.withA(root.ink, 0.5)
@@ -1215,8 +1902,16 @@ Item {
                 Text {
                     id: ffL
                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                    text: "└─┤ out " + (root.outAvail ? (root.outMuted ? "×" : root.outPct) : "—")
-                          + " · in " + (root.inAvail ? (root.inMuted ? "×" : root.inPct) : "—") + " ├"
+                    // The closing figure follows what the surface is showing.
+                    // Compact it is the two levels; open, that would be a
+                    // third reading of the tallies AND of the naos chip, so
+                    // it changes to the one number nothing else on the stele
+                    // carries — how many voices are hushed.
+                    text: mode.expanded
+                          ? ("└─┤ " + root.hushedCount + " of " + root.voiceCount
+                             + " hushed ├")
+                          : ("└─┤ out " + (root.outAvail ? (root.outMuted ? "×" : root.outPct) : "—")
+                             + " · in " + (root.inAvail ? (root.inMuted ? "×" : root.inPct) : "—") + " ├")
                     font.family: root.faceMono; font.pixelSize: 11
                     color: root.withA(root.ink, 0.8)
                 }

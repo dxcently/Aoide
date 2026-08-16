@@ -252,13 +252,29 @@
 // implicitWidth/implicitHeight are constants WITHIN a mode — month/year
 // paging never resizes the window, and the open-unfurl animates painted
 // heights only. The compact↔expanded toggle is the one sanctioned window
-// resize, and it STEPS rather than animates the window (sequenced around
-// the morph — see the remap note at toggleMode) while every visible
-// surface (sheet, rollers, content) animates as paint. StelePopout tracks
-// the stepped implicit sizes through its live bindings (body.width/
-// implicitHeight via WidgetSlot); its one change this pass is the additive
-// anchorEdges/anchorGravity override AoideBar uses to pin this popup's
-// left edge (a centered popup re-centers on every resize, visibly).
+// resize, and it STEPS rather than animates the window while every visible
+// surface (sheet, rollers, content) animates as paint. SteleLayerPopout
+// tracks the stepped implicit sizes through its live bindings (body.width/
+// implicitHeight via WidgetSlot).
+//
+// khoa, 2026-08-16 — THE 300ms resizeGuard IS RETIRED, and the morph now
+// runs on the shared MorphState (facet). The guard was written against a
+// recorded Hyprland behaviour — an xdg_popup re-mapped on the first resize
+// of a visible popup, playing its popup animation (~0.25s vanish/fade) over
+// the remap. Two things have changed under it. This popout has not been an
+// xdg_popup since 2026-08-13 (it moved to its own layer surface for the
+// crisp day grid), and layer surfaces are anchored, not re-mapped. And the
+// behaviour itself no longer reproduces: burst-captured live at ~60ms/frame
+// on Hyprland 0.56.0, this scroll expanded and collapsed with the surface
+// never leaving `hyprctl layers`, its x/y pinned at 31,26 through a 298→621
+// step, and every frame fully painted; the same probe run on a real
+// xdg_popup (AudioColonnade) resized 8 times in 120 frames with ZERO absent
+// frames. See MorphState.qml's header for the full capture.
+// What survives the guard is the ORDER, and for a different reason —
+// window OUT first, window IN last keeps the surface ≥ the paint at every
+// instant, so the sheet's own border and cast shadow are never clipped
+// mid-morph. That order is now the primitive's stepOut/stepIn hooks; the
+// dead 300ms interval is gone, so expanding is that much quicker.
 //
 // khoa, 2026-08-13 (round one, retained): self-framed stele per StelePopout's
 // standing direction after live recon confirmed genuine double-framing under
@@ -274,6 +290,7 @@
 
 import QtQuick
 import Quickshell   // QsWindow attached — the open/close edge (see header)
+import "../.."      // the facet's shared components — MorphState (bar.qml idiom)
 
 Item {
     id: root
@@ -294,44 +311,18 @@ Item {
     }
 
     // ── Mode: compact month ↔ expanded lunisolar year ────────────────────
-    // The toggle is SEQUENCED around the popup-window resize: Hyprland
-    // re-maps an xdg_popup on the first resize of a visible popup and plays
-    // its popup animation over the remap (~0.25s vanish/fade — measured;
-    // anchor-mode-independent). So the window never resizes DURING the
-    // morph: expanding grows the window first (the one-time flicker lands
-    // on a static compact image, position held by the left pin), then
-    // unrolls inside the stable surface; collapsing rolls up first, then
-    // snaps the window down around the static compact image. Re-toggling
-    // while in flight is absorbed.
-    property bool expanded: false
-    property real modeFrac: 0            // 0 compact … 1 expanded (animated)
-    function toggleMode() {
-        if (modeAnim.running || resizeGuard.running) return
-        root.expanded = !root.expanded
-        modeAnim.to = root.expanded ? 1 : 0
-        if (root.expanded) {
-            root.winW = root.expandedWinW      // window out first…
-            root.winH = root.expandedWinH
-            resizeGuard.restart()              // …morph after the remap settles
-        } else {
-            modeAnim.restart()                 // roll up inside the big window
-        }
+    // The state, the 0→1 clock and the ORDER around the window step all live
+    // in the shared MorphState (facet-owned; see its header for the capture
+    // that retired this file's 300ms resizeGuard). What stays here is the one
+    // thing the primitive deliberately does not own: HOW this surface changes
+    // size. The scroll steps its own winW/winH — window out first on expand,
+    // window in last on collapse — so the painted sheet always has a surface
+    // at least as large as itself, and the rollers/content lerp inside it.
+    MorphState {
+        id: mode
+        onStepOut: { root.winW = root.expandedWinW; root.winH = root.expandedWinH }
+        onStepIn:  { root.winW = root.compactWinW;  root.winH = root.compactWinH  }
     }
-    Timer {
-        id: resizeGuard
-        interval: 300
-        onTriggered: modeAnim.restart()
-    }
-    NumberAnimation {
-        id: modeAnim
-        target: root; property: "modeFrac"
-        duration: 340; easing.type: Easing.InOutCubic
-        onStopped: if (!root.expanded && root.modeFrac === 0) {
-            root.winW = root.compactWinW       // …window in last
-            root.winH = root.compactWinH
-        }
-    }
-    function lerp(a, b) { return a + (b - a) * root.modeFrac }
 
     // ── Fixed geometry — constants per mode, interpolated by modeFrac.
     // Window size changes ONLY on the toggle (the sanctioned resize); paging
@@ -344,8 +335,8 @@ Item {
     readonly property int chromeH: 156             // 24 margins + crown 26 + answer 20
                                                    // + frieze 10 + nav 20 + tally 18
                                                    // + close 14 + 6×4 spacing
-    readonly property int sheetW: Math.round(lerp(compactSheetW, expandedSheetW))
-    readonly property int bodyH: Math.round(lerp(compactBodyH, expandedBodyH))
+    readonly property int sheetW: mode.lerpInt(compactSheetW, expandedSheetW)
+    readonly property int bodyH: mode.lerpInt(compactBodyH, expandedBodyH)
     readonly property int modeSheetH: chromeH + bodyH
     readonly property int rollerH: 16
     readonly property int sheetY: 15
@@ -403,7 +394,7 @@ Item {
     property var pageGrab: null          // holds the grab: its url dies with it
     function page(delta) {
         if (delta === 0) return
-        if (pageAnim.running || modeAnim.running || resizeGuard.running) {
+        if (pageAnim.running || mode.busy) {
             root.monthOffset += delta
             return
         }
@@ -551,7 +542,7 @@ Item {
     // Tally: compact — day count at home, distance wound while browsing;
     // expanded — the Metonic position of the Attic year opening in viewYear.
     function tallyText() {
-        if (root.expanded)
+        if (mode.expanded)
             return "meton " + root.goldenNumber + " of 19 · "
                  + root.atticCur.starts.length + " months"
         if (root.monthOffset === 0) return "day " + root.today + " of " + root.daysInMonth
@@ -691,7 +682,7 @@ Item {
                     border.color: root.withA(root.clay, togMa.containsMouse ? 0.9 : 0.55)
                     Text {
                         anchors.centerIn: parent
-                        text: root.expanded ? "μήν ⌃" : "ἔτος ⌄"
+                        text: mode.expanded ? "μήν ⌃" : "ἔτος ⌄"
                         font.family: root.faceMono
                         font.pixelSize: 10
                         color: root.clay
@@ -702,7 +693,7 @@ Item {
                         anchors.fill: parent; anchors.margins: -5
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.toggleMode()
+                        onClicked: mode.toggle()
                     }
                 }
             }
@@ -759,9 +750,9 @@ Item {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 5
-                    opacity: 1 - root.modeFrac
-                    visible: root.modeFrac < 0.999
-                    enabled: !root.expanded
+                    opacity: 1 - mode.frac
+                    visible: mode.frac < 0.999
+                    enabled: !mode.expanded
                     Item {
                         width: 12; height: 18
                         anchors.verticalCenter: parent.verticalCenter
@@ -918,9 +909,9 @@ Item {
                 Column {
                     id: compactBody
                     anchors.horizontalCenter: parent.horizontalCenter
-                    y: Math.round(-24 * root.modeFrac + root.pageShift)
+                    y: Math.round(-24 * mode.frac + root.pageShift)
                     spacing: 4
-                    opacity: Math.max(0, 1 - root.modeFrac * 2.2)
+                    opacity: Math.max(0, 1 - mode.frac * 2.2)
                     visible: opacity > 0.01
 
                     // caps row — leading spacer over the week-number gutter;
@@ -1053,9 +1044,9 @@ Item {
                 Column {
                     id: expandedBody
                     anchors.horizontalCenter: parent.horizontalCenter
-                    y: Math.round(-40 * (1 - root.modeFrac) + root.pageShift)
+                    y: Math.round(-40 * (1 - mode.frac) + root.pageShift)
                     spacing: 8
-                    opacity: Math.max(0, root.modeFrac * 2.2 - 1.2)
+                    opacity: Math.max(0, mode.frac * 2.2 - 1.2)
                     visible: opacity > 0.01
 
                     Repeater {
@@ -1207,7 +1198,7 @@ Item {
                                             root.monthOffset =
                                                 (root.viewYear - root.now.getFullYear()) * 12
                                                 + (block.m - root.now.getMonth())
-                                            root.toggleMode()
+                                            mode.toggle()
                                         }
                                     }
                                 }
@@ -1248,7 +1239,7 @@ Item {
                 MouseArea {
                     anchors.fill: parent
                     acceptedButtons: Qt.NoButton
-                    enabled: root.expanded
+                    enabled: mode.expanded
                     onWheel: {
                         root.page((wheel.angleDelta.y > 0) ? -12 : 12)
                         wheel.accepted = true
@@ -1373,7 +1364,7 @@ Item {
             anchors.fill: parent
             anchors.margins: -2
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.toggleMode()
+            onClicked: mode.toggle()
         }
     }
 }
