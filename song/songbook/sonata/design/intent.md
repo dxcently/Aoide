@@ -4,16 +4,35 @@
 **Palette:** a Greek marble key — pale warm-marble ground, plum-charcoal ink,
 deep Attic-gold chrome accent, terracotta urgent, a true laurel leaf-green
 one-hot blaze; aegean blue steps back to a preview/information role
-**Grammar:** `design/greek-grammar.md` — sonata's house grammar: capital-Greek
-order-marks per surface, the state-glyph contract shared verbatim with
-`theme.rs`, and the role→hue palette below. A deliberate divergence from the
-Pantheon wireframe grammar the retired `default` song once drew (kept as
-historical reference at `docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`)
+**Grammar:** `design/greek-grammar.md` — sonata's drawing vocabulary: faces,
+glyph sets, type tiers, the opacity ladder, rule idioms, state treatments, the
+state-glyph contract shared verbatim with `theme.rs`, and the role→hue palette
+below. A deliberate divergence from the Pantheon wireframe grammar the retired
+`default` song once drew (kept as historical reference at
+`docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`)
 **Cover:** none — the wallpaper note is `null`, so the stylix facet bakes a
 deterministic **bright-marble field** from `palette.bg` (`#f2ebde`) — the
 same null-wallpaper-to-solid mechanism the stylix facet applies to any song
 with no cover note. Colours fit the theme, not a
 photo; the wallpaper switcher handles photos live (see the Iteration Log)
+
+---
+
+## The design shelf — where to look
+
+Per-song design memory lives here, not in the wiki. Four files, in reading
+order for someone about to draw something:
+
+| file | answers |
+|---|---|
+| `making-a-widget.md` | **what makes a widget read as belonging to this desktop** — the shared skeleton with its real numbers, how colour and opacity are spent, the two ways new widgets fail here, worked walkthroughs of the live ones, and how to verify on screen |
+| `greek-grammar.md` | the vocabulary to draw with — faces, glyph sets, type tiers, the opacity ladder, rule idioms, state treatments, role→hue |
+| `widget-structure.md` | the mechanism and the hard contracts — slot pipeline, injected props, root type by anchor kind, host chrome (free vs must-supply), geometry constants, motion tiers, file conventions |
+| `hazards.md` | what has actually failed live — glyph rendering, layout loops, dynamic-loading limits, popup/service traps, verification traps |
+| `intent.md` (this file) | the KEY itself — why this palette, region by region, with computed contrast and the dated iteration log |
+
+Each widget's own file header is its individual design record; there is no
+shared per-widget blueprint anywhere.
 
 ---
 
@@ -221,3 +240,27 @@ text on the wallpaper, so no outline treatment is in use.
   `.borderInactive` (falling back to `palette.accent`/`palette.bg` when a song
   leaves them null) — no compositor-side change was needed, the pipeline just
   picked up the new song-owned notes.
+- 2026-08-15: **`design/` retconned around the belonging problem.** Three
+  separate design passes over ONE bar popout were rejected on sight the same
+  day (an invented votive-tablet metaphor with a 30-line defence; a stripped
+  bare-icon `Flow`; an icon+name row list), and the popout body was torn out
+  of `bar.qml` rather than kept. Diagnosis: the docs transmitted RULES
+  (`notes.*`-only, `radius: 0`, banner style) but not what makes a widget read
+  as family. New `design/making-a-widget.md` states the finding — belonging is
+  carried by a shared eleven-part build order at fixed sizes, not by a
+  metaphor; the metaphor only renames the parts — with the colour-spend
+  census, the two named failure modes, worked walkthroughs of
+  `notifications.qml`/`powermenu.qml`/`calendar.qml`/`AudioColonnade.qml`, a
+  bench check, and the on-screen verification loop. New `design/hazards.md`
+  collects the live-confirmed traps (the invisible-fermata `font.bold` scar,
+  the two further non-ASCII glyph failures, the Layouts sizing loop, the
+  popup-resize remap, the dynamic-loading type-resolution limit, the
+  notification close-path rules). `greek-grammar.md` retconned from
+  house-grammar prose into the concrete vocabulary (faces, glyph sets, type
+  tiers, opacity ladder, rule idioms, state treatments), keeping the
+  order-marks, the state-glyph contract and the role palette; the doc-history
+  paragraphs about what earlier passes cut were dropped, and the verdigris
+  ≤0.5 structural cap is now stated once, plainly, as the live invariant it
+  is. `widget-structure.md` refocused on mechanism + hard contracts and gained
+  a free-vs-must-supply table for the five host anchors and a motion-tier
+  table. No `.qml` touched.
