@@ -179,7 +179,7 @@ else in this section — locked under `declarative`, allowed under
 brand-new widget file is the one thing this doesn't cover: `manifest.json`
 is only read at Quickshell startup, so a new slot still needs a
 `systemctl --user restart aoide-quickshell.service` to be discovered — may
-no longer require a restart now that `aoide shell reload` (Quickshell IPC
+no longer require a restart now that `aoide quickshell reload` (Quickshell IPC
 hot-reload trigger) rebuilds the whole scene fresh from `shell.qml`, which
 should also re-read `manifest.json`; unconfirmed against a live instance,
 confirm before relying on this.

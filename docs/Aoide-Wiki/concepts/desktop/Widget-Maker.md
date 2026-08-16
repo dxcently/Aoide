@@ -146,7 +146,7 @@ aoide-quickshell.service`, because Quickshell's built-in file watcher doesn't
 track `Qt.createComponent`-loaded QML at all ([[Quickshell]]). `aoide rice
 stage` now closes that gap too — it re-syncs the changed widget file into
 `run/qml/songs/<name>/` and, if that sync actually changed something, triggers
-`AoideIpc.qml`'s `Quickshell.reload(false)` via `aoide shell reload` under the
+`AoideIpc.qml`'s `Quickshell.reload(false)` via `aoide quickshell reload` under the
 hood, rebuilding the whole scene fresh so the edit renders without a restart
 (the same IPC hot-reload mechanism described in [[Quickshell]]). The "new
 song's widget files still need a rebuild" caveat above is untouched by

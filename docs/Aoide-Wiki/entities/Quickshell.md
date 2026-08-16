@@ -63,7 +63,7 @@ found via live debugging.
 (`target: "shell"`, one exposed `function reload(): void { Quickshell.reload(false) }`),
 instantiated in `shell.qml` alongside `notes`/`bridge`/`stagingEngine`/`shared`
 — no properties of its own, wired purely for the side effect. `quickshell ipc
-call shell reload` invokes it from outside the process; `aoide shell reload`
+call shell reload` invokes it from outside the process; `aoide quickshell reload`
 (`crates/song/src/commands/shell.rs`, `crates/song/src/ipc.rs`) shells out to
 exactly that call, no-oping to a reported (never fatal) `not-running` status
 when `aoide-quickshell.service` isn't up.

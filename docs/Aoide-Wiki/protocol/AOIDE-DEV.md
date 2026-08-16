@@ -154,7 +154,7 @@ grim out.png ; grim -g "0,0 1920x60" bar.png    # full + crops → read them bac
   deployed tree is `run/qml/` (writable working copies) — NOT
   `modules/facets/quickshell/qml/` and NOT `~/Aoide/qml/`.** Sync only the
   files you changed (`cp modules/facets/quickshell/qml/<f> run/qml/<f>` then
-  `aoide shell reload`, which now replaces the old
+  `aoide quickshell reload`, which now replaces the old
   `systemctl --user restart aoide-quickshell.service` step — a Quickshell
   IPC call (`quickshell ipc call shell reload`) that rebuilds the whole
   scene in-process, no systemd restart); leave files another
@@ -480,7 +480,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
 | Build the system | `nix build .#nixosConfigurations.yomi-strix.…toplevel` |
 | Activate (gated) | `nix-env --set` + `switch-to-configuration switch` |
 | Reload compositor | `hyprctl reload` |
-| Reload shell | `aoide shell reload` (or `systemctl --user restart aoide-quickshell.service`) |
+| Reload shell | `aoide quickshell reload` (or `systemctl --user restart aoide-quickshell.service`) |
 | Stage a song live | `aoide rice stage <song>` |
 | Check QML loads | `qs -p …/shell.qml` |
 | Show the user | `grim` → read the PNG back → judge → send |

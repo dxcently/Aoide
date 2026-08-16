@@ -649,7 +649,7 @@ set of "flavor" surfaces — committed files, not nix options:
   to an EXISTING widget file reaches Quickshell's own file-watcher live too.
   A brand-new slot file still needs a service restart to be discovered
   (the manifest is only read at startup) — **may no longer require a
-  restart** now that `aoide shell reload` (Quickshell IPC hot-reload
+  restart** now that `aoide quickshell reload` (Quickshell IPC hot-reload
   trigger) rebuilds the whole scene fresh from `shell.qml`, which should
   also re-read `manifest.json`; unconfirmed against a live instance, don't
   rely on this until verified.
