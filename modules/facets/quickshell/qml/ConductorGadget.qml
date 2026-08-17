@@ -42,8 +42,9 @@
 // ♪ 𝄐 𝄼 𝄽 𝄂 · state colours — working pulses via a scale animation, awaiting
 // breathes via an opacity animation) lives INSIDE a fixed 16px box at the
 // card's top-left; both animations are confined to the box — nothing floats,
-// no layout shift. The π THINK-TAG (hooked main pi sessions only) lives in a
-// fixed 13×16 box on the identity row, pen confined to the box. The KAOMOJI
+// no layout shift. The π THINK-TAG (hooked main pi sessions only, visible
+// only while the live state is working) lives in a fixed 13×16 box on the
+// identity row, pen confined to the box. The KAOMOJI
 // TROUPE lives inside a fixed clipped box in the
 // ground row (116px main / 90px sub); its frames swap text, never geometry.
 // The thinking slot itself is a fixed-height reserved lane. Every free-
@@ -63,8 +64,9 @@
 // the border, and the kaomoji face — while laurel/firstWorkingId/workingCount
 // stay roster-based (stable tallies). Hook surfacing: a ϟ tag on the identity
 // row — replaced by the π think-tag for hooked MAIN pi sessions (piTag
-// below: a slow self-writing π while working, a still π at rest; the ϟN
-// tally and the "ϟ phase" placeholder keep ϟ) — plus a "ϟ phase"
+// below: exists ONLY while working — the self-writing loop; at rest it
+// vanishes; the ϟN tally and the "ϟ phase" placeholder keep ϟ) — plus a
+// "ϟ phase"
 // placeholder in the thinking box when there is no activity
 // or say, and a ϟN count in the stylobate tally. Phases outside the §2
 // vocabulary fall back to the "·" lamp and the puzzled still — tolerant,
@@ -1075,9 +1077,9 @@ Item {
             !!(s && s.workspace !== undefined && s.workspace !== null)
         readonly property bool hooked: temple.hooked(s ? s.sessionId : "")
         // the pi-harness badge — a hooked MAIN pi session swaps the ϟ bolt
-        // for its own π think-tag (piTag, below): the slow self-writing loop
-        // runs only while the live state is working; at rest the tag holds a
-        // full, still π. Subs keep the ϟ like everyone else.
+        // for its own π think-tag (piTag, below). The tag EXISTS only while
+        // the live state is working (the self-writing loop) — at rest it
+        // vanishes entirely, no still π and no ϟ. Subs keep the ϟ.
         readonly property bool piThinking: card.hooked && !card.child
             && !!card.s && !!card.s.agent
             && ("" + card.s.agent).toLowerCase() === "pi"
@@ -1343,13 +1345,14 @@ Item {
                 // a long still hold — then the pen gently unwrites and the
                 // page rests blank for a beat. A still, deliberate loop
                 // (draw ≈1.5s, hold ≈1.1s, unwrite ≈0.75s, rest ≈0.5s):
-                // pen-on-page thinking, not a spinner. Resting (hooked but
-                // not working) holds the full π, unmoving. Same fixed 13×16
-                // reserved box, same anchoring as the ϟ tag it replaces —
-                // nothing floats, no layout shift.
+                // pen-on-page thinking, not a spinner. The tag exists ONLY
+                // while the live state is working — at rest it vanishes
+                // entirely (no still π, no ϟ). Same fixed 13×16 reserved
+                // box, same anchoring as the ϟ tag it replaces — nothing
+                // floats, no layout shift.
                 Item {
                     id: piTag
-                    visible: card.piThinking
+                    visible: card.piLive
                     anchors.left: kindTag.visible ? kindTag.right : nameT.right
                     anchors.leftMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
@@ -1357,8 +1360,7 @@ Item {
                     width: 13; height: 16
 
                     // the pen's progress: 0 = blank page, 1 = full π. Starts
-                    // at 0 so a fresh card writes itself in on appearance;
-                    // the Canvas's p binding ignores it while resting.
+                    // at 0 so a fresh card writes itself in on appearance.
                     property real drawProgress: 0
                     SequentialAnimation on drawProgress {
                         running: card.piLive
@@ -1372,7 +1374,7 @@ Item {
 
                     Canvas {
                         anchors.fill: parent
-                        property real p: card.piLive ? piTag.drawProgress : 1
+                        property real p: piTag.drawProgress
                         onPChanged: requestPaint()
                         onWidthChanged: requestPaint()
                         onHeightChanged: requestPaint()
