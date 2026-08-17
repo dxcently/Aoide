@@ -42,7 +42,9 @@
 // ♪ 𝄐 𝄼 𝄽 𝄂 · state colours — working pulses via a scale animation, awaiting
 // breathes via an opacity animation) lives INSIDE a fixed 16px box at the
 // card's top-left; both animations are confined to the box — nothing floats,
-// no layout shift. The KAOMOJI TROUPE lives inside a fixed clipped box in the
+// no layout shift. The π THINK-TAG (hooked main pi sessions only) lives in a
+// fixed 13×16 box on the identity row, pen confined to the box. The KAOMOJI
+// TROUPE lives inside a fixed clipped box in the
 // ground row (116px main / 90px sub); its frames swap text, never geometry.
 // The thinking slot itself is a fixed-height reserved lane. Every free-
 // length string elides against a fixed partner: name vs tags, model/id
@@ -60,7 +62,10 @@
 // drives the lamp glyph/colour, the metronome pulse, the terracotta breath,
 // the border, and the kaomoji face — while laurel/firstWorkingId/workingCount
 // stay roster-based (stable tallies). Hook surfacing: a ϟ tag on the identity
-// row, a "ϟ phase" placeholder in the thinking box when there is no activity
+// row — replaced by the π think-tag for hooked MAIN pi sessions (piTag
+// below: a slow self-writing π while working, a still π at rest; the ϟN
+// tally and the "ϟ phase" placeholder keep ϟ) — plus a "ϟ phase"
+// placeholder in the thinking box when there is no activity
 // or say, and a ϟN count in the stylobate tally. Phases outside the §2
 // vocabulary fall back to the "·" lamp and the puzzled still — tolerant,
 // never a crash. Stale hook ids (absent from the roster) are ignored: they
@@ -98,6 +103,7 @@ Item {
     readonly property string faceMono:  "JetBrainsMono Nerd Font"
     readonly property string faceMusic: "Noto Music"
     readonly property string faceSymbol: "Noto Sans Symbols 2"   // hookTag's working-spinner
+    readonly property string faceEmoji:  "Noto Color Emoji"      // moonTag's lunation
 
     function withA(cstr, a) {
         var c = Qt.darker(cstr, 1.0)
@@ -1068,6 +1074,19 @@ Item {
         readonly property bool hasWs:
             !!(s && s.workspace !== undefined && s.workspace !== null)
         readonly property bool hooked: temple.hooked(s ? s.sessionId : "")
+        // the pi-harness badge — a hooked MAIN pi session swaps the ϟ bolt
+        // for its own π think-tag (piTag, below): the slow self-writing loop
+        // runs only while the live state is working; at rest the tag holds a
+        // full, still π. Subs keep the ϟ like everyone else.
+        readonly property bool piThinking: card.hooked && !card.child
+            && !!card.s && !!card.s.agent
+            && ("" + card.s.agent).toLowerCase() === "pi"
+        readonly property bool piLive: card.piThinking && card.cardWorking
+        // the kimi moon — a MAIN kimi session wears kimi-code's own thinking
+        // animation (the moon spinner) right of its name, only for the spin:
+        // nothing is reserved at rest (moonTag below).
+        readonly property bool kimiMain: !card.child && !!card.s && !!card.s.agent
+            && ("" + card.s.agent).toLowerCase() === "kimi"
 
         // troupe casting — hashed per session id, couriers from the packages
         // pool, everyone else from the general pool; resting states hold the
@@ -1236,6 +1255,8 @@ Item {
                                     parent.width - 21 - badgeT.implicitWidth - 10
                                     - (kindTag.visible ? kindTag.implicitWidth + 6 : 0)
                                     - (hookTag.visible ? hookTag.implicitWidth + 6 : 0)
+                                    - (piTag.visible ? piTag.width + 6 : 0)
+                                    - (moonTag.visible ? moonTag.implicitWidth + 6 : 0)
                                     - (wsT.visible ? wsT.implicitWidth + 8 : 0)
                                     - (stateWordT.implicitWidth + 8))
                     font.family: temple.faceSerif
@@ -1252,9 +1273,12 @@ Item {
                     font.family: temple.faceMono; font.pixelSize: 9
                     color: temple.notes.violet
                 }
-                Text {                           // the ϟ hook tag
+                Text {                           // the ϟ hook tag — the pi
+                                                 // harness wears the π think-
+                                                 // tag instead (piTag below),
+                                                 // a kimi main the moon
                     id: hookTag
-                    visible: card.hooked
+                    visible: card.hooked && !card.piThinking && !card.kimiMain
                     anchors.left: kindTag.visible ? kindTag.right : nameT.right
                     anchors.leftMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
@@ -1292,7 +1316,7 @@ Item {
                     // on first write, so that switch is not a small one).
                     text: hookTag.spinning ? (hookTag.spinGlyphs[hookSpin.frame] || "ϟ") : "ϟ"
                     font.family: hookTag.spinning ? temple.faceSymbol : temple.faceMono
-                    font.pixelSize: 9
+                    font.pixelSize: 10   // up from 9 (pixelSize is int — 9.45 isn't valid) — khoa: "a bit bigger"
                     color: temple.withA(temple.lampColor(card.cardLiveState), 0.95)
 
                     Timer {
@@ -1309,6 +1333,117 @@ Item {
                             interval = (frame === 0 || frame === hookTag.spinGlyphs.length - 1)
                                        ? holdIntervalMs : baseIntervalMs
                         }
+                    }
+                }
+
+                // the π think-tag — the pi harness's OWN hook badge. Where a
+                // hooked claude main cycles its glyphs, a hooked pi main
+                // swaps the ϟ bolt for a slow SELF-WRITING π: left stem
+                // draws, right stem draws, then the top bar sweeps across —
+                // a long still hold — then the pen gently unwrites and the
+                // page rests blank for a beat. A still, deliberate loop
+                // (draw ≈1.5s, hold ≈1.1s, unwrite ≈0.75s, rest ≈0.5s):
+                // pen-on-page thinking, not a spinner. Resting (hooked but
+                // not working) holds the full π, unmoving. Same fixed 13×16
+                // reserved box, same anchoring as the ϟ tag it replaces —
+                // nothing floats, no layout shift.
+                Item {
+                    id: piTag
+                    visible: card.piThinking
+                    anchors.left: kindTag.visible ? kindTag.right : nameT.right
+                    anchors.leftMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenterOffset: 1   // rests a tick below the name's optical centre
+                    width: 13; height: 16
+
+                    // the pen's progress: 0 = blank page, 1 = full π. Starts
+                    // at 0 so a fresh card writes itself in on appearance;
+                    // the Canvas's p binding ignores it while resting.
+                    property real drawProgress: 0
+                    SequentialAnimation on drawProgress {
+                        running: card.piLive
+                        loops: Animation.Infinite
+                        alwaysRunToEnd: true
+                        NumberAnimation { to: 1; duration: 1500; easing.type: Easing.InOutQuad }
+                        PauseAnimation { duration: 1100 }
+                        NumberAnimation { to: 0; duration: 750; easing.type: Easing.InOutQuad }
+                        PauseAnimation { duration: 500 }
+                    }
+
+                    Canvas {
+                        anchors.fill: parent
+                        property real p: card.piLive ? piTag.drawProgress : 1
+                        onPChanged: requestPaint()
+                        onWidthChanged: requestPaint()
+                        onHeightChanged: requestPaint()
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.reset()
+                            var w = width, h = height
+                            ctx.strokeStyle = temple.withA(temple.lampColor(card.cardLiveState), 0.95)
+                            ctx.lineWidth = 1.6
+                            ctx.lineCap = "round"
+                            // pen geometry — the top bar rides a fifth of
+                            // the way down; the stems start just beneath it
+                            // and run to ~3/4 of the height (short legs, ~2px
+                            // above the box's floor), so the round caps
+                            // overlap the bar and the joints read as one
+                            // continuous glyph, never three broken strokes.
+                            var barY = h * 0.2
+                            var stemTop = barY + 0.6
+                            var stemBot = h * 0.72
+                            var xL = w * 0.27, xR = w * 0.73
+                            var barL = w * 0.17, barR = w * 0.83
+                            function ease(t) {
+                                return t < 0.5 ? 2 * t * t
+                                               : 1 - Math.pow(-2 * t + 2, 2) / 2
+                            }
+                            function seg(p0, p1, ax, ay, bx, by) {
+                                var f = (p - p0) / (p1 - p0)
+                                if (f <= 0) return
+                                if (f > 1) f = 1
+                                f = ease(f)
+                                ctx.moveTo(ax, ay)
+                                ctx.lineTo(ax + (bx - ax) * f, ay + (by - ay) * f)
+                            }
+                            ctx.beginPath()
+                            seg(0.00, 0.30, xL, stemTop, xL, stemBot)  // left stem
+                            seg(0.30, 0.62, xR, stemTop, xR, stemBot)  // right stem
+                            seg(0.62, 1.00, barL, barY, barR, barY)    // top bar
+                            ctx.stroke()
+                        }
+                    }
+                }
+
+                Text {                           // the moon think-tag — a kimi MAIN
+                                                 // wears kimi-code's own moon
+                                                 // spinner while working
+                    id: moonTag
+                    visible: card.kimiMain && card.cardWorking
+                    anchors.left: hookTag.visible ? hookTag.right
+                                : (piTag.visible ? piTag.right
+                                : (kindTag.visible ? kindTag.right : nameT.right))
+                    anchors.leftMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    // frames + 120ms cadence lifted verbatim from kimi-code's
+                    // MOON_SPINNER (tui/constant/rendering.ts): 8 phases, one
+                    // full lunation ≈ 1s, uncoloured — the emoji face carries
+                    // its own colour. Frame starts at -1 with a guarded index
+                    // for the same transient as hookTag (triggeredOnStart's
+                    // first fire lands on the next tick, not this one).
+                    readonly property var moonGlyphs: ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"]
+                    text: moonTag.moonGlyphs[moonSpin.frame] || "🌑"
+                    font.family: temple.faceEmoji
+                    font.pixelSize: 10
+
+                    Timer {
+                        id: moonSpin
+                        interval: 120
+                        repeat: true
+                        triggeredOnStart: true
+                        running: moonTag.visible
+                        property int frame: -1
+                        onTriggered: frame = (frame + 1) % moonTag.moonGlyphs.length
                     }
                 }
             }
