@@ -3,8 +3,10 @@
 # Dendrite shape v0 (CONTRACTS.md §2):
 #   - one enable toggle: aoide.dunst.enable (off by default)
 #   - carries its own dependencies: the dunst package (dunstctl/dunstify ride
-#     along for the CLI and the herald center's `dunstctl history` poll) and
-#     the daemon unit, via Home Manager's services.dunst module
+#     along for the CLI, the herald center's `dunstctl history` poll and the
+#     permission summons `aoide graph permit` raises), libnotify for the
+#     stock `notify-send` client other aoide code already calls, and the
+#     daemon unit itself via Home Manager's services.dunst module
 #   - reads no other module — with ONE deliberate exception: config.aoide.livery,
 #     the house design-token seam. Popups are a surface, and every surface's
 #     dress flows from livery (the stylix facet reads the same option for the
@@ -23,55 +25,116 @@
 # This dunstrc dresses the popup as the retired popup card did — the Tuscan
 # stele (git show d57205a~1:song/songbook/sonata/widgets/notifications.qml;
 # the same grammar lives on at ledger scale in widgets/herald-center.qml).
-# dunst is not QML: it draws one Pango-markup text block per notification
-# plus a frame, an icon and a progress bar. The stele is therefore carved
-# into the `format` string itself — the man page (dunst.5, v1.13.2) is the
-# ground truth for every key used here; markup written in `format` is parsed
-# regardless of the `markup` setting, which is the whole lever.
+# dunst is not QML: per notification it draws ONE Pango text block, one frame,
+# one icon and one progress bar. The stele is therefore carved into the
+# `format` string itself — markup written in `format` is parsed regardless of
+# the `markup` setting, which is the whole lever. dunst.5 (v1.13.2) is the
+# ground truth for every key used here; everything below was rendered and
+# looked at on a live daemon before it was written down.
 #
-# Reading order (design/greek-grammar.md §4 "the herald tiers"), top down:
-#     ❧ H E R A L D                 entablature: rust crown, ink wordmark
-#     ══════════════                Tuscan frieze — the plain double rule
-#     ┌─┤ program ├──               tier 1: program title in the frame label
-#     ──────────────                the cleave — entablature/shaft boundary
-#     Notification title            tier 2: bold serif, full ink
-#       context                     tier 3: smaller, dimmer, indented
-#     ( ・ω・)ノ                    ledger: urgency kaomoji
-#     └─┤ normal ├── 𝄂              closing frame: urgency word, gold barline
+# Reading order, top down:
+#     ❧ H E R A L D          [ notify ]   entablature: rust crown, ink wordmark,
+#     ══════════════════════════════════  Tuscan frieze — the plain double rule
+#     ┌─┤ program ├───────────────         tier 1: program in the frame label
+#     ──────────────────────────────────  the cleave — entablature/shaft line
+#     Notification title                  tier 2: bold serif, full ink
+#     │ context                           tier 3: smaller, dimmer, hairline
+#     ──────────────────────────────────  the ledger rule
+#     ( ・ω・)ノ  [ 60%]                   ledger: urgency kaomoji, gauge tally
+#     └─┤ normal ├─────────── 𝄂 ┘         closing frame: urgency word, barline
 #
-# What ports 1:1 — the crown, frieze, frames, cleave, three text tiers, the
-# per-urgency kaomoji + urgency word (via rule sections: `format` is a rule
-# action and msg_urgency a rule filter; the special urgency_* sections do NOT
-# accept `format`, so the three [herald-*] rules below carry the whole
-# per-urgency treatment), critical-in-terracotta throughout, critical never
-# times out, the 2px ink border (frame_width; gap_size > 0 frames every
-# notification separately, exactly the retired 8px popup stack).
+# Sizes are the retired card's pixel metrics converted at 96dpi (pt = px*0.75,
+# and the rig runs scale 1.0): 20px crown → 15pt, 13px wordmark → 9.75pt,
+# 11px mono → 8.25pt, 10px mono → 7.5pt, 14px title → 10.5pt, 12px context →
+# 9pt, 16px 𝄂 → 12pt. `letter_spacing='2304'` is the card's `letterSpacing: 3`
+# (3px → 2.25pt → 2304 Pango units) — a real 1:1 port, not faked with spaces.
 #
-# What could NOT port, deliberately degraded (dunst has no conditionals, no
-# animation, no per-line alignment):
-#   - breathing critical pulse       -> persistent card + terracotta frame
-#   - 1px inset signature keyline    -> one frame only; rust rides the glyphs
-#   - right-aligned clock/tally      -> show_age_threshold stamps a native
-#                                       age once a card lingers (the honest-
-#                                       clock intent of b0da918)
-#   - context hairline │ + smart     -> two-space indent; dunst renders the
-#     OSC-9 "Title: message" split      spec fields as sent — the center
-#     and desktop-entry parentTitle     still does the smart reading
-#   - full-width stretching rules    -> fixed-length calligraphy, open-ended
-#                                       on the right (a wrapped rule reads
-#                                       broken; a short one reads deliberate)
+# What ports 1:1 — the ❧ crown and the `[ notify ]` order tag, the frieze, both
+# box-drawing frames, the cleave, the three text tiers with the │ hairline tick
+# on the context, the ledger rule, the per-urgency kaomoji (the card's own
+# proven kana vocabulary) and urgency word, the gold 𝄂 + rust ┘ closing the
+# stele with the same small gap the card left between them, terracotta ink
+# throughout while critical, critical never timing out, 2px ink frame, radius 0
+# everywhere, 10px padding, 360px width, and `gap_size` 8 giving every card its
+# own frame — the retired 8px popup stack exactly. Also 1:1, and the reason the
+# card survives hostile senders: BOTH text tiers are plain text
+# (`markup = no`), which is the card's own `textFormat: Text.PlainText`. An
+# earlier pass ran `markup = full`; a body carrying `<done>` or any unbalanced
+# tag then failed Pango parsing and dunst fell back to rendering the WHOLE
+# format as unstyled plain text — measured, every span lost, every rule
+# wrapped. `no` escapes sender text instead, and the format's own markup is
+# still parsed. Untrusted text is data, never re-interpreted.
+#
+# What could NOT port, deliberately degraded (dunst has no conditionals worth
+# the name, no animation, no per-line alignment, no clock):
+#   - cast shadow                    -> nothing; the frame carries the edge
+#   - 1px inset rust keyline         -> nothing; one frame only, kept ink (the
+#                                       card's OUTER border), rust rides the ink
+#   - breathing critical pulse       -> the standing terracotta frame is its
+#                                       still form
+#   - the gold arrival clock, right  -> NOTHING. There is no time placeholder,
+#                                       and `show_age_threshold`'s native stamp
+#                                       is appended OUTSIDE the format's markup
+#                                       in the default font, where it wraps and
+#                                       tears the closing frame open (measured)
+#                                       — hence -1. The honest clock lives on in
+#                                       herald-center, which reads each entry's
+#                                       real timestamp out of history.
+#   - the honest (Nx) duplicate count-> hidden, same defect mirrored: dunst
+#                                       PREPENDS it outside the markup and it
+#                                       shoves `[ notify ]` onto a second line.
+#                                       Stacking itself stays on; only the
+#                                       numeral is dropped.
+#   - full-width stretching rules    -> fixed-length runs measured against the
+#                                       336px text band (48 cells at 8.25pt).
+#                                       Every rule but one lands flush right.
+#   - a ┐ closing the top frame      -> impossible: `%a` is variable, dunst has
+#                                       no padding. Its tail is a fixed 28 cells
+#                                       (fits a 17-char sender before wrapping);
+#                                       the bottom frame, whose label IS static,
+#                                       does close on ┘.
+#   - right-aligned anything         -> only the entablature tally, where BOTH
+#                                       operands are static, so a tuned space
+#                                       run is exact rather than fragile
+#   - smart OSC-9 "Title: message"   -> dunst renders the spec fields as sent;
+#     splitting, desktop-entry names    the center still does the smart reading
+#   - indicate_hidden's "(N more)"   -> off; that synthetic card bypasses
+#                                       `format` entirely and cannot wear the
+#                                       dress. `notification_limit` keeps the
+#                                       visible stack to what fits the screen;
+#                                       the overflow waits its turn, and history
+#                                       loses nothing.
 #
 # What dunst ADDS over the retired card (the point of the handover):
-#   - a real progress bar (volume/brightness OSDs): gilded — gold fill in a
-#     1px ink-framed trough, square corners
-#   - sender icons, left, 24–32px — the center RE-admitted icons (2026-08-16,
-#     khoa's own ask) and the popup follows it, not the retired card's
-#     NO-ICONS stance
-#   - duplicate stacking with an honest (2x) count, 20-deep history (the
-#     exact window herald-center polls)
-#   - actions: never drawn as chrome (fd4cb3a: the implicit "default" action
-#     is click-anywhere, not a button) — show_indicators off; dunst's stock
-#     mouse map already matches the card (left = dismiss, middle = invoke)
+#   - REAL images. `image-path`/`image-data` land in the icon slot, and the slot
+#     is on TOP (not left): a 96px raster plate above the pediment costs the
+#     calligraphy no width, where a left icon would have shortened every rule
+#     in the card by 40px whether or not a sender supplied one. 24–96px, square
+#     (`icon_corner_radius = 0`, radius 0 house-wide). The max IS the
+#     proportion rule — a 1920x1080 screenshot lands as a 96x54 plate, album
+#     art as 96x96, and nothing can outgrow the stele it sits on.
+#   - a gilded gauge for progress senders: gold fill in a 1px ink-framed square
+#     trough, the full 336px text width. dunst always draws the bar after the
+#     text, so it sits BELOW the closing barline — read it as the stele's
+#     plinth. `%p` also rides the ledger line in gold and vanishes when the
+#     sender set no value.
+#   - the SUMMONS: an agent permission prompt is not a toast (see the
+#     herald-summons rule). It is the one card whose buttons DO something —
+#     left-click approves, middle-click denies, and `aoide graph permit` types
+#     the verdict back into the waiting session. Both gestures were driven end
+#     to end against a live conducted session before this was written down.
+#   - a quiet-hours story, duplicate stacking, and a 20-deep history — the exact
+#     window herald-center polls.
+#
+# dunst's only real conditional is a rule filter, so the per-urgency treatment
+# AND the empty-body treatment are both carried by rules: the special urgency_*
+# sections accept colours but not `format`. `body = "^$"` (POSIX regex on) is
+# what keeps a body-less sender — volume OSDs, bare `notify-send "hi"` — from
+# leaving an orphan │ hairline over a blank line where the context tier would
+# be. Rule ORDER is load-bearing (dunst applies rules in file order, later wins)
+# and Home Manager emits sections in the attrset's own sorted order, so the
+# names below are chosen to sort correctly: `herald-critical` before
+# `herald-critical-terse`, and `herald-summons` after everything.
 #
 # Theming lands the way every Stylix-target app's does: baked at rebuild (the
 # user-gated gate), not live from stage/livery.json. If live popup recoloring
@@ -90,50 +153,120 @@ let
   hex = c: if lib.hasPrefix "#" c then c else "#" + c;
 
   # notif tier: nullOr + palette fallback (options.nix's notifType); palette
-  # tier fields always carry a value (closed tier, non-null defaults).
+  # tier fields always carry a value (closed tier, non-null defaults) except
+  # `hot`, which is nullOr-falls-back-to-accent by its own documented contract.
   notifBg = hex (if lv.notif.bg != null then lv.notif.bg else lv.palette.bg);
   notifFg = hex (if lv.notif.fg != null then lv.notif.fg else lv.palette.fg);
   notifUrgent = hex (if lv.notif.urgent != null then lv.notif.urgent else lv.palette.urgent);
   accent = hex lv.palette.accent;
   ink = hex lv.palette.fg;
+  hot = hex (if lv.palette.hot != null then lv.palette.hot else lv.palette.accent);
 
-  # The herald's signature: RUST, base16 base0F ("notifications' signature",
-  # greek-grammar.md §5). Falls back the same way the stylix facet synthesizes
+  # The herald's signature: RUST, base16 base0F — the one accentSpread slot no
+  # dock temple claims. Falls back the same way the stylix facet synthesizes
   # base0F when a song ships no base16 tier: to palette.urgent.
   rust = hex (if lv.base16 != null then lv.base16.base0F else lv.palette.urgent);
 
   # Ink opacities as Pango #RRGGBBAA — the retired card's withA() steps.
-  # 0.95=F2 0.90=E6 0.85=D9 0.80=CC 0.70=B3 0.55=8C
+  # 0.95=F2 0.90=E6 0.85=D9 0.80=CC 0.70=B3 0.60=99 0.55=8C 0.45=73 0.30=4D
   mono = "JetBrainsMono Nerd Font";
 
-  # One stele per urgency. `sig` is the signature ink (rust; terracotta while
-  # critical — "terracotta ink throughout"), `title` the tier-2 ink, `word`
-  # the bottom-frame label (urgency word single-sourced there, b0da918),
-  # `kao` the ledger kaomoji (the retired card's proven kana vocabulary).
+  # Calligraphy measured against the 336px text band (360 width - 2*10 padding
+  # - 2*2 frame) at mono 8.25pt: 48 cells land flush on the right margin.
+  rule = lib.concatStrings (lib.genList (_: "─") 48);
+  frieze = lib.concatStrings (lib.genList (_: "═") 48);
+  # `%a` is variable, so the top frame's tail is fixed: 28 cells keeps a
+  # 17-char sender name on one line.
+  tabTail = lib.concatStrings (lib.genList (_: "─") 28);
+  dashes = n: lib.concatStrings (lib.genList (_: "─") n);
+  spaces = n: lib.concatStrings (lib.genList (_: " ") n);
+
+  # One stele per urgency (× body-present, and the summons). `sig` is the
+  # signature ink (rust; terracotta while critical — "terracotta throughout"),
+  # `title` the tier-2 ink, `word` the bottom-frame label (the urgency word is
+  # single-sourced there, as on the card), `kao` the ledger kaomoji, `tag` the
+  # entablature's order tag, `actions` draws the summons' button row.
+  #
   # Joined with a literal backslash-n: dunst replaces '\n' in format with a
-  # real line break (dunst.5). No '%' or '&' may appear in the literals
-  # (format variables / Pango entities); single quotes only, the generated
-  # dunstrc wraps the value in double quotes.
+  # real line break. No literal '%' or '&' may appear in the text (format
+  # placeholders / Pango entities), and single quotes only — the generated
+  # dunstrc wraps the whole value in double quotes.
   mkFormat =
-    { sig, title, word, kao }:
-    lib.concatStringsSep "\\n" [
-      # entablature — rust crown ❧ (U+2767, the herald's clef stand-in), ink wordmark
-      "<span font='Noto Serif Bold 15' foreground='${sig}'>❧</span><span font='Noto Serif 10' weight='600' foreground='${notifFg}'> H E R A L D</span>"
-      # Tuscan frieze — the plain double rule IS the order's whole ornament
-      "<span font='${mono} 8' foreground='${sig}B3'>════════════════════════════════════</span>"
-      # tier 1: program title in the box-drawing frame label, open tassel right
-      "<span font='${mono} 8' foreground='${sig}F2'>┌─┤ %a ├──────────</span>"
-      # the cleave — the entablature/shaft boundary (greek-grammar.md §4)
-      "<span font='${mono} 8' foreground='${sig}8C'>────────────────────────────────────</span>"
-      # tier 2: the notification title, bold serif, full ink
-      "<span font='Noto Serif Bold 10.5' foreground='${title}'>%s</span>"
-      # tier 3: context — smaller, dimmer (0.85), indented; same voice, clearly second
-      "<span font='Noto Serif 9' foreground='${notifFg}D9'>  %b</span>"
-      # ledger — the urgency kaomoji in signature ink
-      "<span font='${mono} 8' foreground='${sig}E6'>${kao}</span>"
-      # closing frame — urgency word in the label, gold 𝄂 barline ends the stele
-      "<span font='${mono} 8' foreground='${notifFg}CC'>└─┤ ${word} ├</span><span font='${mono} 8' foreground='${sig}8C'>──────────── </span><span font='Noto Music 12' foreground='${accent}'>𝄂</span>"
-    ];
+    {
+      sig,
+      title,
+      word,
+      kao,
+      tag,
+      body ? true,
+      actions ? false,
+    }:
+    lib.concatStringsSep "\\n" (
+      [
+        # entablature — rust crown ❧ (U+2767, the herald's clef stand-in), the
+        # ink wordmark at its real letter-spacing, and the order tag pushed
+        # right by a measured space run (every operand on this line is static,
+        # so the alignment is exact).
+        (
+          "<span font='Noto Serif Bold 15' foreground='${sig}'>❧</span>"
+          + "<span font='Noto Serif 9.75' weight='600' letter_spacing='2304' foreground='${notifFg}'> HERALD</span>"
+          + "<span font='${mono} 7.5' foreground='${sig}8C'>${spaces (36 - lib.stringLength tag)}[ ${tag} ]</span>"
+        )
+        # Tuscan frieze — the plain double rule IS the order's whole ornament.
+        # One ═ glyph draws both hairlines (and so carries one alpha, where the
+        # card drew 0.70 over 0.35).
+        "<span font='${mono} 8.25' foreground='${sig}B3'>${frieze}</span>"
+        # tier 1: program name in the box-drawing frame label, open on the right
+        "<span font='${mono} 8.25' foreground='${sig}F2'>┌─┤ %a ├${tabTail}</span>"
+        # the cleave — the entablature/shaft boundary of the stele
+        "<span font='${mono} 8.25' foreground='${sig}8C'>${rule}</span>"
+        # tier 2: the notification title, bold serif, full ink
+        "<span font='Noto Serif Bold 10.5' foreground='${title}'>%s</span>"
+      ]
+      ++ lib.optional body (
+        # tier 3: context — smaller, dimmer (0.85), behind the signature
+        # hairline. The card's hairline spanned the whole block; one │ glyph
+        # can only tick the first line, and Pango has no hanging indent.
+        "<span font='${mono} 8.25' foreground='${sig}73'>│</span>"
+        + "<span font='Noto Sans 9' foreground='${notifFg}D9'> %b</span>"
+      )
+      ++ lib.optionals actions [
+        # the card's action row: the FIRST action is the one laurel standout
+        # (paletteHot), the rest accent; ink labels on a 16%-alpha fill
+        # (bgalpha in Pango's integer units — 10485/65535 — so no literal '%'
+        # ever reaches dunst's placeholder pass), and [ ] brackets stand in for
+        # the 1px border dunst cannot draw. Radius 0, like everything here.
+        (
+          "<span font='${mono} 8.25' foreground='${hot}'>[</span>"
+          + "<span font='${mono} 8.25' foreground='${notifFg}' background='${hot}' bgalpha='10485'> approve </span>"
+          + "<span font='${mono} 8.25' foreground='${hot}'>]</span>"
+          + "<span font='${mono} 8.25'>    </span>"
+          + "<span font='${mono} 8.25' foreground='${accent}'>[</span>"
+          + "<span font='${mono} 8.25' foreground='${notifFg}' background='${accent}' bgalpha='10485'> deny </span>"
+          + "<span font='${mono} 8.25' foreground='${accent}'>]</span>"
+        )
+        # dunst can only route ONE named action to a mouse button, so the
+        # gesture map is taught on the card rather than guessed at.
+        "<span font='${mono} 7.5' foreground='${notifFg}99'>left-click approves  ·  middle-click denies</span>"
+      ]
+      ++ [
+        # the ledger rule, then the ledger line: urgency kaomoji in signature
+        # ink, and the gauge tally in gold (empty for any sender with no value)
+        "<span font='${mono} 8.25' foreground='${sig}4D'>${rule}</span>"
+        (
+          "<span font='${mono} 8.25' foreground='${sig}E6'>${kao}</span>"
+          + "<span font='${mono} 7.5' foreground='${accent}'>  %p</span>"
+        )
+        # closing frame — urgency word in the label, gold 𝄂 barline and the rust
+        # ┘ corner, spaced apart the way the card spaced them
+        (
+          "<span font='${mono} 8.25' foreground='${notifFg}CC'>└─┤ ${word} ├</span>"
+          + "<span font='${mono} 8.25' foreground='${sig}8C'>${dashes (35 - lib.stringLength word)} </span>"
+          + "<span font='Noto Music 12' foreground='${accent}'>𝄂</span>"
+          + "<span font='${mono} 8.25' foreground='${sig}F2'> ┘</span>"
+        )
+      ]
+    );
 
   # Shared per-urgency dress: opaque marble stele, ink text, gilded gauge.
   steleColors = {
@@ -141,13 +274,87 @@ let
     foreground = notifFg;
     highlight = accent; # progress-bar fill — gold, the one gauge ink
   };
+
+  # A stele rule: the shared dress, this urgency's whole treatment, and the
+  # `body = "^$"` filter on the terse variant.
+  mkStele =
+    {
+      urgency,
+      sig,
+      title,
+      word,
+      kao,
+      frame,
+      timeout,
+      body,
+      pauseLevel ? null,
+    }:
+    steleColors
+    // {
+      msg_urgency = urgency;
+      frame_color = frame;
+      inherit timeout;
+      format = mkFormat {
+        inherit
+          sig
+          title
+          word
+          kao
+          body
+          ;
+        tag = "notify";
+      };
+    }
+    // lib.optionalAttrs (!body) { body = "^$"; }
+    // lib.optionalAttrs (pauseLevel != null) { override_pause_level = pauseLevel; };
+
+  urgencies = [
+    {
+      urgency = "low";
+      sig = rust;
+      title = notifFg;
+      word = "low";
+      kao = "(´ω｀)"; # at ease, unhurried
+      frame = ink;
+      timeout = "5s"; # the card's house default when the sender leaves it to us
+      pauseLevel = null;
+    }
+    {
+      urgency = "normal";
+      sig = rust;
+      title = notifFg;
+      word = "normal"; # attentive, on the case
+      kao = "( ・ω・)ノ";
+      frame = ink;
+      timeout = "5s";
+      pauseLevel = null;
+    }
+    {
+      # critical: terracotta ink throughout, never times out, and loud enough
+      # to pierce quiet hours (see the DND note on default_pause_level).
+      urgency = "critical";
+      sig = notifUrgent;
+      title = notifUrgent;
+      word = "critical";
+      kao = "(ノ｀ｏ´)ノ"; # alarmed — a critical herald
+      frame = notifUrgent;
+      timeout = 0;
+      pauseLevel = 70;
+    }
+  ];
 in
 {
   options.aoide.dunst.enable =
     lib.mkEnableOption "dunst notification daemon (the herald's delivery backend)";
 
   config = lib.mkIf config.aoide.dunst.enable {
-    environment.systemPackages = [ pkgs.dunst ];
+    # libnotify rides along for `notify-send`: the stock client the freedesktop
+    # world (and aoide's own shellbridge mode-toggle path) reaches for. dunstify
+    # alone left it missing on the box.
+    environment.systemPackages = [
+      pkgs.dunst
+      pkgs.libnotify
+    ];
 
     # HM's module owns the whole daemon lifecycle: dunstrc generation from
     # `settings`, a Type=dbus unit holding BusName=org.freedesktop.Notifications
@@ -172,76 +379,112 @@ in
           padding = 10;
           horizontal_padding = 10;
           font = "Noto Serif 11";
+          # the card's 4px inter-row breath, as leading
+          line_height = 3;
+          word_wrap = true;
 
-          # markup in `format` is always parsed (dunst.5); `full` additionally
-          # honors spec markup senders put in the body — dunst is a rich
-          # renderer, unlike the retired v1 card, and may as well act like one.
-          markup = "full";
+          # Sender text is DATA: escaped and drawn literally, exactly as the
+          # retired card's `textFormat: Text.PlainText`. The format's own markup
+          # is parsed regardless of this setting — see the header for the
+          # measured reason `full` is not an option here.
+          markup = "no";
 
-          # ── icons: the center's re-admission, popup edition — the sender's
-          # provided icon, left of the stele text, 24–32px, 8px off the text
-          # (the center's icon-box metrics) ─────────────────────────────────
-          icon_position = "left";
+          # ── images: the icon slot, on top, so a raster plate never narrows
+          # the calligraphy. Square, and clamped so nothing outgrows the
+          # stele it sits on. ───────────────────────────────────────────────
+          icon_position = "top";
           min_icon_size = 24;
-          max_icon_size = 32;
+          max_icon_size = 96;
+          icon_corner_radius = 0;
           text_icon_padding = 8;
 
-          # ── ported behaviors ─────────────────────────────────────────────
-          # the honest clock: a lingering card (critical persists) gets a
-          # native age stamp after a minute — b0da918's no-stale-time rule
-          show_age_threshold = 60;
-          # fd4cb3a: the implicit "default" action is click-anywhere, never
-          # chrome — no (A) indicators; dunst's stock mouse map already
-          # matches the card (left dismiss, middle invoke)
+          # ── measured off, both for the same defect: dunst injects these
+          # OUTSIDE the format's markup, in the default font, where they tear
+          # the frames open (header has the detail). Stacking stays on; only
+          # its numeral goes. ──────────────────────────────────────────────
+          show_age_threshold = -1;
+          hide_duplicate_count = true;
+          stack_duplicates = true;
+          # the implicit "default" action is click-anywhere, never chrome — and
+          # dunst's indicator is more unstyled text outside the markup
           show_indicators = false;
+          # that synthetic card bypasses `format` and cannot be dressed
+          indicate_hidden = false;
+          # 4 steles ≈ 840px: what actually fits above the bar. The rest waits.
+          notification_limit = 4;
           # the exact window herald-center polls out of `dunstctl history`
           history_length = 20;
 
-          # ── the gilded gauge (progress notifications: volume/brightness) —
-          # gold fill (highlight, per-urgency below) in a 1px ink-framed
-          # trough, square, full text width ────────────────────────────────
+          # ── quiet hours ──────────────────────────────────────────────────
+          # `dunstctl set-paused true` (level 100) is total silence — nothing
+          # gets through. `dunstctl set-pause-level 60` is the useful middle:
+          # ordinary toasts hold, critical (70) and the permission summons (90)
+          # still land. Verified live.
+          default_pause_level = 0;
+
+          # ── the gilded gauge (volume/brightness OSDs) — gold fill in a 1px
+          # ink-framed trough, square, the full text width ─────────────────
+          progress_bar = true;
           progress_bar_height = 8;
           progress_bar_frame_width = 1;
+          progress_bar_corner_radius = 0;
+          progress_bar_min_width = 336;
           progress_bar_max_width = 336;
-        };
+          progress_bar_horizontal_alignment = "left";
 
-        # ── one rule per urgency — filter msg_urgency, carry the WHOLE
-        # treatment (the special urgency_* sections accept colors only, not
-        # `format`; these rules are the single per-urgency source) ──────────
-        herald-low = steleColors // {
-          msg_urgency = "low";
-          frame_color = ink;
-          timeout = "5s"; # house default when the sender leaves it to us
-          format = mkFormat {
-            sig = rust;
-            title = notifFg;
-            word = "low";
-            kao = "(´ω｀)"; # at ease, unhurried
-          };
+          # ── the mouse map ────────────────────────────────────────────────
+          # left: invoke the card's action, then close — which for an ordinary
+          # actionless toast is just the card's own click-anywhere-dismiss, and
+          # for a summons is APPROVE. middle: close this one — the summons reads
+          # that as DENY (see the herald-summons rule). right: clear the desk.
+          # dunst can route only one named action to a button, which is why
+          # deny rides the close path rather than a second action.
+          mouse_left_click = "do_action, close_current";
+          mouse_middle_click = "close_current";
+          mouse_right_click = "close_all";
+
+          # `body = "^$"` on the terse rules needs real regex, not globbing.
+          enable_posix_regex = true;
         };
-        herald-normal = steleColors // {
-          msg_urgency = "normal";
-          frame_color = ink;
-          timeout = "5s";
-          format = mkFormat {
-            sig = rust;
-            title = notifFg;
-            word = "normal";
-            kao = "( ・ω・)ノ"; # attentive, on the case
-          };
-        };
-        # critical: terracotta ink throughout, never times out — the summons
-        # persists until dismissed (the breathing pulse has no dunst analog;
-        # the standing terracotta frame is its still form)
-        herald-critical = steleColors // {
-          msg_urgency = "critical";
-          frame_color = notifUrgent;
+      }
+      // lib.listToAttrs (
+        lib.concatMap (u: [
+          {
+            name = "herald-${u.urgency}";
+            value = mkStele (u // { body = true; });
+          }
+          {
+            name = "herald-${u.urgency}-terse";
+            value = mkStele (u // { body = false; });
+          }
+        ]) urgencies
+      )
+      // {
+        # ── the SUMMONS — an agent asking permission is not a toast ────────
+        # Raised only by `aoide graph permit`, matched on its category so any
+        # other aoide notification stays an ordinary toast. It is critical
+        # urgency (never times out) but overrides the terracotta alarm dress
+        # with the house's gold: distinct from both an ordinary card (ink) and
+        # something going wrong (terracotta), and neutral — a green frame on a
+        # permission gate would lean on the answer. Sorts last on purpose, so
+        # it wins over herald-critical.
+        # The category string is a CONTRACT with the verb that raises it —
+        # `SUMMONS_CATEGORY` in pkgs/aoide/crates/conduct/src/graph/permit.rs.
+        # Rename either side alone and the summons silently degrades to a
+        # toast. That verb always sends a body (the ask, or at minimum the
+        # waiting session's name), which is why there is no -terse twin here.
+        herald-summons = steleColors // {
+          category = "x-aoide.permission";
+          frame_color = accent;
           timeout = 0;
+          override_pause_level = 90; # a summons pierces quiet hours
           format = mkFormat {
-            sig = notifUrgent;
-            title = notifUrgent;
-            word = "critical";
-            kao = "(ノ｀ｏ´)ノ"; # alarmed — a critical herald
+            sig = rust; # the herald's own signature, not the alarm's
+            title = notifFg;
+            word = "summons";
+            kao = "(ノ｀ｏ´)ノ"; # the alarmed herald: someone is waiting on you
+            tag = "summons";
+            actions = true;
           };
         };
       };
