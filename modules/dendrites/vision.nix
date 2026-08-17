@@ -32,6 +32,23 @@
     environment.systemPackages = with pkgs; [
       grim # non-interactive capture: full screen or exact geometry
       slurp # region-select primitive (emits geometry on stdout)
+      # Pointer synthesis for `aoide screen point` (screen phase 2): real
+      # wl_pointer.motion/button/axis events via zwlr_virtual_pointer_manager_v1,
+      # never a cursor warp (hyprctl dispatch movecursor warps — no hover
+      # states fire, an agent could never verify one). The ONLY tool
+      # `screen/point.rs`'s `run_wlrctl_pointer` shells out to.
+      wlrctl
+      # OCR engine for `aoide screen ocr` (screen phase 3), eng-only
+      # trained data: `pkgs.tesseract` unwrapped pulls EVERY language's
+      # tessdata (nixpkgs' own `languages.all`, ~1GB unpacked, measured
+      # 2026-08-16); `enableLanguages` is the wrapper's own override point
+      # (pkgs/applications/graphics/tesseract/wrapper.nix, confirmed against
+      # this flake's pinned nixpkgs rev 279b4a8275f032c566576b3f181fa0f27197f588)
+      # for cutting that down to one language's data — the exact pattern
+      # nixpkgs itself already uses for its nixos-test-driver
+      # (`tesseract4.override { enableLanguages = [ "eng" ]; }`,
+      # pkgs/top-level/all-packages.nix). Measured eng-only closure: ~117MB.
+      (tesseract.override { enableLanguages = [ "eng" ]; })
     ];
   };
 }

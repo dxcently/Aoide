@@ -116,6 +116,13 @@ lib.mkIf config.aoide.enable {
         # Hyprland socket (standard Hyprland env; shellbridge reads it directly).
         # HYPRLAND_INSTANCE_SIGNATURE is set by the compositor at session start.
         "AOIDE_USER=${config.aoide.user}"
+        # Nix-declared baseline song — same env-baked-into-the-service
+        # precedent as quickshell's AOIDE_WALLPAPER (modules/facets/quickshell/
+        # default.nix). Read by dispatch_rice_mode_toggle's declarative-
+        # direction re-exec (shellbridge.rs) so the bar's rice-mode toggle
+        # re-pins to the shipped baseline instead of whatever song happens to
+        # be staged.
+        "AOIDE_DEFAULT_SONG=${config.aoide.song}"
       ];
 
       # Create the socket directory under XDG_RUNTIME_DIR.
@@ -223,7 +230,10 @@ lib.mkIf config.aoide.enable {
   #       "workspace":     "int?    — Hyprland workspace id of the window",
   #       "pid":           "int?    — lifecycle-owning process pid",
   #       "conductable":   "bool?   — spawned under `aoide conduct`",
-  #       "socket":        "string? — per-session injection socket path"
+  #       "socket":        "string? — per-session injection socket path",
+  #       "contextTokens": "int?    — context-window fill of the last request (input+cache tokens); absent until the first assistant turn",
+  #       "contextCeiling": "int?   — context-window ceiling for the current model; re-derived on model change",
+  #       "needsSudo":     "bool?   — true while a conducted shell is blocked at a sudo prompt; cleared (not set false) once the prompt clears"
   #     }
   #   ]
   # }
