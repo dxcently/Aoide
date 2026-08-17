@@ -671,6 +671,12 @@ Item {
                         // slim ledger lines.
                         readonly property bool agentRow: gadget.isAgentRec(modelData)
                         readonly property string activityText: modelData.activity || ""
+                        // whether the ground line shows a REAL directory (the
+                        // daemon's cwd read) or the title fallback (a window
+                        // title — which for a yazi/editor tty is the COMMAND,
+                        // not a path). Real dirs WRAP; fallback text stays a
+                        // single middle-elided line, never wrapped.
+                        readonly property bool cwdReal: (modelData.cwd || "") !== ""
                         // a BARE tty's main label: the foreground command / file
                         // being edited (`nvim notes.md`, `cargo test`), or the
                         // shell process itself when idle (`bash`). An agent row's
@@ -757,8 +763,8 @@ Item {
 
                             // niche centred on the note's optical seat (the -11
                             // lift below), half-height 13 → a 26px opening.
-                            readonly property real nicheTop: height / 2 - 24
-                            readonly property real nicheBot: height / 2 + 2
+                            readonly property real nicheTop: height / 2 - 37
+                            readonly property real nicheBot: height / 2 - 11
                             // an agent terminal's flute stands a shade
                             // brighter — the scan-cue for which columns
                             // hold agents (the traced crown still wins).
@@ -780,7 +786,7 @@ Item {
                                 anchors.centerIn: parent
                                 // Noto Music seats the notehead low in a tall em
                                 // box; lift it to sit between the two text lines.
-                                anchors.verticalCenterOffset: -11
+                                anchors.verticalCenterOffset: -24
                                 text: gadget.glyphFor(modelData.state)
                                 font.family: gadget.faceMusic; font.pixelSize: 25
                                 color: row.accent
@@ -1055,11 +1061,14 @@ Item {
                             // overflows — a yazi session's live dir is a long,
                             // space-free path, and one middle-elided line would
                             // make it unreadable; a long breadcrumb grows the row.
-                            // A magic/scratch row's tag is its INDICATOR: the
-                            // ledger note-glyph + name (𝅘𝅥𝅱 magic / 𝄋 scratch) in
-                            // the bar's own note hue — a terminal parked in the
-                            // magic workspace says so outright instead of hiding
-                            // behind a negative id.
+                            // The TITLE fallback (a bare tty whose window title is
+                            // the running command) NEVER wraps — it stays a single
+                            // middle-elided line, so a yazi command shown there
+                            // can't balloon the card. A magic/scratch row's tag is
+                            // its INDICATOR: the ledger note-glyph + name
+                            // (𝅘𝅥𝅱 magic / 𝄋 scratch) in the bar's own note hue — a
+                            // terminal parked in the magic workspace says so
+                            // outright instead of hiding behind a negative id.
                             Item {
                                 width: parent.width
                                 height: cwdText.implicitHeight
@@ -1082,12 +1091,16 @@ Item {
                                     anchors.rightMargin: wsTag.visible ? 8 : 0
                                     // paths carry no spaces, so WordWrap would never
                                     // break them — WrapAnywhere splits onto new lines
-                                    // (yazi's live dir must stay readable); the elide
-                                    // then only trims the FINAL line's tail. The
-                                    // ground Item's height binds to implicitHeight,
-                                    // so a long breadcrumb grows the row.
-                                    wrapMode: Text.WrapAnywhere
-                                    elide: Text.ElideRight
+                                    // (a yazi session's live dir must stay readable);
+                                    // the elide then only trims the FINAL line's tail.
+                                    // The wrap applies ONLY to a real cwd: the title
+                                    // fallback (a window title — often the yazi
+                                    // COMMAND for a bare tty) stays a single
+                                    // middle-elided line, never wrapped. The ground
+                                    // Item's height binds to implicitHeight, so a
+                                    // long breadcrumb grows the row.
+                                    wrapMode: row.cwdReal ? Text.WrapAnywhere : Text.NoWrap
+                                    elide: row.cwdReal ? Text.ElideRight : Text.ElideMiddle
                                     text: gadget.shortCwd(modelData.cwd) || (modelData.title || "")
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: gadget.withA(gadget.sig, 0.95)

@@ -62,6 +62,15 @@ ShellRoot {
                     return s + "]";
                 }
                 function ctxColor(pct, accent) { return pct >= 85 ? paletteUrgent : accent; }
+                // per-workspace note hue — mirrors LiveryState.noteColor (the
+                // accentSpread cycle; the kimi magic/scratch wsTag work calls
+                // this). Same fallback shape: out-of-range ids → paletteAccent.
+                function noteColor(id) {
+                    var n = parseInt(id, 10);
+                    if (isNaN(n) || n <= 0) return paletteAccent;
+                    var spread = [violet, holoBlue, wireCyan, paletteHot, paletteAccent];
+                    return spread[(n - 1) % spread.length];
+                }
             }
 
             // stub socket sender
