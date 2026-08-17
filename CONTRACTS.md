@@ -1357,6 +1357,43 @@ retired from `modules/dendrites/vision.nix` — `screen::point`'s verbs
 all cross the pointer-synthesis boundary through `screen::synth`
 in-process, and nothing else speaks for the pointer.
 
+**Confirmed at the protocol level** the same day, with a `wl_pointer`
+event logger (`wev`) as the receiving client — the events an app actually
+gets, not pixels inferred from them:
+
+| Verb | What the client received |
+|---|---|
+| `move` | `enter` + a `motion` stream; surface coords matched the requested screen point exactly |
+| `click` | `button` press (state 1) then release (state 0) on the right code, same millisecond |
+| `click --count 2` | two press/release pairs 60 ms apart — inside any double-click threshold, with distinct `time`s |
+| `scroll <n>` | n separate frames, each `axis` ±15.0 + `axis_value120` ±120 — 120 is `wl_pointer`'s own "one full detent", so one notch is exactly one detent |
+| `scroll 0 <n>` | `axis: 1 (horizontal)`, same ±120 per notch — horizontal delivery is real; terminals just ignore the axis |
+| `drag` | press, 21 interpolated `motion` events, release 240 ms later — a real drag, not a teleport |
+| `hover` | `enter`/`motion` into the app, which repaints its hover state (see the `appeared[]` caveat below) |
+
+**The stuck-button recovery is live-verified** (2026-08-17), by
+manufacturing the hazard: a throwaway client pressed a button and called
+`_exit(0)` still holding it. Findings, all measured:
+
+- **Hyprland does NOT auto-release on client death.** The press stays
+  down after the pressing client is gone — the invariant guards a real
+  failure, not a theoretical one.
+- **A held button holds an implicit grab.** While stuck, every pointer
+  event goes to the grab-owning surface no matter where the cursor is
+  (motion arrived at surface coords `-900,280`, far outside that
+  window), and no other app receives anything. That grab surviving its
+  own presser is what makes a stuck button so damaging.
+- **One full `aoide screen point click <button>` clears it.** Only the
+  RELEASE reaches the client: the compositor tracks button state per
+  code, so the recovery click's press is absorbed as a duplicate and the
+  release matches the held state and ends the grab.
+- **The button code must match.** Clicking a different button while one
+  is stuck changes nothing (measured: middle-click left a stuck left
+  button stuck) — recover the exact code that is held.
+- **A force-cleared grab sends no `leave`.** The client is simply cut
+  off, still believing the pointer is inside it. Compositor behavior,
+  noted so nobody reads a missing `leave` as a failed recovery.
+
 ---
 
 ## Versioning

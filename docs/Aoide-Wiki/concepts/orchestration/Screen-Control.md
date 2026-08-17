@@ -58,7 +58,7 @@ full reason-code vocabulary this page's examples draw from).
 | `screen point save` | Persists the current cursor position to state. Read-only. |
 | `screen point restore` | Warps the cursor back to the last `save`d position (a warp is fine here — returning to a known spot, not synthesizing a gesture). |
 | `screen point drag <x1> <y1> <x2> <y2>` | Move to the start (verified), then ONE atomic press→interpolated-motion→release sequence to the end, then verify the release landed. |
-| `screen point hover <x> <y>` | Move to target, hold `--settle-ms`, report what layer surfaces/windows appeared, disappeared, or got retitled while parked there. |
+| `screen point hover <x> <y>` | Move to target, hold `--settle-ms`, report what layer surfaces/windows appeared, disappeared, or got retitled while parked there. Its inventory delta sees toplevels and layer surfaces ONLY — pair it with `screen diff` to catch a hover that repaints in place (see below). |
 | `screen point text <text>` | Click a word/phrase an earlier `screen ocr` already located, by NAME — no picked-by-eye pixel. `--dry-run` resolves the match with no motion at all. |
 | `screen diff <before-capture>` | Re-shoot the identical rect after an optional settle delay, pixel-diff the two images, report a changed bounding box plus an inventory delta. |
 | `screen send <capture>` | Hand a capture (path + comment + OCR text) to a conducted session or a registered A2A agent. |
@@ -151,14 +151,38 @@ result object is written into the AFTER-capture's own sidecar `diff` field.
   every held code and flushes with `WouldBlock` retry before it ever tears
   down the connection. A flush that ultimately fails surfaces as
   `pointer-failed`. See `CONTRACTS.md` §8.
+- **Recovering a stuck button.** Run one full `aoide screen point click
+  <button>` for the code that is held. It must be the SAME code — clicking
+  a different button leaves the stuck one stuck — and the client sees only
+  the release, because the compositor tracks button state per code and
+  absorbs the recovery press as a duplicate. Measured against Hyprland,
+  which does NOT auto-release when the pressing client dies: until the
+  matching release arrives, the dead presser's implicit grab swallows every
+  pointer event system-wide, so no other app can be clicked. The release
+  does not have to come from the process that pressed: in the measured run
+  the presser was already dead and a separate client's release cleared it,
+  which is why the recovery verb works at all. A human clicking the same
+  physical button should clear it by the same per-code path — inferred from
+  that, not separately measured.
+- **What `hover` can and cannot see.** Its inventory delta is built from
+  `hyprctl clients` + `hyprctl layers`, which list toplevels and layer
+  surfaces. Tooltips, context menus and this rice's own bar popouts are
+  `xdg_popup`s and appear in NEITHER, so `appeared[]` stays empty even when
+  the hover visibly did something. Measured: hovering a GTK toolbar button
+  repainted a 34x34 prelight rect that `screen diff` caught while
+  `appeared[]` reported nothing. Verify hover effects with `screen diff`;
+  read `appeared[]` only for genuinely new windows or layer surfaces.
 - **Live-proof status.** Every `screen point` verb that moves the pointer or
   presses a button is unit-tested up to the pointer-synthesis boundary AND
-  live-verified against Hyprland (2026-08-17): `move` lands pixel-exact, a
-  synthesized click focuses the window under it, double-click delivers as
-  one gesture, one scroll notch is one physical wheel detent, `drag`'s
-  atomic press-move-release paints a text selection, and hover enter/motion
-  reaches layer surfaces. The post-run pointer sweep left no selection
-  trail — every release was delivered.
+  live-verified against Hyprland (2026-08-17), pixel-side and then again at
+  the protocol level with a `wl_pointer` event logger as the receiving
+  client: `move` lands pixel-exact (the client's own surface coords agreed),
+  click sends press-then-release on the right code, `--count 2` sends two
+  pairs 60 ms apart, each scroll notch sends one frame carrying
+  `axis_value120: ±120` — `wl_pointer`'s own "one full detent" — on the
+  vertical AND horizontal axis, and `drag` sends press, 21 interpolated
+  motion events, then release. Nothing is left held: the post-run pointer
+  sweep painted no selection trail.
 
 ## Related
 

@@ -310,13 +310,19 @@ resetting to zero.
   process abandons a physically-held button with nothing left watching
   it. **If a button ever does read as stuck** (the flush-failure gap
   above, or a bug in this invariant): one full `aoide screen point click
-  <button>` — a complete press-then-release pair — should clear it, since
-  the compositor is expected to track button state by code, not by which
-  process pressed it. That recovery path specifically is expected, not
-  live-verified: the 2026-08-17 live run (move/click/double-click/
-  scroll/drag/hover all delivered against Hyprland) never produced a
-  stuck button to recover from — its post-run pointer sweep painted no
-  selection trail, confirming every release was delivered.
+  <button>` — a complete press-then-release pair — clears it. That is
+  MEASURED, not assumed (2026-08-17): a throwaway client pressed a button
+  and `_exit(0)`ed still holding it, and Hyprland kept the button down —
+  it does NOT auto-release on client death, and the dead presser's
+  implicit grab kept swallowing every pointer event system-wide (motion
+  delivered at surface coords `-900,280`, no other app receiving
+  anything) until one full click of that code cleared it. Two details
+  that matter when you are the one recovering: **the code must match** —
+  clicking a different button leaves the stuck one stuck — and only the
+  RELEASE reaches the client, because the compositor tracks state per
+  code and absorbs the recovery press as a duplicate. A force-cleared
+  grab also sends the client no `leave`, so a missing `leave` is not a
+  failed recovery.
 - **A `--cursor` shot pollutes a `screen diff`.** `screen diff` pixel-diffs
   two capture buffers; a composited cursor drawn INTO the image (`shot
   --cursor`) means a pure pointer move with no other visual change registers
