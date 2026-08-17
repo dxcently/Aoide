@@ -217,7 +217,7 @@ atomic writes only); missing stage files read as empty registries.
 | Command                            | Does |
 | ---------------------------------- | ---- |
 | `aoide graph view [--focus <id>]`  | Unicode tree render (`◆` projects, `●` sessions, `▶` marks the focused node); `--json` emits the graph document |
-| `aoide graph project add <name> <path>` | register/update an anchor root in `song/stage/projects.json` (idempotent) |
+| `aoide graph project add <name> [<path>]` | register/update an anchor root in `song/stage/projects.json` (idempotent); `path` defaults to the cwd, so a session started there anchors to it |
 | `aoide graph project remove <name>`| unregister (ok + no-op if absent) |
 | `aoide graph project list`         | list the registered anchor roots |
 | `aoide graph link <child> <parent>`| set the spawned-by edge on the child session (rejects self-links and cycles; a not-yet-registered parent is recorded with a warning) |
