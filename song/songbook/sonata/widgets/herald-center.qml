@@ -250,9 +250,12 @@ Item {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     text: "❧"
-                    font.family: root.faceSerif
+                    // Pinned, not faceSerif: Noto Serif has no U+2767, so this
+                    // rode font fallback. Libertine's open fleuron (regular —
+                    // bold smears it) is the crown khoa picked from a rendered
+                    // lineup (2026-08-17); the popup's dunstrc pins the same.
+                    font.family: "Linux Libertine O"
                     font.pixelSize: 20
-                    font.bold: true
                     color: root.signature
                 }
                 Text {
@@ -389,7 +392,7 @@ Item {
                                     anchors.centerIn: parent
                                     visible: !iconImg.visible
                                     text: "❧"
-                                    font.family: root.faceSerif
+                                    font.family: "Linux Libertine O"   // pinned with the entablature crown
                                     font.pixelSize: 16
                                     color: root.withA(entry.ink, 0.8)
                                 }

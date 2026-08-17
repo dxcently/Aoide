@@ -207,8 +207,14 @@ let
         # ink wordmark at its real letter-spacing, and the order tag pushed
         # right by a measured space run (every operand on this line is static,
         # so the alignment is exact).
+        # The crown's face is PINNED: Noto Serif carries no U+2767, so an
+        # unpinned span let Pango fall back to FreeSerif and fake-bold it into
+        # a blob. Libertine's open fleuron is the crown khoa picked from a
+        # rendered lineup of every U+2767 face on the box (2026-08-17), it is
+        # the rig's declared primary serif (fonts.nix), and its regular weight
+        # IS the picked form — no bold.
         (
-          "<span font='Noto Serif Bold 15' foreground='${sig}'>❧</span>"
+          "<span font='Linux Libertine O 15' foreground='${sig}'>❧</span>"
           + "<span font='Noto Serif 9.75' weight='600' letter_spacing='2304' foreground='${notifFg}'> HERALD</span>"
           + "<span font='${mono} 7.5' foreground='${sig}8C'>${spaces (36 - lib.stringLength tag)}[ ${tag} ]</span>"
         )
