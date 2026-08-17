@@ -55,7 +55,7 @@
 # proven kana vocabulary) and urgency word, the gold 𝄂 + rust ┘ closing the
 # stele with the same small gap the card left between them, terracotta ink
 # throughout while critical, critical never timing out, 2px ink frame, radius 0
-# everywhere, 10px padding, 360px width, and `gap_size` 8 giving every card its
+# everywhere, 360px width, and `gap_size` 8 giving every card its
 # own frame — the retired 8px popup stack exactly. Also 1:1, and the reason the
 # card survives hostile senders: BOTH text tiers are plain text
 # (`markup = no`), which is the card's own `textFormat: Text.PlainText`. An
@@ -176,10 +176,15 @@ let
   # 0.95=F2 0.90=E6 0.85=D9 0.80=CC 0.70=B3 0.60=99 0.55=8C 0.45=73 0.30=4D
   mono = "JetBrainsMono Nerd Font";
 
-  # Calligraphy measured against the 336px text band (360 width - 2*10 padding
-  # - 2*2 frame) at mono 8.25pt: 48 cells land flush on the right margin.
-  rule = lib.concatStrings (lib.genList (_: "─") 48);
-  frieze = lib.concatStrings (lib.genList (_: "═") 48);
+  # Calligraphy measured against the 344px text band (360 width - 2*6 padding
+  # - 2*2 frame) at mono 8.25pt, where one cell is exactly 7px: 49 cells land
+  # flush on the right margin. Every fixed run below is measured to THAT band —
+  # the gutter and the run lengths are one number, so a padding change without
+  # this re-measure leaves every rule stopping short of the frame (khoa asked
+  # for the tighter gutter, 2026-08-17; 10px read as an empty margin with no
+  # inset keyline to fill it, which is the one card element dunst cannot draw).
+  rule = lib.concatStrings (lib.genList (_: "─") 49);
+  frieze = lib.concatStrings (lib.genList (_: "═") 49);
   # `%a` is variable, so the top frame's tail is fixed: 28 cells keeps a
   # 17-char sender name on one line.
   tabTail = lib.concatStrings (lib.genList (_: "─") 28);
@@ -222,7 +227,7 @@ let
         (
           "<span font='Linux Libertine O 15' foreground='${sig}'>❧</span>"
           + "<span font='Noto Serif 9.75' weight='600' letter_spacing='2304' foreground='${notifFg}'> HERALD</span>"
-          + "<span font='${mono} 7.5' foreground='${sig}8C'>${spaces (36 - lib.stringLength tag)}[ ${tag} ]</span>"
+          + "<span font='${mono} 7.5' foreground='${sig}8C'>${spaces (37 - lib.stringLength tag)}[ ${tag} ]</span>"
         )
         # Tuscan frieze — the plain double rule IS the order's whole ornament.
         # One ═ glyph draws both hairlines (and so carries one alpha, where the
@@ -269,12 +274,12 @@ let
             + "<span font='${mono} 8.25' foreground='${notifFg}99'>middle · </span>"
             + "<span font='${mono} 8.25' foreground='${accent}'>deny</span>"
             + "<span font='${mono} 8.25' foreground='${notifFg}CC'> ├</span>"
-            + "<span font='${mono} 8.25' foreground='${sig}8C'>─── </span>"
+            + "<span font='${mono} 8.25' foreground='${sig}8C'>──── </span>"
             + "<span font='Noto Music 12' foreground='${accent}'>𝄂</span>"
             + "<span font='${mono} 8.25' foreground='${sig}F2'> ┘</span>"
           else
             "<span font='${mono} 8.25' foreground='${notifFg}CC'>└─┤ ${word} ├</span>"
-            + "<span font='${mono} 8.25' foreground='${sig}8C'>${dashes (35 - lib.stringLength word)} </span>"
+            + "<span font='${mono} 8.25' foreground='${sig}8C'>${dashes (36 - lib.stringLength word)} </span>"
             + "<span font='Noto Music 12' foreground='${accent}'>𝄂</span>"
             + "<span font='${mono} 8.25' foreground='${sig}F2'> ┘</span>"
         )
@@ -389,8 +394,12 @@ in
           frame_width = 2;
           frame_color = ink;
           gap_size = 8;
-          padding = 10;
-          horizontal_padding = 10;
+          # 6, not the card's 10: the QML card spent its gutter on a 1px inset
+          # signature keyline 4px off the border, and dunst draws no second
+          # border — so the same 10px here is just empty marble. Tightened on
+          # khoa's ask; the calligraphy band above is measured to THIS number.
+          padding = 6;
+          horizontal_padding = 6;
           font = "Noto Serif 11";
           # the card's 4px inter-row breath, as leading
           line_height = 3;
