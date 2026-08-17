@@ -163,7 +163,10 @@ lib.mkIf config.aoide.enable {
     # The reaper gathers live window addresses via `hyprctl clients -j`; like
     # shellbridge it needs hyprctl on PATH (else it silently falls back to
     # pid-only liveness and never sees the window-gone signal). Unit-level option.
-    path = [ pkgs.hyprland ];
+    # libnotify rides along for `notify-send`: a sweep that actually changed the
+    # roster raises a toast through dunst (a quiet sweep stays silent), and a
+    # unit PATH without it would degrade that to a journal line nobody reads.
+    path = [ pkgs.hyprland pkgs.libnotify ];
 
     serviceConfig = {
       Type = "oneshot";
@@ -226,6 +229,7 @@ lib.mkIf config.aoide.enable {
   #       "title":         "string? — session name (custom-title / graph-send)",
   #       "activity":      "string? — current tool/command being run",
   #       "say":           "string? — agent's latest words (transcript tail)",
+  #       "tool":          "string? — agent's latest tool call, 'Name: subject' (transcript tail); unlike `activity` it outlives the turn",
   #       "model":         "string? — active Claude model id, e.g. 'claude-sonnet-5'",
   #       "workspace":     "int?    — Hyprland workspace id of the window",
   #       "pid":           "int?    — lifecycle-owning process pid",

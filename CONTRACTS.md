@@ -428,6 +428,17 @@ switch re-caps the meter automatically. Same lifecycle as `contextTokens`:
 absent for shells and until the session has produced an assistant turn, and a
 legacy record without it falls back to a conservative 200k client-side.
 
+**Additive in v0:** a session record MAY also carry an optional `tool` (string)
+— the agent's latest TOOL CALL as a one-line label (`"Bash: cargo test"`): the
+tool's name plus the first argument naming its subject, read off the same
+transcript tail as `say` at the same refresh points (hook boundaries, and every
+`aoide graph reap` sweep). Distinct from `activity`, which stays what it was:
+the tool running RIGHT NOW, hook-set and cleared when the turn settles. `tool`
+survives that settle, so a resting session still shows what it last reached
+for; a reader wanting "is something running" reads `activity`/`state`, not
+this. Same lifecycle as `say`: absent for shells and until the session's first
+tool call, readers tolerate both forms and round-trip fields they do not know.
+
 ### `song/stage/projects.json` — **v0**
 
 Registered project anchor roots for the graph. Written by

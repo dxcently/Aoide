@@ -67,8 +67,8 @@
 // below: exists ONLY while working — the self-writing loop; at rest it
 // vanishes; the ϟN tally and the "ϟ phase" placeholder keep ϟ) — plus a
 // "ϟ phase"
-// placeholder in the thinking box when there is no activity
-// or say, and a ϟN count in the stylobate tally. Phases outside the §2
+// placeholder in the thinking box when the agent has not
+// spoken, and a ϟN count in the stylobate tally. Phases outside the §2
 // vocabulary fall back to the "·" lamp and the puzzled still — tolerant,
 // never a crash. Stale hook ids (absent from the roster) are ignored: they
 // produce no rows and never inflate the ϟN tally.
@@ -569,7 +569,7 @@ Item {
                         id: condTag
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
-                        text: condMouse.containsMouse ? "[ click to recheck ]"
+                        text: condMouse.containsMouse ? "[ reap ]"
                                                       : "[ conductor ]"
                         font.family: temple.faceMono; font.pixelSize: 11
                         color: temple.withA(temple.signature, 0.95)
@@ -1129,16 +1129,31 @@ Item {
                          % faceFrames.length]
             : faces.still(cardLiveState, true)
 
-        // the thinking lane — live voice, else say, else the hook placeholder
-        readonly property string liveText: (s && s.activity) ? ("" + s.activity) : ""
+        // the thinking lane — the agent's WORDS, else the hook placeholder. The
+        // tool used to share this box (a "▸ tool" first line above the say);
+        // it has its own row now (§3.5), so a long say gets all four lines back
+        // and a tool popping in no longer pushes the words out of view.
         readonly property string sayText: (s && s.say)
             ? ("" + s.say).replace(/\s+/g, " ") : ""
-        readonly property bool thinkLive: liveText !== ""
-        readonly property string thinkText: thinkLive
-            ? ((liveText.indexOf("▸") === 0 ? "" : "▸ ") + liveText
-               + (sayText !== "" ? "\n" + sayText : ""))
-            : (sayText !== "" ? sayText
-               : (card.hooked ? ("ϟ " + card.cardLiveState) : "…"))
+        readonly property bool thinkSaid: sayText !== ""
+        readonly property string thinkText: thinkSaid
+            ? sayText
+            : (card.hooked ? ("ϟ " + card.cardLiveState) : "…")
+
+        // the tool lane — what the agent last reached for. TWO sources, and
+        // they disagree on purpose: `activity` is hook-set the instant a tool
+        // starts but is only ever its bare NAME ("Bash"), and is cleared when
+        // the turn settles; `tool` is read off the transcript by the reaper, so
+        // it carries the subject ("Bash: cargo test") and SURVIVES the settle,
+        // but can sit one reap (~12s) behind. Same call → take the rich label;
+        // a live tool the transcript hasn't caught up to → take the live name.
+        readonly property string liveTool: (s && s.activity) ? ("" + s.activity) : ""
+        readonly property string lastTool: (s && s.tool) ? ("" + s.tool) : ""
+        readonly property string toolText: {
+            if (liveTool === "") return lastTool
+            var a = liveTool.toLowerCase(), b = lastTool.toLowerCase()
+            return (b === a || b.indexOf(a + ":") === 0) ? lastTool : liveTool
+        }
 
         // ── the identity trinity — graph number · session id · agent name ────
         // noBadge reads s.no verbatim, stamped in rebuild(): a top-level int
@@ -1571,9 +1586,43 @@ Item {
                 }
             }
 
-            // ── 4 · VOICE: thinking — the live voice, full width. A FIXED
-            // box (4 lines main / 2 sub): text wraps, the LAST line elides,
-            // tool text popping in never shifts the card. sudo — the one
+            // ── 3.5 · HAND: the tool — one line, ▸ caret, its own slot ───────
+            // Between the directive it was given and the words it answers with:
+            // what the agent is REACHING FOR. Always rendered ("—" holds the
+            // slot, same idiom as the directive above), so a tool arriving or
+            // clearing never resizes the plaque and never displaces the say.
+            // Dimmed at rest — then it reads as the last thing done, not a
+            // claim that something is running.
+            Item {
+                width: parent.width
+                height: 14
+
+                Text {
+                    id: toolCaret
+                    anchors.left: parent.left; anchors.leftMargin: 21
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "▸"
+                    font.family: temple.faceMono; font.pixelSize: 10
+                    color: temple.withA(temple.signature,
+                                        card.toolText !== ""
+                                        ? (card.cardWorking ? 0.85 : 0.45) : 0.25)
+                }
+                Text {
+                    anchors.left: toolCaret.right; anchors.leftMargin: 6
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: card.toolText !== "" ? card.toolText : "—"
+                    elide: Text.ElideRight
+                    font.family: temple.faceMono; font.pixelSize: 10
+                    color: temple.withA(temple.notes.paletteFg,
+                                        card.toolText !== ""
+                                        ? (card.cardWorking ? 0.7 : 0.45) : 0.28)
+                }
+            }
+
+            // ── 4 · VOICE: thinking — the agent's own words, full width. A
+            // FIXED box (4 lines main / 2 sub): text wraps, the LAST line
+            // elides, a longer say never shifts the card. sudo — the one
             // urgent flag — pins to the lane's own top-right corner when held.
             Item {
                 width: parent.width
@@ -1601,17 +1650,15 @@ Item {
                     lineHeight: 10
                     lineHeightMode: Text.FixedHeight
                     text: card.thinkText
-                    font.family: (card.thinkLive || card.hooked)
+                    // the ϟ placeholder is machine text (mono, upright); the
+                    // agent's own words stay serif italic — the voice.
+                    font.family: (!card.thinkSaid && card.hooked)
                                  ? temple.faceMono : temple.faceSerif
-                    font.italic: !card.thinkLive && !card.hooked
+                    font.italic: card.thinkSaid || !card.hooked
                     font.pixelSize: 10
-                    color: card.thinkLive
-                           ? temple.withA(temple.notes.paletteFg, 0.65)
-                           : (card.hooked
-                              ? temple.withA(temple.notes.paletteFg, 0.55)
-                              : (card.sayText !== ""
-                                 ? temple.withA(temple.notes.paletteFg, 0.55)
-                                 : temple.withA(temple.notes.paletteFg, 0.25)))
+                    color: (card.thinkSaid || card.hooked)
+                           ? temple.withA(temple.notes.paletteFg, 0.55)
+                           : temple.withA(temple.notes.paletteFg, 0.25)
                 }
             }
 

@@ -219,6 +219,18 @@ Item {
         return (a.length > 0 && a !== "shell") ? "agent" : "shell";
     }
     function isAgentRec(rec) { return recKind(rec) !== "shell"; }
+    // Rank within ONE window — a LIVE agent beats a `done` agent, which beats
+    // the shell hosting them. A window can hold several agent records at once:
+    // each /clear, compact or resume mints a new sessionId and leaves the
+    // outgoing one `done` until the reaper drops it (see
+    // `superseded_done_siblings` in reap.rs). Ranking only agent-over-shell —
+    // as this did — made the winner whichever agent the file listed FIRST, so
+    // the row rendered a dead session's state, cwd and say while a live agent
+    // worked in that very terminal. Ties keep the first seen.
+    function recRank(rec) {
+        if (!isAgentRec(rec)) return 0;                        // the hosting shell
+        return normState(rec.state) === "done" ? 1 : 2;        // tombstone < live agent
+    }
     function terminalRows() {
         // group the windowed records by address; the agent record wins a shared window.
         var byAddr = ({});
@@ -229,7 +241,7 @@ Item {
             if (!addr) continue;               // no window yet → not on the tty roster
             var cur = byAddr[addr];
             if (cur === undefined) { byAddr[addr] = s; order.push(addr); }
-            else if (!isAgentRec(cur) && isAgentRec(s)) { byAddr[addr] = s; }  // agent wins
+            else if (recRank(s) > recRank(cur)) { byAddr[addr] = s; }  // live agent > tombstone > shell
         }
         var out = [];
         for (var k = 0; k < order.length; k++) {
@@ -245,6 +257,9 @@ Item {
                 windowAddress: rec.windowAddress || "",
                 title:         rec.title || "",       // session name (tracked) / window title (synthetic)
                 activity:      rec.activity || "",    // the current command/tool
+                tool:          rec.tool || "",         // the reaper's transcript-read tool
+                                                        // label — richer than activity but
+                                                        // can lag one reap; see toolText below
                 say:           rec.say || "",         // the agent's latest words
                 model:          rec.model || "",         // the running Claude model, if known
                 contextTokens:  rec.contextTokens || 0,  // context-window fill of the last request
@@ -271,7 +286,7 @@ Item {
             var r = list[i];
             parts.push([r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
                         r.workspace, r.windowAddress, r.title,
-                        r.activity, r.say, r.model, r.contextTokens,
+                        r.activity, r.tool, r.say, r.model, r.contextTokens,
                         r.contextCeiling, r.needsSudo].join(""));
         }
         return parts.join("");
@@ -481,7 +496,7 @@ Item {
                     id: ttyTag
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    text: ttyMouse.containsMouse ? "[ click to recheck ]" : "[ tty ]"
+                    text: ttyMouse.containsMouse ? "[ reap ]" : "[ tty ]"
                     font.family: gadget.faceMono; font.pixelSize: 11
                     color: gadget.withA(notes.paletteAccent, 0.95)   // same weight as "[ conductor ]"
                     MouseArea {
@@ -722,6 +737,23 @@ Item {
                         // slim ledger lines.
                         readonly property bool agentRow: gadget.isAgentRec(modelData)
                         readonly property string activityText: modelData.activity || ""
+                        // the tool lane — what the agent last reached for. TWO
+                        // sources, and they disagree on purpose: `activity` is
+                        // hook-set the instant a tool starts but is only ever
+                        // its bare NAME ("Bash"), and is cleared when the turn
+                        // settles; `tool` is read off the transcript by the
+                        // reaper, so it carries the subject ("Bash: cargo
+                        // test") and SURVIVES the settle, but can sit one reap
+                        // (~12s) behind. Same call → take the rich label; a
+                        // live tool the transcript hasn't caught up to → take
+                        // the live name. (mirrors ConductorGadget's SessionCard)
+                        readonly property string liveTool: modelData.activity || ""
+                        readonly property string lastTool: modelData.tool || ""
+                        readonly property string toolText: {
+                            if (liveTool === "") return lastTool
+                            var a = liveTool.toLowerCase(), b = lastTool.toLowerCase()
+                            return (b === a || b.indexOf(a + ":") === 0) ? lastTool : liveTool
+                        }
                         // whether the ground line shows a REAL directory (the
                         // daemon's cwd read) or the title fallback (a window
                         // title — which for a yazi/editor tty is the COMMAND,
@@ -983,12 +1015,12 @@ Item {
                                     wrapMode: Text.Wrap
                                     maximumLineCount: 3
                                     elide: Text.ElideRight
-                                    text: row.activityText.length > 0
-                                          ? row.activityText
+                                    text: row.toolText.length > 0
+                                          ? row.toolText
                                           : (modelData.agent || "agent")
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: gadget.withA(notes.paletteFg,
-                                                        row.activityText.length > 0 ? 0.85 : 0.45)
+                                                        row.toolText.length > 0 ? 0.85 : 0.45)
                                 }
                                 Text {                     // the MODEL — a fixed right cell
                                                             // on the prompt line, baseline-
