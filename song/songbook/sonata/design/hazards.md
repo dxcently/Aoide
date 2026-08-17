@@ -312,8 +312,11 @@ resetting to zero.
   above, or a bug in this invariant): one full `aoide screen point click
   <button>` — a complete press-then-release pair — should clear it, since
   the compositor is expected to track button state by code, not by which
-  process pressed it — expected, not yet live-verified; this workstream
-  has zero live runs against a real compositor to date.
+  process pressed it. That recovery path specifically is expected, not
+  live-verified: the 2026-08-17 live run (move/click/double-click/
+  scroll/drag/hover all delivered against Hyprland) never produced a
+  stuck button to recover from — its post-run pointer sweep painted no
+  selection trail, confirming every release was delivered.
 - **A `--cursor` shot pollutes a `screen diff`.** `screen diff` pixel-diffs
   two capture buffers; a composited cursor drawn INTO the image (`shot
   --cursor`) means a pure pointer move with no other visual change registers

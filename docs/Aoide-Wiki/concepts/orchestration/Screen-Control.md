@@ -152,10 +152,13 @@ result object is written into the AFTER-capture's own sidecar `diff` field.
   down the connection. A flush that ultimately fails surfaces as
   `pointer-failed`. See `CONTRACTS.md` §8.
 - **Live-proof status.** Every `screen point` verb that moves the pointer or
-  presses a button is unit-tested up to (never across) the pointer-synthesis
-  boundary — it has not yet been run live against a real compositor. Live
-  verification is user-gated and pending; nothing about the CLI surface or
-  this page's mappings depends on it landing.
+  presses a button is unit-tested up to the pointer-synthesis boundary AND
+  live-verified against Hyprland (2026-08-17): `move` lands pixel-exact, a
+  synthesized click focuses the window under it, double-click delivers as
+  one gesture, one scroll notch is one physical wheel detent, `drag`'s
+  atomic press-move-release paints a text selection, and hover enter/motion
+  reaches layer surfaces. The post-run pointer sweep left no selection
+  trail — every release was delivered.
 
 ## Related
 

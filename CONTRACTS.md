@@ -1343,12 +1343,19 @@ call, success or failure alike, `synthesize()` issues a release for every
 held code and flushes with `WouldBlock` retry; a flush that ultimately
 fails surfaces as `pointer-failed`.
 
-**Not yet live-proven.** Live verification against a real compositor is
-user-gated and pending (deliberately not done this workstream). The
-`wlrctl` package remains installed (`modules/dendrites/vision.nix`) as a
-fallback until that verification lands, even though nothing in `screen/`
-shells out to it any more — `screen::point`'s verbs all cross the
-pointer-synthesis boundary through `screen::synth` in-process today.
+**Live-proven** against Hyprland (2026-08-17): `create_virtual_pointer`
+accepted with `seat = None`; `point move` lands pixel-exact (readback
+matched request); a synthesized click focuses the window under it;
+double-click delivers as one gesture; one scroll notch is one physical
+wheel detent (3 notches moved kitty exactly 15 lines at its
+default×5 multiplier — `WHEEL_VALUE = 15.0` is settled); drag's atomic
+press-move-release paints a text selection; hover enter/motion reaches
+layer surfaces (bar cell repainted its hover state under the pointer);
+a post-run pointer sweep left no selection trail, so every release was
+delivered. With that proof landed, the `wlrctl` fallback package is
+retired from `modules/dendrites/vision.nix` — `screen::point`'s verbs
+all cross the pointer-synthesis boundary through `screen::synth`
+in-process, and nothing else speaks for the pointer.
 
 ---
 
