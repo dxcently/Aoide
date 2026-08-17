@@ -183,7 +183,7 @@ pkgs.testers.runNixOSTest {
     # ── 2. aoide on PATH ────────────────────────────────────────────────────
     machine.succeed("which aoide")
 
-    # `aoide schema --json` must parse and report exactly 60 commands.
+    # `aoide schema --json` must parse and report exactly 70 commands.
     # This is a deliberate drift tripwire: adding or removing a command must
     # consciously update this count (it caught 8 commands that had landed
     # unrecorded — graph wrap/reap/send, conduct, conductor, and the graph session
@@ -208,7 +208,16 @@ pkgs.testers.runNixOSTest {
     # (no-internal-aliases rule) — landed at 54; bumped by 5 for the new
     # `peer add|list|remove|pull|status` group (cross-device peer federation,
     # CONTRACTS.md §7) — reached 59; bumped by 1 for the new `shell reload`
-    # command (Quickshell IPC hot-reload trigger) — now 60.
+    # command (Quickshell IPC hot-reload trigger) — reached 60; bumped by 2
+    # for the new `screen info`/`screen shot` group (Phase 1 of the `screen`
+    # verb family, docs/architecture/PACKAGE-LAYOUT.md) — reached 62; bumped
+    # by 6 for the new `screen point move|click|scroll|idle|save|restore`
+    # group (Phase 2 of the `screen` verb family — pointer synthesis via
+    # wlrctl, ported from tools/pointer.sh) — reached 68; bumped by 1 for the
+    # new `screen ocr` command (Phase 3 — tesseract text extraction) — reached
+    # 69; bumped by 1 for the new `screen send` command (Phase 5 — hand a
+    # capture to a conducted session or a registered A2A agent, routed
+    # through the existing `graph send`/`a2a agent send` gates) — now 70.
     schema_raw = machine.succeed("aoide schema --json")
     schema_doc = json.loads(schema_raw)
     # schema --json emits a JSON Outcome envelope:
@@ -220,8 +229,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 60, (
-        f"expected 60 commands, got {cmd_count}.  "
+    assert cmd_count == 70, (
+        f"expected 70 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 
