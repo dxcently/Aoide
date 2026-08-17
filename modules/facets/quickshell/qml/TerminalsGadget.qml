@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 
 // ── THE TERMINALS ────────────────────────────────────────────────────────────
@@ -37,7 +38,11 @@ import Quickshell.Io
 //               byline and a fixed SCREEN-PANE inset — a prompt line carrying
 //               the live tool plus a three-line transcript preview. Both
 //               silhouettes are constant-height per kind (reserved lanes), so
-//               streaming data never reflows the roster.
+//               streaming data never reflows the roster. The ONE exception is
+//               the ground line's cwd: it WRAPS onto new lines when the path
+//               overflows (a yazi session's live dir is long and space-free —
+//               a single elided line would hide which dir it is on), so a
+//               long breadcrumb grows its row past the floor.
 // The one laurel-`paletteHot` crown (the traced session) stays a pantheon-wide
 // signal, identical across temples. The music state colours stay shared too —
 // a "working" note reads the same in every house; only the architecture differs.
@@ -83,6 +88,21 @@ Item {
     function withA(cstr, a) {                      // alpha on a role string
         var c = Qt.darker(cstr, 1.0);
         return Qt.rgba(c.r, c.g, c.b, a);
+    }
+
+    // ── Special-workspace resolution ─────────────────────────────────────────
+    // Hyprland names special workspaces ("magic", "scratch") and gives them
+    // NEGATIVE ids — the stage only carries the numeric id, so a magic
+    // terminal would read as a bare negative number (or no tag at all).
+    // Resolve the name from the live workspace list; "" for regular ids and
+    // for specials the list hasn't surfaced yet (tag then stays hidden, the
+    // same graceful silence as a not-yet-tracked workspace).
+    function workspaceName(id) {
+        if (id === undefined || id === null) return ""
+        var vs = (Hyprland.workspaces && Hyprland.workspaces.values) ? Hyprland.workspaces.values : []
+        for (var i = 0; i < vs.length; i++)
+            if (vs[i] && vs[i].id === id) return ("" + (vs[i].name || "")).toLowerCase()
+        return ""
     }
 
     // ── CANONICAL STATE (from the rewritten daemon) ─────────────────────────────
@@ -167,10 +187,11 @@ Item {
     function shortCwd(p) {
         if (!p) return "";
         p = p.replace(/^\/home\/[^/]+/, "~");
-        if (p === "~") return "~";
-        var parts = p.split("/").filter(function (x) { return x.length; });
-        if (parts.length <= 4) return p;
-        return "…/" + parts.slice(-4).join("/");
+        // The FULL breadcrumb, home-collapsed only — no last-N truncation:
+        // the ground line WRAPS on overflow, so the head (which dir yazi is
+        // on) stays readable; "…/tail" would hide exactly the part that
+        // answers that.
+        return p;
     }
     // ── The windowed roster: filter + de-dupe the stage records ──────────────────
     // One row per real terminal window (de-duped by window address). A record with
@@ -327,10 +348,13 @@ Item {
         id: naos
         anchors.fill: parent
         radius: 0
-        // translucent GLASS body — the compositor blur + hyprglass frost THROUGH
-        // it (like the launcher). Alpha lives on the FILL colour, not node opacity,
-        // so the hard plum border + inset keyline below stay crisp at full alpha.
-        color: gadget.withA(notes.paletteBg, 0.72)
+        // OPAQUE + DEFINED body, matching the pantheon contract this file's own
+        // header documents (hard border, inset keyline, cast shadow; no pale
+        // washout). Was translucent glass (withA(paletteBg, 0.72)) letting
+        // whatever sits behind the dock bleed through — every sibling gadget
+        // (ConductorGadget, UsageGadget, MetersGadget, PowerVitalsGadget) fills
+        // solid; Terminals was the one outlier.
+        color: notes.paletteBg
         border.color: notes.paletteFg
         border.width: 2
 
@@ -392,13 +416,24 @@ Item {
                 width: parent.width
                 height: 26
 
+                Rectangle {                           // deeper marble band
+                    anchors.fill: parent
+                    color: gadget.withA(notes.paletteFg, 0.05)
+                }
                 Row {
-                    anchors.centerIn: parent
+                    // khoa, live, pointed at it directly: this was the only
+                    // header in the family centring its clef+name group —
+                    // every sibling left-anchors instead (MetersGadget.qml's
+                    // clef: plain anchors.left: parent.left). centerIn did
+                    // both axes; splitting it out keeps the vertical part.
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
                     spacing: 8
                     Text {
                         id: clef
                         anchors.verticalCenter: parent.verticalCenter
-                        anchors.verticalCenterOffset: -3
+                        anchors.verticalCenterOffset: 1   // was -3, hand-guessed and wrong; still rode
+                                                           // high post horizontal-fix, nudged from a look
                         text: "𝄢"; font.family: gadget.faceMusic; font.pixelSize: 30
                         color: gadget.sig
                     }
@@ -616,6 +651,9 @@ Item {
                         // header): a bare tty settles at the 52 floor; an agent
                         // row adds the fixed screen pane — taller, but just as
                         // constant. Live data streaming in never moves either.
+                        // The one exception: a cwd long enough to wrap (yazi's
+                        // live dir) grows its row past the floor — the dir must
+                        // stay readable, that is the point of the ground line.
                         height: Math.max(52, body.implicitHeight + 16)
 
                         // an emph row must have a real sessionId — plain untracked
@@ -648,9 +686,21 @@ Item {
                         readonly property string sayFlat: ("" + (modelData.say || "")).replace(/\s+/g, " ")
                         // the live Hyprland workspace this row sits on — a plain
                         // arabic number tag (NOT a note-glyph); -1 = none yet.
+                        // Specials carry NEGATIVE ids; the name is resolved from
+                        // the live workspace list so magic/scratch rows wear the
+                        // bar's ledger marks (magic → 𝅘𝅥𝅱, scratch → 𝄋) instead
+                        // of a bare negative number.
                         readonly property int wsId: (modelData.workspace !== undefined
                                                      && modelData.workspace !== null)
                                                         ? modelData.workspace : -1
+                        readonly property string wsName: gadget.workspaceName(row.wsId)
+                        readonly property bool isMagic:   row.wsName.indexOf("magic") !== -1
+                        readonly property bool isScratch: row.wsName.indexOf("scratch") !== -1
+                        readonly property bool wsSpecial: row.isMagic || row.isScratch
+                        // the same hue the bar's ledger note wears for this
+                        // workspace (noteColor is safe for id <= 0) — the tag
+                        // and the bar's note always read in the same colour.
+                        readonly property color wsTagColor: gadget.notes.noteColor(row.wsId)
                         // blocked on a `sudo` password prompt — distinct from
                         // ordinary `awaiting` ("an agent permission answer"):
                         // this reads as "it's YOUR terminal password".
@@ -1001,25 +1051,43 @@ Item {
                             // the GROUND line — WHERE the terminal lives: the cwd
                             // (falls back to the window title for a cwd-less tty)
                             // with the Hyprland workspace tag holding the right
-                            // corner, so "where" reads as one line on every row.
+                            // corner. The dir WRAPS onto new lines when it
+                            // overflows — a yazi session's live dir is a long,
+                            // space-free path, and one middle-elided line would
+                            // make it unreadable; a long breadcrumb grows the row.
+                            // A magic/scratch row's tag is its INDICATOR: the
+                            // ledger note-glyph + name (𝅘𝅥𝅱 magic / 𝄋 scratch) in
+                            // the bar's own note hue — a terminal parked in the
+                            // magic workspace says so outright instead of hiding
+                            // behind a negative id.
                             Item {
                                 width: parent.width
                                 height: cwdText.implicitHeight
-                                Text {                     // the Hyprland workspace — plain number tag
-                                    id: wsTag
+                                Text {                     // the workspace tag — plain "wsN", or
+                                    id: wsTag              // the ledger mark + name for specials
                                     anchors.right: parent.right
                                     anchors.baseline: cwdText.baseline
-                                    visible: row.wsId >= 0
-                                    text: "ws" + row.wsId
+                                    visible: row.wsId >= 0 || row.wsSpecial
+                                    text: row.isMagic ? "𝅘𝅥𝅱 magic"
+                                        : (row.isScratch ? "𝄋 scratch"
+                                                         : ("ws" + row.wsId))
                                     font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: gadget.withA(gadget.sig, 0.85)
+                                    font.bold: row.wsSpecial   // the bar bolds its note glyphs too
+                                    color: gadget.withA(row.wsTagColor, row.wsSpecial ? 0.95 : 0.85)
                                 }
                                 Text {
                                     id: cwdText
                                     anchors.left: parent.left
                                     anchors.right: wsTag.visible ? wsTag.left : parent.right
                                     anchors.rightMargin: wsTag.visible ? 8 : 0
-                                    elide: Text.ElideMiddle
+                                    // paths carry no spaces, so WordWrap would never
+                                    // break them — WrapAnywhere splits onto new lines
+                                    // (yazi's live dir must stay readable); the elide
+                                    // then only trims the FINAL line's tail. The
+                                    // ground Item's height binds to implicitHeight,
+                                    // so a long breadcrumb grows the row.
+                                    wrapMode: Text.WrapAnywhere
+                                    elide: Text.ElideRight
                                     text: gadget.shortCwd(modelData.cwd) || (modelData.title || "")
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: gadget.withA(gadget.sig, 0.95)
