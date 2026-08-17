@@ -39,8 +39,10 @@
 // column is flush — Conductor 360×520, Usage 360×content, Terminals 360×520,
 // Meters 360×268, Power 360×268, all sharing a single left edge (the compact two
 // no longer centred/inset). The body is capped at ≤92% of the screen and scrolls
-// past it, with a slim gold scrollbar in the inner gutter and a "▽ more" hint that
-// fades at the end — a visible affordance that there is more below the fold.
+// past it, with a slim gold scrollbar in the inner gutter (ScrollRail — drag the
+// thumb, or press the track to jump) and a "▽ more" hint that fades at the end —
+// a visible affordance that there is more below the fold. The fore-edge takes the
+// wheel too, so the peeking page-block doubles as a scroll rail.
 // Conductor/Terminals declare `bridge` + `shared` and get them; Meters/Power
 // declare only `notes` (passing an undeclared property is an error), so they get
 // only `notes`.
@@ -73,7 +75,11 @@ PanelWindow {
     property bool shown: false
     property bool hotEdge: false
     property bool overPanel: false
+    // held true while the body scrollbar is being dragged (set by bodyRail) —
+    // a drag that wanders off the board must not let the codex slide shut.
+    property bool railDrag: false
     readonly property bool dockOpen: root.shown || root.hotEdge || root.overPanel
+                                     || root.railDrag
     property real reveal: 0
     Behavior on reveal { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
@@ -338,18 +344,27 @@ PanelWindow {
                 }
 
                 // ── FORE-EDGE: the stack of page-edge striations on the OUTER,
-                // screen-facing edge — this is the sliver that peeks at rest. Many
-                // thin, slightly-varied horizontal rules = the edges of stacked
-                // leaves; an occasional gilt leaf + a ribbon bookmark. ────────────
+                // screen-facing edge — this is the sliver that peeks at rest. The
+                // leaves run VERTICALLY, one thin rule per page edge down the full
+                // height, over a barrel-shaded ground (dark at the board, a crest
+                // highlight, dark again at the outer lip) — the block of paper seen
+                // end-on, so the codex reads as SOLID and popping out of the edge.
+                // An occasional gilt leaf + a ribbon bookmark. ────────────────────
                 Item {
                     id: foreEdge
                     anchors.right: parent.right
                     anchors.top: parent.top; anchors.bottom: parent.bottom
                     width: root.striationW
 
-                    Rectangle {                   // the cut-page ground
+                    Rectangle {                   // the cut-page ground, barrel-shaded
                         anchors.fill: parent
-                        color: root.withA(root.notes.paletteFg, 0.05)
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0.00; color: root.withA(root.notes.paletteFg, 0.17) }
+                            GradientStop { position: 0.34; color: root.withA(root.notes.paletteFg, 0.03) }
+                            GradientStop { position: 0.80; color: root.withA(root.notes.paletteFg, 0.08) }
+                            GradientStop { position: 1.00; color: root.withA(root.notes.paletteFg, 0.22) }
+                        }
                     }
                     Rectangle {                   // the board edge — a hard plum rule
                         anchors.left: parent.left
@@ -358,21 +373,30 @@ PanelWindow {
                         color: root.withA(root.notes.paletteFg, 0.45)
                     }
 
-                    // the leaves — one thin rule per ~3px, flush to the outer edge,
-                    // widths + shading varied so the fore-edge reads as real paper.
+                    // the leaves — one thin VERTICAL rule per ~2px across the band,
+                    // heights + shading varied so the cut edge reads as real paper
+                    // rather than a ruled grid.
                     Repeater {
-                        model: Math.max(12, Math.floor(foreEdge.height / 3))
+                        model: Math.max(6, Math.floor((root.striationW - 2) / 2))
                         Rectangle {
-                            y: index * 3
-                            anchors.right: parent.right
-                            anchors.rightMargin: 1
-                            width: root.striationW - 2 - ((index * 7) % 4)
-                            height: (index % 11 === 0) ? 2 : 1
-                            color: (index % 14 === 0)
-                                   ? root.withA(root.notes.paletteAccent, 0.32)   // a gilt leaf
+                            x: 1 + index * 2
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.topMargin: (index % 5 === 0) ? 0 : 2 + ((index * 7) % 5)
+                            anchors.bottomMargin: (index % 4 === 0) ? 0 : 2 + ((index * 13) % 6)
+                            width: (index % 6 === 0) ? 2 : 1
+                            color: (index % 7 === 3)
+                                   ? root.withA(root.notes.paletteAccent, 0.30)   // a gilt leaf
                                    : root.withA(root.notes.paletteFg,
                                                 0.09 + ((index * 11) % 6) * 0.018)
                         }
+                    }
+
+                    Rectangle {                   // the outer lip — the last leaf, lit
+                        anchors.right: parent.right
+                        anchors.top: parent.top; anchors.bottom: parent.bottom
+                        width: 1
+                        color: root.withA(root.notes.paletteFg, 0.38)
                     }
 
                     Rectangle {                   // a ribbon bookmark spilling from the top
@@ -383,11 +407,26 @@ PanelWindow {
                     }
 
                     // A click on the visible sliver opens (and acknowledges) — the
-                    // third open path alongside the keybind and the hot-edge.
+                    // third open path alongside the keybind and the hot-edge. The
+                    // wheel over the fore-edge scrolls the BODY, so the peeking
+                    // page-block doubles as the dock's thumb rail: hovering it
+                    // already slides the codex out, and the same gesture that got
+                    // you there keeps paging the stack.
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
                         onClicked: root.show()
+                        onWheel: (wheel) => {
+                            var d = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y
+                                                            : wheel.angleDelta.x
+                            var span = flick.contentHeight - flick.height
+                            if (span > 0) {
+                                flick.cancelFlick()
+                                flick.contentY = Math.max(0, Math.min(span,
+                                                          flick.contentY - d * 0.6))
+                            }
+                            wheel.accepted = true
+                        }
                     }
                 }
 
@@ -558,25 +597,23 @@ PanelWindow {
                     }
                 }
 
-                // ── SCROLLBAR: a slim gold thumb in the inner gutter ─────────
-                Item {
-                    id: scrollbar
-                    visible: flick.contentHeight > flick.height + 1
+                // ── SCROLLBAR: a slim gold thumb in the inner gutter, draggable
+                // (ScrollRail). grabPad 4 makes the lane exactly the 12px
+                // gutter — flush to the flick's edge, never over it, so a click
+                // meant for a gadget's right edge still reaches the gadget. ───
+                ScrollRail {
+                    id: bodyRail
+                    flick: flick
+                    railW: 4
+                    minThumb: 28
+                    grabPad: 4
+                    trackColor: root.withA(root.notes.paletteFg, 0.12)
+                    thumbColor: root.withA(root.notes.paletteAccent, 0.8)
                     anchors.top: flick.top; anchors.bottom: flick.bottom
                     anchors.left: flick.right; anchors.leftMargin: 4
-                    width: 4
-
-                    Rectangle {                   // the track
-                        anchors.fill: parent
-                        color: root.withA(root.notes.paletteFg, 0.12)
-                    }
-                    Rectangle {                   // the thumb
-                        width: parent.width
-                        x: 0
-                        y: flick.visibleArea.yPosition * scrollbar.height
-                        height: Math.max(28, flick.visibleArea.heightRatio * scrollbar.height)
-                        color: root.withA(root.notes.paletteAccent, 0.8)
-                    }
+                    // a drag holds the codex out even if the pointer wanders off
+                    // the board (the HoverHandler drops, the grab does not)
+                    onDraggingChanged: root.railDrag = dragging
                 }
 
                 // ── "more below" hint — fades when the stack bottoms out ─────

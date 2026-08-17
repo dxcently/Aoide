@@ -1198,20 +1198,19 @@ Item {
                     }
                 }
 
-                // slim aegean scrollbar in the roster gutter — functional
-                // scrolling either way; this is just the visible thumb.
-                Item {
-                    visible: flick.contentHeight > flick.height + 1
+                // slim aegean scrollbar in the roster gutter — draggable
+                // (ScrollRail). This rail sits OVER the flick, so the grab lane
+                // is held to 3px a side: it reaches only into the playbill's own
+                // 6px gutter and leaves the row plaques clickable.
+                ScrollRail {
+                    flick: flick
+                    railW: 3
+                    minThumb: 20
+                    grabPad: 3
+                    trackColor: gadget.withA(notes.paletteFg, 0.10)
+                    thumbColor: gadget.withA(gadget.sig, 0.75)
                     anchors.top: flick.top; anchors.bottom: flick.bottom
                     anchors.right: parent.right; anchors.rightMargin: 3
-                    width: 3
-                    Rectangle { anchors.fill: parent; color: gadget.withA(notes.paletteFg, 0.10) }
-                    Rectangle {
-                        width: parent.width
-                        y: flick.visibleArea.yPosition * parent.height
-                        height: Math.max(20, flick.visibleArea.heightRatio * parent.height)
-                        color: gadget.withA(gadget.sig, 0.75)
-                    }
                 }
             }
         }

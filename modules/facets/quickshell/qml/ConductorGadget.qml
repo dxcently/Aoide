@@ -952,19 +952,17 @@ Item {
             }
         }
 
-        // slim gold scrollbar in the body gutter
-        Item {
-            visible: flick.contentHeight > flick.height + 1
+        // slim gold scrollbar in the body gutter — draggable (ScrollRail); the
+        // rail sits in the stele's 13px margin, clear of the playbill, so its
+        // grab lane never covers a session card.
+        ScrollRail {
+            flick: flick
+            railW: 3
+            minThumb: 20
+            trackColor: temple.withA(notes.paletteFg, 0.10)
+            thumbColor: temple.withA(temple.signature, 0.75)
             anchors.top: flick.top; anchors.bottom: flick.bottom
             anchors.right: parent.right; anchors.rightMargin: 9
-            width: 3
-            Rectangle { anchors.fill: parent; color: temple.withA(notes.paletteFg, 0.10) }
-            Rectangle {
-                width: parent.width
-                y: flick.visibleArea.yPosition * parent.height
-                height: Math.max(20, flick.visibleArea.heightRatio * parent.height)
-                color: temple.withA(temple.signature, 0.75)
-            }
         }
 
         // ── STYLOBATE: └─┤ tally ├──── 𝄂 ┘ ───────────────────────────────────
