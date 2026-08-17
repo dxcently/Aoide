@@ -43,6 +43,12 @@ Item {
     required property var notes            // palette roles
     property string usagePath: "/home/khoa/Aoide/state/usage.json"
 
+    // Injected by AoidePanel (the dock). null on a bridge-less host — the
+    // manual-refresh click null-guards on it and silently no-ops, exactly like
+    // Meters/Power which declare no bridge at all. OUTBOUND-only (hazards §5):
+    // the only thing ever sent is the `refreshusage` verb, via refreshUsage().
+    property var bridge: null
+
     implicitWidth: 360   // fallback only; the dock stack sets width = root.gadgetW (360)
     // content-driven height: the frame hugs whatever the sections need, so the
     // degraded (live-stub) state is a short panel, not an empty box.
@@ -87,8 +93,71 @@ Item {
     // fresh data", as opposed to e.g. the 30s nowMs countdown timer below,
     // which fires on a clock regardless of whether the file changed at all.
     // clef (the ❋ spark, declared further down) listens here for its tick.
-    onUsageChanged: clef.tick()
+    onUsageChanged: {
+        clef.tick()                              // arrival heartbeat (fires once per poller write)
+        // A landed write satisfies a pending manual refresh: clear the cooldown
+        // early so the spark is clickable again the instant fresh data shows —
+        // "until the next onUsageChanged or refreshCooldownMs, whichever first".
+        if (gadget.refreshPending) {
+            gadget.refreshPending = false
+            refreshCooldown.stop()
+        }
+    }
     readonly property bool hasData: !!(usage && (usage.local || usage.live))
+
+    // ── MANUAL REFRESH — click the ❋ spark to demand a fresh `aoide usage` ────
+    // The spark is already the data heartbeat (it ticks on every poller write,
+    // above); clicking the heartbeat asks for a beat. requestRefresh sends the
+    // OUTBOUND-only `refreshusage` verb (bridge.refreshUsage → shellbridge →
+    // `aoide usage` → state/usage.json write → the FileView watch → onUsageChanged
+    // → clef.tick()), so SUCCESS feedback is the SAME arrival spin a timed poll
+    // draws — no second success animation. clef.acknowledge() covers only the gap
+    // between click and that write with a quiet press-dip, so the click never
+    // feels dead. refreshPending is a cooldown: nothing downstream dedupes the
+    // verb, so without it a mash would stack redundant ~15s `aoide usage` runs on
+    // the daemon — it swallows repeat clicks until the next real write
+    // (onUsageChanged) or refreshCooldownMs, whichever comes first.
+    readonly property int refreshCooldownMs: 10000
+    property bool refreshPending: false
+    function requestRefresh() {
+        if (gadget.refreshPending) return          // in cooldown → ignore the click entirely
+        clef.acknowledge()                          // acknowledge the press (fires even bridge-less)
+        if (!gadget.bridge) return                  // no bridge → nudge only, nothing to send (silent degrade)
+        gadget.refreshPending = true                // engage cooldown (a real request is going out)
+        refreshCooldown.restart()
+        gadget.bridge.refreshUsage()
+    }
+    // Fallback release: if NO write ever lands (daemon down, the verb unknown to
+    // an un-rebuilt daemon, or the fetch itself failing), clear the cooldown
+    // after refreshCooldownMs so the spark never stays stuck un-clickable.
+    Timer { id: refreshCooldown; interval: gadget.refreshCooldownMs; onTriggered: gadget.refreshPending = false }
+
+    // ── STALE-DATA note — fetchedAt wired to exactly this, nothing else ─────────
+    // fetchedAt is the WHOLE document's write stamp (local + live share one poll,
+    // one timestamp), so staleness is checked independent of liveOk — a poller
+    // that's gone quiet is stale whether or not its last live fetch happened to
+    // succeed. Threshold is 3x the poller's own cadence (aoide.usage.interval,
+    // default "300s" — modules/nucleus/options.nix): missing three ticks in a row
+    // is plainly "not refreshing", not a single missed beat. Mirrored as a literal
+    // constant rather than read live off the note file — flag: if that Nix default
+    // ever gets retuned, this drifts with it (a one-line note file field would fix
+    // that properly; not worth it for a single dim caveat).
+    readonly property real pollCadenceMs: 300 * 1000
+    readonly property real staleAfterMs: pollCadenceMs * 3
+    readonly property real fetchedAtMs: {
+        var v = (usage && usage.fetchedAt) ? Date.parse(usage.fetchedAt) : NaN
+        return isNaN(v) ? -1 : v
+    }
+    readonly property bool dataStale:
+        fetchedAtMs > 0 && (gadget.nowMs - fetchedAtMs) > staleAfterMs
+    // "aug 2" — lowercase, matching the gadget's own lowercase note voice
+    // (localNote / "live usage unavailable"); year only when it isn't this one.
+    function staleDateLabel(ms) {
+        var months = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"]
+        var d = new Date(ms), now = new Date(gadget.nowMs)
+        var s = months[d.getMonth()] + " " + d.getDate()
+        return d.getFullYear() === now.getFullYear() ? s : s + " " + d.getFullYear()
+    }
 
     // the live block, and its ok flag — every field below is guarded off THIS,
     // so the section is inert (a note only) until the day `ok` turns true.
@@ -237,11 +306,38 @@ Item {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.verticalCenterOffset: -2
-                    text: "❋"; font.family: gadget.faceSymbol; font.pixelSize: 26   // U+274B — the Claude mark
+                    // Static "❋" (U+274B) at rest; while a manual refresh is
+                    // in flight (gadget.refreshPending) it cycles the same
+                    // spinner glyphs/timing as Conductor's hookTag
+                    // (ConductorGadget.qml) — the fetch used to go silent for
+                    // up to refreshCooldownMs right after the click's press-
+                    // dip, which read as "the animation isn't there".
+                    // Declarative ternary, not an imperative onTriggered
+                    // write (hazards §3: a property both bound and written
+                    // breaks on first write).
+                    readonly property var spinGlyphs: ["⋅", "✻", "✽", "✶", "✳", "✢"]
+                    text: gadget.refreshPending ? (clef.spinGlyphs[spinFrame.frame] || "❋") : "❋"
+                    font.family: gadget.faceSymbol; font.pixelSize: 26   // U+274B — the Claude mark
                     color: gadget.signature
                     transformOrigin: Item.Center
                     rotation: 0
                     scale: 1.0
+
+                    Timer {
+                        id: spinFrame
+                        repeat: true
+                        triggeredOnStart: true
+                        running: gadget.refreshPending
+                        property int frame: -1
+                        readonly property int baseIntervalMs: 170
+                        readonly property int holdIntervalMs: 300
+                        interval: baseIntervalMs
+                        onTriggered: {
+                            frame = (frame + 1) % clef.spinGlyphs.length
+                            interval = (frame === 0 || frame === clef.spinGlyphs.length - 1)
+                                       ? holdIntervalMs : baseIntervalMs
+                        }
+                    }
 
                     // TICK — a quick full spin + scale pulse, fired once per
                     // aoide poller write (see gadget.onUsageChanged above):
@@ -252,10 +348,22 @@ Item {
                     // bound to clef.rotation) so a tick mid-spin extends
                     // smoothly instead of snapping back to 0.
                     function tick() {
+                        ackPulse.stop()   // data arrived: the tick owns `scale` now (hazards §3)
                         tickSpin.from = clef.rotation
                         tickSpin.to = clef.rotation + 360
                         tickSpin.restart()
                         tickPulse.restart()
+                    }
+                    // ACKNOWLEDGE — a quick, quiet press-dip fired on a manual
+                    // refresh CLICK (gadget.requestRefresh), bridging the gap
+                    // until the daemon's write lands and the louder tick() takes
+                    // over. Deliberately smaller and shorter than tick's upward
+                    // pulse: a dip to 0.9 and back, no spin — a click ack, not a
+                    // heartbeat. Stops tickPulse first so only ONE animation ever
+                    // writes `scale` at a time (hazards §3: two on one property fight).
+                    function acknowledge() {
+                        tickPulse.stop()
+                        ackPulse.restart()
                     }
                     RotationAnimation {
                         id: tickSpin
@@ -267,6 +375,11 @@ Item {
                         id: tickPulse
                         NumberAnimation { target: clef; property: "scale"; to: 1.12; duration: 260; easing.type: Easing.OutCubic }
                         NumberAnimation { target: clef; property: "scale"; to: 1.0;  duration: 340; easing.type: Easing.InCubic }
+                    }
+                    SequentialAnimation {
+                        id: ackPulse
+                        NumberAnimation { target: clef; property: "scale"; to: 0.9; duration: 110; easing.type: Easing.OutCubic }
+                        NumberAnimation { target: clef; property: "scale"; to: 1.0; duration: 200; easing.type: Easing.OutBack }
                     }
 
                     // idle — a slow, subtle opacity shimmer so the spark
@@ -293,6 +406,19 @@ Item {
                     text: "[ claude.ai ]"
                     font.family: gadget.faceMono; font.pixelSize: 11
                     color: gadget.withA(gadget.signature, 0.95)
+                }
+
+                // ── the ❋ spark IS the refresh button ────────────────────────
+                // No new chrome/glyph (nothing to font-verify, hazards §1): the
+                // heartbeat glyph doubles as the affordance, house grammar (the
+                // bar's clef→powermenu, mode-cell→toggleRiceMode click precedents).
+                // A ~32px hit area over the 26px glyph; the glyph itself is
+                // untouched. Last child of `head` so it's top-most exactly here.
+                MouseArea {
+                    anchors.centerIn: clef
+                    width: 32; height: 32
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: gadget.requestRefresh()
                 }
             }
 

@@ -97,6 +97,7 @@ Item {
     readonly property string faceSerif: "Noto Serif"
     readonly property string faceMono:  "JetBrainsMono Nerd Font"
     readonly property string faceMusic: "Noto Music"
+    readonly property string faceSymbol: "Noto Sans Symbols 2"   // hookTag's working-spinner
 
     function withA(cstr, a) {
         var c = Qt.darker(cstr, 1.0)
@@ -1257,9 +1258,58 @@ Item {
                     anchors.left: kindTag.visible ? kindTag.right : nameT.right
                     anchors.leftMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "ϟ"
-                    font.family: temple.faceMono; font.pixelSize: 9
+                    // WORKING + claude + main → cycles the same reverse-
+                    // engineered spinner glyphs/timing as UsageGadget's ❋
+                    // (hazards §1: already live-verified at this face,
+                    // "Noto Sans Symbols 2" — new size/context here, 9px
+                    // inline vs 26px standalone spark, so still live-checked
+                    // rather than assumed). NOT reusing UsageGadget's
+                    // glyphYOffset/wobble table — that was calibrated for a
+                    // spark centred against its own wordmark sibling, a
+                    // different enough context; this tag keeps its plain
+                    // verticalCenter, unchanged. Duplicated rather than
+                    // extracted into a shared component: the part that IS
+                    // shared (the glyph array + hold-first/last timing) is
+                    // small, the part that would NOT transfer (Y-correction)
+                    // is the bigger half of the source, and a new shared
+                    // component reopens hazards §3's same-directory dynamic-
+                    // resolution risk for two call sites. Flag: a third call
+                    // site would tip this toward extraction.
+                    readonly property bool spinning: card.cardWorking && !card.child
+                        && card.agentName.toLowerCase() === "claude"
+                    readonly property var spinGlyphs: ["⋅", "✻", "✽", "✶", "✳", "✢"]
+                    // guarded index, not cosmetic: triggeredOnStart's first
+                    // fire lands on the NEXT event-loop tick, not the same
+                    // one as `spinning` flipping true, so this binding does
+                    // see frame===-1 transiently — spinGlyphs[-1] is
+                    // undefined, which QML logs assigning to a QString.
+                    // UsageGadget's own spinner sidesteps this by writing
+                    // clef.text imperatively inside onTriggered instead of
+                    // binding it reactively; kept this one declarative and
+                    // just guarded the fallback, rather than also moving the
+                    // non-spinning "ϟ" branch off a ternary to match exactly
+                    // (hazards §3: a property both bound and written breaks
+                    // on first write, so that switch is not a small one).
+                    text: hookTag.spinning ? (hookTag.spinGlyphs[hookSpin.frame] || "ϟ") : "ϟ"
+                    font.family: hookTag.spinning ? temple.faceSymbol : temple.faceMono
+                    font.pixelSize: 9
                     color: temple.withA(temple.lampColor(card.cardLiveState), 0.95)
+
+                    Timer {
+                        id: hookSpin
+                        interval: baseIntervalMs
+                        repeat: true
+                        triggeredOnStart: true
+                        running: hookTag.spinning
+                        property int frame: -1
+                        readonly property int baseIntervalMs: 170
+                        readonly property int holdIntervalMs: 300
+                        onTriggered: {
+                            frame = (frame + 1) % hookTag.spinGlyphs.length
+                            interval = (frame === 0 || frame === hookTag.spinGlyphs.length - 1)
+                                       ? holdIntervalMs : baseIntervalMs
+                        }
+                    }
                 }
             }
 
