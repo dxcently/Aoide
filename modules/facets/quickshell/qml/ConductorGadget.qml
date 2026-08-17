@@ -4,8 +4,8 @@
 // over a hall of collapsible per-project FOLDERS, each folder a numbered
 // movement whose cards are main-agent plaques with their subagent plaques hung
 // beneath. Self-contained: this file owns its data read (stage/sessions.json +
-// projects.json + hooks.json, QS_STAGE honoured), its model build, and its
-// card UI. Nothing here is shared with TerminalsGadget — that temple keeps its
+// projects.json + hooks.json + herald.json, QS_STAGE honoured), its model
+// build, and its card UI. Nothing here is shared with TerminalsGadget — that temple keeps its
 // own, untouched pattern.
 //
 // ── The entablature (the pantheon) ─────────────────────────────────────────
@@ -169,7 +169,29 @@ Item {
         onLoaded: temple.parseHooks()
         onFileChanged: reload()
     }
-    Component.onCompleted: { parseSessions(); parseProjects(); parseHooks() }
+    // ── The SUMMONS channel — the herald ledger, read for permission cards ──
+    // stage/herald.json is the herald's own file (`aoide herald` / `graph
+    // permit` write it through the shellbridge). The roster reads ONLY its
+    // `kind: "summons"` records, and only to learn which session is blocked on
+    // a permission prompt the human can actually answer.
+    //
+    // Why the ledger and not `state === "awaiting"`: a summons exists only for
+    // a session `graph permit` found CONDUCTABLE — one with a control socket to
+    // type the answer into. An awaiting session with no summons has no channel,
+    // and drawing it a verdict button would be a live-looking control that
+    // cannot do anything (permit.rs, guard 1). The record also disappears the
+    // moment the verdict lands (the daemon dismisses the card after answering),
+    // so the chips take themselves down with no local latch.
+    FileView {
+        id: heraldFile
+        path: temple.stageDir + "/herald.json"
+        watchChanges: true
+        blockLoading: false
+        printErrors: false
+        onLoaded: temple.parseHerald()
+        onFileChanged: reload()
+    }
+    Component.onCompleted: { parseSessions(); parseProjects(); parseHooks(); parseHerald() }
 
     function parseSessions() {
         try {
@@ -208,6 +230,36 @@ Item {
             temple.hookById = {}
         }
         rebuild()
+    }
+
+    // Summons records keyed by the SESSION they block. A verdict is addressed
+    // to the session, so that is the key; the ledger's own record id
+    // (`permit-<session>`) is the daemon's business and never leaves it.
+    property var summonsById: ({})
+    function parseHerald() {
+        var byId = {}
+        try {
+            var t = heraldFile.text()
+            var o = (t && t.trim().length > 0) ? JSON.parse(t) : null
+            var arr = (o && o.notifications) ? o.notifications : []
+            for (var i = 0; i < arr.length; i++) {
+                var n = arr[i]
+                if (!n || n.kind !== "summons" || !n.sessionId) continue
+                byId[n.sessionId] = n     // newest wins; the ledger appends
+            }
+        } catch (e) { byId = {} }
+        temple.summonsById = byId
+    }
+
+    // The ONE outbound door for a verdict — the same wire line the herald's own
+    // chips send ({ cmd: "heraldverdict", id: <sessionId>, verdict: … }), so
+    // both surfaces answer through one daemon path, with one audit trail and
+    // one still-awaiting guard. The closed verdict vocabulary is enforced
+    // daemon-side; nothing else is ever sent from here.
+    function verdict(sessionId, word) {
+        if (!temple.bridge || !sessionId) return
+        temple.bridge.sendCommand({ cmd: "heraldverdict",
+                                    id: "" + sessionId, verdict: word })
     }
 
     // The hook lookup — the any-agent seam. hookPhase returns "" (falsy) for a
@@ -1050,6 +1102,12 @@ Item {
     // the card. sudo — the one urgent flag — pins to the lane's own top-
     // right corner when held.
     //
+    // 4½ · SUMMONS — a 20px lane that EXISTS only while a permission summons
+    // for this session stands in the herald ledger: the ask (the summons
+    // summary) left, approve / deny chips right. The one place the card's
+    // silhouette moves, and it moves for the one thing that is blocking a
+    // human. Same wire line and same daemon guards as the herald's card.
+    //
     // 5 · PULSE — ctx (this session's OWN context window, NUMBERS ONLY —
     // no percentage text, no bar glyph; ctxColor severity rides the colour
     // alone; mains only) and up (elapsed since start, both kinds) SHARE one
@@ -1084,6 +1142,12 @@ Item {
         // Laurel/firstWorkingId/workingCount stay ROSTER-based (stable tallies).
         readonly property string cardLiveState: hookPh !== "" ? hookPh : sState
         readonly property bool sudoHeld: !!(s && s.needsSudo)
+        // the standing permission summons for THIS session, or null — the whole
+        // condition for drawing the verdict chips (see the SUMMONS channel
+        // above; the ledger, not `awaiting`, is what proves it is answerable).
+        readonly property var summonsRec:
+            (s && s.sessionId) ? (temple.summonsById[s.sessionId] || null) : null
+        readonly property bool summoned: !!card.summonsRec
         readonly property bool cardWorking: cardLiveState === "working"
         readonly property bool cardAwaiting: cardLiveState === "awaiting" || sudoHeld
         readonly property bool cardResting: !cardWorking && !cardAwaiting
@@ -1207,6 +1271,12 @@ Item {
             anchors.right: parent.right; anchors.rightMargin: 6
             anchors.top: parent.top; anchors.topMargin: 5
             spacing: 3
+            // ABOVE the card-wide click area (cardMouse, declared after this
+            // Column). Only the verdict chips need it — plain Text/Rectangle
+            // never accept a mouse event, so hover, trace and click-to-focus
+            // still reach cardMouse everywhere else on the plaque. Without it
+            // the chips are buried and every press focuses the window instead.
+            z: 1
 
             // ── 1 · IDENTITY — lamp · name · tags ── wsN · #NN ────────────────
             // The inscription. The graph badge holds the catalogue corner,
@@ -1657,6 +1727,93 @@ Item {
                     color: (card.thinkSaid || card.hooked)
                            ? temple.withA(temple.notes.paletteFg, 0.55)
                            : temple.withA(temple.notes.paletteFg, 0.25)
+                }
+            }
+
+            // ── 4½ · SUMMONS — the permission gate, answered in place ────────
+            // Present ONLY while a summons for this session stands in the
+            // herald ledger; the card grows by this one 20px lane and shrinks
+            // back the moment a verdict lands. It sits directly under the
+            // thinking lane on purpose: that lane is what the agent is asking,
+            // this is the answer — ctx/up/cwd below stay ambient tallies.
+            //
+            // Same two chips, same wire line, same daemon guards as the
+            // herald's own card (herald.qml / herald-center.qml) — this is a
+            // SECOND door onto one mechanism, not a second mechanism. The
+            // label is the summons summary ("Bash · permission"), which is
+            // hook-payload DATA: PlainText, carried, never interpreted.
+            Item {
+                id: summonsLine
+                visible: card.summoned
+                width: parent.width
+                height: visible ? 20 : 0
+
+                Text {                           // what is being asked
+                    anchors.left: parent.left; anchors.leftMargin: 21
+                    anchors.right: approveChip.left; anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    // the lock is nf-fa-lock, written as an escape — the SAME
+                    // glyph the sudo lamp already proves on this stack. (The
+                    // key U+26BF was tried first and rendered as tofu in
+                    // JetBrainsMono Nerd Font — live-checked, per bar.qml's
+                    // unproven-glyph rule.)
+                    text: (card.summonsRec && card.summonsRec.summary)
+                          ? ("\uf023 " + card.summonsRec.summary)
+                          : "\uf023 permission"
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    font.family: temple.faceMono; font.pixelSize: 9
+                    color: temple.notes.paletteUrgent
+                }
+                Rectangle {                      // approve — the gold verdict
+                    id: approveChip
+                    anchors.right: denyChip.left; anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 66; height: 16
+                    radius: 0
+                    color: approveMa.containsMouse
+                           ? temple.withA(temple.signature, 0.20) : "transparent"
+                    border.width: 1
+                    border.color: temple.withA(temple.signature,
+                                               approveMa.containsMouse ? 0.95 : 0.6)
+                    Text {
+                        anchors.centerIn: parent
+                        text: "approve"
+                        font.family: temple.faceMono; font.pixelSize: 9
+                        color: temple.signature
+                    }
+                    MouseArea {
+                        id: approveMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: temple.verdict(card.s ? card.s.sessionId : "", "approve")
+                    }
+                }
+                Rectangle {                      // deny — the terracotta verdict
+                    id: denyChip
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 66; height: 16
+                    radius: 0
+                    color: denyMa.containsMouse
+                           ? temple.withA(temple.notes.paletteUrgent, 0.20) : "transparent"
+                    border.width: 1
+                    border.color: temple.withA(temple.notes.paletteUrgent,
+                                               denyMa.containsMouse ? 0.95 : 0.6)
+                    Text {
+                        anchors.centerIn: parent
+                        text: "deny"
+                        font.family: temple.faceMono; font.pixelSize: 9
+                        color: temple.notes.paletteUrgent
+                    }
+                    MouseArea {
+                        id: denyMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: temple.verdict(card.s ? card.s.sessionId : "", "deny")
+                    }
                 }
             }
 
