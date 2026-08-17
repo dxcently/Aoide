@@ -8,8 +8,8 @@ import Quickshell.Io
 // on the stage. A SIBLING of the Conductor in the same pantheon — but a
 // different god's house. Where the Conductor is a Doric marble stele leaning
 // gold, this is an IONIC temple leaning aegean (holoBlue): scroll-volute
-// capital, a dentil cornice, an egg-and-dart rule, fluted twin-groove columns,
-// and scroll-cornered box framing. Slimmer, more ornate, cooler in key.
+// capital, a dentil cornice, an egg-and-dart rule, and scroll-cornered box
+// framing — the ARCHITECTURE differs; the plaques inside it do not.
 //
 // SHARED across the pantheon (the family resemblance):
 //   · opaque + DEFINED body — hard plum border, inset keyline, cast shadow;
@@ -23,26 +23,38 @@ import Quickshell.Io
 //   · the FUNCTION: agent · state · cwd · elapsed, click → focusSession,
 //     an empty state, and hot-reload of the stage file.
 //
-// DIFFERENT from the Conductor (a separate temple):
+// DIFFERENT from the Conductor (the same plaques, another god's house):
 //   · ORDER   — Ionic, not Doric: a volute (scroll) capital + dentil course
 //               instead of the entablature band + baton course.
 //   · RULE    — egg-and-dart, not the solid baton course.
 //   · SIGNATURE HUE — aegean holoBlue carries the architecture (the Conductor's
 //               gold recedes to a small family nod on the tag).
-//   · COLUMNS — slimmer fluted twin-groove ║ pilasters, not the solid │.
 //   · FRAME   — scroll-cornered box (╭ ╮ ╰ ╯), echoing the volutes.
-//   · HEADER  — the inscription is centred beneath the capital, temple-front.
-//   · ROWS    — TWO row silhouettes, not one card design: a bare tty stays a
-//               slim ledger line (command · state · vitals · ground); an AGENT
-//               terminal (claude/kimi/pi…) wears a serif nameplate + model
-//               byline and a fixed SCREEN-PANE inset — a prompt line carrying
-//               the live tool plus a three-line transcript preview. Both
-//               silhouettes are constant-height per kind (reserved lanes), so
-//               streaming data never reflows the roster. The ONE exception is
-//               the ground line's cwd: it WRAPS onto new lines when the path
-//               overflows (a yazi session's live dir is long and space-free —
-//               a single elided line would hide which dir it is on), so a
-//               long breadcrumb grows its row past the floor.
+//
+// The ROWS wear the Conductor's card silhouette — the owner's round-2
+// directive ("terminals should look like the conductor") retires the old
+// ledger lines and fluted gutter columns for the Conductor's plaque grammar —
+// with ONE deliberate carve-out, also the owner's: the AGENT-SPECIFIC INFO
+// CORE (the screen pane, the [▓░] ctx meter, the plain elapsed tally) keeps
+// this temple's OWN treatment. The Conductor gives every agent a dedicated
+// card; this roster packs the same agent into one row among many — the
+// information density is legitimately different, so that core is not forced
+// pixel-identical. One plaque grammar at two scales:
+//   · AGENT terminals — reserved 16px lamp box (metronome pulse, terracotta
+//     breath, nf-fa-lock on sudo) · serif name · state word + ws tag corner /
+//     the aegean SCREEN PANE ($ live command + model cell + three say lines) /
+//     elapsed + [▓░] meter vitals / cwd + troupe ground.
+//   · bare ttys — SUB-scale: lamp · mono command (a command, not a name) ·
+//     the same corner / elapsed / cwd + troupe. No pane, no meter — agent-only
+//     content; a Column skips invisible children.
+// The plaque chrome is the Conductor's verbatim (fg-hairline 0.22, fill 0.035,
+// urgent border on awaiting/sudo); the left pilaster speaks WORKSPACE note-hue
+// where the Conductor speaks project (3px laurel crown when traced, same law).
+// Constant-height per kind; the sanctioned growths: the ground cwd WRAPS when
+// a real dir overflows (a yazi live dir is long and space-free — an elided
+// line would hide which dir it is on), and the COMMAND lines (the bare label,
+// the pane's prompt) wrap to a 3-line cap — a long command reads, never just
+// truncates.
 // The one laurel-`paletteHot` crown (the traced session) stays a pantheon-wide
 // signal, identical across temples. The music state colours stay shared too —
 // a "working" note reads the same in every house; only the architecture differs.
@@ -236,7 +248,10 @@ Item {
                 say:           rec.say || "",         // the agent's latest words
                 model:          rec.model || "",         // the running Claude model, if known
                 contextTokens:  rec.contextTokens || 0,  // context-window fill of the last request
-                contextCeiling: rec.contextCeiling || 0  // the published ceiling for that model (CONTRACTS.md §4)
+                contextCeiling: rec.contextCeiling || 0, // the published ceiling for that model (CONTRACTS.md §4)
+                needsSudo:      rec.needsSudo === true   // blocked on a sudo password prompt
+                                                         // (was dropped here once, so the sudo
+                                                         // lock + urgent border below never fired)
             });
         }
         // stable order: by workspace, then window address (so re-reads that return
@@ -257,7 +272,7 @@ Item {
             parts.push([r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
                         r.workspace, r.windowAddress, r.title,
                         r.activity, r.say, r.model, r.contextTokens,
-                        r.contextCeiling].join(""));
+                        r.contextCeiling, r.needsSudo].join(""));
         }
         return parts.join("");
     }
@@ -434,23 +449,51 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.verticalCenterOffset: 1   // was -3, hand-guessed and wrong; still rode
                                                            // high post horizontal-fix, nudged from a look
-                        text: "𝄢"; font.family: gadget.faceMusic; font.pixelSize: 30
+                        // 26 (was 30): the bass clef is a squat, wide glyph —
+                        // 26 optically matches the Conductor's treble at 24.
+                        text: "𝄢"; font.family: gadget.faceMusic; font.pixelSize: 26
                         color: gadget.sig
                     }
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: "TERMINALS"
-                        font.family: gadget.faceSerif; font.pixelSize: 19
-                        font.weight: Font.DemiBold; font.letterSpacing: 5
+                        // the family inscription spec — serif 17 DemiBold ls4,
+                        // same as CONDUCTOR's band (was 19/ls5, the one loud
+                        // title in the pantheon).
+                        font.family: gadget.faceSerif; font.pixelSize: 17
+                        font.weight: Font.DemiBold; font.letterSpacing: 4
                         color: notes.paletteFg
                     }
                 }
-                Text {                                // terminal tag — a gold family nod
+                Text {                                // terminal tag — a gold family
+                                                      // nod that IS the recheck
+                                                      // button (UsageGadget's hover-
+                                                      // morph idiom, same as
+                                                      // "[ conductor ]"): hovering
+                                                      // swaps the inscription for
+                                                      // the click cue in the same
+                                                      // slot; a click fires an
+                                                      // on-demand reap/rehook sweep
+                                                      // instead of the daemon's
+                                                      // ~12s timer. Guarded like
+                                                      // focusSession — a no-op
+                                                      // until the bridge verb lands.
+                    id: ttyTag
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "[ tty ]"
+                    text: ttyMouse.containsMouse ? "[ click to recheck ]" : "[ tty ]"
                     font.family: gadget.faceMono; font.pixelSize: 11
-                    color: gadget.withA(notes.paletteAccent, 0.9)
+                    color: gadget.withA(notes.paletteAccent, 0.95)   // same weight as "[ conductor ]"
+                    MouseArea {
+                        id: ttyMouse
+                        anchors.fill: parent; anchors.margins: -4
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (gadget.bridge && gadget.bridge.recheckSessions)
+                                gadget.bridge.recheckSessions()
+                        }
+                    }
                 }
             }
 
@@ -566,7 +609,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.verticalCenterOffset: -1
                     text: "𝄂"
-                    font.family: gadget.faceMusic; font.pixelSize: 18
+                    font.family: gadget.faceMusic; font.pixelSize: 16   // the family closing-barline size
                     color: gadget.sig
                 }
                 Rectangle {
@@ -604,23 +647,28 @@ Item {
                             + "  ╾──────╼"
                     }
                     Item { width: 1; height: 6 }
+                    // the family TACET ritual — face, inscription, and caption
+                    // at the Conductor's exact empty-stage spec (mono 15 @ 0.5,
+                    // serif 14 ls6 @ 0.45, serif-italic 10 @ 0.4); only the
+                    // fluted-column figure above stays this temple's own.
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: "ᕕ( ᐛ )ᕗ"
-                        font.pixelSize: 20
-                        color: gadget.withA(notes.paletteFg, 0.6)
+                        font.family: gadget.faceMono; font.pixelSize: 15
+                        color: gadget.withA(notes.paletteFg, 0.5)
                     }
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: "TACET"
                         font.family: gadget.faceSerif; font.pixelSize: 14
-                        font.letterSpacing: 5
-                        color: gadget.withA(notes.paletteFg, 0.65)
+                        font.letterSpacing: 6
+                        color: gadget.withA(notes.paletteFg, 0.45)
                     }
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: "no terminals on the stage"
-                        font.family: gadget.faceMono; font.pixelSize: 10
+                        font.family: gadget.faceSerif; font.italic: true
+                        font.pixelSize: 10
                         color: gadget.withA(notes.paletteFg, 0.4)
                     }
                 }
@@ -647,14 +695,17 @@ Item {
                                 id: row
                                 required property var modelData
                                 width: parent.width
-                        // TWO constant silhouettes (see the ROWS note in the
-                        // header): a bare tty settles at the 52 floor; an agent
-                        // row adds the fixed screen pane — taller, but just as
-                        // constant. Live data streaming in never moves either.
-                        // The one exception: a cwd long enough to wrap (yazi's
-                        // live dir) grows its row past the floor — the dir must
-                        // stay readable, that is the point of the ground line.
-                        height: Math.max(52, body.implicitHeight + 16)
+                        // ONE plaque silhouette — the Conductor's card law worn
+                        // at two sizes (see the ROWS note in the header): an
+                        // AGENT terminal is a main plaque (identity · screen
+                        // pane · vitals · ground — the pane + [▓░] vitals being
+                        // the owner's carve-out, this temple's own info core),
+                        // a bare tty the sub-scale plaque (identity · vitals ·
+                        // ground). Fixed lanes per kind — live data streaming
+                        // in never moves either. The sanctioned growths: a cwd
+                        // long enough to wrap (yazi's live dir — the dir must
+                        // stay readable) and the command lines' 3-line cap.
+                        height: body.implicitHeight + 11   // 5 top + text + 6 base (card law)
 
                         // an emph row must have a real sessionId — plain untracked
                         // terminals ("" id) never claim the traced crown.
@@ -711,8 +762,14 @@ Item {
                         // ordinary `awaiting` ("an agent permission answer"):
                         // this reads as "it's YOUR terminal password".
                         readonly property bool needsSudo: modelData.needsSudo === true
-
-                        onAwaitingChanged: if (!awaiting) noteGlyph.opacity = 1
+                        // the Conductor's card-state law: a sudo hold counts as
+                        // awaiting (it drives the breath + the urgent border),
+                        // and a resting row dims its lamp + state word to 0.55.
+                        readonly property bool rowAwaiting: row.awaiting || row.needsSudo
+                        readonly property bool resting: !row.working && !row.rowAwaiting
+                        readonly property bool hasCtx: (modelData.contextTokens || 0) > 0
+                        readonly property real ctxPct: row.hasCtx
+                            ? notes.ctxPercent(modelData.contextTokens, modelData.contextCeiling) : 0
 
                         // Re-assert the bar highlight if this row is rebuilt while
                         // it is the hovered one (roster refresh under a still pointer).
@@ -723,12 +780,10 @@ Item {
                                                 modelData.workspace !== undefined ? modelData.workspace : -1);
                         }
 
-                        // the row plaque — ground + hairline, the Conductor's
-                        // card idiom carried over at the same weights (fill
-                        // 0.035, hover 0.10, laurel 0.05, awaiting border 0.75)
-                        // but keyed AEGEAN: the hairline is sig-based, one step
-                        // under the screen pane's own 0.30 bezel so the pane —
-                        // the widget's main focus — still sits a breath forward.
+                        // the row plaque — the Conductor's card chrome verbatim
+                        // (fill 0.035, hover 0.10, laurel 0.05, fg-hairline
+                        // border 0.22, awaiting/sudo border urgent 0.75); only
+                        // the hover wash stays keyed to this temple's aegean.
                         Rectangle {
                             anchors.fill: parent
                             radius: 0
@@ -737,164 +792,170 @@ Item {
                                    : (row.emph ? gadget.withA(notes.paletteHot, 0.05)
                                                : gadget.withA(notes.paletteFg, 0.035))
                             border.width: 1
-                            border.color: (row.awaiting || row.needsSudo)
+                            border.color: row.rowAwaiting
                                           ? gadget.withA(notes.paletteUrgent, 0.75)
-                                          : gadget.withA(gadget.sig, 0.28)
+                                          : gadget.withA(notes.paletteFg, 0.22)
                         }
-                        Rectangle {                    // laurel-green crown (the one standout)
-                            anchors.left: parent.left; anchors.top: parent.top
-                            anchors.bottom: parent.bottom
-                            width: 3; color: notes.paletteHot; visible: row.emph
-                        }
-
-                        // the note, set in a carved niche on the fluted twin-
-                        // groove column. The grooves are DRAWN (two 2px bars),
-                        // not the 38px ║ glyph: a glyph neither spans a tall
-                        // agent row nor clears the note riding on it — drawn
-                        // flutes run the row's full height on every silhouette
-                        // and break around a reserved niche, so column and note
-                        // never collide (the lamp-box discipline, column-shaped).
-                        Item {
-                            id: gutter
-                            anchors.left: parent.left; anchors.leftMargin: 12
-                            anchors.top: parent.top; anchors.topMargin: 1
-                            anchors.bottom: parent.bottom; anchors.bottomMargin: 1
-                            width: 26
-
-                            // niche centred on the note's optical seat (the -11
-                            // lift below), half-height 13 → a 26px opening.
-                            readonly property real nicheTop: height / 2 - 37
-                            readonly property real nicheBot: height / 2 - 11
-                            // an agent terminal's flute stands a shade
-                            // brighter — the scan-cue for which columns
-                            // hold agents (the traced crown still wins).
-                            readonly property color flute:
-                                row.emph ? gadget.withA(notes.paletteHot, 0.9)
-                                         : gadget.withA(gadget.sig, row.agentRow ? 0.75 : 0.5)
-
-                            Rectangle { x: 9;  y: 0; width: 2; color: gutter.flute
-                                        height: Math.max(0, gutter.nicheTop) }
-                            Rectangle { x: 14; y: 0; width: 2; color: gutter.flute
-                                        height: Math.max(0, gutter.nicheTop) }
-                            Rectangle { x: 9;  y: gutter.nicheBot; width: 2; color: gutter.flute
-                                        height: Math.max(0, gutter.height - gutter.nicheBot) }
-                            Rectangle { x: 14; y: gutter.nicheBot; width: 2; color: gutter.flute
-                                        height: Math.max(0, gutter.height - gutter.nicheBot) }
-
-                            Text {
-                                id: noteGlyph
-                                anchors.centerIn: parent
-                                // Noto Music seats the notehead low in a tall em
-                                // box; lift it to sit between the two text lines.
-                                anchors.verticalCenterOffset: -24
-                                text: gadget.glyphFor(modelData.state)
-                                font.family: gadget.faceMusic; font.pixelSize: 25
-                                color: row.accent
-                                SequentialAnimation on opacity {
-                                    running: row.awaiting
-                                    loops: Animation.Infinite; alwaysRunToEnd: true
-                                    NumberAnimation { to: 0.28; duration: 620; easing.type: Easing.InOutSine }
-                                    NumberAnimation { to: 1.0;  duration: 620; easing.type: Easing.InOutSine }
-                                }
-                            }
+                        // the pilaster — the Conductor's project stripe, spoken
+                        // in this temple's own identity hue: the row's WORKSPACE
+                        // note colour (the same grammar the ws tag wears; safe
+                        // for id <= 0). The traced row wears the 3px laurel
+                        // crown, same one-standout law as the Conductor plaque.
+                        Rectangle {
+                            x: 0; width: row.emph ? 3 : 2
+                            height: parent.height
+                            color: row.emph ? notes.paletteHot
+                                            : gadget.withA(row.wsTagColor, 0.6)
                         }
 
                         Column {
                             id: body
-                            anchors.left: gutter.right; anchors.leftMargin: 10
-                            anchors.right: parent.right; anchors.rightMargin: 12
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 2
+                            anchors.left: parent.left; anchors.leftMargin: 9
+                            anchors.right: parent.right; anchors.rightMargin: 6
+                            anchors.top: parent.top; anchors.topMargin: 5
+                            spacing: 3
 
+                            // ── 1 · IDENTITY — lamp · name ── state word · wsN ──
+                            // The Conductor's inscription row: the reserved
+                            // 16px lamp box (metronome pulse working, terracotta
+                            // breath awaiting, the nf-fa-lock swap + 380ms ping
+                            // on a sudo hold — one urgency grammar across both
+                            // temples), the name owning the left run, and the
+                            // catalogue corner reading right→left. No #NN here
+                            // (the graph ordinal is a Conductor idea); the ws
+                            // tag holds the outermost corner instead, wearing
+                            // the ledger marks for specials (𝅘𝅥𝅱 magic / 𝄋
+                            // scratch) in the bar's own note hue.
                             Item {
                                 width: parent.width
-                                height: procName.height
-                                Text {                     // the MAIN label — two voices: an
-                                                            // agent row wears its NAME carved
-                                                            // in serif (claude, pi — the tool
-                                                            // line lives in the screen pane);
-                                                            // a bare tty keeps the mono
-                                                            // foreground command.
-                                    id: procName
-                                    anchors.left: parent.left
-                                    // the state tag + lock badge claim their space
-                                    // FIRST (pinned to the row's right edge below);
-                                    // the label elides into the rest — the whole
-                                    // left run is the name's now, the model
-                                    // byline moved down to the screen pane's
-                                    // prompt line (idiom cell, not a crowded
-                                    // middle field).
-                                    width: Math.max(24, Math.min(implicitWidth,
-                                                    body.width - stateTag.slot - sudoBadge.slot))
-                                    elide: Text.ElideRight
-                                    text: row.agentRow ? (modelData.agent || "agent") : row.procText
-                                    font.family: row.agentRow ? gadget.faceSerif : gadget.faceMono
-                                    font.pixelSize: 14
-                                    font.weight: row.emph ? Font.Bold : Font.Medium
-                                    color: notes.paletteFg
-                                }
-                                Text {
-                                    id: stateTag
-                                    readonly property real slot: visible ? implicitWidth + 8 : 0
+                                // grows as the command label wraps (its 3-line
+                                // cap); single-line rows hold the two family
+                                // steps. Corner tags + lamp ride LINE ONE
+                                // (baseline/top anchors), not the row centre,
+                                // so a wrapped label never drags them down.
+                                height: Math.max(row.agentRow ? 20 : 16,
+                                                 procName.implicitHeight + 2)
+
+                                Text {                     // ws tag — the catalogue corner
+                                    id: wsTagT
+                                    visible: row.wsId >= 0 || row.wsSpecial
                                     anchors.right: parent.right
+                                    anchors.baseline: procName.baseline
+                                    text: row.isMagic ? "𝅘𝅥𝅱 magic"
+                                        : (row.isScratch ? "𝄋 scratch"
+                                                         : ("ws" + row.wsId))
+                                    font.family: gadget.faceMono; font.pixelSize: 9
+                                    font.bold: row.wsSpecial   // the bar bolds its note glyphs too
+                                    color: gadget.withA(row.wsTagColor, row.wsSpecial ? 0.95 : 0.9)
+                                }
+                                Text {                     // state word — the lamp's caption,
+                                                            // same state + colour source as the
+                                                            // glyph so the two never disagree
+                                    id: stateWordT
+                                    anchors.right: wsTagT.visible ? wsTagT.left : parent.right
+                                    anchors.rightMargin: wsTagT.visible ? 8 : 0
                                     anchors.baseline: procName.baseline
                                     text: gadget.stateLabel(modelData.state)
                                     font.family: gadget.faceSerif; font.italic: true
-                                    font.pixelSize: 11
-                                    color: row.accent
+                                    font.pixelSize: 10   // the family state-word size
+                                    color: gadget.withA(gadget.stateColor(modelData.state),
+                                                        row.resting ? 0.55 : 1.0)
                                 }
-                                Text {                     // SUDO lock badge — distinct from the
-                                                            // ordinary awaiting state tag: this
-                                                            // terminal needs the user's password
-                                                            // typed into IT, not an agent decision.
-                                                            // A MONOCHROME nerd-font lock (not the
-                                                            // 🔒 emoji glyph — Qt ignores Text.color
-                                                            // on color-emoji glyphs, so it never
-                                                            // followed the palette) rendered in the
-                                                            // same mono/nerd face as the rest of the
-                                                            // terminal furniture, so it DOES honor
-                                                            // notes.paletteUrgent.
-                                    id: sudoBadge
-                                    readonly property real slot: visible ? implicitWidth + 6 : 0
-                                    anchors.right: stateTag.left
-                                    anchors.rightMargin: visible ? 6 : 0
-                                    anchors.baseline: procName.baseline
-                                    visible: row.needsSudo
-                                    text: ""                     // nf-fa-lock (Nerd Font)
-                                    font.family: gadget.faceMono
-                                    font.pixelSize: 13
-                                    color: notes.paletteUrgent
-                                    // A quicker ping than the state glyph's own
-                                    // awaiting pulse (620ms below) — the badge
-                                    // reads as urgent on its own.
-                                    SequentialAnimation on opacity {
-                                        running: row.needsSudo
-                                        loops: Animation.Infinite; alwaysRunToEnd: true
-                                        onRunningChanged: if (!running) sudoBadge.opacity = 1.0
-                                        NumberAnimation { to: 0.35; duration: 380; easing.type: Easing.InOutSine }
-                                        NumberAnimation { to: 1.0;  duration: 380; easing.type: Easing.InOutSine }
+                                Item {                     // the reserved lamp box
+                                    id: lampBox
+                                    x: 0
+                                    y: row.agentRow ? 2 : 0   // seats on line one
+                                    width: 16; height: 16
+
+                                    Text {
+                                        id: lamp
+                                        anchors.centerIn: parent
+                                        // sudo swaps the note for the SAME
+                                        // nf-fa-lock the Conductor lamp wears
+                                        // (escape-written — the raw PUA char is
+                                        // invisible in editors and got lost once).
+                                        text: row.needsSudo ? "\uf023" : gadget.glyphFor(modelData.state)
+                                        font.family: row.needsSudo ? gadget.faceMono : gadget.faceMusic
+                                        font.pixelSize: 12
+                                        color: row.emph
+                                               ? notes.paletteHot
+                                               : gadget.withA(row.needsSudo ? notes.paletteUrgent
+                                                                            : gadget.stateColor(modelData.state),
+                                                              row.resting ? 0.55 : 1.0)
+
+                                        // working — the metronome pulse, confined
+                                        // to the box (the anchoring law)
+                                        SequentialAnimation on scale {
+                                            running: row.working
+                                            loops: Animation.Infinite
+                                            alwaysRunToEnd: true
+                                            NumberAnimation { to: 1.35; duration: 520; easing.type: Easing.InOutSine }
+                                            NumberAnimation { to: 1.0;  duration: 520; easing.type: Easing.InOutSine }
+                                        }
+                                        // awaiting — the terracotta breath; a sudo
+                                        // hold quickens it to the family's 380ms
+                                        // ping ("your password" beats faster than
+                                        // "an agent question").
+                                        SequentialAnimation on opacity {
+                                            running: row.rowAwaiting
+                                            loops: Animation.Infinite
+                                            alwaysRunToEnd: true
+                                            NumberAnimation { to: 0.35; duration: row.needsSudo ? 380 : 700; easing.type: Easing.InOutSine }
+                                            NumberAnimation { to: 1.0;  duration: row.needsSudo ? 380 : 700; easing.type: Easing.InOutSine }
+                                        }
                                     }
+                                }
+                                Text {                     // the MAIN label — two voices: an
+                                                            // agent row wears its NAME carved in
+                                                            // serif at the family's main size; a
+                                                            // bare tty keeps the mono foreground
+                                                            // command at the sub step (a command
+                                                            // is a command, not a name). The
+                                                            // command WRAPS to a 3-line cap —
+                                                            // commands carry spaces, so plain
+                                                            // Wrap breaks at them; past the cap
+                                                            // the last line still elides. The
+                                                            // identity row's height rides this.
+                                    id: procName
+                                    anchors.left: lampBox.right; anchors.leftMargin: 5
+                                    anchors.top: parent.top
+                                    anchors.topMargin: row.agentRow ? 1 : 0
+                                    elide: Text.ElideRight
+                                    wrapMode: Text.Wrap
+                                    maximumLineCount: 3
+                                    width: parent.width - 21
+                                           - (wsTagT.visible ? wsTagT.implicitWidth + 8 : 0)
+                                           - (stateWordT.implicitWidth + 8)
+                                    text: row.agentRow ? (modelData.agent || "agent") : row.procText
+                                    font.family: row.agentRow ? gadget.faceSerif : gadget.faceMono
+                                    font.pixelSize: row.agentRow ? 14 : 12
+                                    font.weight: row.emph ? Font.Bold : Font.Medium
+                                    color: gadget.withA(notes.paletteFg, row.agentRow ? 1.0 : 0.85)
                                 }
                             }
                             // ── the SCREEN PANE — agent rows only ─────────────
-                            // The genuine preview: a fixed 60px inset framed as
-                            // the agent's little terminal screen — a hairline
-                            // aegean bezel over a faint wash (radius 0). Line one
-                            // is the PROMPT: a `$` sigil + the live tool/command
-                            // on the tty (the agent process itself when nothing
-                            // is running). Under it, THREE reserved lines of the
-                            // agent's latest words, serif-italic quoted — the
-                            // transcript tail, wrapped, last line eliding. Both
-                            // lanes are FIXED: streaming text fills them, the
-                            // silhouette never moves. A silent agent holds the
-                            // pane with dim placeholders (the stable-silhouette
-                            // law); bare ttys skip the pane entirely (a Column
-                            // skips invisible children) and stay slim.
+                            // The DELIBERATE carve-out from "terminals should
+                            // look like the conductor" (the owner's own): the
+                            // agent-specific info core keeps this temple's OWN
+                            // treatment. The Conductor gives every agent a full
+                            // dedicated card; this roster packs the same agent
+                            // into one row among many — the density is
+                            // legitimately different, so the little aegean
+                            // screen stays: a hairline bezel over a faint wash,
+                            // line one the PROMPT ($ sigil + the live tool/
+                            // command, WRAPPING to three lines now — a long
+                            // command reads, never just truncates — with the
+                            // model in a fixed right cell, a middle-elided view
+                            // of the REAL id, pantheon §4), then THREE reserved
+                            // lines of the agent's latest words, serif-italic
+                            // quoted. The say lane is FIXED; the pane grows
+                            // only as the command wraps. Bare ttys skip the
+                            // pane entirely (a Column skips invisible children).
                             Rectangle {
                                 id: screenPane
                                 visible: row.agentRow
                                 width: parent.width
-                                height: 60
+                                height: paneCmd.height + 48   // 4 top + cmd + 4 gap + 36 say + 4 base
                                 radius: 0
                                 color: gadget.withA(gadget.sig, 0.06)
                                 border.width: 1
@@ -908,15 +969,19 @@ Item {
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: gadget.withA(gadget.sig, 0.95)
                                 }
-                                Text {                     // the live tool / command —
-                                                            // flexible left field; narrows
-                                                            // to make room for modelCell
-                                                            // when the model is shown,
-                                                            // widens to fill when it's not.
+                                Text {                     // the live tool / command — wraps
+                                                            // up to three lines (commands
+                                                            // carry spaces, so plain Wrap
+                                                            // breaks at them; the third line
+                                                            // still elides past the cap).
+                                                            // The pane's height rides this.
+                                    id: paneCmd
                                     anchors.left: promptSigil.right; anchors.leftMargin: 5
                                     anchors.right: modelCell.visible ? modelCell.left : parent.right
                                     anchors.rightMargin: 6
-                                    anchors.baseline: promptSigil.baseline
+                                    anchors.top: parent.top; anchors.topMargin: 3
+                                    wrapMode: Text.Wrap
+                                    maximumLineCount: 3
                                     elide: Text.ElideRight
                                     text: row.activityText.length > 0
                                           ? row.activityText
@@ -925,17 +990,11 @@ Item {
                                     color: gadget.withA(notes.paletteFg,
                                                         row.activityText.length > 0 ? 0.85 : 0.45)
                                 }
-                                Text {                     // the MODEL — the agent's provenance,
-                                                            // relocated off the crowded identity
-                                                            // line into this idiom slot: a fixed
-                                                            // right cell sharing the prompt line,
-                                                            // baseline-matched to the $ sigil (not
-                                                            // centered against the whole pane). A
-                                                            // middle-elided view of the REAL model
-                                                            // id (never an invented short — pantheon
-                                                            // §4). Always co-occurs with the screen
-                                                            // pane itself (both agent-row-only), so
-                                                            // this can never orphan the display.
+                                Text {                     // the MODEL — a fixed right cell
+                                                            // on the prompt line, baseline-
+                                                            // matched to the $ sigil; middle-
+                                                            // elided view of the REAL model
+                                                            // id (pantheon §4).
                                     id: modelCell
                                     visible: row.agentRow && (modelData.model || "").length > 0
                                     anchors.right: parent.right; anchors.rightMargin: 6
@@ -945,12 +1004,12 @@ Item {
                                     elide: Text.ElideMiddle
                                     text: modelData.model || ""
                                     font.family: gadget.faceMono; font.pixelSize: 9
-                                    color: gadget.withA(notes.paletteFg, 0.5)
+                                    color: gadget.withA(notes.paletteFg, 0.55)   // Conductor's model dim
                                 }
                                 Text {                     // the WORDS — 3 reserved lines
                                     anchors.left: parent.left; anchors.leftMargin: 6
                                     anchors.right: parent.right; anchors.rightMargin: 6
-                                    y: 20
+                                    anchors.top: paneCmd.bottom; anchors.topMargin: 4
                                     height: 36
                                     text: row.sayFlat.length > 0 ? "“" + row.sayFlat + "”" : "…"
                                     wrapMode: Text.WordWrap
@@ -964,146 +1023,117 @@ Item {
                                                         row.sayFlat.length > 0 ? 0.62 : 0.30)
                                 }
                             }
-                            // TALLY + MOOD — elapsed since the terminal opened and
-                            // (agent rows) the context-window meter, sharing one
-                            // line with the animated mood face: the meta tags pack
-                            // the left (a Row so an invisible tag never leaves a
-                            // gap), the kaomoji stays pinned to the row's right
-                            // edge. The model byline rode up to the identity line
-                            // and the workspace tag down to the ground line, so
-                            // the meter never fights the face for room.
+
+                            // ── VITALS — elapsed · the ctx meter ──────────────
+                            // The same carve-out: this temple's own compact
+                            // treatment, not the Conductor's ctx/up pulse line.
+                            // Elapsed tallied plain in aegean; agent rows add
+                            // the CONTEXT-WINDOW METER — bar + percent + count
+                            // in the dock's [▓░] ASCII-gauge grammar (AoideBar
+                            // battBar / MetersGadget barFill), zero footprint
+                            // until an assistant turn publishes usage.
                             Item {
                                 width: parent.width
-                                height: Math.max(metaRow.implicitHeight, kao.implicitHeight)
+                                height: 13
+
                                 Row {
-                                    id: metaRow
-                                    anchors.left: parent.left
-                                    anchors.right: kao.left; anchors.rightMargin: 6
+                                    anchors.left: parent.left; anchors.leftMargin: 21
+                                    anchors.right: parent.right
                                     anchors.verticalCenter: parent.verticalCenter
                                     spacing: 8
                                     Text {                     // elapsed, tallied in aegean
                                         id: elapsedText
                                         text: gadget.elapsed(modelData.startedAt)
-                                        font.family: gadget.faceMono; font.pixelSize: 11
+                                        font.family: gadget.faceMono; font.pixelSize: 10
                                         color: row.emph ? notes.paletteHot : gadget.sig
                                     }
-                                    Text {                     // CONTEXT-WINDOW METER — bar + percent +
-                                                                // compact count, in the dock's existing
-                                                                // `[▓░]` ASCII-gauge grammar (AoideBar
-                                                                // battBar / MetersGadget barFill). Zero
-                                                                // footprint until an assistant turn has
-                                                                // produced a usage block: this Row skips
-                                                                // invisible children entirely.
+                                    Text {                     // the [▓░] meter — agent rows only
                                         id: ctxTag
                                         anchors.baseline: elapsedText.baseline
-                                        visible: (modelData.contextTokens || 0) > 0
-                                        readonly property real pct: notes.ctxPercent(modelData.contextTokens, modelData.contextCeiling)
-                                        text: notes.ctxBar(pct, 6) + " " + Math.round(pct) + "% · " + notes.ctxCompact(modelData.contextTokens)
+                                        visible: row.hasCtx
+                                        text: notes.ctxBar(row.ctxPct, 6) + " "
+                                              + Math.round(row.ctxPct) + "% · "
+                                              + notes.ctxCompact(modelData.contextTokens)
                                         font.family: gadget.faceMono; font.pixelSize: 10
-                                        // song accent → paletteUrgent past ~85%, same threshold/
-                                        // swap as the sudo badge's urgency grammar.
-                                        color: notes.ctxColor(pct, gadget.sig)
-                                    }
-                                }
-                                Text {
-                                    id: kao                        // the mood face
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    // A FIXED box, right-aligned: the frames of a
-                                    // set differ in width on purpose (that width
-                                    // change is the movement), and an auto-sized
-                                    // Text would drag metaRow's anchor around with
-                                    // it every frame.
-                                    width: 96
-                                    clip: true                 // a wide animation
-                                                                // frame can't paint
-                                                                // outside its box
-                                    horizontalAlignment: Text.AlignRight
-                                    // WORKING animates; every resting state holds
-                                    // one pose. Terminals have no subagent concept
-                                    // (that's a Conductor-only idea), so every row
-                                    // wears the general `working` pool — but HASHED
-                                    // from the row's stable key (pickFor/phaseFor),
-                                    // never drawn at random: the underlying roster
-                                    // model gets reassigned (and every delegate
-                                    // recreated) on ordinary cwd/activity
-                                    // heartbeats, far more often than the roster
-                                    // actually changes, so a random pick would
-                                    // visibly reshuffle mid-session. `rowKey` is
-                                    // the same stable identity (sessionId, else
-                                    // "win:"+windowAddress) already used for
-                                    // hover-across-rebuild above.
-                                    readonly property string moodKey: gadget.rowKey(modelData)
-                                    property int setIdx: gadget.faces.pickFor(moodKey, gadget.faces.working)
-                                    property int frame: gadget.faces.phaseFor(moodKey, frames.length)
-                                    readonly property var frames: gadget.faces.workingFrames(setIdx)
-                                    text: row.working ? frames[frame % frames.length]
-                                                      : gadget.kaomojiFor(modelData.state)
-                                    // Explicit family: the general pool now
-                                    // carries the parcel glyph (the receiving
-                                    // sets), and that icon lives in the Nerd
-                                    // Font's private-use range — Qt's CJK/kana
-                                    // fallback has no claim on it.
-                                    font.family: gadget.faceMono
-                                    font.pixelSize: 10
-                                    color: gadget.withA(row.accent, 0.85)
-                                    Timer {
-                                        running: row.working
-                                        repeat: true; interval: 300
-                                        onTriggered: kao.frame = (kao.frame + 1) % kao.frames.length
+                                        // song accent → paletteUrgent past ~85%, the
+                                        // shared urgency threshold.
+                                        color: notes.ctxColor(row.ctxPct, gadget.sig)
                                     }
                                 }
                             }
-                            // the GROUND line — WHERE the terminal lives: the cwd
-                            // (falls back to the window title for a cwd-less tty)
-                            // with the Hyprland workspace tag holding the right
-                            // corner. The dir WRAPS onto new lines when it
-                            // overflows — a yazi session's live dir is a long,
-                            // space-free path, and one middle-elided line would
-                            // make it unreadable; a long breadcrumb grows the row.
-                            // The TITLE fallback (a bare tty whose window title is
-                            // the running command) NEVER wraps — it stays a single
-                            // middle-elided line, so a yazi command shown there
-                            // can't balloon the card. A magic/scratch row's tag is
-                            // its INDICATOR: the ledger note-glyph + name
-                            // (𝅘𝅥𝅱 magic / 𝄋 scratch) in the bar's own note hue — a
-                            // terminal parked in the magic workspace says so
-                            // outright instead of hiding behind a negative id.
+                            // ── 6 · GROUND — cwd ── the troupe, one line ──────
+                            // The Conductor's ground: cwd left, the animated
+                            // mood face right in its reserved clipped box (116px
+                            // agent / 90px tty — main/sub scale). The cwd keeps
+                            // this roster's one sanctioned growth: a REAL dir
+                            // WRAPS onto new lines when it overflows (a yazi
+                            // session's live dir is long and space-free — one
+                            // elided line would hide which dir it is on), while
+                            // the TITLE fallback (a bare tty's window title,
+                            // often the running command) stays a single middle-
+                            // elided line so it can't balloon the plaque.
                             Item {
                                 width: parent.width
-                                height: cwdText.implicitHeight
-                                Text {                     // the workspace tag — plain "wsN", or
-                                    id: wsTag              // the ledger mark + name for specials
+                                height: Math.max(row.agentRow ? 17 : 15, cwdText.implicitHeight)
+
+                                Item {                     // reserved, clipped troupe box
+                                    id: faceBox
                                     anchors.right: parent.right
-                                    anchors.baseline: cwdText.baseline
-                                    visible: row.wsId >= 0 || row.wsSpecial
-                                    text: row.isMagic ? "𝅘𝅥𝅱 magic"
-                                        : (row.isScratch ? "𝄋 scratch"
-                                                         : ("ws" + row.wsId))
-                                    font.family: gadget.faceMono; font.pixelSize: 10
-                                    font.bold: row.wsSpecial   // the bar bolds its note glyphs too
-                                    color: gadget.withA(row.wsTagColor, row.wsSpecial ? 0.95 : 0.85)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: row.agentRow ? 116 : 90
+                                    height: row.agentRow ? 17 : 15
+                                    clip: true
+                                    Text {
+                                        id: kao            // the mood face
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        // WORKING animates; every resting state
+                                        // holds one pose. Terminals have no
+                                        // subagent concept, so every row wears
+                                        // the general `working` pool — HASHED
+                                        // from the row's stable key (pickFor/
+                                        // phaseFor), never drawn at random: the
+                                        // roster model gets reassigned on
+                                        // ordinary heartbeats, far more often
+                                        // than it actually changes, so a random
+                                        // pick would visibly reshuffle. `rowKey`
+                                        // is the same stable identity used for
+                                        // hover-across-rebuild above.
+                                        readonly property string moodKey: gadget.rowKey(modelData)
+                                        property int setIdx: gadget.faces.pickFor(moodKey, gadget.faces.working)
+                                        property int frame: gadget.faces.phaseFor(moodKey, frames.length)
+                                        readonly property var frames: gadget.faces.workingFrames(setIdx)
+                                        text: row.working ? frames[frame % frames.length]
+                                                          : gadget.kaomojiFor(modelData.state)
+                                        // Explicit family: the general pool
+                                        // carries the parcel glyph, and that
+                                        // icon lives in the Nerd Font's private-
+                                        // use range — Qt's CJK/kana fallback has
+                                        // no claim on it.
+                                        font.family: gadget.faceMono
+                                        font.pixelSize: row.agentRow ? 10 : 9
+                                        color: row.emph ? notes.paletteHot
+                                                        : gadget.withA(row.accent, 0.85)
+                                        Timer {
+                                            running: row.working
+                                            repeat: true; interval: 300
+                                            onTriggered: kao.frame = (kao.frame + 1) % kao.frames.length
+                                        }
+                                    }
                                 }
-                                Text {
+                                Text {                     // cwd — left-anchored; a real
+                                                            // dir wraps, the title fallback
+                                                            // middle-elides (see above)
                                     id: cwdText
-                                    anchors.left: parent.left
-                                    anchors.right: wsTag.visible ? wsTag.left : parent.right
-                                    anchors.rightMargin: wsTag.visible ? 8 : 0
-                                    // paths carry no spaces, so WordWrap would never
-                                    // break them — WrapAnywhere splits onto new lines
-                                    // (a yazi session's live dir must stay readable);
-                                    // the elide then only trims the FINAL line's tail.
-                                    // The wrap applies ONLY to a real cwd: the title
-                                    // fallback (a window title — often the yazi
-                                    // COMMAND for a bare tty) stays a single
-                                    // middle-elided line, never wrapped. The ground
-                                    // Item's height binds to implicitHeight, so a
-                                    // long breadcrumb grows the row.
+                                    anchors.left: parent.left; anchors.leftMargin: 21
+                                    anchors.right: faceBox.left; anchors.rightMargin: 8
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    horizontalAlignment: Text.AlignLeft
                                     wrapMode: row.cwdReal ? Text.WrapAnywhere : Text.NoWrap
                                     elide: row.cwdReal ? Text.ElideRight : Text.ElideMiddle
                                     text: gadget.shortCwd(modelData.cwd) || (modelData.title || "")
                                     font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: gadget.withA(gadget.sig, 0.95)
+                                    color: gadget.withA(gadget.sig, 0.85)   // the Conductor's cwd dim (its holoBlue IS this sig)
                                 }
                             }
                         }

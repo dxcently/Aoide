@@ -65,6 +65,33 @@ QtObject {
         })
     }
 
+    // ── Usage refresh ──────────────────────────────────────────────────────
+    // Backs the CLAUDE ledger gadget's ❋ spark (UsageGadget.qml). A click asks
+    // the daemon to re-run `aoide usage` NOW instead of waiting for the poller
+    // timer: no payload — the daemon runs the command itself and atomic-writes
+    // state/usage.json, which the gadget's own FileView watch picks up (see
+    // shellbridge.rs's dispatch_usage_refresh). No hyprctl/shell-exec from QML.
+    function refreshUsage() {
+        sendCommand({
+            cmd: "refreshusage"
+        })
+    }
+
+    // ── Session recheck ────────────────────────────────────────────────────
+    // Backs the Terminals/Conductor header recheck control. A click asks the
+    // daemon to run the liveness/rehook sweep NOW — reap dead sessions (a
+    // window/process that exited), decay `stopped` → `idle`, and prune orphaned
+    // hook records — instead of waiting up to a full ~12s aoide-graph-reap.timer
+    // period. No payload: the daemon re-execs `aoide graph reap` itself (see
+    // shellbridge.rs's dispatch_recheck_sessions), whose atomic stage writes the
+    // roster gadgets pick up through their own FileView watches. No hyprctl /
+    // MCP / shell-exec from QML.
+    function recheckSessions() {
+        sendCommand({
+            cmd: "rechecksessions"
+        })
+    }
+
     // ── Generic command sender ─────────────────────────────────────────────
     // Writes one newline-delimited JSON line to the shellbridge socket. If the
     // socket is up, it goes out immediately; otherwise the line is queued and

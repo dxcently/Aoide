@@ -555,12 +555,34 @@ Item {
                         font.weight: Font.DemiBold; font.letterSpacing: 4
                         color: notes.paletteFg
                     }
-                    Text {
+                    Text {                       // the source tag IS the recheck
+                                                 // button — UsageGadget's hover-
+                                                 // morph idiom, one reserved
+                                                 // right-anchored slot: hovering
+                                                 // swaps the inscription for the
+                                                 // click cue, a click fires an
+                                                 // on-demand reap/rehook sweep
+                                                 // instead of the daemon's ~12s
+                                                 // timer. Guarded like
+                                                 // focusSession — a no-op until
+                                                 // the bridge verb lands.
+                        id: condTag
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "[ conductor ]"
+                        text: condMouse.containsMouse ? "[ click to recheck ]"
+                                                      : "[ conductor ]"
                         font.family: temple.faceMono; font.pixelSize: 11
                         color: temple.withA(temple.signature, 0.95)
+                        MouseArea {
+                            id: condMouse
+                            anchors.fill: parent; anchors.margins: -4
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (temple.bridge && temple.bridge.recheckSessions)
+                                    temple.bridge.recheckSessions()
+                            }
+                        }
                     }
                 }
             }
@@ -1076,11 +1098,14 @@ Item {
         readonly property bool hasWs:
             !!(s && s.workspace !== undefined && s.workspace !== null)
         readonly property bool hooked: temple.hooked(s ? s.sessionId : "")
-        // the pi-harness badge — a hooked MAIN pi session swaps the ϟ bolt
-        // for its own π think-tag (piTag, below). The tag EXISTS only while
-        // the live state is working (the self-writing loop) — at rest it
-        // vanishes entirely, no still π and no ϟ. Subs keep the ϟ.
-        readonly property bool piThinking: card.hooked && !card.child
+        // the pi-harness badge — a MAIN pi session swaps the ϟ bolt for its
+        // own π think-tag (piTag, below). The tag EXISTS only while the live
+        // state is working (the self-writing loop) — at rest it vanishes
+        // entirely, no still π and no ϟ. Subs keep the ϟ. NOT hook-gated
+        // (was card.hooked &&): kimi's moon fires on plain working with no
+        // hook, and an unhooked working pi never got its animation at all —
+        // the think-tags share one grammar now: working MAIN of that agent.
+        readonly property bool piThinking: !card.child
             && !!card.s && !!card.s.agent
             && ("" + card.s.agent).toLowerCase() === "pi"
         readonly property bool piLive: card.piThinking && card.cardWorking
@@ -1153,9 +1178,11 @@ Item {
                           ? temple.withA(temple.notes.paletteUrgent, 0.75)
                           : temple.withA(temple.notes.paletteFg, 0.22)
         }
-        // the project pilaster — laurel when this is the one traced plaque
+        // the project pilaster — laurel when this is the one traced plaque.
+        // The crown widens to the pantheon's 3px (Terminals' crown bar is 3);
+        // the resting pilaster keeps its slim 2px project-hue stripe.
         Rectangle {
-            x: 0; width: 2
+            x: 0; width: card.laurel ? 3 : 2
             height: parent.height
             color: card.laurel ? temple.notes.paletteHot
                                : temple.withA(card.hue, 0.6)
@@ -1192,7 +1219,10 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: card.hasWs ? ("ws" + card.s.workspace) : ""
                     font.family: temple.faceMono; font.pixelSize: 9
-                    color: temple.withA(temple.notes.holoBlue, 0.9)
+                    // the bar's own note hue for this workspace — the same
+                    // colour grammar the Terminals ground tag already speaks
+                    // (noteColor is safe for id <= 0)
+                    color: temple.withA(temple.notes.noteColor(card.hasWs ? card.s.workspace : 0), 0.9)
                 }
                 Text {                           // state word — the lamp's caption,
                                                  // same live state + colour source as
@@ -1205,7 +1235,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: card.cardLiveState !== "" ? card.cardLiveState : "—"
                     font.family: temple.faceSerif; font.italic: true
-                    font.pixelSize: 9
+                    font.pixelSize: 10   // the family state-word size (Terminals matches)
                     color: temple.withA(temple.lampColor(card.cardLiveState),
                                         card.cardResting ? 0.55 : 1.0)
                 }
@@ -1219,7 +1249,11 @@ Item {
                     Text {
                         id: lamp
                         anchors.centerIn: parent
-                        text: card.sudoHeld ? "" : temple.lampGlyph(card.cardLiveState)
+                        // sudo swaps the lamp for the SAME nf-fa-lock glyph the
+                        // Terminals badge wears (written as an escape — the raw
+                        // PUA char is invisible in editors and got lost once,
+                        // leaving this branch an empty string).
+                        text: card.sudoHeld ? "\uf023" : temple.lampGlyph(card.cardLiveState)
                         font.family: card.sudoHeld ? temple.faceMono : temple.faceMusic
                         font.pixelSize: 12
                         color: card.laurel
@@ -1236,13 +1270,16 @@ Item {
                             NumberAnimation { to: 1.35; duration: 520; easing.type: Easing.InOutSine }
                             NumberAnimation { to: 1.0;  duration: 520; easing.type: Easing.InOutSine }
                         }
-                        // awaiting — a terracotta breath, box-neutral
+                        // awaiting — a terracotta breath, box-neutral. A sudo
+                        // hold quickens it to the Terminals badge's 380ms ping
+                        // (one urgency cadence across both temples: "your
+                        // password" beats faster than "an agent question").
                         SequentialAnimation on opacity {
                             running: card.cardAwaiting
                             loops: Animation.Infinite
                             alwaysRunToEnd: true
-                            NumberAnimation { to: 0.35; duration: 700; easing.type: Easing.InOutSine }
-                            NumberAnimation { to: 1.0;  duration: 700; easing.type: Easing.InOutSine }
+                            NumberAnimation { to: 0.35; duration: card.sudoHeld ? 380 : 700; easing.type: Easing.InOutSine }
+                            NumberAnimation { to: 1.0;  duration: card.sudoHeld ? 380 : 700; easing.type: Easing.InOutSine }
                         }
                     }
                 }
@@ -1262,8 +1299,12 @@ Item {
                                     - (wsT.visible ? wsT.implicitWidth + 8 : 0)
                                     - (stateWordT.implicitWidth + 8))
                     font.family: temple.faceSerif
-                    font.pixelSize: card.child ? 12 : 13
-                    font.weight: Font.Medium
+                    // 14 on mains — the family name size (Terminals' main
+                    // label is serif/mono 14); subs keep their smaller step.
+                    font.pixelSize: card.child ? 12 : 14
+                    // the traced plaque bolds its name, same as the Terminals
+                    // emph row already does.
+                    font.weight: card.laurel ? Font.Bold : Font.Medium
                     color: temple.withA(temple.notes.paletteFg, card.child ? 0.85 : 1.0)
                 }
                 Text {                           // kind tag — WITH the name
@@ -1284,6 +1325,7 @@ Item {
                     anchors.left: kindTag.visible ? kindTag.right : nameT.right
                     anchors.leftMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenterOffset: 2
                     // WORKING + claude + main → cycles the same reverse-
                     // engineered spinner glyphs/timing as UsageGadget's ❋
                     // (hazards §1: already live-verified at this face,
@@ -1654,8 +1696,10 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         text: card.faceText
                         font.family: temple.faceMono; font.pixelSize: 9
+                        // state-tinted at 0.85 — the same face-colour grammar
+                        // the Terminals troupe wears (withA(accent, 0.85))
                         color: card.laurel ? temple.notes.paletteHot
-                                           : temple.withA(temple.notes.paletteFg, 0.6)
+                                           : temple.withA(temple.lampColor(card.cardLiveState), 0.85)
                     }
                 }
             }
@@ -1679,8 +1723,10 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         text: card.faceText
                         font.family: temple.faceMono; font.pixelSize: 10
+                        // state-tinted at 0.85 — the same face-colour grammar
+                        // the Terminals troupe wears (withA(accent, 0.85))
                         color: card.laurel ? temple.notes.paletteHot
-                                           : temple.withA(temple.notes.paletteFg, 0.6)
+                                           : temple.withA(temple.lampColor(card.cardLiveState), 0.85)
                     }
                 }
                 Text {                           // cwd — left-anchored, tail
