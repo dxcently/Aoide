@@ -1237,6 +1237,121 @@ the called-out §6 amendment).
 
 ---
 
+## 8. Screen capture sidecar + pointer synthesis — **v0**
+
+The `aoide screen` family (`pkgs/aoide/crates/conduct/src/screen/`) writes a
+JSON sidecar (`<capture>.json`, same stem as the image) next to every
+`screen shot`/`screen diff` capture. `screen point` has nine verbs, six of
+which synthesize real pointer input against a native Wayland backend
+(`idle`/`save` are read-only queries, `restore` warps via `hyprctl` instead
+of synthesizing). This section is the sidecar field contract, the
+image↔screen scale contract, and the
+`*-*` reason-code vocabulary every `screen` verb's structured error draws
+from. See `concepts/orchestration/Screen-Control` in the wiki for the
+verb-by-verb usage this contract backs.
+
+### The sidecar — `<capture>.json`
+
+Fields below describe a capture written today, current `schemaVersion`
+`"0"`. Reading an older sidecar back is fine — an absent field simply
+means it postdates that capture — but this table isn't a version history,
+so it doesn't track which field arrived when.
+
+| Field | Type | Present when |
+| --- | --- | --- |
+| `schemaVersion` | string | always — `"0"` |
+| `capturedAt` | string, ISO-8601 UTC | always |
+| `origin` | `{x, y}`, logical (Hyprland) px | always — the captured rect's top-left |
+| `size` | `{w, h}`, DEVICE px (post-`scale`) | always — what the image file actually contains |
+| `scale` | float | always — `1.0` unless `--scale`/`--fit` was given |
+| `region` | `{x, y, w, h}`, logical px | always — the exact requested rect verbatim (never recomputed) |
+| `format` | string, `"png"` \| `"jpeg"` | always |
+| `quality` | integer 0-100 | always (ignored for png) |
+| `monitor` | string | only when captured via `--output` |
+| `session` | string | only when captured via `--session` |
+| `window` | string | only when captured via `--window` or `--session` |
+| `class` | string | only when captured via `--window` or `--session` |
+| `title` | string | only when captured via `--window` or `--session` |
+| `comment` | string | only when `--comment` was given |
+| `cursorDrawn` | bool | `Some(true)` only when `--cursor` was given, omitted otherwise — never `Some(false)` |
+| `desktop` | `{cursor, clients, layers}` | omitted only when the hyprctl snapshot call itself failed at capture time — a degraded field, never a failed capture |
+| `ocr` | object \| null | always present — `null` until `screen ocr` populates `{text, words}` |
+| `diff` | object \| null | always present — `null` until `screen diff` writes its result; written into the AFTER-capture's own sidecar only, never the before-capture's |
+
+### The scale contract
+
+`scale` promises **`1.0` always means 1:1** between image pixels and screen
+(logical/Hyprland) pixels — grim's own `-s` is forced explicitly on every
+capture so a monitor's compositor-level DPI scale can never silently leak
+into this field. The two directions: `screen = origin + image_px / scale`
+(image → screen, `--from-shot`'s and `screen ocr`'s transform, via
+`transform_point`) and `image_px = (screen - origin) * scale` (screen →
+image — the same forward relation `expected_image_size` applies to a
+region's `w`/`h` extent, applied here to a point). Both round to the
+nearest pixel (`f64::round`), never
+truncate. `region` exists specifically to prevent a lossy-inverse hazard:
+recovering the original capture rect by dividing `size` back through `scale`
+can drift by roughly 1px on either axis for about 1-in-`scale` widths/heights,
+so `region` records the exact logical rect once, at write time, rather than
+ever reconstructing it.
+
+### The `*-*` reason-code vocabulary
+
+Every `screen` verb's structured error carries a backend-agnostic
+`data.reason`. For most families the caller never learns which underlying
+tool (grim, tesseract, the pointer backend) did the work from the code
+alone, only from the free-text detail string if it wants to — those three
+are interchangeable and stay anonymous by design. `hyprctl-*` is the
+deliberate exception: `hyprctl` isn't a swappable backend, it IS the
+compositor being queried or dispatched against, so its two reason codes
+name it outright.
+
+- **`pointer-*`** — `unavailable`, `failed`, `drift`, `refused`,
+  `not-idle`, `out-of-bounds`, `nothing-saved`, `state-corrupt`,
+  `save-failed`
+- **`sidecar-*`** — `missing`, `corrupt`, `write-failed`
+- **`from-shot-*`** — `out-of-bounds`, `bad-scale`
+- **`text-*`** — `no-ocr`, `not-found`, `ambiguous`
+- **`diff-*`** — `decode-failed`, `size-mismatch`
+- **`capture-*`** — `unavailable`, `failed`, `not-found`
+- **`ocr-*`** — `unavailable`, `failed`
+- **`hyprctl-*`** — `unavailable`, `failed` — `HyprError::reason()`, reached
+  through `hypr_error_outcome` at 28 call sites across the `screen` module
+- **misc** — `dest-dir-unwritable`, `no-monitors`, `pick-cancelled`,
+  `pick-failed`, `session-not-found`, `session-no-window`,
+  `session-store-unreadable`, `window-not-found`
+
+`screen send` sits outside this vocabulary rather than in it: its envelope
+carries a `data.sidecarStatus` tag (`"ok"` / `"missing"` / `"corrupt"`,
+from `SidecarRead::tag()`) alongside the underlying door's whole response
+nested at `data.inner` — a failed send's real reason lives at
+`data.inner.reason` (e.g. `"unknown-agent"`), not at the envelope's own
+top level.
+
+### The pointer backend
+
+`zwlr_virtual_pointer_v1` is spoken natively, in-process, by
+`screen::synth` — no shell-out. Every `screen point` verb assembles a `Seq`
+of motion/button/wheel steps and hands it to one `synthesize()` call, which
+opens a Wayland connection, walks the `Seq`, and tears down. A press and its
+release always share a SINGLE `synthesize()` call (`drag`'s press-move-release
+is one atomic `Seq`, never two calls) — the stuck-button invariant only
+tracks held buttons for the duration of one call, so splitting press and
+release across two calls would leave a window where a crash or a killed
+process abandons a physically-held button. On every exit path out of that
+call, success or failure alike, `synthesize()` issues a release for every
+held code and flushes with `WouldBlock` retry; a flush that ultimately
+fails surfaces as `pointer-failed`.
+
+**Not yet live-proven.** Live verification against a real compositor is
+user-gated and pending (deliberately not done this workstream). The
+`wlrctl` package remains installed (`modules/dendrites/vision.nix`) as a
+fallback until that verification lands, even though nothing in `screen/`
+shells out to it any more — `screen::point`'s verbs all cross the
+pointer-synthesis boundary through `screen::synth` in-process today.
+
+---
+
 ## Versioning
 
 - A contract version is a single integer, tracked in this file's section

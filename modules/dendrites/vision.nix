@@ -32,11 +32,15 @@
     environment.systemPackages = with pkgs; [
       grim # non-interactive capture: full screen or exact geometry
       slurp # region-select primitive (emits geometry on stdout)
-      # Pointer synthesis for `aoide screen point` (screen phase 2): real
+      # Pointer synthesis for `aoide screen point`: real
       # wl_pointer.motion/button/axis events via zwlr_virtual_pointer_manager_v1,
       # never a cursor warp (hyprctl dispatch movecursor warps — no hover
-      # states fire, an agent could never verify one). The ONLY tool
-      # `screen/point.rs`'s `run_wlrctl_pointer` shells out to.
+      # states fire, an agent could never verify one). Synthesis is
+      # in-process now (`screen::synth` speaks the Wayland protocol
+      # directly, no shell-out — CONTRACTS.md §8); wlrctl remains installed
+      # here as a fallback until that native backend is live-verified
+      # against a real compositor (user-gated, pending), at which point
+      # it can then be removed.
       wlrctl
       # OCR engine for `aoide screen ocr` (screen phase 3), eng-only
       # trained data: `pkgs.tesseract` unwrapped pulls EVERY language's

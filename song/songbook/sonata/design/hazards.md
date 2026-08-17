@@ -289,3 +289,36 @@ resetting to zero.
   reliable channel and survives restarts.
 - **Do not declare a visual change done without looking at it.** `grim` the
   screen, crop with `magick`, read the PNG back, judge it yourself first.
+
+---
+
+## 7. `aoide screen point` and `screen diff`
+
+- **A stuck button is a real hazard, not a hypothetical.** A virtual
+  pointer press that never gets a matching release leaves a button
+  logically held on a desk a human may be using — every subsequent click
+  anywhere reads as a drag from that point. `screen::synth::synthesize`
+  tracks which button codes are down as it walks a synthesized sequence
+  and, on EVERY exit path out of that walk — success or failure alike —
+  issues a release for every held code and flushes with `WouldBlock`
+  retry before it ever tears down the connection; a flush that ultimately
+  fails surfaces as `pointer-failed` rather than silently leaving the
+  button held. `screen point drag` presses and releases inside ONE such
+  call (never two separate `move`+`click`-shaped calls), because the
+  tracking only lives for the duration of a single call — splitting press
+  and release across two would leave a window where a crash or a killed
+  process abandons a physically-held button with nothing left watching
+  it. **If a button ever does read as stuck** (the flush-failure gap
+  above, or a bug in this invariant): one full `aoide screen point click
+  <button>` — a complete press-then-release pair — should clear it, since
+  the compositor is expected to track button state by code, not by which
+  process pressed it — expected, not yet live-verified; this workstream
+  has zero live runs against a real compositor to date.
+- **A `--cursor` shot pollutes a `screen diff`.** `screen diff` pixel-diffs
+  two capture buffers; a composited cursor drawn INTO the image (`shot
+  --cursor`) means a pure pointer move with no other visual change registers
+  as a pixel change purely from the cursor glyph sliding across the frame —
+  `screen diff`'s `changed: true` would then be measuring mouse position,
+  not UI state. Shoot without `--cursor` (the default) for any capture that
+  will later feed `screen diff`; reserve `--cursor` for a shot meant to show
+  a human where the pointer is.

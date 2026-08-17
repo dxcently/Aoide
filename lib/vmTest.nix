@@ -217,7 +217,25 @@ pkgs.testers.runNixOSTest {
     # new `screen ocr` command (Phase 3 — tesseract text extraction) — reached
     # 69; bumped by 1 for the new `screen send` command (Phase 5 — hand a
     # capture to a conducted session or a registered A2A agent, routed
-    # through the existing `graph send`/`a2a agent send` gates) — now 70.
+    # through the existing `graph send`/`a2a agent send` gates) — reached 70;
+    # bumped by 1 for `graph permit` (the herald's approve/deny summons,
+    # commit 717708a — landed in this same shared tree while Phase B below
+    # was in flight; that commit updated the golden snapshot in
+    # crates/cli/src/registry.rs but missed this tripwire, so this count was
+    # briefly wrong on disk between the two — caught and fixed here rather
+    # than left silently stale) — reached 71; bumped by 2 for the new
+    # `screen point drag`/`screen point hover` commands (Phase B of the
+    # pointer-emulation workstream, khoa 2026-08-17 — atomic
+    # press-move-release drag, and a hover verb that reports which layer
+    # surfaces/windows appeared/disappeared/retitled while parked) — reached
+    # 73; bumped by 1 for the new `screen diff` command (Phase E of the
+    # pointer-emulation workstream, same day — mechanical act-verification:
+    # re-shoot a prior capture's identical rect, pixel-diff the two images,
+    # report a hyprctl inventory delta alongside it) — reached 74; bumped by
+    # 1 for the new `screen point text` command (Phase F of the
+    # pointer-emulation workstream, khoa 2026-08-17 — click a word/phrase an
+    # earlier `screen ocr` pass already located, by name instead of a
+    # picked-by-eye pixel) — now 75.
     schema_raw = machine.succeed("aoide schema --json")
     schema_doc = json.loads(schema_raw)
     # schema --json emits a JSON Outcome envelope:
@@ -229,8 +247,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 70, (
-        f"expected 70 commands, got {cmd_count}.  "
+    assert cmd_count == 75, (
+        f"expected 75 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

@@ -48,8 +48,10 @@ offline, vendored dependency set unchanged — the same shape as Hermes-agent's
 self-registering tool registry and Claude Code's discrete-tools-behind-a-thin-
 dispatch design.
 
-The command surface itself is unchanged by this shape: **60 leaves**
-(`aoide schema --json | jq '.commands | length'`):
+The command surface itself is unchanged by this shape: **75 leaves**
+(`aoide schema --json | jq '.commands | length'`). The table below sums to
+74 — the `graph` row still says 15 while `graph.*` is actually 16, one
+short pending `graph permit`'s own docs pass:
 
 | Group | Leaves | Real / stub |
 |---|---|---|
@@ -73,6 +75,7 @@ The command surface itself is unchanged by this shape: **60 leaves**
 | `usage` | 1 | real |
 | `hooks install` | 1 | real |
 | `quickshell reload` | 1 | real — Quickshell IPC hot-reload trigger (`CONTRACTS.md` §5) |
+| `screen` group (14 leaves — below) | 14 | real — desktop capture, OCR, pointer synthesis, act-verification (`CONTRACTS.md` §8) |
 
 The **`a2a`** group is the [[A2A-Door]] — the third door onto aoide. `a2a
 serve` raises the A2A (Agent2Agent) JSON-RPC/HTTP server (a discoverable
@@ -221,6 +224,20 @@ watcher/async runtime) that dispatches every action through the same
 `dispatch()` the CLI and MCP doors use — never a second implementation, so the
 one audit log can't tell a conductor keypress from a typed command.
 
+### The `screen` group — capture, OCR, pointer synthesis, verification
+
+`info` / `shot` / `ocr` / `diff` / `send` plus nine `screen point <verb>`s
+(14 leaves, registered last/newest in `commands::all()`) are aoide's
+computer-use surface: shoot a downscaled frame (`shot --fit`), ground a
+target on it (`ocr`, or a picked pixel), act via a real synthesized pointer
+event (`point move`/`click`/`drag`/`hover`/`scroll`/`text` — never a warp),
+and verify the act landed (`diff`, a mechanical pixel-plus-inventory
+measurement, not an LLM guess). Pointer synthesis speaks
+`zwlr_virtual_pointer_v1` natively, in-process — no shell-out. See
+[[Screen-Control]] for the verb-by-verb reference and the Anthropic
+computer-use vocabulary mapping; `CONTRACTS.md` §8 for the capture
+sidecar's field shape and the reason-code vocabulary.
+
 ### Open schema gap
 
 The compositor keybind `SUPER+ESCAPE` (lock) still invokes `aoide shell
@@ -279,6 +296,7 @@ the log location, else the `aoide.auditLog` default applies.
 - [[Agent-Interface]]
 - [[A2A-Door]]
 - [[Peer-Federation]]
+- [[Screen-Control]]
 - [[Session-Graph]]
 - [[Terminal-Commander]]
 - [[Gadget-Dock]]
