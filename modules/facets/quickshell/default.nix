@@ -204,11 +204,15 @@ in
     # stands down for these surfaces (concepts/Notes).
     aoide.surfaces = {
       bar.owner = "quickshell";
-      # dunst owns notification DELIVERY now (the popups are its); Quickshell
-      # keeps only the dock's herald center, which is part of agentWidgets.
-      # Recording "dunst" here also keeps Stylix's dunst/mako targets stood
-      # down, so the dendrite's dunstrc is the only theming applied.
-      notifications.owner = "dunst";
+      # dunst owns notification DELIVERY — the bus name, history, stacking and
+      # the pause levels — but it draws NOTHING (`skip_display` on every rule;
+      # modules/dendrites/dunst.nix). Quickshell owns the SURFACE: the `herald`
+      # popup slot and the dock's `herald-center` ledger, both drawn from
+      # stage/herald.json. The stand-down below keys on "not stylix", so
+      # Stylix's dunst/mako targets stay disabled either way — which is still
+      # what we want, since a Stylix-generated dunstrc would fight the
+      # dendrite's.
+      notifications.owner = "quickshell";
       launcher.owner = "quickshell";
       osd.owner = "quickshell";
       lockscreen.owner = "quickshell";

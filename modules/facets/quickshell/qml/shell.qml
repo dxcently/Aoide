@@ -164,9 +164,15 @@ ShellRoot {
     //   - powermenu (SurfaceSlot): the powermenu (bar clef 𝄞 → powermenu.toggle()),
     //                              song/songbook/sonata/widgets/powermenu.qml
     //   - AoideWallpaperPicker   : SUPER+W wallpaper switcher (global-shortcut)
+    //   - herald (SurfaceSlot)   : the notification popup,
+    //                              song/songbook/sonata/widgets/herald.qml
     // (No AoideNotifications anymore — dunst owns org.freedesktop.Notifications
-    // and draws the popups; the herald lives on as the `herald-center` slot in
-    // AoidePanel's dock column, reading `dunstctl history`.)
+    // as the DAEMON, but draws nothing. It feeds `aoide herald push`, the
+    // shellbridge files each notification into stage/herald.json, and the
+    // `herald` slot below draws the popup — with the images and progress bars
+    // inside the frame, and real hit-tested approve/deny buttons on a
+    // permission summons, none of which dunst could draw itself. The dock's
+    // `herald-center` slot reads the same file as a ledger.)
     AoideClipboard { id: clipboard }
     // The Grimoire's usage ledger — stays in the facet (a data seam, not
     // chrome, CONTRACTS.md §4), injected into the launcher slot as an extra.
@@ -190,6 +196,16 @@ ShellRoot {
         bridge: bridge
         stagingEngine: stagingEngine
         extraProps: ({ clipboard: clipboard, ledger: ledger })
+    }
+    // herald: the notification popup (see the overlay-surfaces note above) —
+    // the slot's PanelWindow watches stage/herald.json and stays dormant
+    // while the ledger is empty.
+    SurfaceSlot {
+        id: heraldSlot
+        slot: "herald"
+        notes: notes
+        bridge: bridge
+        stagingEngine: stagingEngine
     }
     // The declared widget-type registry's runtime half (CONTRACTS.md §5;
     // aoide.arrangement.widgets, registry.json): hosts one SurfaceSlot per

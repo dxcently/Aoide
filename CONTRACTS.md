@@ -473,6 +473,41 @@ unanchored).
 }
 ```
 
+### `song/stage/herald.json` — **v0**
+
+The notification ledger the Quickshell herald draws from. dunst owns
+`org.freedesktop.Notifications` but draws NOTHING (`skip_display` on every
+rule); it hands each notification to `aoide herald push` through its `script`
+hook, which forwards it over the shellbridge socket. **The shellbridge daemon
+is the single writer** — dunst runs its scripts asynchronously, so two
+notifications arriving together would otherwise race a read-modify-write and
+one would be lost. QML only ever READS this file; a click sends a socket
+command (`heraldverdict` / `heralddismiss`) and never writes.
+
+Newest LAST. A non-empty `stackTag` replaces the entry holding the same tag
+rather than appending, and the ledger is capped at 20 (matching the dunstrc's
+`history_length`). `progress` is `-1` for "no value"; `timeoutMs` is `0` for
+"never expires" — the QML herald owns the dismiss clock, because a
+notification dunst never displays is never expired by dunst either.
+
+`kind` is `toast` or `summons`. A summons is an agent blocked on a permission
+prompt, published by `aoide graph permit` rather than by dunst; it carries the
+waiting `sessionId` and is drawn with real approve/deny buttons whose verdict
+routes back through the shellbridge to `graph send`, the one gated injection
+door. Sender text is DATA on both sides of the seam: carried verbatim, never
+parsed as markup or as a command.
+
+```json
+{
+  "schemaVersion": "0",
+  "notifications": [
+    { "id": "7", "app": "notify-send", "summary": "…", "body": "…", "icon": "/nix/store/…png",
+      "urgency": "critical", "progress": 40, "category": "", "stackTag": "",
+      "timeoutMs": 0, "receivedAt": "2026-08-17T12:00:00Z", "kind": "toast", "sessionId": "" }
+  ]
+}
+```
+
 ### `state/usage.json` — **v0**
 
 Account/usage runtime — lives in the gitignored root-runtime `state/` dir

@@ -72,7 +72,8 @@ Every widget QML file, whatever slot it fills, must follow this shape:
 | slot | anchor kind | host anchor | extras | fallback |
 | --- | --- | --- | --- | --- |
 | `calendar` | `WidgetSlot` | `bar.qml` (sonata) — the clock's calendar popout (`WidgetSlot { slot: "calendar" }`) | none | none — an unauthored `calendar` slot renders nothing (the popout itself gates on `stagingEngine.has(...)` before opening) |
-| `notifications` | retired 2026-08-16 — dunst owns `org.freedesktop.Notifications` and draws the popups; the Quickshell `NotificationServer` surface (AoideNotifications.qml) is gone | — | — |
+| `notifications` | retired 2026-08-16 — the Quickshell `NotificationServer` surface (AoideNotifications.qml) is gone; dunst owns `org.freedesktop.Notifications`. Superseded by `herald` below, which draws the popup WITHOUT owning the bus name | — | — |
+| `herald` | `SurfaceSlot` | `shell.qml` (facet) — `SurfaceSlot { slot: "herald" }`; the notification popup, drawn from `song/stage/herald.json` (dunst draws nothing — see `modules/dendrites/dunst.nix`) | none | none — sonata's `widgets/herald.qml` is the floor |
 | `herald-center` | `WidgetSlot` | `AoidePanel.qml` (facet) — the dock's gadget column (`WidgetSlot { slot: "herald-center" }`), under the Conductor | none | none — sonata's own `widgets/herald-center.qml` IS the baseline floor; no facet-side Component fallback is wired |
 | `powermenu` | `SurfaceSlot` | `shell.qml` (facet) — `SurfaceSlot { slot: "powermenu" }`; the bar's clef calls `.item.toggle()` | none | none — sonata's `widgets/powermenu.qml` is the floor |
 | `launcher` | `SurfaceSlot` | `shell.qml` (facet) — `SurfaceSlot { slot: "launcher" }` | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the facet, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |

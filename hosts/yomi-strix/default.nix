@@ -73,8 +73,9 @@
   # Text clipboard history provider (cliphist + wl-clipboard) with QML picker.
   aoide.clipboard.enable = true;
 
-  # Notification daemon — dunst serves/draws popups; the herald lives on as a
-  # dock notification center polling `dunstctl history`.
+  # Notification daemon — dunst owns org.freedesktop.Notifications but draws
+  # nothing; it feeds `aoide herald push`, and the Quickshell herald draws the
+  # popup and the dock ledger.
   aoide.dunst.enable = true;
 
   # Audio backend (PipeWire + WirePlumber) — real volume control for the bar.

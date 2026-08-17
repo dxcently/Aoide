@@ -1,49 +1,39 @@
-// herald-center.qml — sonata's "herald-center" slot: the notification CENTER,
-// a Tuscan stele in the dock. The herald's SECOND form: since 2026-08-16 dunst
-// owns org.freedesktop.Notifications and draws the popups themselves (the
-// aoide.dunst dendrite); this widget is what remains on the Quickshell side —
-// the standing ledger of what was heard, polled out of `dunstctl history`
-// (JSON) every 5s.
+// herald-center.qml — sonata's "herald-center" slot: the notification
+// LEDGER, the herald's standing record in the dock (WidgetSlot host,
+// AoidePanel.qml — root is an Item that sizes itself off its content).
 //
-// khoa, 2026-08-16 (second pass): the first center draft invented a leaner
-// row grammar; khoa preferred the RETIRED popup card's design, so every
-// entry below is that card, verbatim grammar at ledger scale — the box-
-// drawing top frame with the program name in its label slot, the plain
-// cleave rule, the bold serif title over the hairline-indented context, the
-// ledger line (urgency kaomoji left, arrival clock right in gold), and the
-// closing └─┤ urgency ├ … 𝄂 ┘ barline frame, all wrapped in the one outer
-// stele carrying the ❧ / H E R A L D entablature and the Tuscan double-rule
-// frieze. Critical entries keep the old card's two overrides: terracotta
-// ink throughout, and the breathing opacity pulse.
+// The popup (herald.qml) is the herald CRYING the news; this is the roll he
+// cried it FROM: one self-framed stele in the pantheon family (opaque
+// marble, 2px ink border, 1px inset signature keyline, cast shadow, radius
+// 0, colour only from notes.*), carrying every record still on the books as
+// a compact manuscript row — the colonnade's DeviceRow grammar: margin
+// mark, serif name, mono gloss, hairline rule, hover promotes the rule.
 //
-// khoa, 2026-08-17 (third pass): the second pass had quietly shrunk the
-// middle band (5px cleave, 13px title, 8px/2px context indent, 16px
-// ledger) and the card-feel went with it — the ledger's kaomoji struck
-// through its own rule. Restored the retired card's exact metrics: 9px
-// cleave, 14px bold serif title with 2px top pad, context hairline with
-// the 10px indent / 5px drop at 12px, 18px ledger line. Only the icon
-// box (below) deviates from the old card, and it was khoa's own ask.
+//   · SIGNATURE — RUST `notes.base0F`, shared with the popup: one family,
+//     one hue (the same one-signature-per-family rule the calendar's clay
+//     and the colonnade's murex follow).
+//   · CROWN — ❧ U+2767 pinned to "Linux Libertine O" (Noto Serif has no
+//     U+2767; unpinned it falls back to a fake-bolded blob — live-verified
+//     on this stack). Regular weight. The mono frame bands never carry ❧ —
+//     JetBrainsMono is not proven to hold it, and bar.qml's glyph lesson
+//     says ANY unproven non-ASCII glyph needs a live render check first.
+//   · ROWS — newest first. The margin mark is the urgency register: a dim
+//     interpunct for low, the rust fleuron for normal, the terracotta
+//     fleuron (breathing, the bar's urgent-pulse idiom) for critical, the
+//     gold fleuron for a summons. Icons sit INSIDE the row as a 16px mark;
+//     progress is the hairline aegean gauge INSIDE the row band. Clicking a
+//     toast row dismisses it ({ cmd: "heralddismiss" }); a summons row
+//     carries its own hit-tested approve / deny chips instead and cannot be
+//     waved away.
+//   · Sender text is UNTRUSTED DATA — every Text rendering it is
+//     PlainText; `<b>` displays literally.
 //
-// khoa, 2026-08-16 (icons RE-admitted): the retired card explicitly dropped
-// sender icons (its header tells that story); the center brings them back —
-// each entry shows the app's PROVIDED icon/image: dunst's `icon_path` leaf
-// first (an absolute path, or an icon name resolved through the theme via
-// Quickshell.iconPath), then a theme lookup by desktop_entry / appname, then
-// the ❧ crown glyph as the fallback mark. Only the icon IMAGE is trusted
-// from the payload, and only ever as an Image source — house rule 4: all
-// other history fields are rendered strictly as TEXT (no eval, no command
-// construction, Text.PlainText throughout).
-//
-// Fixed slot contract: `notes`/`bridge` always (slots.md) — bridge goes
-// unused today, declared per the contract. NO `notification` extra anymore:
-// the data source is the daemon's history, not a server model.
-//
-// dunstctl history shape (dunst ≥1.9): {"data":[[ {…}, … ]]} — one inner
-// array, oldest first, every leaf wrapped as {"type":…,"data":…}. Leaves we
-// read: appname, summary, body, urgency ("LOW"/"NORMAL"/"CRITICAL"),
-// timestamp (µs since epoch — converted defensively), desktop_entry,
-// icon_path. Anything absent or unparseable degrades to the resting
-// whisper, never an error.
+// Read side: song/stage/herald.json via FileView (bar.qml's sessions.json
+// watch). Newest LAST in the array, capped at 20 daemon-side. This surface
+// never expires anything — the popup owns the dismiss clock; the ledger
+// only drops a record when a human dismisses it (row click, or the
+// [ notifs ]/[ clear ] tag → heralddismiss "*") or answers it (heraldverdict,
+// auto-dismisses daemon-side).
 
 import QtQuick
 import Quickshell
@@ -52,460 +42,547 @@ import Quickshell.Io
 Item {
     id: root
 
+    // ── Note + bridge dependencies (injected by WidgetSlot) ────────────────
     required property var notes
-    required property var bridge         // unused today — fixed slot contract
+    required property var bridge
 
-    readonly property color signature: root.notes.base0F   // rust (Tuscan)
-    readonly property color urgent: root.notes.notifUrgent
-
+    // ── Type voices (the pantheon family) ──────────────────────────────────
     readonly property string faceSerif: "Noto Serif"
     readonly property string faceMono:  "JetBrainsMono Nerd Font"
+    readonly property string faceMusic: "Noto Music"
+    readonly property string faceCrown: "Linux Libertine O"   // ❧ lives here ONLY
+
+    readonly property color sig: notes.base0F        // rust — the family signature
+    readonly property color ink: notes.paletteFg
+    readonly property color aegean: notes.holoBlue   // information (progress)
+    readonly property color gold: notes.paletteAccent
+    readonly property color fire: notes.paletteUrgent
 
     function withA(cstr, a) {
         var c = Qt.color(cstr)
         return Qt.rgba(c.r, c.g, c.b, a)
     }
 
-    // ── The heard ledger ───────────────────────────────────────────────────
-    property var entries: []
-    property bool heardOnce: false   // dunstctl has answered at least once
-
-    function leaf(v) {
-        return (v !== null && typeof v === "object" && v.data !== undefined) ? v.data : v
-    }
-    function toMs(t) {
-        t = Number(t) || 0
-        if (t > 1e14) return t / 1000     // µs → ms
-        if (t > 1e12) return t            // already ms
-        return t * 1000                   // s → ms
-    }
-    function parseHistory(t) {
-        if (!t || ("" + t).trim().length === 0) return
-        var doc
-        try { doc = JSON.parse(t) } catch (e) { return }
-        var inner = doc && doc.data && doc.data[0]
-        if (!inner || !inner.length) { root.entries = []; root.heardOnce = true; return }
-        var out = []
-        var start = Math.max(0, inner.length - 20)
-        for (var i = inner.length - 1; i >= start; i--) {   // newest first
-            var n = inner[i]
-            out.push({
-                app: ("" + (leaf(n.appname) || "notice")).trim(),
-                entry: ("" + (leaf(n.desktop_entry) || "")).trim(),
-                icon: ("" + (leaf(n.icon_path) || "")).trim(),
-                summary: ("" + (leaf(n.summary) || "")).trim(),
-                body: ("" + (leaf(n.body) || leaf(n.message) || "")).trim(),
-                urgency: ("" + leaf(n.urgency)).toUpperCase(),
-                atMs: root.toMs(leaf(n.timestamp))
-            })
-        }
-        root.entries = out
-        root.heardOnce = true
-    }
-
-    Process {
-        id: histProc
-        command: ["dunstctl", "history"]
-        stdout: StdioCollector {
-            id: histOut
-            onStreamFinished: root.parseHistory(histOut.text)
-        }
-    }
-    Timer {
-        interval: 5000
-        repeat: true
-        running: true
-        triggeredOnStart: true
-        onTriggered: if (!histProc.running) histProc.running = true
-    }
-
-    // ── Smart payload reading (ported from the retired popup card) ─────────
-    // Senders arrive in two shapes:
-    //   1. Proper freedesktop: appName + summary (title) + body (message).
-    //   2. Terminal-forwarded OSC-9: the WHOLE "Title: message" string lands
-    //      in `summary`, `body` is empty, and appName is the forwarder, not
-    //      the real program.
-    // parentTitle(): desktop_entry first (".desktop" trimmed), then appname,
-    // then the "notice" floor. titleOf()/contextOf(): when the body is
-    // empty, split a "Title: message" summary at its first ": " so the
-    // notif's own title and its message render as two differentiated tiers.
-    function strippedEntry(e) {
-        var s = (e || "").trim()
-        if (s.slice(-8) === ".desktop") s = s.slice(0, -8)
-        return s
-    }
-    function parentTitle(e) {
-        var d = root.strippedEntry(e.entry)
-        if (d.length > 0) return d.length > 28 ? d.slice(0, 27) + "…" : d
-        var a = e.app
-        if (a.length > 0) return a.length > 28 ? a.slice(0, 27) + "…" : a
-        return "notice"
-    }
-    function splitIdx(e) {
-        var s = e.summary
-        if (s.length === 0 || e.body.length > 0) return -1
-        var idx = s.indexOf(": ")
-        if (idx <= 5 || idx >= 60) return -1 // too short/too long to be a title
-        if (s.slice(0, idx).indexOf(" ") <= 0) return -1 // single word — not a title
-        return idx
-    }
-    function titleOf(e) {
-        var idx = root.splitIdx(e)
-        return idx > 0 ? e.summary.slice(0, idx) : e.summary
-    }
-    function contextOf(e) {
-        if (e.body.length > 0) return e.body
-        var idx = root.splitIdx(e)
-        return idx > 0 ? e.summary.slice(idx + 2) : ""
-    }
-
-    // ── Icon resolution — the app's PROVIDED icon/image ────────────────────
-    // icon_path first: absolute path straight, bare name through the theme.
-    // Then theme lookups by desktop_entry, then appname. Empty = no icon
-    // resolved; the delegate falls back to the ❧ crown glyph (the OLD
-    // herald's mark). Every theme lookup passes check=true so a MISSING icon
-    // resolves to "" (→ ❧) instead of the image://icon/ checkerboard
-    // placeholder iconPath otherwise always returns (khoa, 2026-08-17).
-    function iconSource(e) {
-        var p = e.icon
-        if (p.length > 0) {
-            if (p.charAt(0) === "/") return "file://" + p
-            var r = Quickshell.iconPath(p, true)
-            if (r.length > 0) return r
-        }
-        var d = root.strippedEntry(e.entry)
-        if (d.length > 0) {
-            var rd = Quickshell.iconPath(d, true)
-            if (rd.length > 0) return rd
-        }
-        if (e.app.length > 0) {
-            var ra = Quickshell.iconPath(e.app.toLowerCase(), true)
-            if (ra.length > 0) return ra
-        }
-        return ""
-    }
-
-    // Same kana/punctuation vocabulary the retired card proved safe (no
-    // Thai/Hangul — tofu-adjacent junk in live testing, its note said).
-    function kaomojiFor(urg) {
-        if (urg === "CRITICAL") return "(ノ｀ｏ´)ノ"   // alarmed — a critical herald
-        if (urg === "LOW") return "(´ω｀)"            // at ease, unhurried
-        return "( ・ω・)ノ"                           // attentive, on the case
-    }
-    function urgencyWord(urg) {
-        if (urg === "CRITICAL") return "critical"
-        if (urg === "LOW") return "low"
-        return "normal"
-    }
-    // arrival clock — the ledger's right-hand ink (the entry's own stored
-    // timestamp, not "now": this is a history, the time it WAS heard)
-    function clockOf(ms) {
-        if (ms <= 0) return "--:--"
-        var d = new Date(ms)
-        var h = d.getHours(), m = d.getMinutes()
-        return (h < 10 ? "0" + h : h) + ":" + (m < 10 ? "0" + m : m)
-    }
-
+    // WidgetSlot sizes itself off this item; the dock pins the slot's width,
+    // so width follows the host (bar.qml's parent-width idiom) and height is
+    // this file's own content.
     width: parent ? parent.width : 360
-    implicitHeight: stele.height + 5   // +5 clears the cast shadow's overhang
+    implicitHeight: stele.height + 5     // +5 clears the cast shadow's overhang
 
-    // cast shadow — shared pantheon idiom ───────────────────────────────────
+    // ── The ledger file — read-only, watched ───────────────────────────────
+    readonly property string heraldPath:
+        Quickshell.env("HOME") + "/Aoide/song/stage/herald.json"
+    property var records: []
+    FileView {
+        id: heraldFile
+        path: root.heraldPath
+        watchChanges: true
+        onFileChanged: heraldFile.reload()
+        onTextChanged: {
+            try {
+                var d = JSON.parse(heraldFile.text())
+                root.records = (d && d.notifications) ? d.notifications : []
+            } catch (e) { /* absent/garbage → hold */ }
+        }
+        Component.onCompleted: heraldFile.reload()
+    }
+    // newest first for the roll
+    readonly property var rows: {
+        var out = []
+        for (var i = root.records.length - 1; i >= 0; i--)
+            if (root.records[i] && root.records[i].id !== undefined)
+                out.push(root.records[i])
+        return out
+    }
+
+    function dismiss(id) {
+        root.bridge.sendCommand({ cmd: "heralddismiss", id: "" + id })
+    }
+    function verdict(sessionId, word) {
+        root.bridge.sendCommand({ cmd: "heraldverdict",
+                                  id: "" + sessionId, verdict: word })
+    }
+
+    // ── Relative arrival time, off a 30s tick ──────────────────────────────
+    property date now: new Date()
+    Timer {
+        interval: 30000; repeat: true; running: root.rows.length > 0
+        onTriggered: root.now = new Date()
+    }
+    function relTime(iso) {
+        if (!iso) return ""
+        var t = new Date("" + iso)
+        if (isNaN(t.getTime())) return ""
+        var s = Math.floor((root.now.getTime() - t.getTime()) / 1000)
+        if (s < 45) return "now"
+        if (s < 3600) return Math.round(s / 60) + "m"
+        if (s < 86400) return Math.round(s / 3600) + "h"
+        return Math.round(s / 86400) + "d"
+    }
+
+    function markColor(r) {
+        if (r && r.kind === "summons") return root.gold
+        var u = r ? ("" + r.urgency) : "normal"
+        if (u === "critical") return root.fire
+        if (u === "low") return root.withA(root.ink, 0.3)
+        return root.withA(root.sig, 0.85)
+    }
+
+    // cast shadow — shared pantheon idiom
     Rectangle {
         anchors.fill: stele
         anchors.leftMargin: 4; anchors.topMargin: 5
         anchors.rightMargin: -4; anchors.bottomMargin: -5
         radius: 0
-        color: root.withA(root.notes.paletteFg, 0.22)
+        color: root.withA(root.ink, 0.22)
     }
 
+    // ══ THE STELE ═══════════════════════════════════════════════════════════
     Rectangle {
         id: stele
         width: parent.width
         anchors.top: parent.top
         radius: 0
-        color: root.notes.notifBg
-        border.color: root.notes.paletteFg
+        color: root.notes.paletteBg
+        border.color: root.ink
         border.width: 2
         height: content.implicitHeight + 20
 
-        // inset keyline — the herald's rust signature
-        Rectangle {
+        Rectangle {                                   // inset rust keyline
             anchors.fill: parent; anchors.margins: 4
             radius: 0; color: "transparent"
-            border.color: root.signature; border.width: 1
+            border.color: root.withA(root.sig, 0.8); border.width: 1
         }
 
         Column {
             id: content
             anchors { left: parent.left; right: parent.right; top: parent.top }
-            anchors.margins: 10
+            anchors.margins: 11
             spacing: 4
 
-            // ── ENTABLATURE: crown + carved name + tally ─────────────────
+            // ── ENTABLATURE: ❧ crown + carved name + tag ────────────────
             Item {
-                width: parent.width
-                height: 24
-
+                width: parent.width; height: 22
+                Rectangle {                  // deeper marble band behind the
+                    anchors.fill: parent     // inscription — the dock gadgets'
+                    anchors.margins: -2      // own highlight (ConductorGadget)
+                    color: root.withA(root.ink, 0.05)
+                }
                 Text {
+                    id: crown
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     text: "❧"
-                    // Pinned, not faceSerif: Noto Serif has no U+2767, so this
-                    // rode font fallback. Libertine's open fleuron (regular —
-                    // bold smears it) is the crown khoa picked from a rendered
-                    // lineup (2026-08-17); the popup's dunstrc pins the same.
-                    font.family: "Linux Libertine O"
+                    font.family: root.faceCrown       // pinned — see header
                     font.pixelSize: 20
-                    color: root.signature
+                    color: root.sig
                 }
                 Text {
-                    anchors.centerIn: parent
-                    text: "H E R A L D"
-                    font.family: root.faceSerif
-                    font.pixelSize: 14
-                    font.weight: Font.DemiBold
-                    font.letterSpacing: 3
-                    color: root.notes.paletteFg
+                    anchors.left: crown.right; anchors.leftMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "HERALD"
+                    font.family: root.faceSerif; font.pixelSize: 15
+                    font.weight: Font.DemiBold; font.letterSpacing: 4
+                    color: root.ink
                 }
-                Text {                           // the tally — gold ink
+                // The tag slot IS the clear control (khoa, 2026-08-17). It
+                // names what the ledger is at rest and what clicking it does
+                // under the pointer, so the one affordance costs no extra
+                // chrome — the old free-floating chip on the frame band below
+                // is gone.
+                //
+                // The width is pinned to the LONGER of the two labels so the
+                // swap cannot jiggle the right edge of the inscription band;
+                // a right-anchored Text that resizes on hover twitches.
+                TextMetrics {
+                    id: tagMetrics
+                    font.family: root.faceMono; font.pixelSize: 10
+                    text: "[ notifs ]"
+                }
+                Text {
+                    id: ledgerTag
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    text: root.entries.length + " heard"
-                    font.family: root.faceMono
-                    font.pixelSize: 10
-                    color: root.withA(root.notes.paletteAccent, 0.95)
+                    width: tagMetrics.width
+                    horizontalAlignment: Text.AlignRight
+                    readonly property bool armed: tagMa.containsMouse
+                                                  && root.rows.length > 0
+                    text: ledgerTag.armed ? "[ clear ]" : "[ notifs ]"
+                    font.family: root.faceMono; font.pixelSize: 10
+                    color: root.withA(root.sig, ledgerTag.armed ? 1.0 : 0.9)
+                    MouseArea {
+                        id: tagMa
+                        anchors.fill: parent; anchors.margins: -3
+                        hoverEnabled: true
+                        // Nothing to clear → not a button, and the label never
+                        // offers an action that would do nothing.
+                        enabled: root.rows.length > 0
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.dismiss("*")
+                    }
                 }
             }
 
-            // ── Tuscan frieze — a PLAIN double rule, deliberately un-
-            // ornamented (that bareness IS the Tuscan order) ──────────────
+            // ── frieze — a running fleuron vine: stem + alternating leaves ─
+            Canvas {
+                width: parent.width; height: 9
+                onWidthChanged: requestPaint()
+                onPaint: {
+                    var ctx = getContext("2d")
+                    ctx.reset(); ctx.clearRect(0, 0, width, height)
+                    ctx.strokeStyle = root.withA(root.sig, 0.7)
+                    ctx.lineWidth = 1.1
+                    var cy = height / 2, period = 14
+                    ctx.beginPath()
+                    ctx.moveTo(2, cy); ctx.lineTo(width - 2, cy)   // the stem
+                    ctx.stroke()
+                    var i = 0
+                    for (var x = 8; x < width - 8; x += period, i++) {
+                        var up = (i % 2 === 0) ? -1 : 1            // alternating
+                        ctx.beginPath()                            // leaf curl
+                        ctx.moveTo(x, cy)
+                        ctx.quadraticCurveTo(x + 3.5, cy + up * 3.6,
+                                             x + 7, cy + up * 1.2)
+                        ctx.quadraticCurveTo(x + 4.5, cy + up * 1.8, x + 3, cy)
+                        ctx.stroke()
+                    }
+                }
+            }
+
+            // ── box-drawing top frame — an unbroken rule now that the clear
+            // control lives in the entablature's tag slot above ─────────────
             Item {
-                width: parent.width
-                height: 5
-                Rectangle { width: parent.width; height: 1; y: 0; color: root.withA(root.signature, 0.7) }
-                Rectangle { width: parent.width; height: 1; y: 4; color: root.withA(root.signature, 0.35) }
+                width: parent.width; height: 15
+                Text {
+                    id: tfL
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "┌─┤ ledger ├"
+                    font.family: root.faceMono; font.pixelSize: 11
+                    color: root.withA(root.sig, 0.95)
+                }
+                Text {
+                    id: tfR
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "┐"; font.family: root.faceMono; font.pixelSize: 11
+                    color: root.withA(root.sig, 0.95)
+                }
+                Rectangle {
+                    anchors.left: tfL.right
+                    anchors.right: tfR.left
+                    anchors.leftMargin: 2; anchors.rightMargin: 5
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenterOffset: 1
+                    height: 1; color: root.withA(root.sig, 0.55)
+                }
             }
 
-            // ── the resting whisper (empty / dunst absent) ───────────────
-            Text {
-                visible: root.entries.length === 0
+            // ── the roll — manuscript rows, newest first ───────────────────
+            Column {
                 width: parent.width
-                horizontalAlignment: Text.AlignHCenter
-                text: root.heardOnce ? "the herald rests — nothing heard"
-                                     : "the herald is deaf (dunst not answering)"
-                font.family: root.faceSerif
-                font.italic: true
-                font.pixelSize: 11
-                color: root.withA(root.notes.paletteFg, 0.45)
-                topPadding: 6; bottomPadding: 6
-            }
+                spacing: 0
 
-            // ── the heard entries — newest first, each wearing the retired
-            // popup card's full frame grammar at ledger scale ─────────────
-            Repeater {
-                model: root.entries
-                delegate: Item {
-                    id: entry
-                    width: parent.width
-                    height: entryCol.implicitHeight + 8   // breath between steles
-
-                    readonly property bool critical: modelData.urgency === "CRITICAL"
-                    readonly property color ink: entry.critical ? root.urgent : root.signature
-                    readonly property string iconSrc: root.iconSource(modelData)
-
-                    // Critical breathes — the terracotta-summons pulse idiom
-                    // the retired popup card wore, so a critical line still
-                    // reads as LIVE in the standing ledger.
-                    SequentialAnimation on opacity {
-                        running: entry.critical
-                        loops: Animation.Infinite
-                        NumberAnimation { to: 0.8; duration: 700; easing.type: Easing.InOutQuad }
-                        NumberAnimation { to: 1.0; duration: 700; easing.type: Easing.InOutQuad }
+                // empty state — the herald rests
+                Item {
+                    width: parent.width; height: 34
+                    visible: root.rows.length === 0
+                    Text {
+                        anchors.centerIn: parent
+                        text: "( ˘ω˘ )  nothing to cry"
+                        font.family: root.faceMono; font.pixelSize: 10
+                        color: root.withA(root.ink, 0.45)
                     }
+                }
 
-                    Column {
-                        id: entryCol
-                        anchors { left: parent.left; right: parent.right; top: parent.top }
-                        spacing: 4
+                Repeater {
+                    model: root.rows
+                    delegate: Item {
+                        id: row
+                        required property var modelData
+                        readonly property var rec: modelData
+                        readonly property bool summons: rec && rec.kind === "summons"
+                        readonly property bool critical:
+                            rec && ("" + rec.urgency) === "critical"
+                        readonly property string bodyText:
+                            rec ? ("" + (rec.body || "")) : ""
+                        readonly property string iconPath:
+                            rec ? ("" + (rec.icon || "")) : ""
+                        readonly property int progress:
+                            (rec && rec.progress !== undefined) ? (rec.progress | 0) : -1
+                        readonly property bool hot: rowMa.containsMouse
 
-                        // ── box-drawing top frame — app name in the label ─
-                        Item {
-                            width: parent.width
-                            height: 15
-                            Text {
-                                id: tfL
-                                anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                                text: "┌─┤ " + root.parentTitle(modelData) + " ├"
-                                font.family: root.faceMono; font.pixelSize: 11
-                                color: root.withA(entry.ink, 0.95)
-                            }
-                            Text {
-                                id: tfR
-                                anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                                text: "┐"
-                                font.family: root.faceMono; font.pixelSize: 11
-                                color: root.withA(entry.ink, 0.95)
-                            }
-                            Rectangle {
-                                anchors.left: tfL.right; anchors.right: tfR.left
-                                anchors.leftMargin: 1; anchors.rightMargin: 1
-                                anchors.verticalCenter: parent.verticalCenter
-                                height: 1; color: root.withA(entry.ink, 0.8)
-                            }
+                        width: parent.width
+                        height: 20 + (bodyLine.visible ? 13 : 0)
+                                + (gaugeLine.visible ? 11 : 0)
+                                + (chipLine.visible ? 20 : 0) + 5
+
+                        // critical breathes (the bar's urgent-pulse idiom)
+                        SequentialAnimation on opacity {
+                            running: row.critical
+                            loops: Animation.Infinite
+                            alwaysRunToEnd: true
+                            NumberAnimation { to: 0.55; duration: 700; easing.type: Easing.InOutQuad }
+                            NumberAnimation { to: 1.0;  duration: 700; easing.type: Easing.InOutQuad }
                         }
 
-                        // ── the cleave — one plain rule between the program
-                        // frame and the message, the entablature/shaft line ─
-                        Item {
-                            width: parent.width
-                            height: 9
-                            Rectangle {
-                                anchors.top: parent.top; anchors.topMargin: 1
-                                width: parent.width; height: 1
-                                color: root.withA(entry.ink, 0.55)
-                            }
+                        // row-wide catcher FIRST — chips (later) win the hit
+                        // test. A toast row dismisses on click; a summons row
+                        // is answered, never waved away.
+                        MouseArea {
+                            id: rowMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: row.summons ? Qt.ArrowCursor
+                                                     : Qt.PointingHandCursor
+                            onClicked: if (!row.summons) root.dismiss(row.rec.id)
                         }
 
-                        // ── icon + title / context — the sender's PROVIDED
-                        // icon (or themed lookup, or the ❧ fallback) beside
-                        // two differentiated text tiers ────────────────────
+                        // line 1 — mark · icon mark · summary · time / ✕
                         Item {
-                            width: parent.width
-                            visible: titleLabel.text.length > 0 || contextLabel.text.length > 0
-                            height: Math.max(iconBox.height, words.implicitHeight)
-
-                            Item {
-                                id: iconBox
-                                anchors.left: parent.left; anchors.top: parent.top
-                                width: 26; height: 26
-                                visible: titleLabel.text.length > 0 || contextLabel.text.length > 0
-                                Image {
-                                    id: iconImg
-                                    anchors.fill: parent
-                                    visible: entry.iconSrc !== "" && status === Image.Ready
-                                    source: entry.iconSrc
-                                    fillMode: Image.PreserveAspectFit
-                                    mipmap: true
-                                    asynchronous: true
-                                }
-                                Text {           // no icon resolved (or it failed to load) — the crown glyph stands in
-                                    anchors.centerIn: parent
-                                    visible: !iconImg.visible
-                                    text: "❧"
-                                    font.family: "Linux Libertine O"   // pinned with the entablature crown
-                                    font.pixelSize: 16
-                                    color: root.withA(entry.ink, 0.8)
-                                }
-                            }
-                            Column {
-                                id: words
-                                anchors.left: iconBox.right; anchors.leftMargin: 8
-                                anchors.right: parent.right
-                                spacing: 4
-                                Text {
-                                    id: titleLabel
-                                    width: parent.width
-                                    text: root.titleOf(modelData)
-                                    textFormat: Text.PlainText
-                                    visible: text.length > 0
-                                    color: entry.critical ? root.urgent : root.notes.notifFg
-                                    font.family: root.faceSerif
-                                    font.bold: true
-                                    font.pixelSize: 14
-                                    wrapMode: Text.WordWrap
-                                    topPadding: 2
-                                }
-                                Item {
-                                    width: parent.width
-                                    visible: contextLabel.text.length > 0
-                                    height: contextLabel.implicitHeight + 5
-                                    Rectangle {           // the faint signature hairline
-                                        anchors.left: parent.left
-                                        anchors.top: contextLabel.top
-                                        anchors.bottom: contextLabel.bottom
-                                        width: 1
-                                        color: root.withA(entry.ink, 0.45)
-                                    }
-                                    Text {
-                                        id: contextLabel
-                                        anchors.top: parent.top; anchors.topMargin: 5
-                                        anchors.left: parent.left; anchors.leftMargin: 10
-                                        anchors.right: parent.right
-                                        text: root.contextOf(modelData)
-                                        textFormat: Text.PlainText
-                                        color: root.notes.notifFg
-                                        opacity: 0.85
-                                        font.pixelSize: 12
-                                        lineHeight: 1.3
-                                        wrapMode: Text.WordWrap
-                                    }
-                                }
-                            }
-                        }
-
-                        // ── ledger line: urgency kaomoji left, arrival
-                        // clock right in gold (terracotta while critical) ──
-                        Item {
-                            width: parent.width
-                            height: 18
-                            Rectangle {
-                                anchors.top: parent.top
-                                anchors.left: parent.left; anchors.right: parent.right
-                                height: 1; color: root.withA(entry.ink, 0.3)
-                            }
+                            id: line1
+                            anchors.left: parent.left; anchors.right: parent.right
+                            anchors.top: parent.top
+                            height: 20
                             Text {
+                                id: mark
                                 anchors.left: parent.left
-                                anchors.bottom: parent.bottom
-                                text: root.kaomojiFor(modelData.urgency)
-                                font.family: root.faceMono   // Nerd Font cells — MoodFaces' proven kaomoji metrics
-                                font.pixelSize: 11
-                                color: root.withA(entry.ink, 0.9)
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 14
+                                horizontalAlignment: Text.AlignHCenter
+                                text: (row.rec && ("" + row.rec.urgency) === "low"
+                                       && !row.summons) ? "·" : "❧"
+                                font.family: root.faceCrown
+                                font.pixelSize: 12
+                                color: root.markColor(row.rec)
+                            }
+                            Rectangle {
+                                id: rowPlate
+                                visible: row.iconPath.length > 0
+                                anchors.left: mark.right; anchors.leftMargin: 3
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 16; height: 16
+                                radius: 0
+                                color: root.withA(root.ink, 0.06)
+                                border.width: 1
+                                border.color: root.withA(root.ink, 0.35)
+                                // fit on the mount, never upscale, decode
+                                // bounded — the popup plate's rules at row
+                                // scale (see herald.qml's plate note)
+                                Image {
+                                    anchors.centerIn: parent
+                                    source: row.iconPath.length > 0
+                                            ? "file://" + row.iconPath : ""
+                                    fillMode: Image.PreserveAspectFit
+                                    asynchronous: true; smooth: true
+                                    mipmap: true
+                                    sourceSize: Qt.size(32, 32)
+                                    readonly property real fitS:
+                                        (implicitWidth > 0 && implicitHeight > 0)
+                                        ? Math.min(1, Math.min(14 / implicitWidth,
+                                                               14 / implicitHeight))
+                                        : 1
+                                    width: Math.max(1, Math.round(implicitWidth * fitS))
+                                    height: Math.max(1, Math.round(implicitHeight * fitS))
+                                }
                             }
                             Text {
+                                anchors.left: rowPlate.visible ? rowPlate.right : mark.right
+                                anchors.leftMargin: 5
+                                anchors.right: stamp.left; anchors.rightMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: row.rec ? ("" + (row.rec.summary || "")) : ""
+                                textFormat: Text.PlainText
+                                elide: Text.ElideRight
+                                font.family: root.faceSerif
+                                font.pixelSize: 11
+                                font.weight: (row.critical || row.summons)
+                                             ? Font.DemiBold : Font.Normal
+                                color: root.withA(root.ink, row.hot ? 1.0 : 0.85)
+                            }
+                            Text {
+                                id: stamp
                                 anchors.right: parent.right
-                                anchors.bottom: parent.bottom
-                                text: root.clockOf(modelData.atMs)
+                                anchors.verticalCenter: parent.verticalCenter
+                                // hover turns the clock into the dismiss hint
+                                text: (row.hot && !row.summons)
+                                      ? "x" : root.relTime(row.rec ? row.rec.receivedAt : "")
                                 font.family: root.faceMono
-                                font.pixelSize: 10
-                                color: entry.critical ? root.urgent : root.notes.paletteAccent
+                                font.pixelSize: 8
+                                font.letterSpacing: 1
+                                color: (row.hot && !row.summons)
+                                       ? root.fire : root.withA(root.ink, 0.45)
                             }
                         }
 
-                        // ── box-drawing bottom frame — urgency word in the
-                        // label, closing 𝄂 barline in gold ──────────────────
+                        // line 2 — who said it · what else it said
+                        Text {
+                            id: bodyLine
+                            visible: row.rec
+                                     && (("" + (row.rec.app || "")).length > 0
+                                         || row.bodyText.length > 0)
+                            anchors.left: parent.left; anchors.leftMargin: 22
+                            anchors.right: parent.right
+                            anchors.top: line1.bottom
+                            height: visible ? 13 : 0
+                            text: (row.rec ? ("" + (row.rec.app || "")) : "")
+                                  + (row.bodyText.length > 0
+                                     ? ("  ·  " + row.bodyText) : "")
+                            textFormat: Text.PlainText
+                            elide: Text.ElideRight
+                            font.family: root.faceMono
+                            font.pixelSize: 8
+                            font.letterSpacing: 1
+                            color: root.withA(root.ink, 0.45)
+                        }
+
+                        // the gauge — progress inside the row band, aegean
                         Item {
-                            width: parent.width
-                            height: 18
-                            Text {
-                                id: ffL
-                                anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                                text: "└─┤ " + root.urgencyWord(modelData.urgency) + " ├"
-                                font.family: root.faceMono; font.pixelSize: 11
-                                color: root.withA(root.notes.notifFg, 0.8)
-                            }
-                            Text {
-                                id: ffCorner
-                                anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                                text: "┘"
-                                font.family: root.faceMono; font.pixelSize: 11
-                                color: root.withA(entry.ink, 0.95)
-                            }
-                            Text {
-                                id: ffBar
-                                anchors.right: ffCorner.left; anchors.rightMargin: 4
+                            id: gaugeLine
+                            visible: row.progress >= 0
+                            anchors.left: parent.left; anchors.leftMargin: 22
+                            anchors.right: parent.right
+                            anchors.top: bodyLine.bottom
+                            height: visible ? 11 : 0
+                            Item {
+                                anchors.left: parent.left
+                                anchors.right: rowFig.left; anchors.rightMargin: 6
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: "𝄂"
-                                font.family: "Noto Music"; font.pixelSize: 16
-                                color: root.notes.paletteAccent
+                                height: 4
+                                Rectangle {
+                                    anchors.fill: parent; radius: 0
+                                    color: root.withA(root.ink, 0.09)
+                                    border.width: 1
+                                    border.color: root.withA(root.ink, 0.35)
+                                }
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top; anchors.bottom: parent.bottom
+                                    anchors.margins: 1
+                                    width: (parent.width - 2)
+                                           * Math.max(0, Math.min(1, row.progress / 100))
+                                    radius: 0
+                                    color: root.withA(root.aegean, 0.9)
+                                }
                             }
-                            Rectangle {
-                                anchors.left: ffL.right; anchors.right: ffBar.left
-                                anchors.leftMargin: 2; anchors.rightMargin: 6
+                            Text {
+                                id: rowFig
+                                anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
-                                height: 1; color: root.withA(entry.ink, 0.55)
+                                width: 28
+                                horizontalAlignment: Text.AlignRight
+                                text: Math.max(0, Math.min(100, row.progress)) + "%"
+                                font.family: root.faceMono; font.pixelSize: 8
+                                color: root.withA(root.ink, 0.7)
                             }
                         }
+
+                        // the verdict chips — two hit regions, gold / fire
+                        Item {
+                            id: chipLine
+                            visible: row.summons
+                            anchors.left: parent.left; anchors.leftMargin: 22
+                            anchors.right: parent.right
+                            anchors.top: gaugeLine.bottom
+                            height: visible ? 20 : 0
+                            Rectangle {
+                                id: rowApprove
+                                anchors.right: rowDeny.left; anchors.rightMargin: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 72; height: 16
+                                radius: 0
+                                color: rowApproveMa.containsMouse
+                                       ? root.withA(root.gold, 0.20) : "transparent"
+                                border.width: 1
+                                border.color: root.withA(root.gold,
+                                                  rowApproveMa.containsMouse ? 0.95 : 0.6)
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "approve"
+                                    font.family: root.faceMono; font.pixelSize: 9
+                                    color: root.gold
+                                }
+                                MouseArea {
+                                    id: rowApproveMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.verdict(row.rec.sessionId, "approve")
+                                }
+                            }
+                            Rectangle {
+                                id: rowDeny
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 72; height: 16
+                                radius: 0
+                                color: rowDenyMa.containsMouse
+                                       ? root.withA(root.fire, 0.20) : "transparent"
+                                border.width: 1
+                                border.color: root.withA(root.fire,
+                                                  rowDenyMa.containsMouse ? 0.95 : 0.6)
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "deny"
+                                    font.family: root.faceMono; font.pixelSize: 9
+                                    color: root.fire
+                                }
+                                MouseArea {
+                                    id: rowDenyMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.verdict(row.rec.sessionId, "deny")
+                                }
+                            }
+                        }
+
+                        // the rule — hover promotes it (DeviceRow idiom)
+                        Rectangle {
+                            anchors.left: parent.left; anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            height: 1
+                            color: root.withA(row.hot ? root.sig : root.ink,
+                                              row.hot ? 0.6 : 0.13)
+                            Behavior on color { ColorAnimation { duration: 150 } }
+                        }
                     }
+                }
+            }
+
+            // ── box-drawing bottom frame — the count, closing 𝄂 ────────────
+            Item {
+                width: parent.width; height: 16
+                Text {
+                    id: ffL
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "└─┤ " + root.rows.length
+                          + (root.rows.length === 1 ? " notice ├" : " notices ├")
+                    font.family: root.faceMono; font.pixelSize: 11
+                    color: root.withA(root.ink, 0.8)
+                }
+                Text {
+                    id: ffCorner
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "┘"; font.family: root.faceMono; font.pixelSize: 11
+                    color: root.withA(root.sig, 0.95)
+                }
+                Text {
+                    id: ffBar
+                    anchors.right: ffCorner.left; anchors.rightMargin: 4
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "\u{1D102}"
+                    font.family: root.faceMusic; font.pixelSize: 15
+                    color: root.notes.paletteAccent
+                }
+                Rectangle {
+                    anchors.left: ffL.right; anchors.right: ffBar.left
+                    anchors.leftMargin: 2; anchors.rightMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenterOffset: 1
+                    height: 1; color: root.withA(root.sig, 0.55)
                 }
             }
         }
