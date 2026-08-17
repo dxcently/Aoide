@@ -32,8 +32,17 @@
   config,
   lib,
   pkgs,
+  inputs,
   ...
 }:
+
+let
+  # The same Quickshell package the facet installs (its default.nix) — the
+  # daemon's rice-toggle path re-execs `aoide rice …`, whose widget-sync half
+  # shells out to `quickshell ipc call shell reload`; the client binary must
+  # be the build the live shell actually runs.
+  quickshellPkg = inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
+in
 
 lib.mkIf config.aoide.enable {
 
@@ -62,7 +71,29 @@ lib.mkIf config.aoide.enable {
     # failed with `hyprctl unavailable: No such file or directory` and the
     # listener could not read `hyprctl clients` — the click never jumped.
     # (This is a unit-level option, NOT a serviceConfig key.)
-    path = [ pkgs.hyprland ];
+    #
+    # Everything else the daemon can reach rides the same PATH — each entry
+    # is a bare-name spawn inside an `aoide` subcommand the socket handler
+    # re-execs, each verified absent from the default unit PATH:
+    #   curl       — UsageGadget's ❋ refresh: RefreshUsage re-execs
+    #                `aoide usage`, whose live claude.ai fetch spawns `curl`;
+    #                without it every daemon-routed refresh degraded to
+    #                {error: "curl failed"} while a shell-run succeeded.
+    #   hyprlock   — the powermenu's `lock` (PowerAction::Lock).
+    #   libnotify  — `notify-send`: the rice-mode toggle's success toast.
+    #   procps     — `kill`: the stray-process sweep `rice mode stage` opens
+    #                with (reap_stray_processes); systemctl is already covered
+    #                by the default PATH's systemd package.
+    #   quickshell — `quickshell ipc call shell reload` when a daemon-routed
+    #                `rice mode stage` syncs changed widget bodies.
+    path = [
+      pkgs.curl
+      pkgs.hyprland
+      pkgs.hyprlock
+      pkgs.libnotify
+      pkgs.procps
+      quickshellPkg
+    ];
 
     serviceConfig = {
       # shellbridge is a sub-command of the aoide binary. `--run` seeds the

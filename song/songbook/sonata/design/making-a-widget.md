@@ -3,6 +3,13 @@
 **Song:** sonata
 **Read before:** writing any new `widgets/*.qml`, or redesigning an existing one.
 
+> **2026-08-16:** `widgets/notifications.qml` (the per-popup card cited
+> throughout as the stele exemplar) is retired — dunst owns notification
+> delivery now and the herald lives on as `widgets/herald-center.qml`, the
+> dock's notification center, which carries the SAME grammar (Tuscan stele, ❧
+> crown, rust signature). Read `herald-center.qml` wherever this file says
+> `notifications.qml`; the grammar analysis below stands unchanged.
+
 The other three files in this folder tell you what is *available*
 (`greek-grammar.md`), how the machinery *works* (`widget-structure.md`), and
 what has *bitten us live* (`hazards.md`). This file is the one that answers the

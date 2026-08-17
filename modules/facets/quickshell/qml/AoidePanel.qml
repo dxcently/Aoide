@@ -60,6 +60,9 @@ PanelWindow {
     required property var notes
     required property var bridge
     property var shared: null
+    // the song-slot resolver — only the herald-center WidgetSlot below needs
+    // it; gadgets that are pure facet chrome never see it
+    property var stagingEngine: null
 
     // ── Reveal state ────────────────────────────────────────────────────────
     // `shown` is the pinned toggle; `hotEdge`/`overPanel` are the hover peeks.
@@ -454,7 +457,8 @@ PanelWindow {
                         width: flick.width
                         spacing: 16
 
-                        // ORDER: Conductor → Usage → Terminals → Meters → Power.
+                        // ORDER: Conductor → Usage → Terminals → Meters → Power →
+                        // Herald (the notification center sits at the BOTTOM).
                         // Every gadget takes root.gadgetW so the column is flush —
                         // one shared left edge, no 340-vs-360 stagger.
 
@@ -524,6 +528,19 @@ PanelWindow {
                         PowerVitalsGadget {
                             width: root.gadgetW; height: 268
                             notes: root.notes
+                        }
+
+                        // Herald — the notification CENTER, the dock's BOTTOM
+                        // gadget (song slot; dunst owns the popups themselves
+                        // since 2026-08-16). Content-height passthrough from the
+                        // loaded song widget (WidgetSlot sizes to its item);
+                        // width pinned here so the column stays flush.
+                        WidgetSlot {
+                            slot: "herald-center"
+                            width: root.gadgetW
+                            notes: root.notes
+                            bridge: root.bridge
+                            stagingEngine: root.stagingEngine
                         }
                     }
                 }

@@ -171,7 +171,11 @@ in
     # stands down for these surfaces (concepts/Notes).
     aoide.surfaces = {
       bar.owner = "quickshell";
-      notifications.owner = "quickshell";
+      # dunst owns notification DELIVERY now (the popups are its); Quickshell
+      # keeps only the dock's herald center, which is part of agentWidgets.
+      # Recording "dunst" here also keeps Stylix's dunst/mako targets stood
+      # down, so the dendrite's dunstrc is the only theming applied.
+      notifications.owner = "dunst";
       launcher.owner = "quickshell";
       osd.owner = "quickshell";
       lockscreen.owner = "quickshell";

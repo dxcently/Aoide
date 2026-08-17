@@ -655,7 +655,7 @@ set of "flavor" surfaces — committed files, not nix options:
   rely on this until verified.
 - **Fixed injected-prop contract:** a loaded widget receives `notes`
   (`LiveryState`) and `bridge` (`ShellBridge`) always, plus whatever
-  slot-specific extras the anchor declares (e.g. notifications' `notification`)
+  slot-specific extras the anchor declares (e.g. the bar slot's `shared`)
   — **never** nix `config.*`. This does not loosen the song-shape rule above:
   a song's `rice.nix` still sets **ONLY** `aoide.livery` — widgets are
   committed QML files carried by the build, not nix options, and a widget is

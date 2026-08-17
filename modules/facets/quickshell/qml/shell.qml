@@ -154,6 +154,7 @@ ShellRoot {
         notes: notes
         bridge: bridge
         shared: shared
+        stagingEngine: stagingEngine
     }
 
     // ── Overlay surfaces — each owns its own PanelWindow internally, wired
@@ -163,8 +164,9 @@ ShellRoot {
     //   - powermenu (SurfaceSlot): the powermenu (bar clef 𝄞 → powermenu.toggle()),
     //                              song/songbook/sonata/widgets/powermenu.qml
     //   - AoideWallpaperPicker   : SUPER+W wallpaper switcher (global-shortcut)
-    //   - AoideNotifications     : org.freedesktop.Notifications popup stack,
-    //                              bottom-right (live whenever a notification exists)
+    // (No AoideNotifications anymore — dunst owns org.freedesktop.Notifications
+    // and draws the popups; the herald lives on as the `herald-center` slot in
+    // AoidePanel's dock column, reading `dunstctl history`.)
     AoideClipboard { id: clipboard }
     // The Grimoire's usage ledger — stays in the facet (a data seam, not
     // chrome, CONTRACTS.md §4), injected into the launcher slot as an extra.
@@ -190,5 +192,4 @@ ShellRoot {
         extraProps: ({ clipboard: clipboard, ledger: ledger })
     }
     AoideWallpaperPicker { notes: notes }
-    AoideNotifications { notes: notes; bridge: bridge; stagingEngine: stagingEngine }
 }

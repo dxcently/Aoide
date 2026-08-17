@@ -14,10 +14,12 @@ import Quickshell.Services.UPower
 //                  gold and the Meters ran aegean. The frieze is an EGG-AND-DART
 //                  ovolo (eggs alternating with darts) — neither the Conductor's
 //                  baton course nor the Meters' running wave.
-//   · MUSIC      — the battery drains toward silence: its charge is a REST glyph
-//                  (𝄽𝄾𝄿𝅀𝅁𝅂 emptier→fuller), full 𝆑, charging 𝄮. The link is a
-//                  SUSTAINED note 𝅗𝅥 while up, a rest 𝄽 when the line goes dead.
-//                  A gold 𝄂 closes the score.
+//   · MUSIC      — the battery's charge is a Nerd Font battery glyph now
+//                  (khoa, 2026-08-17: the old rest-notation 𝄽…𝅂/𝆑/𝄮 icons
+//                  retired — ten nf-md steps emptier→fuller, alert while low,
+//                  lightning-bolt while charging). The link keeps the
+//                  SUSTAINED note 𝅗𝅥 while up, a rest 𝄽 when the line goes
+//                  dead. A gold 𝄂 closes the score.
 //   · TERMINAL   — box-drawing frames the panel; charge is an ASCII bar
 //                  ⟦▓▓▓░░░⟧ recast with true fill colour; iface names sit in mono.
 //   · KAOMOJI    — one mood face reads the machine's overall footing.
@@ -62,16 +64,18 @@ Item {
     readonly property bool battFull: battDev && battDev.state === UPowerDeviceState.FullyCharged
     readonly property bool battLow: battAvail && !battCharging && battPct <= gadget.lowAt
 
-    // rest-notation icon by charge — the battery drains toward silence
+    // battery icon by charge — Nerd Font (nf-md) battery glyphs, ten steps
+    // emptier→fuller; alert while low, lightning-bolt while charging
     function battIcon() {
-        if (!battAvail) return "𝄻";                 // whole rest — mains, at ease
-        if (battFull) return "𝆑";
-        if (battCharging) return "𝄮";
-        var rests = ["𝄽", "𝄾", "𝄿", "𝅀", "𝅁", "𝅂"];
-        var idx = Math.floor(battPct / 100 * (rests.length - 1));
+        if (!battAvail) return "󰂑";                 // battery-unknown — mains, at ease
+        if (battFull) return "󰁹";                   // battery (full)
+        if (battCharging) return "󰂄";               // battery-charging
+        if (battLow) return "󰂃";                    // battery-alert — running low
+        var steps = ["󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"];  // 10%…100%
+        var idx = Math.floor(battPct / 100 * (steps.length - 1));
         if (idx < 0) idx = 0;
-        if (idx >= rests.length) idx = rests.length - 1;
-        return rests[idx];
+        if (idx >= steps.length) idx = steps.length - 1;
+        return steps[idx];
     }
     function battWord() {
         if (!battAvail) return "on mains";
@@ -333,7 +337,7 @@ Item {
                     Item {
                         width: parent.width; height: 46
 
-                        Item {                                // rest glyph on a mono column
+                        Item {                                // battery glyph on a mono column
                             id: battGutter
                             anchors.left: parent.left; anchors.leftMargin: 4
                             anchors.top: parent.top
@@ -342,7 +346,7 @@ Item {
                                 anchors.centerIn: parent
                                 anchors.verticalCenterOffset: -2
                                 text: gadget.battIcon()
-                                font.family: gadget.faceMusic; font.pixelSize: 24
+                                font.family: gadget.faceMono; font.pixelSize: 22
                                 color: gadget.battHue()
                             }
                         }

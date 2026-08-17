@@ -132,12 +132,18 @@ lib.mkIf config.aoide.enable {
   # ── Usage widget poller (opt-in, off by default per house policy) ────────
   # When aoide.usage.enable is true, run `aoide usage` on a timer: it computes
   # the LOCAL token/cost rollup from this machine's own Claude Code
-  # transcripts (no network, no credentials — CONTRACTS.md §4) and atomically
-  # writes state/usage.json for the widget to read. Oneshot service + timer
-  # (not a long-lived process, unlike aoide-mcp/aoide-a2a) since each run is a
-  # quick scan-and-write.
+  # transcripts and fetches the LIVE claude.ai usage block (CONTRACTS.md §4),
+  # then atomically writes state/usage.json for the widget to read. Oneshot
+  # service + timer (not a long-lived process, unlike aoide-mcp/aoide-a2a)
+  # since each run is a quick scan-and-write.
   systemd.user.services.aoide-usage = lib.mkIf config.aoide.usage.enable {
-    description = "Aoide usage widget: local token/cost rollup (no network, no credentials)";
+    description = "Aoide usage widget: local token/cost rollup + live claude.ai usage fetch";
+
+    # curl MUST be on the unit PATH: the live half of `aoide usage` spawns
+    # `curl` for the /api/oauth/usage fetch, and a user unit's default PATH
+    # (coreutils &c.) lacks it — without this every tick degrades the live
+    # block to {error: "curl failed"}. Unit-level option, not serviceConfig.
+    path = [ pkgs.curl ];
 
     serviceConfig = {
       Type       = "oneshot";

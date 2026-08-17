@@ -27,7 +27,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 | Greeter | Login greeter |
 | Wallpaper layer | Managed wallpaper display |
 
-No mako, swaync, rofi, or hyprlock — Quickshell holds the entire role. Styling comes exclusively from livery; structural patterns draw from unixporn canon (quickshell/ags bars, swaync-style centers, anyrun launchers) but are never copied directly.
+No mako or swaync for popups — dunst holds the notification-delivery role (the `aoide.dunst` dendrite), and the herald lives on as a dock notification center polling `dunstctl history`; launcher/wallpaper/lockscreen remain Quickshell's. Styling comes exclusively from livery; structural patterns draw from unixporn canon (quickshell/ags bars, swaync-style centers, anyrun launchers) but are never copied directly.
 
 ## Bridge: shellbridge
 

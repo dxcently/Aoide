@@ -57,8 +57,8 @@ Every widget QML file, whatever slot it fills, must follow this shape:
 - **Declares `required property var bridge`** — the `ShellBridge`, injected
   by every anchor unconditionally (`WidgetSlot` guards the fallback path,
   but a song widget is always given this).
-- **Declares any slot-specific extras as `required property`** — e.g.
-  notifications' `notification` (see table). Extras are per-slot, not
+- **Declares any slot-specific extras as `required property`** — e.g. the
+  bar slot's `shared` (see table). Extras are per-slot, not
   universal; check the table for what a given slot's anchor passes.
 - **Sizes itself via `implicitWidth`/`implicitHeight`** — the host
   positions the `WidgetSlot`, not the widget; the widget only needs to
@@ -72,7 +72,8 @@ Every widget QML file, whatever slot it fills, must follow this shape:
 | slot | anchor kind | host anchor | extras | fallback |
 | --- | --- | --- | --- | --- |
 | `calendar` | `WidgetSlot` | `bar.qml` (sonata) — the clock's calendar popout (`WidgetSlot { slot: "calendar" }`) | none | none — an unauthored `calendar` slot renders nothing (the popout itself gates on `stagingEngine.has(...)` before opening) |
-| `notifications` | `WidgetSlot` | `AoideNotifications.qml` (facet) — each card in the notification stack's `Repeater` (`WidgetSlot { slot: "notifications" }`) | `notification` (the tracked `Notification` model item) | none — sonata's own `widgets/notifications.qml` IS the baseline floor; no facet-side Component fallback is wired |
+| `notifications` | retired 2026-08-16 — dunst owns `org.freedesktop.Notifications` and draws the popups; the Quickshell `NotificationServer` surface (AoideNotifications.qml) is gone | — | — |
+| `herald-center` | `WidgetSlot` | `AoidePanel.qml` (facet) — the dock's gadget column (`WidgetSlot { slot: "herald-center" }`), under the Conductor | none | none — sonata's own `widgets/herald-center.qml` IS the baseline floor; no facet-side Component fallback is wired |
 | `powermenu` | `SurfaceSlot` | `shell.qml` (facet) — `SurfaceSlot { slot: "powermenu" }`; the bar's clef calls `.item.toggle()` | none | none — sonata's `widgets/powermenu.qml` is the floor |
 | `launcher` | `SurfaceSlot` | `shell.qml` (facet) — `SurfaceSlot { slot: "launcher" }` | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the facet, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
 | `bar` | `WidgetSlot` | `shell.qml` (facet) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }` | `shared` (session-state QtObject), `powermenu` (the powermenu slot's live `.item`), `stagingEngine` (so the bar's own embedded calendar `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
