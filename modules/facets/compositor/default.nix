@@ -18,7 +18,9 @@
 # flow (concepts/Desktop-Architecture).
 #
 # Reading discipline (CONTRACTS.md §1):
-#   - Reads ONLY aoide.livery (palette + component tiers).
+#   - Reads ONLY aoide.livery (palette + component tiers) and
+#     aoide.arrangement (declared widget/surface types) — the enumerated,
+#     closed facet whitelist (AGENTS.md house rule 5).
 #   - Component-tier fallback applied locally.
 #   - NEVER reads song/ runtime paths (checks.no-song-read enforced structurally).
 {
@@ -30,6 +32,7 @@
 let
   cfg = config.aoide.facets.compositor;
   t = config.aoide.livery;
+  arr = config.aoide.arrangement;
 
   # ── Component-tier fallback helpers ────────────────────────────────────────
   # No hex lives here by design (CONTRACTS.md §1/§5): the facet is host- and
@@ -59,6 +62,55 @@ let
   blurEnabled = if geo.blurEnabled != null then geo.blurEnabled else true;
   blurPasses = if geo.blurPasses != null then geo.blurPasses else 3;
   blurSize = if geo.blurSize != null then geo.blurSize else 8;
+
+  # ── Declared widget-type registry → compositor layerrules (v1) ───────────
+  # aoide.arrangement.widgets (nucleus/options.nix, Phase 1) is the registry a
+  # song uses to declare a brand-new surface-kind widget TYPE. It is empty
+  # for every song until Phase 3/4/6 land (Sonata, the only committed song
+  # today, declares nothing) — mapAttrsToList over {} yields [ ], so every
+  # derived value below is [ ] / "" in practice right now: a structural
+  # no-op, not an accident of which song happens to be active.
+  #
+  # Each entry's namespace is its declared `namespace` field, or else
+  # "aoide-<slot>" from the attribute key (the option doc's contract — a
+  # plain nix default can't see its own key, so the consumer derives it).
+  # The layerrule idiom matches the aoide-dock/launcher/powermenu/calendar
+  # rules above exactly: blur on + ignore_alpha when blurred, blur off
+  # (pinned, same as aoide-calendar) when not — never an unmatched
+  # namespace left to a future blanket rule's mercy.
+  #
+  # NOTE on `layer` (overlay/top): checked against the built Hyprland
+  # source (src/desktop/rule/layerRule/LayerRule.cpp) —
+  # Desktop::Rule::CLayerRule::matches switches solely on
+  # RULE_PROP_NAMESPACE; there is no per-layer match criterion `layerrule`
+  # can target. `layer` therefore has no effect on THIS file's generation;
+  # it's the QML runtime's WlrLayershell.layer choice (Phase 4), not
+  # compositor-facet business.
+  # Filter to kind == "surface" first: a `dock` entry has no layer surface
+  # of its own (it mounts as an Item inside aoide-dock's PanelWindow), so
+  # it must never generate a layerrule/hyprglass namespace here.
+  declaredWidgets = lib.mapAttrsToList (slot: w: {
+    namespace = if w.namespace != null then w.namespace else "aoide-${slot}";
+    inherit (w) blur;
+  }) (lib.filterAttrs (_: w: w.kind == "surface") arr.widgets);
+
+  widgetLayerRules = lib.concatMapStrings (
+    e:
+    if e.blur then
+      ''
+        layerrule = blur on, match:namespace ${e.namespace}
+        layerrule = ignore_alpha 0.05, match:namespace ${e.namespace}
+      ''
+    else
+      "layerrule = blur off, match:namespace ${e.namespace}\n"
+  ) declaredWidgets;
+
+  # Same glass-namespace idiom as aoide-dock/launcher/powermenu: only
+  # blurred widgets join the hyprglass namespace list (an unblurred entry
+  # stays deliberately absent, same reasoning as aoide-calendar above).
+  widgetGlassNamespaces = lib.concatStringsSep ", " (
+    map (e: e.namespace) (lib.filter (e: e.blur) declaredWidgets)
+  );
 
   # ── Hyprland config fragment — notes baked in at build time ──────────────
   # The livery emitter (crates/song) re-runs hyprctl keyword dispatch
@@ -121,6 +173,11 @@ let
     # the same reason.
     layerrule = blur off, match:namespace aoide-calendar
 
+    # aoide.arrangement.widgets (declared widget-type registry, v1): one
+    # layerrule pair (or a pinned blur-off) per registered slot, same idiom
+    # as the aoide-* rules above. Empty today for every song — expands only
+    # once a song's rice.nix actually populates .widgets (Phase 3/4/6).
+    ${widgetLayerRules}
     # hyprglass (pkgs/hyprglass, loaded via the HM plugins list below):
     # Liquid Glass on the quickshell surfaces, ON TOP of the blur+gloss —
     # refraction/fresnel the flat gradient can't fake. Same namespaces as
@@ -144,7 +201,9 @@ let
         }
         layers {
             enabled = 1
-            namespaces = aoide-dock, aoide-launcher, aoide-powermenu
+            namespaces = aoide-dock, aoide-launcher, aoide-powermenu${
+              lib.optionalString (widgetGlassNamespaces != "") ", ${widgetGlassNamespaces}"
+            }
             preset = glass
         }
     }

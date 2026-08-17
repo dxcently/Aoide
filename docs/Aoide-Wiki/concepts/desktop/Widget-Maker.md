@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-15
+updated: 2026-08-17
 tags: [aoide, extensibility, declarative, widget, agent]
 ---
 
@@ -162,6 +162,49 @@ carries, not nix options, so a song widget is structurally incapable of
 reaching host/facet options through this surface. `greeter`/`lockscreen`/
 `osd`/`nowPlaying` remain unbuilt slots — no host anchor exists for them
 yet.
+
+## A third way onto the screen — the declared widget-type registry
+
+The staging engine above resolves a slot NAME the facet already anchored.
+`aoide.arrangement.widgets` (`modules/nucleus/options.nix`, sibling of
+`aoide.livery` — [[Song-Anatomy]]) is a third, independent way a song puts
+something on screen, beyond the two above: filling an anchor the facet
+already wired, or owning a whole surface like `bar.qml`/`herald-center`
+outright. Here a song **registers an entirely new slot** via nix — a slot
+the facet never anchored — instead of dressing one that already exists.
+
+A song's `rice.nix` declares `aoide.arrangement.widgets.<slot> = { kind =
+"surface" | "dock"; … }`; the declaration is twin-written into that song's
+`livery.json` under a flat top-level `.widgets` key (same twin-write every
+other song field uses) and validated strictly by `rice lint`
+(`pkgs/aoide/crates/song/src/livery/schema.rs`) — closed, and the two kinds'
+extra fields are mutually exclusive. `kind = "surface"` owns its own
+`PanelWindow`/layer-shell surface (namespace/layer/shortcut/blur fields,
+powermenu/launcher-style); `kind = "dock"` mounts as an `Item` into
+`AoidePanel`'s existing gadget column alongside the shipped gadgets (an
+`order` field only, for deterministic layout among multiple declared `dock`
+entries — the registry has no stable key order across the build-time nix
+walk and the native hot-sync). The slot's QML body still lives at the
+ordinary `song/songbook/<name>/widgets/<slot>.qml` path.
+
+Crucially, this is **reuse, not a fourth rendering mechanism**: a declared
+slot resolves through the exact same `WidgetSlot`/`SurfaceSlot` primitives
+above. `SongSurfaces.qml` hosts every `kind = "surface"` entry as an
+`Instantiator` of `SurfaceSlot`s; `SongGadgets.qml` hosts every `kind =
+"dock"` entry as a `Repeater` of `WidgetSlot`s, sorted by `order` and
+mounted as the column's last children. Both keep the fixed injected-prop
+contract (`notes` + `bridge` only) and the same baseline-fallback resolution
+`resolveSong` already gives the anchored catalog — a declared slot with no
+actual `widgets/<slot>.qml` body warns (`[aoide/surfaceslot]` /
+`[aoide/songgadgets]`) and renders nothing, the same inert-not-error posture
+as an unauthored anchored slot. `song/songbook/etude/` is the worked
+example: it declares one `kind = "surface"` entry (`demo`) and proves the
+whole pipeline — nix option → build-time `registry.json` walk (a build
+artifact parallel to, but never merged into, `manifest.json` — a different
+question: which slots are TYPE declarations, not which slot bodies exist) →
+`rice lint` → `rice stage`/`preview` hot-sync → render — end to end. Full
+mechanism: `CONTRACTS.md` §5's "declared widget-type registry" subsection;
+full field/table reference: `modules/facets/quickshell/qml/slots.md`.
 
 ## What this makes Aoide
 

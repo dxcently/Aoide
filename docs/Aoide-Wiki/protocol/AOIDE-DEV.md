@@ -398,14 +398,33 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   ruled empty pages, `4b56ae6` Greek/Roman/English numeral+text balance) —
   verify pushed to origin. Book height (621) is still a magic number, not
   derived from content — low priority. See [[Quickshell]].
-- **[open] Per-song flavor widgets.** `calendar`/`notifications`/`bar`
-  slots (`WidgetSlot`) and `powermenu`/`launcher` slots (`SurfaceSlot`,
-  window-owning) are built and live (`StagingEngine.qml`, hot-swaps via
-  `aoide rice stage <name>`) — see `modules/facets/quickshell/qml/slots.md`
-  for the wired-slot catalog. `greeter`/`lockscreen`/`osd`/`nowPlaying`
-  remain unbuilt — no host anchor, no trigger/data source yet. See
-  `song/songbook/update-playbook.md`, `CONTRACTS.md` §5, [[Widget-Maker]],
-  [[Gadget-Dock]], [[Quickshell]].
+- **[landed] Per-song flavor widgets — declared widget-type registry.**
+  `calendar`/`herald-center`/`bar` slots (`WidgetSlot`) and
+  `powermenu`/`launcher` slots (`SurfaceSlot`, window-owning) are the
+  anchored catalog, built and live (`StagingEngine.qml`, hot-swaps via
+  `aoide rice stage <name>`) — see `modules/facets/quickshell/qml/slots.md`.
+  A song is no longer limited to filling an anchor the facet already wired:
+  `aoide.arrangement.widgets.<slot>` (`modules/nucleus/options.nix`) lets a
+  song register an entirely new slot via nix (`kind = "surface" | "dock"`),
+  validated by `rice lint` (`pkgs/aoide/crates/song/src/livery/schema.rs`)
+  and hosted at runtime by `SongSurfaces.qml` (surface) /
+  `SongGadgets.qml` (dock) — reusing the same `WidgetSlot`/`SurfaceSlot`
+  primitives, not a new rendering mechanism. `song/songbook/etude/` is the
+  real worked example (one `kind: "surface"` entry). `greeter`/`lockscreen`/
+  `osd`/`nowPlaying` still have no host anchor of ANY kind — a registered
+  `surface`/`dock` slot is a compositor overlay or dock `Item` in an
+  already-running session, not a greetd/session-manager integration point,
+  so the registry doesn't close this gap. See `CONTRACTS.md` §5,
+  [[Widget-Maker]], [[Gadget-Dock]], [[Quickshell]].
+- **[open, v2] Declared dock-widget ordering doesn't interleave with the
+  shipped gadgets.** `order` (`aoide.arrangement.widgets.<slot>.order`,
+  dock-only) sorts declared `kind: "dock"` entries against EACH OTHER only —
+  `SongGadgets.qml` always mounts as the last children of `AoidePanel`'s
+  gadget column (`modules/facets/quickshell/qml/AoidePanel.qml`), after the
+  six shipped gadgets (Conductor/Terminals/Usage/Meters/Power/herald-center).
+  A declared `dock` widget can never be ordered before or between the
+  shipped gadgets, only reordered among other declared `dock` widgets.
+  Deferred, not scheduled.
 - **[plan, not started] Conductor/Terminals: dedupe rows, name by cwd, show
   `say`.** Partially landed with the Phase 9 crate split: the reaper is
   extracted (`pkgs/aoide/crates/conduct/src/reap.rs`) and

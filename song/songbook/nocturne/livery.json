@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "0",
+  "palette": {
+    "bg":     "#0a0e27",
+    "fg":     "#e8ecf7",
+    "accent": "#9fb8e0",
+    "urgent": "#e2607a"
+  },
+  "bar": {
+    "bg":     "#0a0e27",
+    "fg":     "#e8ecf7",
+    "accent": "#9fb8e0"
+  },
+  "notif": {
+    "bg":     "#0a0e27",
+    "fg":     "#e8ecf7",
+    "urgent": "#e2607a"
+  },
+  "window": {
+    "border":         "#9fb8e0",
+    "borderInactive": "#0a0e27"
+  },
+  "widgets": {
+    "vigil": {
+      "kind": "dock",
+      "order": 0
+    }
+  }
+}

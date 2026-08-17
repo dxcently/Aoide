@@ -191,5 +191,15 @@ ShellRoot {
         stagingEngine: stagingEngine
         extraProps: ({ clipboard: clipboard, ledger: ledger })
     }
+    // The declared widget-type registry's runtime half (CONTRACTS.md §5;
+    // aoide.arrangement.widgets, registry.json): hosts one SurfaceSlot per
+    // surface-kind entry the active song declares. Empty registry (sonata
+    // today) → no-op, same as powermenu/launcher above but data-driven
+    // instead of a fixed slot name.
+    SongSurfaces {
+        notes: notes
+        bridge: bridge
+        stagingEngine: stagingEngine
+    }
     AoideWallpaperPicker { notes: notes }
 }

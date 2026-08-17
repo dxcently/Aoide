@@ -16,6 +16,18 @@
 // `notification`) — never nix `config.*`. A song widget is store-copied
 // score, structurally incapable of reaching host/facet options through this
 // surface.
+//
+// ── Declared widget-type registry (Phase 4) ─────────────────────────────────
+// A second, independent data source: the same build (Phase 2) and
+// `rice stage`/`preview` hot-sync (Phase 3) also carry each song's
+// `aoide.arrangement.widgets` declarations into a sibling
+// songs/registry.json, shaped `{ "<song>": { "<slot>": {…declaration…} } }`
+// — which slots a song registers as widget-TYPE declarations (kind/
+// namespace/layer/shortcut/blur), a rarer, smaller set than manifest.json's
+// "which slot bodies exist". `declaredWidgets(song)` below answers "what did
+// <song> register" the way `has`/`source` answer "does <song> dress <slot>"
+// — a parallel accessor, not a replacement; `resolveSong`/body-loading are
+// unchanged.
 
 import QtQuick
 import Quickshell
@@ -54,6 +66,40 @@ QtObject {
             }
         }
         Component.onCompleted: manifestFile.reload()
+    }
+
+    readonly property string registryPath:
+        Quickshell.env("HOME") + "/Aoide/run/qml/songs/registry.json"
+
+    // { "<song>": { "<slot>": {…declaration…} }, … } — empty until the first
+    // successful parse.
+    property var registry: ({})
+
+    // Same named-property idiom as manifestFile above (QtObject has no
+    // default property) — an independent FileView watching the sibling
+    // registry.json, same directory/reload/parse shape as manifestFile.
+    property FileView registryFile: FileView {
+        id: registryFile
+        path: root.registryPath
+        watchChanges: true
+        onFileChanged: registryFile.reload()
+        onTextChanged: {
+            try {
+                root.registry = JSON.parse(registryFile.text())
+            } catch (e) {
+                console.warn("[aoide/stagingengine] Failed to parse songs/registry.json:", e)
+            }
+        }
+        Component.onCompleted: registryFile.reload()
+    }
+
+    // <song>'s declared widget-type registrations — `{}` when the song has
+    // none, or the file hasn't loaded yet. Never throws: an unknown song or
+    // a not-yet-parsed registry both cleanly answer `{}`, same
+    // bounds-checked posture as `has` below.
+    function declaredWidgets(song) {
+        if (!song || !root.registry || !root.registry[song]) return {}
+        return root.registry[song]
     }
 
     // Does <song> authored a QML file for <slot>? Bounds-checked: an unknown

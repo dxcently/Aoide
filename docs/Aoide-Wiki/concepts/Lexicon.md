@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-13
+updated: 2026-08-16
 tags: [aoide, naming, meta, architecture]
 ---
 
@@ -54,7 +54,7 @@ The full map lives in [[Song-Vocabulary]]; the logic of the family here. A **ric
 | Term | Is | Term | Is |
 |---|---|---|---|
 | song | a rice | key | its palette |
-| melody | semantic tier | arrangement | component tier |
+| melody | semantic tier | component tier | bar / notif / window overrides |
 | instruments | the facets that sound it | venue | the host performing it |
 | cover | wallpaper | chimes | notification/system sounds |
 | liner | per-song design notes | songbook | cross-cutting design memory |
@@ -87,9 +87,16 @@ values *and* the act of stamping them, naming the whole reach.
 Which is why the seam needs no musical word — it is not on the music axis:
 
 - **The Greek axis** names *who acts* — Aoide, Melete, Mneme.
-- **The music axis** names *what is made and performed* — score, song, key, melody, arrangement, instruments, venue, rehearsal, recording.
+- **The music axis** names *what is made and performed* — score, song, key, melody, instruments, venue, rehearsal, recording.
 
-livery sits at the seam — one axis, not a third.
+livery sits at the seam — one axis, not a third. `aoide.arrangement` sits there
+too, livery's structural sibling: where livery is the song's DRESS (palette ·
+base16 · component tiers · geometry · cover), arrangement is its STRUCTURE —
+which widget/surface TYPES a song brings into existence
+(`modules/nucleus/options.nix`), stored in the same `livery.json` (a flat
+`.widgets` key) and read under the same enumerated, closed facet whitelist
+(AGENTS.md house rule 5) — a second seam-level namespace, not a third axis
+either.
 
 The name keeps reading true past the rename:
 

@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-13
+updated: 2026-08-17
 tags: [aoide, widget, qml, desktop, gadget]
 ---
 
@@ -73,11 +73,16 @@ surface today — `aoide graph view`/`--json` and the `aoide conductor` TUI are 
 renderers; the dock's Conductor gadget gives the desktop its at-a-glance
 agent-tree view instead of a literal graph diagram ([[Session-Graph]]).
 
-Nothing else is part of the canonical dock — the bar's own calendar popout is
-not a dock gadget; its body is resolved per-song by the staging engine
-([[Widget-Maker#The staging engine — a song overrides desktop chrome]]), not
-hosted here. A clone can add its own gadgets on the same recipe (a frame,
-livery-only colour, a stage file for data).
+These six — Conductor, Terminals, Meters, Power, the opt-in Usage stele, and
+the herald-center notification slot — are the dock's **baseline**, not a
+closed set: a song MAY register a further gadget by declaring
+`kind = "dock"` in `aoide.arrangement.widgets.<slot>` (`CONTRACTS.md` §5),
+which mounts it as an `Item` into the same gadget column via
+`SongGadgets.qml`, ordered against any other declared `dock` entries by its
+`order` field. The bar's own calendar popout is a separate case — not a dock
+gadget at all; its body is resolved per-song by the staging engine
+([[Widget-Maker#The staging engine — a song overrides desktop chrome]]) and
+never hosted in this column.
 
 ## Posture — a left-edge panel
 
@@ -85,7 +90,7 @@ The dock rests off-screen past the LEFT edge with its fore-edge always
 peeking, and slides fully in on either trigger:
 
 - **Hot edge** — a 6px hover strip on the left screen edge.
-- **SUPER+G** — an in-process Hyprland global shortcut (`aoide:dock`) the
+- **SUPER+P** — an in-process Hyprland global shortcut (`aoide:dock`) the
   panel registers itself, not a CLI verb: it pins the dock open, and a second
   press dismisses it.
 

@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-13
+updated: 2026-08-16
 tags: [aoide, naming, rice]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -20,7 +20,7 @@ Every term maps to a literal path inside `song/` (which lives at `~/Aoide/song`;
 |---|---|---|
 | key | palette | `songbook/<song>/palette/` |
 | melody | semantic tier — survives transposition | (tier within livery) |
-| arrangement | component tier | (tier within livery) |
+| component tier | bar / notif / window overrides | (tier within livery) |
 | instruments | facets — quickshell, compositor, stylix | `modules/facets/` (in the nix tree) |
 | song | rice | `songbook/<song>/` |
 | design | per-song design wiki | `songbook/<song>/design/` |
@@ -37,7 +37,7 @@ Every term maps to a literal path inside `song/` (which lives at `~/Aoide/song`;
 
 Gitignored runtime dirs (`stage/`, `auditions/`, `catalog/`, `index/`, `log/`) hold ephemera only. Everything else is versioned.
 
-## Arrangement — What a Full Rice Covers
+## Full-Orchestration Coverage
 
 A full-orchestration rice addresses all six dimensions:
 
@@ -50,7 +50,7 @@ A full-orchestration rice addresses all six dimensions:
 | chimes | Notification and system sounds |
 | cover | Wallpaper |
 
-Everything app-side is a [[Stylix]] target — `rice.nix` feeds the scheme once and it fans out to every nix-manageable app. Everything shell-side is a [[Quickshell]] widget — one runtime reading `stage/livery.json` means nearly the full arrangement hot-reloads at rehearsal.
+Everything app-side is a [[Stylix]] target — `rice.nix` feeds the scheme once and it fans out to every nix-manageable app. Everything shell-side is a [[Quickshell]] widget — one runtime reading `stage/livery.json` means nearly the full rice hot-reloads at rehearsal.
 
 ## Replay — any song, any host
 

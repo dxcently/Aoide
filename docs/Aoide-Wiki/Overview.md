@@ -27,7 +27,7 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 - [[Snowflake-Anatomy]] — the layered structure of the Aoide flake: nucleus, dendrites, and facets; why Nix's snowflake logo maps to the repo's growth model
 - [[Clone-and-Run]] — the install model: clone upstream to `~/Aoide`, run `aoide onboard`; shared history enables clean upstream merges, and a remote fork stays optional
 - [[Self-Ricing]] — the headline feature: the agent generates, lints, previews, and adopts rices; songbook write-back is the "self" in self-ricing
-- [[Song-Vocabulary]] — the performed-half naming map: key, melody, arrangement, instruments, design, songbook, cover, chimes, stage, rehearsal, recording
+- [[Song-Vocabulary]] — the performed-half naming map: key, melody, component tier, instruments, design, songbook, cover, chimes, stage, rehearsal, recording
 - [[Agent-Interface]] — the CLI-first capability surface: `aoide <cmd>`, MCP as a generated façade, guide tiers, and agent-first ergonomics
 - [[A2A-Door]] — aoide's third door: the bidirectional Agent2Agent (JSON-RPC/HTTP) interop wire — a discoverable A2A agent (server) and an A2A client that drives external agents, all from the one command registry
 - [[Desktop-Architecture]] — how aoided, shellbridge, Quickshell, and the compositor compose into a single agent-ready desktop body

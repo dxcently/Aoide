@@ -108,3 +108,64 @@ per song (helper files, asset subdirs, all of it) but only manifests
 top-level **lowercase-kebab** `.qml` files as slots; `.gitkeep` is always
 skipped. A helper file is carried to disk but never independently
 resolvable as a slot.
+
+## Declared slots — the widget-type registry
+
+Everything above is the **anchored** catalog: a slot name a host surface
+already wired a `WidgetSlot`/`SurfaceSlot` for. This section is a second,
+independent mechanism — a **declared** slot: a song registers a brand-new
+slot name via nix, apart from the fixed catalog above, instead of merely
+dressing a name the facet already anchored.
+
+`aoide.arrangement.widgets.<slot>` (`modules/nucleus/options.nix`, sibling
+of `aoide.livery`) is the registration. It is twin-written into that song's
+`livery.json` under a flat top-level `.widgets` key — the same twin-write
+pattern every other song field uses — and validated strictly by `rice lint`
+(closed, kind-conditional field rejection;
+`pkgs/aoide/crates/song/src/livery/schema.rs`). The slot's QML body still
+lives at the normal `song/songbook/<name>/widgets/<slot>.qml` path, same
+convention as every slot in the table above — registering a slot's TYPE and
+authoring its body are two separate acts, same as the anchored catalog.
+
+Each entry names a `kind`; the two kinds' extra fields are mutually
+exclusive (`rice lint` rejects a field from the wrong kind):
+
+| kind | fields | renders |
+| --- | --- | --- |
+| `surface` | `namespace` (nullOr str; derives `aoide-<slot>` when null), `layer` (`overlay` \| `top`, default `overlay`), `shortcut` (nullOr str — a `GlobalShortcut` name, split on `:` into appid/name), `blur` (bool, default true) | its own `PanelWindow`/layer-shell surface — hosted by `SongSurfaces.qml`, a non-visual `Instantiator` of `SurfaceSlot`s, one per declared surface-kind entry the active song carries |
+| `dock` | `order` (nullOr int, sort key; default treated as 0) | an `Item` mounted into `AoidePanel`'s gadget column — hosted by `SongGadgets.qml`, a `Repeater` of `WidgetSlot`s, sorted `(order ?? 0, slot-name)` ascending; mounted as the column's last children, after the shipped gadgets and `herald-center` |
+
+`order` exists because the registry is serialized through
+`serde_json::Value`/`BTreeMap` (no `preserve_order` feature), so a song's
+declared widget keys do NOT preserve authored order between the build-time
+nix walk and the native hot-sync — `order` is the only way to get
+deterministic layout among multiple `dock` entries. It only sorts declared
+`dock` entries against each other; it does not interleave a `dock` entry
+among the shipped gadgets ahead of it in the column.
+
+**Injected-prop contract — unchanged, still just `notes` + `bridge`.** Both
+`SongSurfaces.qml` and `SongGadgets.qml` pass the same fixed pair every
+anchor above does — deliberately WITHOUT `shared` (the session-state
+QtObject only the `bar` slot receives): a declared widget is store-copied
+score like any other slot body, no wider surface than the rest of this
+contract grants.
+
+**Bodyless-slot warning.** A song can declare a slot's TYPE with no actual
+`widgets/<slot>.qml` body — neither the active song nor the sonata baseline
+carries one. Both hosts detect this via the same `resolvedSong === ""`
+signal the anchored catalog's own resolution already computes:
+`SongSurfaces.qml` reuses `SurfaceSlot`'s own existing
+`console.warn("[aoide/surfaceslot] no song (active or baseline) provides
+slot", …)` path unchanged; `SongGadgets.qml` warns at
+`console.warn("[aoide/songgadgets] no song (active or baseline) provides
+dock slot", …)`. Either way: a console warning, nothing rendered — a
+declaration with no body is inert, not an error.
+
+`song/songbook/etude/` is the worked example: `rice.nix` declares
+`aoide.arrangement.widgets.demo = { kind = "surface"; namespace =
+"aoide-etude-demo"; layer = "overlay"; shortcut = "aoide:etude-demo"; blur =
+true; }`, `widgets/demo.qml` is its `PanelWindow`-rooted body — proving
+build-walk → `rice lint` → `rice stage`/`preview` hot-sync →
+`SongSurfaces.qml` end to end. No committed song declares a `kind: "dock"`
+entry yet; `SongGadgets.qml`'s `Repeater` holds zero delegates in practice
+today, a structural no-op rather than an accident of which song is active.

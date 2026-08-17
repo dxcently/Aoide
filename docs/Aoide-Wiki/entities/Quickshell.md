@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-08-15
+updated: 2026-08-16
 tags: [aoide, shell, ui, qml, quickshell]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 The shell and UI runtime for Aoide, written in QML. It renders the complete shell surface: workspaces bar (with agent sessions and connection state), notification daemon (implementing `org.freedesktop.Notifications` natively), agent widgets, launcher, OSD, lockscreen, greeter, and wallpaper layer. This replaces the swaync / rofi / hyprlock / swww zoo with a single runtime.
 
-Quickshell reads `stage/livery.json` at runtime, so nearly the full arrangement — colors, typography, geometry, shell widgets — hot-reloads during rehearsal (preview) without a rebuild. GTK/Qt targets require app restarts and are adopt-only for preview purposes.
+Quickshell reads `stage/livery.json` at runtime, so nearly the full rice — colors, typography, geometry, shell widgets — hot-reloads during rehearsal (preview) without a rebuild. GTK/Qt targets require app restarts and are adopt-only for preview purposes.
 
 Communication discipline: Quickshell reads state files from shellbridge and issues commands via the unix socket. It never speaks an agent protocol or MCP directly.
 

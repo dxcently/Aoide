@@ -12,7 +12,9 @@ land with a migration note in `song/songbook/update-playbook.md`.
 ## 1. Note schema — **v0**
 
 The single seam between the frozen nix layer and the live desktop. Facets read
-`aoide.livery` and **nothing else**. Declared in `modules/nucleus/options.nix`.
+`aoide.livery` (the dress) and `aoide.arrangement` (the structure) and
+**nothing else** — an enumerated, closed pair, not an open `aoide.*` (AGENTS.md
+house rule 5). Both are declared in `modules/nucleus/options.nix`.
 
 Notes are Aoide's design-token layer; the container format remains the W3C
 design-tokens format. v0 lives inside the (future) W3C design-tokens container;
@@ -189,13 +191,13 @@ Top-level shape (stable keys):
   "aoide": "0.0.0",
   "commands": [
     {
-      "path": ["rice", "gen"],
-      "summary": "Generate a rice from a prompt or wallpaper.",
+      "path": ["rice", "compose"],
+      "summary": "Scaffold a new song under song/songbook/<name>/ by copying --from's notes.",
       "args": [
-        { "name": "prompt", "type": "string", "required": false }
+        { "name": "name", "type": "string", "required": true }
       ],
       "flags": [
-        { "name": "json", "type": "bool", "description": "Structured I/O." }
+        { "name": "from", "type": "string", "description": "Source song to copy notes from (default \"sonata\")." }
       ],
       "gated": false,
       "implemented": true,
@@ -315,22 +317,33 @@ staging writes; never an error.
   "mode": "draft",
   "song": "sonata",
   "draft": "neon-night",
+  "stagingSong": "etude",
   "since": "2026-08-14T00:00:00Z"
 }
 ```
 
-`song`/`draft`/`since` are optional (omitted, not `null`, when absent — the
-`SessionRecord`/`A2aAgent` Option convention). `song` names the song a
-`staging`- or `draft`-mode session is pointed at. `draft` is `Some(name)`
-**if and only if** `mode == "draft"` — every other mode always carries
-`draft` absent; nothing in the codebase ever sets one without the other.
-`rice mode draft <name>` sets both together on entry; `rice mode stage`/
-`rice mode declarative` both clear `draft` (and tear the routing symlink
-down) whenever they transition OUT of `draft` mode. `rice draft drop
+`song`/`draft`/`stagingSong`/`since` are optional (omitted, not `null`, when
+absent — the `SessionRecord`/`A2aAgent` Option convention). `song` names the
+song a `staging`- or `draft`-mode session is pointed at. `draft` is
+`Some(name)` **if and only if** `mode == "draft"` — every other mode always
+carries `draft` absent; nothing in the codebase ever sets one without the
+other. `rice mode draft <name>` sets both together on entry; `rice mode
+stage`/`rice mode declarative` both clear `draft` (and tear the routing
+symlink down) whenever they transition OUT of `draft` mode. `rice draft drop
 <name>` refuses rather than clearing this field, if `<name>` is the
 currently-routed draft (see below). Nothing else branches on `draft` — it
 is purely observational, surfaced by `rice mode status`. `since` is when the
 current mode was entered.
+
+**Additive in v0 (khoa, 2026-08-17):** `stagingSong` remembers the last song
+actively used in `Staging` mode — distinct from `song`, which `rice mode
+declarative` legitimately overwrites to reflect whatever's now actually
+active. Locking declarative must never touch or clear `stagingSong`, so a
+later bare `rice mode stage` (no name — what the bar toggle sends) can still
+resolve back to what was being staged, instead of losing that memory the
+moment a declarative round-trip overwrites `song`. Absent when never set (a
+fresh `mode.json`, or one written before this field existed); readers fall
+back to resolving off `stage/livery.json`'s own `"song"` field in that case.
 
 ### `song/songbook/<song>/drafts/<name>/` — **v0**
 
@@ -581,7 +594,8 @@ Each song's `rice.nix` **self-gates**, exactly like a dendrite:
 
 ### Rules (host-agnostic discipline)
 
-- A song sets **ONLY `aoide.livery`** (palette + component tiers) and — later —
+- A song sets **ONLY `aoide.livery`** (palette + component tiers) and
+  **`aoide.arrangement`** (declared widget/surface types) and — later —
   cover/chime references inside `song/`.
 - A song **NEVER** sets host options (monitors, hardware, services) and
   **NEVER** enables facets or dendrites. Those are the venue's decision.
@@ -698,6 +712,113 @@ None of this loosens the fixed injected-prop rule above: every extra these
 additions introduce (`shared`, the powermenu slot's `.item` handle,
 `clipboard`, `ledger`) is a runtime QML object handle, same as
 `notification` before it — never nix `config.*`.
+
+**Additive (2026-08-17) — declared widget-type registry:** everything above
+this paragraph is the **anchored** catalog — a slot name a host surface
+already wired a `WidgetSlot`/`SurfaceSlot` for. `aoide.arrangement.widgets`
+(`modules/nucleus/options.nix`, house rule 5's other half of the closed
+`aoide.livery` + `aoide.arrangement` pair) is a second, independent
+mechanism: it lets a song **register a brand-new slot** via nix, apart from
+the fixed catalog above, instead of only dressing a name the facet already
+anchored. `arrangement` carries the song's STRUCTURE (which widget/surface
+TYPES it brings into existence) where `livery` carries its DRESS — different
+questions, hence a separate option tree, but still the same two-namespace
+whitelist rule 5 already closes off; a third namespace would need the same
+explicit amendment.
+
+An entry is `attrsOf widgetType`, keyed by slot name (the attribute name IS
+the slot name), with one required field, `kind`:
+
+- **`kind = "surface"`** — owns its own `PanelWindow`/layer-shell surface
+  (powermenu/launcher-style overlays). Extra fields: `namespace` (nullOr
+  str; derives `aoide-<slot>` when null, since a plain nix default can't see
+  its own attribute key), `layer` (`overlay` | `top`, default `overlay`),
+  `shortcut` (nullOr str — a `GlobalShortcut` name a venue's compositor
+  config may bind; naming one is not binding it, keeping the song/venue
+  split intact), `blur` (bool, default true).
+- **`kind = "dock"`** — mounts as an `Item` into `AoidePanel`'s existing
+  gadget column, alongside the shipped Conductor/Terminals/Meters/Power/
+  Usage gadgets and `herald-center`. Extra field: `order` (nullOr int) — the
+  only sort key among multiple declared `dock` entries, because the
+  registry is serialized through `serde_json::Value`/`BTreeMap` (no
+  `preserve_order` feature enabled), so a song's declared widget keys do
+  NOT preserve authored order between the build-time nix walk and the
+  native hot-sync. Consumers sort `(order ?? 0, slot-name)` ascending.
+
+The two kinds' extra fields are mutually exclusive — a `namespace`/`layer`/
+`shortcut`/`blur` on a `dock` entry, or an `order` on a `surface` entry, is
+rejected. Nix option types can't easily express "field X only valid when
+kind==Y", so this is enforced natively, not at the nix layer: `rice lint`
+(`pkgs/aoide/crates/song/src/livery/schema.rs`) is the authoritative,
+closed/strict validator — every field the wrong kind carries is a named
+rejection, every unknown key inside an entry is rejected, same closed-set
+discipline as the palette/base16/component tiers above. The song's own QML
+body for a declared slot still lives at
+`song/songbook/<name>/widgets/<slot>.qml`, same convention as any other
+slot — declaring a slot's TYPE and authoring its body remain two separate
+acts.
+
+**Physical storage:** unchanged by the arrangement/livery option-tree split
+— a song's declarations live in that song's `livery.json` under a flat
+top-level `.widgets` key, sibling to `.palette`/`.base16`/`.bar`
+(`livery.json`'s fields are flat-per-concern, never nested under a
+`"livery"` key; precedent: `livery.json` already carries a top-level `song`
+key with no `aoide.livery.song` option). No separate file: `livery.json` is
+the one stage/draft-routed twin file (`rice mode draft` symlinks it), so
+splitting a second file off would have to duplicate that same routing and
+keep two files atomically consistent across every flip — a cost the option
+tree split doesn't need to pay, since that split is a NIX NAMESPACE decision
+about what facets may read, not a file-layout decision.
+
+**`registry.json`:** a build-time artifact parallel to `manifest.json` but
+serving a different purpose — NOT merged into it. `manifest.json` answers
+"which slot **bodies** exist" (any `.qml` file a song drops under
+`widgets/`); `registry.json` answers "which slots did a song **register as
+a widget-TYPE declaration**" (a rarer, smaller set — most songs declare
+none). The quickshell facet's build
+(`modules/facets/quickshell/default.nix`) walks every committed song's
+`livery.json` `.widgets // {}` into `$out/qml/songs/registry.json`, shaped
+`{ "<song>": { "<slot>": {…declaration…} } }` — every committed song gets an
+entry, `{}` when absent, never an error, never a skipped song. `rice
+stage`/`preview` hot-syncs one song's entry live, no rebuild
+(`sync_song_registry`, `pkgs/aoide/crates/song/src/widgets.rs`), mirroring
+`sync_song_widgets`'s existing `manifest.json` hot-sync. The compositor
+facet (`modules/facets/compositor/default.nix`) reads `aoide.arrangement.widgets`
+(the nix option, active song only) to generate one layerrule pair per
+`kind = "surface"` entry — filtered to `surface` first, since a `dock` entry
+has no layer surface of its own and must never generate a namespace/glass
+rule.
+
+**Runtime hosts:** two, one per kind, both reading
+`stagingEngine.declaredWidgets(song)` (`StagingEngine.qml`, the
+`registry.json` FileView) and both keeping the fixed injected-prop contract
+(`notes` + `bridge` only — no `shared`, deliberately, so a declared widget
+gets no wider surface than any other slot body):
+
+- **`SongSurfaces.qml`** — non-visual host for `kind = "surface"` entries.
+  An `Instantiator` of `SurfaceSlot`s (the same anchor a fixed window-owning
+  slot like `powermenu` uses), one per declared entry, plus one
+  `GlobalShortcut` per entry that names a non-null `shortcut`.
+- **`SongGadgets.qml`** — visual host for `kind = "dock"` entries. A
+  `Repeater` of `WidgetSlot`s (the same anchor `herald-center` uses),
+  mounted as the last children of `AoidePanel`'s gadget column, sorted by
+  `order`.
+
+Both reuse the SAME `resolveSong` → `Qt.createComponent` →
+`Component.createObject` mechanism and baseline-fallback chain the anchored
+catalog above already defines — a declared slot is not a fourth rendering
+mechanism, just a new way to name a slot that resolves through the existing
+two primitives. A declared slot with no actual `widgets/<slot>.qml` body
+(neither the active song nor sonata) resolves through the same
+`resolvedSong === ""` signal the anchored catalog already computes and warns
+(`[aoide/surfaceslot]` / `[aoide/songgadgets]`) instead of throwing —
+declaring a TYPE with no body is inert, not an error.
+
+`song/songbook/etude/` is the worked, real example: its `rice.nix` declares
+one `kind = "surface"` entry (`demo`), proving the whole pipeline —
+nix option → build-time `registry.json` walk → `rice lint` → `rice
+stage`/`preview` hot-sync → `SongSurfaces.qml` render — end to end. No
+committed song declares a `kind = "dock"` entry yet.
 
 ---
 

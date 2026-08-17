@@ -101,6 +101,22 @@ let
   # StagingEngine.qml) can check availability without probing the filesystem
   # per-frame. The wired-slot catalog (which slots an anchor actually
   # resolves at runtime) lives in qml/slots.md, not here.
+  #
+  # ── Declared widget-type registry (Phase 2) ─────────────────────────────
+  # The same per-song walk also generates $out/qml/songs/registry.json,
+  # shaped `{ "<song>": { "<slot>": { …declaration… } } }` — which slots a
+  # song declares as widget-TYPE registrations (a rarer, smaller set than
+  # manifest.json's "which slot bodies exist"). Read from each committed
+  # song's `livery.json` (`.widgets // {}`), never from any nix option:
+  # `config.aoide.arrangement.widgets` (Phase 1) only exists for the ACTIVE song
+  # at eval time (a song's rice.nix self-gates on `config.aoide.song ==
+  # "<name>"`), so cross-song data has to come from committed FILES, same
+  # reason manifest.json already reads the songbook off disk instead of
+  # nix options. Every committed song gets an entry — `{}` when the song has
+  # no `livery.json` or no `.widgets` key — never an error, never a skipped
+  # song (same optional/empty-registry tolerance used elsewhere). This walk
+  # stays permissive: whatever's under `.widgets` passes through unjudged;
+  # shape validation is Phase 3's job (the Rust-side `rice lint` engine).
   quickshellConfig = pkgs.runCommand "aoide-quickshell-config" { nativeBuildInputs = [ pkgs.jq ]; } ''
     mkdir -p "$out/qml"
     cp -r ${./qml}/. "$out/qml/"
@@ -118,6 +134,8 @@ let
     mkdir -p "$out/qml/songs"
     manifest="$out/qml/songs/manifest.json"
     echo '{}' > "$manifest"
+    registry="$out/qml/songs/registry.json"
+    echo '{}' > "$registry"
     for d in ${songbook}/*/; do
       name=$(basename "$d")
       slots=""
@@ -146,6 +164,21 @@ let
           '.[$name] = $slots' "$manifest" > "$tmp"
         mv "$tmp" "$manifest"
       fi
+
+      # ── Declared widget-type registry entry for this song ────────────────
+      # `.widgets // {}` off the song's committed livery.json — `{}` when
+      # the file is absent or carries no `.widgets` key. Every song gets an
+      # entry (unlike manifest.json's slots, which only merge when
+      # non-empty) since an empty registration set is itself meaningful
+      # output, not an omission.
+      widgets='{}'
+      if [ -f "$d/livery.json" ]; then
+        widgets=$(jq -c '.widgets // {}' "$d/livery.json")
+      fi
+      tmp=$(mktemp)
+      jq --arg name "$name" --argjson widgets "$widgets" \
+        '.[$name] = $widgets' "$registry" > "$tmp"
+      mv "$tmp" "$registry"
     done
   '';
 

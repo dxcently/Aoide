@@ -2,7 +2,8 @@
 #
 # Every other module (dendrites, facets) builds against the options
 # declared here. This is versioned in CONTRACTS.md (note schema v0). Facets
-# read ONLY `aoide.livery` and `aoide.surfaces`; no module reads another
+# read ONLY `aoide.livery`, `aoide.arrangement` and `aoide.surfaces` — an
+# enumerated, closed whitelist (AGENTS.md house rule 5); no module reads another
 # module. The coupling discipline is enforced by lib/checks.nix, not by
 # politeness.
 #
@@ -187,6 +188,86 @@ let
     };
   };
 
+  # ── Declared widget-type registry entry (v1) ──────────────────────────────
+  # Lets a song register a brand-new widget TYPE via nix, apart from the
+  # shipped/anchored slot catalog (CONTRACTS.md §5 "Per-song flavor
+  # widgets"). Keyed by slot name in `arrangement.widgets` below — the attribute
+  # name IS the slot name, expected shape `[a-z0-9][a-z0-9-]*` (documented
+  # convention, not enforced at this layer — same permissive-here,
+  # `rice lint`-is-authoritative posture as `hexColor` above). The song's own
+  # QML body for a declared slot still lives at
+  # `song/songbook/<name>/widgets/<slot>.qml` same as any other slot — this
+  # option only declares that the slot IS a widget-type registration, not
+  # just inert score.
+  widgetType = types.submodule {
+    options = {
+      kind = mkOption {
+        type = types.enum [
+          "surface"
+          "dock"
+        ];
+        default = "surface";
+        description = ''
+          The widget's registration kind. `surface` owns its own
+          PanelWindow/layer (powermenu/launcher-style overlays); `dock`
+          mounts as an Item into AoidePanel's existing gadget column,
+          alongside the shipped ConductorGadget/TerminalsGadget/etc.
+        '';
+      };
+      namespace = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          The window/layer-shell namespace this widget registers under.
+          null derives to "aoide-<slot>" — the consumer (the compositor
+          facet) computes this from the attribute key, since a plain option
+          default can't see its own key.
+        '';
+      };
+      layer = mkOption {
+        type = types.enum [
+          "overlay"
+          "top"
+        ];
+        default = "overlay";
+        description = "The compositor layer this widget's surface renders on.";
+      };
+      shortcut = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          A GlobalShortcut name (e.g. "aoide:<slot>") a venue's compositor
+          config may bind a key to. Naming a shortcut is not binding it —
+          the venue owns the actual keybind, keeping the song/venue split
+          intact.
+        '';
+      };
+      blur = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Whether the compositor blurs behind this widget's surface.";
+      };
+      order = mkOption {
+        type = types.nullOr types.int;
+        default = null;
+        description = ''
+          Sort key for deterministic layout among multiple declared `dock`
+          entries. The registry is serialized through
+          `serde_json::Value`/`BTreeMap` on the Rust side (no
+          `preserve_order` feature enabled), so a song's declared widget
+          keys do NOT preserve authored order between the build-time nix
+          walk and the native hot-sync — `order` is the only way to get
+          deterministic layout among multiple `dock` widgets. Consumers
+          sort by `(order ?? 0, slot-name)` as tie-break. Meaningless for a
+          `kind = "surface"` entry (the compositor facet and the QML
+          runtime don't use it) — invalid combinations are rejected
+          native-side (Phase 9), not by a nix-level constraint (nix option
+          types can't easily express "field X only valid when kind==Y").
+        '';
+      };
+    };
+  };
+
 in
 {
   options.aoide = {
@@ -279,6 +360,53 @@ in
               "no cover" — the stylix facet falls back to its deterministic
               solid-colour derivation (from palette.bg), so the baked path stays
               buildable with no binary asset.
+            '';
+          };
+        };
+      };
+    };
+
+    # ── Arrangement seam (v1) — structure, livery's sibling ────────────────
+    arrangement = mkOption {
+      description = ''
+        The v1 arrangement schema — the second (and only other) namespace a
+        facet may read. Where `aoide.livery` carries the song's DRESS
+        (palette · base16 · component tiers · geometry · cover), arrangement
+        carries its STRUCTURE: which widget/surface TYPES the song brings
+        into existence. Dress and structure are different questions, so they
+        are different option trees; the facet read-whitelist stays an
+        enumerated, closed PAIR (AGENTS.md house rule 5), never an open
+        `aoide.*`.
+      '';
+      default = { };
+      type = types.submodule {
+        options = {
+          widgets = mkOption {
+            type = types.attrsOf widgetType;
+            default = { };
+            description = ''
+              Declared widget-type registry: lets a song register a brand-new
+              widget TYPE via nix, apart from the shipped/anchored slot
+              catalog. Two kinds exist (`kind`, on each entry): `surface`
+              owns its own PanelWindow/layer (powermenu/launcher-style);
+              `dock` mounts as an Item into AoidePanel's existing gadget
+              column. Keyed by slot name (the attribute name IS the slot
+              name). The song's own QML body for a declared slot still lives at
+              `song/songbook/<name>/widgets/<slot>.qml` same as any other slot
+              (CONTRACTS.md §5) — this option only declares that the slot IS a
+              widget-type registration, not just inert score.
+
+              PHYSICAL STORAGE is unchanged by the arrangement rename: a song's
+              declarations live in that song's `livery.json` under a flat
+              top-level `.widgets` key, sibling to `.palette`/`.base16`/`.bar`
+              (livery.json's fields are flat-per-concern, never nested under a
+              `"livery"` key). livery.json is the one stage/draft-ROUTED twin
+              file — `rice mode draft` symlinks it — so splitting a second file
+              off would have to duplicate that routing and keep two files
+              atomically consistent across the flip. The option-tree split is a
+              NIX NAMESPACE decision about what facets may read; it is not a
+              file split. Precedent: livery.json already carries a top-level
+              `song` key with no `aoide.livery.song` option (CONTRACTS.md §4).
             '';
           };
         };

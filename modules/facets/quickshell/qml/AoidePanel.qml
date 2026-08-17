@@ -542,6 +542,19 @@ PanelWindow {
                             bridge: root.bridge
                             stagingEngine: root.stagingEngine
                         }
+
+                        // Declared dock-kind widgets — the v2 expansion of the
+                        // declared widget-type registry (SongGadgets.qml, the
+                        // dock counterpart to SongSurfaces.qml's surface-kind
+                        // host). Empty today (no committed song declares a
+                        // `kind: "dock"` entry), so this contributes zero
+                        // footprint and zero spacing — a structural no-op.
+                        SongGadgets {
+                            notes: root.notes
+                            bridge: root.bridge
+                            stagingEngine: root.stagingEngine
+                            gadgetW: root.gadgetW
+                        }
                     }
                 }
 
