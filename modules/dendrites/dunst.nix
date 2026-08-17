@@ -107,22 +107,27 @@
 #
 # What dunst ADDS over the retired card (the point of the handover):
 #   - REAL images. `image-path`/`image-data` land in the icon slot, and the slot
-#     is on TOP (not left): a 96px raster plate above the pediment costs the
+#     is on TOP (not left): a raster plate above the pediment costs the
 #     calligraphy no width, where a left icon would have shortened every rule
-#     in the card by 40px whether or not a sender supplied one. 24–96px, square
-#     (`icon_corner_radius = 0`, radius 0 house-wide). The max IS the
-#     proportion rule — a 1920x1080 screenshot lands as a 96x54 plate, album
-#     art as 96x96, and nothing can outgrow the stele it sits on.
+#     in the card by 40px whether or not a sender supplied one. 24–48px, square
+#     (`icon_corner_radius = 0`, radius 0 house-wide) — was 24–96 until a live
+#     96px app icon dwarfed its own stele (khoa, 2026-08-17: "gigantic"; the
+#     plate is a mark, not a poster). The max IS the proportion rule — a
+#     1920x1080 screenshot lands as a 48x27 plate, album art as 48x48, and
+#     nothing can outgrow the stele it sits on.
 #   - a gilded gauge for progress senders: gold fill in a 1px ink-framed square
 #     trough, the full 336px text width. dunst always draws the bar after the
 #     text, so it sits BELOW the closing barline — read it as the stele's
 #     plinth. `%p` also rides the ledger line in gold and vanishes when the
 #     sender set no value.
 #   - the SUMMONS: an agent permission prompt is not a toast (see the
-#     herald-summons rule). It is the one card whose buttons DO something —
+#     herald-summons rule). It is the one card whose gestures DO something —
 #     left-click approves, middle-click denies, and `aoide graph permit` types
 #     the verdict back into the waiting session. Both gestures were driven end
 #     to end against a live conducted session before this was written down.
+#     The approve/deny controls live IN the closing frame's label slots (each
+#     carrying its own gesture name) — see the closing-frame comment in
+#     mkFormat for why the earlier free-floating chip row was a misclick trap.
 #   - a quiet-hours story, duplicate stacking, and a 20-deep history — the exact
 #     window herald-center polls.
 #
@@ -185,7 +190,8 @@ let
   # signature ink (rust; terracotta while critical — "terracotta throughout"),
   # `title` the tier-2 ink, `word` the bottom-frame label (the urgency word is
   # single-sourced there, as on the card), `kao` the ledger kaomoji, `tag` the
-  # entablature's order tag, `actions` draws the summons' button row.
+  # entablature's order tag, `actions` turns the closing frame into the
+  # summons' approve/deny button frame (and drops `word` from it).
   #
   # Joined with a literal backslash-n: dunst replaces '\n' in format with a
   # real line break. No literal '%' or '&' may appear in the text (format
@@ -236,25 +242,6 @@ let
         "<span font='${mono} 8.25' foreground='${sig}73'>│</span>"
         + "<span font='Noto Sans 9' foreground='${notifFg}D9'> %b</span>"
       )
-      ++ lib.optionals actions [
-        # the card's action row: the FIRST action is the one laurel standout
-        # (paletteHot), the rest accent; ink labels on a 16%-alpha fill
-        # (bgalpha in Pango's integer units — 10485/65535 — so no literal '%'
-        # ever reaches dunst's placeholder pass), and [ ] brackets stand in for
-        # the 1px border dunst cannot draw. Radius 0, like everything here.
-        (
-          "<span font='${mono} 8.25' foreground='${hot}'>[</span>"
-          + "<span font='${mono} 8.25' foreground='${notifFg}' background='${hot}' bgalpha='10485'> approve </span>"
-          + "<span font='${mono} 8.25' foreground='${hot}'>]</span>"
-          + "<span font='${mono} 8.25'>    </span>"
-          + "<span font='${mono} 8.25' foreground='${accent}'>[</span>"
-          + "<span font='${mono} 8.25' foreground='${notifFg}' background='${accent}' bgalpha='10485'> deny </span>"
-          + "<span font='${mono} 8.25' foreground='${accent}'>]</span>"
-        )
-        # dunst can only route ONE named action to a mouse button, so the
-        # gesture map is taught on the card rather than guessed at.
-        "<span font='${mono} 7.5' foreground='${notifFg}99'>left-click approves  ·  middle-click denies</span>"
-      ]
       ++ [
         # the ledger rule, then the ledger line: urgency kaomoji in signature
         # ink, and the gauge tally in gold (empty for any sender with no value)
@@ -264,12 +251,32 @@ let
           + "<span font='${mono} 7.5' foreground='${accent}'>  %p</span>"
         )
         # closing frame — urgency word in the label, gold 𝄂 barline and the rust
-        # ┘ corner, spaced apart the way the card spaced them
+        # ┘ corner, spaced apart the way the card spaced them. On the SUMMONS
+        # the frame's label slots ARE the buttons (khoa, 2026-08-17): the free-
+        # floating chip row invited aiming at `deny` and left-clicking — which
+        # APPROVES, since dunst has no per-region hit testing — and cost two
+        # rows besides. Each frame label carries its own gesture name, so
+        # there is nothing to aim at and nothing to misread: the card's whole
+        # face is left = approve / middle = deny, and the frame says exactly
+        # that. approve wears the one laurel standout (paletteHot), deny gold;
+        # both closes are measured to the standard frame's 42-cell band.
         (
-          "<span font='${mono} 8.25' foreground='${notifFg}CC'>└─┤ ${word} ├</span>"
-          + "<span font='${mono} 8.25' foreground='${sig}8C'>${dashes (35 - lib.stringLength word)} </span>"
-          + "<span font='Noto Music 12' foreground='${accent}'>𝄂</span>"
-          + "<span font='${mono} 8.25' foreground='${sig}F2'> ┘</span>"
+          if actions then
+            "<span font='${mono} 8.25' foreground='${notifFg}CC'>└─┤ </span>"
+            + "<span font='${mono} 8.25' foreground='${notifFg}99'>left · </span>"
+            + "<span font='${mono} 8.25' foreground='${hot}'>approve</span>"
+            + "<span font='${mono} 8.25' foreground='${notifFg}CC'> ├─┤ </span>"
+            + "<span font='${mono} 8.25' foreground='${notifFg}99'>middle · </span>"
+            + "<span font='${mono} 8.25' foreground='${accent}'>deny</span>"
+            + "<span font='${mono} 8.25' foreground='${notifFg}CC'> ├</span>"
+            + "<span font='${mono} 8.25' foreground='${sig}8C'>─── </span>"
+            + "<span font='Noto Music 12' foreground='${accent}'>𝄂</span>"
+            + "<span font='${mono} 8.25' foreground='${sig}F2'> ┘</span>"
+          else
+            "<span font='${mono} 8.25' foreground='${notifFg}CC'>└─┤ ${word} ├</span>"
+            + "<span font='${mono} 8.25' foreground='${sig}8C'>${dashes (35 - lib.stringLength word)} </span>"
+            + "<span font='Noto Music 12' foreground='${accent}'>𝄂</span>"
+            + "<span font='${mono} 8.25' foreground='${sig}F2'> ┘</span>"
         )
       ]
     );
@@ -400,7 +407,7 @@ in
           # stele it sits on. ───────────────────────────────────────────────
           icon_position = "top";
           min_icon_size = 24;
-          max_icon_size = 96;
+          max_icon_size = 48;
           icon_corner_radius = 0;
           text_icon_padding = 8;
 
