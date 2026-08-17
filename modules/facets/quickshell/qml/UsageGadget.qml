@@ -102,6 +102,8 @@ Item {
             gadget.refreshPending = false
             refreshCooldown.stop()
         }
+        clef.fetchDone = true
+        clef.maybeStop()
     }
     readonly property bool hasData: !!(usage && (usage.local || usage.live))
 
@@ -119,18 +121,94 @@ Item {
     // (onUsageChanged) or refreshCooldownMs, whichever comes first.
     readonly property int refreshCooldownMs: 10000
     property bool refreshPending: false
+    // Hover discoverability cue — set by either click-to-refresh MouseArea
+    // (the ❋ spark and the live-section overlay, both below). Text-only, no
+    // animation: the spinner is reserved for real work (refreshPending).
+    property bool hoverRefresh: false
+
+    // The real Claude Code status-verb list — extracted verbatim (strings on
+    // the installed claude-code binary) rather than invented, per khoa: "just
+    // copy the code over". One word is drawn per click and held for that
+    // whole spin (see requestRefresh/spinWord below), same as the real CLI
+    // picks one verb per turn rather than cycling through several.
+    readonly property var spinWords: [
+        "Accomplishing", "Actioning", "Actualizing", "Architecting", "Baking",
+        "Beaming", "Beboppin'", "Befuddling", "Billowing", "Blanching",
+        "Bloviating", "Boogieing", "Boondoggling", "Booping", "Bootstrapping",
+        "Brewing", "Bunning", "Burrowing", "Calculating", "Canoodling",
+        "Caramelizing", "Cascading", "Catapulting", "Cerebrating",
+        "Channeling", "Channelling", "Choreographing", "Churning", "Clauding",
+        "Coalescing", "Cogitating", "Combobulating", "Composing", "Computing",
+        "Concocting", "Considering", "Contemplating", "Cooking", "Crafting",
+        "Creating", "Crunching", "Crystallizing", "Cultivating", "Deciphering",
+        "Deliberating", "Determining", "Dilly-dallying", "Discombobulating",
+        "Doing", "Doodling", "Drizzling", "Ebbing", "Effecting", "Elucidating",
+        "Embellishing", "Enchanting", "Envisioning", "Fermenting",
+        "Fiddle-faddling", "Finagling", "Flambéing", "Flibbertigibbeting",
+        "Flowing", "Flummoxing", "Fluttering", "Forging", "Forming",
+        "Frolicking", "Frosting", "Gallivanting", "Galloping", "Garnishing",
+        "Generating", "Gesticulating", "Germinating", "Gitifying", "Grooving",
+        "Gusting", "Harmonizing", "Hashing", "Hatching", "Herding", "Honking",
+        "Hullaballooing", "Hyperspacing", "Ideating", "Imagining",
+        "Improvising", "Incubating", "Inferring", "Infusing", "Ionizing",
+        "Jitterbugging", "Julienning", "Kneading", "Leavening", "Levitating",
+        "Lollygagging", "Manifesting", "Marinating", "Meandering",
+        "Metamorphosing", "Misting", "Moonwalking", "Moseying", "Mulling",
+        "Mustering", "Musing", "Nebulizing", "Nesting", "Newspapering",
+        "Noodling", "Nucleating", "Orbiting", "Orchestrating", "Osmosing",
+        "Perambulating", "Percolating", "Perusing", "Philosophising",
+        "Photosynthesizing", "Pollinating", "Pondering", "Pontificating",
+        "Pouncing", "Precipitating", "Prestidigitating", "Processing",
+        "Proofing", "Propagating", "Puttering", "Puzzling", "Quantumizing",
+        "Razzle-dazzling", "Razzmatazzing", "Recombobulating", "Reticulating",
+        "Roosting", "Ruminating", "Sautéing", "Scampering", "Schlepping",
+        "Scurrying", "Seasoning", "Shenaniganing", "Shimmying", "Simmering",
+        "Skedaddling", "Sketching", "Slithering", "Smooshing", "Sock-hopping",
+        "Spelunking", "Spinning", "Sprouting", "Stewing", "Sublimating",
+        "Swirling", "Swooping", "Symbioting", "Synthesizing", "Tempering",
+        "Thinking", "Thundering", "Tinkering", "Tomfoolering",
+        "Topsy-turvying", "Transfiguring", "Transmuting", "Twisting",
+        "Undulating", "Unfurling", "Unravelling", "Vibing", "Waddling",
+        "Wandering", "Warping", "Whatchamacalliting", "Whirlpooling",
+        "Whirring", "Whisking", "Wibbling", "Working", "Wrangling", "Zesting",
+        "Zigzagging"
+    ]
+    property string spinWord: ""
     function requestRefresh() {
         if (gadget.refreshPending) return          // in cooldown → ignore the click entirely
-        clef.acknowledge()                          // acknowledge the press (fires even bridge-less)
-        if (!gadget.bridge) return                  // no bridge → nudge only, nothing to send (silent degrade)
+        // No bridge → the quiet press-dip is the ONLY feedback we can give (nothing
+        // to send, silent degrade). WITH a bridge we deliberately SKIP the dip: the
+        // spin below starts on this very click and IS the feedback, and any scale
+        // motion here would make the spin read differently from Conductor's hookTag
+        // (which never scales) — khoa: the two spinners must look identical mid-spin.
+        if (!gadget.bridge) { clef.acknowledge(); return }
         gadget.refreshPending = true                // engage cooldown (a real request is going out)
         refreshCooldown.restart()
         gadget.bridge.refreshUsage()
+        // One word for the whole spin, drawn now and held (not rerolled
+        // every frame) — matches the real CLI picking one verb per turn.
+        gadget.spinWord = gadget.spinWords[Math.floor(Math.random() * gadget.spinWords.length)]
+        // Start the loop fresh — reset even though activeSpin should
+        // already be false here (the cooldown guard above blocks re-entry
+        // while a previous cycle is in flight), so a stray leftover frame
+        // can never be mistaken for an instant "already looped".
+        clef.activeSpin = true
+        clef.fetchDone = false
+        clef.loopedOnce = false
+        spinFrame.frame = -1
     }
     // Fallback release: if NO write ever lands (daemon down, the verb unknown to
     // an un-rebuilt daemon, or the fetch itself failing), clear the cooldown
     // after refreshCooldownMs so the spark never stays stuck un-clickable.
-    Timer { id: refreshCooldown; interval: gadget.refreshCooldownMs; onTriggered: gadget.refreshPending = false }
+    Timer {
+        id: refreshCooldown
+        interval: gadget.refreshCooldownMs
+        onTriggered: {
+            gadget.refreshPending = false
+            clef.fetchDone = true
+            clef.maybeStop()
+        }
+    }
 
     // ── STALE-DATA note — fetchedAt wired to exactly this, nothing else ─────────
     // fetchedAt is the WHOLE document's write stamp (local + live share one poll,
@@ -305,53 +383,103 @@ Item {
                     id: clef                          // sunburst, crowning the stele
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
-                    anchors.verticalCenterOffset: -2
-                    // Static "❋" (U+274B) at rest; while a manual refresh is
-                    // in flight (gadget.refreshPending) it cycles the same
-                    // spinner glyphs/timing as Conductor's hookTag
-                    // (ConductorGadget.qml) — the fetch used to go silent for
-                    // up to refreshCooldownMs right after the click's press-
-                    // dip, which read as "the animation isn't there".
-                    // Declarative ternary, not an imperative onTriggered
-                    // write (hazards §3: a property both bound and written
-                    // breaks on first write).
-                    readonly property var spinGlyphs: ["⋅", "✻", "✽", "✶", "✳", "✢"]
-                    text: gadget.refreshPending ? (clef.spinGlyphs[spinFrame.frame] || "❋") : "❋"
-                    font.family: gadget.faceSymbol; font.pixelSize: 26   // U+274B — the Claude mark
+                    anchors.verticalCenterOffset: 1
+                    // Fixed width + centered glyph — spinGlyphs vary in
+                    // natural width at this size ("⋅" vs "✳" etc.), and
+                    // CLAUDE (anchored to clef.right, below) would jitter
+                    // sideways each frame without a stable box to anchor
+                    // against (khoa: "keep it exactly in the same position").
+                    width: 32
+                    horizontalAlignment: Text.AlignHCenter
+                    // Static "❋" (U+274B) at rest; cycles the same spinner
+                    // glyphs/timing as Conductor's hookTag (ConductorGadget.qml)
+                    // — click-triggered only (khoa: "only play while claude
+                    // is working", hover never starts it). activeSpin is
+                    // purely imperative, never bound (hazards §3): set true
+                    // by gadget.requestRefresh() the moment a real request
+                    // goes out, cleared by maybeStop() only once BOTH the
+                    // fetch has concluded (fetchDone, set from
+                    // onUsageChanged / refreshCooldown) AND a full lap has
+                    // played (loopedOnce, set from spinFrame) — a fast
+                    // response still gets to finish the loop it started
+                    // (khoa: "should play 1 whole loop first").
+                    readonly property var spinGlyphs: ["·", "✻", "✽", "✶", "✳", "✢"]
+                    property bool activeSpin: false
+                    property bool fetchDone: false
+                    property bool loopedOnce: false
+                    function maybeStop() {
+                        if (clef.activeSpin && clef.fetchDone && clef.loopedOnce)
+                            clef.activeSpin = false
+                    }
+                    text: clef.activeSpin ? (clef.spinGlyphs[spinFrame.frame] || "❋") : "❋"
+                    // Per-frame font, mirroring hookTag's own faceSymbol/faceMono
+                    // ternary. The dot frame (spinGlyphs[0], "·" U+00B7 MIDDLE DOT)
+                    // is NOT in "Noto Sans Symbols 2" — the font's charset lacks it
+                    // and its .notdef for it is blank, so that one frame renders as
+                    // an invisible gap (or a Qt fallback gamble): glaring in THIS
+                    // 26px spark, imperceptible in hookTag's 10px. The five stars
+                    // ✻✽✶✳✢ and the resting ❋ ARE in NSS2, so they keep faceSymbol;
+                    // only the dot swaps to faceMono, which HAS a well-centred U+00B7
+                    // (measured: its ink centre lands inside the stars' own vertical
+                    // band at this size — no Y-offset needed, only the right font).
+                    // Glyph array + hold-first/last timing stay identical to hookTag
+                    // (COPY exactly); only the per-frame font is corrected here.
+                    font.family: text === "·" ? gadget.faceMono : gadget.faceSymbol
+                    font.pixelSize: 26   // U+274B — the Claude mark
                     color: gadget.signature
                     transformOrigin: Item.Center
-                    rotation: 0
                     scale: 1.0
+                    // A spin means "no scale motion", exactly like hookTag: the instant
+                    // a spin begins, kill any tick/ack pulse still in flight from a
+                    // just-prior poll and pin scale at rest for the whole lap. Paired
+                    // with tick()'s activeSpin guard (no NEW pulse starts mid-spin) and
+                    // requestRefresh dropping the ack-dip on the spin path, this
+                    // guarantees scale stays 1.0 start-to-finish of every spin.
+                    onActiveSpinChanged: if (activeSpin) { tickPulse.stop(); ackPulse.stop(); scale = 1.0 }
 
                     Timer {
                         id: spinFrame
+                        interval: baseIntervalMs
                         repeat: true
                         triggeredOnStart: true
-                        running: gadget.refreshPending
+                        running: clef.activeSpin
                         property int frame: -1
+                        // Matches Conductor's hookSpin exactly (khoa: "it
+                        // should use the conductors claude animation") —
+                        // hold-first/last timing, same glyph order.
                         readonly property int baseIntervalMs: 170
                         readonly property int holdIntervalMs: 300
-                        interval: baseIntervalMs
                         onTriggered: {
+                            // wrapped: true exactly when THIS tick advances
+                            // past the last glyph back to 0 — a genuine lap,
+                            // not the very first tick (frame starts at -1,
+                            // never at length-1, so it can't be mistaken
+                            // for one).
+                            var wrapped = frame === clef.spinGlyphs.length - 1
                             frame = (frame + 1) % clef.spinGlyphs.length
+                            if (wrapped) { clef.loopedOnce = true; clef.maybeStop() }
                             interval = (frame === 0 || frame === clef.spinGlyphs.length - 1)
                                        ? holdIntervalMs : baseIntervalMs
                         }
                     }
 
-                    // TICK — a quick full spin + scale pulse, fired once per
-                    // aoide poller write (see gadget.onUsageChanged above):
-                    // the spark's MOTION is a live-update heartbeat, distinct
-                    // from the slow idle shimmer below which just keeps it
-                    // from reading as inert between pushes. from/to are set
-                    // imperatively right before each restart (rather than
-                    // bound to clef.rotation) so a tick mid-spin extends
-                    // smoothly instead of snapping back to 0.
+                    // TICK — a scale pulse, fired once per aoide poller write
+                    // (see gadget.onUsageChanged above): the spark's MOTION is
+                    // a live-update heartbeat, distinct from the slow idle
+                    // shimmer below which just keeps it from reading as inert
+                    // between pushes. No rotation — the refreshPending glyph-
+                    // cycle above is the "working" language now; this is only
+                    // the arrival beat.
                     function tick() {
+                        // While a manual-refresh spin is in flight the spin ITSELF is
+                        // the arrival feedback; a scale pop on top would break the match
+                        // with Conductor's hookTag (which has no scale motion), so the
+                        // heartbeat pulse is suppressed until the spin ends. onUsageChanged
+                        // still sets fetchDone + maybeStop() AROUND this call, so the state
+                        // machine that ends the spin is untouched. Normal (timed-poll)
+                        // heartbeats — when not spinning — still pulse exactly as before.
+                        if (clef.activeSpin) return
                         ackPulse.stop()   // data arrived: the tick owns `scale` now (hazards §3)
-                        tickSpin.from = clef.rotation
-                        tickSpin.to = clef.rotation + 360
-                        tickSpin.restart()
                         tickPulse.restart()
                     }
                     // ACKNOWLEDGE — a quick, quiet press-dip fired on a manual
@@ -364,12 +492,6 @@ Item {
                     function acknowledge() {
                         tickPulse.stop()
                         ackPulse.restart()
-                    }
-                    RotationAnimation {
-                        id: tickSpin
-                        target: clef; property: "rotation"
-                        duration: 620
-                        easing.type: Easing.OutCubic
                     }
                     SequentialAnimation {
                         id: tickPulse
@@ -385,25 +507,36 @@ Item {
                     // idle — a slow, subtle opacity shimmer so the spark
                     // never sits fully static between pushes; deliberately
                     // much quieter than the tick, so the tick still reads
-                    // as the distinct "just updated" event.
+                    // as the distinct "just updated" event. Paused during
+                    // activeSpin (khoa: match Conductor's hookTag exactly —
+                    // that one only ever swaps text, no opacity motion, so
+                    // the two should look identical mid-spin).
                     SequentialAnimation on opacity {
+                        running: !clef.activeSpin
                         loops: Animation.Infinite
                         NumberAnimation { to: 0.72; duration: 1800; easing.type: Easing.InOutSine }
                         NumberAnimation { to: 1.0;  duration: 1800; easing.type: Easing.InOutSine }
                     }
                 }
                 Text {
-                    anchors.left: clef.right; anchors.leftMargin: 8
+                    anchors.left: clef.right; anchors.leftMargin: 4
                     anchors.verticalCenter: parent.verticalCenter
                     text: "CLAUDE"
                     font.family: gadget.faceSerif; font.pixelSize: 19
                     font.weight: Font.DemiBold; font.letterSpacing: 4
                     color: notes.paletteFg
                 }
-                Text {                                // the source, unmistakably
+                Text {                                // the source — swaps to the
+                                                        // hover cue or the spin word,
+                                                        // same reserved right-anchored
+                                                        // slot (activeSpin wins over
+                                                        // hoverRefresh: the mouse is
+                                                        // usually still over the spark
+                                                        // right as a spin starts)
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "[ claude.ai ]"
+                    text: clef.activeSpin ? ("[ " + gadget.spinWord + "… ]")
+                          : (gadget.hoverRefresh ? "[ click to refresh ]" : "[ claude.ai ]")
                     font.family: gadget.faceMono; font.pixelSize: 11
                     color: gadget.withA(gadget.signature, 0.95)
                 }
@@ -418,6 +551,9 @@ Item {
                     anchors.centerIn: clef
                     width: 32; height: 32
                     cursorShape: Qt.PointingHandCursor
+                    hoverEnabled: true
+                    onEntered: gadget.hoverRefresh = true
+                    onExited: gadget.hoverRefresh = false
                     onClicked: gadget.requestRefresh()
                 }
             }
@@ -483,6 +619,16 @@ Item {
             }
 
             // ── LIVE SECTION — gauges when ok, a quiet note otherwise ────────────
+            // Wrapped in a plain Item (not just a MouseArea sibling) because
+            // Column positions its own children's y directly — a MouseArea
+            // child with anchors.fill fights that. The wrapper takes
+            // liveSection's old slot in the outer body Column (khoa:
+            // clicking the live usage section should refresh too, not just
+            // the ❋ spark).
+            Item {
+                id: liveSectionWrap
+                width: parent.width
+                height: liveSection.height
             Column {
                 id: liveSection
                 width: parent.width
@@ -540,6 +686,16 @@ Item {
                             color: gadget.withA(notes.paletteFg, 0.38)
                         }
                     }
+                }
+            }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    hoverEnabled: true
+                    onEntered: gadget.hoverRefresh = true
+                    onExited: gadget.hoverRefresh = false
+                    onClicked: gadget.requestRefresh()
                 }
             }
 

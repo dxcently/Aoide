@@ -1280,7 +1280,7 @@ Item {
                                                  // tag instead (piTag below),
                                                  // a kimi main the moon
                     id: hookTag
-                    visible: card.hooked && !card.piThinking && !card.kimiMain
+                    visible: card.hooked && card.cardWorking && !card.piThinking && !card.kimiMain
                     anchors.left: kindTag.visible ? kindTag.right : nameT.right
                     anchors.leftMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
@@ -1303,7 +1303,7 @@ Item {
                     // site would tip this toward extraction.
                     readonly property bool spinning: card.cardWorking && !card.child
                         && card.agentName.toLowerCase() === "claude"
-                    readonly property var spinGlyphs: ["⋅", "✻", "✽", "✶", "✳", "✢"]
+                    readonly property var spinGlyphs: ["·", "✻", "✽", "✶", "✳", "✢"]
                     // guarded index, not cosmetic: triggeredOnStart's first
                     // fire lands on the NEXT event-loop tick, not the same
                     // one as `spinning` flipping true, so this binding does
