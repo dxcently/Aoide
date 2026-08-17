@@ -497,6 +497,20 @@ PanelWindow {
                             shared: root.shared
                         }
 
+                        // Usage — the claude.ai ledger stele, sits DIRECTLY under
+                        // the Terminals. Content-driven height. Visible ONLY once
+                        // state/usage.json exists (hasData), so a host without
+                        // `aoide usage enable` shows nothing; an invisible Column
+                        // child is excluded from the layout, so it collapses to
+                        // zero footprint (no gap) rather than leaving a hole.
+                        UsageGadget {
+                            id: usageGadget
+                            width: root.gadgetW
+                            notes: root.notes
+                            bridge: root.bridge     // for the ❋-spark manual refresh (refreshusage verb)
+                            visible: hasData
+                        }
+
                         // Meters + Power — the compact steles, native height 268;
                         // notes ONLY (declaring an undeclared prop is an error, so no
                         // bridge/shared here). No centring wrapper anymore — they take

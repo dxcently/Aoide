@@ -137,6 +137,7 @@ ShellRoot {
             extraProps: ({
                 shared: shared,
                 powermenu: powermenuSlot.item,
+                dock: aoidePanel,
                 stagingEngine: stagingEngine
             })
         }
@@ -149,6 +150,7 @@ ShellRoot {
     // GlobalShortcut (SUPER+P → aoide:dock) internally — shell.qml just hands it
     // the shared singletons. Replaces the old AoideAgentWidgets hot-edge drawer.
     AoidePanel {
+        id: aoidePanel
         notes: notes
         bridge: bridge
         shared: shared

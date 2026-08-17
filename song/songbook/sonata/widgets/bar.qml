@@ -101,7 +101,7 @@
 //     `audioCueShown` read the BAR CELL only and the card vanished the instant
 //     the pointer left the cell — it could be looked at and never entered.
 //     Restored as two latches (`cueBodyHover` for the card's own body,
-//     `cueHotRow` for the voice rows) behind a 220ms grace `Timer`. ONE
+//     `cueHotRow` for the channel rows) behind a 220ms grace `Timer`. ONE
 //     `MouseArea` at the cue's root feeds both: anything that accepts hover
 //     there was measured swallowing every nested row's hover, and a
 //     `HoverHandler` did not compose any better, so the row band is resolved
@@ -111,7 +111,7 @@
 //     lie 4px of popup surface owned by no item, and a pointer that pauses
 //     there outlives any grace. Both notes are recorded on the component
 //     itself with what was measured.
-//   · MUTE MOVES INTO THE CUE, AND MIDDLE-CLICK IS WITHDRAWN. Each voice row
+//   · MUTE MOVES INTO THE CUE, AND MIDDLE-CLICK IS WITHDRAWN. Each channel row
 //     is now clickable — out and in toggle mute, bt toggles adapter power
 //     (this file's own colonnade already holds that powered-down and silenced
 //     are one idea and draws them as one shape). Yesterday's middle-click on
@@ -119,7 +119,7 @@
 //     taken by "open" and mute could not be allowed to cost a surface plus
 //     two clicks. It no longer costs that: the cue is already on screen
 //     whenever the pointer is on the cell, it now STAYS on screen, and one
-//     click on the row does it, for all THREE voices instead of two. A second
+//     click on the row does it, for all THREE channels instead of two. A second
 //     invisible path to a verb that is now drawn on screen is not a shortcut,
 //     it is a thing that rots, so `Qt.MiddleButton` is gone from both cells
 //     and `mmb · mute` is gone from the ledger with it — the line now reads
@@ -473,6 +473,17 @@ component WorkspaceRow: Item {
     // directly — the old `{ cmd: "powermenu" }` bridge line was a dead end
     // (shellbridge never parsed that verb).
     required property var powermenu
+    // The center-left dock (AoidePanel instance), injected by shell.qml the
+    // SAME way — audit-report.md flagged the ✎N cell's `{ cmd: "dock",
+    // action: "toggle" }` as a silent no-op and suggested teaching shellbridge
+    // the verb, but that goes against this file's own already-stated rule two
+    // lines up: ShellBridge is OUTBOUND-only by design (hazards.md §5,
+    // AoidePanel.qml's own header — "no inbound CLI verb to toggle a
+    // surface"), and adding one here would be a second, inconsistent path to
+    // the exact toggle GlobalShortcut (SUPER+P → aoide:dock) already owns
+    // cleanly. Fixed the same way powermenu was: call .toggle() on the
+    // injected instance directly.
+    required property var dock
     // Shared session state (shell.qml's QtObject). Threaded through so the
     // centre WorkspaceRow can read `shared.hoveredWorkspace` — the gadget-dock
     // hover-preview bridge (concepts/Terminal-Commander). Optional/null-safe so
@@ -646,7 +657,7 @@ component WorkspaceRow: Item {
         if (n) Pipewire.preferredDefaultAudioSource = n
     }
 
-    // ── THE VOICES — per-application streams, the colonnade's naos payload ──
+    // ── THE CHANNELS — per-application streams, the colonnade's naos payload ──
     // The nodes the three rosters above deliberately SKIP (`isStream`). The
     // `PwNodeType.Flags` enum carries AudioOutStream/AudioInStream directly, so
     // the direction is read off the type rather than guessed from isSink:
@@ -695,7 +706,7 @@ component WorkspaceRow: Item {
         if (s.length === 0) s = ""
         return s.length > 18 ? s.substring(0, 17) + "…" : s
     }
-    // MONITORS ARE NOT VOICES, and the filter for them is `ready` — measured,
+    // MONITORS ARE NOT CHANNELS, and the filter for them is `ready` — measured,
     // not assumed. Opening pavucontrol adds five `Stream/Input/Audio` nodes
     // named "PulseAudio Volume Control", one peak meter per bar it draws; they
     // outnumbered the three real applications in the naos five to three (live
@@ -758,7 +769,7 @@ component WorkspaceRow: Item {
     }
 
     // ── Bluetooth helpers (Quickshell.Bluetooth → bluez) ───────────────────
-    // The third audio voice. `Bluetooth` is the bluez singleton; with bluez
+    // The third audio channel. `Bluetooth` is the bluez singleton; with bluez
     // down (or no adapter) `defaultAdapter` is null and every derived read
     // below degrades to the "no adapter" register — live-verified on
     // yomi-strix, where `hardware.bluetooth` is not enabled yet and
@@ -1150,7 +1161,7 @@ component WorkspaceRow: Item {
     //                       stele's own bounds to claim StelePopout's 4px host
     //                       gap, the strip of popup between the cell and this
     //                       card that belongs to no item.
-    //   · `cueHotRow`     — which voice row the pointer is on, as an INDEX and
+    //   · `cueHotRow`     — which channel row the pointer is on, as an INDEX and
     //                       not a bool: two rows racing on enter/exit order
     //                       can settle a shared bool false with the pointer
     //                       still inside one of them. An index only ever
@@ -1164,7 +1175,7 @@ component WorkspaceRow: Item {
     property bool volCellHover: false  // pointer over the vol cell
     property bool micCellHover: false  // pointer over the mic cell
     property bool cueBodyHover: false  // pointer inside the cue stele's body
-    property int  cueHotRow: -1        // voice row under the pointer (-1 none)
+    property int  cueHotRow: -1        // channel row under the pointer (-1 none)
     property bool audioOpen: false     // the colonnade — click-latched
     readonly property bool audioCellHover: volCellHover || micCellHover
     readonly property bool cueRetain: cueBodyHover || cueHotRow >= 0
@@ -1357,7 +1368,7 @@ component WorkspaceRow: Item {
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.bridge.sendCommand({ cmd: "dock", action: "toggle" })
+                onClicked: if (root.dock) root.dock.toggle()
             }
         }
 
@@ -1476,7 +1487,7 @@ component WorkspaceRow: Item {
         // mute on the middle button here because left-click had just become
         // "open" and mute could not be allowed to cost a surface plus two
         // clicks. That premise is gone: the cue now stays open when entered
-        // and every voice row on it is a one-click mute, so the cost is a
+        // and every channel row on it is a one-click mute, so the cost is a
         // hover the pointer is already making plus one click — and it covers
         // bluetooth too, which middle-click never did. What was left was a
         // gesture with no mark on the cell, advertised only by a ledger line
@@ -1501,13 +1512,21 @@ component WorkspaceRow: Item {
                 onExited: root.volCellHover = false
                 onClicked: root.audioOpen = !root.audioOpen
                 onWheel: function(wheel) {
-                    root.volAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
+                    // gate on the vertical axis actually carrying a delta — a
+                    // horizontal-only wheel event (trackpad swipe, a mouse's
+                    // tilt-wheel) has angleDelta.y === 0, and `0 > 0 ? 2 : -2`
+                    // silently fell to -2, i.e. ANY horizontal scroll read as
+                    // "turn it down". Still swallows the gesture either way
+                    // (accepted stays unconditional) — this only stops the
+                    // wrong axis from moving the value.
+                    if (wheel.angleDelta.y !== 0)
+                        root.volAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
                     wheel.accepted = true
                 }
             }
         }
 
-        // Microphone (INPUT) — the cool aegean voice, paired beside the vol cell.
+        // Microphone (INPUT) — the cool aegean channel, paired beside the vol cell.
         // Same gesture set as the vol cell: scroll = capture gain, click = open
         // the colonnade, hover = the cue readout (mute lives on the cue's own
         // `in` row as of 2026-08-16 — see the vol cell's note above).
@@ -1531,7 +1550,10 @@ component WorkspaceRow: Item {
                 onExited: root.micCellHover = false
                 onClicked: root.audioOpen = !root.audioOpen
                 onWheel: function(wheel) {
-                    root.micAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
+                    // same angleDelta.y gate as the vol cell above — see its
+                    // comment for why.
+                    if (wheel.angleDelta.y !== 0)
+                        root.micAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
                     wheel.accepted = true
                 }
             }
@@ -1624,12 +1646,12 @@ component WorkspaceRow: Item {
     // khoa, 2026-08-15: hovering an audio cell must NOT open the widget; it
     // shows current output volume, mic status and bluetooth status, and stops
     // there. In manuscript terms that is a CUE STAFF — the small stave a
-    // copyist writes above a part so the player can see what the other voices
+    // copyist writes above a part so the player can see what the other channels
     // are doing without reading their parts.
     //
     // khoa, 2026-08-16: it is no longer read-only. A copyist's cue staff also
-    // carries the TACET marks — where a voice falls silent — and that is the
-    // one verb this card grows: clicking a voice row silences it (mute for
+    // carries the TACET marks — where a channel falls silent — and that is the
+    // one verb this card grows: clicking a channel row silences it (mute for
     // out/in, adapter power for bt). Nothing else on it is clickable, and the
     // full control surface is still the colonnade one click away. It also
     // RETAINS on its own body now (see the popout-state block above); the
@@ -1649,7 +1671,7 @@ component WorkspaceRow: Item {
     //               AudioColonnade.qml's SIGNATURE note; the rule here is only
     //               that the two faces move together, always.
     //   · CROWN   — ♪ a single note, the small cue-note; the colonnade's ♫ is
-    //               the beamed pair (two voices), so the crowns say which is
+    //               the beamed pair (two channels), so the crowns say which is
     //               the glance and which is the full score.
     //   · FRIEZE  — a CUE-STAFF course: three ruled hairlines at the same 3px
     //               pitch as the bar's own staff, stepped down the ladder
@@ -1670,13 +1692,13 @@ component WorkspaceRow: Item {
     // the first load of this build. Helper components nest inside an OBJECT
     // (launcher.qml's GlassPage lives inside its `book` Item) but never
     // inside another inline component.
-    component CueVoice: Item {
-        id: voice
+    component CueChannel: Item {
+        id: channel
         property var notes
         property string glyph: ""
         property string glyphFace: "Noto Music"
         property string name: ""
-        property color hue: voice.notes ? voice.notes.paletteFg : "#000000"
+        property color hue: channel.notes ? channel.notes.paletteFg : "#000000"
         property bool live: true          // false → the whole row recedes
         property bool meter: false
         property int pct: 0
@@ -1686,20 +1708,20 @@ component WorkspaceRow: Item {
         // khoa, 2026-08-16 — the row is a CONTROL now. It carries no MouseArea
         // of its own: the cue's single root MouseArea resolves which row the
         // pointer is in and calls `picked()` (the note there records why).
-        // `row` is this voice's index in that scheme; `topInCue` is the top
+        // `row` is this channel's index in that scheme; `topInCue` is the top
         // edge it publishes for the hit test, derived from its own position so
         // the drawing and the hit band cannot drift apart. `hushed` is the
-        // silenced state; `actionable` gates both click and hover for a voice
+        // silenced state; `actionable` gates both click and hover for a channel
         // with nothing behind it.
         property int row: -1
         property bool actionable: false
         property bool hushed: false
         signal picked()
 
-        readonly property real topInCue: voice.y + (voice.parent ? voice.parent.y : 0)
-        readonly property bool hot: root.cueHotRow === voice.row && voice.actionable
-        readonly property color ink: voice.notes ? voice.notes.paletteFg : "#000000"
-        readonly property color urgent: voice.notes ? voice.notes.paletteUrgent : "#000000"
+        readonly property real topInCue: channel.y + (channel.parent ? channel.parent.y : 0)
+        readonly property bool hot: root.cueHotRow === channel.row && channel.actionable
+        readonly property color ink: channel.notes ? channel.notes.paletteFg : "#000000"
+        readonly property color urgent: channel.notes ? channel.notes.paletteUrgent : "#000000"
         readonly property real rowAlpha: live ? 1.0 : 0.4
         function withA(cstr, a) {
             var c = Qt.color(cstr)
@@ -1716,7 +1738,7 @@ component WorkspaceRow: Item {
             anchors.fill: parent
             anchors.leftMargin: -3; anchors.rightMargin: -3
             radius: 0
-            color: voice.hot ? voice.withA(voice.hue, 0.13) : "transparent"
+            color: channel.hot ? channel.withA(channel.hue, 0.13) : "transparent"
             Behavior on color { ColorAnimation { duration: 150 } }
         }
         // The hush mark — a 1px rule struck through a silenced row, in
@@ -1727,8 +1749,8 @@ component WorkspaceRow: Item {
             anchors.verticalCenter: parent.verticalCenter
             anchors.verticalCenterOffset: 1
             height: 1
-            visible: voice.hushed
-            color: voice.withA(voice.urgent, 0.75)
+            visible: channel.hushed
+            color: channel.withA(channel.urgent, 0.75)
         }
 
         // THE MARGIN MARK — the row's own "this line is a target". Added
@@ -1747,10 +1769,10 @@ component WorkspaceRow: Item {
             anchors.verticalCenterOffset: -1
             width: 11
             horizontalAlignment: Text.AlignHCenter
-            text: voice.actionable ? "·" : ""
+            text: channel.actionable ? "·" : ""
             font.family: "Noto Music"
-            font.pixelSize: voice.hot ? 13 : 11
-            color: voice.withA(voice.hue, voice.hot ? 1.0 : 0.3)
+            font.pixelSize: channel.hot ? 13 : 11
+            color: channel.withA(channel.hue, channel.hot ? 1.0 : 0.3)
             Behavior on color { ColorAnimation { duration: 150 } }
         }
         Text {
@@ -1759,20 +1781,20 @@ component WorkspaceRow: Item {
             anchors.verticalCenter: parent.verticalCenter
             width: 15
             horizontalAlignment: Text.AlignHCenter
-            text: voice.glyph
-            font.family: voice.glyphFace
+            text: channel.glyph
+            font.family: channel.glyphFace
             font.pixelSize: 13
-            color: voice.hue
-            opacity: voice.rowAlpha
+            color: channel.hue
+            opacity: channel.rowAlpha
         }
         Text {
             id: vName
             anchors.left: vGlyph.right; anchors.leftMargin: 5
             anchors.verticalCenter: parent.verticalCenter
-            text: voice.name
+            text: channel.name
             font.family: "Noto Serif"; font.pixelSize: 11
             font.letterSpacing: 1
-            color: voice.withA(voice.ink, (voice.hot ? 1.0 : 0.85) * voice.rowAlpha)
+            color: channel.withA(channel.ink, (channel.hot ? 1.0 : 0.85) * channel.rowAlpha)
         }
         // the gauge — one hairline track, one fill, no box (the opacity
         // ladder does the separating; making-a-widget.md §3)
@@ -1781,38 +1803,38 @@ component WorkspaceRow: Item {
             anchors.left: vName.right; anchors.leftMargin: 8
             anchors.verticalCenter: parent.verticalCenter
             width: 58; height: 5
-            visible: voice.meter
+            visible: channel.meter
             Rectangle {
                 anchors.fill: parent; radius: 0
-                color: voice.withA(voice.ink, 0.09)
+                color: channel.withA(channel.ink, 0.09)
                 border.width: 1
-                border.color: voice.withA(voice.ink, 0.35 * voice.rowAlpha)
+                border.color: channel.withA(channel.ink, 0.35 * channel.rowAlpha)
             }
             Rectangle {
                 anchors.left: parent.left; anchors.top: parent.top
                 anchors.bottom: parent.bottom; anchors.margins: 1
-                width: (parent.width - 2) * Math.max(0, Math.min(1, voice.pct / 100))
+                width: (parent.width - 2) * Math.max(0, Math.min(1, channel.pct / 100))
                 radius: 0
-                color: voice.withA(voice.hue, 0.9 * voice.rowAlpha)
+                color: channel.withA(channel.hue, 0.9 * channel.rowAlpha)
                 Behavior on width { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
             }
         }
         Text {                            // the chip — the bt row's profile
             anchors.left: vName.right; anchors.leftMargin: 8
             anchors.verticalCenter: parent.verticalCenter
-            visible: !voice.meter && voice.chip.length > 0
-            text: voice.chip
+            visible: !channel.meter && channel.chip.length > 0
+            text: channel.chip
             font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 8
             font.letterSpacing: 1
-            color: voice.withA(voice.ink, 0.55)
+            color: channel.withA(channel.ink, 0.55)
         }
         Text {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            text: voice.value
+            text: channel.value
             font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 11
-            color: voice.hushed ? voice.urgent
-                                : voice.withA(voice.hue, voice.rowAlpha)
+            color: channel.hushed ? channel.urgent
+                                : channel.withA(channel.hue, channel.rowAlpha)
         }
     }
 
@@ -1832,20 +1854,29 @@ component WorkspaceRow: Item {
             return Qt.rgba(c.r, c.g, c.b, a)
         }
         function kaomojiFor() {
+            // audit-B: this disagreed with AudioColonnade.qml's own
+            // kaomojiFor() on mic-only-muted (volMuted false, micMuted true)
+            // — that state fell through the old `if (root.volMuted)` branch
+            // entirely and read as whatever came next (bt-connected/loud/
+            // attentive), never as "one silenced". AudioColonnade's version
+            // is the one that reads correct: it tallies BOTH channels
+            // (mutedCount) and treats either single mute the same way. Made
+            // to match — same glyph, either channel — rather than inventing
+            // a third version.
             if (root.volMuted && root.micMuted) return "(-_- )"
-            if (root.volMuted) return "( ･_･)"
+            if (root.volMuted || root.micMuted) return "( ･_･)"
             if (root.btConnected) return "♪( ˘ω˘ )"
             if (root.volPct >= 85) return "♪(´▽｀)"
             return "( ･ω･)ﾉ"
         }
-        // The three voice rows, in the order they are drawn — the index the
+        // The three channel rows, in the order they are drawn — the index the
         // hit test speaks in, and the index each row carries as `row`.
-        function voices() { return [voiceOut, voiceIn, voiceBt] }
-        // Which voice row a pointer Y (in this root's coordinates) falls in,
-        // or -1. Skips a voice with nothing behind it, so a dead row is not
+        function channels() { return [channelOut, channelIn, channelBt] }
+        // Which channel row a pointer Y (in this root's coordinates) falls in,
+        // or -1. Skips a channel with nothing behind it, so a dead row is not
         // merely inert but untargetable.
         function rowAt(y) {
-            var vs = cue.voices()
+            var vs = cue.channels()
             for (var i = 0; i < vs.length; i++) {
                 var v = vs[i]
                 if (!v.actionable) continue
@@ -1866,7 +1897,7 @@ component WorkspaceRow: Item {
         // ── THE RETENTION LATCHES · ONE HIT-TESTING AUTHORITY ───────────────
         // Everything the pointer does to this card goes through this single
         // MouseArea: it holds the card open, it claims StelePopout's host gap,
-        // it decides which voice row is hot, and it dispatches the click. That
+        // it decides which channel row is hot, and it dispatches the click. That
         // is not tidiness, it is what the measurements on 2026-08-16 left
         // standing. Arrangements were built and read off screen through a live
         // state print in this ledger:
@@ -1886,23 +1917,27 @@ component WorkspaceRow: Item {
         //      outside its parent's bounds gets its enter and not its leave.
         // So: one object, no nesting, no handler. The row band is resolved
         // ARITHMETICALLY from the pointer position, which needs no event
-        // delivery to a nested item at all. Each voice publishes its own top
+        // delivery to a nested item at all. Each channel publishes its own top
         // edge (`topInCue`) rather than the numbers being restated here, so
         // moving a band in the Column cannot desynchronise the hit test from
         // the drawing.
         //
-        // WHAT WAS NOT VERIFIED BY POINTING AT IT, and why: this rig has no
-        // input synthesis, and `hyprctl dispatch movecursor` — which is what
-        // drove every reading above — WARPS the cursor without generating a
-        // pointer motion event inside a surface the pointer is already in.
+        // WHAT WAS NOT VERIFIED BY POINTING AT IT AT THE TIME, and why: this
+        // measurement predates `aoide screen point move` (wlrctl virtual-
+        // pointer motion, not a warp — it DOES fire a motion event inside a
+        // surface the pointer already entered, unlike a warp). At the time
+        // this was written, `hyprctl dispatch movecursor` was the only lever,
+        // and IT warps the cursor without generating that motion event.
         // Proved directly: warping off the vol cell to another cell on the
         // same bar surface leaves the vol cell still underlined, i.e. its
-        // hover never cleared. So enter/leave ACROSS surfaces is testable
-        // here and motion WITHIN one is not, which is why the cell-to-card
-        // handoff below is proven and the per-row hover wash is not. It is
-        // also the reason this design is preferred over per-row MouseAreas
-        // even though both work under a real pointer: one item that owns both
-        // the hover and the press has no delivery question left to get wrong.
+        // hover never cleared. So enter/leave ACROSS surfaces was testable
+        // that way and motion WITHIN one was not, which is why the
+        // cell-to-card handoff below was proven and the per-row hover wash
+        // was not — worth re-running with the newer tool rather than assumed
+        // still true. It is also the reason this design is preferred over
+        // per-row MouseAreas even though both work under a real pointer: one
+        // item that owns both the hover and the press has no delivery
+        // question left to get wrong.
         //
         // `topMargin: -4` claims the host gap: StelePopout parents its child
         // at `anchors.topMargin: 4`, so 4px of popup surface sit ABOVE this
@@ -1924,7 +1959,7 @@ component WorkspaceRow: Item {
             onExited: { root.cueBodyHover = false; root.cueHotRow = -1 }
             onClicked: {
                 var r = cue.rowAt(mouseY - 4)
-                if (r >= 0) cue.voices()[r].picked()
+                if (r >= 0) cue.channels()[r].picked()
             }
             // khoa, 2026-08-16 — the cue takes the WHEEL too. It rides this
             // same single object rather than a handler per row: the row is
@@ -1939,10 +1974,18 @@ component WorkspaceRow: Item {
             // the card with no way to tell that apart from a broken handler.
             // Unaccepted, it falls through to whatever is behind.
             onWheel: function(wheel) {
+                // same angleDelta.y !== 0 gate as the bar cells' own wheel
+                // handlers — a horizontal-only event no longer masquerades as
+                // "turn it down" on either row. The bt row's passthrough
+                // (wheel.accepted = false) is untouched.
                 var r = cue.rowAt(mouseY - 4)
-                if (r === 0) { root.volAdjust(wheel.angleDelta.y > 0 ? 2 : -2); wheel.accepted = true }
-                else if (r === 1) { root.micAdjust(wheel.angleDelta.y > 0 ? 2 : -2); wheel.accepted = true }
-                else wheel.accepted = false
+                if (r === 0) {
+                    if (wheel.angleDelta.y !== 0) root.volAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
+                    wheel.accepted = true
+                } else if (r === 1) {
+                    if (wheel.angleDelta.y !== 0) root.micAdjust(wheel.angleDelta.y > 0 ? 2 : -2)
+                    wheel.accepted = true
+                } else wheel.accepted = false
             }
         }
 
@@ -2048,14 +2091,14 @@ component WorkspaceRow: Item {
                     }
                 }
 
-                // ── THE BODY — the three voices ────────────────────────────
+                // ── THE BODY — the three channels ────────────────────────────
                 // khoa, 2026-08-16 — each row is a one-click silencer now:
                 // out and in toggle mute, bt toggles adapter power. Powered
                 // down and silenced are ONE state in this widget's grammar
                 // (the colonnade draws both as the same broken column), so a
                 // single word covers all three in the ledger below.
-                CueVoice {
-                    id: voiceOut
+                CueChannel {
+                    id: channelOut
                     notes: cue.notes
                     row: 0
                     glyph: root.volMuted ? "𝄽" : root.volIcon(root.volPct)
@@ -2070,8 +2113,8 @@ component WorkspaceRow: Item {
                     hushed: root.volAvail && root.volMuted
                     onPicked: root.volToggleMute()
                 }
-                CueVoice {
-                    id: voiceIn
+                CueChannel {
+                    id: channelIn
                     notes: cue.notes
                     row: 1
                     glyph: root.micMuted ? "𝄽" : "●"
@@ -2086,8 +2129,8 @@ component WorkspaceRow: Item {
                     hushed: root.micAvail && root.micMuted
                     onPicked: root.micToggleMute()
                 }
-                CueVoice {
-                    id: voiceBt
+                CueChannel {
+                    id: channelBt
                     glyph: ""                       // nf-fa-bluetooth
                     notes: cue.notes
                     row: 2
@@ -2187,7 +2230,7 @@ component WorkspaceRow: Item {
 
     // The CUE — the hover readout. A small self-framed stele (the eleven parts
     // at their floor sizes, making-a-widget.md §1) hung under the vol cell,
-    // reading out the three voices and nothing else. Hosted BARE through
+    // reading out the three channels and nothing else. Hosted BARE through
     // StelePopout, per khoa's 2026-07-31 standing direction — NOT the
     // BarPopout/GadgetFrame the battery gauge still wears one cell over: that
     // host supplies its own pediment and closure, which would double-frame a

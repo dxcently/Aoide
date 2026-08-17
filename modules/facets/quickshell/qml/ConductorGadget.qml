@@ -1317,7 +1317,12 @@ Item {
                     // (hazards §3: a property both bound and written breaks
                     // on first write, so that switch is not a small one).
                     text: hookTag.spinning ? (hookTag.spinGlyphs[hookSpin.frame] || "ϟ") : "ϟ"
-                    font.family: hookTag.spinning ? temple.faceSymbol : temple.faceMono
+                    // "·" (U+00B7 MIDDLE DOT) isn't in Noto Sans Symbols 2 —
+                    // same gap UsageGadget's clef hit at 26px, just quieter
+                    // here at 10px rather than actually invisible. Same fix:
+                    // that one frame reads from faceMono regardless of
+                    // spinning state (resting "ϟ" was already faceMono).
+                    font.family: (hookTag.spinning && hookTag.text !== "·") ? temple.faceSymbol : temple.faceMono
                     font.pixelSize: 10   // up from 9 (pixelSize is int — 9.45 isn't valid) — khoa: "a bit bigger"
                     color: temple.withA(temple.lampColor(card.cardLiveState), 0.95)
 
