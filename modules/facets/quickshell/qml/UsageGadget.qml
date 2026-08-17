@@ -319,7 +319,14 @@ Item {
             readonly property bool urgent: util >= gadget.urgentAt
             width: parent ? parent.width : 0
             visible: present
-            height: present ? (compact ? 26 : 34) : 0
+            // Row height copies MetersGadget's stacked Gauge geometry (its
+            // label-over-bar row is h46: label line, ~5px air, an 18px bar
+            // box, 2px bottom margin). At the old 34/26 the two line boxes
+            // OVERLAPPED — serif label ≈19px + mono bar ≈18.5px + 2 margin
+            // ≈ 39.5 > 34 — and the ▓░ shade glyphs ink their full cell, so
+            // the bar's top rows sat above the label's baseline: the
+            // "crowded" PLAN/WEEKLY read. 44/36 restores Meters' air.
+            height: present ? (compact ? 36 : 44) : 0
 
             Text {                                    // section label (serif)
                 id: umName
@@ -435,7 +442,14 @@ Item {
                     // with tick()'s activeSpin guard (no NEW pulse starts mid-spin) and
                     // requestRefresh dropping the ack-dip on the spin path, this
                     // guarantees scale stays 1.0 start-to-finish of every spin.
-                    onActiveSpinChanged: if (activeSpin) { tickPulse.stop(); ackPulse.stop(); scale = 1.0 }
+                    // opacity is pinned the same way: the idle shimmer below stops on
+                    // activeSpin (its `running` flips false) but a stopped animation
+                    // LEAVES the property at its mid-flight value — so without this
+                    // write every spin played at a random frozen 0.72..1.0, visibly
+                    // dimmer than hookTag (which has no element-opacity motion, ever)
+                    // and different spin to spin; at 0.72 the faint "·" frame all but
+                    // vanished, reading as the dot's font override being broken.
+                    onActiveSpinChanged: if (activeSpin) { tickPulse.stop(); ackPulse.stop(); scale = 1.0; opacity = 1.0 }
 
                     Timer {
                         id: spinFrame
@@ -510,7 +524,12 @@ Item {
                     // as the distinct "just updated" event. Paused during
                     // activeSpin (khoa: match Conductor's hookTag exactly —
                     // that one only ever swaps text, no opacity motion, so
-                    // the two should look identical mid-spin).
+                    // the two should look identical mid-spin). Pausing alone
+                    // is HALF the match: stopping freezes opacity mid-value,
+                    // so onActiveSpinChanged above also pins it back to 1.0
+                    // — hookTag spins at constant full opacity, so must this.
+                    // On spin end `running` flips true again and the loop
+                    // eases from 1.0 back into its cycle — no snap.
                     SequentialAnimation on opacity {
                         running: !clef.activeSpin
                         loops: Animation.Infinite
@@ -575,7 +594,16 @@ Item {
                     ctx.moveTo(0, top); ctx.lineTo(width, top)
                     ctx.moveTo(0, bot); ctx.lineTo(width, bot)
                     ctx.stroke()
-                    var period = height * 1.1, r = (bot - top) / 2 - 1.5
+                    // bead radius: span/2 − 3, NOT − 1.5 — at −1.5 the bead ink
+                    // (centre ± r ± half the 1.4 stroke) ended 0.1px from the
+                    // rails' inner ink edge: sub-pixel, so antialiasing welded
+                    // beads to rails and the band smeared into the ┌─ frame
+                    // line below (khoa's "overlapping rows"). An astragal's
+                    // beads FLOAT between the fillets — unlike Meters'
+                    // triglyphs, whose verticals rightly span rail to rail.
+                    // −3 leaves 1.6px of true air each side; reels inset 2.5
+                    // (was 1, which OVERLAPPED rail ink by 0.4px) for 1.8px.
+                    var period = height * 1.1, r = (bot - top) / 2 - 3
                     for (var x = 0; x < width; x += period) {
                         var bx = x + period * 0.3       // the bead (a circle)
                         ctx.beginPath()
@@ -583,8 +611,8 @@ Item {
                         ctx.stroke()
                         var rx = x + period * 0.75      // the reel (paired short bars)
                         ctx.beginPath()
-                        ctx.moveTo(rx - 1.5, top + 1); ctx.lineTo(rx - 1.5, bot - 1)
-                        ctx.moveTo(rx + 1.5, top + 1); ctx.lineTo(rx + 1.5, bot - 1)
+                        ctx.moveTo(rx - 1.5, top + 2.5); ctx.lineTo(rx - 1.5, bot - 2.5)
+                        ctx.moveTo(rx + 1.5, top + 2.5); ctx.lineTo(rx + 1.5, bot - 2.5)
                         ctx.stroke()
                     }
                 }
