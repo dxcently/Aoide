@@ -21,7 +21,7 @@
 # `shell` is pointed at the `aoide-shell` wrapper below, so EVERY kitty window
 # runs its login shell under `aoide conduct` — each terminal becomes its own
 # tracked, conductable session (a control socket a central agent can type into,
-# nested into the DAG when spawned from another session). The wrapper is written
+# nested into the graph when spawned from another session). The wrapper is written
 # to be UNBREAKABLE: any failure to conduct falls back to the plain login shell,
 # and `AOIDE_NO_CONDUCT=1` is the explicit escape hatch.
 { config, lib, ... }:
@@ -39,7 +39,7 @@
         #   2. `aoide` not on PATH         → the plain login shell (never shell-less).
         #   3. otherwise                   → `aoide conduct` the login shell, always
         #      parented to $AOIDE_SESSION_ID when already in the env (nested
-        #      terminals build the DAG tree). We ALWAYS wrap — a kitty spawned from
+        #      terminals build the graph tree). We ALWAYS wrap — a kitty spawned from
         #      a conducted shell is still its own conducted session, just parented.
         #   4. belt-and-suspenders         → if the conduct exec ever returns, fall
         #      through to the plain login shell anyway.
