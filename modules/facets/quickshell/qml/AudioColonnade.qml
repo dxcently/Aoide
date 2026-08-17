@@ -1,7 +1,7 @@
 import QtQuick
 
 // ── THE COLONNADE · a two-column temple porch (audio in + out) ────────────────
-// The bar's audio control: BOTH voices of the machine's sound, drawn as a pair
+// The bar's audio control: BOTH channels of the machine's sound, drawn as a pair
 // of literal fluted classical columns sharing one architrave and one stylobate
 // — a temple FRONT, not two gauges. The INPUT (source / microphone) is the left
 // column, the OUTPUT (sink / speakers) the right. Each column IS its meter: the
@@ -18,7 +18,7 @@ import QtQuick
 // its own chrome, converging the outer panel on the rest of the pantheon family
 // while keeping its OWN distinct order/hue/crown/motif:
 //
-//   · ORDER   — a DISTYLE PORCH of TWO orders, one per voice, so the columns are
+//   · ORDER   — a DISTYLE PORCH of TWO orders, one per channel, so the columns are
 //               told apart by SHAPE as well as hue:
 //                 – MIC → IONIC, aegean (`holoBlue`): a volute (scroll) capital,
 //                   echoing the aegean Ionic Terminals temple. The cool input.
@@ -29,7 +29,7 @@ import QtQuick
 //               calendar widget"); it was base09 amber, which the calendar also
 //               wears. The reasoning that picked amber still stands and is what
 //               narrowed the replacement: the chrome must not read as any of
-//               this widget's own VOICES, so gold (output), aegean (input) and
+//               this widget's own CHANNELS, so gold (output), aegean (input) and
 //               teal (bt) were disqualified, laurel is the one-hot blaze, and
 //               base0F rust is both notifications' and — measured — the same
 //               orange-brown family as the calendar's clay (1.49:1), so it
@@ -40,7 +40,7 @@ import QtQuick
 //               were under; and amber sat 1.07:1 from the gold Doric fill it
 //               was drawn beside, near-isoluminant in the same warm family.
 //               Tyrian murex is the dedication dye — the temple's ribbon, not
-//               any voice's. base0E is also PowerVitals' dock signature; the
+//               any channel's. base0E is also PowerVitals' dock signature; the
 //               share is cross-FAMILY and stands, flagged, because a signature
 //               tells apart steles of the same family and the bar-popout family
 //               is now unique (calendar clay, audio murex, notifications rust).
@@ -50,7 +50,7 @@ import QtQuick
 //               both read cleanly against murex chrome (captured). The frieze
 //               dropped 0.85 → 0.7 after looking: at the old alpha the bead
 //               course out-read its own crown.
-//   · CROWN   — ♫ a beamed pair of notes (two voices) in place of a clef, the
+//   · CROWN   — ♫ a beamed pair of notes (two channels) in place of a clef, the
 //               way Power's ϟ / Notification's ❧ stand in where no clef fits.
 //   · FRIEZE  — a bead-and-reel (astragal) course: round beads spaced by reels,
 //               a classical moulding none of the other temples use.
@@ -66,7 +66,7 @@ import QtQuick
 // CLICK-latched, and hovering gets a separate small cue readout in bar.qml —
 // so `hovered` is kept but no longer load-bearing for that host.
 //
-//   · ORDER   — the third voice takes the third classical order, CORINTHIAN
+//   · ORDER   — the third channel takes the third classical order, CORINTHIAN
 //               (concave abacus, flaring kalathos bell, two tiers of acanthus
 //               tips, corner helices). Doric cushion / Ionic volutes /
 //               Corinthian leaves: the three bays are told apart by capital
@@ -186,7 +186,7 @@ import QtQuick
 //     playback/recording wear the cue's row (mark · name · gloss · gauge ·
 //     figure; click silences, wheel adjusts). Devices are a CHOICE, so
 //     outputs/inputs/bt wear the picker's row (mark · name · gloss · rule;
-//     click selects, the current one marked in the voice's hue) — the very
+//     click selects, the current one marked in the channel's hue) — the very
 //     same `DeviceRow` the compact bay picker now uses, so the two faces
 //     cannot disagree about which channel is current. A row carrying both a
 //     gauge and a selection mark would be a species with no precedent here.
@@ -200,8 +200,8 @@ import QtQuick
 //     porch, and `[ mixer ]` keeps its ledger [ token ] — the one door that
 //     leaves the widget, and khoa asked for it explicitly. No gear, no
 //     slider-with-thumb: a level is a fill and the wheel sets it, everywhere.
-//   · THE LIVE FIGURES follow the mode. The naos control carries the voice
-//     count (`3 voices ⌄`), so it is the control, the label and the figure at
+//   · THE LIVE FIGURES follow the mode. The naos control carries the channel
+//     count (`3 channels ⌄`), so it is the control, the label and the figure at
 //     once; and the closing frame stops repeating the tallies once the naos is
 //     up, changing to the one number nothing else says — how many are hushed.
 //
@@ -255,7 +255,7 @@ Item {
     signal pickSource(string key)         // → Pipewire.preferredDefaultAudioSource
     signal pickBt(string key)             // → BluetoothDevice connect/disconnect
 
-    // ── THE VOICES — per-application PipeWire streams, the naos's payload ───
+    // ── THE CHANNELS — per-application PipeWire streams, the naos's payload ───
     // Same seam as the rosters: plain data in, an opaque key back out.
     //   { key: string, name: string, gloss: string, pct: int, muted: bool,
     //     out: bool }        out=true a playback stream, false a capture one
@@ -318,8 +318,8 @@ Item {
     // An organ's register selects which rank speaks; this stele's pipes are
     // literally columns, so the word costs nothing and renames a course that
     // was already going to be chips. Five of them, khoa 2026-08-16:
-    //   0 playback  · per-app OUTPUT streams   (gold — the output voice)
-    //   1 recording · per-app INPUT streams    (aegean — the input voice)
+    //   0 playback  · per-app OUTPUT streams   (gold — the output channel)
+    //   1 recording · per-app INPUT streams    (aegean — the input channel)
     //   2 outputs   · sinks                    (gold)
     //   3 inputs    · sources                  (aegean)
     //   4 bt        · paired bluetooth devices (teal)
@@ -332,7 +332,7 @@ Item {
     // and a mute, so they wear the cue's row — mark · name · gloss · gauge ·
     // figure, click silences, wheel adjusts. Registers 2–4 are DEVICES: they
     // are a CHOICE, not a level, so they wear the picker's row — mark · name ·
-    // gloss · rule, click selects, the current one marked in the voice's hue.
+    // gloss · rule, click selects, the current one marked in the channel's hue.
     // Both already existed in this file; a row carrying both a gauge and a
     // selection mark would be a third species with no precedent.
     property int register: 0
@@ -365,7 +365,7 @@ Item {
         if (r === 4) return "bt"
         return ""
     }
-    // One hue per VOICE, carried across both of that voice's registers — the
+    // One hue per CHANNEL, carried across both of that channel's registers — the
     // same single job gold already does for the VOL fill, its plinth chip and
     // its picker's current row.
     function registerHue(r) {
@@ -418,7 +418,7 @@ Item {
     // safe on this stack.
     function kaomojiFor() {
         var mutedCount = (outMuted ? 1 : 0) + (inMuted ? 1 : 0)
-        if (mode.expanded && voiceCount === 0) return "( ･ - ･ )"   // an empty room
+        if (mode.expanded && channelCount === 0) return "( ･ - ･ )"   // an empty room
         if (mode.expanded && hushedCount > 0) return "( >ω<)"       // some hushed
         if (mutedCount === 2) return "(-_- )"                 // both hushed
         if (mutedCount === 1) return "( ･_･)"                 // one silenced
@@ -505,12 +505,12 @@ Item {
     // things making noise has `[ mixer ]` for it. Past six the list scrolls.
     readonly property int porchH: 168
     readonly property int rowH: 20               // one manuscript row, both species
-    readonly property int voiceSlots: 6
+    readonly property int channelSlots: 6
     readonly property int regChipW: 56           // 5 * 56 + 4 * 6 = 304, the porch's
     readonly property int regGap: 6              // own measure to the pixel
     readonly property int naosOpenH: 4 + 1 + 4 + 15 + 4
-                                    + root.voiceSlots * root.rowH
-    readonly property int voiceCount: root.streamRoster ? root.streamRoster.length : 0
+                                    + root.channelSlots * root.rowH
+    readonly property int channelCount: root.streamRoster ? root.streamRoster.length : 0
     readonly property int hushedCount: {
         var list = root.streamRoster || []
         var n = 0
@@ -591,7 +591,7 @@ Item {
                     // Corinthian — a CONCAVE abacus over a flaring kalathos
                     // bell, two rows of acanthus tips rising off the neck, and
                     // a small helix scroll tucked under each abacus corner.
-                    // The ornate order for the ornate voice; told apart from
+                    // The ornate order for the ornate channel; told apart from
                     // Doric's plain cushion and Ionic's two big volutes by the
                     // leaf course alone, colour removed.
                     var kH = shaftHalf + 11
@@ -902,7 +902,7 @@ Item {
 
     // ══ ONE DEVICE — a choosable channel, as a manuscript row ════════════════
     // launcher.qml's row: margin mark · serif name · mono gloss · hairline
-    // rule, with the CURRENT entry marked in the voice's own hue — the same
+    // rule, with the CURRENT entry marked in the channel's own hue — the same
     // "filled in the bay's hue is the live one" language the lit drum and the
     // rising fill already speak. Shared verbatim by the compact bay picker and
     // the naos's three device registers, so `current` can only ever come from
@@ -972,34 +972,34 @@ Item {
         }
     }
 
-    // ══ ONE VOICE — a per-application stream, as a manuscript row ════════════
+    // ══ ONE CHANNEL — a per-application stream, as a manuscript row ════════════
     // launcher.qml's row, which the picker already borrowed, with the cue's
     // hairline gauge spliced in between the gloss and the figure. Declared at
     // the ROOT's level and not inside another component — Quickshell's engine
     // rejects a nested inline component outright ("Nested inline components are
     // not supported", hit live in bar.qml).
     //
-    // The margin mark is the STATE, not a selection: `♪` while the voice
+    // The margin mark is the STATE, not a selection: `♪` while the channel
     // sounds, `𝄽` — the rest — when it is hushed, which is the grammar's own
     // muted treatment (a rest glyph in place of the value) moved to the margin
     // so the figure can keep saying how loud it WOULD be. No laurel anywhere:
     // a mixer has no one selected row, and inventing one to spend the blaze on
     // would be backwards.
-    component VoiceRow : Item {
-        id: voice
+    component ChannelRow : Item {
+        id: channel
         required property var modelData
-        readonly property string vkey:  voice.modelData ? ("" + voice.modelData.key) : ""
-        readonly property string vname: voice.modelData ? ("" + voice.modelData.name) : ""
-        readonly property string vgloss: voice.modelData ? ("" + voice.modelData.gloss) : ""
-        readonly property int  vpct:   voice.modelData ? (voice.modelData.pct | 0) : 0
-        readonly property bool vmuted: voice.modelData && voice.modelData.muted === true
-        readonly property bool vout:   !voice.modelData || voice.modelData.out !== false
+        readonly property string vkey:  channel.modelData ? ("" + channel.modelData.key) : ""
+        readonly property string vname: channel.modelData ? ("" + channel.modelData.name) : ""
+        readonly property string vgloss: channel.modelData ? ("" + channel.modelData.gloss) : ""
+        readonly property int  vpct:   channel.modelData ? (channel.modelData.pct | 0) : 0
+        readonly property bool vmuted: channel.modelData && channel.modelData.muted === true
+        readonly property bool vout:   !channel.modelData || channel.modelData.out !== false
         // Each row wears its own bay's hue, so a capture stream reads as
         // belonging to the aegean MIC pillar and a playback one to the gold
         // VOL pillar without a word being spent on which it is.
-        readonly property color hue: voice.vout ? root.notes.paletteAccent
+        readonly property color hue: channel.vout ? root.notes.paletteAccent
                                                 : root.notes.holoBlue
-        readonly property bool hot: voiceMa.containsMouse
+        readonly property bool hot: channelMa.containsMouse
 
         Text {                                   // the margin mark — the state
             id: vMark
@@ -1008,11 +1008,11 @@ Item {
             anchors.verticalCenterOffset: -1
             width: 13
             horizontalAlignment: Text.AlignHCenter
-            text: voice.vmuted ? "𝄽" : "♪"
+            text: channel.vmuted ? "𝄽" : "♪"
             font.family: root.faceMusic
-            font.pixelSize: voice.vmuted ? 12 : 13
-            color: voice.vmuted ? root.notes.paletteUrgent
-                                : root.withA(voice.hue, voice.hot ? 1.0 : 0.8)
+            font.pixelSize: channel.vmuted ? 12 : 13
+            color: channel.vmuted ? root.notes.paletteUrgent
+                                : root.withA(channel.hue, channel.hot ? 1.0 : 0.8)
         }
         Text {                                   // who
             id: vName
@@ -1021,9 +1021,9 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             anchors.verticalCenterOffset: -1
             elide: Text.ElideRight
-            text: voice.vname
+            text: channel.vname
             font.family: root.faceSerif; font.pixelSize: 11
-            color: root.withA(root.ink, voice.hot ? 1.0 : 0.85)
+            color: root.withA(root.ink, channel.hot ? 1.0 : 0.85)
         }
         Text {                                   // what it is playing
             id: vGloss
@@ -1033,7 +1033,7 @@ Item {
             width: 72
             horizontalAlignment: Text.AlignRight
             elide: Text.ElideRight
-            text: voice.vgloss
+            text: channel.vgloss
             font.family: root.faceMono; font.pixelSize: 8
             font.letterSpacing: 1
             color: root.withA(root.ink, 0.45)
@@ -1052,10 +1052,10 @@ Item {
             Rectangle {
                 anchors.left: parent.left; anchors.top: parent.top
                 anchors.bottom: parent.bottom; anchors.margins: 1
-                width: (parent.width - 2) * Math.max(0, Math.min(1, voice.vpct / 100))
+                width: (parent.width - 2) * Math.max(0, Math.min(1, channel.vpct / 100))
                 radius: 0
-                color: voice.vmuted ? root.withA(root.ink, 0.28)
-                                    : root.withA(voice.hue, 0.9)
+                color: channel.vmuted ? root.withA(root.ink, 0.28)
+                                    : root.withA(channel.hue, 0.9)
                 Behavior on width { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
                 Behavior on color { ColorAnimation { duration: 150 } }
             }
@@ -1067,27 +1067,27 @@ Item {
             anchors.verticalCenterOffset: -1
             width: 32
             horizontalAlignment: Text.AlignRight
-            text: voice.vpct + "%"
+            text: channel.vpct + "%"
             font.family: root.faceMono; font.pixelSize: 10
-            color: voice.vmuted ? root.notes.paletteUrgent
-                                : root.withA(root.ink, voice.hot ? 1.0 : 0.8)
+            color: channel.vmuted ? root.notes.paletteUrgent
+                                : root.withA(root.ink, channel.hot ? 1.0 : 0.8)
         }
         Rectangle {                              // the rule — hover promotes it
             anchors.left: parent.left; anchors.right: parent.right
             anchors.bottom: parent.bottom
             height: 1
-            color: root.withA(voice.hot ? voice.hue : root.ink,
-                              voice.hot ? 0.6 : 0.13)
+            color: root.withA(channel.hot ? channel.hue : root.ink,
+                              channel.hot ? 0.6 : 0.13)
             Behavior on color { ColorAnimation { duration: 150 } }
         }
         MouseArea {
-            id: voiceMa
+            id: channelMa
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.streamToggle(voice.vkey)
+            onClicked: root.streamToggle(channel.vkey)
             onWheel: function(wheel) {
-                root.streamAdjust(voice.vkey, wheel.angleDelta.y > 0 ? 2 : -2)
+                root.streamAdjust(channel.vkey, wheel.angleDelta.y > 0 ? 2 : -2)
                 wheel.accepted = true
             }
         }
@@ -1202,8 +1202,8 @@ Item {
                 // its size, so it gets the pressable edge a control has in this
                 // house and a tag never does (calendar.qml's `[ ἔτος ⌄ ]`
                 // argument, and the same drawn chip the plinth already wears).
-                // It carries the live voice count as well as the verb, so it is
-                // ALSO this stele's per-app figure and the word "voices"
+                // It carries the live channel count as well as the verb, so it is
+                // ALSO this stele's per-app figure and the word "channels"
                 // appears exactly once on the surface — the naos captions its
                 // rows by their SOURCE (`♪ apps`), the way a notification card
                 // captions itself with the program that sent it.
@@ -1225,7 +1225,7 @@ Item {
                         anchors.centerIn: parent
                         // ⌄ / ⌃ are calendar.qml's own pair, already rendering
                         // live at this face — a proven glyph reused.
-                        text: root.voiceCount + " voices " + (mode.expanded ? "⌃" : "⌄")
+                        text: root.channelCount + " channels " + (mode.expanded ? "⌃" : "⌄")
                         font.family: root.faceMono; font.pixelSize: 9
                         color: root.sig
                         opacity: naosMa.containsMouse ? 1.0 : 0.85
@@ -1382,7 +1382,7 @@ Item {
                         onToggle: root.outToggle()
                         onAdjust: function(d) { root.outAdjust(d) }
                     }
-                    // The BLUETOOTH pier — the third voice. Power is the base
+                    // The BLUETOOTH pier — the third channel. Power is the base
                     // state (dark adapter = a RUINED column, the same broken
                     // silhouette a muted channel wears), and a connected device
                     // lights one of the two drums: the A2DP ↔ headset switch.
@@ -1393,7 +1393,7 @@ Item {
                         shaftWidth: root.pierW
                         avail: root.btAvail
                         muted: root.btAvail && !root.btOn      // powered down = ruin
-                        fillHue: root.notes.wireCyan           // teal — the third cool voice
+                        fillHue: root.notes.wireCyan           // teal — the third cool channel
                         drums: true
                         drumLabels: ["A2DP", "HSP"]
                         drumsLive: root.btConnected
@@ -1756,7 +1756,7 @@ Item {
                         anchors.horizontalCenter: parent.horizontalCenter
                         width: parent.width - 2 * naos.inset
                         Repeater {
-                            model: root.voiceSlots
+                            model: root.channelSlots
                             delegate: Item {
                                 width: parent.width; height: root.rowH
                                 Rectangle {
@@ -1783,19 +1783,19 @@ Item {
                     // other list in this house pages rather than growing
                     // chrome.
                     ListView {
-                        id: voiceView
+                        id: channelView
                         y: naos.listY
                         anchors.horizontalCenter: parent.horizontalCenter
                         width: parent.width - 2 * naos.inset
-                        height: Math.min(naos.rows.length, root.voiceSlots) * root.rowH
+                        height: Math.min(naos.rows.length, root.channelSlots) * root.rowH
                         clip: true
                         model: naos.streams ? naos.rows : []
                         opacity: naos.streams ? 1 : 0
                         visible: opacity > 0.01
                         Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
                         boundsBehavior: Flickable.StopAtBounds
-                        delegate: VoiceRow {
-                            width: voiceView.width
+                        delegate: ChannelRow {
+                            width: channelView.width
                             height: root.rowH
                         }
                     }
@@ -1804,7 +1804,7 @@ Item {
                         y: naos.listY
                         anchors.horizontalCenter: parent.horizontalCenter
                         width: parent.width - 2 * naos.inset
-                        height: Math.min(naos.rows.length, root.voiceSlots) * root.rowH
+                        height: Math.min(naos.rows.length, root.channelSlots) * root.rowH
                         clip: true
                         model: naos.streams ? [] : naos.rows
                         opacity: naos.streams ? 0 : 1
@@ -1824,7 +1824,7 @@ Item {
                     // register rather than opening onto blank marble.
                     Column {
                         x: naos.inset
-                        y: naos.listY + (root.voiceSlots * root.rowH) / 2 - 16
+                        y: naos.listY + (root.channelSlots * root.rowH) / 2 - 16
                         width: parent.width - 2 * naos.inset
                         spacing: 3
                         visible: naos.rows.length === 0
@@ -1867,7 +1867,7 @@ Item {
                     id: hint
                     anchors.right: mixerTag.left; anchors.rightMargin: 10
                     anchors.bottom: parent.bottom
-                    // The verbs are the same on a shaft and on a voice row,
+                    // The verbs are the same on a shaft and on a channel row,
                     // which is why the naos needed no gesture vocabulary of
                     // its own — this one line still names both.
                     text: "scroll · set   click · mute"
@@ -1906,9 +1906,9 @@ Item {
                     // Compact it is the two levels; open, that would be a
                     // third reading of the tallies AND of the naos chip, so
                     // it changes to the one number nothing else on the stele
-                    // carries — how many voices are hushed.
+                    // carries — how many channels are hushed.
                     text: mode.expanded
-                          ? ("└─┤ " + root.hushedCount + " of " + root.voiceCount
+                          ? ("└─┤ " + root.hushedCount + " of " + root.channelCount
                              + " hushed ├")
                           : ("└─┤ out " + (root.outAvail ? (root.outMuted ? "×" : root.outPct) : "—")
                              + " · in " + (root.inAvail ? (root.inMuted ? "×" : root.inPct) : "—") + " ├")
