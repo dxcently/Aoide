@@ -1,7 +1,7 @@
 # Fleshing out Aoide ricing — the rehearsal, the cue, and the observation stack
 
 Status: a design handout captured from a chat session (2026-08-18), not yet
-built and not yet LOCKED — khoa has steered every section at least once, but
+built and not yet LOCKED — the User has steered every section at least once, but
 the final "lock" word hasn't been said. Nothing here is asserted as existing
 unless marked EXISTS. A companion command flesh-out was produced by another
 agent in a separate session; it was not found anywhere in the repo at capture
@@ -28,7 +28,7 @@ The governing principle that survived every revision:
 > and state files riding the existing three doors (CLI / MCP / A2A, one
 > schema). ACP is dead (folded into A2A); AG-UI is the wrong layer.
 
-And the discipline added last (khoa, closing note of the session):
+And the discipline added last (the User, closing note of the session):
 
 > **Terse index always, full contract on demand.** A connected agent carries
 > only the command *index* — names plus one-liners, enough to know aoide has
@@ -83,7 +83,7 @@ outward to whatever it can't touch.* Agent-agnosticism lives in the
 
 An agent doing aoide-related work learns of `aoide cue` from the pull
 surfaces it already reads — `AGENTS.md`, `aoide guide`, bare `aoide`, the
-MCP tool index. **No SessionStart context injection, ever** (cut by khoa:
+MCP tool index. **No SessionStart context injection, ever** (cut by the User:
 the hook door keeps tracking state passively but injects nothing; an agent
 minding its own business never hears from aoide).
 
@@ -145,7 +145,7 @@ volunteers it.** Hooking happens top-down, when actually needed:
 
 | who decides | how it lands |
 |---|---|
-| khoa | wraps/conducts the agent, or tells it to join |
+| the User | wraps/conducts the agent, or tells it to join |
 | an orchestrator | spawns via `conduct`/`wrap` (auto-registered), or its brief says `graph join` |
 | an engagement | a score step whose mechanics require identity says "`graph join` first" — an instruction inside work already accepted, not ambient pressure |
 
@@ -215,7 +215,7 @@ aoide rice rehearse begin <song> [--draft <name>]   — enters mode draft
         ▼
 aoide rice rehearse end [--distill]   — draft survives; journal → design log
         ▼
-aoide rice declare                    — unchanged: khoa-gated, still planned
+aoide rice declare                    — unchanged: User-gated, still planned
 ```
 
 ### 5.1 `rice score` — the self-describing step
@@ -294,7 +294,7 @@ adds enforcement:
 - `rice review record --verdict pass|fail --notes …` — `score advance`
   from `review` refuses unless the verdict came from a **different session
   id** than the editing one. The executor cannot self-certify. `--solo`
-  exists for khoa, flagged in the journal. (Different-*session*, not
+  exists for the User, flagged in the journal. (Different-*session*, not
   different-*agent*: model identity is unverifiable and harness-specific.)
 - The `plan` step gates on an intent-note touch — planning leaves an
   artifact or didn't happen.
@@ -314,7 +314,7 @@ reverts them:
 | engagement | the loop | revert substrate | hard gate |
 |---|---|---|---|
 | rehearsal (§5) | plan → edit → check → review → mark, inside a draft | takes through draft routing | different-session review verdict |
-| nix maintenance | plan → bump (flake inputs) → build → generation diff → review → switch | nix generations + git — **no new snapshot machinery** | the switch stays khoa-run ([[Rebuild-Gate]]); agents stop at a built, reviewed, un-switched generation |
+| nix maintenance | plan → bump (flake inputs) → build → generation diff → review → switch | nix generations + git — **no new snapshot machinery** | the switch stays User-run ([[Rebuild-Gate]]); agents stop at a built, reviewed, un-switched generation |
 | nix development | plan → edit → build/test → live-surface check → review → commit | git | tests pass + different-session review before commit — the test→show→confirm→log discipline made mechanical |
 
 What the intentions buy now, for free:
@@ -332,7 +332,7 @@ What the intentions buy now, for free:
   tables). Until then, imitation over abstraction.
 
 Both nix loops inherit the review discipline unchanged: a reviewer session
-distinct from the editor, verdicts journaled, `--solo` for khoa. The
+distinct from the editor, verdicts journaled, `--solo` for the User. The
 maintenance loop's terminal step is the one place an engagement ends at a
 **human** action by design — the rebuild gate is governance, not a missing
 feature.
@@ -405,7 +405,7 @@ Open / uncertain:
 - Whether auto-take hashes cover.json on every check (leaning yes).
 - If real agents ignore the cue line, auto-join for known harness
   ancestries is the noted one-line escalation — not built.
-- The design as a whole awaits khoa's explicit LOCK before wiki concept
+- The design as a whole awaits the User's explicit LOCK before wiki concept
   pages assert any of it as existing.
 
 ## Related
