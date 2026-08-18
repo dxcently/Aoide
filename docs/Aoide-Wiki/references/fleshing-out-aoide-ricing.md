@@ -49,6 +49,7 @@ And the discipline added last (the User, closing note of the session):
 │    register: hook door │ graph wrap │ conduct │ A2A(remote)  │
 │    observe:  hook edges + graph tail (transcript ∨ PTY tee)  │
 │    steer:    graph send (gated) │ A2A message/send (remote)  │
+│    escalate: the sudo door — declared ops, polkit auth (§8)  │
 ├──────────────────────────────────────────────────────────────┤
 │  ENGAGEMENTS  (scoped protocols riding citizenship)          │
 │    the rehearsal — the rice loop, formalized (first tenant;  │
@@ -351,15 +352,29 @@ dirty tree builds with `self.rev = null` and cannot round-trip, so the
 build step's gate refuses (or loudly journals) a dirty build. No new
 snapshot machinery: git + generations + one journal line.
 
-## 7. Rollback for humans — the same verbs grow pickers
+## 7. Rollback and pruning — one verb, two modes
 
-The revert verbs above are agent-shaped: exact flags, `--json`, no
-questions. The User gets the **same verbs** in a human mode: invoked bare
-on a tty with no selecting flag, a verb lists its candidates as a numbered
-picker and confirms before writing. Hand-rolled prompt — rows, a number,
-y/n — no TUI crate, the same no-new-deps discipline as the A2A server.
-Flags and `--json` bypass the picker entirely, so scripts and agents never
-meet a prompt.
+Every verb here serves **both audiences from one implementation**. There is
+no human CLI and no agent CLI; there is one verb with two entrances:
+
+```
+                       aoide rice back
+                              │
+        ┌─────────────────────┴─────────────────────┐
+   flags / --json                            bare, on a tty
+   (agents, scripts)                         (the User)
+        │                                           │
+   selection is given                     numbered picker, multi-select
+   executes, structured out               where it makes sense, confirm
+        │                                           │
+        └──────────► same code path, same rails ────┘
+                     same audit line
+```
+
+Hand-rolled prompt — rows, a number or a space-toggled set, y/n — no TUI
+crate, the same no-new-deps discipline as the A2A server. A non-tty stdout
+never prompts, so a piped or agent invocation cannot hang waiting on a
+human.
 
 | bare verb on a tty | picker rows | on select |
 |---|---|---|
@@ -384,7 +399,108 @@ select one-of-many (a song, a draft, a take, a session id) grows the same
 bare-on-a-tty picker, applied opportunistically as verbs get touched — not
 as a big retrofit pass.
 
-## 8. How an agent picks up the harness
+### 7.1 Pruning — nix entirely, never a second store
+
+**Decision: just nix.** Aoide invents no store, no generation format, no
+snapshot layer. Pruning verbs are wrappers whose whole contribution is
+*selection, correlation, and rails* — nix already does the deleting, and
+`graph prune` (EXISTS — drops finished session records) already sets the
+house meaning of the word.
+
+| verb | wraps | protected by default |
+|---|---|---|
+| `rice take prune [--older-than 14d] [--keep 20] [--all-but-marks]` | aoide's own `takes/` dir — its only native storage | **marked** takes (reviewed-good states); `--force` to take one out |
+| `aoide nix prune [--generations 42,43] [--older-than 30d] [--keep 5]` | `nix-env -p /nix/var/nix/profiles/system --delete-generations …`, then optionally `nix store gc` | current + booted generation (nix refuses these anyway — a free rail); any generation the journal flags `keep` |
+| `aoide graph prune` | EXISTS — done session records | — |
+
+Both prune verbs are dry-run-shaped: they print what would go and what it
+frees, and the bare-tty mode is a **multi-select** picker (space toggles,
+Enter confirms) because pruning is the one place selecting several at once
+is the normal case. The symmetry worth keeping: **a mark protects a take
+exactly as `keep` protects a generation** — one idea, two substrates.
+
+Consequence of pruning worth stating once: deleting a generation does not
+delete its commit. The §6 round-trip degrades gracefully — a pruned
+generation still resolves to its rev, so recovery becomes *checkout and
+rebuild* instead of *boot straight into it*. Related grounded finding:
+`nix.gc.automatic` is **not** configured anywhere in this repo today, so
+nothing is silently eating generations behind the journal's back — if it
+is ever turned on, its retention and the journal's `keep` flags need to
+agree.
+
+## 8. The sudo door — privilege with a human inside it
+
+This is not a new invention: `modules/nucleus/aoided.nix` already declares
+aoided as owner of "the user-gated rebuild pipeline (**polkit pattern**):
+agent proposes → user admits → git records", and the compositor facet
+already runs **hyprpolkitagent** as a user service, installed explicitly
+so that "the aoided rebuild gate's future polkit prompt" would have
+something to present a dialog with. Both EXIST. This section specifies the
+thing they were left waiting for.
+
+First, the distinction that makes the door worth building:
+
+| path | what it is | verdict |
+|---|---|---|
+| `needsSudo` (EXISTS) | an agent typed `sudo` inside its own conducted shell and is now **stuck** at a password prompt; aoide detects it and badges the roster card | passive, a *stall* to be rescued — the guide should teach agents away from it |
+| the sudo door (NEW) | the agent never runs `sudo`; it **requests a declared operation** and aoide performs it after the User authenticates | the supported path |
+
+```
+agent: aoide sudo request nix.prune --older-than 30d --reason "…"
+  │   an op id from the nix-declared allowlist — never an argv
+  ▼
+state/escalations.json → pending
+  │   agent polls `aoide sudo status <id>`; DENIED is a normal result,
+  │   not an error to retry-loop on
+  ▼
+summons raised on surfaces that already exist
+  (conductor roster card · dock sudo badge · desktop notification)
+  ▼
+the User authenticates — polkit prompt at the seat (hyprpolkitagent, EXISTS)
+  │   the PAM stack decides the factors: password · TOTP · FIDO2 key
+  ▼
+aoide's privileged helper runs THE DECLARED OP
+  │   fixed argv template; agent values only in slots the op declares
+  ▼
+result + audit (Door::Sudo) + grant expires — single-use by default
+```
+
+The rails, each with its one reason:
+
+| rail | why |
+|---|---|
+| op ids only, never a command line | the A2A door's rule, reused: the caller names the *what*, aoide owns the *how* |
+| the allowlist is nix options | admitted at rebuild time = the existing rebuild gate, no new governance |
+| fresh auth per request; single-use default, TTL only if an op declares it | an agent never inherits ambient root for its lifetime |
+| no `shell` / `exec` / free-argv op, ever | one such op collapses the entire door into `sudo su` |
+| no seat → no auth → stays pending, then expires | there is no headless bypass; absence of a human is a denial |
+| every request, approval, denial, execution audited | one audit log, `Door::Sudo`, same as every other door |
+
+### 8.1 The second factor is PAM's job, not aoide's
+
+Aoide implements no authentication and holds no secret. Factors are
+configured in nix on the PAM stack behind the polkit action —
+`pam_oath` for TOTP, `pam_u2f` for a FIDO2 key, password alone if that is
+what the User wants. The only thing an op declares is an **auth class**
+(`admin`, `admin-2fa`), which selects which polkit action id it goes
+through; strengthening a class is then a nix edit that needs no aoide
+change. This is the same "just nix entirely" answer as §7.1 — the system
+already has an authentication stack, and a second one written by aoide
+would be strictly worse.
+
+### 8.2 Reconciling with §6 and §7
+
+A fair objection: §6 says the switch stays User-run and §7 says the
+generation-rollback offer has no flag form — does a `nix.switch` op
+undo that? No, and the distinction is the point: **the ban is on an
+unattended switch, not on an agent-initiated one.** Through this door the
+agent can *ask*, but the operation completes only when a human
+authenticates at a live prompt, per request, with an audit line. That is
+the rebuild gate mechanized — arguably stronger than a hand-typed `sudo`,
+which authenticates nothing about *why*. What remains forbidden: any op
+that would let the switch happen with no human present.
+
+## 9. How an agent picks up the harness
 
 Layered by capability, degrading gracefully — the score and cue being
 self-describing is what makes every tier land on the same truth:
@@ -399,7 +515,7 @@ self-describing is what makes every tier land on the same truth:
 Nothing in any tier names a harness; a new harness is one `AgentProfile`
 entry.
 
-## 9. Phasing
+## 10. Phasing
 
 Observation lands first (small, orthogonal, and the rehearsal's watch UI
 consumes it); each phase reviewed before the next, house style:
@@ -424,7 +540,17 @@ consumes it); each phase reviewed before the next, house style:
 - **F — watching UI**: `rice watch` + dock Rehearsal gadget on O3,
   `rehearse end --distill`.
 
-## 10. Decisions made (unmake at will) and open items
+The two cross-cutting additions slot in beside them, both usable long
+before any engagement exists:
+
+- **P — pruning** (§7.1): `rice take prune` with `A`; `aoide nix prune`
+  with the nix loop. Multi-select picker ships with each.
+- **S — the sudo door** (§8): the escalation record, the polkit-backed
+  helper, the summons on existing surfaces, `Door::Sudo` audit. Its first
+  customer is `aoide nix prune` (deleting system generations needs root),
+  which is why S lands with the nix work rather than after it.
+
+## 11. Decisions made (unmake at will) and open items
 
 Decided in-session, one line each:
 
@@ -440,10 +566,20 @@ Decided in-session, one line each:
 - PTY tee in `conduct` only; output logs under `state/`.
 - Terse index always, full contract on demand (§0) — applies to the CLI
   help, the MCP tool list, and any context an orchestrator hands a worker.
-- Human mode = bare-on-a-tty numbered picker + confirm, hand-rolled, no
-  TUI crates; flags/`--json` bypass it. The nix switch-rollback offer
-  lives only behind interactive confirmation — never a flag — which is
-  what keeps it human-only.
+- One verb, two entrances (§7) — agents and the User share every verb;
+  bare-on-a-tty gets a hand-rolled picker (multi-select where selecting
+  several is normal), flags/`--json` bypass it, non-tty never prompts.
+- Pruning is nix entirely (§7.1) — wrap `delete-generations` / `store gc`,
+  never a second store; marks protect takes as `keep` protects
+  generations.
+- Privilege goes through the sudo door (§8), never through an agent
+  holding a password: declared op ids, nix-admitted allowlist, fresh
+  polkit auth per request, single-use default, no free-argv op ever.
+  Factors are PAM's (`pam_oath` / `pam_u2f`), selected by an op's auth
+  class — aoide implements no authentication and stores no secret.
+- The ban is on an **unattended** switch, not an agent-initiated one
+  (§8.2) — an agent may ask; only a live human authentication completes
+  it.
 - No generic engagement framework — the rehearsal is the only **built**
   tenant; nix maintenance and nix development are intended siblings (§6),
   and the shared shape gets extracted only when the second tenant lands.
