@@ -169,6 +169,10 @@ init); `AOIDE_SESSION_ID` / `graph join --id` is the manual override.
   │ HOOK EDGES          state, not content                     │ EXISTS
   │   working/awaiting/stopped + which tool.                   │
   ├────────────────────────────────────────────────────────────┤
+  │ EDIT EDGES           which file, not just which tool       │ NEW
+  │   same hook payload, one field newly read:                 │
+  │   tool_input.file_path → pre-image capture (§7.2).         │
+  ├────────────────────────────────────────────────────────────┤
   │ A2A                 REMOTE agents only                     │ EXISTS
   │   command + status; never local observation.               │
   └────────────────────────────────────────────────────────────┘
@@ -376,6 +380,12 @@ reverts them:
 | nix maintenance | plan → bump (flake inputs) → build → generation diff → review → switch | nix generations + git — **no new snapshot machinery** | the switch stays User-run ([[Rebuild-Gate]]); agents stop at a built, reviewed, un-switched generation |
 | nix development | plan → edit → build/test → live-surface check → review → commit | git | tests pass + different-session review before commit — the test→show→confirm→log discipline made mechanical |
 
+The nix-development row's revert substrate is listed as "git" with no
+mechanism behind it. §7.2 is that mechanism, one level down from a nix
+generation: a generation is stamped with its commit (below), a session is
+stamped with its pre-images — neither invents a store, and §7.2's journal is
+substrate-blind and rice-free, so this loop would inherit it unchanged.
+
 What the intentions buy now, for free:
 
 - The cue's `assignment.engagement` field is already a name, not an enum —
@@ -508,6 +518,190 @@ rebuild* instead of *boot straight into it*. Related grounded finding:
 nothing is silently eating generations behind the journal's back — if it
 is ever turned on, its retention and the journal's `keep` flags need to
 agree.
+
+### 7.2 Project edits and per-session revert — git as a second substrate
+
+**Decision: git holds the bytes, aoide holds pointers.** §7.1 is "just nix,
+never a second store" for the built system; this is the same discipline one
+level down, for a *registered project's own working tree*. On every edit-tool
+hook, aoide writes the file's pre-edit content into the **project's own git
+object store** (`git hash-object -w`), anchors it with a ref so gc can never
+collect it, and appends one line to a single append-only journal,
+`state/edits.jsonl`. Reverting a session means, for each file it touched,
+restoring the earliest pre-image it recorded — gated by a hash check against
+what is live now. This is the mechanism §6's nix-development row lists as
+"git" with nothing behind it, and it is the same seam §7's widget-commit lane
+already promised: a working-tree restore, HEAD never moved, never a commit.
+
+```
+PreToolUse, tool ∈ profile.edit_tools, file_path under a registered project
+        │
+        ▼
+   git hash-object -w -- <file>       pre-image → the project's own
+   git update-ref refs/aoide/preimage/<sha> <sha>   object store, anchored —
+        │                                            gc cannot take it
+        ▼
+   append {kind:"pre", project, session, path, mode,
+           tuid, sha, tool, at}  →  state/edits.jsonl
+
+PostToolUse, same tools
+        │
+        ▼
+   git hash-object -- <file>          fingerprint only — never stored,
+        │                             never restored, compared at revert
+        ▼
+   append {kind:"post", …, sha, at}  →  state/edits.jsonl
+```
+
+**Verified on this box:** `git update-ref` accepts a ref that points directly
+at a blob (no tree, no commit), and that blob survives `git gc --prune=now`
+— probed 2026-08-18. The anchoring rail this section depends on is not a
+hope; it is a fact checked against this machine's git before the design was
+finalized. Nothing above is mechanized in code yet — the probe is a shell
+transcript, not a shipped feature (phasing, below).
+
+Only **five** git operations exist anywhere in this design: `rev-parse
+--show-toplevel` (is this a repo, and where), `hash-object -w` (store a
+pre-image), `hash-object` (fingerprint the live file), `cat-file blob` (read
+a pre-image back at revert time), `update-ref` under `refs/aoide/` (anchor).
+`git add`, any commit, any HEAD move — structurally absent. A revert is a
+working-tree restore, full stop; the User's branch, index, stash, and history
+are never touched. A hook running under a minimal-PATH launcher (systemd and
+friends) may not find `git` on `PATH` at all — capture then silently records
+nothing, consistent with the best-effort posture every capture already has.
+
+**The journal.** One file for every registered project, `state/edits.jsonl`
+— not one journal per project, so no project-name-to-path derivation and no
+new sanitization surface. Each line is a pointer, never content: a *pre* line
+and its matching *post* line share `project`, `session`, `path`, `mode`,
+`tool`, `tuid`, `at`, plus each line's own `sha` — `kind` says which one it
+is, and `sha` is the single on-disk field name in both cases, never split
+into two. `tuid` (the tool-use id from the hook payload) exists so a session
+that edits one file twice in flight pairs its own pre and post correctly
+rather than by proximity. `sha: null` on a pre-image means the file did not
+exist before the edit — **that null is the answer to "which file was made
+through aoide."** Appends are lock-free by construction:
+one line is far under `PIPE_BUF`, so concurrent hook processes interleave
+atomically without a lock — the same reasoning `with_stage_lock`'s own doc
+comment already carries for why it is *not* used on a pure append.
+
+**The verbs:**
+
+```
+aoide graph project edits [--project <name>] [--session <id>]
+                          [--path <rel>] [--since <Nd|Nh>] [--json]
+
+aoide graph project back --session <id> [--project <name>] [--force] [--json]
+aoide graph project back                    bare on a tty → the picker
+```
+
+`edits` is a pure fold over the journal — no git, no repo required, works on
+an unregistered-as-git project exactly as well as a tracked one. `+` marks a
+file whose earliest pre-image is `null` — made through aoide, the ask's own
+phrasing. `back` is the revert; it needs the project's git toplevel and
+refuses cleanly, naming `git init`, when there isn't one — **aoide never runs
+`git init` for the User.** Both verbs are dual-entrance exactly per §7: flags
+and `--json` are the agent door; bare on a tty is the User's door and opens a
+picker (rows = sessions, newest first) — that picker lands only after the
+sibling take-tree picker's `aoide_protocol::pick` groundwork (§10's A8), so
+the flag door ships first and alone.
+
+**Per-session revert is exact only for files nothing has touched since.**
+That is the honest limit, not a bug: two sessions editing one file is a
+three-way merge, and a merge can fail — no storage design changes that. What
+*is* decidable and cheap is a hash check. `back --session S` first plans,
+then classifies every file S touched into three states, not two — a crash
+mid-revert must not strand the User in a state the tool then refuses to
+finish:
+
+| state | test | action |
+|---|---|---|
+| `clean` | live hash == S's recorded post-image | restore S's pre-image (or delete, if `pre == null`) |
+| `already-restored` | live hash == the pre-image being restored (file correctly absent, for a creation) | skip — counts as success, not a conflict |
+| `moved-on` | anything else, including a file `rm`'d out from under the check | refuse — **no files are written** until every file plans clean or already-restored |
+
+The three-state split is what makes a repeated or crash-interrupted revert
+**idempotent**: re-running `back --session S` after a partial revert finishes
+the remainder and only then appends the one `revert` line, instead of seeing
+its own half-finished work as a new conflict and refusing forever.
+
+A `moved-on` file refuses with one of two messages, because the cause splits
+cleanly into two cases and the wrong one is actively misleading:
+
+- **Another aoide session moved on** — the journal names it: *"`path`
+  moved on (session `s_9f`, 11:02) — revert `s_9f` first, or pass
+  `--force`."* Reverting in **LIFO order composes correctly**: undo the newer
+  session and S's files become clean.
+- **Nothing in the journal moved it** — a shell write, a hand edit, or a
+  `rice back` touched the file, and there is no session to name: *"`path`
+  changed outside aoide's view (shell write, hand edit, or a rice revert) —
+  `--force` overrides after capturing the current content."* This is where
+  the Bash blind spot (below) becomes visible at exactly the moment it
+  matters, instead of staying an abstract caveat.
+
+**`--force` overrides, and destroys nothing.** It proceeds past `moved-on`
+files, but only after capturing the file's *current* content as a fresh
+anchored pre-image first — the discarded bytes stay in the repo's object
+store, named in the journal's `revert` line, recoverable with `git cat-file
+blob <sha>` for as long as R7's pruning leaves the ref alone. A clean revert
+takes the same precaution: even with no conflict, the file's current content
+is captured before it is overwritten, so **a revert can itself be reverted.**
+
+**Limitations, stated as limitations, not buried:**
+
+- **The Bash blind spot is permanent.** A `Bash` heredoc, `sed -i`, `mv`, or
+  `rm` is invisible to every capture point this design has — the hook door
+  only ever sees `tool_input.file_path` for the harness's own edit tools.
+  Wrapping every `Bash` call in a `git status` diff was considered and
+  rejected: it would journal build-output churn (`target/`) as if an agent
+  had "edited" it, and still could not attribute *which* Bash call did it.
+  The honest-refusal rail above is the whole mitigation: a Bash-modified file
+  fails the hash check at revert time and surfaces as the second refusal
+  shape, "changed outside aoide's view" — detected, never silently
+  overwritten, but never captured either.
+- **A non-git project registers and works — up to a point.** `graph project
+  add` still only validates an absolute, existing directory; whether it is a
+  git repo is reported (`git: false`), never fixed for the User. `edits`
+  (provenance) needs no repo and works identically either way. `back`
+  refuses with `not-a-git-repo`, naming `git init`, and never runs it —
+  aoide does not create a repository inside a directory the User named
+  without being asked to.
+- **`NotebookEdit` carries `notebook_path`, not `file_path`.** Capture reads
+  either key, so a notebook edit is captured like any other rather than
+  silently producing nothing under a plausible-looking `edit_tools` entry.
+- **A symlinked file round-trips by content, not by link.** Capture hashes
+  what the symlink points at (git follows symlinks); restore writes through
+  the symlink at its target (the same transparency `atomic_write_bytes`
+  already has) — content comes back correctly, the link itself is never
+  touched either way.
+
+**Composition with rice takes: disjoint substrates, on purpose, with no
+exclusion list.** Takes (§5.2) cover the stage-routed draft files
+(`stage/livery.json`, `stage/cover.json`, and their draft-mode copies); this
+journal covers tracked files inside a registered project's working tree. In
+this repo both exist at once and mostly don't overlap — except that a
+songbook widget's QML body, which §5.2's scope line already assigns to git
+as its revert mechanism, is now covered by this journal the moment a session
+edits it through an edit tool: **not a collision, the §7 widget-commit seam
+finally arriving by another door.** Where the substrates do genuinely
+overlap — an edit-tool write to a routed draft file — both systems record,
+redundantly and harmlessly: each revert path trusts only its own hash
+comparison, never the other system's state. A `rice back` that rewrites a
+livery file reads, to this journal, as an ordinary out-of-view change (the
+second refusal shape, above); a `project back` that rewrites it reads, to
+the takes system, as drift, and gets a drift take on its next touch. No
+coordination verb exists between `rice back` and `project back`, and none is
+needed — the two rails already compose without one.
+
+**Not designed here, and explicitly not shipping in v0** (the User's call):
+a whole-project revert, `project back --commit <rev>` — a working-tree `git
+checkout <rev> -- .` with HEAD never moving, answering "revert projects back
+to previous states" in its coarse reading rather than the per-session one.
+It is a handful of lines once the git seam above exists, and it is exactly
+the picker's second lane §7 already promises for the take tree. It is left
+for later, same register as §6's nix loops: an intended lane, not a designed
+one, because git already does this by hand and the feature aoide uniquely
+supplies is the per-session lane above it.
 
 ## 8. The sudo door — privilege with a human inside it
 
@@ -698,7 +892,9 @@ consumes it); each phase reviewed before the next, house style:
 
   Widget-commit lane of the §7 picker is scoped out of A0–A9 — it needs
   the first `git` shell-out anywhere in the Rust tree and is orthogonal to
-  branching; it lands as its own later step.
+  branching; it lands as its own later step. §7.2's R2 is where that first
+  `git` shell-out actually lands, for a different reason (project revert);
+  the widget-commit lane can build on the same seam once both exist.
 - **B — the rehearsal state machine**: `rehearse begin/end`, `rice score`
   + step table + `advance`, draft-mode requirement.
 - **C — hook correlation**: auto-take on `PostToolUse` drift, the
@@ -721,6 +917,34 @@ before any engagement exists:
   helper, the summons on existing surfaces, `Door::Sudo` audit. Its first
   customer is `aoide nix prune` (deleting system generations needs root),
   which is why S lands with the nix work rather than after it.
+
+**R — project edits and per-session revert** (§7.2): its own serialized
+run, R0–R7, one cargo-running executor at a time same as A0–A9, each step
+reviewed before the next:
+
+- **R0** — this handout amended with §7.2 (this section). Prose only, lands
+  before any code.
+- **R1** — the edit journal (`aoide-storage`): `EditLine` (with `tuid`),
+  append/read, the pure folds a revert plan and the provenance query both
+  consume.
+- **R2** — the git seam: the five subprocess operations, doc-commented
+  never-stages/never-commits/never-moves-HEAD; `pkgs/aoide/default.nix`
+  gains `git` in `nativeCheckInputs` so the gc-survival test can run under
+  `nix flake check`, not only in a dev shell.
+- **R3** — the capture edges, wired into the hook door's existing payload
+  parse without touching `map_hook`. **Gated: does not start until a
+  one-turn live capture (`aoide hooks install claude --capture`) confirms
+  the shape of a claude `PostToolUse` payload on this box** — the `pre` arm
+  is already grounded in existing code, the `post` arm is not, and R3 is
+  not written against an assumption.
+- **R4** — `aoide graph project edits`, the provenance query, both renders.
+- **R5** — `aoide graph project back --session`, flags/`--json` entrance —
+  the step that lands the ask.
+- **R6** — the bare-on-a-tty picker lane. **Strictly after the sibling
+  take-tree workstream's A8** (`aoide_protocol::pick`); nothing else in R
+  depends on it, so R7 may land first if A8 slips.
+- **R7** — `graph project edits prune`: retention for the journal and the
+  `refs/aoide/preimage/*` refs no surviving line names.
 
 ## 11. Decisions made (unmake at will) and open items
 
@@ -801,6 +1025,30 @@ Decided in-session, one line each:
   root; the head and its ancestry are never prunable, `--force` included.
 - The picker lives in `aoide_protocol::pick` — door behavior, and every
   domain crate already reaches `Door`.
+- Project revert (§7.2): git holds the bytes, aoide holds pointers —
+  subprocess `git` is the eleventh external tool the tree shells to, not a
+  new architectural category, and no `git2`/`gitoxide` dependency is taken.
+- One `state/edits.jsonl` for every project, not one journal per project —
+  deletes the project-name-to-path derivation and its unvalidated-name
+  hazard outright.
+- No new noun for "one session's edits inside a project" — the journal
+  calls them `pre`/`post` lines, prose says *pre-image*. `part` stays the
+  reserved musical candidate if the User ever wants one, matching the
+  take-tree's own no-noun-until-asked discipline.
+- No `graph project new` — registration is the only project-level
+  provenance the ask describes; a scaffolding verb is a different feature.
+- `git merge-file` (a three-way merge on conflict) is rejected as the
+  conflict policy — it would land literal conflict markers in the User's
+  source files from what is supposed to be a *safety* verb. All-or-nothing
+  refusal with the LIFO hint stands instead.
+- `--force` on `project back` is **kept** — the pre-capture makes it
+  non-destructive by construction (discarded bytes stay anchored and named
+  in the `revert` line), and without it two sessions interleaved on one
+  file would strand the User with no in-tool exit.
+- The whole-project `project back --commit <rev>` lane is **deferred by the
+  User** — not shipping in v0, intended-later exactly like §6's nix loops;
+  the per-session lane is the feature aoide uniquely supplies, and git
+  already does the coarse revert by hand.
 
 Open / uncertain:
 
@@ -815,6 +1063,11 @@ Open / uncertain:
   work correctly either way, and nothing here depends on the answer.
 - The design as a whole awaits the User's explicit LOCK before wiki concept
   pages assert any of it as existing.
+- Whether a claude `PostToolUse` payload carries `tool_input.file_path` is
+  still unconfirmed on this box (§7.2) — the `PreToolUse` arm is grounded in
+  existing code, kimi's `PostToolUse` is grounded by a live capture already
+  on disk, claude's `PostToolUse` is not. R3 is gated on a one-turn live
+  capture settling this before it starts.
 
 ## Related
 
