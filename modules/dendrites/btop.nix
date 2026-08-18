@@ -13,16 +13,14 @@
   options.aoide.btop.enable = lib.mkEnableOption "the btop resource monitor";
 
   config = lib.mkIf config.aoide.btop.enable {
-    home-manager.users.${config.aoide.user} =
-      { ... }:
-      {
-        programs.btop = {
-          enable = true;
-          settings = {
-            theme_background = false;
-            rounded_corners = false;
-          };
+    home-manager.users.${config.aoide.user} = _: {
+      programs.btop = {
+        enable = true;
+        settings = {
+          theme_background = false;
+          rounded_corners = false;
         };
       };
+    };
   };
 }

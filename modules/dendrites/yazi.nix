@@ -14,58 +14,56 @@
   options.aoide.yazi.enable = lib.mkEnableOption "the yazi terminal file manager";
 
   config = lib.mkIf config.aoide.yazi.enable {
-    home-manager.users.${config.aoide.user} =
-      { ... }:
-      {
-        programs.yazi = {
-          enable = true;
-          enableBashIntegration = true;
-          shellWrapperName = "y";
+    home-manager.users.${config.aoide.user} = _: {
+      programs.yazi = {
+        enable = true;
+        enableBashIntegration = true;
+        shellWrapperName = "y";
 
-          settings = {
-            manager = {
-              ratio = [
-                0
-                1
-                1
-              ];
-              sort_by = "mtime";
-              sort_sensitive = false;
-              sort_reverse = true;
-              linemode = "size";
-              show_hidden = false;
-            };
-          };
-
-          theme = {
-            mgr = {
-              preview_hovered = {
-                underline = false;
-              };
-              folder_offset = [
-                1
-                0
-                1
-                0
-              ];
-              preview_offset = [
-                1
-                1
-                1
-                1
-              ];
-            };
-
-            status.separator_style = {
-              fg = "red";
-              bg = "red";
-            };
+        settings = {
+          manager = {
+            ratio = [
+              0
+              1
+              1
+            ];
+            sort_by = "mtime";
+            sort_sensitive = false;
+            sort_reverse = true;
+            linemode = "size";
+            show_hidden = false;
           };
         };
 
-        home.shellAliases = {
-          sy = "sudo yazi";
+        theme = {
+          mgr = {
+            preview_hovered = {
+              underline = false;
+            };
+            folder_offset = [
+              1
+              0
+              1
+              0
+            ];
+            preview_offset = [
+              1
+              1
+              1
+              1
+            ];
+          };
+
+          status.separator_style = {
+            fg = "red";
+            bg = "red";
+          };
         };
       };
+
+      home.shellAliases = {
+        sy = "sudo yazi";
+      };
+    };
   };
 }

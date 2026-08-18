@@ -62,18 +62,15 @@ inputs.nixpkgs.lib.nixosSystem {
       # self-flaked (pkgs/aoide/flake.nix) and skipped by the walker — it is
       # injected from the `aoide` input instead: the same derivation the
       # flake's `packages.aoide` and `pkg-aoide` use.
-      (
-        { ... }:
-        {
-          nixpkgs.overlays = [
-            (import ./pkgs.nix { inherit lib; }).overlay
-            (_final: _prev: { aoide = inputs.aoide.packages.${system}.default; })
-          ];
-        }
-      )
+      (_: {
+        nixpkgs.overlays = [
+          (import ./pkgs.nix { inherit lib; }).overlay
+          (_final: _prev: { aoide = inputs.aoide.packages.${system}.default; })
+        ];
+      })
       # home-manager house defaults, applied only when the module is present.
       (
-        { ... }:
+        _:
         lib.optionalAttrs (inputs ? home-manager) {
           home-manager.useGlobalPkgs = lib.mkDefault true;
           home-manager.useUserPackages = lib.mkDefault true;

@@ -166,7 +166,10 @@ lib.mkIf config.aoide.enable {
     # libnotify rides along for `notify-send`: a sweep that actually changed the
     # roster raises a toast through dunst (a quiet sweep stays silent), and a
     # unit PATH without it would degrade that to a journal line nobody reads.
-    path = [ pkgs.hyprland pkgs.libnotify ];
+    path = [
+      pkgs.hyprland
+      pkgs.libnotify
+    ];
 
     serviceConfig = {
       Type = "oneshot";

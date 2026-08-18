@@ -1,7 +1,8 @@
 # lib/checks.nix — the contractual coupling discipline, as flake checks.
 #
-# Two assertions ride as flake `checks` (see concepts/Governance and
-# concepts/Notes in the wiki):
+# Five checks ride as flake `checks` (see concepts/Governance and
+# concepts/Notes in the wiki, and the mechanical-integrity design for fmt +
+# discovery specifically):
 #
 #   1. surface-ownership — no render surface may have two owners. The
 #      Quickshell facet declares `aoide.surfaces.<name>.owner`; Stylix reads
@@ -14,10 +15,24 @@
 #      an evaluated nixos config never imports/reads those paths, so we assert
 #      over the module tree's source strings.
 #
-# Both are written so they PASS TRIVIALLY today (no facets declare owners yet)
-# and become real as Wave-1 facets populate `aoide.surfaces`. Each check
-# resolves to a trivial derivation: it either builds (assertion held) or the
-# eval fails with a readable message (assertion broken).
+#   3. song-shape — a committed song under song/songbook/<name>/ is exactly
+#      one rice.nix, never a stray extra module riding along.
+#
+#   4. fmt — `nixfmt --check` over every `.nix` file in the flake's own
+#      COMMITTED source (flake.nix's declared `formatter`, run by nothing
+#      until this check existed).
+#
+#   5. discovery — every `pkgs/<name>/` directory is a recognised shape
+#      (shelved, callPackage target, or self-flaked) per lib/pkgs.nix's own
+#      discovery rule; a fourth shape is a half-created package that vanishes
+#      from `packages`/`pkg-<name>` silently today.
+#
+# 1–3 and 5 are written so they PASS TRIVIALLY where nothing populates the
+# registry they inspect yet (1) and become real as Wave-1 facets/packages
+# land. Each resolves to a trivial derivation: it either builds (assertion
+# held) or the eval fails with a readable message (assertion broken). 4 is a
+# real `runCommand` — it has to actually run a binary, so it can only fail at
+# build time, not eval time.
 { lib, pkgs }:
 let
   # A check that succeeds as a buildable derivation, or throws at eval time
@@ -44,8 +59,9 @@ let
       names = builtins.attrNames surfaces;
       badOwner = builtins.filter (n: (surfaces.${n}.owner or "") == "") names;
     in
-    assertCheck "surface-ownership" (badOwner == [ ])
-      "surfaces with no owner: ${builtins.toString badOwner}";
+    assertCheck "surface-ownership" (
+      badOwner == [ ]
+    ) "surfaces with no owner: ${builtins.toString badOwner}";
 
   # ── Check 2: no song/ RUNTIME read at build time ───────────────────────────
   # Asserts that no walked module path lives under a `song/` RUNTIME dir. The
@@ -78,8 +94,9 @@ let
         builtins.any (needle: lib.hasInfix needle s) runtimeInfixes || isSongDraft s
       ) modulePaths;
     in
-    assertCheck "no-song-read" (offenders == [ ])
-      "modules read song/ runtime paths at build time: ${builtins.toString offenders}";
+    assertCheck "no-song-read" (
+      offenders == [ ]
+    ) "modules read song/ runtime paths at build time: ${builtins.toString offenders}";
 
   # ── Check 3: song shape (host-agnostic discipline) ─────────────────────────
   # A committed song under song/songbook/<name>/ carries ONLY notes: its
@@ -101,11 +118,46 @@ let
     songbookPaths:
     let
       strays = builtins.filter (
-        p: let s = toString p; in !lib.hasSuffix "/rice.nix" s
+        p:
+        let
+          s = toString p;
+        in
+        !lib.hasSuffix "/rice.nix" s
       ) songbookPaths;
     in
-    assertCheck "song-shape" (strays == [ ])
-      "songbook holds non-rice.nix modules (a song is rice.nix only): ${builtins.toString strays}";
+    assertCheck "song-shape" (
+      strays == [ ]
+    ) "songbook holds non-rice.nix modules (a song is rice.nix only): ${builtins.toString strays}";
+
+  # ── Check 4: nixfmt --check over the committed source ──────────────────────
+  # `src` is the flake's own store copy (flake.nix passes `self`), which nix
+  # already git-filters — this scopes the check to the COMMITTED tree, never
+  # the working tree. Uncommitted drift is `aoide soundcheck`'s job, not
+  # this one's; the two are disjoint by construction (`nix flake check`
+  # cannot see gitignored/uncommitted files, full stop). A real `runCommand`
+  # because it has to run the `nixfmt` binary — no purely-eval way to check
+  # formatting.
+  fmt =
+    src:
+    pkgs.runCommand "aoide-check-fmt" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
+      set -euo pipefail
+      cd ${src}
+      nixfmt --check $(find . -name '*.nix' -type f)
+      touch "$out"
+    '';
+
+  # ── Check 5: package discovery completeness ─────────────────────────────────
+  # `strays` is lib/pkgs.nix's own `strayEntries` — every `pkgs/<name>/`
+  # directory that is neither shelved (`_`-prefixed), a callPackage target
+  # (carries default.nix), nor self-flaked (carries flake.nix, e.g.
+  # pkgs/aoide). The predicate lives in lib/pkgs.nix, next to the discovery
+  # rule it enforces; this check only asserts the list it returns is empty —
+  # it invents no second copy of the rule.
+  discovery =
+    strays:
+    assertCheck "discovery" (
+      strays == [ ]
+    ) "pkgs/ entries neither a package, shelved, nor self-flaked: ${builtins.toString strays}";
 in
 {
   inherit
@@ -113,5 +165,7 @@ in
     surfaceOwnership
     noSongRead
     songShape
+    fmt
+    discovery
     ;
 }

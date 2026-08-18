@@ -24,7 +24,6 @@
 }:
 let
   cfg = config.aoide.facets.quickshell;
-  t = config.aoide.livery;
 
   # Committed songs live here (CONTRACTS.md §5) — versioned score, legitimately
   # walked at build time (checks.no-song-read only bans song/ RUNTIME infixes,
@@ -62,18 +61,6 @@ let
       "${activeSongNotes}" > "$tmp"
     mv -f "$tmp" "$HOME/Aoide/song/stage/livery.json"
   '';
-
-  # ── Component-tier fallback helpers ────────────────────────────────────────
-  # Each is: use the component override when set, else fall back to the palette.
-  # Facets apply the fallback here (CONTRACTS.md §1 rule: "Facets apply the
-  # fallback, not the option system").
-  barBg = if t.bar.bg != null then t.bar.bg else t.palette.bg;
-  barFg = if t.bar.fg != null then t.bar.fg else t.palette.fg;
-  barAccent = if t.bar.accent != null then t.bar.accent else t.palette.accent;
-
-  notifBg = if t.notif.bg != null then t.notif.bg else t.palette.bg;
-  notifFg = if t.notif.fg != null then t.notif.fg else t.palette.fg;
-  notifUrgent = if t.notif.urgent != null then t.notif.urgent else t.palette.urgent;
 
   # ── QML root — the full skeleton config installed into run/qml/ ────────────
   # Each surface widget is a stub that reads its colors from notes. Deployed

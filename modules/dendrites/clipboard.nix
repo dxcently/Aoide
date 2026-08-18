@@ -119,7 +119,10 @@ in
         # Wayland/Unix resources it actually needs.
         UMask = "0077";
         ProtectSystem = "strict";
-        ReadWritePaths = [ "%h/.cache/cliphist" "%h/.cache/aoide-clipboard" ];
+        ReadWritePaths = [
+          "%h/.cache/cliphist"
+          "%h/.cache/aoide-clipboard"
+        ];
         PrivateTmp = true;
         NoNewPrivileges = true;
         ProtectKernelTunables = true;

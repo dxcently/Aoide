@@ -18,7 +18,12 @@
 # The `aoide` binary (installed by pkgs/aoide, Agent B) ships both `aoide` (CLI)
 # and `aoided` (daemon). We reference it via pkgs so eval stays clean even
 # before the package is fully realised.
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 lib.mkIf config.aoide.enable {
 
@@ -37,8 +42,8 @@ lib.mkIf config.aoide.enable {
 
     # Start when the graphical session is ready (Hyprland/Wayland compositor up).
     wantedBy = [ "graphical-session.target" ];
-    after    = [ "graphical-session.target" ];
-    partOf   = [ "graphical-session.target" ];
+    after = [ "graphical-session.target" ];
+    partOf = [ "graphical-session.target" ];
 
     serviceConfig = {
       # The `aoide` package installs both the `aoide` CLI and the `aoided`
@@ -47,7 +52,7 @@ lib.mkIf config.aoide.enable {
       ExecStart = "${pkgs.aoide}/bin/aoided";
 
       # Restart on failure; don't restart on clean exit or user stop.
-      Restart    = "on-failure";
+      Restart = "on-failure";
       RestartSec = "3s";
 
       # Audit log path comes from the option contract (modules/nucleus/options.nix).
@@ -63,7 +68,7 @@ lib.mkIf config.aoide.enable {
 
       # Standard output goes to the journal for `journalctl --user -u aoided`.
       StandardOutput = "journal";
-      StandardError  = "journal";
+      StandardError = "journal";
     };
 
     # Skeleton: a real implementation will also set up the unix socket path,
@@ -80,20 +85,20 @@ lib.mkIf config.aoide.enable {
     description = "Aoide MCP façade (network, user-only)";
 
     wantedBy = [ "aoided.service" ];
-    after    = [ "aoided.service" ];
-    bindsTo  = [ "aoided.service" ];
+    after = [ "aoided.service" ];
+    bindsTo = [ "aoided.service" ];
 
     serviceConfig = {
-      ExecStart  = "${pkgs.aoide}/bin/aoide mcp serve --stdio";
-      Restart    = "on-failure";
+      ExecStart = "${pkgs.aoide}/bin/aoide mcp serve --stdio";
+      Restart = "on-failure";
       RestartSec = "5s";
       Environment = [
         "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
         "AOIDE_USER=${config.aoide.user}"
       ];
       NoNewPrivileges = true;
-      StandardOutput  = "journal";
-      StandardError   = "journal";
+      StandardOutput = "journal";
+      StandardError = "journal";
     };
   };
 
@@ -109,12 +114,12 @@ lib.mkIf config.aoide.enable {
     description = "Aoide A2A (Agent2Agent) door (loopback by default, user-only)";
 
     wantedBy = [ "aoided.service" ];
-    after    = [ "aoided.service" ];
-    bindsTo  = [ "aoided.service" ];
+    after = [ "aoided.service" ];
+    bindsTo = [ "aoided.service" ];
 
     serviceConfig = {
-      ExecStart  = "${pkgs.aoide}/bin/aoide a2a serve";
-      Restart    = "on-failure";
+      ExecStart = "${pkgs.aoide}/bin/aoide a2a serve";
+      Restart = "on-failure";
       RestartSec = "5s";
       Environment = [
         "AOIDE_A2A_BIND=${config.aoide.a2a.bindAddress}"
@@ -124,8 +129,8 @@ lib.mkIf config.aoide.enable {
         "AOIDE_USER=${config.aoide.user}"
       ];
       NoNewPrivileges = true;
-      StandardOutput  = "journal";
-      StandardError   = "journal";
+      StandardOutput = "journal";
+      StandardError = "journal";
     };
   };
 
@@ -146,15 +151,15 @@ lib.mkIf config.aoide.enable {
     path = [ pkgs.curl ];
 
     serviceConfig = {
-      Type       = "oneshot";
-      ExecStart  = "${pkgs.aoide}/bin/aoide usage";
+      Type = "oneshot";
+      ExecStart = "${pkgs.aoide}/bin/aoide usage";
       Environment = [
         "AOIDE_STATE_DIR=%h/Aoide/state"
         "AOIDE_USER=${config.aoide.user}"
       ];
       NoNewPrivileges = true;
-      StandardOutput  = "journal";
-      StandardError   = "journal";
+      StandardOutput = "journal";
+      StandardError = "journal";
     };
   };
 

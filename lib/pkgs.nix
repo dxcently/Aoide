@@ -81,9 +81,32 @@ let
   # supplies callPackage (nixpkgs legacyPackages in the flake output, `final`
   # in the overlay).
   discover = pkgs: lib.genAttrs packageNames (name: pkgs.callPackage (pkgsDir + "/${name}") { });
+
+  # Entries under pkgsDir that are none of the three admitted shapes above
+  # (shelved `_`-dir, callPackage target, self-flaked): a half-created
+  # `pkgs/<name>/` that discovery silently drops today, with nothing flagging
+  # it — plus any non-directory stray. Same predicate as `isPackageDir` above,
+  # inverted and without the `_`-exemption, so the rule stays written ONCE,
+  # here, next to `packageNames`. Consumed by lib/checks.nix's `discovery`
+  # flake check (`nix flake check`, the COMMITTED-tree half — see the
+  # mechanical-integrity design in the wiki); a self-flaked dir like
+  # `pkgs/aoide` (default.nix AND flake.nix) is correctly never a stray.
+  strayEntries =
+    let
+      entries = builtins.readDir pkgsDir;
+      isStray =
+        name:
+        entries.${name} != "directory"
+        || (
+          !(lib.hasPrefix "_" name)
+          && !(builtins.pathExists (pkgsDir + "/${name}/default.nix"))
+          && !(builtins.pathExists (pkgsDir + "/${name}/flake.nix"))
+        );
+    in
+    builtins.filter isStray (builtins.attrNames entries);
 in
 {
-  inherit packageNames discover;
+  inherit packageNames discover strayEntries;
 
   # Overlay form for nixpkgs.overlays: injects every discovered package and
   # guards each name against ACCIDENTALLY masking a stock nixpkgs attribute

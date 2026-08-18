@@ -18,36 +18,34 @@
   options.aoide.git.enable = lib.mkEnableOption "git + gh for the aoide user (LFS, identity, credential helper)";
 
   config = lib.mkIf config.aoide.git.enable {
-    home-manager.users.${config.aoide.user} =
-      { ... }:
-      {
-        programs = {
-          git = {
-            enable = true;
-            lfs.enable = true;
-            signing.format = null;
-            settings = {
-              user.name = "dxcently";
-              user.email = "dxcently@gmail.com";
-              init.defaultBranch = "main";
-              core.editor = "nvim";
-              safe.directory = [
-                "/etc/nixos"
-                "/home/khoa/Aoide"
-              ];
-            };
+    home-manager.users.${config.aoide.user} = _: {
+      programs = {
+        git = {
+          enable = true;
+          lfs.enable = true;
+          signing.format = null;
+          settings = {
+            user.name = "dxcently";
+            user.email = "dxcently@gmail.com";
+            init.defaultBranch = "main";
+            core.editor = "nvim";
+            safe.directory = [
+              "/etc/nixos"
+              "/home/khoa/Aoide"
+            ];
           };
-          gh = {
+        };
+        gh = {
+          enable = true;
+          gitCredentialHelper = {
             enable = true;
-            gitCredentialHelper = {
-              enable = true;
-              hosts = [
-                "https://github.com"
-                "https://gist.github.com"
-              ];
-            };
+            hosts = [
+              "https://github.com"
+              "https://gist.github.com"
+            ];
           };
         };
       };
+    };
   };
 }

@@ -62,18 +62,16 @@ let
   # pkgs/<name> and guards each name against shadowing a nixpkgs attribute.
   # `aoide` itself is self-flaked (pkgs/aoide/flake.nix) and skipped by the
   # walker — injected from the `aoide` input, exactly as mkHost does.
-  overlayModule =
-    { ... }:
-    {
-      nixpkgs.overlays = [
-        (import ./pkgs.nix { inherit lib; }).overlay
-        (_final: _prev: { aoide = inputs.aoide.packages.${system}.default; })
-      ];
-    };
+  overlayModule = _: {
+    nixpkgs.overlays = [
+      (import ./pkgs.nix { inherit lib; }).overlay
+      (_final: _prev: { aoide = inputs.aoide.packages.${system}.default; })
+    ];
+  };
 
   # home-manager defaults — same as mkHost.
   hmDefaultsModule =
-    { ... }:
+    _:
     lib.optionalAttrs (inputs ? home-manager) {
       home-manager.useGlobalPkgs = lib.mkDefault true;
       home-manager.useUserPackages = lib.mkDefault true;

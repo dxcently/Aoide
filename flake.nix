@@ -51,8 +51,8 @@
     { self, nixpkgs, ... }@inputs:
     let
       systems = [ "x86_64-linux" ];
-      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
-      lib = nixpkgs.lib;
+      forAllSystems = f: nixpkgs.lib.genAttrs systems f;
+      inherit (nixpkgs) lib;
 
       # Per-host assembly (walker + host + home-manager + stylix).
       mkHost = import ./lib/mkHost.nix {
@@ -105,10 +105,13 @@
       # The contractual coupling discipline (lib/checks.nix). They pass
       # trivially now (no facets declare surface owners yet) and become real as
       # Wave-1 facets populate `aoide.surfaces`. Also builds EVERY package as
-      # `pkg-<name>` — the walked set auto-generated from lib/pkgs.nix
-      # (pkg-melete, pkg-mneme) plus `pkg-aoide` explicit from the `aoide`
-      # input, since the core is self-flaked — so `nix flake check` exercises
-      # the packaging contract for the whole set with no coverage gap.
+      # `pkg-<name>` — one per DISCOVERED package (lib/pkgs.nix; whatever
+      # currently lives under pkgs/ — no fixed list here to go stale) plus
+      # `pkg-aoide` explicit from the `aoide` input, since the core is
+      # self-flaked — so `nix flake check` exercises the packaging contract
+      # for the whole set with no coverage gap. `fmt` and `discovery` enforce
+      # the formatter and the pkgs/ discovery rule respectively — see
+      # lib/checks.nix's header.
       checks = forAllSystems (
         system:
         let
@@ -133,6 +136,13 @@
           # Committed songs self-register from song/songbook (walked into each
           # host by lib/mkHost.nix); song-shape asserts each is a rice.nix only.
           song-shape = checks.songShape (walk ./song/songbook);
+          # Formatter enforcement — flake.nix:173 declares `formatter = nixfmt`;
+          # nothing ran it before this check existed. Scoped to `self`, the
+          # git-filtered committed tree (see lib/checks.nix's Check 4).
+          fmt = checks.fmt self;
+          # pkgs/ discovery completeness — see lib/pkgs.nix's `strayEntries`
+          # and lib/checks.nix's Check 5.
+          discovery = checks.discovery pkgsWalk.strayEntries;
           # VM boot test — boots the Aoide desktop config headless and asserts
           # the stack comes up (multi-user.target, aoide on PATH,
           # greetd enabled, aoided + shellbridge user services active, graph

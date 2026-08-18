@@ -1,0 +1,11 @@
+# statix lint policy for this flake.
+#
+# repeated_keys (W20) fires whenever the same top-level attr (e.g. `aoide`,
+# `systemd`) is assigned more than once in a set — which is exactly the house
+# style this repo writes in on purpose: one option per line, flat, easy to
+# diff and grep (see hosts/yomi-strix/default.nix:58, "the whole desktop, one
+# line each"). Nesting everything into `aoide = { enable = ...; user = ...; }`
+# to satisfy the lint would fight readability for no defect caught. Disabled
+# here rather than case-by-case suppressed, so the rule never resurfaces as
+# noise in `aoide soundcheck` either.
+disabled = ["repeated_keys"]

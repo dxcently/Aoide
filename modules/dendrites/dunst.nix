@@ -62,11 +62,15 @@
 #   aoide.dunst.enable = true;
 #
 # hosts/ knows dendrites; dendrites never know hosts.
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 {
-  options.aoide.dunst.enable =
-    lib.mkEnableOption "dunst notification daemon (the herald's delivery backend)";
+  options.aoide.dunst.enable = lib.mkEnableOption "dunst notification daemon (the herald's delivery backend)";
 
   config = lib.mkIf config.aoide.dunst.enable {
     # libnotify rides along for `notify-send`: the stock client the freedesktop

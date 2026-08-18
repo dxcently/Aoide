@@ -14,15 +14,13 @@
   options.aoide.mcfly.enable = lib.mkEnableOption "mcfly smart shell history (vim keys, fuzzy search)";
 
   config = lib.mkIf config.aoide.mcfly.enable {
-    home-manager.users.${config.aoide.user} =
-      { ... }:
-      {
-        programs.mcfly = {
-          enable = true;
-          enableBashIntegration = false;
-          keyScheme = "vim";
-          fuzzySearchFactor = 2;
-        };
+    home-manager.users.${config.aoide.user} = _: {
+      programs.mcfly = {
+        enable = true;
+        enableBashIntegration = false;
+        keyScheme = "vim";
+        fuzzySearchFactor = 2;
       };
+    };
   };
 }

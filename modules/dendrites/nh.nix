@@ -21,17 +21,15 @@ in
   options.aoide.nh.enable = lib.mkEnableOption "nh (nix-helper) rebuild wrapper pointed at the Aoide flake";
 
   config = lib.mkIf config.aoide.nh.enable {
-    home-manager.users.${config.aoide.user} =
-      { ... }:
-      {
-        programs.nh = {
+    home-manager.users.${config.aoide.user} = _: {
+      programs.nh = {
+        enable = true;
+        clean = {
           enable = true;
-          clean = {
-            enable = true;
-            extraArgs = "--keep-since 1w --keep 10";
-          };
-          flake = flakeDir;
+          extraArgs = "--keep-since 1w --keep 10";
         };
+        flake = flakeDir;
       };
+    };
   };
 }
