@@ -337,6 +337,20 @@ maintenance loop's terminal step is the one place an engagement ends at a
 **human** action by design — the rebuild gate is governance, not a missing
 feature.
 
+**Generation ↔ codebase round-trip.** Rolling back the *built system* is
+native nix (numbered generations, `nixos-rebuild switch --rollback`, the
+boot menu). What nix does **not** do is map a generation back to the config
+codebase that produced it — the source is a GC-able build-time dep. The
+maintenance engagement closes that gap the takes-journal way: set
+`system.configurationRevision = self.rev` so every generation is stamped
+with its commit, journal `{generation, gitRev, flakeLockHash}` at each
+build/switch step, and the intended revert verb (`aoide nix back
+--generation N`, name provisional) resolves generation → recorded rev →
+`git checkout` — flake.lock rides along because it lives in the repo. A
+dirty tree builds with `self.rev = null` and cannot round-trip, so the
+build step's gate refuses (or loudly journals) a dirty build. No new
+snapshot machinery: git + generations + one journal line.
+
 ## 7. How an agent picks up the harness
 
 Layered by capability, degrading gracefully — the score and cue being
