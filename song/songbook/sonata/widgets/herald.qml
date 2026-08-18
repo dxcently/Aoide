@@ -110,30 +110,50 @@ PanelWindow {
         Component.onCompleted: heraldFile.reload()
     }
 
-    // ── The dismiss clock — deadlines pinned per id at FIRST sight ─────────
+    // ── The dismiss clock — deadlines pinned per ARRIVAL at FIRST sight ────
     // A rewrite of herald.json (any new arrival) recreates every delegate;
     // a Timer living in the delegate would restart each card's clock on
     // every neighbour's arrival. So the clock lives here: one map id →
     // epoch-ms deadline (0 = never), one 500ms sweep while cards show.
+    //
+    // Keyed by id AND `receivedAt`, not id alone: dunst's `stack_duplicates`
+    // (modules/dendrites/dunst.nix) reuses ONE notification id for a repeated
+    // identical summary+body — e.g. two back-to-back "nothing to reap" reap
+    // pings carry the same DUNST_ID. `aoide herald push` still stamps a FRESH
+    // `receivedAt` on every call (its own wall clock, `herald.rs`), so the
+    // record in the file genuinely changed even though its id didn't. Without
+    // the receivedAt check, `lapsed[id]` latched TRUE the first time that id's
+    // card expired would carry forward onto every later push reusing that id
+    // — the popup would silently stop showing that reap result forever, which
+    // is exactly the "ran with nothing to refresh, no ping" symptom this
+    // fixes. A push whose receivedAt is unchanged (a redundant FileView
+    // reload of the same arrival, no real new event) still inherits its
+    // deadline/lapsed state untouched.
     property var deadlines: ({})
     property var lapsed: ({})
+    property var arrivals: ({})    // id -> receivedAt of the arrival currently tracked
     property int epoch: 0          // bumped to re-run visibleRecords
 
     function ingest(arr) {
         var now = Date.now()
         var dl = {}
         var lp = {}
+        var av = {}
         for (var i = 0; i < arr.length; i++) {
             var r = arr[i]
             if (!r || r.id === undefined) continue
             var id = "" + r.id
+            var receivedAt = "" + (r.receivedAt || "")
+            var sameArrival = root.arrivals[id] !== undefined && root.arrivals[id] === receivedAt
             var t = (r.timeoutMs !== undefined) ? (r.timeoutMs | 0) : 0
-            dl[id] = (id in root.deadlines) ? root.deadlines[id]
+            dl[id] = (sameArrival && id in root.deadlines) ? root.deadlines[id]
                                             : (t > 0 ? now + t : 0)
-            if (root.lapsed[id]) lp[id] = true      // stays lapsed
+            if (sameArrival && root.lapsed[id]) lp[id] = true   // stays lapsed only within the SAME arrival
+            av[id] = receivedAt
         }
         root.deadlines = dl                          // dropped ids pruned
         root.lapsed = lp
+        root.arrivals = av
         root.records = arr
         root.epoch++
     }
