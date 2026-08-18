@@ -351,7 +351,40 @@ dirty tree builds with `self.rev = null` and cannot round-trip, so the
 build step's gate refuses (or loudly journals) a dirty build. No new
 snapshot machinery: git + generations + one journal line.
 
-## 7. How an agent picks up the harness
+## 7. Rollback for humans — the same verbs grow pickers
+
+The revert verbs above are agent-shaped: exact flags, `--json`, no
+questions. The User gets the **same verbs** in a human mode: invoked bare
+on a tty with no selecting flag, a verb lists its candidates as a numbered
+picker and confirms before writing. Hand-rolled prompt — rows, a number,
+y/n — no TUI crate, the same no-new-deps discipline as the A2A server.
+Flags and `--json` bypass the picker entirely, so scripts and agents never
+meet a prompt.
+
+| bare verb on a tty | picker rows | on select |
+|---|---|---|
+| `rice back` | two labeled lanes: **takes** (NNNN · age · cause · session, marks lettered) and **widget commits** (recent git commits touching the song's widget bodies) | a take writes through the routing (same as `--take N`); a commit does `git checkout <rev> -- songbook/<song>/…` — working-tree restore, HEAD never moves |
+| `rice take diff` | takes/marks to diff against | the diff, no write |
+| `aoide nix back` | journaled `{generation · rev · subject · age · dirty?}` | `git checkout <rev>` of the config repo; then **offers** the matching generation rollback as a second, separately-confirmed step |
+
+Two teeth in that table:
+
+- The nix **switch-rollback offer exists only behind the interactive
+  confirmation — there is deliberately no flag for it.** That is the
+  rebuild gate enforced mechanically: a human at the tty is the gate in
+  person; an agent scripting flags can check out code but can never reach
+  the switch.
+- The widget-commit lane is the "help with rolling back through git"
+  verb: takes cover the stage-routed files (§5.2), git covers widget
+  bodies, and the one picker shows both lanes so the User never has to
+  remember which substrate owns which file.
+
+The discipline generalizes as a CLI-wide convention: any verb whose flags
+select one-of-many (a song, a draft, a take, a session id) grows the same
+bare-on-a-tty picker, applied opportunistically as verbs get touched — not
+as a big retrofit pass.
+
+## 8. How an agent picks up the harness
 
 Layered by capability, degrading gracefully — the score and cue being
 self-describing is what makes every tier land on the same truth:
@@ -366,7 +399,7 @@ self-describing is what makes every tier land on the same truth:
 Nothing in any tier names a harness; a new harness is one `AgentProfile`
 entry.
 
-## 8. Phasing
+## 9. Phasing
 
 Observation lands first (small, orthogonal, and the rehearsal's watch UI
 consumes it); each phase reviewed before the next, house style:
@@ -378,7 +411,9 @@ consumes it); each phase reviewed before the next, house style:
   tail falls back to it, ANSI-strip on read.
 - **O3 — conductor/dock output pane** rendering the same resolver.
 - **A — takes + `rice back`**: journaling at the write entrypoints,
-  explicit `rice take`, revert-through-routing. Safety floor first.
+  explicit `rice take`, revert-through-routing, and the bare-on-a-tty
+  picker (§7) — the human mode ships with the verb, not after it.
+  Safety floor first.
 - **B — the rehearsal state machine**: `rehearse begin/end`, `rice score`
   + step table + `advance`, draft-mode requirement.
 - **C — hook correlation**: auto-take on `PostToolUse` drift, the
@@ -389,7 +424,7 @@ consumes it); each phase reviewed before the next, house style:
 - **F — watching UI**: `rice watch` + dock Rehearsal gadget on O3,
   `rehearse end --distill`.
 
-## 9. Decisions made (unmake at will) and open items
+## 10. Decisions made (unmake at will) and open items
 
 Decided in-session, one line each:
 
@@ -405,6 +440,10 @@ Decided in-session, one line each:
 - PTY tee in `conduct` only; output logs under `state/`.
 - Terse index always, full contract on demand (§0) — applies to the CLI
   help, the MCP tool list, and any context an orchestrator hands a worker.
+- Human mode = bare-on-a-tty numbered picker + confirm, hand-rolled, no
+  TUI crates; flags/`--json` bypass it. The nix switch-rollback offer
+  lives only behind interactive confirmation — never a flag — which is
+  what keeps it human-only.
 - No generic engagement framework — the rehearsal is the only **built**
   tenant; nix maintenance and nix development are intended siblings (§6),
   and the shared shape gets extracted only when the second tenant lands.
