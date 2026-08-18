@@ -507,13 +507,68 @@ self-describing is what makes every tier land on the same truth:
 
 | tier | mechanism | covers |
 |---|---|---|
+| **S** | **the installable skill** (§9.1) — one generated `SKILL.md` dropped into a harness's skills dir | any agent with a skill mechanism, anywhere on the box — including one that never opens this repo |
 | 0 | `AGENTS.md` + `aoide guide` (rice-scoped section) + bare `aoide` | anything that reads a repo |
 | 1 | the business-triggered cue line (§3.2) — just-in-time, pull-shaped | anything that runs `aoide` |
 | 2 | MCP: `rice_score` / `rice_take` / `rice_back` / `cue` in the tool index for free (one schema), served terse with contracts fetched on demand | MCP-speaking agents |
-| 3 | A2A: rehearsal state on `tasks/get`; AgentCard advertises the skills; a remote agent joins via `message/send` into the rehearsal's context | external/remote agents |
+| 3 | A2A: rehearsal state on `tasks/get`; the AgentCard advertises capabilities (A2A calls these "skills" — unrelated to tier S); a remote agent joins via `message/send` into the rehearsal's context | external/remote agents |
 
 Nothing in any tier names a harness; a new harness is one `AgentProfile`
 entry.
+
+### 9.1 Tier S — aoide as an installable agent skill
+
+The gap this closes: the cue is strictly pull-only (§3), which is correct
+but leaves an agent that has **never run `aoide` and never read this
+repo** with no way to know aoide exists at all. Tier 0 covers
+repo-readers. A skill covers everyone else, box-wide — it is the one
+surface that reaches an agent working in a different directory entirely.
+
+**Hard rule: the skill is a pointer, not a payload.** Roughly thirty
+lines — what aoide is in two sentences, `aoide cue` as the one verb to
+run, and where contracts live (`aoide schema --json`, `aoide guide
+<topic>`). It must never carry step instructions, a command list, or
+contract detail. Those live in the score's step table and the registry;
+a skill that copies them is a second source that starts drifting the day
+it is written, which is the exact failure the one-schema-three-doors rule
+exists to prevent. This is also §0's terse-index discipline in its purest
+form: the always-loaded part is one description line, and everything real
+is fetched on demand.
+
+```
+aoide skill emit                      generated from the SAME registry as
+   │                                  the MCP tool list and the AgentCard —
+   │                                  a fourth generated artifact, not a
+   │                                  hand-maintained file that rots
+   ▼
+aoide skill install --agent claude    idempotent, never-clobbering, reports
+   │                                  added/present — the exact shape of the
+   │                                  EXISTING `aoide hooks install <agent>`
+   ▼
+~/.claude/skills/aoide/SKILL.md       path comes from a `SkillSpec` on the
+                                      AgentProfile — a one-field sibling of
+                                      the `SettingsSpec` that already sits
+                                      there (EXISTS) for hook settings
+```
+
+Rules that keep it honest:
+
+- **Opt-in, never self-installing.** `skill install` is a User verb (or an
+  orchestrator's), the same boundary hooks install already respects. An
+  installed skill's description line is loaded by the *harness's* own
+  relevance trigger, not pushed by aoide — which is why this does not
+  violate the no-SessionStart-injection rule: the agent's own mechanism
+  decides, and the User chose to put it there.
+- **One skill, not a family.** A skill per domain would mean several
+  always-loaded description lines in every agent's context — the
+  front-loading banned in §0. One `aoide` skill, one verb, done. (A
+  second would only earn its place if a domain's trigger words don't
+  overlap "aoide" at all — "rice", "theme", "colors". One line noted;
+  not built.)
+- **Harness-agnostic, degrading to nothing.** A harness with no skill
+  mechanism gets no `SkillSpec` and loses nothing — tiers 0–3 already
+  cover it. A new harness that has one is, as ever, a single profile
+  entry.
 
 ## 10. Phasing
 
@@ -537,6 +592,9 @@ consumes it); each phase reviewed before the next, house style:
 - **D — the review gate**: `rice review record`, distinct-session
   enforcement, `--solo`.
 - **E — pickup surfaces**: `guide` rice section, AGENTS.md; MCP/A2A free.
+  Plus tier S — `skill emit` + `skill install` and the `SkillSpec` field
+  (§9.1). Small and independent of every engagement: it can land as early
+  as O0, since a pointer-only skill has nothing to point at but the cue.
 - **F — watching UI**: `rice watch` + dock Rehearsal gadget on O3,
   `rehearse end --distill`.
 
@@ -580,6 +638,10 @@ Decided in-session, one line each:
 - The ban is on an **unattended** switch, not an agent-initiated one
   (§8.2) — an agent may ask; only a live human authentication completes
   it.
+- Tier S: aoide ships as one installable agent skill (§9.1), generated
+  from the registry, **pointer-only** (never step instructions or a
+  command list), installed by a User verb into a path the `SkillSpec`
+  names. One skill, not a family.
 - No generic engagement framework — the rehearsal is the only **built**
   tenant; nix maintenance and nix development are intended siblings (§6),
   and the shared shape gets extracted only when the second tenant lands.
