@@ -51,8 +51,9 @@ And the discipline added last (khoa, closing note of the session):
 │    steer:    graph send (gated) │ A2A message/send (remote)  │
 ├──────────────────────────────────────────────────────────────┤
 │  ENGAGEMENTS  (scoped protocols riding citizenship)          │
-│    the rehearsal — the rice loop, formalized (only tenant;   │
-│    no generic engagement framework until a second exists)    │
+│    the rehearsal — the rice loop, formalized (first tenant;  │
+│    no generic framework until a second tenant is BUILT)      │
+│    intended: nix maintenance · nix development (§6)          │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -300,7 +301,43 @@ adds enforcement:
 - A reviewer spawned through any door runs `rice score`, sees
   `step: review` + `rice take diff`, and knows its job with zero briefing.
 
-## 6. How an agent picks up the harness
+## 6. Intended siblings — the nix loops (intentions only, not designed)
+
+The engagement layer has two more claimed tenants: a **nix maintenance
+loop** and a **nix development loop**. Neither is designed here — this
+section exists so the rehearsal isn't mistaken for the whole story, and so
+the shapes below constrain what the rehearsal's machinery may assume. An
+engagement is a step table + gates + a journal riding citizenship; what
+changes per tenant is the **substrate** — where writes land and what
+reverts them:
+
+| engagement | the loop | revert substrate | hard gate |
+|---|---|---|---|
+| rehearsal (§5) | plan → edit → check → review → mark, inside a draft | takes through draft routing | different-session review verdict |
+| nix maintenance | plan → bump (flake inputs) → build → generation diff → review → switch | nix generations + git — **no new snapshot machinery** | the switch stays khoa-run ([[Rebuild-Gate]]); agents stop at a built, reviewed, un-switched generation |
+| nix development | plan → edit → build/test → live-surface check → review → commit | git | tests pass + different-session review before commit — the test→show→confirm→log discipline made mechanical |
+
+What the intentions buy now, for free:
+
+- The cue's `assignment.engagement` field is already a name, not an enum —
+  `"rehearsal"` today, `"maintenance"` or `"development"` later with zero
+  cue changes.
+- The rehearsal must not bake rice-isms into anything shared: the score's
+  step-table shape, the journal line shape, and the review-gate mechanics
+  are the parts a nix loop would imitate, so they stay substrate-blind.
+  Takes/marks are rice-only (the nix loops get revert from nix and git)
+  and stay inside `rice`.
+- **When the second tenant is built** — not before — the shared engagement
+  shape gets extracted (one `score`-like resolver, per-engagement step
+  tables). Until then, imitation over abstraction.
+
+Both nix loops inherit the review discipline unchanged: a reviewer session
+distinct from the editor, verdicts journaled, `--solo` for khoa. The
+maintenance loop's terminal step is the one place an engagement ends at a
+**human** action by design — the rebuild gate is governance, not a missing
+feature.
+
+## 7. How an agent picks up the harness
 
 Layered by capability, degrading gracefully — the score and cue being
 self-describing is what makes every tier land on the same truth:
@@ -315,7 +352,7 @@ self-describing is what makes every tier land on the same truth:
 Nothing in any tier names a harness; a new harness is one `AgentProfile`
 entry.
 
-## 7. Phasing
+## 8. Phasing
 
 Observation lands first (small, orthogonal, and the rehearsal's watch UI
 consumes it); each phase reviewed before the next, house style:
@@ -338,7 +375,7 @@ consumes it); each phase reviewed before the next, house style:
 - **F — watching UI**: `rice watch` + dock Rehearsal gadget on O3,
   `rehearse end --distill`.
 
-## 8. Decisions made (unmake at will) and open items
+## 9. Decisions made (unmake at will) and open items
 
 Decided in-session, one line each:
 
@@ -354,9 +391,11 @@ Decided in-session, one line each:
 - PTY tee in `conduct` only; output logs under `state/`.
 - Terse index always, full contract on demand (§0) — applies to the CLI
   help, the MCP tool list, and any context an orchestrator hands a worker.
-- No generic engagement framework — the rehearsal is the only tenant;
-  `stage/rehearsal.json` keeps an imitable shape as the one line of
-  future-proofing.
+- No generic engagement framework — the rehearsal is the only **built**
+  tenant; nix maintenance and nix development are intended siblings (§6),
+  and the shared shape gets extracted only when the second tenant lands.
+  `stage/rehearsal.json` keeps an imitable, substrate-blind shape as the
+  one line of future-proofing.
 
 Open / uncertain:
 
