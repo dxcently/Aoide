@@ -220,6 +220,11 @@ Contract guarantees:
   a discovery consumer filter to only the live commands without a second
   command inventory. The A2A AgentCard (§6) is the first such consumer: its
   `skills` list is exactly the commands with `implemented: true`.
+- `examples` (optional string array) — invocation samples shown by
+  `aoide <command> --help`. **Additive**, same discipline as `implemented`:
+  omitted from `schema --json` entirely when empty, so a command without
+  examples serializes byte-identical to before the field existed; consumers
+  simply see the key when present.
 
 ---
 
