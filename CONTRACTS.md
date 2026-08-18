@@ -124,10 +124,8 @@ MAY declare `aoide.surfaces.<name>.owner` — they read no other module.
 
 ### Repo shape (the root is closed)
 
-The repo root is **closed**: `modules/`, `hosts/`, `pkgs/`, `lib/`, `docs/`,
-`song/`, plus flake furniture (`flake.nix`, `CONTRACTS.md`, `README.md`, `.git*`)
-and nothing else. New content lands **inside the existing tree at its designated
-place** — never a new root directory:
+The repo root is **closed**: new content lands **inside the existing tree at
+its designated place** — never a new root entry:
 
 - covers (wallpapers) → `song/songbook/<song>/assets/`
 - chimes (sounds) → `song/songbook/<song>/sounds/`
@@ -135,17 +133,63 @@ place** — never a new root directory:
 - module assets → next to their module, as a directory dendrite/facet
 
 Content paths are looked up in the Song Map (`concepts/Song-Vocabulary` in the
-wiki). Creating a new root directory is a **contract change**, not a
+wiki). Creating a new **closed** root entry is a **contract change**, not a
 convenience: it lands here first, with review — not sprayed into the tree.
 
-The closed set above is the **committed** root; a handful of **gitignored
-root-runtime** directories sit alongside it without being part of it —
-`catalog/`, `index/`, `log/` (content-pipeline + audit runtime), `state/`
-(account/usage runtime, e.g. `state/usage.json`; disposable, never committed),
-and `run/` (the deployed Quickshell tree rsynced from the store by
-home-manager, `modules/facets/quickshell/default.nix`; disposable, never the
-checked-in source). None of these are ever committed, so none are a contract
-change to add to or write into.
+The root's actual contents, machine-readable — one `name kind` pair per line,
+`kind` one of `closed-file` / `closed-dir` (the closed set this section
+governs — adding one is the contract change above), `runtime-file` /
+`runtime-dir` (gitignored working-tree state, never committed), or
+`clutter-symlink` (nix build output, see below). A `name` ending in `*` is a
+glob, not a literal entry:
+
+```
+AGENTS.md        closed-file
+audit-report.md  closed-file
+.claude          closed-dir
+CONTRACTS.md     closed-file
+docs             closed-dir
+flake.lock       closed-file
+flake.nix        closed-file
+.git             closed-dir
+.gitignore       closed-file
+hosts            closed-dir
+lib              closed-dir
+modules          closed-dir
+pkgs             closed-dir
+README.md        closed-file
+song             closed-dir
+statix.toml      closed-file
+.pi              runtime-dir
+.pi-subagents    runtime-dir
+log              runtime-file
+run              runtime-dir
+state            runtime-dir
+result*          clutter-symlink
+```
+
+`runtime-*` entries: `.pi/` and `.pi-subagents/` (pi / subagent session
+runtime), `log` (content-pipeline + audit runtime, newline-delimited JSON —
+a **file**, not a directory), `state/` (account/usage runtime, e.g.
+`state/usage.json`), and `run/` (the deployed Quickshell tree rsynced from
+the store by home-manager, `modules/facets/quickshell/default.nix`). All are
+disposable and never committed. `.gitignore` also reserves `catalog/` and
+`index/` for the same content-pipeline runtime; neither exists on disk today.
+
+`clutter-symlink` covers the nix build-output symlinks `.gitignore` matches
+with `result` and `result-*` — an expected byproduct of `nix build`, not part
+of the closed root and not governed runtime state either. They are listed as
+the glob `result*` rather than by name because how many exist, and what each
+is called, changes with every build. `aoide soundcheck`
+(`pkgs/aoide/crates/upkeep/`) computes the live set from `git check-ignore`
+and reports it under its own `clutter` check at `info` severity; this list
+reuses that term rather than inventing another one.
+
+None of the `runtime-*` or `clutter-*` entries are ever committed, so none
+are a contract change to add to or write into. Only the `closed-*` set is
+governed; "closed" is this section's own term, and membership in it is not
+the same question as whether git tracks the entry (`.git` is closed and
+untracked both).
 
 ### Package shape (`pkgs/` is walked too)
 
