@@ -1,5 +1,4 @@
 import QtQuick
-import "../.."
 
 // ── THE COLONNADE · a two-column temple porch (audio in + out) ────────────────
 // The bar's audio control: BOTH channels of the machine's sound, drawn as a pair
@@ -162,7 +161,7 @@ import "../.."
 // mixing channels and audio options", then: "additional tabs for playback,
 // recording, output devices and input devices" (pavucontrol's four, plus a
 // fifth for bt — see REGISTERS below). The morph itself is not this file's:
-// it runs on the shared `MorphState`, the facet component the calendar's
+// it runs on the shared `MorphState`, the same-dir helper the calendar's
 // compact↔expanded scroll also runs on now.
 //
 //   · IT GROWS DOWN, AND THE PORCH STAYS. The expanded state is this same

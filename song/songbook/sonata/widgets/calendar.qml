@@ -258,7 +258,7 @@
 // implicitHeight via WidgetSlot).
 //
 // khoa, 2026-08-16 — THE 300ms resizeGuard IS RETIRED, and the morph now
-// runs on the shared MorphState (facet). The guard was written against a
+// runs on the shared MorphState (same-dir helper). The guard was written against a
 // recorded Hyprland behaviour — an xdg_popup re-mapped on the first resize
 // of a visible popup, playing its popup animation (~0.25s vanish/fade) over
 // the remap. Two things have changed under it. This popout has not been an
@@ -290,7 +290,6 @@
 
 import QtQuick
 import Quickshell   // QsWindow attached — the open/close edge (see header)
-import "../.."      // the facet's shared components — MorphState (bar.qml idiom)
 
 Item {
     id: root
@@ -312,7 +311,7 @@ Item {
 
     // ── Mode: compact month ↔ expanded lunisolar year ────────────────────
     // The state, the 0→1 clock and the ORDER around the window step all live
-    // in the shared MorphState (facet-owned; see its header for the capture
+    // in the shared MorphState (same-dir helper; see its header for the capture
     // that retired this file's 300ms resizeGuard). What stays here is the one
     // thing the primitive deliberately does not own: HOW this surface changes
     // size. The scroll steps its own winW/winH — window out first on expand,

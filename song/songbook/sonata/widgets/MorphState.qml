@@ -60,10 +60,11 @@
 // mid-flight is absorbed, and any motion that must not run across the morph
 // (calendar.qml's page slide) tests it instead of naming an animation id.
 //
-// Reachable from a song widget: it is a facet-owned TOP-LEVEL component, so a
-// widget under run/qml/songs/<song>/ reaches it with `import "../.."` — the same
-// import bar.qml already uses for StelePopout/AudioColonnade. A helper in the
-// song's OWN directory would not resolve (widget-structure.md §8).
+// Reachable from a song widget: as of P2 it is an uppercase helper in
+// sonata's own widgets/ dir (carried by the build, never independently
+// resolvable as a slot), so a widget in the same directory — calendar.qml,
+// AudioColonnade.qml — reaches it same-dir, with no import needed
+// (widget-structure.md §8).
 //
 // QtObject has no default property, so the animation is a NAMED property
 // (hazards.md §3) — the LiveryState/SurfaceSlot idiom.
