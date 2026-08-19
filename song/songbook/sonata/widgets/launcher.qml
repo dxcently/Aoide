@@ -87,13 +87,13 @@
 // spread is the alphabet, `pageSize` entries at a time. The chapter hue tints
 // that spread's running headers and its thumb tab.
 //
-// ── `root.notes` is safe to reach for; do NOT null-guard it ───────────────
+// ── `root.livery` is safe to reach for; do NOT null-guard it ───────────────
 // (khoa, 2026-08-15) Every hot reload used to dump ~66-79 lines of
-// "TypeError: Cannot read property 'notes' of null" into the journal, all of
+// "TypeError: Cannot read property 'livery' of null" into the journal, all of
 // them pointing at this file — 1984 in six hours. Read the message
-// precisely: the null is `root` ITSELF, not `root.notes`. (In
-// `root.withA(root.notes.x, a)` QV4 evaluates the call's ARGUMENTS before
-// looking up the callee, so a null `root` surfaces on `.notes`, not on
+// precisely: the null is `root` ITSELF, not `root.livery`. (In
+// `root.withA(root.livery.x, a)` QV4 evaluates the call's ARGUMENTS before
+// looking up the callee, so a null `root` surfaces on `.livery`, not on
 // `.withA` — the message names the argument, not the receiver.)
 //
 // Traced live with lifecycle probes: the burst is TEARDOWN, not construction.
@@ -102,15 +102,15 @@
 // The cause was NOT here at all — `SurfaceSlot.qml` was rebuilding this slot
 // twice per reload, building a whole spare Grimoire and then `destroy()`ing
 // it while the engine was live, which nulls the `root` id in this file's
-// context and re-evaluates all 65 `root.notes.*` bindings at once. Fixed at
+// context and re-evaluates all 65 `root.livery.*` bindings at once. Fixed at
 // that seam (SurfaceSlot's `_builtSource` idempotence guard); measured
 // afterwards at one construction per reload and zero warnings across 19
 // consecutive reloads.
 //
-// The lesson for this file: `root.notes` is a required property injected at
+// The lesson for this file: `root.livery` is a required property injected at
 // creation and is live for the whole life of the surface. If these warnings
 // ever come back, the defect is in whatever is destroying this window, not
-// in the bindings — do not paper over it with 65 `root.notes &&` guards.
+// in the bindings — do not paper over it with 65 `root.livery &&` guards.
 
 import QtQuick
 import QtQuick.Effects
@@ -122,7 +122,7 @@ PanelWindow {
     id: root
 
     // ── Note + bridge dependencies (injected by shell.qml) ─────────────────
-    required property var notes
+    required property var livery
     required property var bridge
     required property var clipboard
     // The Grimoire's usage ledger — stays in the facet, injected as an extra
@@ -294,7 +294,7 @@ PanelWindow {
             if (fe) freqEntries.push(fe)
         }
         out.push({ id: "frequency", title: "MOST SUMMONED", whisper: "ἕξις · σελίς I",
-                   hue: root.notes.paletteAccent, entries: freqEntries })
+                   hue: root.livery.paletteAccent, entries: freqEntries })
 
         var all = []
         for (var k in root.appsById) all.push(root.appsById[k])
@@ -309,7 +309,7 @@ PanelWindow {
             // the first alphabet page is σελίς II — matching the folio's
             // `chapterIndex + 1 / N` count.
             out.push({ id: "page" + pageNum, title: firstCh + " – " + lastCh,
-                       whisper: "σελίς " + root.romanNumeral(pageNum + 1), hue: root.notes.wireCyan, entries: slice })
+                       whisper: "σελίς " + root.romanNumeral(pageNum + 1), hue: root.livery.wireCyan, entries: slice })
         }
 
         // The clipboard closes the book — LAST chapter, so page-flips never
@@ -324,7 +324,7 @@ PanelWindow {
                    // number — the folio's N / N.
                    whisper: "ἀποθήκη · σελίς " + root.romanNumeral(out.length + 1),
                    tabSymbol: "🗒",
-                   hue: root.notes.paletteAccent, entries: clipboardEntries })
+                   hue: root.livery.paletteAccent, entries: clipboardEntries })
 
         return out
     }
@@ -339,7 +339,7 @@ PanelWindow {
 
     readonly property color currentHue:
         (root.currentChapter && root.currentChapter.hue) ? root.currentChapter.hue
-                                                           : root.withA(root.notes.paletteFg, 0.5)
+                                                           : root.withA(root.livery.paletteFg, 0.5)
 
     // ── Search — substring/prefix ranked, extended with keywords + frequency ─
     readonly property bool searching: ("" + root.query).trim().length > 0
@@ -544,7 +544,7 @@ PanelWindow {
         onClicked: root.hide()
         Rectangle {
             anchors.fill: parent
-            color: root.withA(root.notes.paletteFg, 0.28)
+            color: root.withA(root.livery.paletteFg, 0.28)
         }
     }
 
@@ -569,8 +569,8 @@ PanelWindow {
             anchors.left: parent.left; anchors.right: parent.right
             anchors.bottom: parent.bottom
             height: row.isSel ? 2 : 1
-            color: row.isSel ? root.notes.paletteHot
-                             : root.withA(root.notes.paletteFg, 0.13)
+            color: row.isSel ? root.livery.paletteHot
+                             : root.withA(root.livery.paletteFg, 0.13)
         }
 
         Row {
@@ -590,8 +590,8 @@ PanelWindow {
                 text: row.isSel ? "♪" : "·"
                 font.family: root.faceMusic
                 font.pixelSize: row.isSel ? 15 : 13
-                color: row.isSel ? root.notes.paletteHot
-                                 : root.withA(root.notes.paletteFg, 0.3)
+                color: row.isSel ? root.livery.paletteHot
+                                 : root.withA(root.livery.paletteFg, 0.3)
             }
             Image {
                 anchors.verticalCenter: parent.verticalCenter
@@ -634,7 +634,7 @@ PanelWindow {
                 text: row.isClipboard
                       ? ((row.modelData && row.modelData.preview) ? row.modelData.preview : "")
                       : ((row.modelData && row.modelData.name) ? row.modelData.name : "")
-                color: root.notes.paletteFg
+                color: root.livery.paletteFg
                 opacity: row.isSel ? 1.0 : 0.88
                 font.family: root.faceSerif
                 font.pixelSize: row.isClipboardText ? 12 : 14
@@ -657,7 +657,7 @@ PanelWindow {
                     : ((row.modelData && row.modelData.comment) ? row.modelData.comment : ""))
                 visible: sub.length > 0
                 text: sub
-                color: root.withA(root.notes.holoBlue, 0.8)
+                color: root.withA(root.livery.holoBlue, 0.8)
                 font.family: root.faceMono
                 font.pixelSize: 10
                 elide: Text.ElideRight
@@ -806,7 +806,7 @@ PanelWindow {
                     y: (index + 1) * blankRules.rowPitch - 1
                     width: blankRules.width
                     height: 1
-                    color: root.withA(root.notes.paletteFg, 0.13)
+                    color: root.withA(root.livery.paletteFg, 0.13)
                 }
             }
         }
@@ -827,7 +827,7 @@ PanelWindow {
                 text: root.freqSparse
                       ? "the grimoire is still\nlearning your habits\n(´･ω･`)"
                       : "the notepad is still\nwaiting for more clippings\n(｡･ω･｡)"
-                color: root.notes.paletteFg
+                color: root.livery.paletteFg
                 opacity: 0.5
                 font.family: root.faceMono
                 font.pixelSize: 12
@@ -851,7 +851,7 @@ PanelWindow {
                 text: page.isLeft
                       ? "the grimoire is searching\nfor “" + root.query.slice(0, 24) + "”…"
                       : "nothing under that name\nοὐδὲν τοιοῦτον ὄνομα"
-                color: root.notes.paletteFg
+                color: root.livery.paletteFg
                 opacity: 0.75
                 font.family: root.faceMono
                 font.pixelSize: 12
@@ -868,7 +868,7 @@ PanelWindow {
                     x: modelData.x * parent.width - implicitWidth / 2
                     y: modelData.y * parent.height - implicitHeight / 2
                     text: modelData.face
-                    color: root.notes.paletteFg
+                    color: root.livery.paletteFg
                     opacity: 0.5
                     font.family: root.faceMono
                     font.pixelSize: 12
@@ -889,7 +889,7 @@ PanelWindow {
                   : (root.romanNumeral(root.chapterIndex + 1) + " / " + root.romanNumeral(root.chapters.length))
             font.family: root.faceMono
             font.pixelSize: 10
-            color: root.withA(root.notes.paletteFg, 0.45)
+            color: root.withA(root.livery.paletteFg, 0.45)
         }
     }
 
@@ -939,8 +939,8 @@ PanelWindow {
                     text: modelData.g
                     font.family: modelData.f === 1 ? root.faceMusic : root.faceSerif
                     font.pixelSize: modelData.s
-                    color: modelData.c === 1 ? root.withA(root.notes.paletteAccent, 0.95)
-                                             : root.withA(root.notes.wireCyan, 0.9)
+                    color: modelData.c === 1 ? root.withA(root.livery.paletteAccent, 0.95)
+                                             : root.withA(root.livery.wireCyan, 0.9)
                 }
             }
         }
@@ -996,7 +996,7 @@ PanelWindow {
             text: "𝄞"
             font.family: root.faceMusic
             font.pixelSize: 40
-            color: root.withA(root.notes.paletteAccent, 0.9)
+            color: root.withA(root.livery.paletteAccent, 0.9)
             opacity: root.fold * 0.9
         }
 
@@ -1009,8 +1009,8 @@ PanelWindow {
             y: -14 * (1 - root.fold)
             width: 640; height: 48
             radius: 0
-            color: root.withA(root.notes.paletteBg, 0.72)
-            border.color: root.notes.paletteFg
+            color: root.withA(root.livery.paletteBg, 0.72)
+            border.color: root.livery.paletteFg
             border.width: 2
 
             Rectangle {   // gloss
@@ -1025,7 +1025,7 @@ PanelWindow {
             Rectangle {   // gold keyline
                 anchors.fill: parent; anchors.margins: 4
                 color: "transparent"
-                border.color: root.withA(root.notes.paletteAccent, 0.8)
+                border.color: root.withA(root.livery.paletteAccent, 0.8)
                 border.width: 1
             }
 
@@ -1033,7 +1033,7 @@ PanelWindow {
                 id: prompt
                 anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
                 text: "♪"
-                color: root.notes.paletteAccent
+                color: root.livery.paletteAccent
                 font.family: root.faceMusic
                 font.pixelSize: 17
                 font.bold: true
@@ -1044,7 +1044,7 @@ PanelWindow {
                 text: "⌘ spc"
                 font.family: root.faceMono
                 font.pixelSize: 10
-                color: root.withA(root.notes.paletteFg, 0.5)
+                color: root.withA(root.livery.paletteFg, 0.5)
             }
 
             TextInput {
@@ -1055,11 +1055,11 @@ PanelWindow {
                     verticalCenter: parent.verticalCenter
                 }
                 focus: true
-                color: root.notes.paletteFg
+                color: root.livery.paletteFg
                 font.family: root.faceMono
                 font.pixelSize: 15
-                selectionColor: root.notes.paletteAccent
-                selectedTextColor: root.notes.paletteBg
+                selectionColor: root.livery.paletteAccent
+                selectedTextColor: root.livery.paletteBg
                 clip: true
                 text: root.query
                 onTextChanged: root.query = text
@@ -1067,7 +1067,7 @@ PanelWindow {
                 Text {
                     anchors { left: parent.left; verticalCenter: parent.verticalCenter }
                     text: "τί ζητεῖς;"
-                    color: root.notes.paletteFg
+                    color: root.livery.paletteFg
                     opacity: 0.4
                     font.family: root.faceMono
                     font.pixelSize: 15
@@ -1138,8 +1138,8 @@ PanelWindow {
                 height: book.pageH
                 radius: 0
                 clip: true
-                color: root.withA(root.notes.paletteBg, 0.82)
-                border.color: root.notes.paletteFg
+                color: root.withA(root.livery.paletteBg, 0.82)
+                border.color: root.livery.paletteFg
                 border.width: 2
 
                 Rectangle {   // gloss sheen
@@ -1157,13 +1157,13 @@ PanelWindow {
                 Rectangle {
                     anchors.fill: parent; anchors.margins: 12
                     color: "transparent"
-                    border.color: root.withA(root.notes.paletteAccent, 0.75)
+                    border.color: root.withA(root.livery.paletteAccent, 0.75)
                     border.width: 1
                 }
                 Rectangle {
                     anchors.fill: parent; anchors.margins: 16
                     color: "transparent"
-                    border.color: root.withA(root.notes.wireCyan, 0.35)
+                    border.color: root.withA(root.livery.wireCyan, 0.35)
                     border.width: 1
                 }
 
@@ -1182,7 +1182,7 @@ PanelWindow {
                             text: "◆"
                             font.family: root.faceMusic
                             font.pixelSize: 9
-                            color: root.withA(root.notes.paletteAccent, 0.75)
+                            color: root.withA(root.livery.paletteAccent, 0.75)
                         }
                     }
                 }
@@ -1213,8 +1213,8 @@ PanelWindow {
                         height: book.pageH
                         radius: 0
                         // back leaves sit in shadow, front leaves near the page
-                        color: root.withA(Qt.darker(root.notes.paletteBg, 1.0 + d * 0.03), 0.9)
-                        border.color: root.withA(root.notes.paletteFg, 0.16 + (ps.layers - d) * 0.02)
+                        color: root.withA(Qt.darker(root.livery.paletteBg, 1.0 + d * 0.03), 0.9)
+                        border.color: root.withA(root.livery.paletteFg, 0.16 + (ps.layers - d) * 0.02)
                         border.width: 1
                     }
                 }
@@ -1225,13 +1225,13 @@ PanelWindow {
             component BoardSegment: Rectangle {
                 height: book.stackH + 10
                 radius: 0
-                color: root.withA(root.notes.paletteBg, 0.82)
-                border.color: root.notes.paletteFg
+                color: root.withA(root.livery.paletteBg, 0.82)
+                border.color: root.livery.paletteFg
                 border.width: 2
                 Rectangle {
                     anchors.fill: parent; anchors.margins: 3
                     color: "transparent"
-                    border.color: root.withA(root.notes.paletteAccent, 0.5)
+                    border.color: root.withA(root.livery.paletteAccent, 0.5)
                     border.width: 1
                 }
             }
@@ -1268,14 +1268,14 @@ PanelWindow {
                     width: 60; height: book.pageH - 4
                     gradient: Gradient {
                         orientation: Gradient.Horizontal
-                        GradientStop { position: 0.0; color: root.withA(root.notes.paletteFg, 0.0) }
-                        GradientStop { position: 1.0; color: root.withA(root.notes.paletteFg, 0.2) }
+                        GradientStop { position: 0.0; color: root.withA(root.livery.paletteFg, 0.0) }
+                        GradientStop { position: 1.0; color: root.withA(root.livery.paletteFg, 0.2) }
                     }
                 }
                 Rectangle {   // crease hairline at the hinge
                     x: book.pageW - 2; y: 2
                     width: 1; height: book.pageH - 4
-                    color: root.withA(root.notes.paletteFg, 0.35)
+                    color: root.withA(root.livery.paletteFg, 0.35)
                 }
 
                 // this half's board, carrying its half of the inscription
@@ -1291,7 +1291,7 @@ PanelWindow {
                         font.family: root.faceSerif
                         font.pixelSize: 11
                         font.letterSpacing: 4
-                        color: root.withA(root.notes.paletteAccent, 0.95)
+                        color: root.withA(root.livery.paletteAccent, 0.95)
                     }
                 }
 
@@ -1325,7 +1325,7 @@ PanelWindow {
                     x: -book.boardPad; y: 0
                     width: book.pageW + book.boardPad
                     height: book.height
-                    color: root.withA(root.notes.paletteFg, 0.3)
+                    color: root.withA(root.livery.paletteFg, 0.3)
                     opacity: (1 - root.fold) * 0.5
                 }
 
@@ -1335,13 +1335,13 @@ PanelWindow {
                     x: 4; y: book.pageH - 32
                     width: 28; height: 28
                     visible: root.chapterIndex > 0
-                    property color earC: root.notes.paletteAccent
+                    property color earC: root.livery.paletteAccent
                     onEarCChanged: requestPaint()
                     onPaint: {
                         var ctx = getContext("2d")
                         ctx.reset()
                         ctx.clearRect(0, 0, width, height)
-                        ctx.fillStyle = root.withA(root.notes.paletteBg, 0.9)
+                        ctx.fillStyle = root.withA(root.livery.paletteBg, 0.9)
                         ctx.strokeStyle = root.withA(earC, 0.85)
                         ctx.lineWidth = 1.4
                         ctx.beginPath()
@@ -1379,14 +1379,14 @@ PanelWindow {
                     width: 60; height: book.pageH - 4
                     gradient: Gradient {
                         orientation: Gradient.Horizontal
-                        GradientStop { position: 0.0; color: root.withA(root.notes.paletteFg, 0.2) }
-                        GradientStop { position: 1.0; color: root.withA(root.notes.paletteFg, 0.0) }
+                        GradientStop { position: 0.0; color: root.withA(root.livery.paletteFg, 0.2) }
+                        GradientStop { position: 1.0; color: root.withA(root.livery.paletteFg, 0.0) }
                     }
                 }
                 Rectangle {   // crease hairline at the hinge
                     x: 1; y: 2
                     width: 1; height: book.pageH - 4
-                    color: root.withA(root.notes.paletteFg, 0.35)
+                    color: root.withA(root.livery.paletteFg, 0.35)
                 }
 
                 BoardSegment {
@@ -1401,7 +1401,7 @@ PanelWindow {
                         font.family: root.faceSerif
                         font.pixelSize: 11
                         font.letterSpacing: 4
-                        color: root.withA(root.notes.paletteAccent, 0.95)
+                        color: root.withA(root.livery.paletteAccent, 0.95)
                     }
                 }
 
@@ -1432,7 +1432,7 @@ PanelWindow {
                     x: 0; y: 0
                     width: book.pageW + book.boardPad
                     height: book.height
-                    color: root.withA(root.notes.paletteFg, 0.3)
+                    color: root.withA(root.livery.paletteFg, 0.3)
                     opacity: (1 - root.fold) * 0.5
                 }
 
@@ -1462,10 +1462,10 @@ PanelWindow {
                             height: Math.max(1, Math.min(34,
                                     Math.floor((book.pageH - 110) / tabCount) - 4))
                             radius: 0
-                            color: root.withA(root.notes.paletteBg, isCur ? 0.95 : 0.7)
+                            color: root.withA(root.livery.paletteBg, isCur ? 0.95 : 0.7)
                             border.width: 1
-                            border.color: isCur ? root.notes.paletteAccent
-                                                : root.withA(root.notes.paletteFg, 0.4)
+                            border.color: isCur ? root.livery.paletteAccent
+                                                : root.withA(root.livery.paletteFg, 0.4)
                             Text {
                                 anchors.centerIn: parent
                                 text: {
@@ -1487,8 +1487,8 @@ PanelWindow {
                                     return chap === 0 ? root.faceMusic : root.faceSerif
                                 }
                                 font.pixelSize: 11
-                                color: parent.isCur ? root.notes.paletteAccent
-                                                    : root.withA(root.notes.paletteFg, 0.6)
+                                color: parent.isCur ? root.livery.paletteAccent
+                                                    : root.withA(root.livery.paletteFg, 0.6)
                             }
                             MouseArea {
                                 anchors.fill: parent
@@ -1510,10 +1510,10 @@ PanelWindow {
                     width: isCur ? 30 : 24
                     height: 34
                     radius: 0
-                    color: root.withA(root.notes.paletteBg, isCur ? 0.95 : 0.7)
+                    color: root.withA(root.livery.paletteBg, isCur ? 0.95 : 0.7)
                     border.width: 1
-                    border.color: isCur ? root.notes.paletteAccent
-                                        : root.withA(root.notes.paletteFg, 0.4)
+                    border.color: isCur ? root.livery.paletteAccent
+                                        : root.withA(root.livery.paletteFg, 0.4)
                     visible: root.clipboardChapterIndex >= 0
                     Text {
                         anchors.centerIn: parent
@@ -1523,8 +1523,8 @@ PanelWindow {
                         }
                         font.family: root.faceSerif
                         font.pixelSize: 11
-                        color: parent.isCur ? root.notes.paletteAccent
-                                            : root.withA(root.notes.paletteFg, 0.6)
+                        color: parent.isCur ? root.livery.paletteAccent
+                                            : root.withA(root.livery.paletteFg, 0.6)
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -1539,13 +1539,13 @@ PanelWindow {
                     x: book.pageW - 32; y: book.pageH - 32
                     width: 28; height: 28
                     visible: root.chapterIndex < root.chapters.length - 1
-                    property color earC: root.notes.paletteAccent
+                    property color earC: root.livery.paletteAccent
                     onEarCChanged: requestPaint()
                     onPaint: {
                         var ctx = getContext("2d")
                         ctx.reset()
                         ctx.clearRect(0, 0, width, height)
-                        ctx.fillStyle = root.withA(root.notes.paletteBg, 0.9)
+                        ctx.fillStyle = root.withA(root.livery.paletteBg, 0.9)
                         ctx.strokeStyle = root.withA(earC, 0.85)
                         ctx.lineWidth = 1.4
                         ctx.beginPath()
@@ -1578,7 +1578,7 @@ PanelWindow {
                 y: book.pageH / 2 - height / 2
                 visible: root.currentList.length === 0 && !root.searching && !root.freqSparse && !root.clipSparse
                 text: root.emptyMessage
-                color: root.notes.paletteFg
+                color: root.livery.paletteFg
                 opacity: 0.5 * root.fold
                 font.family: root.faceMono
                 font.pixelSize: 13
@@ -1591,12 +1591,12 @@ PanelWindow {
                 y: book.pageH - 6
                 width: 8
                 height: book.stackH + 44
-                color: root.withA(root.notes.paletteAccent, 0.85)
+                color: root.withA(root.livery.paletteAccent, 0.85)
                 opacity: root.fold * root.fold
                 Rectangle {   // tip shadow line — the ribbon's cut end
                     anchors.bottom: parent.bottom
                     width: parent.width; height: 2
-                    color: root.withA(root.notes.paletteFg, 0.4)
+                    color: root.withA(root.livery.paletteFg, 0.4)
                 }
             }
         }

@@ -31,14 +31,14 @@
 // Delegate: the real `WidgetSlot.qml` component directly (the same one
 // `herald-center` uses in AoidePanel.qml) — resolve/load logic is not
 // reimplemented here. Fixed injected-prop contract (CONTRACTS.md §5
-// containment): `notes` + `bridge` only, nothing else — no `extraProps`,
+// containment): `livery` + `bridge` only, nothing else — no `extraProps`,
 // and that omission is load-bearing, not a style choice. `WidgetSlot
 // ._rebuild()` has no idempotence guard the way `SurfaceSlot` had to grow
 // one after an `extraProps` object-literal binding caused a destroy/rebuild
 // storm (see `SurfaceSlot.qml`'s `_builtSource`/`_sameExtras` guards) — an
 // `extraProps` binding here would risk the same storm for no reason, since
 // dock gadgets get the same fixed prop contract as everything else declared
-// so far, not the wider `notes+bridge+shared` the shipped facet gadgets get.
+// so far, not the wider `livery+bridge+shared` the shipped facet gadgets get.
 //
 // A declared dock slot whose declaring song has no actual
 // `widgets/<slot>.qml` body (neither the active song nor the sonata
@@ -55,7 +55,7 @@ import QtQuick
 Repeater {
     id: root
 
-    required property var notes
+    required property var livery
     required property var bridge
     required property var stagingEngine
     property real gadgetW: 360
@@ -66,7 +66,7 @@ Repeater {
     // the Repeater below holds zero delegates: a structural no-op, not an
     // accident of which song happens to be active.
     readonly property var dockEntries: {
-        var decl = root.stagingEngine.declaredWidgets(root.notes.songName)
+        var decl = root.stagingEngine.declaredWidgets(root.livery.songName)
         var keys = Object.keys(decl)
         var out = []
         for (var i = 0; i < keys.length; i++) {
@@ -92,7 +92,7 @@ Repeater {
 
         width: root.gadgetW
         slot: modelData.slot
-        notes: root.notes
+        livery: root.livery
         bridge: root.bridge
         stagingEngine: root.stagingEngine
 

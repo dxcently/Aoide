@@ -54,7 +54,7 @@ ShellRoot {
             spacing: 34
 
             AudioColonnade {                          // live: vol 86 · mic 100
-                notes: win.stub                       // · bt bound in A2DP
+                livery: win.stub                       // · bt bound in A2DP
                 outPct: 86;  outMuted: false; outAvail: true
                 inPct: 100;  inMuted: false; inAvail: true
                 btAvail: true; btOn: true; btConnected: true
@@ -64,7 +64,7 @@ ShellRoot {
                 btRoster: win.devices
             }
             AudioColonnade {                          // the BT bay OPEN, with a
-                notes: win.stub                       // fabricated device roster
+                livery: win.stub                       // fabricated device roster
                 outPct: 40;  outMuted: false; outAvail: true
                 inPct: 65;   inMuted: true;  inAvail: true
                 btAvail: true; btOn: true; btConnected: true

@@ -56,7 +56,7 @@ ShellRoot {
             return
         }
         harness.exodos = comp.createObject(null, {
-            "notes": harness.stubNotes,
+            "livery": harness.stubNotes,
             "bridge": harness.stubBridge
         })
         if (!harness.exodos) {

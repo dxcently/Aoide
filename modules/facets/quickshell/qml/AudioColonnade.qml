@@ -13,7 +13,7 @@ import QtQuick
 // wear (greek-grammar.md §4; NotificationCard.qml documents the shared shell):
 // opaque marble body, 2px paletteFg border, 1px inset signature keyline, a cast
 // shadow, a carved-serif crown + name, a Canvas frieze, a box-drawing TUI frame
-// top AND bottom (closing 𝄂 barline in gold), radius 0, colour only from notes.
+// top AND bottom (closing 𝄂 barline in gold), radius 0, colour only from livery.
 // It no longer wears GadgetFrame — it is hosted bare (StelePopout) and draws all
 // its own chrome, converging the outer panel on the rest of the pantheon family
 // while keeping its OWN distinct order/hue/crown/motif:
@@ -24,7 +24,7 @@ import QtQuick
 //                   echoing the aegean Ionic Terminals temple. The cool input.
 //                 – VOL → DORIC, Attic gold (`paletteAccent`): a plain echinus
 //                   capital, echoing the gold Doric Conductor. The warm output.
-//   · SIGNATURE (chrome hue) — MUREX `notes.violet` (base0E) as of 2026-08-16,
+//   · SIGNATURE (chrome hue) — MUREX `livery.violet` (base0E) as of 2026-08-16,
 //               by direction ("make the audio widget main color diff from the
 //               calendar widget"); it was base09 amber, which the calendar also
 //               wears. The reasoning that picked amber still stands and is what
@@ -50,7 +50,7 @@ import QtQuick
 //               both read cleanly against murex chrome (captured). The frieze
 //               dropped 0.85 → 0.7 after looking: at the old alpha the bead
 //               course out-read its own crown.
-//   · CROWN   — ♫ a beamed pair of notes (two channels) in place of a clef, the
+//   · CROWN   — ♫ a beamed pair of livery (two channels) in place of a clef, the
 //               way Power's ϟ / Notification's ❧ stand in where no clef fits.
 //   · FRIEZE  — a bead-and-reel (astragal) course: round beads spaced by reels,
 //               a classical moulding none of the other temples use.
@@ -205,12 +205,12 @@ import QtQuick
 //     once; and the closing frame stops repeating the tallies once the naos is
 //     up, changing to the one number nothing else says — how many are hushed.
 //
-// House rules: every colour from `notes` roles (zero hex); radius 0; no
+// House rules: every colour from `livery` roles (zero hex); radius 0; no
 // QtQuick.Layouts (plain Item/Row/anchors — the documented sizing-loop hazard).
 Item {
     id: root
 
-    required property var notes
+    required property var livery
 
     // ── Live levels, fed from the bar's Pipewire seams ──────────────────────
     property int  outPct: 0
@@ -369,9 +369,9 @@ Item {
     // same single job gold already does for the VOL fill, its plinth chip and
     // its picker's current row.
     function registerHue(r) {
-        if (r === 1 || r === 3) return root.notes.holoBlue      // aegean — in
-        if (r === 4) return root.notes.wireCyan                 // teal — bt
-        return root.notes.paletteAccent                         // gold — out
+        if (r === 1 || r === 3) return root.livery.holoBlue      // aegean — in
+        if (r === 4) return root.livery.wireCyan                 // teal — bt
+        return root.livery.paletteAccent                         // gold — out
     }
     // What the stele's own top frame says. One band captions the body: the
     // porch's word closed, the open bay's word while a bay is open, the
@@ -394,8 +394,8 @@ Item {
     readonly property string faceMusic: "Noto Music"                // notation
 
     // this stele's signature — MUREX (base0E). See the header's SIGNATURE note.
-    readonly property color sig: notes.violet
-    readonly property color ink: notes.paletteFg
+    readonly property color sig: livery.violet
+    readonly property color ink: livery.paletteFg
 
     function withA(cstr, a) {
         var c = Qt.color(cstr)
@@ -407,7 +407,7 @@ Item {
                        ca.b + (cb.b - ca.b) * t, 1.0)
     }
     function stepTone(a) {                              // warm marble step tone
-        var w = mix(notes.paletteFg, notes.paletteBg, 0.42)
+        var w = mix(livery.paletteFg, livery.paletteBg, 0.42)
         return Qt.rgba(w.r, w.g, w.b, a)
     }
     // one mood face reading the whole box (kana/punct proven safe by MoodFaces)
@@ -442,9 +442,9 @@ Item {
         return []
     }
     function bayHue(b) {
-        if (b === 0) return root.notes.holoBlue        // aegean — the input
-        if (b === 1) return root.notes.paletteAccent   // Attic gold — output
-        if (b === 2) return root.notes.wireCyan        // teal — bluetooth
+        if (b === 0) return root.livery.holoBlue        // aegean — the input
+        if (b === 1) return root.livery.paletteAccent   // Attic gold — output
+        if (b === 2) return root.livery.wireCyan        // teal — bluetooth
         return root.ink
     }
     // What the stele's own top frame says while this bay is open. The bay's
@@ -526,7 +526,7 @@ Item {
         property int pct: 0
         property bool muted: false
         property bool avail: true
-        property color fillHue: root.notes.paletteAccent
+        property color fillHue: root.livery.paletteAccent
         property alias hovering: hoverMa.containsMouse
         property real shaftWidth: root.shaftW
         signal toggle()
@@ -773,7 +773,7 @@ Item {
                             font.family: root.faceMono
                             font.pixelSize: 9
                             font.letterSpacing: 1
-                            color: drum.lit ? root.notes.paletteBg
+                            color: drum.lit ? root.livery.paletteBg
                                             : root.withA(root.ink,
                                                   !col.avail ? 0.25
                                                 : (col.drumsLive ? 0.8 : 0.32))
@@ -997,8 +997,8 @@ Item {
         // Each row wears its own bay's hue, so a capture stream reads as
         // belonging to the aegean MIC pillar and a playback one to the gold
         // VOL pillar without a word being spent on which it is.
-        readonly property color hue: channel.vout ? root.notes.paletteAccent
-                                                : root.notes.holoBlue
+        readonly property color hue: channel.vout ? root.livery.paletteAccent
+                                                : root.livery.holoBlue
         readonly property bool hot: channelMa.containsMouse
 
         Text {                                   // the margin mark — the state
@@ -1011,7 +1011,7 @@ Item {
             text: channel.vmuted ? "𝄽" : "♪"
             font.family: root.faceMusic
             font.pixelSize: channel.vmuted ? 12 : 13
-            color: channel.vmuted ? root.notes.paletteUrgent
+            color: channel.vmuted ? root.livery.paletteUrgent
                                 : root.withA(channel.hue, channel.hot ? 1.0 : 0.8)
         }
         Text {                                   // who
@@ -1069,7 +1069,7 @@ Item {
             horizontalAlignment: Text.AlignRight
             text: channel.vpct + "%"
             font.family: root.faceMono; font.pixelSize: 10
-            color: channel.vmuted ? root.notes.paletteUrgent
+            color: channel.vmuted ? root.livery.paletteUrgent
                                 : root.withA(root.ink, channel.hot ? 1.0 : 0.8)
         }
         Rectangle {                              // the rule — hover promotes it
@@ -1108,7 +1108,7 @@ Item {
         width: parent.width
         anchors.top: parent.top
         radius: 0
-        color: root.notes.paletteBg
+        color: root.livery.paletteBg
         border.color: root.ink
         border.width: 2
         height: content.implicitHeight + 20
@@ -1369,7 +1369,7 @@ Item {
                         width: root.colW; height: parent.height
                         order: "ionic"
                         pct: root.inPct; muted: root.inMuted; avail: root.inAvail
-                        fillHue: root.notes.holoBlue          // aegean — cool input
+                        fillHue: root.livery.holoBlue          // aegean — cool input
                         onToggle: root.inToggle()
                         onAdjust: function(d) { root.inAdjust(d) }
                     }
@@ -1378,7 +1378,7 @@ Item {
                         width: root.colW; height: parent.height
                         order: "doric"
                         pct: root.outPct; muted: root.outMuted; avail: root.outAvail
-                        fillHue: root.notes.paletteAccent     // Attic gold — warm output
+                        fillHue: root.livery.paletteAccent     // Attic gold — warm output
                         onToggle: root.outToggle()
                         onAdjust: function(d) { root.outAdjust(d) }
                     }
@@ -1393,7 +1393,7 @@ Item {
                         shaftWidth: root.pierW
                         avail: root.btAvail
                         muted: root.btAvail && !root.btOn      // powered down = ruin
-                        fillHue: root.notes.wireCyan           // teal — the third cool channel
+                        fillHue: root.livery.wireCyan           // teal — the third cool channel
                         drums: true
                         drumLabels: ["A2DP", "HSP"]
                         drumsLive: root.btConnected
@@ -1420,7 +1420,7 @@ Item {
                         font.pixelSize: muted ? 11 : 13
                         font.letterSpacing: muted ? 3 : 0
                         font.weight: muted ? Font.DemiBold : Font.Normal
-                        color: muted ? root.notes.paletteUrgent
+                        color: muted ? root.livery.paletteUrgent
                                      : (avail ? root.ink : root.withA(root.ink, 0.4))
                     }
                     Tally { pct: root.inPct;  muted: root.inMuted;  avail: root.inAvail }
@@ -1439,8 +1439,8 @@ Item {
                         font.letterSpacing: root.btConnected ? 0 : 3
                         font.weight: root.btConnected ? Font.Normal : Font.DemiBold
                         color: !root.btAvail ? root.withA(root.ink, 0.4)
-                             : (!root.btOn ? root.notes.paletteUrgent
-                             : (root.btConnected ? root.notes.wireCyan : root.ink))
+                             : (!root.btOn ? root.livery.paletteUrgent
+                             : (root.btConnected ? root.livery.wireCyan : root.ink))
                     }
                 }
                 }   // ── end porchBody ────────────────────────────────────────
@@ -1926,7 +1926,7 @@ Item {
                     anchors.right: ffCorner.left; anchors.rightMargin: 4
                     anchors.verticalCenter: parent.verticalCenter
                     text: "𝄂"; font.family: root.faceMusic; font.pixelSize: 16
-                    color: root.notes.paletteAccent
+                    color: root.livery.paletteAccent
                 }
                 Rectangle {
                     anchors.left: ffL.right; anchors.right: ffBar.left

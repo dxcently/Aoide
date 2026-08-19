@@ -304,7 +304,7 @@ one-to-one. The tree holds **60 commands** — real (50): `guide`,
 group (`save`/`list`/`drop`), the 4-verb `rice mode`
 group (`status`/`stage`/`declarative`/`draft`), `cover set`, `mcp serve`,
 `daemon`, `shellbridge`, `conduct`, `conductor`, `adapter melete`, the 3-verb
-`livery` group (`lint`/`resolve`/`emit` — the native note engine), the 5-verb
+`livery` group (`lint`/`resolve`/`emit` — the native design-token engine), the 5-verb
 `a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`), the
 5-verb `peer` group (`peer add/list/remove/pull/status` — cross-device peer
 federation, [[Peer-Federation]]), `usage`,

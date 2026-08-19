@@ -161,12 +161,12 @@
 // emoji are absent from all three declared faces (fc-list verified), bare
 // they fall back to Noto Color Emoji — fixed-color, deaf to `color:` —
 // while FE0E resolves them to DejaVu Sans monochrome, which recolors in
-// notes.* ink and stays legible at 9px (all render-verified side-by-side,
+// livery.* ink and stays legible at 9px (all render-verified side-by-side,
 // including against ●◐○◑ and the Nerd Font PUA weather moons). The owner
 // then overrode, explicitly: real emoji. So the phase marks are the ONE
-// glyph family wearing fixed color outside the notes.* roles — scoped
+// glyph family wearing fixed color outside the livery.* roles — scoped
 // strictly to this family, everything else on the sheet still inks from
-// notes.*. Should color emoji ever leave the rig, the FE0E monochrome set
+// livery.*. Should color emoji ever leave the rig, the FE0E monochrome set
 // (aegean, ink-is-shadow polarity) is the documented fallback.
 //
 // EIGHTHS. monthPhases() divides each lunation at k + q/8, q 0..7 — new,
@@ -194,7 +194,7 @@
 //
 // The order (held; see round-one header block below for the full account):
 //   · ORDER COMPOSITE — the volute order; voluta = "rolled", the scroll in
-//     stone. · SIGNATURE clay `notes.base09` as the RUBRIC (red-ochre ink of
+//     stone. · SIGNATURE clay `livery.base09` as the RUBRIC (red-ochre ink of
 //     the fasti; the "unclaimed slot" claim stays DEAD — AudioColonnade and
 //     UsageGadget also wear base09, collision still open for adjudication).
 //     · CROWN 𝄴. · FRIEZE Vitruvian wave-scroll. · RUBRIC Sunday Κ + Sunday
@@ -279,7 +279,7 @@
 // khoa, 2026-08-13 (round one, retained): self-framed stele per StelePopout's
 // standing direction after live recon confirmed genuine double-framing under
 // GadgetFrame (two captions, two closures, glass losing the numerals over
-// dark windows). Fixed injected-prop contract: `notes` + `bridge` only
+// dark windows). Fixed injected-prop contract: `livery` + `bridge` only
 // (bridge unused). Qt's Window.visible attached NEVER flips under
 // quickshell's proxy windows (verified); QsWindow.window.visible is the real
 // open/close edge. [2026-08-14: greek-grammar.md's §4 widget-by-widget map
@@ -295,15 +295,15 @@ import "../.."      // the facet's shared components — MorphState (bar.qml idi
 Item {
     id: root
 
-    required property var notes
+    required property var livery
     required property var bridge
 
     readonly property string faceSerif: "Noto Serif"
     readonly property string faceMono:  "JetBrainsMono Nerd Font"
     readonly property string faceMusic: "Noto Music"
-    readonly property color clay: notes.base09
-    readonly property color ink: notes.paletteFg
-    readonly property color aegean: notes.holoBlue   // the moon's information hue
+    readonly property color clay: livery.base09
+    readonly property color ink: livery.paletteFg
+    readonly property color aegean: livery.holoBlue   // the moon's information hue
 
     function withA(cstr, a) {
         var c = Qt.color(cstr)
@@ -592,7 +592,7 @@ Item {
         width: root.sheetW
         height: root.sheetVisH
         radius: 0
-        color: root.notes.paletteBg
+        color: root.livery.paletteBg
         border.color: root.ink
         border.width: 2
         clip: true
@@ -839,7 +839,7 @@ Item {
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: "" + root.viewYear
-                        color: root.notes.paletteAccent
+                        color: root.livery.paletteAccent
                         font.family: root.faceSerif
                         font.pixelSize: 14
                         font.bold: true
@@ -992,12 +992,12 @@ Item {
                                             width: 26
                                             height: 17
                                             radius: 0
-                                            color: isToday ? root.notes.paletteHot : "transparent"
+                                            color: isToday ? root.livery.paletteHot : "transparent"
 
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: parent.dayNum
-                                                color: parent.isToday ? root.notes.paletteBg
+                                                color: parent.isToday ? root.livery.paletteBg
                                                        : (parent.isCurrent
                                                            ? (parent.isSunday ? root.withA(root.clay, 0.95) : root.ink)
                                                            : root.withA(root.ink, 0.3))
@@ -1082,7 +1082,7 @@ Item {
                                         Text {
                                             height: 16
                                             text: root.monthNames[block.m]
-                                            color: block.isViewed ? root.notes.paletteAccent : root.ink
+                                            color: block.isViewed ? root.livery.paletteAccent : root.ink
                                             font.family: root.faceSerif
                                             font.pixelSize: 13
                                             font.bold: true
@@ -1150,7 +1150,7 @@ Item {
                                                             width: 22
                                                             height: 16
                                                             radius: 0
-                                                            color: isToday ? root.notes.paletteHot : "transparent"
+                                                            color: isToday ? root.livery.paletteHot : "transparent"
                                                             // numeral CENTERED — round four's
                                                             // left-anchoring was forced by the old
                                                             // 15×11 cell; at 22×16 with an 8px moon
@@ -1162,7 +1162,7 @@ Item {
                                                             Text {
                                                                 anchors.centerIn: parent
                                                                 text: parent.inMonth ? parent.dayN : ""
-                                                                color: parent.isToday ? root.notes.paletteBg
+                                                                color: parent.isToday ? root.livery.paletteBg
                                                                        : (index === 0 ? root.withA(root.clay, 0.8)
                                                                                       : root.withA(root.ink, 0.8))
                                                                 font.family: root.faceSerif
@@ -1260,7 +1260,7 @@ Item {
                     anchors.left: parent.left
                     anchors.bottom: parent.bottom
                     text: root.tallyText()
-                    color: root.notes.paletteAccent
+                    color: root.livery.paletteAccent
                     font.family: root.faceMono
                     font.pixelSize: 11
                     font.bold: true
@@ -1287,7 +1287,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "𝄂"
                     font.family: root.faceMusic; font.pixelSize: 16
-                    color: root.notes.paletteAccent
+                    color: root.livery.paletteAccent
                 }
                 Rectangle {
                     anchors.left: parent.left; anchors.right: closeBar.left

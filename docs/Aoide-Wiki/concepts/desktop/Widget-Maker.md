@@ -80,7 +80,7 @@ A narrower, sibling mechanism to the make-a-widget loop above: not the agent
 building a *new* capability, but a **song** ([[Song-Anatomy]]) replacing a
 piece of *existing* chrome with its own QML. **The staging engine**
 (`StagingEngine.qml`) resolves the active song's livery tokens
-(`LiveryState`/`notes`) to per-slot QML; a host surface embeds one of two
+(`LiveryState`/`livery`) to per-slot QML; a host surface embeds one of two
 fixed per-slot anchors, which asks the engine whether the active song
 dressed that slot and loads its file, or falls back to shared chrome:
 
@@ -126,7 +126,7 @@ WlrLayershell namespace each `SurfaceSlot` window carries — lives in
 `modules/facets/quickshell/qml/slots.md`, alongside the shape every widget
 file follows: an `Item` root for a `WidgetSlot` widget (sized off its
 `implicit*`; a `SurfaceSlot` widget's root is a `PanelWindow` instead),
-`required property var notes`/`bridge` injected by every anchor
+`required property var livery`/`bridge` injected by every anchor
 unconditionally, any slot-specific extras declared as their own `required
 property`, and never `config.*`.
 
@@ -153,7 +153,7 @@ song's widget files still need a rebuild" caveat above is untouched by
 this — that's the Nix build carrying new files into the store, not rendering.
 
 **Containment invariant** (`CONTRACTS.md §5`): a loaded song widget receives
-only `notes` (`LiveryState`) and `bridge` (`ShellBridge`), plus whatever
+only `livery` (`LiveryState`) and `bridge` (`ShellBridge`), plus whatever
 slot-specific extras the anchor declares (e.g. notifications' `notification`,
 launcher's `clipboard`/`ledger`) — never nix `config.*`. This doesn't loosen
 the song-shape rule elsewhere in this page: a song's `rice.nix` still sets
@@ -193,7 +193,7 @@ above. `SongSurfaces.qml` hosts every `kind = "surface"` entry as an
 `Instantiator` of `SurfaceSlot`s; `SongGadgets.qml` hosts every `kind =
 "dock"` entry as a `Repeater` of `WidgetSlot`s, sorted by `order` and
 mounted as the column's last children. Both keep the fixed injected-prop
-contract (`notes` + `bridge` only) and the same baseline-fallback resolution
+contract (`livery` + `bridge` only) and the same baseline-fallback resolution
 `resolveSong` already gives the anchored catalog — a declared slot with no
 actual `widgets/<slot>.qml` body warns (`[aoide/surfaceslot]` /
 `[aoide/songgadgets]`) and renders nothing, the same inert-not-error posture

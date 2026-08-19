@@ -11,7 +11,7 @@
 // is its QML (`source`).
 //
 // Fixed injected-prop contract (CONTRACTS.md §5 containment): a loaded song
-// widget receives ONLY `notes` (LiveryState) and `bridge` (ShellBridge) —
+// widget receives ONLY `livery` (LiveryState) and `bridge` (ShellBridge) —
 // plus whatever slot-specific extras the anchor declares (e.g. notifications'
 // `notification`) — never nix `config.*`. A song widget is store-copied
 // score, structurally incapable of reaching host/facet options through this
@@ -52,7 +52,7 @@ QtObject {
     property var manifest: ({})
 
     // Declared as a property (not a default-child) because QtObject has no
-    // default property — the LiveryState.noteFile idiom.
+    // default property — the LiveryState.liveryFile idiom.
     property FileView manifestFile: FileView {
         id: manifestFile
         path: root.manifestPath

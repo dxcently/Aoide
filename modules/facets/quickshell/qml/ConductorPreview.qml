@@ -6,7 +6,7 @@ import Quickshell.Wayland
 //   qs -p modules/facets/quickshell/qml/ConductorPreview.qml
 // Floats a 360x520 overlay surface. Unlike MetersPreview's stub palette, the
 // roster needs LiveryState's real helpers (ctxPercent/ctxBar/noteColor/
-// elapsedSince), so the harness instantiates the real notes + bridge and a
+// elapsedSince), so the harness instantiates the real livery + bridge and a
 // stub `shared`. RosterTemple honours QS_STAGE, so a fixture stage dir can be
 // pointed at to exercise empty/multi-project states:
 //   QS_STAGE=/tmp/stage-fixture qs -p …/ConductorPreview.qml
@@ -20,7 +20,7 @@ ShellRoot {
         implicitWidth: 360
         implicitHeight: 520
 
-        LiveryState { id: notes }
+        LiveryState { id: livery }
         ShellBridge { id: bridge }
         QtObject {
             id: sharedStub
@@ -31,7 +31,7 @@ ShellRoot {
 
         ConductorGadget {
             anchors.fill: parent
-            notes: notes
+            livery: livery
             bridge: bridge
             shared: sharedStub
         }

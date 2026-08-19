@@ -28,7 +28,7 @@ ShellRoot {
             anchors.margins: 0
 
             // stub palette — the warm gold-marble light theme (hex only here)
-            notes: QtObject {
+            livery: QtObject {
                 property string paletteBg:     "#f2ebde"   // pale marble ground
                 property string paletteFg:     "#2f2a33"   // dark plum ink
                 property string paletteAccent: "#a07414"   // Attic gold
@@ -38,7 +38,7 @@ ShellRoot {
                 property string holoBlue:      "#345f81"   // aegean
                 property string violet:        "#6f4373"   // murex
 
-                // context-meter helpers — the gadget calls notes.ctx* (LiveryState
+                // context-meter helpers — the gadget calls livery.ctx* (LiveryState
                 // owns the real ones); mirrored here so the stub renders the meter
                 // instead of throwing. Same math, verbatim.
                 function ctxCeiling(ceiling) { return (ceiling && ceiling > 0) ? ceiling : 200000; }

@@ -1,15 +1,15 @@
-// LiveryState.qml — shared note state, hot-reloaded from stage/livery.json.
+// LiveryState.qml — shared livery state, hot-reloaded from stage/livery.json.
 //
-// Singleton: every surface widget binds to properties here. When the note
+// Singleton: every surface widget binds to properties here. When the livery
 // file is atomically replaced (write-temp-then-rename per CONTRACTS.md §4),
 // the FileView fires a change signal and all bindings update in one pass —
 // the full arrangement hot-reloads without a QML restart. The canonical
 // file is livery.json, sole source since LIVERY-MERGE Phase 4 dropped the
 // legacy mirror.
 //
-// Note schema v0 (CONTRACTS.md §1): palette + bar.* / notif.* / window.*
-// All values are concrete hex strings (fallbacks already applied by the note
-// emitter — Quickshell never sees null).
+// livery schema v0 (CONTRACTS.md §1): palette + bar.* / notif.* / window.*
+// All values are concrete hex strings (fallbacks already applied by the
+// livery emitter — Quickshell never sees null).
 
 import QtQuick
 import Quickshell
@@ -18,13 +18,13 @@ import Quickshell.Io
 QtObject {
     id: root
 
-    // ── Note file path ─────────────────────────────────────────────────────
+    // ── livery file path ────────────────────────────────────────────────────
     // Stage path: ~/Aoide/song/stage/livery.json (gitignored runtime; the nix
     // build never depends on this path — checks.no-song-read enforces that).
-    readonly property string notePath:
+    readonly property string liveryPath:
         Quickshell.env("HOME") + "/Aoide/song/stage/livery.json"
 
-    // ── Parsed note object ─────────────────────────────────────────────────
+    // ── Parsed livery object ─────────────────────────────────────────────────
     property var raw: ({
         "schemaVersion": "0",
         "palette": { "bg": "#f4ecdc", "fg": "#423420", "accent": "#4f74a0", "urgent": "#b0475f", "hot": "#6f8a4f" },
@@ -36,10 +36,10 @@ QtObject {
 
     // ── Song name ───────────────────────────────────────────────────────────
     // Additive optional field (`aoide rice preview <name>` injects `song` into
-    // the staged notes — dispatch.rs handle_rice_preview) — drives per-song
+    // the staged livery — dispatch.rs handle_rice_preview) — drives per-song
     // flavor-widget resolution (the staging engine: StagingEngine.qml /
     // WidgetSlot.qml). Absent (a
-    // notes file staged some other way) means "no song identity" — resolvers
+    // livery file staged some other way) means "no song identity" — resolvers
     // treat "" as "nothing authored", never a crash.
     readonly property string songName: (raw.song) ? raw.song : ""
 
@@ -49,8 +49,8 @@ QtObject {
     readonly property color paletteAccent: raw.palette ? raw.palette.accent : "#4f74a0"
     readonly property color paletteUrgent: raw.palette ? raw.palette.urgent : "#b0475f"
     // Hot/trace highlight — the one-neon element (optic-nerve green). Optional
-    // in the v0 note schema: falls back to the accent when palette.hot is
-    // absent, so a note file without it renders exactly as before.
+    // in the v0 livery schema: falls back to the accent when palette.hot is
+    // absent, so a livery file without it renders exactly as before.
     readonly property color paletteHot:
         (raw.palette && raw.palette.hot) ? raw.palette.hot : paletteAccent
 
@@ -60,7 +60,7 @@ QtObject {
     // multicolor accents from it under semantic names — the cool wireframe cyan,
     // hologram periwinkle, violet brain-glow and glitch pink of the reference
     // stills. When the block is ABSENT every accent falls back to paletteAccent,
-    // so a note file without base16 renders exactly as the round-3 rose field.
+    // so a livery file without base16 renders exactly as the round-3 rose field.
     readonly property color wireCyan:   // base0C — wireframe outlines + leaders
         (raw.base16 && raw.base16.base0C) ? raw.base16.base0C : paletteAccent
     readonly property color holoBlue:   // base0D — depth-stack back copies
@@ -210,7 +210,7 @@ QtObject {
     // ── Usage panel: path + reset-countdown (shared by UsageGadget) ────────
     // The `aoide usage` poller writes ~/Aoide/state/usage.json (schema §0 —
     // live plan/weekly utilization + a local this-machine estimate). Path kept
-    // here alongside notePath so a consumer never hard-codes its own copy.
+    // here alongside liveryPath so a consumer never hard-codes its own copy.
     readonly property string usagePath:
         Quickshell.env("HOME") + "/Aoide/state/usage.json"
     // A compact "resets in 3h20m" from an ISO-8601 instant, relative to `nowMs`
@@ -233,30 +233,30 @@ QtObject {
     // ── File watcher — atomic hot-reload ─────────────────────────────────
     // Declared as a property (not a default-child) because QtObject has no
     // default property — nesting it directly fails to load. The FileView
-    // watches livery.json, the sole stage note file since LIVERY-MERGE
+    // watches livery.json, the sole stage livery file since LIVERY-MERGE
     // Phase 4.
-    property FileView noteFile: FileView {
-        id: noteFile
-        path: root.notePath
+    property FileView liveryFile: FileView {
+        id: liveryFile
+        path: root.liveryPath
         watchChanges: true
-        onFileChanged: noteFile.reload()
+        onFileChanged: liveryFile.reload()
         onTextChanged: {
-            var txt = noteFile.text()
+            var txt = liveryFile.text()
             if (!txt) return
             try {
                 var parsed = JSON.parse(txt)
                 root.raw = parsed
             } catch (e) {
-                console.warn("[aoide/notes] Failed to parse livery.json:", e)
+                console.warn("[aoide/livery] Failed to parse livery.json:", e)
             }
         }
-        Component.onCompleted: noteFile.reload()
+        Component.onCompleted: liveryFile.reload()
     }
 
     // ── Rice mode — hot-reloaded from stage/mode.json ──────────────────────
     // `aoide rice mode {stage,declarative,draft}` (storage::mode, RiceMode)
     // writes this file on every mode change; the background reconciler
-    // touches it too. Same FileView-hot-reload idiom as notePath above, kept
+    // touches it too. Same FileView-hot-reload idiom as liveryPath above, kept
     // as a SEPARATE file/watcher since mode.json and livery.json are written
     // independently by different code paths. Default mirrors Rust's own
     // `impl Default for RiceMode` (declarative) so an absent/unparseable
@@ -278,7 +278,7 @@ QtObject {
             try {
                 root.modeRaw = JSON.parse(txt)
             } catch (e) {
-                console.warn("[aoide/notes] Failed to parse mode.json:", e)
+                console.warn("[aoide/livery] Failed to parse mode.json:", e)
             }
         }
         Component.onCompleted: modeFile.reload()

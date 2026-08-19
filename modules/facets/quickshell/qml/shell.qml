@@ -1,7 +1,7 @@
 // shell.qml — Aoide Quickshell root.
 //
 // Entry point for the Quickshell session. Instantiates all surface widgets
-// and wires the shared note loader (LiveryState) so every widget hot-reloads
+// and wires the shared livery loader (LiveryState) so every widget hot-reloads
 // from song/stage/livery.json when it changes.
 //
 // Communication discipline (CONTRACTS.md / entities/Quickshell):
@@ -23,7 +23,7 @@ import Quickshell.Wayland
 
 ShellRoot {
     // ── Shared singletons (one instance for the whole session) ─────────────
-    LiveryState { id: notes }
+    LiveryState { id: livery }
     ShellBridge { id: bridge }
     // `aoide quickshell reload`'s IPC target (crates/song/src/ipc.rs) — no
     // properties, wired for its side effect (Quickshell.reload) alone.
@@ -34,14 +34,14 @@ ShellRoot {
     StagingEngine { id: stagingEngine }
 
     // ── Shared session state (floating gadgets + DAG trace link) ───────────
-    // A plain QtObject passed by property, exactly like notes/bridge — the
+    // A plain QtObject passed by property, exactly like livery/bridge — the
     // cleanest quickshell idiom for cross-widget state that needs no file
     // watch of its own. Holds: (a) `floatingModel`, the ListModel of gadgets
     // torn off onto DesktopGadgets ({ kind, gx, gy }); and (b) `tracedSessionId`,
     // the hover-trace link — TerminalManagerGadget writes it on row hover,
     // DagGraphGadget highlights the node whose id matches. Session-scoped, no
     // persistence (v1). QtObject has no default property, so the ListModel is a
-    // named property (the LiveryState.noteFile idiom).
+    // named property (the LiveryState.liveryFile idiom).
     QtObject {
         id: shared
 
@@ -96,7 +96,7 @@ ShellRoot {
 
         AoideWallpaper {
             anchors.fill: parent
-            notes: notes
+            livery: livery
         }
     }
 
@@ -122,7 +122,7 @@ ShellRoot {
         WidgetSlot {
             id: barSlot
             anchors.fill: parent
-            notes: notes
+            livery: livery
             bridge: bridge
             stagingEngine: stagingEngine
             slot: "bar"
@@ -151,14 +151,14 @@ ShellRoot {
     // the shared singletons. Replaces the old AoideAgentWidgets hot-edge drawer.
     AoidePanel {
         id: aoidePanel
-        notes: notes
+        livery: livery
         bridge: bridge
         shared: shared
         stagingEngine: stagingEngine
     }
 
     // ── Overlay surfaces — each owns its own PanelWindow internally, wired
-    // to notes/bridge only. Hidden/dormant until summoned/triggered.
+    // to livery/bridge only. Hidden/dormant until summoned/triggered.
     //   - launcher (SurfaceSlot) : SUPER+Space launcher (bridge-toggled),
     //                              song/songbook/sonata/widgets/launcher.qml
     //   - powermenu (SurfaceSlot): the powermenu (bar clef 𝄞 → powermenu.toggle()),
@@ -185,14 +185,14 @@ ShellRoot {
     SurfaceSlot {
         id: powermenuSlot
         slot: "powermenu"
-        notes: notes
+        livery: livery
         bridge: bridge
         stagingEngine: stagingEngine
     }
     SurfaceSlot {
         id: launcherSlot
         slot: "launcher"
-        notes: notes
+        livery: livery
         bridge: bridge
         stagingEngine: stagingEngine
         extraProps: ({ clipboard: clipboard, ledger: ledger })
@@ -203,7 +203,7 @@ ShellRoot {
     SurfaceSlot {
         id: heraldSlot
         slot: "herald"
-        notes: notes
+        livery: livery
         bridge: bridge
         stagingEngine: stagingEngine
     }
@@ -213,9 +213,9 @@ ShellRoot {
     // today) → no-op, same as powermenu/launcher above but data-driven
     // instead of a fixed slot name.
     SongSurfaces {
-        notes: notes
+        livery: livery
         bridge: bridge
         stagingEngine: stagingEngine
     }
-    AoideWallpaperPicker { notes: notes }
+    AoideWallpaperPicker { livery: livery }
 }

@@ -30,16 +30,16 @@ let
   # never song/songbook/).
   songbook = ../../../song/songbook;
 
-  # ── Active song's committed notes — also a legitimate build-time read ──────
+  # ── Active song's committed livery — also a legitimate build-time read ─────
   # `song/songbook/<name>/livery.json` is versioned score (checks.no-song-read
   # only bans song/{stage,auditions,catalog,index}/, never song/songbook/), so
-  # naming the ACTIVE song's notes file here is allowed for the same reason
+  # naming the ACTIVE song's livery file here is allowed for the same reason
   # `songbook` above is. Path concatenation (not string-interpolating the
   # whole `songbook` dir) so only this one file gets copied into the store.
-  activeSongNotes = songbook + "/${config.aoide.song}/livery.json";
+  activeSongLivery = songbook + "/${config.aoide.song}/livery.json";
 
   # ── Seed script for `home.activation.aoideSeedStage` (below) ───────────────
-  # Reasserts the ACTIVE song's committed notes into the live stage twin
+  # Reasserts the ACTIVE song's committed livery into the live stage twin
   # (`song/stage/livery.json`, CONTRACTS.md §4) on every activation, injecting
   # the same `"song"` field `aoide rice preview <name>` would (jq's
   # `. + {song: …}`; `-S` sorts keys to match serde_json::Value's BTreeMap
@@ -49,7 +49,7 @@ let
   # exactly). Write-temp-then-rename in the SAME directory (so the rename is
   # atomic) mirrors `shellbridge::atomic_write` (`aoide_storage::fs::atomic_write`)
   # so a hot-reloading FileView (LiveryState.qml) never reads a torn file.
-  # The write goes to livery.json, the canonical stage note file. The whole
+  # The write goes to livery.json, the canonical stage livery file. The whole
   # thing is one script
   # (not inline `run` commands) so a `--dry-run` activation either runs it in
   # full or not at all — never a half-applied mkdir/mktemp/jq/mv sequence.
@@ -58,12 +58,12 @@ let
     mkdir -p "$HOME/Aoide/song/stage"
     tmp=$(mktemp "$HOME/Aoide/song/stage/.livery.json.XXXXXX")
     ${pkgs.jq}/bin/jq -S '. + {song: $song}' --arg song "${config.aoide.song}" \
-      "${activeSongNotes}" > "$tmp"
+      "${activeSongLivery}" > "$tmp"
     mv -f "$tmp" "$HOME/Aoide/song/stage/livery.json"
   '';
 
   # ── QML root — the full skeleton config installed into run/qml/ ────────────
-  # Each surface widget is a stub that reads its colors from notes. Deployed
+  # Each surface widget is a stub that reads its colors from livery. Deployed
   # to a gitignored root-runtime dir (run/, alongside catalog/index/log —
   # never the repo's checked-in tree) so the live copy can never be confused
   # with source (modules/facets/quickshell/qml/) or collide with it — this is
@@ -261,7 +261,7 @@ in
       # (CONTRACTS.md §4); until now nothing seeded it from the BAKED default,
       # so a host that never ran `aoide rice preview <name>` had a stale/absent
       # stage twin even though the compositor/Stylix/QML tree were all built
-      # from the active song. This reasserts the active song's committed notes
+      # from the active song. This reasserts the active song's committed livery
       # into the stage file on every activation — `seedStageScript` (above)
       # does the actual write. Same "switch = truth resets the sketch"
       # discipline as `aoideDeployQml`'s rsync above: this OVERWRITES whatever

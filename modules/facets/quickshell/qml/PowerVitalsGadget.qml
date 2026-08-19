@@ -30,11 +30,11 @@ import Quickshell.Services.UPower
 // empty state: "AC — no battery" on a desktop, never a faked 100%. Sub-hues each
 // earn a job: charge fill = teal(wireCyan), link + detail = aegean(holoBlue),
 // low/offline = terracotta(paletteUrgent). Murex is the temple. Colour flows
-// from `notes` roles only; hard corners (radius 0) everywhere.
+// from `livery` roles only; hard corners (radius 0) everywhere.
 Item {
     id: gadget
 
-    required property var notes            // palette roles
+    required property var livery            // palette roles
     property string routePath: "/proc/net/route"
 
     implicitWidth: 340
@@ -46,7 +46,7 @@ Item {
     readonly property string faceMusic: "Noto Music"
 
     // this temple's signature accent — MUREX (Corinthian)
-    readonly property color signature: notes.violet
+    readonly property color signature: livery.violet
 
     readonly property int cells: 14
     readonly property real lowAt: 15
@@ -85,10 +85,10 @@ Item {
         return "discharging";
     }
     function battHue() {
-        if (!battAvail) return notes.holoBlue;      // aegean — steady mains
-        if (battLow) return notes.paletteUrgent;    // terracotta
-        if (battCharging || battFull) return notes.paletteAccent;   // gold
-        return notes.wireCyan;                      // teal — on its own reserves
+        if (!battAvail) return livery.holoBlue;      // aegean — steady mains
+        if (battLow) return livery.paletteUrgent;    // terracotta
+        if (battCharging || battFull) return livery.paletteAccent;   // gold
+        return livery.wireCyan;                      // teal — on its own reserves
     }
     function battTime() {
         if (!battDev || !battAvail) return "";
@@ -134,7 +134,7 @@ Item {
         return n ? "link" : "";
     }
     function netGlyph() { return gadget.netUp ? "𝅗𝅥" : "𝄽"; }   // sustained note vs rest
-    function netHue() { return gadget.netUp ? notes.holoBlue : notes.paletteUrgent; }
+    function netHue() { return gadget.netUp ? livery.holoBlue : livery.paletteUrgent; }
 
     // ── one mood face for the whole box ───────────────────────────────────────
     function kaomojiFor() {
@@ -155,15 +155,15 @@ Item {
         anchors.leftMargin: 4; anchors.topMargin: 5
         anchors.rightMargin: -4; anchors.bottomMargin: -5
         radius: 0
-        color: gadget.withA(notes.paletteFg, 0.22)
+        color: gadget.withA(livery.paletteFg, 0.22)
     }
 
     Rectangle {
         id: stele
         anchors.fill: parent
         radius: 0
-        color: notes.paletteBg
-        border.color: notes.paletteFg
+        color: livery.paletteBg
+        border.color: livery.paletteFg
         border.width: 2
 
         Rectangle {                                   // inset keyline — MUREX (Corinthian)
@@ -186,7 +186,7 @@ Item {
 
                 Rectangle {
                     anchors.fill: parent; anchors.bottomMargin: 5
-                    color: gadget.withA(notes.paletteFg, 0.05)
+                    color: gadget.withA(livery.paletteFg, 0.05)
                 }
                 Text {
                     id: clef
@@ -205,7 +205,7 @@ Item {
                     text: "POWER"
                     font.family: gadget.faceSerif; font.pixelSize: 19
                     font.weight: Font.DemiBold; font.letterSpacing: 4
-                    color: notes.paletteFg
+                    color: livery.paletteFg
                 }
                 Text {
                     anchors.right: parent.right
@@ -293,7 +293,7 @@ Item {
                     text: "└─┤ " + (gadget.battAvail ? gadget.battPct + "% batt" : "AC")
                           + " · " + (gadget.netUp ? gadget.netIface : "offline") + " ├"
                     font.family: gadget.faceMono; font.pixelSize: 11
-                    color: gadget.withA(notes.paletteFg, 0.8)
+                    color: gadget.withA(livery.paletteFg, 0.8)
                 }
                 Text {
                     id: ffCorner
@@ -309,7 +309,7 @@ Item {
                     anchors.verticalCenterOffset: -1
                     text: "𝄂"
                     font.family: gadget.faceMusic; font.pixelSize: 18
-                    color: notes.paletteAccent
+                    color: livery.paletteAccent
                 }
                 Rectangle {
                     anchors.left: ffL.right; anchors.right: ffBar.left
@@ -361,7 +361,7 @@ Item {
                                 text: "BATTERY"
                                 font.family: gadget.faceSerif; font.pixelSize: 15
                                 font.weight: Font.Medium; font.letterSpacing: 2
-                                color: notes.paletteFg
+                                color: livery.paletteFg
                             }
                             Text {
                                 anchors.baseline: battName.baseline
@@ -376,7 +376,7 @@ Item {
                             anchors.verticalCenter: battCap.verticalCenter
                             text: gadget.battAvail ? gadget.battPct + "%" : "AC"
                             font.family: gadget.faceMono; font.pixelSize: 15
-                            color: gadget.battLow ? notes.paletteUrgent : notes.paletteAccent
+                            color: gadget.battLow ? livery.paletteUrgent : livery.paletteAccent
                         }
 
                         // gauge (present) OR honest "no battery" line (absent)
@@ -392,7 +392,7 @@ Item {
                                 text: "AC — no battery present"
                                 font.family: gadget.faceSerif; font.italic: true
                                 font.pixelSize: 12
-                                color: gadget.withA(notes.holoBlue, 0.95)
+                                color: gadget.withA(livery.holoBlue, 0.95)
                             }
 
                             // the charge gauge — ASCII bar recast, teal fill
@@ -424,7 +424,7 @@ Item {
                                     text: gadget.barTrack()
                                     font.family: gadget.faceMono; font.pixelSize: 14
                                     fontSizeMode: Text.HorizontalFit
-                                    color: gadget.withA(notes.paletteFg, 0.22)
+                                    color: gadget.withA(livery.paletteFg, 0.22)
                                 }
                                 Text {                        // fill — teal / gold / terracotta
                                     anchors.fill: parent
@@ -432,9 +432,9 @@ Item {
                                     text: gadget.barFill(gadget.battPct)
                                     font.family: gadget.faceMono; font.pixelSize: 14
                                     fontSizeMode: Text.HorizontalFit
-                                    color: gadget.battLow ? notes.paletteUrgent
+                                    color: gadget.battLow ? livery.paletteUrgent
                                           : (gadget.battCharging || gadget.battFull)
-                                            ? notes.paletteAccent : notes.wireCyan
+                                            ? livery.paletteAccent : livery.wireCyan
                                 }
                             }
                         }
@@ -449,11 +449,11 @@ Item {
                         Rectangle {                          // laurel spine — a live link
                             anchors.left: parent.left; anchors.top: parent.top
                             anchors.bottom: parent.bottom
-                            width: 3; color: notes.paletteHot; visible: netRow.emph
+                            width: 3; color: livery.paletteHot; visible: netRow.emph
                         }
                         Rectangle {
                             anchors.fill: parent
-                            color: netRow.emph ? gadget.withA(notes.paletteHot, 0.08) : "transparent"
+                            color: netRow.emph ? gadget.withA(livery.paletteHot, 0.08) : "transparent"
                         }
 
                         Item {                                // sustained note / rest
@@ -466,7 +466,7 @@ Item {
                                 anchors.verticalCenterOffset: -2
                                 text: gadget.netGlyph()
                                 font.family: gadget.faceMusic; font.pixelSize: 24
-                                color: netRow.emph ? notes.paletteHot : gadget.netHue()
+                                color: netRow.emph ? livery.paletteHot : gadget.netHue()
                             }
                         }
 
@@ -481,14 +481,14 @@ Item {
                                 font.family: gadget.faceSerif; font.pixelSize: 15
                                 font.weight: netRow.emph ? Font.Bold : Font.Medium
                                 font.letterSpacing: 2
-                                color: notes.paletteFg
+                                color: livery.paletteFg
                             }
                             Text {
                                 anchors.baseline: netName.baseline
                                 text: gadget.netUp ? gadget.netKind() : "no route"
                                 font.family: gadget.faceSerif; font.italic: true
                                 font.pixelSize: 11
-                                color: netRow.emph ? notes.paletteHot : gadget.netHue()
+                                color: netRow.emph ? livery.paletteHot : gadget.netHue()
                             }
                         }
                         Text {                                // up / — in gold
@@ -496,7 +496,7 @@ Item {
                             anchors.verticalCenter: netCap.verticalCenter
                             text: gadget.netUp ? "up" : "—"
                             font.family: gadget.faceMono; font.pixelSize: 15
-                            color: gadget.netUp ? notes.paletteAccent : notes.paletteUrgent
+                            color: gadget.netUp ? livery.paletteAccent : livery.paletteUrgent
                         }
 
                         // link line — iface in mono, an aegean established-link bar
@@ -509,15 +509,15 @@ Item {
                                 anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                                 text: gadget.netUp ? ("⇅ " + gadget.netIface) : "⌀ link down"
                                 font.family: gadget.faceMono; font.pixelSize: 12
-                                color: gadget.netUp ? gadget.withA(notes.holoBlue, 0.95)
-                                                    : gadget.withA(notes.paletteUrgent, 0.9)
+                                color: gadget.netUp ? gadget.withA(livery.holoBlue, 0.95)
+                                                    : gadget.withA(livery.paletteUrgent, 0.9)
                             }
                             Text {                            // established-link ticks (aegean)
                                 anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                                 visible: gadget.netUp
                                 text: "▰▰▰▰▰"
                                 font.family: gadget.faceMono; font.pixelSize: 12
-                                color: gadget.withA(notes.holoBlue, 0.85)
+                                color: gadget.withA(livery.holoBlue, 0.85)
                             }
                         }
                     }
@@ -537,14 +537,14 @@ Item {
                             text: gadget.kaomojiFor()
                             font.pixelSize: 11
                             color: gadget.withA(gadget.netUp && !gadget.battLow
-                                                ? notes.holoBlue : notes.paletteUrgent, 0.9)
+                                                ? livery.holoBlue : livery.paletteUrgent, 0.9)
                         }
                         Text {
                             anchors.right: parent.right; anchors.rightMargin: 12
                             anchors.bottom: parent.bottom
                             text: gadget.battAvail ? gadget.battTime() : "mains · steady"
                             font.family: gadget.faceMono; font.pixelSize: 10
-                            color: gadget.withA(notes.holoBlue, 0.95)
+                            color: gadget.withA(livery.holoBlue, 0.95)
                         }
                     }
                 }

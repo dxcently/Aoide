@@ -443,7 +443,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   (`setHover`/`requestHoverClear`/`computeEmph`) wholesale. `ConductorPreview.qml`
   updated to match: the harness now instantiates real `LiveryState` +
   `ShellBridge` instead of a stub palette object, since the new roster reads
-  `notes`' real `ctxPercent`/`ctxBar`/`noteColor`/`elapsedSince` helpers.
+  `livery`'s real `ctxPercent`/`ctxBar`/`noteColor`/`elapsedSince` helpers.
   Deployed live to `run/qml/` for testing, service is up — but this has not
   yet had the khoa-looks-first vision check (§3) before landing as reviewed
   design. See [[Conductor-Channel]].

@@ -11,7 +11,7 @@
 // calling `.toggle()` on the loaded item. This file must NOT register its
 // own GlobalShortcut for the same appid/name, or the two would collide.
 //
-// Fixed injected-prop contract (CONTRACTS.md §5): only `notes` + `bridge` —
+// Fixed injected-prop contract (CONTRACTS.md §5): only `livery` + `bridge` —
 // SongSurfaces.qml passes no extras.
 
 import QtQuick
@@ -21,7 +21,7 @@ import Quickshell.Wayland
 PanelWindow {
     id: root
 
-    required property var notes
+    required property var livery
     required property var bridge
 
     // Starts HIDDEN — same default posture as sonata's powermenu.qml
@@ -59,8 +59,8 @@ PanelWindow {
         width: 520
         height: 220
         radius: 12
-        color: root.notes.paletteAccent
-        border.color: root.notes.paletteFg
+        color: root.livery.paletteAccent
+        border.color: root.livery.paletteFg
         border.width: 3
 
         Column {
@@ -73,14 +73,14 @@ PanelWindow {
                 font.pixelSize: 48
                 font.letterSpacing: 10
                 font.weight: Font.Bold
-                color: root.notes.paletteBg
+                color: root.livery.paletteBg
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "arrangement demo — phase 6 proof"
                 font.family: "JetBrainsMono Nerd Font"
                 font.pixelSize: 14
-                color: root.notes.paletteBg
+                color: root.livery.paletteBg
             }
         }
     }

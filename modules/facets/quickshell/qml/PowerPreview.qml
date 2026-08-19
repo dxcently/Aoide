@@ -30,7 +30,7 @@ ShellRoot {
             anchors.margins: 0
 
             // stub palette — the warm gold-marble light theme (hex only here)
-            notes: QtObject {
+            livery: QtObject {
                 property string paletteBg:     "#f2ebde"   // pale marble ground
                 property string paletteFg:     "#2f2a33"   // dark plum ink
                 property string paletteAccent: "#a07414"   // Attic gold (numeric tallies)

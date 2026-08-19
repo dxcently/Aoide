@@ -7,10 +7,10 @@
 // messenger walks on mid-scene and reads out what happened offstage. Each
 // notification is one small SELF-FRAMED STELE in the pantheon family the
 // bar's popouts wear (opaque marble body, 2px ink border, 1px inset
-// signature keyline, cast shadow, radius 0, colour only from notes.*),
+// signature keyline, cast shadow, radius 0, colour only from livery.*),
 // stacked under the bar at the screen's top-right, newest first.
 //
-//   · SIGNATURE — RUST `notes.base0F`. The family register: calendar wears
+//   · SIGNATURE — RUST `livery.base0F`. The family register: calendar wears
 //     clay base09, the colonnade murex base0E, power murex in the dock; rust
 //     is the notification family's own hue (AudioColonnade's signature
 //     grounding names it so), and no bar-popout stele wears it today.
@@ -64,7 +64,7 @@ PanelWindow {
     id: root
 
     // ── Note + bridge dependencies (injected by SurfaceSlot) ───────────────
-    required property var notes
+    required property var livery
     required property var bridge
 
     // ── Type voices (the pantheon family) ──────────────────────────────────
@@ -74,11 +74,11 @@ PanelWindow {
     readonly property string faceCrown: "Linux Libertine O"         // ❧ lives here ONLY
 
     // this family's signature — RUST (base0F); see the header
-    readonly property color sig: notes.base0F
-    readonly property color ink: notes.paletteFg
-    readonly property color aegean: notes.holoBlue      // information (progress)
-    readonly property color gold: notes.paletteAccent   // the summons register
-    readonly property color fire: notes.paletteUrgent   // critical / deny
+    readonly property color sig: livery.base0F
+    readonly property color ink: livery.paletteFg
+    readonly property color aegean: livery.holoBlue      // information (progress)
+    readonly property color gold: livery.paletteAccent   // the summons register
+    readonly property color fire: livery.paletteUrgent   // critical / deny
 
     function withA(cstr, a) {
         var c = Qt.color(cstr)
@@ -302,7 +302,7 @@ PanelWindow {
                     width: root.cardW
                     height: col.implicitHeight + 20
                     radius: 0
-                    color: root.notes.paletteBg
+                    color: root.livery.paletteBg
                     border.color: root.ink
                     border.width: 2
 
@@ -604,7 +604,7 @@ PanelWindow {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: "\u{1D102}"
                                 font.family: root.faceMusic; font.pixelSize: 14
-                                color: root.notes.paletteAccent
+                                color: root.livery.paletteAccent
                             }
                             Rectangle {
                                 anchors.left: parent.left; anchors.right: closeBar.left

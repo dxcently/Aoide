@@ -26,7 +26,7 @@
 // thumb flush with the end of the track when the content bottoms out.
 //
 // Colours and geometry come from the host (each wears its own signature and
-// anchors its own gutter); nothing here reads `notes` — it is pure chrome.
+// anchors its own gutter); nothing here reads `livery` — it is pure chrome.
 
 import QtQuick
 

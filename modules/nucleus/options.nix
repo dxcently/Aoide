@@ -1,7 +1,7 @@
 # modules/nucleus/options.nix — THE OPTION CONTRACT.
 #
 # Every other module (dendrites, facets) builds against the options
-# declared here. This is versioned in CONTRACTS.md (note schema v0). Facets
+# declared here. This is versioned in CONTRACTS.md (livery schema v0). Facets
 # read ONLY `aoide.livery`, `aoide.arrangement` and `aoide.surfaces` — an
 # enumerated, closed whitelist (AGENTS.md house rule 5); no module reads another
 # module. The coupling discipline is enforced by lib/checks.nix, not by
@@ -20,7 +20,7 @@ let
     ;
 
   # A base16 hex colour, with or without leading '#'. Kept permissive so v0
-  # note files stay easy to author; the note engine's `rice lint` is the
+  # livery files stay easy to author; the livery engine's `rice lint` is the
   # authoritative validator (the native livery engine, pkgs/aoide).
   hexColor = types.strMatching "#?[0-9a-fA-F]{6}";
 
@@ -58,7 +58,7 @@ let
   # ── Geometry submodule (v0 optional tier: gaps/border/rounding/blur) ──────
   # Additive-optional under the existing v0 schema (same nullOr-with-fallback
   # shape as the component tier above): every field is optional and falls
-  # back to the compositor facet's opinionated default when unset. A notes
+  # back to the compositor facet's opinionated default when unset. A livery
   # file with no `geometry` block behaves exactly as before — the compositor
   # facet applies the fallback, not the option system.
   geometryType = types.submodule {
@@ -281,7 +281,7 @@ in
     # (same self-registration discipline as dendrites — see CONTRACTS.md §5).
     #
     # The VENUE (host) decides its instruments (facets/dendrites, hardware);
-    # the SONG carries only the notes (palette + component tiers). A song must
+    # the SONG carries only the livery (palette + component tiers). A song must
     # never set host options or enable facets/dendrites.
     song = mkOption {
       type = types.str;
@@ -291,7 +291,7 @@ in
         The song (rice) this host performs. Defaults to "sonata" — the shipped
         standard baseline, guaranteed present. Set to a committed song name
         (a folder under song/songbook/<name>/) to replay it on this host;
-        the notes fan-out swaps with zero other edits.
+        the livery fan-out swaps with zero other edits.
       '';
     };
 
@@ -301,10 +301,10 @@ in
         The v0 livery schema — the single seam between the frozen nix layer
         and the live desktop. Facets consume this and nothing else. Livery IS
         Aoide's design-token layer: the tokens themselves, named for the one
-        set of house colours every surface wears in unison — "notes" and
-        "livery" are one thing, not a values/engine split. The container
-        remains the W3C design-tokens format. Versioned as "livery schema v0"
-        in CONTRACTS.md.
+        set of house colours every surface wears in unison. Values and engine
+        are one thing: the tokens are livery, resolved/validated/emitted by
+        livery. The container remains the W3C design-tokens format. Versioned
+        as "livery schema v0" in CONTRACTS.md.
       '';
       default = { };
       type = types.submodule {

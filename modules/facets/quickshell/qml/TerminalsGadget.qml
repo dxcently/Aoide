@@ -13,7 +13,7 @@ import Quickshell.Io
 //
 // SHARED across the pantheon (the family resemblance):
 //   · opaque + DEFINED body — hard plum border, inset keyline, cast shadow;
-//     no pale washout, fully legible. All colour from `notes` roles; radius 0.
+//     no pale washout, fully legible. All colour from `livery` roles; radius 0.
 //   · MUSIC state-glyph contract  ♪ working · 𝄐 awaiting · 𝄼 stopped · 𝄽 idle ·
 //     𝄂 done · · unknown, closed by a final barline 𝄂. (glyphs = HARD CONTRACT)
 //   · KAOMOJI every working row draws from MoodFaces.qml's general `working`
@@ -61,7 +61,7 @@ import Quickshell.Io
 Item {
     id: gadget
 
-    required property var notes            // palette roles
+    required property var livery            // palette roles
     required property var bridge           // socket sender (bridge.focusSession)
     property var shared: null              // cross-widget state (shared.tracedSessionId)
     property string stagePath: "/home/khoa/Aoide/song/stage/sessions.json"
@@ -75,7 +75,7 @@ Item {
     readonly property string faceMusic: "Noto Music"                // notation
 
     // this temple's signature — aegean, not the Conductor's gold ─────────────────
-    readonly property color sig: notes.holoBlue
+    readonly property color sig: livery.holoBlue
 
     // live state ────────────────────────────────────────────────────────────────
     // This roster is the tty roster: EVERY live terminal window, whether or not it
@@ -150,12 +150,12 @@ Item {
     function isWorking(state)  { return normState(state) === "working"; }
     function stateColor(state) {
         switch (normState(state)) {
-        case "awaiting": return notes.paletteUrgent;
-        case "working":  return notes.paletteAccent;
-        case "stopped":  return notes.holoBlue;
-        case "idle":     return notes.violet;
-        case "done":     return notes.wireCyan;
-        default:         return withA(notes.paletteFg, 0.45);
+        case "awaiting": return livery.paletteUrgent;
+        case "working":  return livery.paletteAccent;
+        case "stopped":  return livery.holoBlue;
+        case "idle":     return livery.violet;
+        case "done":     return livery.wireCyan;
+        default:         return withA(livery.paletteFg, 0.45);
         }
     }
     function stateLabel(state) {
@@ -370,7 +370,7 @@ Item {
         anchors.leftMargin: 4; anchors.topMargin: 5
         anchors.rightMargin: -4; anchors.bottomMargin: -5
         radius: 0
-        color: gadget.withA(notes.paletteFg, 0.22)
+        color: gadget.withA(livery.paletteFg, 0.22)
     }
 
     // the naos (temple body) ─────────────────────────────────────────────────────
@@ -384,8 +384,8 @@ Item {
         // whatever sits behind the dock bleed through — every sibling gadget
         // (ConductorGadget, UsageGadget, MetersGadget, PowerVitalsGadget) fills
         // solid; Terminals was the one outlier.
-        color: notes.paletteBg
-        border.color: notes.paletteFg
+        color: livery.paletteBg
+        border.color: livery.paletteFg
         border.width: 2
 
         Rectangle {                                   // inset aegean keyline (signature)
@@ -448,7 +448,7 @@ Item {
 
                 Rectangle {                           // deeper marble band
                     anchors.fill: parent
-                    color: gadget.withA(notes.paletteFg, 0.05)
+                    color: gadget.withA(livery.paletteFg, 0.05)
                 }
                 Row {
                     // khoa, live, pointed at it directly: this was the only
@@ -477,7 +477,7 @@ Item {
                         // title in the pantheon).
                         font.family: gadget.faceSerif; font.pixelSize: 17
                         font.weight: Font.DemiBold; font.letterSpacing: 4
-                        color: notes.paletteFg
+                        color: livery.paletteFg
                     }
                 }
                 Text {                                // terminal tag — a gold family
@@ -498,7 +498,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: ttyMouse.containsMouse ? "[ reap ]" : "[ tty ]"
                     font.family: gadget.faceMono; font.pixelSize: 11
-                    color: gadget.withA(notes.paletteAccent, 0.95)   // same weight as "[ conductor ]"
+                    color: gadget.withA(livery.paletteAccent, 0.95)   // same weight as "[ conductor ]"
                     MouseArea {
                         id: ttyMouse
                         anchors.fill: parent; anchors.margins: -4
@@ -609,7 +609,7 @@ Item {
                     text: "╰─┤ " + gadget.rows.length + " terminal" + (gadget.rows.length === 1 ? "" : "s")
                           + " · " + gadget.projectCount + " cwd" + (gadget.projectCount === 1 ? "" : "s") + " ├"
                     font.family: gadget.faceMono; font.pixelSize: 11
-                    color: gadget.withA(notes.paletteFg, 0.8)
+                    color: gadget.withA(livery.paletteFg, 0.8)
                 }
                 Text {
                     id: ffCorner
@@ -670,21 +670,21 @@ Item {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: "ᕕ( ᐛ )ᕗ"
                         font.family: gadget.faceMono; font.pixelSize: 15
-                        color: gadget.withA(notes.paletteFg, 0.5)
+                        color: gadget.withA(livery.paletteFg, 0.5)
                     }
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: "TACET"
                         font.family: gadget.faceSerif; font.pixelSize: 14
                         font.letterSpacing: 6
-                        color: gadget.withA(notes.paletteFg, 0.45)
+                        color: gadget.withA(livery.paletteFg, 0.45)
                     }
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: "no terminals on the stage"
                         font.family: gadget.faceSerif; font.italic: true
                         font.pixelSize: 10
-                        color: gadget.withA(notes.paletteFg, 0.4)
+                        color: gadget.withA(livery.paletteFg, 0.4)
                     }
                 }
 
@@ -728,7 +728,7 @@ Item {
                                             && modelData.sessionId === gadget.emphId
                         property bool awaiting: gadget.isAwaiting(modelData.state)
                         property bool working:  gadget.isWorking(modelData.state)
-                        property color accent: emph ? notes.paletteHot
+                        property color accent: emph ? livery.paletteHot
                                                     : gadget.stateColor(modelData.state)
                         // the roster's ONE structural fork: an AGENT terminal
                         // (claude/kimi/pi… — recKind falls back to agent!="shell")
@@ -761,7 +761,7 @@ Item {
                         // single middle-elided line, never wrapped.
                         readonly property bool cwdReal: (modelData.cwd || "") !== ""
                         // a BARE tty's main label: the foreground command / file
-                        // being edited (`nvim notes.md`, `cargo test`), or the
+                        // being edited (`nvim livery.md`, `cargo test`), or the
                         // shell process itself when idle (`bash`). An agent row's
                         // main label is its NAME instead — its activity moves
                         // into the screen pane's prompt line.
@@ -789,7 +789,7 @@ Item {
                         // the same hue the bar's ledger note wears for this
                         // workspace (noteColor is safe for id <= 0) — the tag
                         // and the bar's note always read in the same colour.
-                        readonly property color wsTagColor: gadget.notes.noteColor(row.wsId)
+                        readonly property color wsTagColor: gadget.livery.noteColor(row.wsId)
                         // blocked on a `sudo` password prompt — distinct from
                         // ordinary `awaiting` ("an agent permission answer"):
                         // this reads as "it's YOUR terminal password".
@@ -801,7 +801,7 @@ Item {
                         readonly property bool resting: !row.working && !row.rowAwaiting
                         readonly property bool hasCtx: (modelData.contextTokens || 0) > 0
                         readonly property real ctxPct: row.hasCtx
-                            ? notes.ctxPercent(modelData.contextTokens, modelData.contextCeiling) : 0
+                            ? livery.ctxPercent(modelData.contextTokens, modelData.contextCeiling) : 0
 
                         // Re-assert the bar highlight if this row is rebuilt while
                         // it is the hovered one (roster refresh under a still pointer).
@@ -821,12 +821,12 @@ Item {
                             radius: 0
                             color: hover.containsMouse
                                    ? gadget.withA(gadget.sig, 0.10)
-                                   : (row.emph ? gadget.withA(notes.paletteHot, 0.05)
-                                               : gadget.withA(notes.paletteFg, 0.035))
+                                   : (row.emph ? gadget.withA(livery.paletteHot, 0.05)
+                                               : gadget.withA(livery.paletteFg, 0.035))
                             border.width: 1
                             border.color: row.rowAwaiting
-                                          ? gadget.withA(notes.paletteUrgent, 0.75)
-                                          : gadget.withA(notes.paletteFg, 0.22)
+                                          ? gadget.withA(livery.paletteUrgent, 0.75)
+                                          : gadget.withA(livery.paletteFg, 0.22)
                         }
                         // the pilaster — the Conductor's project stripe, spoken
                         // in this temple's own identity hue: the row's WORKSPACE
@@ -836,7 +836,7 @@ Item {
                         Rectangle {
                             x: 0; width: row.emph ? 3 : 2
                             height: parent.height
-                            color: row.emph ? notes.paletteHot
+                            color: row.emph ? livery.paletteHot
                                             : gadget.withA(row.wsTagColor, 0.6)
                         }
 
@@ -910,8 +910,8 @@ Item {
                                         font.family: row.needsSudo ? gadget.faceMono : gadget.faceMusic
                                         font.pixelSize: 12
                                         color: row.emph
-                                               ? notes.paletteHot
-                                               : gadget.withA(row.needsSudo ? notes.paletteUrgent
+                                               ? livery.paletteHot
+                                               : gadget.withA(row.needsSudo ? livery.paletteUrgent
                                                                             : gadget.stateColor(modelData.state),
                                                               row.resting ? 0.55 : 1.0)
 
@@ -962,7 +962,7 @@ Item {
                                     font.family: row.agentRow ? gadget.faceSerif : gadget.faceMono
                                     font.pixelSize: row.agentRow ? 14 : 12
                                     font.weight: row.emph ? Font.Bold : Font.Medium
-                                    color: gadget.withA(notes.paletteFg, row.agentRow ? 1.0 : 0.85)
+                                    color: gadget.withA(livery.paletteFg, row.agentRow ? 1.0 : 0.85)
                                 }
                             }
                             // ── the SCREEN PANE — agent rows only ─────────────
@@ -991,7 +991,7 @@ Item {
                                 radius: 0
                                 color: gadget.withA(gadget.sig, 0.06)
                                 border.width: 1
-                                border.color: row.emph ? gadget.withA(notes.paletteHot, 0.45)
+                                border.color: row.emph ? gadget.withA(livery.paletteHot, 0.45)
                                                        : gadget.withA(gadget.sig, 0.30)
 
                                 Text {                     // the prompt sigil
@@ -1019,7 +1019,7 @@ Item {
                                           ? row.toolText
                                           : (modelData.agent || "agent")
                                     font.family: gadget.faceMono; font.pixelSize: 10
-                                    color: gadget.withA(notes.paletteFg,
+                                    color: gadget.withA(livery.paletteFg,
                                                         row.toolText.length > 0 ? 0.85 : 0.45)
                                 }
                                 Text {                     // the MODEL — a fixed right cell
@@ -1036,7 +1036,7 @@ Item {
                                     elide: Text.ElideMiddle
                                     text: modelData.model || ""
                                     font.family: gadget.faceMono; font.pixelSize: 9
-                                    color: gadget.withA(notes.paletteFg, 0.55)   // Conductor's model dim
+                                    color: gadget.withA(livery.paletteFg, 0.55)   // Conductor's model dim
                                 }
                                 Text {                     // the WORDS — 3 reserved lines
                                     anchors.left: parent.left; anchors.leftMargin: 6
@@ -1051,7 +1051,7 @@ Item {
                                     lineHeightMode: Text.FixedHeight
                                     font.family: gadget.faceSerif; font.italic: true
                                     font.pixelSize: 10
-                                    color: gadget.withA(notes.paletteFg,
+                                    color: gadget.withA(livery.paletteFg,
                                                         row.sayFlat.length > 0 ? 0.62 : 0.30)
                                 }
                             }
@@ -1077,19 +1077,19 @@ Item {
                                         id: elapsedText
                                         text: gadget.elapsed(modelData.startedAt)
                                         font.family: gadget.faceMono; font.pixelSize: 10
-                                        color: row.emph ? notes.paletteHot : gadget.sig
+                                        color: row.emph ? livery.paletteHot : gadget.sig
                                     }
                                     Text {                     // the [▓░] meter — agent rows only
                                         id: ctxTag
                                         anchors.baseline: elapsedText.baseline
                                         visible: row.hasCtx
-                                        text: notes.ctxBar(row.ctxPct, 6) + " "
+                                        text: livery.ctxBar(row.ctxPct, 6) + " "
                                               + Math.round(row.ctxPct) + "% · "
-                                              + notes.ctxCompact(modelData.contextTokens)
+                                              + livery.ctxCompact(modelData.contextTokens)
                                         font.family: gadget.faceMono; font.pixelSize: 10
                                         // song accent → paletteUrgent past ~85%, the
                                         // shared urgency threshold.
-                                        color: notes.ctxColor(row.ctxPct, gadget.sig)
+                                        color: livery.ctxColor(row.ctxPct, gadget.sig)
                                     }
                                 }
                             }
@@ -1144,7 +1144,7 @@ Item {
                                         // no claim on it.
                                         font.family: gadget.faceMono
                                         font.pixelSize: row.agentRow ? 10 : 9
-                                        color: row.emph ? notes.paletteHot
+                                        color: row.emph ? livery.paletteHot
                                                         : gadget.withA(row.accent, 0.85)
                                         Timer {
                                             running: row.working
@@ -1207,7 +1207,7 @@ Item {
                     railW: 3
                     minThumb: 20
                     grabPad: 3
-                    trackColor: gadget.withA(notes.paletteFg, 0.10)
+                    trackColor: gadget.withA(livery.paletteFg, 0.10)
                     thumbColor: gadget.withA(gadget.sig, 0.75)
                     anchors.top: flick.top; anchors.bottom: flick.bottom
                     anchors.right: parent.right; anchors.rightMargin: 3

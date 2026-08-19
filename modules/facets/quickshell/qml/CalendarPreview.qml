@@ -53,7 +53,7 @@ ShellRoot {
             Component.onCompleted: {
                 var src = Quickshell.env("CAL_WIDGET")
                 if (!src || src === "") src = "songs/sonata/calendar.qml"
-                setSource(src, { "notes": win.stub, "bridge": null })
+                setSource(src, { "livery": win.stub, "bridge": null })
             }
         }
     }

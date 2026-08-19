@@ -30,7 +30,7 @@
 // closing frame bottom, carved-serif name, radius 0). Severity reads left to
 // right: gold → verdigris → murex → aegean → clay → terracotta.
 //
-// Colour discipline: every colour is a `notes` role read — zero hex. The one
+// Colour discipline: every colour is a `livery` role read — zero hex. The one
 // laurel (`paletteHot`) is the hovered/selected stele's keyline + ♪ mark,
 // nothing else. wireCyan appears once as LOGOUT's SIGNATURE hue (the grammar's
 // Meters precedent: the ≤0.5-alpha cap binds the STRUCTURAL role, not the
@@ -76,7 +76,7 @@ PanelWindow {
     id: root
 
     // ── Note + bridge dependencies (injected by shell.qml) ─────────────────
-    required property var notes
+    required property var livery
     required property var bridge
 
     // ── Type voices (the Conductor family) ─────────────────────────────────
@@ -159,22 +159,22 @@ PanelWindow {
     readonly property var endings: [
         { action: "lock",      name: "LOCK",      term: "fermata",
           greek: "κλείς",           glyph: "𝄐", gs: 56,
-          frieze: "◆───◆───◆",      hue: root.notes.paletteAccent },
+          frieze: "◆───◆───◆",      hue: root.livery.paletteAccent },
         { action: "logout",    name: "LOGOUT",    term: "coda",
           greek: "ἔξοδος χοροῦ",    glyph: "𝄌", gs: 56,
-          frieze: "⌐¬ ⌐¬ ⌐¬ ⌐¬",    hue: root.notes.wireCyan },
+          frieze: "⌐¬ ⌐¬ ⌐¬ ⌐¬",    hue: root.livery.wireCyan },
         { action: "suspend",   name: "SUSPEND",   term: "grand pause",
           greek: "ἀνάπαυσις",       glyph: "𝄾", gs: 56,
-          frieze: "╌╌ ╌╌ ╌╌ ╌╌",    hue: root.notes.violet },
+          frieze: "╌╌ ╌╌ ╌╌ ╌╌",    hue: root.livery.violet },
         { action: "hibernate", name: "HIBERNATE", term: "tacet",
           greek: "χειμερία νάρκη",  glyph: "𝄻", gs: 64,
-          frieze: "▔▁▔▁▔▁▔",        hue: root.notes.holoBlue },
+          frieze: "▔▁▔▁▔▁▔",        hue: root.livery.holoBlue },
         { action: "reboot",    name: "REBOOT",    term: "da capo",
           greek: "ἀπ᾿ ἀρχῆς",       glyph: "𝄇", gs: 54,
-          frieze: "┏┛┗┓┏┛┗┓",       hue: root.notes.base09 },
+          frieze: "┏┛┗┓┏┛┗┓",       hue: root.livery.base09 },
         { action: "shutdown",  name: "SHUTDOWN",  term: "fine",
           greek: "τέλος",           glyph: "𝄂", gs: 54,
-          frieze: "══════════",     hue: root.notes.paletteUrgent }
+          frieze: "══════════",     hue: root.livery.paletteUrgent }
     ]
 
     // ══ Dim scrim — the ink veil the glass frosts through; a click anywhere
@@ -184,7 +184,7 @@ PanelWindow {
         onClicked: root.hide()
         Rectangle {
             anchors.fill: parent
-            color: root.withA(root.notes.paletteFg, 0.30)
+            color: root.withA(root.livery.paletteFg, 0.30)
             opacity: root.rise
         }
     }
@@ -223,9 +223,9 @@ PanelWindow {
         width: 196
         height: 306
         radius: 0
-        color: root.withA(root.notes.paletteBg, stele.lit ? 0.85 : 0.74)
+        color: root.withA(root.livery.paletteBg, stele.lit ? 0.85 : 0.74)
         Behavior on color { ColorAnimation { duration: 160 } }
-        border.color: root.notes.paletteFg
+        border.color: root.livery.paletteFg
         border.width: 2
 
         // ── the deal — this card's slice of the master clock ───────────────
@@ -278,7 +278,7 @@ PanelWindow {
         Rectangle {   // inset keyline — signature hue; the laurel when chosen
             anchors.fill: parent; anchors.margins: 5
             color: "transparent"
-            border.color: stele.lit ? root.notes.paletteHot
+            border.color: stele.lit ? root.livery.paletteHot
                                     : root.withA(stele.hue, 0.7)
             border.width: stele.lit ? 2 : 1
             Behavior on border.color { ColorAnimation { duration: 160 } }
@@ -296,32 +296,32 @@ PanelWindow {
                 id: cornerTL
                 anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                 text: "┌"; font.family: root.faceMono; font.pixelSize: 11
-                color: root.withA(root.notes.paletteFg, 0.6)
+                color: root.withA(root.livery.paletteFg, 0.6)
             }
             Text {
                 id: cornerTR
                 anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                 text: "┐"; font.family: root.faceMono; font.pixelSize: 11
-                color: root.withA(root.notes.paletteFg, 0.6)
+                color: root.withA(root.livery.paletteFg, 0.6)
             }
             Text {
                 id: termLabel
                 anchors.centerIn: parent
                 text: "┤ " + stele.modelData.term + " ├"
                 font.family: root.faceMono; font.pixelSize: 10
-                color: root.withA(root.notes.paletteFg, 0.8)
+                color: root.withA(root.livery.paletteFg, 0.8)
             }
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.left: cornerTL.right; anchors.right: termLabel.left
                 anchors.leftMargin: 1; anchors.rightMargin: 2
-                height: 1; color: root.withA(root.notes.paletteFg, 0.35)
+                height: 1; color: root.withA(root.livery.paletteFg, 0.35)
             }
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.left: termLabel.right; anchors.right: cornerTR.left
                 anchors.leftMargin: 2; anchors.rightMargin: 1
-                height: 1; color: root.withA(root.notes.paletteFg, 0.35)
+                height: 1; color: root.withA(root.livery.paletteFg, 0.35)
             }
         }
 
@@ -416,14 +416,14 @@ PanelWindow {
             font.pixelSize: 15
             font.letterSpacing: 4
             font.weight: Font.DemiBold
-            color: root.notes.paletteFg
+            color: root.livery.paletteFg
         }
         Text {
             anchors.right: nameRow.left; anchors.rightMargin: 7
             anchors.verticalCenter: nameRow.verticalCenter
             text: "♪"
             font.family: root.faceMusic; font.pixelSize: 14
-            color: root.notes.paletteHot
+            color: root.livery.paletteHot
             opacity: stele.lit ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 160 } }
         }
@@ -460,32 +460,32 @@ PanelWindow {
                 id: cornerBL
                 anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                 text: "└"; font.family: root.faceMono; font.pixelSize: 11
-                color: root.withA(root.notes.paletteFg, 0.6)
+                color: root.withA(root.livery.paletteFg, 0.6)
             }
             Text {
                 id: cornerBR
                 anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                 text: "┘"; font.family: root.faceMono; font.pixelSize: 11
-                color: root.withA(root.notes.paletteFg, 0.6)
+                color: root.withA(root.livery.paletteFg, 0.6)
             }
             Text {
                 id: finisMark
                 anchors.centerIn: parent
                 text: "┤ 𝄂 ├"
                 font.family: root.faceMono; font.pixelSize: 10
-                color: root.withA(root.notes.paletteFg, 0.65)
+                color: root.withA(root.livery.paletteFg, 0.65)
             }
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.left: cornerBL.right; anchors.right: finisMark.left
                 anchors.leftMargin: 1; anchors.rightMargin: 2
-                height: 1; color: root.withA(root.notes.paletteFg, 0.35)
+                height: 1; color: root.withA(root.livery.paletteFg, 0.35)
             }
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.left: finisMark.right; anchors.right: cornerBR.left
                 anchors.leftMargin: 2; anchors.rightMargin: 1
-                height: 1; color: root.withA(root.notes.paletteFg, 0.35)
+                height: 1; color: root.withA(root.livery.paletteFg, 0.35)
             }
         }
 
@@ -527,7 +527,7 @@ PanelWindow {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "𝄂"
                     font.family: root.faceMusic; font.pixelSize: 24
-                    color: root.withA(root.notes.paletteAccent, 0.95)
+                    color: root.withA(root.livery.paletteAccent, 0.95)
                 }
                 Text {
                     text: "ΕΞΟΔΟΣ"
@@ -535,14 +535,14 @@ PanelWindow {
                     font.pixelSize: 27
                     font.letterSpacing: 12
                     font.weight: Font.DemiBold
-                    color: root.notes.paletteBg
+                    color: root.livery.paletteBg
                     style: Text.Normal
                 }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "𝄂"
                     font.family: root.faceMusic; font.pixelSize: 24
-                    color: root.withA(root.notes.paletteAccent, 0.95)
+                    color: root.withA(root.livery.paletteAccent, 0.95)
                 }
             }
 
@@ -552,7 +552,7 @@ PanelWindow {
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: parent.width * 0.62
                 height: 1
-                color: root.withA(root.notes.wireCyan, 0.35)
+                color: root.withA(root.livery.wireCyan, 0.35)
             }
 
             Text {
@@ -561,7 +561,7 @@ PanelWindow {
                 text: "the closing song — πῶς τελευτᾷ ἡ ᾠδή;"
                 font.family: root.faceMono
                 font.pixelSize: 11
-                color: root.withA(root.notes.paletteBg, 0.75)
+                color: root.withA(root.livery.paletteBg, 0.75)
             }
         }
 
@@ -584,7 +584,7 @@ PanelWindow {
             text: "← → choose · ⏎ so be it · esc μένε — stay ( ˘ω˘ )ﾉ"
             font.family: root.faceMono
             font.pixelSize: 11
-            color: root.withA(root.notes.paletteBg, 0.7)
+            color: root.withA(root.livery.paletteBg, 0.7)
         }
     }
 }

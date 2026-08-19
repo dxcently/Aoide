@@ -44,10 +44,10 @@
 // a visible affordance that there is more below the fold. The fore-edge takes the
 // wheel too, so the peeking page-block doubles as a scroll rail.
 // Conductor/Terminals declare `bridge` + `shared` and get them; Meters/Power
-// declare only `notes` (passing an undeclared property is an error), so they get
-// only `notes`.
+// declare only `livery` (passing an undeclared property is an error), so they get
+// only `livery`.
 //
-// All colour flows from `notes` roles; radius 0 everywhere.
+// All colour flows from `livery` roles; radius 0 everywhere.
 
 import QtQuick
 import Quickshell
@@ -59,7 +59,7 @@ PanelWindow {
     id: root
 
     // ── Note + bridge + shared dependencies (injected by shell.qml) ─────────
-    required property var notes
+    required property var livery
     required property var bridge
     property var shared: null
     // the song-slot resolver — only the herald-center WidgetSlot below needs
@@ -286,7 +286,7 @@ PanelWindow {
             anchors.leftMargin: 5; anchors.topMargin: 6
             anchors.rightMargin: -5; anchors.bottomMargin: -6
             radius: 0
-            color: root.withA(root.notes.paletteFg, 0.22)
+            color: root.withA(root.livery.paletteFg, 0.22)
         }
 
         // the marble board (cover) ─────────────────────────────────────────
@@ -294,14 +294,14 @@ PanelWindow {
             id: cover
             anchors.fill: parent
             radius: 0
-            color: root.notes.paletteBg
-            border.color: root.notes.paletteFg
+            color: root.livery.paletteBg
+            border.color: root.livery.paletteFg
             border.width: 2
 
             Rectangle {                          // inset gold keyline
                 anchors.fill: parent; anchors.margins: 4
                 radius: 0; color: "transparent"
-                border.color: root.notes.paletteAccent; border.width: 1
+                border.color: root.livery.paletteAccent; border.width: 1
             }
 
             // the interior, inside the keyline
@@ -317,17 +317,17 @@ PanelWindow {
                     anchors.left: parent.left
                     anchors.top: parent.top; anchors.bottom: parent.bottom
                     width: root.spineW
-                    color: root.withA(root.notes.paletteFg, 0.10)
+                    color: root.withA(root.livery.paletteFg, 0.10)
 
                     Rectangle {
                         anchors.left: parent.left; anchors.leftMargin: 4
                         anchors.top: parent.top; anchors.bottom: parent.bottom
-                        width: 1; color: root.withA(root.notes.paletteAccent, 0.55)
+                        width: 1; color: root.withA(root.livery.paletteAccent, 0.55)
                     }
                     Rectangle {
                         anchors.right: parent.right; anchors.rightMargin: 4
                         anchors.top: parent.top; anchors.bottom: parent.bottom
-                        width: 1; color: root.withA(root.notes.paletteAccent, 0.55)
+                        width: 1; color: root.withA(root.livery.paletteAccent, 0.55)
                     }
                     Column {                      // stitched binding stations
                         anchors.centerIn: parent
@@ -337,7 +337,7 @@ PanelWindow {
                             Text {
                                 text: "◆"
                                 font.family: root.faceMusic; font.pixelSize: 7
-                                color: root.withA(root.notes.paletteAccent, 0.7)
+                                color: root.withA(root.livery.paletteAccent, 0.7)
                             }
                         }
                     }
@@ -360,17 +360,17 @@ PanelWindow {
                         anchors.fill: parent
                         gradient: Gradient {
                             orientation: Gradient.Horizontal
-                            GradientStop { position: 0.00; color: root.withA(root.notes.paletteFg, 0.17) }
-                            GradientStop { position: 0.34; color: root.withA(root.notes.paletteFg, 0.03) }
-                            GradientStop { position: 0.80; color: root.withA(root.notes.paletteFg, 0.08) }
-                            GradientStop { position: 1.00; color: root.withA(root.notes.paletteFg, 0.22) }
+                            GradientStop { position: 0.00; color: root.withA(root.livery.paletteFg, 0.17) }
+                            GradientStop { position: 0.34; color: root.withA(root.livery.paletteFg, 0.03) }
+                            GradientStop { position: 0.80; color: root.withA(root.livery.paletteFg, 0.08) }
+                            GradientStop { position: 1.00; color: root.withA(root.livery.paletteFg, 0.22) }
                         }
                     }
                     Rectangle {                   // the board edge — a hard plum rule
                         anchors.left: parent.left
                         anchors.top: parent.top; anchors.bottom: parent.bottom
                         width: 1
-                        color: root.withA(root.notes.paletteFg, 0.45)
+                        color: root.withA(root.livery.paletteFg, 0.45)
                     }
 
                     // the leaves — one thin VERTICAL rule per ~2px across the band,
@@ -386,8 +386,8 @@ PanelWindow {
                             anchors.bottomMargin: (index % 4 === 0) ? 0 : 2 + ((index * 13) % 6)
                             width: (index % 6 === 0) ? 2 : 1
                             color: (index % 7 === 3)
-                                   ? root.withA(root.notes.paletteAccent, 0.30)   // a gilt leaf
-                                   : root.withA(root.notes.paletteFg,
+                                   ? root.withA(root.livery.paletteAccent, 0.30)   // a gilt leaf
+                                   : root.withA(root.livery.paletteFg,
                                                 0.09 + ((index * 11) % 6) * 0.018)
                         }
                     }
@@ -396,14 +396,14 @@ PanelWindow {
                         anchors.right: parent.right
                         anchors.top: parent.top; anchors.bottom: parent.bottom
                         width: 1
-                        color: root.withA(root.notes.paletteFg, 0.38)
+                        color: root.withA(root.livery.paletteFg, 0.38)
                     }
 
                     Rectangle {                   // a ribbon bookmark spilling from the top
                         anchors.right: parent.right; anchors.rightMargin: 6
                         anchors.top: parent.top
                         width: 3; height: 74
-                        color: root.withA(root.notes.paletteAccent, 0.7)
+                        color: root.withA(root.livery.paletteAccent, 0.7)
                     }
 
                     // A click on the visible sliver opens (and acknowledges) — the
@@ -440,7 +440,7 @@ PanelWindow {
 
                     Rectangle {                   // deeper marble band
                         anchors.fill: parent; anchors.bottomMargin: 4
-                        color: root.withA(root.notes.paletteFg, 0.05)
+                        color: root.withA(root.livery.paletteFg, 0.05)
                     }
                     Row {
                         anchors.left: parent.left; anchors.leftMargin: 2
@@ -452,14 +452,14 @@ PanelWindow {
                             anchors.verticalCenterOffset: -3
                             text: "𝄞"
                             font.family: root.faceMusic; font.pixelSize: 28
-                            color: root.notes.paletteAccent
+                            color: root.livery.paletteAccent
                         }
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
                             text: "AOIDE"
                             font.family: root.faceSerif; font.pixelSize: 16
                             font.weight: Font.DemiBold; font.letterSpacing: 5
-                            color: root.notes.paletteFg
+                            color: root.livery.paletteFg
                         }
                     }
                     Text {                        // a small Greek touch on the right
@@ -468,13 +468,13 @@ PanelWindow {
                         anchors.verticalCenterOffset: -2
                         text: "ᾠδή"
                         font.family: root.faceSerif; font.pixelSize: 12; font.italic: true
-                        color: root.withA(root.notes.paletteAccent, 0.85)
+                        color: root.withA(root.livery.paletteAccent, 0.85)
                     }
                     Rectangle {                   // hairline gold rule under the title
                         anchors.left: parent.left; anchors.right: parent.right
                         anchors.bottom: parent.bottom
                         height: 1
-                        color: root.withA(root.notes.paletteAccent, 0.5)
+                        color: root.withA(root.livery.paletteAccent, 0.5)
                     }
                 }
 
@@ -505,7 +505,7 @@ PanelWindow {
                         // wired with bridge + shared (which it declares).
                         ConductorGadget {
                             width: root.gadgetW; height: 520
-                            notes: root.notes
+                            livery: root.livery
                             bridge: root.bridge
                             shared: root.shared
                         }
@@ -526,7 +526,7 @@ PanelWindow {
                         //   UsageGadget {
                         //       id: usageGadget
                         //       width: root.gadgetW
-                        //       notes: root.notes
+                        //       livery: root.livery
                         //       visible: hasData
                         //   }
                         //
@@ -535,7 +535,7 @@ PanelWindow {
                         // wired with bridge + shared (which it declares).
                         TerminalsGadget {
                             width: root.gadgetW; height: 520
-                            notes: root.notes
+                            livery: root.livery
                             bridge: root.bridge
                             shared: root.shared
                         }
@@ -549,24 +549,24 @@ PanelWindow {
                         UsageGadget {
                             id: usageGadget
                             width: root.gadgetW
-                            notes: root.notes
+                            livery: root.livery
                             bridge: root.bridge     // for the ❋-spark manual refresh (refreshusage verb)
                             visible: hasData
                         }
 
                         // Meters + Power — the compact steles, native height 268;
-                        // notes ONLY (declaring an undeclared prop is an error, so no
+                        // livery ONLY (declaring an undeclared prop is an error, so no
                         // bridge/shared here). No centring wrapper anymore — they take
                         // root.gadgetW directly and share the column's left edge with
                         // the others. Their frames anchors.fill, so the wider 360
                         // width just fills.
                         MetersGadget {
                             width: root.gadgetW; height: 268
-                            notes: root.notes
+                            livery: root.livery
                         }
                         PowerVitalsGadget {
                             width: root.gadgetW; height: 268
-                            notes: root.notes
+                            livery: root.livery
                         }
 
                         // Herald — the notification CENTER, the dock's BOTTOM
@@ -577,7 +577,7 @@ PanelWindow {
                         WidgetSlot {
                             slot: "herald-center"
                             width: root.gadgetW
-                            notes: root.notes
+                            livery: root.livery
                             bridge: root.bridge
                             stagingEngine: root.stagingEngine
                         }
@@ -589,7 +589,7 @@ PanelWindow {
                         // `kind: "dock"` entry), so this contributes zero
                         // footprint and zero spacing — a structural no-op.
                         SongGadgets {
-                            notes: root.notes
+                            livery: root.livery
                             bridge: root.bridge
                             stagingEngine: root.stagingEngine
                             gadgetW: root.gadgetW
@@ -607,8 +607,8 @@ PanelWindow {
                     railW: 4
                     minThumb: 28
                     grabPad: 4
-                    trackColor: root.withA(root.notes.paletteFg, 0.12)
-                    thumbColor: root.withA(root.notes.paletteAccent, 0.8)
+                    trackColor: root.withA(root.livery.paletteFg, 0.12)
+                    thumbColor: root.withA(root.livery.paletteAccent, 0.8)
                     anchors.top: flick.top; anchors.bottom: flick.bottom
                     anchors.left: flick.right; anchors.leftMargin: 4
                     // a drag holds the codex out even if the pointer wanders off
@@ -623,7 +623,7 @@ PanelWindow {
                     anchors.bottom: flick.bottom; anchors.bottomMargin: 2
                     text: "▽ more"
                     font.family: root.faceMono; font.pixelSize: 11
-                    color: root.withA(root.notes.paletteAccent, 0.9)
+                    color: root.withA(root.livery.paletteAccent, 0.9)
                     visible: flick.visibleArea.heightRatio < 0.999
                     opacity: (flick.visibleArea.yPosition
                               + flick.visibleArea.heightRatio) < 0.995 ? 1 : 0

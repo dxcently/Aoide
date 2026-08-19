@@ -52,7 +52,7 @@ Every widget QML file, whatever slot it fills, must follow this shape:
 
 - **Root is an `Item`.** (`WidgetSlot` sizes itself off the loaded item's
   `implicitWidth`/`implicitHeight`, so a non-`Item` root breaks layout.)
-- **Declares `required property var notes`** — the active song's
+- **Declares `required property var livery`** — the active song's
   `LiveryState`, injected by every anchor unconditionally.
 - **Declares `required property var bridge`** — the `ShellBridge`, injected
   by every anchor unconditionally (`WidgetSlot` guards the fallback path,
@@ -144,7 +144,7 @@ deterministic layout among multiple `dock` entries. It only sorts declared
 `dock` entries against each other; it does not interleave a `dock` entry
 among the shipped gadgets ahead of it in the column.
 
-**Injected-prop contract — unchanged, still just `notes` + `bridge`.** Both
+**Injected-prop contract — unchanged, still just `livery` + `bridge`.** Both
 `SongSurfaces.qml` and `SongGadgets.qml` pass the same fixed pair every
 anchor above does — deliberately WITHOUT `shared` (the session-state
 QtObject only the `bar` slot receives): a declared widget is store-copied

@@ -762,7 +762,7 @@ set of "flavor" surfaces — committed files, not nix options:
   trigger) rebuilds the whole scene fresh from `shell.qml`, which should
   also re-read `manifest.json`; unconfirmed against a live instance, don't
   rely on this until verified.
-- **Fixed injected-prop contract:** a loaded widget receives `notes`
+- **Fixed injected-prop contract:** a loaded widget receives `livery`
   (`LiveryState`) and `bridge` (`ShellBridge`) always, plus whatever
   slot-specific extras the anchor declares (e.g. the bar slot's `shared`)
   — **never** nix `config.*`. This does not loosen the song-shape rule above:
@@ -887,7 +887,7 @@ rule.
 **Runtime hosts:** two, one per kind, both reading
 `stagingEngine.declaredWidgets(song)` (`StagingEngine.qml`, the
 `registry.json` FileView) and both keeping the fixed injected-prop contract
-(`notes` + `bridge` only — no `shared`, deliberately, so a declared widget
+(`livery` + `bridge` only — no `shared`, deliberately, so a declared widget
 gets no wider surface than any other slot body):
 
 - **`SongSurfaces.qml`** — non-visual host for `kind = "surface"` entries.
