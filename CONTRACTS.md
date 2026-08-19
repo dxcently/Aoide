@@ -68,8 +68,55 @@ The test, applicable to a file you have never seen:
 So: **a new API lands as a bridge first, and the QML picks it up second** — never
 the reverse, and never only in QML. A surface may read, arrange, animate and
 draw; it may not own the only copy of a fact, shell out to do work a verb should
-do, or decide policy. The same rule governs the facet/song line: the facet keeps
-agnostic bridges and APIs, the song keeps everything that paints (§5).
+do, or decide policy.
+
+#### The paint test — facet QML vs song QML
+
+The terminal test above decides **bridge vs QML**. This second test decides
+where a file that already passed it lives: the facet keeps agnostic bridges and
+APIs, the song keeps everything that paints (§5). **The facet is not a component
+library** — a shared visual component's home is the song's `widgets/` dir under
+an uppercase name, not `modules/facets/quickshell/qml/`.
+
+> A file stays in `modules/facets/quickshell/qml/` **iff all three are YES**:
+>
+> 1. **Song-blind.** Does the file name zero aesthetic decisions? Reading
+>    `livery.paletteFg` is fine — that is picking up an API. *Deciding* that a
+>    gauge is drawn `[▓▓░░]`, that a frame wears a pediment, that a face is a
+>    kaomoji, that a morph takes 340ms because that is the house tier, or that
+>    the accent cycle runs rust→murex→aegean — those are not.
+> 2. **Song-plural.** Would a second, unrelated song use this file **unchanged**?
+>    Not "could be adapted to". Unchanged.
+> 3. **Bridge or mechanism.** Is its job one of exactly three: (a) publish system
+>    or aoide state as **data**; (b) resolve, host, or inject a song's own QML;
+>    (c) be the process entry point that wires (a) into (b)? "It draws something
+>    reusable" is not a fourth category.
+>
+> Any NO → it belongs in `song/songbook/<song>/widgets/`.
+>
+> **Tie-breaker**, when an agent honestly cannot call question 2: *would a
+> reviewer file this file's diff under "design change"?* If yes, it is song. A
+> facet file's diff is always a mechanism change.
+>
+> **What the test is not.** It is not "does it paint" — `WidgetSlot` is an
+> `Item` and `SurfaceSlot` hosts a `PanelWindow`, and both are facet. It is not
+> "is it a `QtObject`" — `MoodFaces` and `MorphState` are `QtObject`s and both
+> are song. It is not line count — `AudioColonnade` is 1940 lines of song and
+> `AoideIpc` is 24 lines of facet. It is not "is it shared" — shared across
+> *widgets* is not shared across *songs*, and only the second earns a facet home.
+>
+> **The corollary for a new API**: a new capability lands as a facet bridge that
+> answers **with data**, never with a component to instantiate, and the song
+> picks it up by name. Concretely: a facet bridge exposes `paletteAccent`; it
+> does not expose `ctxBar()`. If the natural shape of the new thing is "a
+> component every widget instantiates", it is not an API — it is a song helper,
+> and it goes in `widgets/` with an uppercase name.
+
+Question 3 is the load-bearing one, and it is where every genuine argument in
+this tree lives. The same text sits in
+`modules/facets/quickshell/qml/slots.md` — one wording, two homes, because a
+ricing agent reading about where to put a helper is exactly the agent who needs
+the rule.
 
 ---
 

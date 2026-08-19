@@ -110,6 +110,56 @@ top-level **lowercase-kebab** `.qml` files as slots; `.gitkeep` is always
 skipped. A helper file is carried to disk but never independently
 resolvable as a slot.
 
+### Facet or song?
+
+**The facet is not a component library.** The destination for a shared
+visual component is the song's `widgets/` dir with an uppercase name —
+the helper mechanism directly above — not this directory.
+
+`CONTRACTS.md §0`'s test runs first and decides **bridge vs QML**: delete
+every `.qml` in the repo; if the capability is no longer reachable from a
+terminal, it was never QML's to hold. The test below decides **facet QML
+vs song QML**, and only applies to a file that already passed §0.
+
+> ### The paint test
+>
+> A file stays in `modules/facets/quickshell/qml/` **iff all three are YES**:
+>
+> 1. **Song-blind.** Does the file name zero aesthetic decisions? Reading
+>    `livery.paletteFg` is fine — that is picking up an API. *Deciding* that a
+>    gauge is drawn `[▓▓░░]`, that a frame wears a pediment, that a face is a
+>    kaomoji, that a morph takes 340ms because that is the house tier, or that
+>    the accent cycle runs rust→murex→aegean — those are not.
+> 2. **Song-plural.** Would a second, unrelated song use this file **unchanged**?
+>    Not "could be adapted to". Unchanged.
+> 3. **Bridge or mechanism.** Is its job one of exactly three: (a) publish system
+>    or aoide state as **data**; (b) resolve, host, or inject a song's own QML;
+>    (c) be the process entry point that wires (a) into (b)? "It draws something
+>    reusable" is not a fourth category.
+>
+> Any NO → it belongs in `song/songbook/<song>/widgets/`.
+>
+> **Tie-breaker**, when an agent honestly cannot call question 2: *would a
+> reviewer file this file's diff under "design change"?* If yes, it is song. A
+> facet file's diff is always a mechanism change.
+>
+> **What the test is not.** It is not "does it paint" — `WidgetSlot` is an
+> `Item` and `SurfaceSlot` hosts a `PanelWindow`, and both are facet. It is not
+> "is it a `QtObject`" — `MoodFaces` and `MorphState` are `QtObject`s and both
+> are song. It is not line count — `AudioColonnade` is 1940 lines of song and
+> `AoideIpc` is 24 lines of facet. It is not "is it shared" — shared across
+> *widgets* is not shared across *songs*, and only the second earns a facet home.
+>
+> **The corollary for a new API**: a new capability lands as a facet bridge that
+> answers **with data**, never with a component to instantiate, and the song
+> picks it up by name. Concretely: a facet bridge exposes `paletteAccent`; it
+> does not expose `ctxBar()`. If the natural shape of the new thing is "a
+> component every widget instantiates", it is not an API — it is a song helper,
+> and it goes in `widgets/` with an uppercase name.
+
+Question 3 is the load-bearing one, and it is where every genuine argument in
+this tree lives.
+
 ## Declared slots — the widget-type registry
 
 Everything above is the **anchored** catalog: a slot name a host surface
