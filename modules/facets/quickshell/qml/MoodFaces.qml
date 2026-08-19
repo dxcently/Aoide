@@ -26,13 +26,25 @@
 //   • Trailing ASCII spaces are unreliable: Qt trims them when measuring, so a
 //     frame that ends in " " does not actually shift. Use ideographic space
 //     (U+3000) when a frame needs to sit left of its own right edge.
+//   • Fit the troupe box: it is FIXED and clipped — 116px at pixelSize 10
+//     (main/agent rows) and 90px at pixelSize 9 (sub/tty rows), in both
+//     ConductorGadget and TerminalsGadget — so a too-wide frame gets cut off
+//     on the LEFT. Measured in the real stack (JetBrainsMono Nerd Font
+//     advances ≈0.6em, Noto Sans Mono CJK ≈1.0em for the kana/CJK fallback),
+//     the binding limit is the 9px/90px sub box, i.e. ≈100px in 10px terms:
+//     keep every frame ≤ ~98px at pixelSize 10. The 2026-08 two-face sets
+//     (toss/duet/weave/lift, 118–150px) all clipped and were replaced by
+//     portal/relay/slalom/spin.
 //   • Stay inside the CJK/kana/music repertoire the shell's fonts actually
 //     cover. Anything exotic renders as tofu, and tofu is the same width every
 //     frame, so it looks like a working animation that has simply stopped.
 //     The one sanctioned exception is the parcel glyph 󰏗 (U+F03D7, plus roll's
 //     mid-tumble circle U+F111): those live in the Nerd Font's private-use
 //     range, and since BOTH pools now carry them, every Text that draws these
-//     frames must set font.family to the Nerd Font (both gadgets do).
+//     frames must set font.family to the Nerd Font (both gadgets do). A second
+//     is portal's 🌀 (U+1F300): fontconfig settles it on Symbola — MONOCHROME,
+//     0.75em — so it holds the fixed-width rule; had it landed on a colour
+//     emoji font it would have broken both palette and metrics.
 
 import QtQuick
 
@@ -82,23 +94,31 @@ QtObject {
         { name: "boogie",    // arms-up dancer sweeps left→mid→right→mid across
           // the box while a single ♪ flits from side to side around it.
           frames: ["♪ヽ( ・ω・)ノ　　", "　ヽ( ・ω・)ノ♪　", "　　ヽ( ・ω・)ノ♪", "　♪ヽ( ・ω・)ノ　"] },
-        // toss/duet/weave/lift assume ⊃/⊂ render at 2 cells (matching ノ/ヽ)
-        // in the shell's Nerd Font, unlike every other ⊃/⊂ set here which
-        // just reorders a constant glyph multiset. Re-check frame width by
-        // East-Asian-Width cell count if that font ever changes.
-        { name: "toss",      // a lazy game of catch between two ´ω｀ twins who
-          // wear the same soft face the whole rally; the arms do the acting —
-          // ⊃ hurl, hold through the flight, ⊂ scoop on the landing, then
-          // the return throw, mirrored.
-          frames: ["(´ω｀)⊃ｏ　　ヽ(´ω｀)", "(´ω｀)ノ　ｏ　ヽ(´ω｀)", "(´ω｀)ノ　　ｏ⊂(´ω｀)", "(´ω｀)ノ　ｏ　⊂(´ω｀)"] },
-        { name: "duet",      // the same ´ω｀ twins, different game: a single ♪
-          // lobbed back and forth — the tune is the ball, passed one cell per
-          // beat down the same throw/scoop arc.
-          frames: ["(´ω｀)⊃♪　　ヽ(´ω｀)", "(´ω｀)ノ　♪　ヽ(´ω｀)", "(´ω｀)ノ　　♪⊂(´ω｀)", "(´ω｀)ノ　♪　⊂(´ω｀)"] },
-        { name: "weave",     // and their juggling act: a ball each, thrown up
-          // together ノ…ヽ, crossing ｏｏ in the middle, caught ⊃…⊂ on the
-          // other side — same soft faces the whole exchange.
-          frames: ["(´ω｀)⊃ｏ　　ｏ⊂(´ω｀)", "(´ω｀)ノｏ　　ｏヽ(´ω｀)", "(´ω｀)ノ　ｏｏ　ヽ(´ω｀)", "(´ω｀)ノｏ　　ｏヽ(´ω｀)"] },
+        // portal/relay/slalom/spin replace the 2026-08 two-face sets
+        // (toss/duet/weave/lift) — those measured 118–150px wide and clipped
+        // against the troupe box's left edge (see the width rule above).
+        { name: "portal",    // the face strolls right into a portal 🌀 and is
+          // swallowed glyph by glyph — trailing edge first — until only the
+          // swirl is left; the loop restart is the next traveller stepping
+          // up to it. Portal pinned to the right edge; every frame 67.5px
+          // (🌀 is 0.75em via Symbola — see the repertoire rule above).
+          frames: ["( ・ω・)　　🌀", "　( ・ω・)　🌀", "　　( ・ω・)🌀", "　　 ( ・ω・🌀", "　　　 ( ・ω🌀", "　　　  ( ・🌀", "　　　　   (🌀", "　　　　    🌀"] },
+        { name: "relay",     // the same hand-off with a tune instead of a
+          // ball: ♪ is lobbed down the same arc into the partner's ノ.
+          frames: ["(´ω｀)ノ♪　　ノ", "(´ω｀)ノ　♪　ノ", "(´ω｀)ノ　　♪ノ", "(´ω｀)ノ　♪　ノ"] },
+        { name: "slalom",    // two balls ｏ close in from both edges and the
+          // face ducks between them — a beat of ＾ω＾ as they pass, then the
+          // next pair. The face never moves; the traffic does.
+          frames: ["ｏ　　( ・ω・)　ｏ", "　ｏ　( ・ω・)ｏ　", "　　ｏ( ＾ω＾)　ｏ", "　ｏ　( ・ω・)ｏ　"] },
+        { name: "spin",      // the face itself pirouettes, in eight beats —
+          // ONE leftward conveyor: the ・ω・ features glide left and slip
+          // behind the edge one by one while the back ㅅ enters from the
+          // right, crosses the head, and exits left; the features come back
+          // around from the right behind it. Same glyphs every frame — only
+          // their positions move. The trailing repeat of the first frame is
+          // a deliberate settle beat facing front before the next turn.
+          // (The ㅅ frames are 43.2px vs the rest's 44 — 0.8px, invisible.)
+          frames: ["( ・ω・)", "(・ω・ )", "(ω・　 )", "(・ ㅅ )", "( ㅅ 　)", "(ㅅ  ・)", "(　 ω・)", "( ・ω・)"] },
         { name: "scribble",  // the pen φ walks the page line ＿＿＿ one cell per
           // beat, left to right, then wraps — a new line started.
           frames: ["( ・ω・)φ＿＿＿", "( ・ω・)＿φ＿＿", "( ・ω・)＿＿φ＿", "( ・ω・)＿＿＿φ"] },
@@ -110,11 +130,6 @@ QtObject {
           // up ／, tumbles over ＼ a cell further, and lands — a beat of
           // ＾＾ satisfaction before the next page.
           frames: ["( 一ω一)⊂口　　", "( 一ω一)⊂口／　", "( 一ω一)⊂口　＼", "( ＾ω＾)⊂口　　"] },
-        { name: "lift",      // two spotters share one barbell: the presser ⊃
-          // launches it across, ready hands ノ/ヽ track it crossing the gap,
-          // the catcher ⊂ receives it at full extension — same ｀ω´ strain on
-          // both faces, unchanging, the whole set.
-          frames: ["( ｀ω´)⊃ｏ＝ｏ　　ヽ( ｀ω´)", "( ｀ω´)ノ　ｏ＝ｏ　ヽ( ｀ω´)", "( ｀ω´)ノ　　ｏ＝ｏ⊂( ｀ω´)", "( ｀ω´)ノ　ｏ＝ｏ　⊂( ｀ω´)"] },
         { name: "catch",     // incoming delivery: a parcel 󰏗 sails in from the
           // right a cell per beat, arms ノ up and ready, and lands in the
           // hand つ with a ＾ω＾ — the loop restart is the next drop.
