@@ -93,27 +93,30 @@ QtObject {
     }
 
     // ── Generic command sender ─────────────────────────────────────────────
-    // Writes one newline-delimited JSON line to the shellbridge socket. If the
-    // socket is up, it goes out immediately; otherwise the line is queued and
-    // the connection is initiated — the queue flushes on connect. This is the
-    // ONLY outbound path from QML (no hyprctl / MCP / shell exec here).
+    // Writes one newline-delimited JSON line to the shellbridge socket. EVERY
+    // command takes the same queue → fresh-connect → flush path: the line is
+    // queued, any stale link is dropped, a new connection is opened, and the
+    // queue drains in onConnectedChanged. A persistent link was the original
+    // posture, but a peer-closed socket does not reliably flip `connected`
+    // back to false (Quickshell 0.3.0) — a zombie connection then eats clicks
+    // silently (observed live: four reap clicks flushed in one burst, minutes
+    // late). A unix-socket connect is cheap and every verb here is a human
+    // gesture, so a fresh link per command costs nothing and can never wedge.
+    // This is the ONLY outbound path from QML (no hyprctl / MCP / shell exec).
     function sendCommand(obj) {
-        var line = JSON.stringify(obj) + "\n"
-        if (socket.connected) {
-            socket.write(line)
-            socket.flush()
-        } else {
-            socket._queue.push(line)
-            socket.connected = true // initiate connect; _queue flushes on connect
-        }
+        socket._queue.push(JSON.stringify(obj) + "\n")
+        socket.connected = false // drop any stale link before…
+        socket.connected = true  // …reconnecting; the queue flushes on connect
     }
 
     // ── Socket connection ──────────────────────────────────────────────────
     // Quickshell.Io.Socket (0.3.0): a real unix-domain client. `connected` is
-    // both the state and the trigger — set it true to connect. We connect on
-    // demand and stay connected; on any drop, `connected` goes false and the
-    // next sendCommand reconnects. shellbridge reads newline-delimited JSON and
-    // dispatches (e.g. hyprctl focuswindow) — no IPC is invented in QML.
+    // both the state and the trigger — sendCommand cycles it false→true per
+    // command (see above), and the queue drains here once the link is up. If
+    // the daemon is down the connect simply fails and the lines wait in
+    // `_queue` for the next command's retry. shellbridge reads
+    // newline-delimited JSON and dispatches (e.g. hyprctl focuswindow) — no
+    // IPC is invented in QML.
     property Socket socket: Socket {
         path: root.socketPath
         connected: false
