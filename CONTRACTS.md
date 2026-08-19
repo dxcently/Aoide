@@ -1122,6 +1122,73 @@ conductable session with zero approval. Fixed in `a2a.rs::do_inject` /
   already rebuild-time-only (`aoide.a2a.spawnAgent`, never client-chosen);
   the gap being closed here was specific to Inject's unconditional `--yes`.
 
+**Amendment (2026-08-19): bearer-token authentication — Spawn is gated for
+the first time, and loopback stops being an unconditional trust signal.**
+The 2026-08-14 amendment above assumed `PeerOrigin::Loopback` (TCP
+`peer_addr()` resolving to `127.0.0.0/8`/`::1`) means "the operator, on this
+machine." Behind any reverse proxy or tunnel (`ssh -R`, a tailscale funnel,
+cloudflared, nginx) that assumption is false: the SERVER's end of the
+connection sees the proxy's OWN loopback address for every caller, so a
+remote attacker who can reach the proxy inherits loopback's automatic trust.
+Worse, Spawn (`SendAction::Spawn` → `do_spawn`) was **origin-blind
+entirely** — `message/send`'s doc comment said so outright ("`origin`...
+only ever affects the Inject branch") — so ANY caller that reached the port,
+proxied or not, could already launch the operator's configured
+`aoide.a2a.spawnAgent` with an attacker-chosen prompt, with zero gate beyond
+that command being non-empty. Fixed in `a2a.rs`:
+
+- `aoide.a2a.tokenFile` (nix option; `--token-file` flag /
+  `AOIDE_A2A_TOKEN_FILE` env at the `a2a serve` layer, mirroring
+  `resolve_spawn_agent`'s exact flag→env→default precedence) names a file
+  holding the server's own expected token, read ONCE at launch
+  (`resolve_token_file`/`read_expected_token`). Empty (the default) is
+  **the off-path**: every decision below becomes a no-op and behavior is
+  byte-identical to before this amendment — pinned by
+  `effective_origin_is_the_identity_function_when_no_token_is_configured`
+  and `spawn_authorized_always_allows_when_no_token_is_configured`
+  (`a2a.rs` tests), on top of the existing unmodified
+  `should_deliver_now_covers_every_origin_autogate_combination` regression
+  pin from the 2026-08-14 amendment.
+- The caller presents the token as `Authorization: Bearer <token>`
+  (`parse_http_request` now captures it; `extract_bearer` parses the
+  scheme). Compared against the expected token with a length-independent
+  byte loop (`aoide_storage::peer_store::token_bytes_eq`), not `==`, so a
+  secret comparison doesn't take the crudest form of a timing shortcut — no
+  new crate for genuine constant-time comparison, per house "zero new deps"
+  discipline.
+- **Spawn is gated for the first time**: `spawn_authorized(token_configured,
+  token_state)` must return `true` before `do_spawn` runs. With no token
+  configured this is always `true` (Spawn's admission stays rebuild-time-only,
+  unchanged). With one configured, an absent or wrong bearer is a clean
+  `-32005` JSON-RPC error, never a silent fallback to the old open behavior.
+- **Loopback's trust is coupled to the same switch, with no opt-out**: once
+  `tokenFile` is non-empty, `effective_origin` coerces any origin that did
+  NOT present the valid token to `PeerOrigin::Unknown` (reusing that
+  variant's existing "never trusted" arm in `should_deliver_now` rather than
+  adding a fourth origin kind) before `should_deliver_now` ever sees it.
+  There is deliberately no separate `trustLoopback` boolean — a single
+  switch that cannot be mis-configured into "token required, but a
+  proxied/tunneled caller that looks loopback still auto-delivers," which is
+  exactly the hole this amendment closes. A caller that DOES present the
+  valid token keeps loopback's original standing exactly.
+- **Per-peer identification also moved off address**: `Peer.tokenFile`
+  (`state/peers.json`, set via `peer add --token-file <path>`) is a SEPARATE
+  per-peer secret from the server-wide `tokenFile` above — it resurrects the
+  `autogate` flag's original intent (§7) by letting a token, not an
+  IP, say WHICH registered peer is calling. `aoide_storage::peer_store::
+  is_autogated_peer_token` folds this the same way `is_autogated_peer_addr`
+  already did; Inject's `autogate_match` is now the OR of both checks, so an
+  operator who never sets a peer's `tokenFile` sees the original
+  address-only match, unchanged. This is a per-peer credential, not one
+  shared secret — a shared token can't tell two peers apart and would need
+  its own global knob; the server-wide `tokenFile` above answers a different
+  question ("is this caller authenticated as the operator/self at all,"
+  which Spawn and the loopback coupling need) and works independently of
+  whether any peer has a `tokenFile` set.
+- Every outcome (Spawn's new `-32005` rejection included) still audits
+  through the SAME `Door::A2a` log every other §6 outcome already uses — no
+  second logging path.
+
 ### Session-DAG integration (client side)
 
 An external A2A agent, once registered (`aoide a2a agent add <url>`), folds
@@ -1147,8 +1214,9 @@ security posture; the message text is untrusted data, never executed.
 
 ### Status
 
-The option surface (`aoide.a2a.enable`/`bindAddress`/`port`/`spawnAgent`), the
-`kind:"a2a"` DAG fold, and the `a2a serve` command are **real**: the
+The option surface (`aoide.a2a.enable`/`bindAddress`/`port`/`spawnAgent`/
+`tokenFile`), the `kind:"a2a"` DAG fold, and the `a2a serve` command are
+**real**: the
 AgentCard, `tasks/get`, and `message/send` (Phase B2: inject-or-spawn
 execution, above) all run. The CLIENT side is now **real** too (Phase D):
 `a2a agent add|list|remove` maintain the `state/a2a-agents.json` registry
@@ -1208,6 +1276,14 @@ send`'s local "sender is the target's own parent" rule (§6's amendment
 above): a peer marked `true` here has its INBOUND `message/send` auto-deliver
 without the pending queue, even though its connection is non-loopback. An
 unmarked/unknown sender is never autogated.
+
+`tokenFile` (string, optional, additive per §6's 2026-08-18 amendment; set
+via `peer add --token-file <path>`) is a path to a file holding THIS peer's
+own shared secret — how an autogate-marked peer is identified by a presented
+`Authorization: Bearer <token>` instead of (or alongside) its address, since
+address alone is dead behind any proxy/tunnel. Absent by default; an
+unmarked peer is identified by address only, exactly as before this field
+existed.
 
 `aoide peer add <name> <url> [--autogate]` verifies the peer FIRST — fetches
 its `/.well-known/agent-card.json` (mirroring `a2a agent add`'s

@@ -476,6 +476,25 @@ in
           instead of launching anything.
         '';
       };
+
+      tokenFile = mkOption {
+        type = types.str;
+        default = "";
+        description = ''
+          Path to a file holding the shared secret an inbound `message/send`
+          must present (`Authorization: Bearer <token>`) to be trusted
+          (CONTRACTS.md §6 amendment, 2026-08-18). Empty (the default) is
+          the fully-open behavior every prior release shipped: loopback
+          auto-delivers, Spawn is gated only by `spawnAgent` being set. Once
+          non-empty, TWO things change together, with no separate opt-out:
+          Spawn REQUIRES a valid token, and loopback STOPS being an implicit
+          trust signal (closing the gap where a reverse proxy or tunnel
+          makes a remote caller look loopback to the door). The file itself
+          is never read by nix — only its path crosses this option and the
+          `aoide-a2a` unit's environment; the secret is read off disk once,
+          at `a2a serve` launch.
+        '';
+      };
     };
 
     # ── Usage widget + poller (opt-in, off by default) ───────────────────────
