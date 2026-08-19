@@ -53,13 +53,6 @@ import QtQuick
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Io
-// Reaches the facet's shared components — GadgetFrame (the summon pane's
-// chrome), same as dock.qml's own facet-share import. Deployed-tree relative
-// path: this file lands at $out/qml/songs/sonata/wallpaper-picker.qml, so two
-// levels up ($out/qml/songs/ → $out/qml/) is the facet's own qml/ root (the
-// same bar.qml/dock.qml idiom documented in their own headers) — this only
-// resolves in the DEPLOYED layout, not from the source tree.
-import "../.."
 
 PanelWindow {
     id: root

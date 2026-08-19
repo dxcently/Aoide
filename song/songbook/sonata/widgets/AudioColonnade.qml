@@ -1,4 +1,5 @@
 import QtQuick
+import "../.."
 
 // ── THE COLONNADE · a two-column temple porch (audio in + out) ────────────────
 // The bar's audio control: BOTH channels of the machine's sound, drawn as a pair

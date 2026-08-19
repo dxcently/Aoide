@@ -13,10 +13,10 @@
 // `.item`, for the clef), `shared` (session state, optional).
 // `WorkspaceRow.qml` travels alongside this file as a helper component
 // (uppercase filename — carried by the build, never independently
-// resolvable as a slot). `StelePopout`/`BarPopout`/`SteleLayerPopout`/
-// `WidgetSlot`/`AudioColonnade` stay in the facet as shared, reusable
-// popout-hosting chrome (not bar-specific content) — reached via the
-// `import "../.."` below.
+// resolvable as a slot), joined by `BarPopout`/`AudioColonnade` as of P1.
+// `StelePopout`/`SteleLayerPopout`/`WidgetSlot` stay in the facet as
+// shared, reusable popout-hosting chrome (not bar-specific content) —
+// reached via the `import "../.."` below.
 //
 // Aoide is the muse of song, so the bar is one bar of music. The old
 // architectural grammar (the Pantheon entablature — keystone, colonnade wings,
@@ -159,8 +159,9 @@ import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
 import Quickshell.Services.SystemTray
 // Reaches the facet's shared, reusable popout-hosting chrome (WidgetSlot,
-// StelePopout, BarPopout, SteleLayerPopout, AudioColonnade) — none of it is
-// bar-specific content, so it stays in the facet rather than moving here.
+// StelePopout, SteleLayerPopout) — none of it is bar-specific content, so
+// it stays in the facet rather than moving here. BarPopout and
+// AudioColonnade moved to sonata/widgets/ in P1 and resolve same-dir now.
 // Deployed-tree relative path: this file lands at $out/qml/songs/sonata/
 // bar.qml, so two levels up ($out/qml/songs/ → $out/qml/) is the facet's
 // own qml/ root (modules/facets/quickshell/default.nix's build walk fixes
