@@ -40,7 +40,7 @@ Other glyph findings:
 - **Moon-phase emoji** are absent from all three declared faces (`fc-list`
   verified). Bare code points fall back to Noto Color Emoji, which is
   fixed-colour and deaf to `color:`; appending `U+FE0E` resolves them to
-  DejaVu Sans monochrome, which recolours from `notes.*` and stays legible at
+  DejaVu Sans monochrome, which recolours from `livery.*` and stays legible at
   9px. `calendar.qml` runs the colour version by explicit owner override and
   documents the monochrome set as its rollback.
 - **Kaomoji charset.** Stay inside the kana and punctuation vocabulary
@@ -125,6 +125,8 @@ Other glyph findings:
   binding that captured it.** `launcher.qml` was dumping ~66-79
   `TypeError: Cannot read property 'notes' of null` lines per hot reload
   (1984 in six hours) — all of them its own 65 `root.notes.*` bindings
+  (quoted verbatim from the logs of the day; that property has since been
+  renamed to `livery`, so grep for `root.livery.*` in today's tree)
   re-evaluating at once, in one burst, on the log line right after the
   window's `Component.onDestruction`. **Read that message precisely: the
   null is `root`, not `root.notes`.** In `root.withA(root.notes.x, a)` QV4
