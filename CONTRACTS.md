@@ -9,6 +9,70 @@ land with a migration note in `song/songbook/update-playbook.md`.
 
 ---
 
+## 0. Design philosophy — everything is a plugin
+
+Not a versioned interface; the rule the interfaces below are shaped by. It is
+recorded here because every contract in this file is downstream of it.
+
+**Everything is a plugin.** A capability enters Aoide by *existing* at a
+conventional path, declaring what it needs by *name*, and being removable
+without a trace. Nothing enters by being added to a list.
+
+The repo already runs this way and did before it had a name for it: `lib/walk.nix`
+discovers `modules/dendrites/*`, `modules/facets/*`, `pkgs/*` and
+`song/songbook/*/rice.nix` by walking the tree, so **adding a capability is a new
+folder, never an edit to an import list** (§2, §5). Each of those modules
+self-gates on its own `enable`/`aoide.song` rather than being switched on from
+outside. A widget resolves through `StagingEngine.resolveSong(song, slot)` — by
+slot *name*, falling back to sonata — so no surface ever imports a concrete
+widget (§5). Facets read `aoide.livery` and `aoide.arrangement` and nothing else:
+a closed set of named services, never another module's internals (house rule 5).
+
+Two names for the halves, taken from **Cordis** — *A Programming Paradigm for
+Spatiotemporal Composability* (Shi, Zhang & Cui; preprint 2026-08-13,
+`github.com/cordiverse/paper`), the plugin kernel under DeepSeek Harness, where
+the model adapter, tool registry, session log and agent loop are all swappable
+the same way:
+
+- **Spatial composability** — a component declares its dependencies by service
+  name and waits for them, instead of importing an implementation. Ours:
+  `aoide.livery`/`aoide.arrangement`, slot names, the stage files in §4, the
+  `aoide schema --json` tree that both doors generate from.
+- **Temporal composability** — a component's effects are *revertible*: removing
+  it unwinds everything it installed. Ours: `rice draft save`/`drop`, the
+  staging→declare→rebuild boundary, and NixOS generations underneath. A change
+  that cannot be backed out is not finished.
+
+This is Nix's own thesis (declarative, additive, atomically reversible) applied
+above the nix layer, and it is why the two doors — CLI and MCP — are one
+implementation with two façades rather than two features.
+
+**What it forbids, concretely:** a registry an author must edit to be seen; a
+module reaching into another module; a capability that only exists inside one
+consumer; an effect with no inverse. When a design choice is open, take the one
+that can be deleted.
+
+### The corollary for Quickshell: render surfaces only
+
+**Quickshell paints; it never *is* the capability.** Every QML file in
+`modules/facets/quickshell/` and `song/songbook/*/widgets/` is a render surface
+that picks up an agnostic bridge or API by name. State, policy, IPC and system
+access live behind a bridge (a CLI verb, a stage file in §4, an IPC socket) that
+is reachable **with only a shell**.
+
+The test, applicable to a file you have never seen:
+
+> Delete every `.qml` in the repo. Is this capability still reachable from a
+> terminal? **No → it is in the wrong place.**
+
+So: **a new API lands as a bridge first, and the QML picks it up second** — never
+the reverse, and never only in QML. A surface may read, arrange, animate and
+draw; it may not own the only copy of a fact, shell out to do work a verb should
+do, or decide policy. The same rule governs the facet/song line: the facet keeps
+agnostic bridges and APIs, the song keeps everything that paints (§5).
+
+---
+
 ## 1. Note schema — **v0**
 
 The single seam between the frozen nix layer and the live desktop. Facets read

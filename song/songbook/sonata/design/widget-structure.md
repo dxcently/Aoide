@@ -45,6 +45,35 @@ Three consequences worth internalising:
   aoide-quickshell.service` (the manifest is read once, at startup). An edit
   to an existing file only needs `aoide rice stage`.
 
+### The hard line: a widget is a RENDER SURFACE
+
+House rule 7, and the one rule in this file that is not about looks. A widget
+**paints**; it is never the place a capability *lives*. State, policy, IPC and
+system access sit behind an agnostic bridge — a CLI verb, a stage file
+(`CONTRACTS.md §4`), an IPC socket — that a shell can reach with no desktop
+running. The widget picks that bridge up **by name** and draws it.
+
+The test, for a file you have never seen:
+
+> Delete every `.qml` in the repo. Is this capability still reachable from a
+> terminal? **No → it is in the wrong place.**
+
+In practice, inside a `widgets/*.qml`:
+
+- **Read** from `livery`, `bridge`, and whatever `slots.md` lists for your slot.
+  Arrange, animate, draw. That is the whole job.
+- **Do not** hold the only copy of a fact. If the widget computes something a
+  verb should know, the verb should compute it and the widget should read it.
+- **Do not** `Process`-out to do work a verb should do. `bridge` is the only
+  outbound path (§2), and if the thing you need has no verb, the verb is the
+  work — write it, then draw it.
+- **Do not** decide policy. Gates, permissions and admission live in `aoided`.
+- **A new API lands as a bridge FIRST and the QML picks it up second.** Never
+  the reverse; never only in QML.
+
+This is also the facet/song line: `modules/facets/quickshell/` keeps agnostic
+bridges and APIs, the song keeps everything that paints.
+
 ---
 
 ## 2. What the widget is handed

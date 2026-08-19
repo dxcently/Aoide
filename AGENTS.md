@@ -113,6 +113,16 @@ only.
    by code review — no automated `checks` coupling check exists yet.
 6. **Every operation flows through `aoided`:** one policy surface, one gate,
    one audit log (`~/Aoide/log`). Both doors inherit it.
+7. **Everything is a plugin.** A capability enters by *existing* at a
+   conventional path, declares what it needs by *name*, and is removable
+   without a trace — never by an edit to an import list, never by reaching into
+   another module, never as an effect with no inverse. **Corollary: Quickshell
+   is a render surface, never an API.** QML paints and picks up an agnostic
+   bridge by name; state, policy, IPC and system access live behind a bridge
+   reachable with only a shell. A new API lands as a bridge FIRST and the QML
+   picks it up second. The test: *delete every `.qml` — is this capability
+   still reachable from a terminal?* No means it is in the wrong place.
+   `CONTRACTS.md §0` has the full statement and its Cordis citation.
 
 See `CONTRACTS.md` for the versioned interfaces (note schema, dendrite shape,
 `schema --json`, stage files) and `docs/BUILD.md` for module-authoring.
