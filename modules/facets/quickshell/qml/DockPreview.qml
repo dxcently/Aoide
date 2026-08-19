@@ -16,15 +16,13 @@ import Quickshell
 // In the deployed tree ($out/qml/, where songs/ sits beside this file) the
 // default relative source resolves with no env needed.
 //
-// ── Phase 1 note (the "sonata carries the complete rice set" plan) ─────────
-// The committed default source below, `songs/sonata/dock.qml`, DOES NOT
-// EXIST YET. Phase 3 of that plan creates it — the real dock body, an
-// ANCHORED PanelWindow hosting every gadget slot as a `WidgetSlot`. Until
-// Phase 3 lands, this harness only runs by way of the `DOCK_WIDGET` env
-// override, pointed at a hand-written probe body. It is committed now
-// anyway, same as the plan's other harnesses: it is the permanent dev tool
-// for the dock, and Phase 3 only has to supply the file this default source
-// names, not write a new harness.
+// The default source, `songs/sonata/dock.qml`, is sonata's real dock body —
+// an ANCHORED PanelWindow hosting every gadget slot as a `WidgetSlot`. That
+// body declares `livery`, `bridge`, `shared` and `stagingEngine` as REQUIRED
+// properties, so all four must appear in the `createObject` prop map below
+// or creation returns null; `shared` is the session-state QtObject the real
+// dock is handed by its host, and this harness passes null for it (the
+// gadgets that take it as a slot extra guard their own writes).
 //
 // A REAL `StagingEngine` is instantiated below and threaded through as the
 // `stagingEngine` extra — unlike CalendarPreview/ExodosPreview (which hand
@@ -72,6 +70,7 @@ ShellRoot {
         harness.dock = comp.createObject(null, {
             "livery": harness.stubLivery,
             "bridge": harness.stubBridge,
+            "shared": null,
             "stagingEngine": harness.stagingEngine
         })
         if (!harness.dock) {
