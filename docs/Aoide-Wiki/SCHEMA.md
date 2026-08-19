@@ -58,11 +58,11 @@ This file and every `protocol/OPERATIONS/` page obey the rules they describe. Ch
 
 Snapshot of this wiki's files, diffed on each lint pass and rewritten at the end. The wiki is meant to be read whole; this manifest exists for the lint self-description check, not to spare you the reading.
 
-snapshot: 2026-08-01
+snapshot: 2026-08-19
 
 ### Tags
 
-agent · aoide · architecture · auto-discovery · base16 · blueprint · bridge · cli · coding-agent · compositor · conductor · content · crate · daemon · dag · declarative · deployment · design · desktop · dxflake · editor · extensibility · features · flake · gadget · git · glyph · governance · graph · harness · hyprland · integration · ipc · knowledge · livery · mcp · melete · meta · mneme · naming · nix · node · onboarding · orchestration · orchestrator · pantheon · pipeline · policy · protocol · pty · qml · quickshell · rebuild · rice · rust · security · session · shell · song · stylix · terminal · theming · tui · ui · vault · wayland · widget · wiki
+agent · aoide · architecture · auto-discovery · base16 · blueprint · bridge · cli · coding-agent · compositor · conductor · content · crate · daemon · dag · declarative · deployment · design · desktop · dxflake · editor · extensibility · features · flake · gadget · git · glyph · governance · graph · harness · hyprland · integration · ipc · knowledge · livery · mcp · melete · meta · mneme · naming · nix · node · onboarding · orchestration · orchestrator · pantheon · pipeline · plugin · policy · protocol · pty · qml · quickshell · rebuild · rice · rust · security · session · shell · song · stylix · terminal · theming · tui · ui · vault · wayland · widget · wiki
 
 ### Notes
 
@@ -73,6 +73,7 @@ concepts/Codebase.md
 concepts/Full-Architecture.md
 concepts/Lexicon.md
 concepts/Package-Layout.md
+concepts/Plugin-Architecture.md
 concepts/Snowflake-Anatomy.md
 concepts/desktop/Desktop-Architecture.md
 concepts/desktop/Feature-Set.md

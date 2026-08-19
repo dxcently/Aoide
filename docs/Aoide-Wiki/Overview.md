@@ -16,6 +16,7 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 ## Concepts
 
 - [[Full-Architecture]] — the whole-body map: every subsystem, its inputs/outputs, and how the frozen and performed halves meet at the livery seam
+- [[Plugin-Architecture]] — the design philosophy every contract is downstream of: a capability enters by existing at a conventional path and is removable without a trace; Quickshell paints and is never where a capability lives
 - [[Codebase]] — how the built repo actually works: the flake, the `lib/` walker + overlay, the option contract, the systemd/service map, socket + stage-file contracts, and what is real vs stubbed at the walking-skeleton milestone
 - [[Widget-Maker]] — the core thesis: Aoide as an extensible, declarative widget maker; the coding agent writes new integrations rather than selecting plugins
 - [[Feature-Set]] — what ships in the box (Melete + Mneme integrated) and the exemplar features: messaging bridge, fleet management, scheduled-job widget

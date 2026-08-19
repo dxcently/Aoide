@@ -198,6 +198,9 @@ no session id.)
 
 ## The rules a widget is built by
 
+These are the render-surface corollary ([[Plugin-Architecture#The corollary
+for Quickshell: render surfaces only]]) applied to the roster widgets:
+
 1. **Pure view.** Render the published fields. Never derive `state` (no regex on
    a state string), never enumerate the system (no `hyprctl`/`/proc`/MCP in QML),
    never invent IPC.
@@ -236,5 +239,6 @@ split, and the reaper's own `crate::reap` module — all switched in and verifie
 
 ## Related
 
+- [[Plugin-Architecture]] — the render-surface rule this contract enforces
 - [[shellbridge]] · [[Quickshell]] · [[Conductor-Channel]] · [[Terminal-Commander]]
 - [[Session-Graph]] · [[Agent-Hooking]] · [[Gadget-Dock]] · [[Widget-Maker]]

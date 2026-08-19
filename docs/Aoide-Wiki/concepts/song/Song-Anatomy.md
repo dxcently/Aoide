@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-28
-updated: 2026-08-14
+updated: 2026-08-19
 tags: [aoide, song, rice, architecture]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -63,6 +63,16 @@ holds:
 | `icons/` | per-song icon overrides |
 | `widgets/` | per-song widget bodies — QML files the staging engine resolves per slot ([[Widget-Maker#The staging engine — a song overrides desktop chrome]]) |
 | `design/` | the song's design memory — `intent.md` (palette rationale, iteration log), ingested like any content ([[Self-Ricing#Songbook Discipline — the "Self" in Self-Ricing]]) |
+
+**sonata's `widgets/` holds fourteen bodies today**: `bar`, `calendar`,
+`conductor`, `dock`, `herald`, `herald-center`, `launcher`, `meters`,
+`powermenu`, `power`, `terminals`, `usage`, `wallpaper`, `wallpaper-picker`.
+Six are wired to a live host anchor (`calendar`, `herald`, `herald-center`,
+`powermenu`, `launcher`, `bar` — `modules/facets/quickshell/qml/slots.md`);
+the other eight (`dock`, `conductor`, `terminals`, `meters`, `power`,
+`usage`, `wallpaper`, `wallpaper-picker`) are twins of facet originals still
+doing the live drawing, carried but unanchored until the facet switch lands
+([[Gadget-Dock#What the dock holds]]).
 
 ### `songbook/` root — cross-cutting design memory
 
@@ -142,3 +152,4 @@ top-level `song/` dir. The lookup is the Song Map
 - [[Ricing-Protocol]] — the ricing protocol this page's per-song design memory
   supports
 - [[Widget-Maker]] — the staging engine, which resolves a song's `widgets/` files to live desktop chrome
+- [[Gadget-Dock]] — the dock/gadget bodies now twinned into sonata's `widgets/`, pending the facet switch

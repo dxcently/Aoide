@@ -1,6 +1,7 @@
 ---
 type: concept
 created: 2026-08-01
+updated: 2026-08-19
 tags: [aoide, agent, a2a, orchestration, interop]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -100,8 +101,7 @@ to **rebuild time** instead.
 - **Admitted at rebuild time.** Enabling the door (`aoide.a2a.enable`) and
   setting the spawn target (`aoide.a2a.spawnAgent`) are nix options, so both go
   through the normal [[Rebuild-Gate|rebuild gate]] — turning them on is the
-  user's admission, made once at rebuild, not per request. This holds
-  unconditionally for a **loopback** caller.
+  user's admission, made once at rebuild, not per request.
 - **Bounded per request.** A `message/send` spawn runs **only** the configured
   `spawnAgent` executable — the client names the prompt, never the command. If
   `spawnAgent` is empty (the default), spawning is unavailable and the door
@@ -111,9 +111,8 @@ to **rebuild time** instead.
   executed — the A2A door adds no new trust tier.
 - **Non-loopback callers are gated at request time.** `message/send`
   classifies the caller's address first (`a2a::classify_origin` →
-  `PeerOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`). A `Loopback`
-  caller keeps the rebuild-time-only admission above, unchanged. A `Remote`
-  caller instead falls back to the same interactive pending-approval queue
+  `PeerOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`). A `Remote`
+  caller falls back to the same interactive pending-approval queue
   `graph send` uses — auto-delivering only when the sender's address matches
   a peer registered with `autogate: true` in `state/peers.json`
   ([[Peer-Federation]]); an `Unknown` origin (the address couldn't be read
@@ -121,8 +120,39 @@ to **rebuild time** instead.
   This is the one interactive per-request gate the wire otherwise lacks —
   added for [[Peer-Federation|peer federation]]'s non-loopback case, which
   the original loopback-only design didn't need to cover.
-- **Audited.** Every inject, spawn, and error writes to the single audit log as
-  `Door::A2a`, the same log every other door writes. Loopback by default.
+- **Bearer-token authentication gates Spawn.**
+  `aoide.a2a.tokenFile` names a file holding the server's expected bearer
+  token, read once at `a2a serve` launch. Empty (the default) is the
+  off-path: every rule below is a no-op and behavior is byte-identical to a
+  server with no token configured. A caller presents the token as
+  `Authorization: Bearer <token>`; the server compares it with a
+  length-independent byte scan (`peer_store::token_bytes_eq`), never `==`.
+  With a token configured, `spawn_authorized(token_configured, token_state)`
+  must return `true` before a spawn runs — an absent or wrong bearer answers
+  `-32005`. With no token configured, Spawn reads neither origin nor token at
+  all: any caller reaching the port may run the configured agent, bounded
+  only by `spawnAgent` naming the command, never the client.
+- **Loopback is trusted unconditionally only while no token is configured.**
+  `effective_origin(origin, token_configured, token_state)`
+  coerces any caller — loopback included — that did not present the valid
+  token to `PeerOrigin::Unknown` before `should_deliver_now` ever sees it,
+  which never auto-delivers. There is no separate "trust loopback" toggle: behind a
+  reverse proxy or tunnel (`ssh -R`, a tailscale funnel, cloudflared, nginx)
+  the server sees the proxy's own loopback address for every caller, so an
+  unconditional loopback trust hands a remote attacker the same standing as
+  the operator. A caller that presents the valid token keeps
+  loopback's original standing exactly.
+- **Per-peer tokens identify WHICH peer, not just whether one is trusted.**
+  `Peer.tokenFile` (`state/peers.json`, set via `peer add --token-file
+  <path>`) is a separate, per-peer secret from the server-wide `tokenFile`
+  above. `peer_store::is_autogated_peer_token` folds a presented token
+  against every registered peer's own token file, and Inject's autogate
+  match is the OR of the address check and this token check — a shared
+  secret could never tell two peers apart, so identifying which peer called
+  needs one file per peer, not one flag for the whole door.
+- **Audited.** Every inject, spawn, and error — including Spawn's new
+  `-32005` rejection — writes to the single audit log as `Door::A2a`, the
+  same log every other door writes. Loopback by default, off by default.
 
 ## Related
 

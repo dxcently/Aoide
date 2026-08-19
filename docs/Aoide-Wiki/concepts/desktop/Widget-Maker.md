@@ -74,6 +74,20 @@ works. Preview is the sketch; adopt is the truth — identical discipline to
 ricing. A bad generation can never reach the running system without the
 [[Governance|gate]], and every step lands in the single audit log.
 
+## The hard line: a widget is a render surface
+
+House rule 7 ([[Plugin-Architecture#The corollary for Quickshell: render
+surfaces only]]), applied at the widget level. A widget **paints**; it is
+never the place a capability *lives*. State, policy, IPC, and system access
+sit behind an agnostic bridge — a CLI verb, a stage file (`CONTRACTS.md`
+§4), an IPC socket — that a shell can reach with no desktop running. The
+widget picks that bridge up by name and draws it: a new API lands as a
+bridge FIRST, the QML picks it up second, never the reverse. The test for a
+file never seen before — delete every `.qml` in the repo; a capability not
+reachable from a terminal after that was in the wrong place. Sonata's own
+`design/widget-structure.md` carries the same rule for the ricing agents
+that read that file directly.
+
 ## The staging engine — a song overrides desktop chrome
 
 A narrower, sibling mechanism to the make-a-widget loop above: not the agent
@@ -220,6 +234,7 @@ full field/table reference: `modules/facets/quickshell/qml/slots.md`.
 
 ## Related
 
+- [[Plugin-Architecture]] — the design philosophy this page's mechanisms implement
 - [[Feature-Set]]
 - [[Self-Ricing]]
 - [[Snowflake-Anatomy]]

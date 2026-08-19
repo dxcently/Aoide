@@ -41,7 +41,8 @@ over a directory, filtered to `.nix` files whose path does not contain `/_`.
 That single infix rule is the **shelving opt-out** — prefix a file or directory
 with `_` (`_example.nix`, `_scratch/`) to hide it from discovery without
 deleting it. There is no import list; a file placed under a walked directory
-self-registers. This is [[dxflake]]'s pattern, now implemented in-house.
+self-registers. This is [[dxflake]]'s pattern, now implemented in-house, and
+the concrete case of [[Plugin-Architecture]]'s discovery-by-existing rule.
 
 **`lib/pkgs.nix`** is the same idea for `pkgs/`: it reads `../pkgs`, keeps each
 directory without a `_` prefix that holds a `default.nix`, and maps it to
@@ -319,6 +320,7 @@ outright rather than left as a stub with no design behind it.)
 
 ## Related
 
+- [[Plugin-Architecture]] — the discovery-by-existing rule `lib/walk.nix` implements
 - [[Snowflake-Anatomy]]
 - [[Full-Architecture]]
 - [[Package-Layout]]

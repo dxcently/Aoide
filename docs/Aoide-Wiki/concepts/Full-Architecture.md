@@ -286,7 +286,9 @@ API; the vault declares exports, Aoide admits through the same gate.
 ## The control plane — one gate, one log, three doors
 
 Everything an agent can do is one command schema with three front doors that
-cannot drift, funnelled through a single policy/audit surface. See
+cannot drift, funnelled through a single policy/audit surface — one
+implementation with three façades, the [[Plugin-Architecture#Spatial and
+temporal composability|same thesis]] as the walker and the widget slots. See
 [[Agent-Interface]], [[A2A-Door]], and [[Governance]].
 
 ```
@@ -395,6 +397,7 @@ headless boot of the assembled stack) fail eval on violation.
 ## Related
 
 - [[Overview]]
+- [[Plugin-Architecture]] — the design philosophy every contract on this page is downstream of
 - [[Codebase]]
 - [[Package-Layout]]
 - [[Snowflake-Anatomy]]

@@ -1,6 +1,7 @@
 ---
 type: concept
 created: 2026-08-15
+updated: 2026-08-19
 tags: [aoide, agent, a2a, orchestration, interop, federation]
 ---
 
@@ -60,6 +61,13 @@ local "sender is the target's own parent" autogate rule: a peer marked
 queue even though the connection is non-loopback — see
 [[#Security — the non-loopback pending-gate amendment]] below. An
 unmarked/unknown sender is never autogated.
+
+`tokenFile` (`peer add --token-file <path>`, optional) names a file on THIS
+instance holding the shared secret that peer presents as `Authorization:
+Bearer <token>` — a per-peer credential that identifies WHICH registered
+peer is calling once address alone can't (behind a proxy or tunnel every
+caller's address looks the same). Absent by default: an unmarked peer
+authenticates by address only.
 
 ## The cache — `state/peer-cache/<name>.json`
 
@@ -141,8 +149,8 @@ a session id they could match.
 
 ## CLI surface
 
-`aoide peer add <name> <url> [--autogate]` / `list` / `remove <name>` /
-`pull [<name>]` / `status` — see
+`aoide peer add <name> <url> [--autogate] [--token-file <path>]` / `list` /
+`remove <name>` / `pull [<name>]` / `status` — see
 [[aoide-cli#The `peer` group — aoide-to-aoide federation]] for the per-verb
 behavior. Registered as its own group, directly after `a2a agent
 add/list/remove/send` in `schema --json`'s order.
@@ -152,19 +160,27 @@ add/list/remove/send` in `schema --json`'s order.
 The [[A2A-Door]]'s original security model assumes a **loopback** caller and
 moves all admission to rebuild time (enabling the door, setting
 `spawnAgent`) rather than gating per request. Peer federation is the first
-caller that isn't loopback, so `message/send` now classifies the caller's
+caller that isn't loopback, so `message/send` classifies the caller's
 address first (`a2a::classify_origin` → `PeerOrigin`: `Loopback` /
 `Remote(IpAddr)` / `Unknown`):
 
-- **`Loopback`** — unchanged: delivers immediately, admission stays at
-  rebuild time.
 - **`Remote`** — falls back to the same interactive pending-approval queue
   `graph send` already uses, UNLESS the sender's address matches a peer
   registered with `autogate: true` in `state/peers.json`
-  ([[#The registry — `state/peers.json`]] above), in which case it
-  auto-delivers exactly like a loopback call.
+  ([[#The registry — `state/peers.json`]] above) **or** presents that
+  peer's own `tokenFile` secret as a bearer token
+  (`peer_store::is_autogated_peer_token`) — either match auto-delivers
+  exactly like a loopback call.
 - **`Unknown`** (the caller's address couldn't be read at all) — never
   auto-delivered, failing safe the same as an unmatched `Remote`.
+- **`Loopback`** — delivers immediately, admission stays at rebuild time,
+  **only while no server-wide `aoide.a2a.tokenFile` is configured**
+  ([[A2A-Door#Security and governance]]). Once one is, a caller — loopback
+  included — that does not present the valid token is coerced to `Unknown`
+  before this classification is even consulted: behind a reverse proxy or
+  tunnel every caller's connection looks loopback to the server, so an
+  unconditional loopback trust hands a remote attacker the operator's own
+  standing.
 
 This is the one interactive per-request gate the wire otherwise lacks —
 added specifically for the case the original loopback-only design didn't

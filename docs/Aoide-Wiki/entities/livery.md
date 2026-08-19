@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-08-14
+updated: 2026-08-19
 aliases: [aoide-notes, Notes, notes package, note engine]
 tags: [aoide, livery, theming, base16]
 ---
@@ -134,27 +134,27 @@ The engine's surface is the `aoide livery` verb group (native, inside the
 CLI's `Invocation`/`Outcome` shell — the standalone note CLI's
 subcommands, native):
 
-- **`aoide livery lint [<song>|<path>]`** — validate a note container
+- **`aoide livery lint [<song>|<path>]`** — validate a livery file
   against the authoritative v0 schema. The nix option type in
   `modules/nucleus/options.nix` is a permissive gate; *this* is the real
   validator. It enforces the closed palette tier
   (`bg/fg/accent/urgent`, unknown keys rejected) and the optional component
   tier (`bar.*` / `notif.*` / `window.*`, each field `nullOr` hex), accepting
-  both bare hex strings and W3C `{ $value, $type }` note objects, and treating
+  both bare hex strings and W3C `{ $value, $type }` token objects, and treating
   `{group.name}` alias references as valid pending resolution. `aoide rice
   lint` runs this engine natively — no binary locate, no shell-out.
 - **`aoide livery resolve [<song>|<path>]`** — print the fully-resolved,
-  flattened note set.
+  flattened livery set.
 - **`aoide livery emit <target> [<song>|<path>]`** — run one of the four
   emitters (`stage` · `hyprctl` · `osc` · `file`); `--out PATH` writes
   atomically, `--template` supplies the file backend's template.
 
-No argument defaults to the staged notes. Exit codes align with the CLI
+No argument defaults to the staged livery. Exit codes align with the CLI
 convention: `0` ok · `2` usage · `1` error.
 
 ## The emitters
 
-All four consume the *same* fully-resolved note set (from `resolve.rs`), so
+All four consume the *same* fully-resolved livery set (from `resolve.rs`), so
 the live targets can never disagree:
 
 1. **`stage`** → `song/stage/livery.json` for [[Quickshell]]. With `--out PATH` it

@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-08-14
+updated: 2026-08-19
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
@@ -180,8 +180,8 @@ terminal; its five failure reasons are `session-not-found` /
 
 ### The `peer` group — aoide-to-aoide federation
 
-`add <name> <url> [--autogate]` / `list` / `remove <name>` / `pull [<name>]`
-/ `status` register OTHER aoide instances as **peers** and fold their
+`add <name> <url> [--autogate] [--token-file <path>]` / `list` / `remove
+<name>` / `pull [<name>]` / `status` register OTHER aoide instances as **peers** and fold their
 resolved session graphs into this instance's own — the newest door onto
 aoide, built entirely on top of the existing [[A2A-Door]] rather than a new
 transport (`aoide/graphSummary`, one new JSON-RPC method on the same
@@ -197,7 +197,11 @@ scope for this v0.
 - **`peer add`** — verifies the peer FIRST (fetches its AgentCard, mirroring
   `a2a agent add`'s verification-before-registering pattern) and only
   registers on success; a duplicate `name` is rejected rather than
-  repointed, unlike `a2a agent add`'s upsert-on-readd.
+  repointed, unlike `a2a agent add`'s upsert-on-readd. `--token-file` records
+  a per-peer bearer secret this instance expects that peer to present,
+  identifying WHICH peer is calling once address alone can't (a proxy or
+  tunnel makes every caller's address look loopback) — see
+  [[A2A-Door#Security and governance]].
 - **`peer remove`** — a missing name is an error, not idempotent-silent
   (`rice draft drop`'s precedent, a deliberate divergence from `a2a agent
   remove`'s tolerate-missing stance); also drops that peer's cache file.

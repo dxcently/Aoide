@@ -37,7 +37,7 @@ No mako or swaync for popups — dunst holds the notification-delivery role (the
 - **In:** unix socket commands (QML issues requests here)
 - **IPC:** Hyprland IPC consumed by shellbridge, not by QML
 
-**Rule:** no MCP in QML, ever. QML is a display layer; intelligence lives in [[aoided]] and [[shellbridge]].
+**Rule:** no MCP in QML, ever. QML is a display layer; intelligence lives in [[aoided]] and [[shellbridge]] — the render-surface corollary of [[Plugin-Architecture]].
 
 ## Session jump flow
 
@@ -55,6 +55,7 @@ A click in the bar widget reaches the correct terminal window in one hop, with n
 
 ## Related
 
+- [[Plugin-Architecture]]
 - [[Quickshell]]
 - [[Hyprland]]
 - [[shellbridge]]

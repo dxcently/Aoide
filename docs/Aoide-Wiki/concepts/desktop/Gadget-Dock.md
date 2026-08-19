@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-17
+updated: 2026-08-19
 tags: [aoide, widget, qml, desktop, gadget]
 ---
 
@@ -15,6 +15,16 @@ summoned on demand and distinct from the terminal/TUI DAG views.
 gadget files — see [[Quickshell]] and [[Codebase]]. Appearance is not specified
 here: the dock re-skins with the active song, and rice design memory lives in
 the songbook ([[Self-Ricing]]), not on this page.*
+
+**Status: songbook migration landed, facet switch pending a rebuild.** Twin
+bodies for the dock and all five gadgets above, plus the wallpaper layer and
+its picker, already live at `song/songbook/sonata/widgets/{dock,conductor,
+terminals,meters,power,usage,wallpaper,wallpaper-picker}.qml`
+([[Song-Anatomy]]) — inert, since `shell.qml` still instantiates the facet
+originals above directly rather than through a `WidgetSlot`/`SurfaceSlot`
+anchor. Repointing it is the pending switch and needs a User rebuild; until
+it lands, this page's `modules/facets/quickshell/qml/` implementation notes
+describe what actually renders.
 
 ## What the dock holds
 
@@ -109,6 +119,7 @@ space.
 - [[Conductor-Channel]]
 - [[Session-Graph]]
 - [[Widget-Maker]]
+- [[Song-Anatomy]]
 - [[shellbridge]]
 - [[Codebase]]
 - [[Widget-Bridge-Contract]]
