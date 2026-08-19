@@ -59,7 +59,7 @@ tag    "[ notify ]" mono 10    "[ pipewire ]" mono 10     "[ fasti ]" mono 10
 **That is the whole trick.** The skeleton is fixed and shared; what varies per
 widget is exactly four things:
 
-1. a **signature hue** — one `notes.*` role this widget owns, worn by its
+1. a **signature hue** — one `livery.*` role this widget owns, worn by its
    keyline, crown, frieze, frame and ledger rule (`base0F` rust for
    notifications, `base09` amber/clay for AudioColonnade and calendar);
 2. a **crown glyph** where a clef would go (`❧`, `♫`, `𝄴`, `ϟ`);
@@ -101,7 +101,7 @@ There are exactly two, and a new widget picks one:
 
 ## 2. Spend colour like it costs money
 
-Count every `notes.*` read in each widget (`grep -o "notes\.[a-zA-Z0-9]*"`):
+Count every `livery.*` read in each widget (`grep -o "livery\.[a-zA-Z0-9]*"`):
 
 | widget | ink + ground | accent | hot | everything else |
 |---|---|---|---|---|
@@ -139,7 +139,7 @@ Nothing in this house dims by eye. The same ladder recurs file to file
 
 ```qml
 // calendar.qml — a 42-cell grid stays readable with no boxes and no colour
-color: parent.isToday   ? root.notes.paletteBg                  // on laurel fill
+color: parent.isToday   ? root.livery.paletteBg                 // on laurel fill
      : parent.isCurrent ? (parent.isSunday ? withA(clay, 0.95)  // rubric
                                            : root.ink)          // 1.0 — this month
                         : withA(root.ink, 0.3)                  // spill days
@@ -356,7 +356,7 @@ array:**
 readonly property var endings: [
     { action: "lock",    name: "LOCK",    term: "fermata",
       greek: "κλείς",    glyph: "𝄐", gs: 56,
-      frieze: "◆───◆───◆", hue: root.notes.paletteAccent },
+      frieze: "◆───◆───◆", hue: root.livery.paletteAccent },
     …
 ]
 ```
@@ -414,7 +414,7 @@ mori on one sheet without any of it turning to noise.
   chrome: noumenia marks, Attic month names, phase-glyph fallback ink.
 
 **Where it draws the line:** the moon phases are the ONE glyph family wearing
-fixed colour outside `notes.*` — real emoji `U+1F311`–`U+1F318`, sanctioned
+fixed colour outside `livery.*` — real emoji `U+1F311`–`U+1F318`, sanctioned
 explicitly in the header, with the monochrome fallback (`U+FE0E` → DejaVu
 Sans, inked aegean) recorded as the rollback path. A sanctioned exception
 looks like that: named, scoped to one family, tested against alternatives, and
@@ -474,7 +474,7 @@ precedent above.
 - [ ] Content `Column` at `margins: 10–12`, `spacing: 4`.
 
 **Colour**
-- [ ] Every colour from `notes.*` (exceptions are labeled in the header).
+- [ ] Every colour from `livery.*` (exceptions are labeled in the header).
 - [ ] Ink + ground dominate the read; laurel marks exactly one thing (its two
       reads serve one state); every other role does one job.
 - [ ] Opacity steps come off the ladder in `greek-grammar.md`, not by eye.

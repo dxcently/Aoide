@@ -82,7 +82,7 @@ Every widget declares both of these; both anchors inject them
 unconditionally, so omitting one is a load error, not a silent gap:
 
 ```qml
-required property var notes    // LiveryState singleton — the palette + helpers
+required property var livery   // LiveryState singleton — the palette + helpers
 required property var bridge   // ShellBridge — the ONLY outbound path from QML
 ```
 
@@ -105,7 +105,7 @@ in the same file, three lines apart.
 structurally incapable of reaching nix options through this surface —
 `WidgetSlot.qml`, `SurfaceSlot.qml` and `StagingEngine.qml` all restate this.
 
-### What `notes.*` actually exposes
+### What `livery.*` actually exposes
 
 From `modules/facets/quickshell/qml/LiveryState.qml`:
 
@@ -192,9 +192,9 @@ host adds `+6`/`+8` around it. Skipping the `+5` clips your own shadow.
 
 ## 5. Colour discipline
 
-Every colour reads from `notes.*` or a same-named local alias
-(`readonly property color ink: notes.paletteFg`, `clay: notes.base09`,
-`aegean: notes.holoBlue`, `sig: notes.base0F`). What actually exists outside
+Every colour reads from `livery.*` or a same-named local alias
+(`readonly property color ink: livery.paletteFg`, `clay: livery.base09`,
+`aegean: livery.holoBlue`, `sig: livery.base0F`). What actually exists outside
 that rule today, exhaustively:
 
 **Sanctioned material literals** — light and shadow, not palette. The Aero
@@ -210,19 +210,19 @@ header as "one sanctioned literal").
 - `bar.qml`'s **structural ink is literal `#000000`** — staff lines, barlines,
   playhead, page rail. The manuscript metaphor treats printed staff lines as
   ink-on-paper, not a themed chrome role. Text ink on the strip is still
-  `notes.paletteFg`.
+  `livery.paletteFg`.
 - `calendar.qml`'s **moon-phase glyphs render as real colour emoji**
   (`U+1F311`–`U+1F318`) — "the ONE glyph family wearing fixed color outside
-  the `notes.*` roles", with the `U+FE0E` monochrome fallback recorded as the
+  the `livery.*` roles", with the `U+FE0E` monochrome fallback recorded as the
   rollback path.
 
 **One unlabeled leftover, not a precedent.** `bar.qml`'s battery `BarPopout`
 body draws its two `Text` elements in literal `"#14141a"` (lines 1183, 1191) —
 a survival from the old dark popout palette, covered by no header note. It is
 the only bare hex in ordinary widget chrome anywhere in the five files. Do not
-copy it; a new popout body inks from `notes.*`.
+copy it; a new popout body inks from `livery.*`.
 
-A widget breaking the `notes.*` rule **without** a header note like the two
+A widget breaking the `livery.*` rule **without** a header note like the two
 above is the anomaly worth flagging in review.
 
 ---

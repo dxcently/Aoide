@@ -3,7 +3,7 @@
 **Song:** sonata
 
 The concrete kit an author picks from: faces, glyphs, type tiers, the opacity
-ladder, rule idioms, state treatments, and which `notes.*` role plays which
+ladder, rule idioms, state treatments, and which `livery.*` role plays which
 part. Everything here is in live use in `widgets/*.qml` or the shared facet
 chrome — nothing is aspirational.
 
@@ -82,7 +82,7 @@ wedges; `←  →  ⏎  ⌘` key hints; `✎` the sessions cell.
 
 **Colour glyphs, sanctioned once.** `U+1F311`–`U+1F318` moon phases in
 `calendar.qml` render as real colour emoji — the one family wearing fixed
-colour outside `notes.*`. `🗒` is the launcher's clipboard bookmark tab.
+colour outside `livery.*`. `🗒` is the launcher's clipboard bookmark tab.
 
 *Rotation note:* a rotated `Text`'s layout box does NOT rotate with it, so
 `calendar.qml` rides every rotated guillemet inside a fixed-size wrapper
@@ -171,7 +171,7 @@ today except the launcher's chapter tabs.
 
 Full derivation of the hues in `intent.md`; this is which role plays what.
 
-| role (`notes.*`) | slot | Greek hue | its job |
+| role (`livery.*`) | slot | Greek hue | its job |
 |---|---|---|---|
 | `paletteBg` | base00 | marble ground | every body fill; also the INK for text over the dark scrim |
 | `paletteFg` | base05 | plum-charcoal ink | all text, all borders, all structural rules |
