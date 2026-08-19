@@ -237,7 +237,10 @@ pkgs.testers.runNixOSTest {
     # feed verb of the herald retcon (khoa 2026-08-17 — dunst stops drawing
     # and becomes the daemon only, handing each notification to this verb
     # through its `script` hook; the Quickshell herald draws the card from
-    # the resulting stage/herald.json) — now 76.
+    # the resulting stage/herald.json) — reached 76; bumped by 7 for the
+    # self-ricing take tree and the flake integrity checker (`rice back`,
+    # `rice take` and its `list`/`mark`/`diff`/`prune` leaves, and
+    # `soundcheck`) — now 83.
     schema_raw = machine.succeed("aoide schema --json")
     schema_doc = json.loads(schema_raw)
     # schema --json emits a JSON Outcome envelope:
@@ -249,8 +252,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 76, (
-        f"expected 76 commands, got {cmd_count}.  "
+    assert cmd_count == 83, (
+        f"expected 83 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 
