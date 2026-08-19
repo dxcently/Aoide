@@ -25,9 +25,9 @@
 // shows up. (Quickshell 0.3 ships no folder-model primitive; a Process is the
 // house idiom for a one-shot side read.)
 //
-// Colors ONLY from notes roles (paletteBg/paletteFg/paletteAccent/wireCyan);
-// radius:0 throughout. Greek grammar styling is a LATER pass — this is the
-// functional, palette-correct build.
+// Colors ONLY from livery roles (paletteBg/paletteFg/paletteAccent);
+// radius:0 throughout. Deliberately plain: a flat pane, a thumbnail grid,
+// and a one-pixel selection border. No decorative styling.
 
 import QtQuick
 import Quickshell
@@ -39,7 +39,7 @@ PanelWindow {
     id: root
 
     // ── Note dependency (injected by shell.qml) ────────────────────────────
-    required property var notes
+    required property var livery
 
     // ── Visibility gate (mirrors AoideLauncher) ────────────────────────────
     property bool shown: false
@@ -138,20 +138,22 @@ PanelWindow {
         onClicked: root.hide()
         Rectangle {
             anchors.fill: parent
-            color: Qt.rgba(Qt.color(root.notes.paletteFg).r,
-                           Qt.color(root.notes.paletteFg).g,
-                           Qt.color(root.notes.paletteFg).b, 0.28)
+            color: Qt.rgba(Qt.color(root.livery.paletteFg).r,
+                           Qt.color(root.livery.paletteFg).g,
+                           Qt.color(root.livery.paletteFg).b, 0.28)
         }
     }
 
-    // ══ THE SUMMON PANE ══════════════════════════════════════════════════════
-    GadgetFrame {
+    // ══ THE SUMMON PANE — a plain flat rectangle, no frame, no title. ════════
+    Rectangle {
         id: pane
         anchors.centerIn: parent
         width: 620
-        notes: root.notes
-        title: "wallpaper.summon"
-        glassOpacity: 0.9
+        height: 404
+        radius: 0
+        color: root.livery.paletteBg
+        border.color: root.livery.paletteFg
+        border.width: 1
 
         MouseArea { anchors.fill: parent; onClicked: {} }   // swallow pane clicks
 
@@ -184,8 +186,8 @@ PanelWindow {
         }
 
         Column {
-            width: parent.width
-            spacing: 8
+            anchors.centerIn: parent
+            width: parent.width - 24
 
             // ── Cover grid ────────────────────────────────────────────────────
             GridView {
@@ -205,8 +207,8 @@ PanelWindow {
                 Text {
                     anchors.centerIn: parent
                     visible: root.covers.length === 0
-                    text: "no covers in song/covers/ ♪(´ε｀ )"
-                    color: root.notes.paletteFg
+                    text: "no covers in song/covers/"
+                    color: root.livery.paletteFg
                     opacity: 0.5
                     font.family: "monospace"
                     font.pixelSize: 13
@@ -220,22 +222,21 @@ PanelWindow {
                     width: grid.cellWidth
                     height: grid.cellHeight
 
-                    // Selected thumb gets the launcher's accent-box treatment.
+                    // Plain cell: thumbnail, a one-pixel accent border when
+                    // selected, nothing otherwise.
                     Rectangle {
                         anchors.fill: parent
                         anchors.margins: grid.gutter / 2
                         radius: 0
-                        color: Qt.rgba(Qt.color(root.notes.paletteBg).r,
-                                       Qt.color(root.notes.paletteBg).g,
-                                       Qt.color(root.notes.paletteBg).b, 0.35)
-                        border.color: cell.isSel ? root.notes.paletteAccent
-                                                 : root.notes.wireCyan
-                        border.width: cell.isSel ? 2 : 1
+                        color: "transparent"
+                        border.color: cell.isSel ? root.livery.paletteAccent
+                                                 : "transparent"
+                        border.width: 1
 
                         Image {
                             id: thumb
                             anchors.fill: parent
-                            anchors.margins: cell.isSel ? 3 : 2
+                            anchors.margins: 2
                             source: (cell.modelData && cell.modelData.path)
                                     ? "file://" + cell.modelData.path : ""
                             sourceSize.width: 320
@@ -246,30 +247,17 @@ PanelWindow {
                             smooth: true
                         }
 
-                        // Selected wash over the whole cell (the "current" read).
-                        Rectangle {
-                            anchors.fill: parent
-                            visible: cell.isSel
-                            color: Qt.rgba(Qt.color(root.notes.paletteAccent).r,
-                                           Qt.color(root.notes.paletteAccent).g,
-                                           Qt.color(root.notes.paletteAccent).b, 0.14)
-                        }
-
-                        // Filename callout along the bottom.
+                        // Filename along the bottom, plain solid strip.
                         Rectangle {
                             anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                             height: 18
-                            color: Qt.rgba(Qt.color(root.notes.paletteBg).r,
-                                           Qt.color(root.notes.paletteBg).g,
-                                           Qt.color(root.notes.paletteBg).b, 0.62)
+                            color: root.livery.paletteBg
                             Text {
                                 anchors { left: parent.left; leftMargin: 6; right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
                                 text: (cell.modelData && cell.modelData.name) ? cell.modelData.name : ""
-                                color: root.notes.paletteFg
-                                opacity: cell.isSel ? 1.0 : 0.8
+                                color: root.livery.paletteFg
                                 font.family: "monospace"
                                 font.pixelSize: 11
-                                font.bold: cell.isSel
                                 elide: Text.ElideRight
                             }
                         }
