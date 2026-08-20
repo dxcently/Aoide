@@ -630,6 +630,15 @@ for; a reader wanting "is something running" reads `activity`/`state`, not
 this. Same lifecycle as `say`: absent for shells and until the session's first
 tool call, readers tolerate both forms and round-trip fields they do not know.
 
+**Additive in v0:** a session record MAY also carry an optional `logPath`
+(string) — the absolute path to the pty-master transcript of a HEADLESS
+`aoide conduct` session (`state/sessions/<sessionId>.log`, below). Stamped
+once, right after the session registers, by `aoide conduct --headless`; every
+INTERACTIVE session (conduct with a real controlling tty, `graph wrap`, a
+hook-only agent) never sets it. Absent means "no headless log" (the common
+case); readers must tolerate both forms and round-trip fields they do not
+know.
+
 ### `song/stage/projects.json` — **v0**
 
 Registered project anchor roots for the graph. Written by
@@ -776,6 +785,20 @@ block carries the optional `fiveHour` / `sevenDay` / `sevenDayOpus` /
 When the live fetch fails (the common case off a personal box), the `live`
 block degrades to, e.g., `{ "ok": false, "error": "unauthorized (consumer
 OAuth restricted to Claude Code)" }` and the widget falls back to `local`.
+
+### `state/sessions/<sessionId>.log` — **v0**
+
+The pty-master transcript of one HEADLESS `aoide conduct --headless` session —
+raw bytes read off the pty, mirrored verbatim as they arrive (no framing, no
+encoding, not necessarily valid UTF-8). Lives in the same gitignored
+root-runtime `state/` dir as `usage.json` (state-dir resolution as above), one
+file per headless session, created on first write and opened append-only for
+the session's whole lifetime. Append-only and UNROTATED — a deliberate known
+gap, not a design goal: nothing truncates or rolls this file, so a
+long-running or noisy headless session grows its log without bound. Written
+only by `aoide conduct --headless`; an interactive `conduct` session never
+creates one. The session's `sessions.json` record (above) publishes this
+file's absolute path as `logPath` the moment it's open.
 
 ### `state/a2a-agents.json` — **v0**
 
