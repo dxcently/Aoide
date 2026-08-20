@@ -54,22 +54,39 @@ PanelWindow {
     // -- The dismiss clock -- one map id -> epoch-ms deadline (0 = never) ----
     property var deadlines: ({})
     property var lapsed: ({})
+    // id -> receivedAt of the arrival currently tracked. dunst's
+    // stack_duplicates reuses ONE notification id for a repeated identical
+    // toast (e.g. two back-to-back "nothing to reap" pings carry the same
+    // DUNST_ID), but aoide herald push still stamps a fresh receivedAt on
+    // every call -- so the record genuinely changed even though its id
+    // didn't. Without this check, lapsed[id] latches true the first time
+    // that id's card expires and carries forward onto every LATER push
+    // reusing that id -- the popup silently stops showing that id's result
+    // forever. Ported from sonata's herald.qml, same shared pipeline, same
+    // bug.
+    property var arrivals: ({})
     property int epoch: 0
 
     function ingest(arr) {
         var now = Date.now()
         var dl = {}
         var lp = {}
+        var av = {}
         for (var i = 0; i < arr.length; i++) {
             var r = arr[i]
             if (!r || r.id === undefined) continue
             var id = "" + r.id
+            var receivedAt = "" + (r.receivedAt || "")
+            var sameArrival = root.arrivals[id] !== undefined && root.arrivals[id] === receivedAt
             var t = (r.timeoutMs !== undefined) ? (r.timeoutMs | 0) : 0
-            dl[id] = (id in root.deadlines) ? root.deadlines[id] : (t > 0 ? now + t : 0)
-            if (root.lapsed[id]) lp[id] = true
+            dl[id] = (sameArrival && id in root.deadlines) ? root.deadlines[id]
+                                            : (t > 0 ? now + t : 0)
+            if (sameArrival && root.lapsed[id]) lp[id] = true
+            av[id] = receivedAt
         }
         root.deadlines = dl
         root.lapsed = lp
+        root.arrivals = av
         root.records = arr
         root.epoch++
     }

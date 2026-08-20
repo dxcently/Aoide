@@ -46,6 +46,15 @@ Item {
     required property var dock
     required property var stagingEngine
 
+    // WidgetSlot sizes ITSELF off this item's implicitWidth/Height (an
+    // Item's implicitWidth otherwise defaults to 0, or to its children's
+    // extent) -- exactly backwards for a whole-width surface like the bar,
+    // and nothing anchors this Item to the window's real width on its own.
+    // Binding implicitWidth to parent.width would be a loop (WidgetSlot's
+    // own width already reads off implicitWidth): bind width directly
+    // instead, the same fix sonata's bar.qml carries for the identical
+    // hazard.
+    width: parent ? parent.width : implicitWidth
     implicitWidth: parent ? parent.width : 0
     implicitHeight: 26
 
