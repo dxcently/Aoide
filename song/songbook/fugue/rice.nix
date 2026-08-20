@@ -11,8 +11,23 @@
 # HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.livery.
 # All livery values are literal nix expressions (no song/ runtime reads).
 { lib, config, ... }:
+let
+  song = import ../../../lib/song.nix { inherit lib; };
+
+  # `_widgets/` is the widget-record shelf (lib/song.nix's header) — one
+  # plain function per slot (`bar`, `herald`), rolled up and bound to owner
+  # "fugue" by `_widgets/default.nix`. `composeSong` validates both records
+  # and folds them into `arrangement.widgets` (empty today: both leave `kind`
+  # unset, so neither is a declared registry entry — see each file for why).
+  # Adding this shelf is what lets another song's composition borrow fugue's
+  # `bar`/`herald` bodies: `mkWidget` binds `owner` from its caller, so an
+  # `owner = "fugue"` record can only be minted from a fugue-owned roll-up.
+  widgets = import ./_widgets { inherit lib; };
+in
 {
   config = lib.mkIf (config.aoide.song == "fugue") {
+
+    aoide.arrangement.widgets = (song.composeSong widgets).arrangement.widgets;
 
     # ── Palette tier — graphite/teal/lime, cool and flat ────────────────────
     aoide.livery.palette = {
