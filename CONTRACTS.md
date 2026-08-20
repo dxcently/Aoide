@@ -221,6 +221,12 @@ option system keeps storing the song's authored values inert; no config-side
 | `override.urgent`  | `nullOr hex`  | `null`  | `palette.urgent` and its twins |
 | `override.hot`     | `nullOr hex`  | `null`  | `palette.hot` and its twins; sets it directly when the song left it `null` |
 
+Additionally, `override.base16.<slot>` / `override.{bar,notif,window}.<field>` set
+that ONE named key slot-exactly — no propagation, no participation in the
+recolour pass — and a named key wins over the recolour on its own slot;
+naming a `base16` slot when the performed song carries no base16 scheme is an
+eval error.
+
 **Migration to v1:** the update playbook migrates `song/songbook/*/rice.nix`
 and `livery.json` from v0 to v1 when the design-system workstream lands v1.
 

@@ -145,12 +145,70 @@ let
   # and the song/stage/livery.json seed). A recolour, never a re-key: slots
   # not carrying an overridden anchor's value stay the song's. Same
   # nullOr-hex-per-field shape as the component tier above (mkComponent).
-  overrideType = mkComponent {
-    bg = "Venue recolour of the song's bg anchor (and every slot carrying its value).";
-    fg = "Venue recolour of the song's fg anchor (and every slot carrying its value).";
-    accent = "Venue recolour of the song's accent anchor (and every slot carrying its value).";
-    urgent = "Venue recolour of the song's urgent anchor (and every slot carrying its value).";
-    hot = "Venue recolour of the song's hot anchor; when the song left hot null, sets it directly.";
+  #
+  # Phase 1b (named-key overrides): sibling sub-tiers `base16`/`bar`/`notif`/
+  # `window` set ONE slot exactly — no propagation, no value-match
+  # participation (lib/livery.nix's `resolve` applies these as a second,
+  # overlay pass). No name collision with the five anchor fields above
+  # (anchors are bg/fg/accent/urgent/hot; the sub-tiers are base16/bar/
+  # notif/window). `base16` is its OWN all-optional submodule here, built
+  # from `base16Roles` the same way `base16Type` is (NOT `base16Type`
+  # itself — that one requires all 16 slots once given, right for a song's
+  # scheme, wrong for a slot-exact override where every field must default
+  # to null). `bar`/`notif`/`window` reuse `barType`/`notifType`/`windowType`
+  # verbatim: those are already nullOr-per-field with default null (the
+  # component-tier shape), so an unset override field really is "no
+  # override" and reuse costs nothing — minting override-worded twins would
+  # be churn for the same shape.
+  overrideType = types.submodule {
+    options =
+      lib.mapAttrs
+        (
+          _: descr:
+          mkOption {
+            type = types.nullOr hexColor;
+            default = null;
+            description = descr;
+          }
+        )
+        {
+          bg = "Venue recolour of the song's bg anchor (and every slot carrying its value).";
+          fg = "Venue recolour of the song's fg anchor (and every slot carrying its value).";
+          accent = "Venue recolour of the song's accent anchor (and every slot carrying its value).";
+          urgent = "Venue recolour of the song's urgent anchor (and every slot carrying its value).";
+          hot = "Venue recolour of the song's hot anchor; when the song left hot null, sets it directly.";
+        }
+      // {
+        base16 = mkOption {
+          type = types.submodule {
+            options = lib.mapAttrs (
+              slot: role:
+              mkOption {
+                type = types.nullOr hexColor;
+                default = null;
+                description = "Slot-exact venue override of base16 ${slot} (${role}). No propagation.";
+              }
+            ) base16Roles;
+          };
+          default = { };
+          description = "Slot-exact base16 overrides — sets THAT slot, propagates nothing.";
+        };
+        bar = mkOption {
+          type = barType;
+          default = { };
+          description = "Slot-exact bar.* overrides — sets that field, propagates nothing.";
+        };
+        notif = mkOption {
+          type = notifType;
+          default = { };
+          description = "Slot-exact notif.* overrides — sets that field, propagates nothing.";
+        };
+        window = mkOption {
+          type = windowType;
+          default = { };
+          description = "Slot-exact window.* overrides — sets that field, propagates nothing.";
+        };
+      };
   };
 
   # ── Base16 scheme submodule (optional full-scheme tier) ───────────────────
