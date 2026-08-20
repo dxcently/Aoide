@@ -773,3 +773,29 @@ Concepts, beside [[Conductor-Channel]]).
 **Flag:** the queued installable onboarding skill (agent-read dir, wired via
 hooks/commands) folds this page's spec into itself as part of collapsing the
 AGENTS.md/guide.rs duplication — not done in this pass.
+
+## [2026-08-20] fix | per-profile `graph send --submit` keystroke — the kimi `\r` footgun closed (#52 Phase 2)
+
+`AgentProfile` (`protocol/src/agents.rs`) gained `submit_key`: `\n` for claude
+and pi, `\r` for kimi (ground-truthed on a live screen — Conductor-Channel's
+`graph send` entry). `graph send`'s delivery path (`conduct/src/graph/
+send.rs::session_send`) now appends the TARGET session's own `submit_key`,
+resolved from its registered agent via `profile_for_agent` (promoted
+`pub(in crate::graph)` from `permit.rs`, the same resolver `graph permit`
+already used — no second lookup of the profile table); an unregistered or
+empty agent falls back to claude's `\n`, same as that resolver always has.
+Ordering is unchanged and load-bearing: the submit byte still appends to the
+ORIGINAL text before the sender-provenance prefix is prepended.
+
+Closes the manual workaround the wiki previously documented: a `graph send
+--submit` against a kimi target used to type the line without submitting it,
+requiring a separate `\r` send. `Conductor-Channel.md`, `Session-Graph.md`,
+`Agent-Hooking.md`, and `references/cli/Graph-and-Conduct.md` are corrected —
+the byte is now resolved automatically, not a caller's manual step.
+`CONTRACTS.md` §4 gained one sentence at the `pending.json` submit entry:
+the queued flag means "submit the line", the concrete keystroke resolves at
+delivery time.
+
+**Flag:** `AOIDE-DEV.md:281-282` still describes the old `\n`-only /
+separate-`\r`-send behavior and is now stale — left untouched
+(orchestrator-owned file per the brief); orchestrator to correct.

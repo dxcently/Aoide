@@ -219,7 +219,7 @@ timeout = 5
 
 An entry carries ONLY `event`/`command`/`timeout` — extra fields (a claude-style `matcher`) make kimi's config fail to load.
 
-Operator notes: kimi's TUI submits on `\r`, not `\n` — see [[Conductor-Channel]] for what that means for `graph send --submit`. And kimi's model aliases are provider-prefixed on the CLI too (`-m kimi-code/kimi-for-coding`; a bare alias errors `config.invalid`).
+Operator notes: kimi's TUI submits on `\r`, not `\n` — `graph send --submit` resolves this automatically from the target's own agent profile (see [[Conductor-Channel]]), so no manual workaround is needed. And kimi's model aliases are provider-prefixed on the CLI too (`-m kimi-code/kimi-for-coding`; a bare alias errors `config.invalid`).
 
 ### Any plain CLI agent (no hook system)
 
@@ -257,7 +257,7 @@ Pass `--parent "$AOIDE_SESSION_ID"` (or the `--parent` flag on `session start`) 
 - `aoide guide` — the terse in-CLI version of this page.
 - [[aoide-cli]] — the full command tree, including `conduct` and the interactive `conductor` TUI that renders every door's sessions.
 - [[Agent-Interface]] — the CLI trunk the hook door and `hooks install` live on.
-- [[Conductor-Channel]] — the send/injection semantics, including the kimi `\r` submit caveat.
+- [[Conductor-Channel]] — the send/injection semantics, including per-profile submit keystroke resolution (`\n`, or `\r` for kimi).
 - [[Terminal-Commander]] — the graph concept (projects anchor sessions by cwd).
 - [[shellbridge]] — its socket accept loop is live for the window-jump verb (`focuswindow`), but session *registration* (start/phase/end) still has no socket verb; the CLI doors above remain the writers — and the permanent fallback.
 - [[Widget-Bridge-Contract]] — the full `sessions.json` field contract and canonical-state rules the states above feed.

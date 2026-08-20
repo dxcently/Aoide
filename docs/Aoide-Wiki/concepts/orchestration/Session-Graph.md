@@ -111,12 +111,13 @@ the registry entry should follow).
   mechanism in [[Conductor-Channel]].
 - **`graph send`** (the gated injection door — full semantics in
   [[Conductor-Channel]]) types into a conducted session's control socket;
-  `--submit` appends `\n`. One per-harness operator fact: kimi's TUI submits
-  on `\r`, not `\n`, so against a kimi target `--submit` types the line
-  WITHOUT submitting it — deliver `\r` as a separate send. Sends without
-  standing authorization queue in `song/stage/pending.json`; **`graph pending
-  list|approve|deny`** is the resolve surface over that queue — `approve`
-  re-drives a held entry through this same door with `--yes`.
+  `--submit` appends the target harness's own submit keystroke, resolved at
+  delivery time from the target session's agent profile — `\n` for claude and
+  pi, `\r` for kimi, whose TUI submits on carriage return rather than
+  newline. Sends without standing authorization queue in
+  `song/stage/pending.json`; **`graph pending list|approve|deny`** is the
+  resolve surface over that queue — `approve` re-drives a held entry through
+  this same door with `--yes`.
 
 A durability rule spans the layer: the stage rewriters **round-trip unknown
 fields** (serde flatten), so graph management never clobbers fields other

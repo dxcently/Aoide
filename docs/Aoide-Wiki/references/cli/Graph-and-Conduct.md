@@ -260,8 +260,10 @@ aoide graph send --id <id> [--submit] [--yes] [--from <sender>] -- <text …>
   from?}` to `song/stage/pending.json` (atomic, under the stage lock; `from`
   carries the resolved sender attribution when one resolves, omitted
   otherwise). Delivered path — opens the target's control socket
-  (`$XDG_RUNTIME_DIR/aoide/session-<id>.sock`) and writes `<text>` (+ `\n` on
-  `--submit`), prefixed with `from <sender>: ` on its first line when a sender
+  (`$XDG_RUNTIME_DIR/aoide/session-<id>.sock`) and writes `<text>` (+ the
+  target's own submit keystroke on `--submit`, resolved at delivery time from
+  the target session's agent profile — `\n` for claude and pi, `\r` for
+  kimi), prefixed with `from <sender>: ` on its first line when a sender
   resolves AND the text names the node (below); then auto-renames the node
   (`title` in `sessions.json` + re-stage) to a one-line ≤60-char form of the
   UNPREFIXED text — UNLESS the text carries no letter at all (a bare keystroke
