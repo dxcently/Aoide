@@ -699,6 +699,31 @@ parsed as markup or as a command.
 }
 ```
 
+### `song/stage/pending.json` — **v0**
+
+The held-injection queue: entries `aoide graph send` writes when its gate
+doesn't clear immediate delivery (no `--yes`, no autogate match), and the
+A2A door's own `message/send` Inject path reuses VERBATIM when its admission
+check doesn't clear a caller either (`crates/server/src/a2a.rs::do_inject`) —
+one queue, two writers, no second pending-queue implementation. Read and
+resolved by `aoide graph pending list/approve/deny`: `list` enumerates every
+entry (a malformed one — a stale hand-edited line — surfaces as
+`"state": "malformed"` rather than failing the read); `approve` re-drives the
+entry through the SAME gated injection door with `--yes`, in-process; `deny`
+drops it. Either resolution REMOVES the entry from this file — the record of
+what happened is the audit log (`graph.pending.approve` / `.deny`), not a
+persisted "resolved" archive. An entry carries no id of its own; `list`'s
+`id` is its array position, which shifts on the next resolve.
+
+```json
+{
+  "schemaVersion": "0",
+  "pending": [
+    { "sessionId": "conduct-6364-1786576226", "text": "/compact keep only operational records", "submit": true, "queuedAt": "2026-08-13T14:01:10Z" }
+  ]
+}
+```
+
 ### `state/usage.json` — **v0**
 
 Account/usage runtime — lives in the gitignored root-runtime `state/` dir
