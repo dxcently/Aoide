@@ -350,8 +350,10 @@ aoide graph permit --id <id> [--tool <name>] [--what <text>] [--json]
 
 - **Reads:** `song/stage/sessions.json` (record, `conductable`/`socket`,
   `title`, `agent` → profile); the harness's verified permission-prompt keys
-  (`aoide_protocol::agents::PermissionKeys` — only claude's are verified:
-  approve `1`, deny `3`).
+  (`aoide_protocol::agents::PermissionKeys` — claude and kimi both carry
+  verified keys: approve `1` (once-only; the digit alone chooses AND
+  confirms, no trailing submit byte), deny `3`; pi has none and a summons
+  stays off for it).
 - **Writes:** none directly. Publishes the summons card by sending one
   newline-delimited JSON line `{"cmd": "heraldpush", "notification": {…}}` to
   the shellbridge socket `$XDG_RUNTIME_DIR/aoide/shellbridge.sock`; the daemon

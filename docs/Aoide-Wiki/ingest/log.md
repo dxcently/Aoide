@@ -799,3 +799,22 @@ delivery time.
 **Flag:** `AOIDE-DEV.md:281-282` still describes the old `\n`-only /
 separate-`\r`-send behavior and is now stale — left untouched
 (orchestrator-owned file per the brief); orchestrator to correct.
+
+## [2026-08-20] fix | kimi's permission-prompt keys, verified on a live screen (#52 follow-up)
+
+`KIMI_PROFILE.permission_keys` (`protocol/src/agents.rs`) was `None` —
+kimi's own permission prompt had never been read on a live screen, so
+`graph permit` refused to summon it rather than guess. A headless
+conducted kimi driven to a real shell-permission prompt settled it: `▶ 1.
+Approve once / 2. Approve for this session / 3. Reject / 4. Reject with
+feedback`, and injecting the bare byte `1` (no trailing `\r`) fired
+approval immediately — the digit alone chooses AND confirms, same as
+claude's. `permission_keys` is now `Some({approve: "1", deny: "3"})`,
+matching claude's shape (never `"2"`, the session-wide allow-all; `"4"` is
+reject-with-feedback, not the bare deny). `permit.rs`'s
+`only_claude_carries_verified_permission_keys_today` test — name and
+assertion both stale — is renamed
+`claude_and_kimi_carry_verified_permission_keys_pi_does_not` and now pins
+kimi's keys instead of asserting they're absent; pi's stay `None` (no live
+probe yet). `references/cli/Graph-and-Conduct.md`'s `graph permit` entry
+corrected to match — no other page asserted kimi refuses a summons.
