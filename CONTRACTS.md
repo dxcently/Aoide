@@ -1319,7 +1319,7 @@ that command being non-empty. Fixed in `a2a.rs`:
   **the off-path**: every decision below becomes a no-op and behavior is
   byte-identical to before this amendment — pinned by
   `effective_origin_is_the_identity_function_when_no_token_is_configured`
-  and `spawn_authorized_always_allows_when_no_token_is_configured`
+  and `token_authorized_always_allows_when_no_token_is_configured`
   (`a2a.rs` tests), on top of the existing unmodified
   `should_deliver_now_covers_every_origin_autogate_combination` regression
   pin from the 2026-08-14 amendment.
@@ -1362,6 +1362,30 @@ that command being non-empty. Fixed in `a2a.rs`:
 - Every outcome (Spawn's new `-32005` rejection included) still audits
   through the SAME `Door::A2a` log every other §6 outcome already uses — no
   second logging path.
+
+**Amendment (2026-08-20, Phase G): the READ verbs are token-gated by the same
+switch.** The 2026-08-19 amendment gated Spawn and the Inject-delivery origin,
+but left the read verbs — `tasks/get`, `aoide/graphSummary`, and the SSE pair
+(`message/stream`, `tasks/resubscribe`) — open regardless of the token. On
+loopback that is harmless, but the moment the door faces a network,
+`aoide/graphSummary` hands any caller the operator's WHOLE resolved session
+graph, and `tasks/get`/`tasks/resubscribe` leak any session's live state.
+Closed by the same predicate that gates Spawn, now named `token_authorized`
+(the old `spawn_authorized`; one predicate, since the question is identical —
+does the caller hold a valid token when one is required):
+
+- `handle_jsonrpc` computes the gate once and short-circuits `tasks/get` and
+  `aoide/graphSummary` to `-32005` (the shared `unauthorized()` value) when a
+  token is configured and no valid bearer is presented — *before* the read
+  runs, so a real session id still returns the error, never its state.
+- `stream_task` gates BOTH SSE reads at the top, before `message_send` runs,
+  so an unauthenticated `message/stream` neither injects nor spawns; the
+  `-32005` arrives as the stream's single SSE error event.
+- Off-path (no token, today's default) is byte-identical to before — pinned
+  by `read_verbs_stay_open_when_no_token_is_configured`; the gate itself by
+  `read_verbs_are_token_gated_when_a_token_is_configured`. `message/send` is
+  unchanged (it still runs its own `classify_token` internally for
+  `effective_origin`, so it is not re-gated in the dispatcher).
 
 ### Session-DAG integration (client side)
 
