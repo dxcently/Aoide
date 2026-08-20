@@ -953,7 +953,7 @@ PanelWindow {
             height: book.height + 12
             visible: false
             color: "transparent"
-            border.color: "white"
+            border.color: root.livery.paletteAccent
             border.width: 6
         }
         MultiEffect {
@@ -971,7 +971,7 @@ PanelWindow {
             anchors.margins: -4
             visible: false
             color: "transparent"
-            border.color: "white"
+            border.color: root.livery.paletteAccent
             border.width: 5
         }
         MultiEffect {

@@ -56,15 +56,20 @@
 // manuscript paper, no glass and no gloss. The page fill is livery.paletteBg
 // at full alpha (Qt.rgba(paletteBg.r, .g, .b, 1.0)); there is no blur behind
 // it and no gradient sheen on top — the strip reads as solid paper. The
-// structural ink stays BLACK (#000000 staff lines, barlines, playhead), but
-// the TEXT ink is now the song's umber (livery.paletteFg #423420) drawn CLEAN
-// — the old white legibility outline is dropped, since dark text on the
-// opaque sheet needs no halo (that outline was a relic of the old dark bar
-// and only muddied the type on cream).
+// structural ink (staff lines, barlines, page rail) follows livery.barFg,
+// not a literal — sonata's own bar.fg (#2f2a33) sits near-black on the
+// marble page, so this reads the same as the old #000000 did here, but a
+// song that borrows this widget carries its own bar foreground with it
+// (fugue's bar.fg is null, falling through to paletteFg, its bone-white
+// #e4e6eb — the staff stays legible on graphite instead of vanishing). The
+// TEXT ink is the song's umber (livery.paletteFg #423420) drawn CLEAN — the
+// old white legibility outline is dropped, since dark text on the opaque
+// sheet needs no halo (that outline was a relic of the old dark bar and
+// only muddied the type on cream).
 // One restrained STATE accent survives from the song (LiveryState): the ACTIVE
 // workspace note-head fills with paletteAccent, the BLOCKED ✎ pulse + low battery
 // go glitchPink, and open/hover toggles (volume) flash paletteAccent.
-// Everything at rest is black.
+// Everything at rest follows livery.barFg.
 //
 // khoa, 2026-08-15 — THE AUDIO CELLS SPLIT IN TWO. Hovering an audio cell used
 // to open the whole colonnade; it now opens a small CUE stele (the `AudioCue`
@@ -1257,7 +1262,7 @@ component WorkspaceRow: Item {
         width: 1.5
         height: root.staffSpan + 4
         radius: 0.5
-        color: "#000000"
+        color: root.livery.barFg
         opacity: 0.7
         anchors.verticalCenter: parent.verticalCenter
     }
@@ -1286,7 +1291,7 @@ component WorkspaceRow: Item {
         anchors.fill: page
         radius: 0
         color: "transparent"
-        border.color: "#000000"
+        border.color: root.livery.barFg
         border.width: 1
         opacity: 0.5
     }
@@ -1303,7 +1308,7 @@ component WorkspaceRow: Item {
             anchors.rightMargin: root.edgePad + 10
             height: 1
             y: root.staffMid + (index - 2) * root.staffGap
-            color: "#000000"
+            color: root.livery.barFg
             opacity: 0.55
         }
     }
@@ -1632,12 +1637,12 @@ component WorkspaceRow: Item {
             spacing: 2
             Rectangle {
                 width: 1.5; height: root.staffSpan + 4; radius: 0.5
-                color: "#000000"; opacity: 0.7
+                color: root.livery.barFg; opacity: 0.7
                 anchors.verticalCenter: parent.verticalCenter
             }
             Rectangle {
                 width: 3; height: root.staffSpan + 4; radius: 0.5
-                color: "#000000"; opacity: 0.9
+                color: root.livery.barFg; opacity: 0.9
                 anchors.verticalCenter: parent.verticalCenter
             }
         }
@@ -2307,7 +2312,7 @@ component WorkspaceRow: Item {
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: root.battBar(root.battPct) + " " + root.battPct + "%"
-                color: root.battWarn ? root.livery.paletteUrgent : "#14141a"
+                color: root.battWarn ? root.livery.paletteUrgent : root.livery.paletteFg
                 font.family: "monospace"
                 font.pixelSize: 14
             }
@@ -2315,7 +2320,7 @@ component WorkspaceRow: Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 visible: root.battTime().length > 0
                 text: root.battTime()
-                color: "#14141a"
+                color: root.livery.paletteFg
                 opacity: 0.75
                 font.family: "monospace"
                 font.pixelSize: 11
