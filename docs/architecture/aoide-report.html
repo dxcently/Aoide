@@ -1,4 +1,4 @@
-<title>AoideOS — Architecture</title>
+<title>Aoide — Architecture</title>
 <style>
   :root {
     --ground:#DEE5E0; --surface:#F5F8F4; --raised:#FFFFFF;
@@ -15,7 +15,7 @@
       --ink:#E7EDE9; --muted:#94A49B; --faint:#7d97901a;
       --line:#242F34; --line-strong:#33424a;
       --accent:#54B7A0; --accent-ink:#7fd0bd; --bronze:#CB9860; --bronze-ink:#e0ad78;
-      --plate:#EEF1EC; --plate-line:#CBD5CC;
+      --plate:#161e21; --plate-line:#2a363c;
       --good:#54B7A0; --warn:#CB9860; --wait:#8b9a92;
       --shadow:0 1px 2px #0006, 0 10px 30px #0004;
     }
@@ -23,13 +23,15 @@
   :root[data-theme="light"] {
     --ground:#DEE5E0; --surface:#F5F8F4; --raised:#FFFFFF; --ink:#16211D; --muted:#556860;
     --line:#CAD6CC; --line-strong:#AEBDB0; --accent:#2F7D6B; --accent-ink:#1E5B4D;
-    --bronze:#A9743B; --bronze-ink:#8A5B26; --good:#2F7D6B; --warn:#A9743B; --wait:#7C8A83;
+    --bronze:#A9743B; --bronze-ink:#8A5B26; --plate:#EEF1EC; --plate-line:#CBD5CC;
+    --good:#2F7D6B; --warn:#A9743B; --wait:#7C8A83;
     --shadow:0 1px 2px #16211d0f, 0 8px 24px #16211d0a;
   }
   :root[data-theme="dark"] {
     --ground:#0E1316; --surface:#141B1E; --raised:#182024; --ink:#E7EDE9; --muted:#94A49B;
     --line:#242F34; --line-strong:#33424a; --accent:#54B7A0; --accent-ink:#7fd0bd;
-    --bronze:#CB9860; --bronze-ink:#e0ad78; --good:#54B7A0; --warn:#CB9860; --wait:#8b9a92;
+    --bronze:#CB9860; --bronze-ink:#e0ad78; --plate:#161e21; --plate-line:#2a363c;
+    --good:#54B7A0; --warn:#CB9860; --wait:#8b9a92;
     --shadow:0 1px 2px #0006, 0 10px 30px #0004;
   }
 
@@ -67,20 +69,18 @@
   .prose code, .caption code, td code, .ledger code { font-family: ui-monospace, monospace; font-size:.86em; background:var(--faint); padding:.06em .35em; border-radius:4px; }
 
   .plate { background:var(--plate); border:1px solid var(--plate-line); border-radius:10px; padding:1.4rem 1rem; overflow-x:auto; box-shadow:var(--shadow); }
-  .plate pre.mermaid { margin:0; display:flex; justify-content:center; min-width:min-content; background:transparent; }
+  .plate svg { display:block; margin:0 auto; width:100%; height:auto; }
+  .plate svg text { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
   .plate-foot { font-family: ui-monospace, monospace; font-size:.68rem; color:var(--muted); margin:.7rem .2rem 0; letter-spacing:.04em; }
   .legend { display:flex; flex-wrap:wrap; gap:.9rem 1.4rem; margin:1.2rem .1rem 0; font-size:.82rem; color:var(--muted); }
   .legend span { display:inline-flex; align-items:center; gap:.5rem; }
-  .sw { width:.85rem; height:.85rem; border-radius:3px; border:1px solid #0002; flex:none; }
-
-  /* ASCII tree blocks */
-  .ascii-cap { font-family:ui-monospace,monospace; font-size:.72rem; letter-spacing:.1em; text-transform:uppercase; color:var(--accent-ink); margin:1.4rem 0 .5rem; }
-  pre.ascii {
-    margin:0; padding:1.1rem 1.2rem; background:var(--surface); border:1px solid var(--line);
-    border-left:3px solid var(--accent); border-radius:8px; overflow-x:auto;
-    font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size:.8rem; line-height:1.5; color:var(--ink);
-    box-shadow:var(--shadow); tab-size:2;
-  }
+  .sw { width:.85rem; height:.85rem; border-radius:3px; border:1px solid var(--line-strong); flex:none; }
+  .sw.solid-accent { border:2px solid var(--accent); background:transparent; }
+  .sw.solid-ink { border:2px solid var(--ink); background:transparent; }
+  .sw.filedoc { background:var(--plate); border:1px solid var(--line-strong); }
+  .sw.dashed { border:1.5px dashed var(--muted); background:transparent; }
+  .sw.kernel { background:color-mix(in srgb, var(--accent) 18%, transparent); border:2px solid var(--accent); }
+  .sw.unwired { border:1.5px solid var(--line-strong); background:transparent; }
 
   /* Process / mapping tables */
   .tbl-scroll { overflow-x:auto; border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); background:var(--surface); }
@@ -93,7 +93,16 @@
   .tag { display:inline-block; font-family:ui-monospace,monospace; font-size:.66rem; letter-spacing:.05em; padding:.12rem .45rem; border-radius:4px; border:1px solid currentColor; }
   .tag.live { color:var(--good); } .tag.skel { color:var(--bronze); } .tag.perterm { color:var(--muted); }
 
-  /* Phase ledger */
+  /* ASCII tree blocks */
+  .ascii-cap { font-family:ui-monospace,monospace; font-size:.72rem; letter-spacing:.1em; text-transform:uppercase; color:var(--accent-ink); margin:1.4rem 0 .5rem; }
+  pre.ascii {
+    margin:0; padding:1.1rem 1.2rem; background:var(--surface); border:1px solid var(--line);
+    border-left:3px solid var(--accent); border-radius:8px; overflow-x:auto;
+    font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size:.8rem; line-height:1.5; color:var(--ink);
+    box-shadow:var(--shadow); tab-size:2;
+  }
+
+  /* Phase / plan ledger */
   .ledger { display:flex; flex-direction:column; gap:.5rem; }
   .lrow { display:grid; grid-template-columns:auto 1fr auto; gap:.9rem; align-items:center; padding:.7rem .95rem; background:var(--surface); border:1px solid var(--line); border-radius:8px; }
   .lrow .ph { font-family:Georgia,serif; font-style:italic; font-weight:600; color:var(--accent); font-size:1rem; min-width:1.4rem; }
@@ -123,273 +132,178 @@
 
 <div class="wrap">
   <header>
-    <p class="eyebrow">AoideOS · Architecture &amp; Working Report</p>
+    <p class="eyebrow">Aoide · Architecture &amp; Working Report</p>
     <h1>The muse, <span class="thin">wired for song.</span></h1>
-    <p class="dek">A living report on AoideOS: what it is, how the pieces fit (trees + graphs), and the state of the work in flight. Updated in place as the build moves.</p>
+    <p class="dek">Aoide is an app server harness. The doors are its ingress, the schema is its protocol, songs and facets are what it serves — and Quickshell is a client that happens to paint. A living report, updated in place as the build moves.</p>
     <div class="meta">
-      <span class="chip"><b>8</b> crates · <b>2</b> binaries</span>
-      <span class="chip"><b>48</b> commands</span>
+      <span class="chip"><b>10</b> crates · <b>2</b> binaries</span>
+      <span class="chip"><b>83</b> commands</span>
       <span class="chip">3 doors · one schema</span>
+      <span class="chip"><b>4</b> songs</span>
       <span class="chip">nucleus · dendrites · facets</span>
-      <span class="chip">song = rice</span>
     </div>
   </header>
 
-  <!-- OVERVIEW -->
+  <!-- WHAT IT IS -->
   <section>
-    <div class="plate-label"><span class="no">§</span><h2>What AoideOS is</h2><span class="h-line"></span><span>general</span></div>
+    <div class="plate-label"><span class="no">§</span><h2>What Aoide is</h2><span class="h-line"></span><span>general</span></div>
     <div class="prose">
-      <p>Two things wear the name, and they are <em>not</em> the same. <b>Aoide</b> is the orchestration <b>core</b> — the shell-only, headless-capable bridge layer through which agents are freely orchestrated: any agent with a shell is fully capable (no MCP required), and <b>every terminal is a conductable, tracked session by default</b>, so a central agent can speak into any other running session. <b>AoideOS</b> is the <b>distribution</b> built on that core — the NixOS flake that additionally ships the Quickshell widget toolkit (bar, dock, gadgets, the DAG/conductor surfaces) and the song/notes ricing engine. Aoide is the engine; AoideOS is the desktop around it. You <b>clone and run</b> it, not install it.</p>
-      <p>The naming thesis in one line: <b>architecture is frozen music</b> — the Nix layer is the score, the running desktop is the performance, a rice is a song the system sings.</p>
-      <p>Every capability is reachable through <b>one command registry</b> via three doors — the <b>CLI</b> (a human or script types <code>aoide &lt;cmd&gt;</code>), the <b>MCP</b> façade (an agent reaches outward for tools), and the <b>A2A</b> door (a peer agent speaks to aoide over the wire). All three derive from the same schema, so they cannot drift.</p>
+      <p>Two things wear the name. <b>Aoide</b> is the orchestration <b>core</b> — a shell-only, headless-capable <b>app server</b> for a machine and its agents: any agent with a shell is fully capable (no MCP required), and <b>every terminal is a conductable, tracked session by default</b>, so a central agent can speak into any other running session. <b>AoideOS</b> is the <b>distribution</b> built on that core — the NixOS flake that additionally ships the Quickshell desktop and the song/livery ricing engine. Aoide is the server; AoideOS is one venue it plays. You <b>clone and run</b> it, not install it.</p>
+      <p>The naming thesis in one line: <b>architecture is frozen music</b> — the Nix layer is the score, the running desktop is the performance, a rice is a <b>song</b> the system sings, and the host performing it is the <b>venue</b>.</p>
+      <p>The server framing is not a metaphor bolted on after the fact; the repo asserts it as a test any file can fail (<code>CONTRACTS.md</code> §0): <em>delete every <code>.qml</code> in the repo — is this capability still reachable from a terminal? No means it is in the wrong place.</em> One body, several doors.</p>
     </div>
   </section>
 
-  <!-- PLATE I -->
+  <!-- WHY AOIDE -->
   <section>
-    <div class="plate-label"><span class="no">I.</span><h2>The declarative body</h2><span class="h-line"></span><span>Nix · build-time</span></div>
-    <p class="caption">Everything the system <em>is</em> is declared here. <b>nucleus</b> holds the core services + the <code>aoide.*</code> option contract; <b>dendrites</b> are additive per-app integrations, each dormant until a host flips its <code>.enable</code>; <b>facets</b> are presentation surfaces. Nix <em>builds the whole OS</em> (closure, units, generations) — the running machine needs it. What decouples is the <b>rice</b> (widgets, songs, the <code>aoide</code> binary, <code>song/stage</code> JSON): plain files that'd run on another distro. The independence is the rice's, not the OS's.</p>
+    <div class="plate-label"><span class="no">§</span><h2>Why Aoide</h2><span class="h-line"></span><span>the thesis</span></div>
+    <div class="prose">
+      <p>A conventional desktop configuration is a <b>fixed product</b>. Its UI <em>is</em> the product — the bar, the theme, the launcher are the thing itself, so replacing any of them means surgery on the core: an import list edited, a config rewritten, a fork maintained. A conventional agent harness has the mirror problem: it owns a model loop but not a machine. Aoide inverts both. <b>The harness is the product; every surface — the painted desktop included — is a client that mounts</b>, and anything a client can do is reachable with only a shell.</p>
+    </div>
     <div class="plate">
-      <pre class="mermaid">
-%%{init: {'theme':'neutral','flowchart':{'curve':'basis','nodeSpacing':28,'rankSpacing':40},'themeVariables':{'fontFamily':'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize':'13px'}}}%%
-flowchart TB
-  flake["flake.nix"]:::root
-  flake --> lib["lib/ · mkHost · walk · checks · vmTest"]
-  flake --> pkg["pkgs/aoide"]:::core
-  pkg --> binA["aoide · CLI"]:::core
-  pkg --> binD["aoided · daemon"]:::core
-  flake --> mods["modules/"]
-  mods --> nuc["nucleus/ — core + option contract"]:::grpA
-  nuc --> nucx["options · packages · nix<br/>aoided · shellbridge · melete-adapter"]
-  mods --> den["dendrites/ — per-app · additive · guarded on .enable"]:::grpB
-  den --> denx["bash · kitty · neovim · yazi · firefox · git<br/>obsidian · mneme · melete · hyprland · vision · audio …"]
-  mods --> fac["facets/ — presentation surfaces"]:::grpC
-  fac --> facx["quickshell (qml + shell service)<br/>compositor (hypr deco) · stylix (base16)"]
-  flake --> hosts["hosts/ — machine configs"]:::grpD
-  hosts --> hx["yomi-strix: aoide.song · enables · hardware<br/>common: shared enables"]
-  classDef root fill:#1b2622,stroke:#1b2622,color:#eef1ec,font-weight:600;
-  classDef core fill:#d6ebe4,stroke:#2F7D6B,color:#123,font-weight:600;
-  classDef grpA fill:#e7efe9,stroke:#2F7D6B,color:#123;
-  classDef grpB fill:#efeade,stroke:#A9743B,color:#123;
-  classDef grpC fill:#e6ecef,stroke:#4a6b7a,color:#123;
-  classDef grpD fill:#eae7ef,stroke:#6b5a8a,color:#123;
-      </pre>
+      <svg viewBox="0 0 920 410" style="min-width:760px" role="img" aria-label="A fixed product contrasted with the Aoide harness and its mounted clients">
+        <!-- left panel -->
+        <text x="30" y="30" font-size="11" letter-spacing="2" fill="var(--muted)">A CONVENTIONAL RICE</text>
+        <rect x="20" y="42" width="390" height="320" rx="12" fill="var(--surface)" stroke="var(--line)"/>
+        <rect x="105" y="90" width="220" height="58" rx="8" fill="var(--raised)" stroke="var(--muted)" stroke-width="1.5"/>
+        <text x="215" y="114" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">DOTFILES + CONFIG</text>
+        <text x="215" y="132" text-anchor="middle" font-size="10" fill="var(--muted)">the UI is the product</text>
+        <line x1="215" y1="148" x2="215" y2="196" stroke="var(--muted)" stroke-width="1.5"/>
+        <rect x="65" y="196" width="300" height="64" rx="8" fill="var(--surface)" stroke="var(--muted)" stroke-width="1.5"/>
+        <text x="215" y="222" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">FIXED SURFACE</text>
+        <text x="215" y="240" text-anchor="middle" font-size="10" fill="var(--muted)">import lists · baked theme · bolt-on scripts</text>
+        <text x="215" y="296" text-anchor="middle" font-size="10.5" fill="var(--muted)">new capability = edit the core</text>
+        <text x="215" y="312" text-anchor="middle" font-size="10.5" fill="var(--muted)">replace the UI = replace the product</text>
+        <!-- divider -->
+        <line x1="460" y1="60" x2="460" y2="350" stroke="var(--line)"/>
+        <!-- right panel -->
+        <text x="520" y="30" font-size="11" letter-spacing="2" fill="var(--accent-ink)">AOIDE — THE HARNESS</text>
+        <rect x="510" y="42" width="390" height="320" rx="12" fill="var(--surface)" stroke="var(--accent)"/>
+        <!-- ties first, under nodes -->
+        <line x1="655" y1="168" x2="615" y2="120" stroke="var(--line-strong)" stroke-width="1.2"/>
+        <line x1="755" y1="168" x2="795" y2="120" stroke="var(--line-strong)" stroke-width="1.2"/>
+        <line x1="620" y1="199" x2="610" y2="202" stroke="var(--line-strong)" stroke-width="1.2"/>
+        <line x1="790" y1="199" x2="800" y2="202" stroke="var(--line-strong)" stroke-width="1.2"/>
+        <line x1="655" y1="230" x2="615" y2="278" stroke="var(--line-strong)" stroke-width="1.2"/>
+        <line x1="755" y1="230" x2="795" y2="278" stroke="var(--line-strong)" stroke-width="1.2"/>
+        <!-- hub -->
+        <rect x="620" y="168" width="170" height="62" rx="10" fill="color-mix(in srgb, var(--accent) 18%, transparent)" stroke="var(--accent)" stroke-width="2"/>
+        <text x="705" y="192" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">AOIDE</text>
+        <text x="705" y="210" text-anchor="middle" font-size="10" fill="var(--muted)">one registry · one dispatcher</text>
+        <!-- satellites -->
+        <rect x="535" y="70" width="160" height="50" rx="8" fill="var(--raised)" stroke="var(--ink)" stroke-width="1.5"/>
+        <text x="615" y="90" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">DESKTOP</text>
+        <text x="615" y="106" text-anchor="middle" font-size="9.5" fill="var(--muted)">quickshell — it paints</text>
+        <rect x="715" y="70" width="160" height="50" rx="8" fill="var(--raised)" stroke="var(--ink)" stroke-width="1.5"/>
+        <text x="795" y="90" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">TERMINAL</text>
+        <text x="795" y="106" text-anchor="middle" font-size="9.5" fill="var(--muted)">aoide &lt;cmd&gt;</text>
+        <rect x="520" y="180" width="90" height="44" rx="8" fill="var(--raised)" stroke="var(--ink)" stroke-width="1.5"/>
+        <text x="565" y="199" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)">AGENT</text>
+        <text x="565" y="214" text-anchor="middle" font-size="9.5" fill="var(--muted)">mcp</text>
+        <rect x="800" y="180" width="90" height="44" rx="8" fill="var(--raised)" stroke="var(--ink)" stroke-width="1.5"/>
+        <text x="845" y="199" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)">PEER</text>
+        <text x="845" y="214" text-anchor="middle" font-size="9.5" fill="var(--muted)">a2a</text>
+        <rect x="535" y="278" width="160" height="50" rx="8" fill="var(--raised)" stroke="var(--ink)" stroke-width="1.5"/>
+        <text x="615" y="298" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">SONGS</text>
+        <text x="615" y="314" text-anchor="middle" font-size="9.5" fill="var(--muted)">what it serves</text>
+        <rect x="715" y="278" width="160" height="50" rx="8" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="795" y="309" text-anchor="middle" font-size="18" fill="var(--muted)">+</text>
+        <text x="705" y="350" text-anchor="middle" font-size="10.5" fill="var(--muted)">clients mount, swap, unmount — the harness does not change</text>
+      </svg>
     </div>
     <div class="legend">
-      <span><span class="sw" style="background:#d6ebe4;border-color:#2F7D6B"></span>aoide binary / core</span>
-      <span><span class="sw" style="background:#e7efe9;border-color:#2F7D6B"></span>nucleus</span>
-      <span><span class="sw" style="background:#efeade;border-color:#A9743B"></span>dendrites</span>
-      <span><span class="sw" style="background:#e6ecef;border-color:#4a6b7a"></span>facets</span>
-      <span><span class="sw" style="background:#eae7ef;border-color:#6b5a8a"></span>hosts</span>
+      <span><span class="sw kernel"></span>the harness kernel</span>
+      <span><span class="sw solid-ink"></span>a client</span>
+      <span><span class="sw dashed"></span>the next client mounts here</span>
     </div>
-    <p class="ascii-cap">the same, as a tree</p>
-    <pre class="ascii">flake.nix
-├── lib/            mkHost · walk.nix · checks · pkgs · vmTest
-├── pkgs/aoide  ──► aoide (CLI)  +  aoided (daemon)     [one crate, two binaries]
-├── modules/
-│   ├── nucleus/    core services + the option contract
-│   │   ├── options.nix        aoide.* schema (the contract)
-│   │   ├── aoided.nix       → aoided.service          (audit · gate · event bus)
-│   │   ├── shellbridge.nix  → shellbridge.service     (atomic stage writer)
-│   │   └── melete-adapter.nix → aoide-melete-adapter.service
-│   ├── dendrites/  per-app integrations — additive, each guarded on `.enable`
-│   │   ├── bash · kitty · neovim · yazi · firefox · git · starship · nh
-│   │   └── obsidian · mneme · melete · hyprland · vision · audio …
-│   └── facets/     presentation surfaces
-│       ├── quickshell/ → aoide-quickshell.service + qml/*   (the shell)
-│       ├── compositor/  (hyprland decoration)
-│       └── stylix/      (base16 theming)
-└── hosts/
-    ├── common/default.nix          shared enables
-    └── yomi-strix/{default,hardware}.nix   aoide.song · per-host enables</pre>
+    <div class="prose" style="margin-top:1.3rem">
+      <p><b>Everything mounts, everything reverts.</b> Capabilities enter the server by <em>existing</em>: <code>lib/walk.nix</code> discovers dendrites, facets, packages, and songs by walking the tree, so a new capability is a new folder — never an edit to an import list — and removing it leaves no trace. The doctrine has a temporal half too: every effect is revertible. Drafts route through a symlink, every draft write mints a take, <code>rice back</code> restores the live stage exactly, and beneath it all NixOS generations make the frozen half atomically reversible. The repo names its source — Cordis's spatial and temporal composability, adopted as <code>CONTRACTS.md</code> §0: <em>when a design choice is open, take the one that can be deleted.</em></p>
+      <p><b>One protocol, structurally.</b> The server's ingress cannot drift apart because there is nothing to drift: the CLI dispatcher, <code>schema --json</code>, the MCP tool list, and the A2A AgentCard all derive from one <code>Registry</code> in one crate, and nothing else in the tree enumerates commands. Adding a door is a façade; adding a capability is a registry entry every door advertises at once.</p>
+      <p><b>What this buys that neither parent can do.</b> A conventional rice cannot hot-preview a different song's widgets without a rebuild; Aoide stages any committed song live, because all songs' QML ships at once and slots re-resolve on a <code>songName</code> change. A conventional rice cannot be driven safely by an agent; Aoide's write paths are gated — the rebuild is user-gated, <code>graph send</code> queues pending, an A2A spawn runs only the operator-configured command, and every door writes one audit log. A conventional harness cannot observe local agents for free; Aoide's conductor tracks every terminal mechanically — hooks, PTY, transcripts — because <em>observing is free; conversing costs tokens</em>. And the whole thing travels: a song is a host-agnostic score, any venue performs it by naming it, and the core is a flake that runs wherever Nix does.</p>
+      <p>That is the whole argument: <b>the desktop is the first client Aoide ever serves — it is not the product.</b> It is why every chart below draws Quickshell at the edge, never at the center.</p>
+    </div>
   </section>
 
-  <!-- PLATE II -->
+  <!-- THE PROTOCOL -->
   <section>
-    <div class="plate-label"><span class="no">II.</span><h2>The live loop</h2><span class="h-line"></span><span>runtime · dataflow</span></div>
-    <p class="caption">The heartbeat. Producers publish session state; <b>shellbridge</b> writes it atomically to <code>song/stage/*.json</code>; Quickshell hot-reloads and fills each slot with the active song's widget. <b>aoided</b> is the policy/audit brain — <em>not</em> in the widget path.</p>
+    <div class="plate-label"><span class="no">I.</span><h2>The protocol — one schema, N doors</h2><span class="h-line"></span><span>ingress</span></div>
+    <p class="caption">Every capability is reachable through <b>one command registry</b> via three doors — the <b>CLI</b> (humans, scripts, the TUI), the <b>MCP</b> façade (an agent reaches for tools), and the <b>A2A</b> door (a peer agent speaks over the wire). All three derive from the same schema in the <code>protocol</code> crate, so they cannot drift; untrusted input stops in the <code>server</code> crate, which never depends on the trunk — the assembled registry is <em>injected</em> at launch.</p>
     <div class="plate">
-      <pre class="mermaid">
-%%{init: {'theme':'neutral','flowchart':{'curve':'basis','nodeSpacing':30,'rankSpacing':46},'themeVariables':{'fontFamily':'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize':'13px'}}}%%
-flowchart LR
-  subgraph PROD["producers"]
-    direction TB
-    hooks["agent hooks<br/>(Claude Code)"]:::prod
-    conduct["aoide conduct — PTY / terminal<br/>cwd · activity · state · needsSudo · contextTokens"]:::prod
-    reap["aoide-graph-reap<br/>reaps dead sessions"]:::prod
-  end
-  sb["shellbridge.service<br/>atomic write-then-rename"]:::bridge
-  subgraph STAGE["song/stage/*.json — hot-reloaded"]
-    direction TB
-    st["sessions · hooks · graph · projects<br/>livery · cover · grimoire"]:::stage
-  end
-  qs["aoide-quickshell.service<br/>StagingEngine"]:::shell
-  subgraph WID["widgets"]
-    direction TB
-    w["AoideBar · ConductorGadget · gadgets<br/>WidgetSlot → run/qml/songs/&lt;song&gt;/&lt;slot&gt;.qml"]:::wid
-  end
-  a2a["aoide a2a serve<br/>(3rd door, inbound)"]:::door
-  tui["conductor TUI"]:::tui
-  aoided["aoided.service<br/>audit log · rebuild gate · event bus"]:::daemon
-  hooks --> sb
-  conduct --> sb
-  reap --> sb
-  a2a -->|inject / spawn| conduct
-  sb --> STAGE
-  STAGE --> qs
-  qs --> WID
-  a2a -.audit.-> aoided
-  tui -->|dispatch| aoided
-  conduct -.audit.-> aoided
-  classDef prod fill:#efeade,stroke:#A9743B,color:#123;
-  classDef bridge fill:#d6ebe4,stroke:#2F7D6B,color:#123,font-weight:600;
-  classDef stage fill:#e7efe9,stroke:#2F7D6B,color:#123;
-  classDef shell fill:#e6ecef,stroke:#4a6b7a,color:#123,font-weight:600;
-  classDef wid fill:#e6ecef,stroke:#4a6b7a,color:#123;
-  classDef tui fill:#eae7ef,stroke:#6b5a8a,color:#123;
-  classDef door fill:#efe2ea,stroke:#93436e,color:#123;
-  classDef daemon fill:#f0e4d6,stroke:#A9743B,color:#123;
-      </pre>
+      <svg viewBox="0 0 960 560" style="min-width:820px" role="img" aria-label="Three doors deriving from one protocol registry, with the server crate as the untrusted-input boundary">
+        <defs>
+          <marker id="f3a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+          <marker id="f3b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--bronze)"/></marker>
+          <marker id="f3m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+        </defs>
+        <!-- server container -->
+        <rect x="255" y="52" width="660" height="130" rx="10" fill="none" stroke="var(--line-strong)" stroke-dasharray="6 4"/>
+        <rect x="272" y="45" width="330" height="15" fill="var(--plate)"/>
+        <text x="280" y="57" font-size="10" letter-spacing="1" fill="var(--muted)">CRATES/SERVER — UNTRUSTED INPUT STOPS HERE</text>
+        <rect x="280" y="86" width="140" height="58" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="350" y="110" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">LISTENER</text>
+        <text x="350" y="126" text-anchor="middle" font-size="9.5" fill="var(--muted)">tcp · stdio</text>
+        <line x1="420" y1="115" x2="470" y2="115" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f3a)"/>
+        <text x="447" y="106" text-anchor="middle" font-size="9" fill="var(--accent-ink)">PARSE</text>
+        <rect x="475" y="86" width="160" height="58" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="555" y="110" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">JSON-RPC / HTTP</text>
+        <text x="555" y="126" text-anchor="middle" font-size="9.5" fill="var(--muted)">typed wire structs</text>
+        <line x1="635" y1="115" x2="685" y2="115" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f3a)"/>
+        <text x="661" y="106" text-anchor="middle" font-size="9" fill="var(--accent-ink)">HAND OFF</text>
+        <rect x="690" y="86" width="200" height="58" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="790" y="106" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)">INJECTED DISPATCH FN</text>
+        <text x="790" y="121" text-anchor="middle" font-size="9" fill="var(--muted)">the registry arrives as a</text>
+        <text x="790" y="133" text-anchor="middle" font-size="9" fill="var(--muted)">parameter, never a dependency</text>
+        <!-- serve-loop edges up into the container -->
+        <line x1="350" y1="250" x2="350" y2="186" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f3a)"/>
+        <text x="358" y="222" font-size="9" fill="var(--accent-ink)">SERVE LOOP</text>
+        <line x1="575" y1="250" x2="575" y2="186" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f3a)"/>
+        <text x="583" y="222" font-size="9" fill="var(--accent-ink)">SERVE LOOP</text>
+        <text x="125" y="228" text-anchor="middle" font-size="9" fill="var(--muted)">PARSES ARGV IN-PROCESS</text>
+        <text x="125" y="240" text-anchor="middle" font-size="9" fill="var(--muted)">— NO LISTENER —</text>
+        <!-- door units -->
+        <rect x="30" y="250" width="190" height="80" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="125" y="278" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">CLI DOOR</text>
+        <text x="125" y="296" text-anchor="middle" font-size="10" fill="var(--muted)">aoide &lt;cmd&gt;</text>
+        <text x="125" y="310" text-anchor="middle" font-size="9.5" fill="var(--muted)">humans · scripts · the TUI</text>
+        <rect x="255" y="250" width="190" height="80" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="350" y="278" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">MCP DOOR</text>
+        <text x="350" y="296" text-anchor="middle" font-size="10" fill="var(--muted)">mcp serve</text>
+        <text x="350" y="310" text-anchor="middle" font-size="9.5" fill="var(--muted)">tool calls over stdio</text>
+        <rect x="480" y="250" width="190" height="80" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="575" y="274" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">A2A DOOR</text>
+        <text x="575" y="292" text-anchor="middle" font-size="10" fill="var(--muted)">a2a serve</text>
+        <text x="575" y="306" text-anchor="middle" font-size="9.5" fill="var(--muted)">agent card · send · sse</text>
+        <text x="575" y="320" text-anchor="middle" font-size="9" fill="var(--muted)">peers: aoide/graphSummary</text>
+        <rect x="705" y="250" width="190" height="80" rx="8" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="800" y="286" text-anchor="middle" font-size="18" fill="var(--muted)">+</text>
+        <text x="800" y="312" text-anchor="middle" font-size="9.5" fill="var(--muted)">the next door is a façade</text>
+        <!-- paired arrows to substrate -->
+        <line x1="65" y1="330" x2="65" y2="436" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f3a)"/>
+        <line x1="185" y1="440" x2="185" y2="334" stroke="var(--bronze)" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#f3b)"/>
+        <text x="125" y="372" text-anchor="middle" font-size="9.5" fill="var(--accent-ink)">PARSE ARGV</text>
+        <text x="125" y="404" text-anchor="middle" font-size="9.5" fill="var(--bronze-ink)">OUTCOME</text>
+        <line x1="290" y1="330" x2="290" y2="436" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f3a)"/>
+        <line x1="410" y1="440" x2="410" y2="334" stroke="var(--bronze)" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#f3b)"/>
+        <text x="350" y="372" text-anchor="middle" font-size="9.5" fill="var(--accent-ink)">DERIVES TOOL LIST</text>
+        <text x="350" y="404" text-anchor="middle" font-size="9.5" fill="var(--bronze-ink)">OUTCOME</text>
+        <line x1="515" y1="330" x2="515" y2="436" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f3a)"/>
+        <line x1="635" y1="440" x2="635" y2="334" stroke="var(--bronze)" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#f3b)"/>
+        <text x="575" y="368" text-anchor="middle" font-size="9.5" fill="var(--accent-ink)">DERIVES AGENTCARD</text>
+        <text x="575" y="380" text-anchor="middle" font-size="8.5" fill="var(--muted)">(implemented only)</text>
+        <text x="575" y="404" text-anchor="middle" font-size="9.5" fill="var(--bronze-ink)">TASK + OUTCOME</text>
+        <line x1="800" y1="330" x2="800" y2="436" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#f3m)"/>
+        <text x="800" y="388" text-anchor="middle" font-size="9.5" fill="var(--muted)">SAME SCHEMA</text>
+        <!-- substrate -->
+        <rect x="30" y="440" width="880" height="74" rx="8" fill="color-mix(in srgb, var(--accent) 10%, transparent)" stroke="var(--accent)"/>
+        <text x="470" y="470" text-anchor="middle" font-size="12.5" font-weight="700" letter-spacing="1" fill="var(--ink)">AOIDE-PROTOCOL — ONE REGISTRY</text>
+        <text x="470" y="492" text-anchor="middle" font-size="10" fill="var(--muted)">83 commands · Outcome envelope · Door + audit spine · schema v0</text>
+      </svg>
     </div>
-    <p class="plate-foot">solid = live dataflow · dotted = policy / audit · aoided sits off the widget path</p>
-    <p class="ascii-cap">truth vs sketch · deploy</p>
-    <pre class="ascii">producers ─► shellbridge.service ─► song/stage/*.json ─► Quickshell ─► widgets
-  agent hooks · conduct PTY · graph-reap        (atomic)     StagingEngine   bar·dock·gadgets
-
-deploy:  qml in git ──home.file symlink──► home.activation rsync -a --delete ──► run/qml/ (gitignored)
-truth vs sketch:  `aoide song` + rebuild = bakes hypr.conf + Stylix + deploys qml   (truth)
-                  `aoide rice preview`   = writes stage/livery.json + hyprctl keyword (sketch, no reload)</pre>
-  </section>
-
-  <!-- PLATE III -->
-  <section>
-    <div class="plate-label"><span class="no">III.</span><h2>Three doors, one schema</h2><span class="h-line"></span><span>nine crates, root now virtual</span></div>
-    <p class="caption">Still <em>one</em> dispatcher + one self-registering <code>registry.rs</code> behind every door (the Hermes pattern holds), but Phase 9 finished what Phase 6 stopped short of: the app shell itself moved out into <code>crates/cli</code>, and the workspace root became a bare virtual manifest — <b>no <code>[package]</code>, no <code>src/</code></b>. Domain handlers that used to sit in the root's <code>commands/</code> now live with their domain (graph/hooks → <code>conduct</code>, rice/cover/design → <code>song</code>, usage → <code>storage</code>, a2a-serve/daemon/shellbridge → <code>server</code>, a2a-agent/melete-adapter → <code>client</code>); the root crate keeps only what's coupled to the assembled registry itself (meta, stubs, <code>mcp serve</code>'s tool-count handler). <code>protocol</code> is still the sink everything depends on — registry/wire/output/policy, never the other direction — and <code>server</code> still can't reach <code>cli</code>'s assembled registry (that'd be a cycle), so it's still injected in as a plain <code>&amp;Registry</code> + dispatch-fn parameter at the two launch sites. A ninth, dev-only <code>test-support</code> crate now holds the shared test rig + <code>env_lock</code>.</p>
-    <div class="plate">
-      <pre class="mermaid">
-%%{init: {'theme':'neutral','flowchart':{'curve':'basis','nodeSpacing':26,'rankSpacing':38},'themeVariables':{'fontFamily':'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize':'13px'}}}%%
-flowchart TB
-  cliD["CLI · aoide cmd"]:::door
-  mcpD["MCP · aoide mcp serve"]:::door
-  a2aD["A2A · aoide a2a serve"]:::door
-  tui["conductor TUI"]:::door
-  cliD --> root
-  tui --> root
-  mcpD --> server
-  a2aD --> server
-  root["crates/cli — dispatch.rs + registry.rs<br/>meta · stubs · mcp tool-count → 48 commands total · the trunk"]:::hub
-  root -->|injects registry + dispatch fn| server["server<br/>a2a serve · mcp serve · daemon::run · shellbridge"]:::mid
-  root --> client["client<br/>A2A outbound (agent *) · melete adapter"]:::mid
-  root --> song["song<br/>rice/cover/design · notes/lint · mint"]:::mid
-  root --> conduct["conduct<br/>PTY · session DAG · reap · hooks install"]:::mid
-  server --> conduct
-  server --> storage
-  client --> storage
-  song --> storage
-  conduct --> storage
-  storage["storage<br/>session &amp; design records · usage · atomic fs"]:::mid
-  storage --> protocol["protocol — leaf<br/>registry · wire (jsonrpc/a2a/mcp) · policy · output · agents"]:::leaf
-  test["test-support<br/>dev-only · test rig + env_lock"]:::dev
-  classDef door fill:#efe2ea,stroke:#93436e,color:#123;
-  classDef hub fill:#d6ebe4,stroke:#2F7D6B,color:#123,font-weight:600;
-  classDef mid fill:#efeade,stroke:#A9743B,color:#123;
-  classDef leaf fill:#e6ecef,stroke:#4a6b7a,color:#123,font-weight:600;
-  classDef dev fill:#f0f0f0,stroke:#8698901a,color:#556860,stroke-dasharray:3 3;
-      </pre>
-    </div>
-    <p class="ascii-cap">the workspace, as a tree</p>
-    <pre class="ascii">pkgs/aoide/
-├── Cargo.toml                 virtual workspace root — no [package], no src/ (Phase 9)
-└── crates/
-    ├── cli/         the trunk — aoide + aoided binaries, dispatch.rs, registry-coupled handlers only
-    │   ├── src/bin/{aoide.rs, aoided.rs}
-    │   └── src/commands/  meta · stubs · mcp-serve tool count            ── three doors, one schema
-    ├── protocol/    the leaf — registry · invocation/output · wire{jsonrpc,a2a,mcp} · policy · agents
-    ├── storage/     stage-file records (session/design/usage) · atomic fs · time
-    ├── conduct/     PTY multiplexer · session DAG · hook plumbing · reaper · graph*/hooks-install verbs
-    ├── client/      A2A outbound (agent add/list/send) · melete adapter
-    ├── server/      a2a serve · mcp serve · daemon::run · shellbridge — DI'd, never depends on the trunk
-    ├── song/        livery lint · live geometry+hyprctl · rice mint/cover/design verbs
-    ├── conductor/   the TUI — app · ui · graphview · theme — DI'd like server
-    └── test-support/  dev-only — shared test rig + env_lock (Phase 9)</pre>
-  </section>
-
-  <!-- PROCESS TABLE -->
-  <section>
-    <div class="plate-label"><span class="no">§</span><h2>What actually runs</h2><span class="h-line"></span><span>systemd · user services</span></div>
-    <div class="tbl-scroll">
-      <table>
-        <thead><tr><th>Process</th><th>Role</th><th>State</th></tr></thead>
-        <tbody>
-          <tr><td class="mono">shellbridge.service</td><td>Publishes session/hook state to <code>song/stage/*.json</code> — the atomic writer that drives the widgets.</td><td><span class="tag live">live</span></td></tr>
-          <tr><td class="mono">aoide-quickshell.service</td><td>The shell. StagingEngine hot-reloads the stage + swaps per-song widgets into slots.</td><td><span class="tag live">live</span></td></tr>
-          <tr><td class="mono">aoide conduct</td><td>PTY wrapper, one per terminal. Ticks live cwd / activity / state / <code>needsSudo</code> (and soon <code>contextTokens</code>).</td><td><span class="tag perterm">per-terminal</span></td></tr>
-          <tr><td class="mono">aoide a2a serve</td><td>The A2A door: AgentCard + <code>tasks/get</code> + <code>message/send</code> (inject/spawn). Opt-in, loopback, off by default.</td><td><span class="tag skel">opt-in</span></td></tr>
-          <tr><td class="mono">aoided.service</td><td>Orchestrator brain: single audit log, rebuild gate, event bus. Not in the widget path.</td><td><span class="tag skel">skeleton</span></td></tr>
-          <tr><td class="mono">aoide-graph-reap</td><td>Reaps sessions whose owning process vanished.</td><td><span class="tag live">live</span></td></tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- PACKAGE RESTRUCTURE -->
-  <section>
-    <div class="plate-label"><span class="no">§</span><h2>The package restructure</h2><span class="h-line"></span><span>one crate → nine</span></div>
-    <div class="prose">
-      <p>Pi-style: a monorepo of single-charter crates instead of one growing binary. <code>protocol</code> extracts first on purpose — it's the registry/wire/output contract every door and every other crate reads, so "one schema, N doors" stops being a convention and becomes something the compiler enforces. Everything above it (<code>storage</code>, <code>conduct</code>, <code>client</code>, <code>server</code>, <code>song</code>) depends only downward. Phase 9 went one step further than Phase 6 had: instead of leaving the root <code>aoide</code> package as the trunk, the app shell itself moved to <code>crates/cli</code> and the root <code>Cargo.toml</code> became a bare virtual workspace — nothing lives there but the manifest. Every phase lands as a <b>reviewed, green-build unit</b> — plan (Opus) → execute (Sonnet) → adversarial review (Fable) → land — and every external call site keeps compiling unchanged (the lib keeps the historical name <code>aoide</code>, so no <code>use aoide::…</code> caller moved).</p>
-      <p>Two phases remain <b>deliberately deferred</b>, not forgotten: <code>management</code> (host-ops — rebuild/switch/service control) has almost no real content to extract yet, by house policy (rebuild stays user-gated, no self-updaters); <code>steward</code> (a system-management agent with design-memory + self-audit) is blocked on a product decision that hasn't been made — is it LLM-driven itself, or a verb surface an external agent drives? <code>evals</code> is downstream of both and waits on them.</p>
-    </div>
-    <div class="two-col split" style="margin-top:1.3rem">
-      <div>
-        <p class="ascii-cap">monolith → crate</p>
-        <div class="tbl-scroll">
-          <table style="min-width:0">
-            <thead><tr><th>was</th><th>now lives in</th></tr></thead>
-            <tbody>
-              <tr><td class="mono">registry.rs, output.rs, dispatch::Invocation</td><td><code>protocol</code></td></tr>
-              <tr><td class="mono">daemon.rs (Gate/GateProposal/Subscription)</td><td><code>protocol::policy</code></td></tr>
-              <tr><td class="mono">a2a.rs + mcp.rs wire payloads, AgentProfile table</td><td><code>protocol::wire</code>, <code>protocol::agents</code></td></tr>
-              <tr><td class="mono">shellbridge.rs (fs half), graph/model.rs shapes, usage.rs</td><td><code>storage</code></td></tr>
-              <tr><td class="mono">graph/ (DAG · verbs · window · send), reap.rs, hooks install</td><td><code>conduct</code></td></tr>
-              <tr><td class="mono">a2a.rs (client half), adapter.rs, a2a agent *</td><td><code>client</code></td></tr>
-              <tr><td class="mono">a2a.rs (server half), mcp.rs, daemon::run, shellbridge daemon</td><td><code>server</code></td></tr>
-              <tr><td class="mono">notes.rs, hypr.rs, rice mint/cover/design verbs</td><td><code>song</code></td></tr>
-              <tr><td class="mono">conductor/ (TUI)</td><td><code>conductor</code> <span class="tag live">live</span></td></tr>
-              <tr><td class="mono">the app shell itself (src/, dispatch.rs, bins)</td><td><code>cli</code> <small>Phase 9 — the new trunk</small></td></tr>
-              <tr><td class="mono">test rig + env_lock (was duplicated per-crate)</td><td><code>test-support</code> <small>dev-only, Phase 9</small></td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div>
-        <p class="ascii-cap">phase ledger</p>
-        <div class="ledger">
-          <div class="lrow"><span class="ph">1</span><span class="what">Workspace scaffold</span><span class="pill done">landed · e6809f6</span></div>
-          <div class="lrow"><span class="ph">2</span><span class="what">Extract <code>protocol</code> <small>one schema, N doors — structural now</small></span><span class="pill done">landed · fd9bc1e</span></div>
-          <div class="lrow"><span class="ph">3a</span><span class="what">Extract <code>storage</code></span><span class="pill done">landed · 5691985</span></div>
-          <div class="lrow"><span class="ph">3b</span><span class="what">Extract <code>conduct</code></span><span class="pill done">landed · 9c41f2a</span></div>
-          <div class="lrow"><span class="ph">4a</span><span class="what">Typed wire structs <small>a2a/mcp payloads, byte-diffed identical</small></span><span class="pill done">landed · 38f9c62</span></div>
-          <div class="lrow"><span class="ph">4b</span><span class="what">Extract <code>client</code></span><span class="pill done">landed · 0508e76</span></div>
-          <div class="lrow"><span class="ph">4c</span><span class="what">Extract <code>server</code> <small>DI seam — <code>&amp;'static Registry</code>, verified sound</small></span><span class="pill done">landed · 5ae9f6d</span></div>
-          <div class="lrow"><span class="ph">5a</span><span class="what">Birth <code>song</code> <small>leaf — notes + live geometry</small></span><span class="pill done">landed · de63880</span></div>
-          <div class="lrow"><span class="ph">5b</span><span class="what"><code>song</code> mint + cover</span><span class="pill done">landed · c56faa7</span></div>
-          <div class="lrow"><span class="ph">6</span><span class="what">Extract <code>conductor</code> <small>cli stays the root package — no separate crate; DI seam (6a) then the move (6b)</small></span><span class="pill done">landed · d6b771d, 1f5ae31</span></div>
-          <div class="lrow"><span class="ph">9</span><span class="what">Handlers → domain crates, app shell → <code>crates/cli</code> <small>supersedes phase 6's "cli stays root" finding; root is now a virtual workspace</small></span><span class="pill done">landed · 3c46537</span></div>
-          <div class="lrow"><span class="ph">7</span><span class="what">steward <small>canon + self-audit agent</small></span><span class="pill wait">deferred — needs khoa's call</span></div>
-          <div class="lrow"><span class="ph">8</span><span class="what">evals <small>golden + behavior + door-contract suites</small></span><span class="pill wait">deferred — downstream of 6+7</span></div>
-        </div>
-      </div>
-    </div>
-    <div class="callout">
-      <b>A phase-6 finding, later reversed by phase 9 — recorded both times, not quietly swapped.</b> Phase 4 corrected the blueprint in-flight: a2a/mcp's wire payloads went to <code>protocol</code>, not <code>client</code>, since both <code>server</code> and <code>client</code> read them. Phase 6 concluded <code>cli</code> would never be a separate crate — the root <code>aoide</code> package already <em>was</em> the trunk. Phase 9 revisited that once handler-by-handler extraction left the root with almost nothing domain-specific in it: with only registry-coupled code remaining, keeping it in an implicit root package stopped earning its keep, so it became an explicit <code>crates/cli</code> and the root went fully virtual. Same reasoning both times — let the boundary earn its keep or don't draw it — different answer once the code around it had moved.
-    </div>
-  </section>
-
-  <!-- A2A WORKSTREAM -->
-  <section>
-    <div class="plate-label"><span class="no">§</span><h2>The A2A workstream</h2><span class="h-line"></span><span>the third door</span></div>
-    <div class="prose">
-      <p>aoide's conductor was already a bespoke agent-driving client — PTY injection + transcript-scraping, the most fragile seam in the system. <b>A2A</b> (Agent2Agent, the Linux Foundation successor to the now-defunct ACP) gives that session graph a <b>standard wire</b>: external agents join aoide's tree, and aoide-run agents are callable from outside. It's the third door, and its discovery derives from the same registry as the other two.</p>
+    <p class="plate-foot">solid = request path · dashed = response path · every door reads the same registry — stubs (implemented:false) are dispatch-refused and never advertised</p>
+    <div class="legend">
+      <span><span class="sw solid-accent"></span>server-side process</span>
+      <span><span class="sw kernel"></span>the protocol substrate</span>
+      <span><span class="sw dashed"></span>dashed container = grouping · dashed leaf = not yet real</span>
     </div>
     <div class="two-col split" style="margin-top:1.3rem">
       <div>
@@ -403,7 +317,7 @@ flowchart TB
               <tr><td class="mono">contextId</td><td>a <code>SessionRecord</code></td></tr>
               <tr><td class="mono">WORKING</td><td><code>working</code></td></tr>
               <tr><td class="mono">INPUT_REQUIRED</td><td><code>awaiting</code></td></tr>
-              <tr><td class="mono">AUTH_REQUIRED</td><td><code>needsSudo</code> 🔒</td></tr>
+              <tr><td class="mono">AUTH_REQUIRED</td><td><code>needsSudo</code></td></tr>
               <tr><td class="mono">COMPLETED</td><td><code>stopped</code></td></tr>
               <tr><td class="mono">SUBMITTED</td><td><code>idle</code></td></tr>
             </tbody>
@@ -411,20 +325,294 @@ flowchart TB
         </div>
       </div>
       <div>
-        <p class="ascii-cap">phase ledger</p>
-        <div class="ledger">
-          <div class="lrow"><span class="ph">A</span><span class="what">Contract <small>CONTRACTS §6 · options · kind · stubs</small></span><span class="pill done">landed · dff3af6</span></div>
-          <div class="lrow"><span class="ph">B</span><span class="what">Server MVP <small>AgentCard + tasks/get, read-only</small></span><span class="pill done">landed · 8388e44</span></div>
-          <div class="lrow"><span class="ph">B2</span><span class="what">message/send <small>inject + spawn (configured agent)</small></span><span class="pill done">landed · fa365f5</span></div>
-          <div class="lrow"><span class="ph">C</span><span class="what">Streaming <small>message/stream + tasks/resubscribe · SSE</small></span><span class="pill done">landed · ebf5115</span></div>
-          <div class="lrow"><span class="ph">D</span><span class="what">Client <small>agent add/list/remove/send · DAG fold</small></span><span class="pill done">landed · 1919a7e</span></div>
-          <div class="lrow"><span class="ph">E</span><span class="what">Discovery-from-registry</span><span class="pill done">folded into B</span></div>
-          <div class="lrow"><span class="ph">F</span><span class="what">Wiki <small>A2A-Door page + door-wide updates</small></span><span class="pill done">landed · 9606a76</span></div>
+        <div class="prose">
+          <p><b>The A2A door is complete and bidirectional</b> (phases A–F all landed): AgentCard at <code>/.well-known/agent-card.json</code>, <code>message/send</code> (inject or spawn), <code>tasks/get</code>, SSE streaming, and the client side (<code>a2a agent add/list/remove/send</code>, folded into the session DAG as <code>kind:"a2a"</code> nodes). <b>Peer federation</b> rides the same door: another aoide registers as a peer (<code>aoide peer add</code>), <code>aoide/graphSummary</code> pulls its whole resolved session graph, and it folds in as a <code>peer:*</code> subtree — fresh within a 5-minute TTL, stale-but-present otherwise, never silently dropped.</p>
+          <p><b>Two planes, honestly.</b> The command plane above is the one schema. There is a second, narrower contract — the <b>state plane</b>: <code>song/stage/*.json</code> documents the server publishes and clients watch, plus the shellbridge socket the painting client writes back through (<code>CONTRACTS.md</code> §4). It is versioned separately and is not registry-derived; the next section shows it as the server's notification stream.</p>
         </div>
       </div>
     </div>
     <div class="callout">
-      <b>Security model.</b> The capability is admitted at <b>rebuild time</b> — enabling the door (<code>aoide.a2a.enable</code>) and setting <code>aoide.a2a.spawnAgent</code> are nix options, so turning on A2A goes through the normal rebuild gate. Per request is <b>bounded</b> (a spawn runs the <em>configured</em> agent, never a client-supplied command — the client supplies only the prompt) and <b>audited</b> (<code>Door::A2a</code>), loopback by default. Forwarded messages are data, never executed. There is no interactive per-request gate because a request/response can't block on your admission — the rebuild <em>is</em> the admission.
+      <b>Security model.</b> The <em>capability</em> is admitted at rebuild time — enabling the door (<code>aoide.a2a.enable</code>, off by default, loopback by default) and setting <code>aoide.a2a.spawnAgent</code> are nix options, so turning A2A on goes through the normal rebuild gate, and a spawn only ever runs the <em>configured</em> command (the client supplies the prompt, never the argv). Per <em>request</em> there is now real gating too: a non-loopback <code>message/send</code> auto-delivers only from a peer explicitly marked <code>autogate</code> — anything else queues <b>pending</b> for a human (2026-08-14) — and with <code>aoide.a2a.tokenFile</code> set, a bearer token gates spawn and strips loopback's automatic trust, closing the reverse-proxy hole (2026-08-19). Every outcome audits through <code>Door::A2a</code> into the one log every door writes.
+    </div>
+  </section>
+
+  <!-- THE SERVER AT WORK -->
+  <section>
+    <div class="plate-label"><span class="no">II.</span><h2>The server at work</h2><span class="h-line"></span><span>runtime · one request, traced</span></div>
+    <p class="caption">A real request, end to end — an A2A <code>message/send</code> steering a running session, chosen because it crosses every layer. The request path is solid; everything a client <em>learns</em> — envelopes, streams, published state — returns dashed. The painting client appears exactly once, at the edge, consuming the same published state any client could.</p>
+    <div class="plate">
+      <svg viewBox="0 0 960 520" style="min-width:860px" role="img" aria-label="A request traced through the door, dispatcher, gate, and session, with state published to stage files and hot-reloaded by the desktop client">
+        <defs>
+          <marker id="f2a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+          <marker id="f2b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--bronze)"/></marker>
+          <marker id="f2m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+        </defs>
+        <!-- request row -->
+        <rect x="20" y="80" width="120" height="66" rx="8" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+        <text x="80" y="106" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">CLIENT</text>
+        <text x="80" y="124" text-anchor="middle" font-size="9.5" fill="var(--muted)">peer · cli · mcp</text>
+        <line x1="140" y1="113" x2="205" y2="113" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f2a)"/>
+        <text x="175" y="96" text-anchor="middle" font-size="9" fill="var(--accent-ink)">JSON-RPC</text>
+        <text x="175" y="107" text-anchor="middle" font-size="9" fill="var(--accent-ink)">MESSAGE/SEND</text>
+        <rect x="210" y="80" width="140" height="66" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="280" y="102" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">A2A DOOR</text>
+        <text x="280" y="118" text-anchor="middle" font-size="9.5" fill="var(--muted)">a2a serve</text>
+        <text x="280" y="132" text-anchor="middle" font-size="9" fill="var(--muted)">crates/server</text>
+        <line x1="350" y1="113" x2="420" y2="113" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f2a)"/>
+        <text x="385" y="103" text-anchor="middle" font-size="9" fill="var(--accent-ink)">PARSE + AUTH</text>
+        <text x="385" y="130" text-anchor="middle" font-size="8.5" fill="var(--muted)">bearer · remote queues pending</text>
+        <rect x="425" y="80" width="140" height="66" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="495" y="102" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">DISPATCH</text>
+        <text x="495" y="118" text-anchor="middle" font-size="9.5" fill="var(--muted)">one dispatcher</text>
+        <text x="495" y="132" text-anchor="middle" font-size="9" fill="var(--muted)">registry injected</text>
+        <line x1="565" y1="113" x2="635" y2="113" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f2a)"/>
+        <text x="600" y="103" text-anchor="middle" font-size="9" fill="var(--accent-ink)">INJECT | SPAWN</text>
+        <rect x="640" y="80" width="140" height="66" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="710" y="102" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">CONDUCT</text>
+        <text x="710" y="118" text-anchor="middle" font-size="9.5" fill="var(--muted)">graph::send</text>
+        <text x="710" y="132" text-anchor="middle" font-size="9" fill="var(--muted)">the gated door</text>
+        <line x1="780" y1="113" x2="835" y2="113" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f2a)"/>
+        <text x="808" y="96" text-anchor="middle" font-size="9" fill="var(--accent-ink)">GATED</text>
+        <text x="808" y="107" text-anchor="middle" font-size="9" fill="var(--accent-ink)">DELIVERY</text>
+        <rect x="840" y="80" width="105" height="66" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="892" y="106" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">SESSION</text>
+        <text x="892" y="124" text-anchor="middle" font-size="9.5" fill="var(--muted)">agent pty</text>
+        <!-- response back to client -->
+        <path d="M 245 146 V 200 H 80 V 152" fill="none" stroke="var(--bronze)" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#f2b)"/>
+        <text x="162" y="192" text-anchor="middle" font-size="9.5" fill="var(--bronze-ink)">TASK ENVELOPE · SSE STATUS</text>
+        <!-- session ticks down to shellbridge -->
+        <path d="M 892 146 V 293 H 826" fill="none" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f2a)"/>
+        <text x="884" y="182" text-anchor="end" font-size="9" fill="var(--accent-ink)">HOOK EVENTS +</text>
+        <text x="884" y="193" text-anchor="end" font-size="9" fill="var(--accent-ink)">STATE TICKS</text>
+        <!-- state plane -->
+        <rect x="640" y="260" width="180" height="66" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="730" y="282" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">SHELLBRIDGE</text>
+        <text x="730" y="298" text-anchor="middle" font-size="9.5" fill="var(--muted)">shellbridge.service</text>
+        <text x="730" y="312" text-anchor="middle" font-size="9" fill="var(--muted)">the single writer</text>
+        <line x1="640" y1="293" x2="576" y2="293" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f2a)"/>
+        <text x="608" y="283" text-anchor="middle" font-size="9" fill="var(--accent-ink)">ATOMIC WRITE</text>
+        <rect x="330" y="260" width="240" height="76" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <text x="450" y="286" text-anchor="middle" font-size="12" fill="var(--ink)">song/stage/*.json</text>
+        <text x="450" y="304" text-anchor="middle" font-size="9.5" fill="var(--muted)">sessions · graph · livery · cover · herald</text>
+        <text x="450" y="318" text-anchor="middle" font-size="9" fill="var(--muted)">write-temp-then-rename, never torn</text>
+        <line x1="330" y1="298" x2="246" y2="298" stroke="var(--bronze)" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#f2b)"/>
+        <text x="288" y="288" text-anchor="middle" font-size="9" fill="var(--bronze-ink)">HOT-RELOAD</text>
+        <rect x="40" y="260" width="200" height="76" rx="8" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/>
+        <text x="140" y="284" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">DESKTOP CLIENT</text>
+        <text x="140" y="302" text-anchor="middle" font-size="9.5" fill="var(--muted)">quickshell — fileview watchers</text>
+        <text x="140" y="316" text-anchor="middle" font-size="9" fill="var(--muted)">LiveryState · StagingEngine</text>
+        <!-- desktop return path -->
+        <path d="M 140 336 V 400 H 730 V 330" fill="none" stroke="var(--bronze)" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#f2b)"/>
+        <text x="435" y="392" text-anchor="middle" font-size="9.5" fill="var(--bronze-ink)">SOCKET VERBS — approve · dismiss · toggle</text>
+        <!-- audit -->
+        <path d="M 320 146 V 436" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="2 3" marker-end="url(#f2m)"/>
+        <text x="328" y="228" font-size="9" fill="var(--muted)">EVERY DOOR</text>
+        <text x="328" y="239" font-size="9" fill="var(--muted)">WRITES AUDIT</text>
+        <rect x="280" y="440" width="220" height="54" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <text x="390" y="462" text-anchor="middle" font-size="11" fill="var(--ink)">the audit log</text>
+        <text x="390" y="478" text-anchor="middle" font-size="9" fill="var(--muted)">Door::Cli · Mcp · A2a — one log</text>
+      </svg>
+    </div>
+    <p class="plate-foot">solid = request path · dashed = responses and published-state notifications · dotted = audit — the desktop appears only as a client, and policy sits off the paint path</p>
+    <div class="legend">
+      <span><span class="sw solid-ink"></span>client-side</span>
+      <span><span class="sw solid-accent"></span>server-side process</span>
+      <span><span class="sw filedoc"></span>published document</span>
+    </div>
+    <div class="prose" style="margin-top:1.3rem">
+      <p><b>The state plane is the notification stream.</b> Producers — agent hooks (claude, kimi, pi via the <code>AgentProfile</code> seam), <code>aoide conduct</code> PTYs, the reaper, dunst — feed <code>shellbridge.service</code>, which is the <em>single writer</em> of <code>song/stage/*.json</code>. Notifications ride the same seam: dunst owns the freedesktop bus but draws <b>nothing</b> (<code>skip_display</code> on every rule) — each notification goes through <code>aoide herald push</code> into <code>stage/herald.json</code>, the QML herald only <em>reads</em> it, and a click returns through the socket (<code>heraldverdict</code> / <code>heralddismiss</code>). A permission summons carries real approve/deny buttons whose verdict routes back to <code>graph send</code>, the one gated injection door.</p>
+      <p><b>Truth vs sketch.</b> <code>aoide rice stage</code> writes the live stage twin and best-effort <code>hyprctl</code> keywords — a sketch, no rebuild. The gated rebuild is the truth: it bakes the same <code>aoide.livery</code> into hyprland.conf and the Stylix fan-out, rsyncs the QML tree to <code>run/qml/</code> (<code>rsync -a --delete</code> — a switch reasserts the store's truth over hot edits), and re-seeds the stage from the active song's committed livery, so a host that never staged anything still boots correct. Both fan-outs derive from one <code>aoide.livery</code>, so sketch and truth cannot drift.</p>
+      <p><b>The rice loop has mechanical rails now.</b> Three modes (<code>stage/mode.json</code>): <code>staging</code> unlocks live writes, <code>declarative</code> refuses them (the safe default), and <code>draft</code> routes <code>stage/livery.json</code> through a symlink into a saved draft. Inside a draft, <b>every write mints a take</b> (a tree with parent pointers, not a line), <code>rice take mark</code> stamps reviewed states with a letter, and <code>rice back</code> restores any take or mark — snapshotting un-taken drift first, so nothing is ever destroyed. All live today.</p>
+    </div>
+  </section>
+
+  <!-- WHAT IT SERVES -->
+  <section>
+    <div class="plate-label"><span class="no">III.</span><h2>What it serves — songs, slots, the seam</h2><span class="h-line"></span><span>livery · songbook</span></div>
+    <p class="caption">A <b>song</b> is a committed, host-agnostic score: it sets only <code>aoide.livery</code> (its dress) and <code>aoide.arrangement</code> (its structure) and never touches host options — <b>the venue decides its instruments; the song carries only the notes</b>. Every committed song's widget QML ships at once, so slots re-resolve live on a song switch, falling through the baseline chain: the active song, else <b>sonata</b>, else the anchor's own fallback, else nothing.</p>
+    <div class="plate">
+      <svg viewBox="0 0 980 660" style="min-width:880px" role="img" aria-label="Songs feeding the livery seam, the staging engine resolving slots, and the landed-but-unwired pieces">
+        <defs>
+          <marker id="f4a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+          <marker id="f4b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--bronze)"/></marker>
+          <marker id="f4m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+        </defs>
+        <!-- song units -->
+        <rect x="40" y="40" width="155" height="82" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="117" y="66" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">SONATA</text>
+        <text x="117" y="84" text-anchor="middle" font-size="9.5" fill="var(--muted)">14 slot bodies</text>
+        <text x="117" y="98" text-anchor="middle" font-size="9.5" fill="var(--muted)">the baseline floor</text>
+        <rect x="215" y="40" width="155" height="82" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="292" y="66" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">FUGUE</text>
+        <text x="292" y="84" text-anchor="middle" font-size="9.5" fill="var(--muted)">bar · herald</text>
+        <text x="292" y="98" text-anchor="middle" font-size="9.5" fill="var(--muted)">the rest falls through</text>
+        <rect x="390" y="40" width="155" height="82" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="467" y="66" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">NOCTURNE</text>
+        <text x="467" y="84" text-anchor="middle" font-size="9.5" fill="var(--muted)">demo — dock kind</text>
+        <text x="467" y="98" text-anchor="middle" font-size="9" fill="var(--muted)">inherits sonata's structure</text>
+        <rect x="565" y="40" width="155" height="82" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="642" y="66" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">ETUDE</text>
+        <text x="642" y="84" text-anchor="middle" font-size="9.5" fill="var(--muted)">demo — surface kind</text>
+        <text x="642" y="98" text-anchor="middle" font-size="9.5" fill="var(--muted)">declares its own slot</text>
+        <text x="748" y="90" text-anchor="middle" font-size="18" fill="var(--muted)">···</text>
+        <rect x="775" y="40" width="165" height="82" rx="8" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="857" y="78" text-anchor="middle" font-size="18" fill="var(--muted)">+</text>
+        <text x="857" y="102" text-anchor="middle" font-size="9.5" fill="var(--muted)">a song is a folder</text>
+        <!-- score arrows down to seam -->
+        <line x1="117" y1="122" x2="117" y2="186" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f4a)"/>
+        <text x="124" y="158" font-size="9" fill="var(--accent-ink)">SCORE</text>
+        <line x1="292" y1="122" x2="292" y2="186" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f4a)"/>
+        <text x="299" y="158" font-size="9" fill="var(--accent-ink)">SCORE</text>
+        <line x1="467" y1="122" x2="467" y2="186" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f4a)"/>
+        <text x="474" y="158" font-size="9" fill="var(--accent-ink)">SCORE</text>
+        <line x1="642" y1="122" x2="642" y2="186" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f4a)"/>
+        <text x="649" y="158" font-size="9" fill="var(--accent-ink)">SCORE</text>
+        <line x1="857" y1="122" x2="857" y2="186" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#f4m)"/>
+        <text x="864" y="158" font-size="9" fill="var(--muted)">SCORE</text>
+        <!-- seam bar -->
+        <rect x="40" y="190" width="900" height="72" rx="8" fill="color-mix(in srgb, var(--accent) 10%, transparent)" stroke="var(--accent)"/>
+        <text x="490" y="220" text-anchor="middle" font-size="12.5" font-weight="700" letter-spacing="1" fill="var(--ink)">THE SEAM — aoide.livery + aoide.arrangement</text>
+        <text x="490" y="242" text-anchor="middle" font-size="9.5" fill="var(--muted)">committed as rice.nix + livery.json · frozen into the build · sounded live from song/stage/livery.json</text>
+        <!-- hot-reload into the engine -->
+        <line x1="300" y1="262" x2="300" y2="326" stroke="var(--bronze)" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#f4b)"/>
+        <text x="308" y="290" font-size="9.5" fill="var(--bronze-ink)">HOT-RELOAD —</text>
+        <text x="308" y="302" font-size="9.5" fill="var(--bronze-ink)">songName · livery values</text>
+        <!-- build-walk edge along the right margin -->
+        <path d="M 940 81 H 962 V 405 H 944" fill="none" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f4a)"/>
+        <text x="972" y="260" font-size="9" fill="var(--accent-ink)" transform="rotate(90 972 260)">BUILD WALK → run/qml/songs/&lt;name&gt;/</text>
+        <!-- staging engine container -->
+        <rect x="40" y="330" width="900" height="160" rx="10" fill="none" stroke="var(--line-strong)" stroke-dasharray="6 4"/>
+        <rect x="60" y="322" width="320" height="15" fill="var(--plate)"/>
+        <text x="68" y="334" font-size="10" letter-spacing="1" fill="var(--muted)">THE STAGING ENGINE — FACET, MECHANISM ONLY</text>
+        <rect x="70" y="370" width="200" height="78" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <text x="170" y="396" text-anchor="middle" font-size="10.5" fill="var(--ink)">manifest.json · registry.json</text>
+        <text x="170" y="414" text-anchor="middle" font-size="9.5" fill="var(--muted)">which songs author bodies</text>
+        <text x="170" y="428" text-anchor="middle" font-size="9.5" fill="var(--muted)">which declare widget types</text>
+        <line x1="270" y1="409" x2="355" y2="409" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f4a)"/>
+        <text x="313" y="398" text-anchor="middle" font-size="9" fill="var(--accent-ink)">HAS SONG × SLOT?</text>
+        <rect x="360" y="370" width="210" height="78" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="465" y="396" text-anchor="middle" font-size="11" fill="var(--ink)">resolveSong(song, slot)</text>
+        <text x="465" y="414" text-anchor="middle" font-size="9.5" fill="var(--muted)">active → sonata → ""</text>
+        <text x="465" y="428" text-anchor="middle" font-size="9.5" fill="var(--muted)">the baseline-fallback chain</text>
+        <line x1="570" y1="409" x2="655" y2="409" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f4a)"/>
+        <text x="613" y="392" text-anchor="middle" font-size="9" fill="var(--accent-ink)">CREATE WITH</text>
+        <text x="613" y="402" text-anchor="middle" font-size="9" fill="var(--accent-ink)">livery + bridge</text>
+        <rect x="660" y="370" width="250" height="78" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="785" y="392" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">ANCHORS</text>
+        <text x="785" y="410" text-anchor="middle" font-size="9.5" fill="var(--muted)">WidgetSlot · SurfaceSlot</text>
+        <text x="785" y="424" text-anchor="middle" font-size="9.5" fill="var(--muted)">SongSurfaces · SongGadgets</text>
+        <text x="785" y="438" text-anchor="middle" font-size="9" fill="var(--muted)">inject livery + bridge, never config.*</text>
+        <text x="490" y="512" text-anchor="middle" font-size="9.5" fill="var(--muted)">wired anchors today: bar · calendar · herald · herald-center · powermenu · launcher — a slot with no anchor is carried, never rendered</text>
+        <!-- status nodes -->
+        <rect x="40" y="545" width="340" height="90" rx="8" fill="none" stroke="var(--line-strong)" stroke-width="1.5"/>
+        <text x="210" y="571" text-anchor="middle" font-size="11" fill="var(--muted)">lib/song.nix — mkWidget · composeSong</text>
+        <text x="210" y="589" text-anchor="middle" font-size="9.5" fill="var(--muted)">one nix function per widget · guards at composition</text>
+        <text x="210" y="603" text-anchor="middle" font-size="9.5" fill="var(--muted)">feeds aoide.arrangement — nothing imports it yet</text>
+        <rect x="52" y="612" width="140" height="16" rx="8" fill="color-mix(in srgb, var(--bronze) 16%, transparent)"/>
+        <text x="122" y="624" text-anchor="middle" font-size="8.5" letter-spacing="1" fill="var(--bronze-ink)">LANDED · UNWIRED</text>
+        <rect x="600" y="545" width="340" height="90" rx="8" fill="none" stroke="var(--line-strong)" stroke-width="1.5"/>
+        <text x="770" y="571" text-anchor="middle" font-size="11" font-weight="600" fill="var(--muted)">SONATA'S GADGET TWINS</text>
+        <text x="770" y="589" text-anchor="middle" font-size="9.5" fill="var(--muted)">dock · wallpaper · conductor · terminals · meters · usage</text>
+        <text x="770" y="603" text-anchor="middle" font-size="9.5" fill="var(--muted)">staged in the songbook — the facet bodies still render</text>
+        <rect x="612" y="612" width="160" height="16" rx="8" fill="color-mix(in srgb, var(--bronze) 16%, transparent)"/>
+        <text x="692" y="624" text-anchor="middle" font-size="8.5" letter-spacing="1" fill="var(--bronze-ink)">AWAITS SWITCH (P3)</text>
+      </svg>
+    </div>
+    <p class="plate-foot">a declared slot with no body is inert, not an error · the venue decides its instruments — the song carries only the notes</p>
+    <div class="legend">
+      <span><span class="sw solid-accent"></span>live</span>
+      <span><span class="sw unwired"></span>landed, unwired (bronze chip)</span>
+      <span><span class="sw dashed"></span>dashed container = grouping · dashed leaf = extension point</span>
+      <span><span class="sw filedoc"></span>published document</span>
+    </div>
+    <div class="prose" style="margin-top:1.3rem">
+      <p><b>The paint test decides where a QML file lives</b> (<code>CONTRACTS.md</code> §0, mirrored in <code>slots.md</code>). A file stays in the facet only if all three are yes: it names <em>zero</em> aesthetic decisions; a second, unrelated song would use it <em>unchanged</em>; and its job is one of exactly three — publish state as data, resolve/host a song's QML, or be the entry point wiring one into the other. Any no, and it belongs in <code>song/songbook/&lt;song&gt;/widgets/</code>. The facet is not a component library.</p>
+      <p><b>The migration that test drives is mid-flight, honestly.</b> P0 (the doctrine) and P1–P2 (GadgetFrame, BarPopout, AudioColonnade, MorphState, the stele popouts) landed reviewed-clean; sonata's songbook now carries the dock, wallpaper, and gadget bodies as staged twins. <b>P3 — the facet switch — is the gate</b>: it awaits the User's rebuild, and everything after it (deleting the dead facet bodies, the preview harnesses, the LiveryState grammar split) queues behind. Until then <code>shell.qml</code> still instantiates the facet-side bodies, which is what the bronze chip in the chart records.</p>
+      <p><b>Two registries, two questions.</b> <code>manifest.json</code> answers "which slot <em>bodies</em> exist" (any lowercase <code>widgets/*.qml</code> a song drops; uppercase files are helper types, declared per-song in a generated <code>qmldir</code>). <code>registry.json</code> answers "which slots did a song <em>declare as a widget type</em>" via <code>aoide.arrangement.widgets</code> — <code>surface</code> kind (own layer-shell window, namespace, shortcut) hosted by <code>SongSurfaces</code>, <code>dock</code> kind (an item in the dock's gadget column) hosted by <code>SongGadgets</code>. <code>etude</code> proves the surface pipeline end to end; <code>nocturne</code> proves dock plus wholesale structural inheritance — it authors no bar at all and still gets sonata's, re-dressed in its own palette. <code>rice lint</code> validates the declarations strictly, native in <code>crates/song/src/livery/</code> — the livery engine that replaced the old Node token package outright.</p>
+    </div>
+  </section>
+
+  <!-- THE CHASSIS -->
+  <section>
+    <div class="plate-label"><span class="no">§</span><h2>The chassis</h2><span class="h-line"></span><span>Nix · build plane</span></div>
+    <div class="prose">
+      <p>The build plane provisions the server and its clients. <b>nucleus</b> holds the core services and the <code>aoide.*</code> option contract; <b>dendrites</b> are additive per-app integrations, each dormant until a host flips its <code>.enable</code>; <b>facets</b> are render surfaces reading only <code>aoide.livery</code> + <code>aoide.arrangement</code>. Everything is walker-discovered — <code>modules/</code>, <code>pkgs/</code>, and <code>song/songbook/</code> alike — and the repo root is <em>closed</em>: new content lands inside the tree at its designated place, never as a new root entry. A host is a venue: it names its song in one line and decides its own instruments.</p>
+    </div>
+    <p class="ascii-cap">the repo, as a tree</p>
+    <pre class="ascii">flake.nix
+├── lib/            mkHost · walk.nix · checks · pkgs · song.nix (unwired) · vmTest
+├── pkgs/
+│   ├── aoide/  ──► the crate workspace (its own subdir flake; aoide + aoided)
+│   └── melete · mneme · …          walker-discovered, one folder each
+├── modules/
+│   ├── nucleus/    options.nix (the aoide.* contract) · aoided · shellbridge · melete-adapter
+│   ├── dendrites/  27 walked · additive · guarded on `.enable`
+│   │   ├── bash · kitty · neovim · yazi · firefox · git · starship · btop · mcfly
+│   │   └── dunst · clipboard · screenshot · vision · audio · hyprland
+│   │       claude-code · kimi-code · pi-coding-agent · melete · mneme · …
+│   └── facets/     quickshell (qml mechanism + shell service) · compositor · stylix
+├── song/
+│   ├── songbook/   sonata · fugue · nocturne · etude   (+ learnings · update-playbook)
+│   └── stage/      gitignored runtime — the live twin, never read at eval
+└── hosts/
+    ├── common/                     shared enables
+    └── yomi-strix/                 aoide.song = "sonata" · per-host enables · hardware</pre>
+  </section>
+
+  <!-- PROCESS TABLE -->
+  <section>
+    <div class="plate-label"><span class="no">§</span><h2>What actually runs</h2><span class="h-line"></span><span>systemd · user services</span></div>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Process</th><th>Role</th><th>State</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">shellbridge.service</td><td>The single writer of <code>song/stage/*.json</code> — session/hook state, the herald ledger, the socket the desktop's verbs return through.</td><td><span class="tag live">live</span></td></tr>
+          <tr><td class="mono">aoide-quickshell.service</td><td>The painting client. LiveryState + StagingEngine hot-reload the stage and swap per-song widgets into slots.</td><td><span class="tag live">live</span></td></tr>
+          <tr><td class="mono">aoide conduct</td><td>PTY wrapper, one per terminal. Publishes cwd · activity · state · <code>needsSudo</code> · <code>contextTokens</code> · ceiling · last tool.</td><td><span class="tag perterm">per-terminal</span></td></tr>
+          <tr><td class="mono">aoide-graph-reap</td><td>Reaps sessions whose owning process vanished.</td><td><span class="tag live">live</span></td></tr>
+          <tr><td class="mono">dunst</td><td>Owns the notification bus, draws nothing (<code>skip_display</code>); hands every notification to <code>aoide herald push</code>.</td><td><span class="tag live">live</span></td></tr>
+          <tr><td class="mono">aoide-a2a.service</td><td>The A2A door: AgentCard, <code>message/send</code> (gated), SSE, peer pulls. Loopback + bearer-token options.</td><td><span class="tag skel">opt-in, off by default</span></td></tr>
+          <tr><td class="mono">aoide usage poller</td><td>Local transcript rollup + the unofficial account-usage fetch (ToS-gray, degrades quietly).</td><td><span class="tag skel">opt-in, off by default</span></td></tr>
+          <tr><td class="mono">aoided.service</td><td>Policy brain: audit log, rebuild gate, event bus. Not in the paint path.</td><td><span class="tag skel">skeleton</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- WHAT IS PLANNED -->
+  <section>
+    <div class="plate-label"><span class="no">§</span><h2>What is planned</h2><span class="h-line"></span><span>live vs planned, said plainly</span></div>
+    <div class="prose">
+      <p>Everything above this line runs today unless its chart or chip says otherwise. This section is the other half — designed or deferred, with each item's gate named. The crate restructure itself is <b>done</b> (Phases 1–6 and 9; the root is a virtual workspace, handlers live with their domains), so what remains of it is exactly its deferred tail.</p>
+    </div>
+    <p class="ascii-cap">the workspace, as a tree</p>
+    <pre class="ascii">pkgs/aoide/                        its own flake — the repo consumes it as a path input
+├── Cargo.toml                     virtual workspace root — no [package], no src/
+└── crates/
+    ├── cli/           the trunk — aoide + aoided bins, dispatch, registry-coupled handlers
+    ├── protocol/      the leaf — registry · Outcome · wire{jsonrpc,a2a,mcp} · policy · agents
+    ├── storage/       stage/state records · edit journal + pre-image blobs · atomic fs
+    ├── conduct/       PTY multiplexer · session DAG · hooks · reaper · screen family
+    ├── client/        A2A outbound · peers · melete adapter
+    ├── server/        a2a serve · mcp serve · daemon · shellbridge — registry injected, never depended on
+    ├── song/          livery engine (lint · resolve · emit) · rice verbs · takes · modes
+    ├── conductor/     the TUI
+    ├── upkeep/        soundcheck — report-only working-tree integrity, never mutates
+    └── test-support/  dev-only shared test rig</pre>
+    <div class="ledger" style="margin-top:1.3rem">
+      <div class="lrow"><span class="ph">P3</span><span class="what">The facet switch <small>flip shell.qml's dock/wallpaper/gadget bodies to the staged sonata twins; P4–P7 (delete dead facet bodies, preview harnesses, LiveryState grammar split) queue behind it</small></span><span class="pill active">pending — awaits the User's rebuild</span></div>
+      <div class="lrow"><span class="ph">◦</span><span class="what">Wire <code>lib/song.nix</code> <small>the widget-record builder (mkWidget / composeSong) — landed with eval-time guards, but no roll-up imports it yet</small></span><span class="pill active">landed · unwired</span></div>
+      <div class="lrow"><span class="ph">◦</span><span class="what">Project-edit verbs <small><code>graph project edits</code> / <code>back</code> — the substrate (edit journal + gc-anchored pre-image blobs) landed in storage; the verbs are not in the registry</small></span><span class="pill active">substrate landed</span></div>
+      <div class="lrow"><span class="ph">◦</span><span class="what">The rehearsal engagement <small><code>rice score</code> / <code>rehearse begin·end</code> — a step machine over the (live) takes/marks rails; different-session review gate</small></span><span class="pill wait">designed, not locked</span></div>
+      <div class="lrow"><span class="ph">◦</span><span class="what">Pickup surfaces <small><code>aoide cue</code> · <code>graph join</code> · the installable pointer-only skill — strictly pull, no session injection</small></span><span class="pill wait">designed, not locked</span></div>
+      <div class="lrow"><span class="ph">◦</span><span class="what">The sudo door <small>declared op ids on a nix allowlist, polkit auth at the seat, PAM-owned factors, <code>Door::Sudo</code> audit — never a free argv</small></span><span class="pill wait">designed, not locked</span></div>
+      <div class="lrow"><span class="ph">◦</span><span class="what">Nix maintenance + development loops <small>generation↔commit round-trip, prune wrappers — the engagement layer's other tenants</small></span><span class="pill wait">intentions only</span></div>
+      <div class="lrow"><span class="ph">7</span><span class="what"><code>steward</code> <small>system-management agent with design canon + self-audit — blocked on the User's call: LLM-driven itself, or a verb surface an external agent drives?</small></span><span class="pill wait">deferred</span></div>
+      <div class="lrow"><span class="ph">—</span><span class="what"><code>management</code> <small>host-ops hands (rebuild/switch/service control) — there is no such code in the binary to extract, by house policy; carved out only when the verbs exist</small></span><span class="pill wait">deferred indefinitely</span></div>
+      <div class="lrow"><span class="ph">8</span><span class="what"><code>evals</code> <small>behavior + door-contract + ricing suites — downstream of steward and management</small></span><span class="pill wait">deferred</span></div>
+    </div>
+    <div class="callout">
+      <b>Where the plans live.</b> The rehearsal, cue, sudo-door, and nix-loop designs are captured in <code>docs/Aoide-Wiki/references/fleshing-out-aoide-ricing.md</code> — steered section by section but <em>not yet LOCKED</em>, so nothing there is asserted as existing. The crate deferrals carry their reasoning in <code>docs/architecture/PACKAGE-LAYOUT.md</code>'s status notes. A reader of this report should never mistake either for a running system: if a thing runs, it is in the charts as a solid stroke; if it does not, it is dashed, chipped, or in this section.
     </div>
   </section>
 
@@ -432,36 +620,26 @@ flowchart TB
   <section>
     <div class="plate-label"><span class="no">§</span><h2>Recent work</h2><span class="h-line"></span><span>changelog</span></div>
     <div class="clog">
-      <div class="centry"><span class="hash pending">pending</span><span class="msg"><b>livery merge</b> — the standalone Node note engine (wrapping Style Dictionary) ported natively into <code>crates/song/src/livery/</code>, taking the name <b>livery</b>: one <code>Emitter</code> trait + registry with four pure backends (stage / hyprctl / osc / file-template), the <code>aoide livery emit|resolve|lint</code> verb group (51 commands in <code>schema --json</code>), the nix option renamed <code>aoide.livery</code> behind a <code>mkRenamedOptionModule</code> transition alias, the songbook token file renamed <code>livery.json</code>, and the live stage file renamed <code>stage/livery.json</code> with the old stage path mirrored during the compat window (dropped when the transition closes). The standalone Node package is deleted; the Node toolchain leaves the core. Schema shape unchanged — still v0, no version bump.</span></div>
-      <div class="centry"><span class="hash">ca08b73</span><span class="msg"><b>pi session tracking</b> — the pi coding agent joins the graph as the third <code>AgentProfile</code> (<code>protocol::agents</code>): claude-shaped hook event map, identity normalize, shared model ceiling, and a <code>TranscriptSpec</code> tail-reading pi's own jsonl (<code>~/.pi/agent/sessions/--&lt;bucket(cwd)&gt;--/&lt;ts&gt;_&lt;sid&gt;.jsonl</code>, dots preserved in the bucket) for say/title/model/context tokens. <code>hooks install pi</code> reports declarative — pi's wiring is the dendrite-managed extension (<code>aoide-pi-session.ts</code>, TUI-only so pi-subagents' child runs never register), not a settings file. E2E-verified live: real pi TUI → idle → working (prompt-named) → stopped → done, model + ctx read from the transcript. <small>07b4079 flags the landed-but-unswept state; live binary needs the gated switch before pi sessions track.</small></span></div>
-      <div class="centry"><span class="hash">23e945d</span><span class="msg"><b>Kimi CLI's nix package pulled, the agent profile stays</b> — the custom <code>pkgs/kimi-code</code> derivation and its <code>kimi-code.nix</code> dendrite are gone (host wiring in <code>yomi-strix/default.nix</code> too); <code>protocol::agents</code>' <code>kimi</code> <code>AgentProfile</code> entry is untouched. Net effect: aoide still knows how to hook/conduct a Kimi session end-to-end, it just no longer ships a house-built Kimi binary — bring your own.</span></div>
-      <div class="centry"><span class="hash">34a587a</span><span class="msg"><b>wiki: Aoide vs. LangChain/LangGraph/LangSmith</b> — a positioning handoff (<code>references/AOIDE-VS-LANGCHAIN-HANDOFF.md</code>): the three-layer comparison table, the <code>steward</code> fork this forces (§2, tied to the still-open Phase 7 call), an open graph-db reframing proposal for the session DAG (§3, discussed not decided), and a stated-intention-only note on the session graph eventually adopting knowledge-graph paradigms — typed entities, semantic (not just structural) edges — rather than a plain process DAG (§4).</span></div>
-      <div class="centry"><span class="hash">5ab2bfa</span><span class="msg"><b>docs resync to Phase 9</b> — code references across the wiki repointed at the new crate paths (<code>adapter.rs</code> → <code>crates/client</code>, graph/reap → <code>crates/conduct</code>); <code>AOIDE-DEV.md</code> itself relocated to <code>docs/Aoide-Wiki/protocol/</code>. <small>39eed5d, 5ab2bfa.</small></span></div>
-      <div class="centry"><span class="hash">3c46537</span><span class="msg"><b>package restructure, phase 9</b> — went further than phase 6 stopped: the root's remaining <code>src/commands/</code> handlers moved out to their domain crates (graph*/hooks-install → <code>conduct</code>, rice*/cover/design → <code>song</code>, usage → <code>storage</code>, a2a-serve/daemon/shellbridge → <code>server</code>, a2a-agent*/melete-adapter → <code>client</code>), the app shell itself became <code>crates/cli</code> (package <code>aoide-cli</code>, lib still named <code>aoide</code> — zero caller churn), and the root <code>Cargo.toml</code> is now a bare virtual workspace with no <code>[package]</code>, no <code>src/</code>. Versions centralized under <code>[workspace.dependencies]</code>; a new dev-only <code>test-support</code> crate holds the shared test rig + <code>env_lock</code> instead of duplicating it per-crate. Behavior-preserving and proven, not assumed: <code>schema --json</code> byte-identical across debug/nix/toplevel builds, golden command-path snapshot unchanged, 278 workspace tests green, yomi-strix toplevel builds.</span></div>
-      <div class="centry"><span class="hash">66b8295</span><span class="msg"><b>Pi header</b> — <code>pi-coding-agent.nix</code> gained a home-manager-deployed extension (<code>~/.pi/agent/extensions/aoide-pi-header.ts</code>) swapping Pi's compact startup wordmark for the block-art mascot; <code>/builtin-header</code> restores the default. TUI-only, no effect in print/JSON/RPC modes.</span></div>
-      <div class="centry"><span class="hash">92b23b1</span><span class="msg">Deleted the default songbook calendar widget.</span></div>
-      <div class="centry"><span class="hash">2a21f80</span><span class="msg"><b>agent-profile seam + kimi integration</b> — every claude-hardcoded fact the bridge carried (hook event map, permission vocab, sub-agent tool names, model ceilings, transcript locator/extractors, hook-settings spec) extracted behind <code>protocol::agents</code> <code>AgentProfile</code> entries; the hook door (<code>graph session hook --agent</code>), transcript refresh, window listener, and reaper all dispatch through the table. New <code>aoide hooks install &lt;agent&gt; [--capture]</code> verb wires a harness's settings file idempotently (48 commands). Also fixed a live bug: a wrapper-of-agent (<code>aoide conduct -- kimi</code>) was evicted at its child's SessionStart and reaped as a duplicate — conducted PTY hosts are no longer agent-duplicate candidates. E2E-verified on yomi-strix with the debug binary. <small>Flag condensed post-commit in a6df64f; the Kimi side of this profile outlived the nix package itself — see 23e945d above.</small></span></div>
-      <div class="centry"><span class="hash pending">pending</span><span class="msg"><b>Kimi Code CLI dendrite</b> — Moonshot AI's terminal coding agent joins the fleet, sibling of <code>claude-code</code>. New <code>pkgs/kimi-code</code>: a real, reproducible <code>fetchurl</code> derivation over upstream's prebuilt Linux x64 binary (hand-verified sha256, not taken on faith from any fetched page), <code>autoPatchelfHook</code>'d against glibc/libstdc++ — needed <code>dontStrip = true</code> since it's a Bun-compiled single-file executable with its JS bundle appended after the ELF body, and the default strip pass was corrupting that payload (symptom: SIGILL on launch). New <code>modules/dendrites/kimi.nix</code> ships <code>aoide.kimi.enable</code> defaulted off, same shape as every other dendrite; yomi-strix opts in. Toplevel builds green; activation is pending an interactive sudo switch.</span></div>
-      <div class="centry"><span class="hash">9e61965</span><span class="msg"><b>Conductor "playbill" redesign</b> — the session roster rebuilt from a blind spec (the design agent never saw the old implementation): projects as roman-numeral movements, per-session state read off a fixed-width lamp glyph/color, the old mood-face/kaomoji + hover-clear machinery dropped wholesale. <code>ConductorPreview.qml</code>'s harness now instantiates real <code>LiveryState</code>/<code>ShellBridge</code> instead of a stub palette. Deployed live to <code>run/qml/</code>, flagged in AOIDE-DEV.md §7 — still awaiting khoa's vision-check before it counts as reviewed design, not just committed.</span></div>
-      <div class="centry"><span class="hash">25e2bdb</span><span class="msg"><b>package-layout docs sync</b> — <code>PACKAGE-LAYOUT.md</code> + its wiki mirror flip Phase 6 from "in planning" to landed, record that <code>cli</code> is the root package rather than a separate crate, and confirm the seven-crate final count. <b>Closes out the entire multi-phase package-restructure workstream</b> — Phases 7 (<code>steward</code>) and 8 (<code>evals</code>) remain DEFER, both genuinely blocked on decisions outside the restructure itself, not just unscheduled.</span></div>
-      <div class="centry"><span class="hash">c56faa7</span><span class="msg"><b>package restructure, phases 1→5b</b> — <code>pkgs/aoide</code> went from one crate to eight: <code>protocol</code> (the registry/wire/output contract every door and crate reads — "one schema, N doors" is now compiler-enforced, not a convention), <code>storage</code>, <code>conduct</code>, <code>client</code>, <code>server</code> (needed a dependency-injection seam — the trunk's assembled command registry can't be a dependency of the crate that serves MCP/A2A, so it's threaded in as a parameter instead; verified the resulting <code>&amp;'static Registry</code> is sound, not just compiling), and <code>song</code>. Every phase landed as plan(Opus)→execute(Sonnet)→adversarial-review(Fable), zero call-site churn behind <code>pub use</code> shims. Two corrections along the way: a2a/mcp wire payloads belong in <code>protocol</code> not <code>client</code> (both server and client read them); <code>management</code> and <code>cli</code> both turned out not to be real crates worth building yet — see the ledger above. <small>e6809f6 … c56faa7, nine commits.</small></span></div>
-      <div class="centry"><span class="hash">a3f5b84</span><span class="msg"><b>context-ceiling fix</b> — the dock's context meter used to guess each session's ceiling client-side (default 200k, only bump to 1M on a literal <code>[1m]</code> marker) — wrong for the current model lineup, which is natively 1M with no such marker, so Sonnet-5/Opus-4.7+ sessions read as falsely near-full. <code>aoide</code> now computes the ceiling from the model id and publishes it on the session record; the widget reads the fact instead of guessing. Review caught a real off-by-one in the fix itself (a legacy dated snapshot id could land its date in the un-guarded minor-version slot) before it landed.</span></div>
-      <div class="centry"><span class="hash">d72c660</span><span class="msg"><b>design mode, phases A+B</b> — <code>aoide rice design {status,enter,exit}</code>: a <code>stage/design.json</code> marker recording that a song is being actively iterated on, for other tooling to read instead of every design pass re-deriving the workflow from a fresh prompt. <code>enter</code> reuses <code>rice preview</code>'s handler directly rather than reimplementing it. Phase C (the actual new capability — live-carrying a song's <code>widgets/*.qml</code> into <code>run/qml/songs/</code> without a full rebuild) and Phase D (a <code>sync</code> verb) are scoped but not built.</span></div>
-      <div class="centry"><span class="hash">ac7448c</span><span class="msg"><b>dock re-skin</b> — the claude.ai usage stele moves <b>directly under the Conductor</b> (Conductor → Usage → Terminals → Meters → Power) and is re-skinned to read as Claude: the segno clef becomes the rayed spark <code>❋</code> (U+274B, from the declared <code>noto-fonts</code>), signature stays palette-driven on <code>base09</code> (clay/kiln-fired orange in the light sonata). One width source now governs the whole dock — <code>root.gadgetW = 360</code> — dropping the Meters/Power centring wrappers so all five steles share a single left edge. <small>Glyph + warmth get the final say on the next light vision-check.</small></span></div>
-      <div class="centry"><span class="hash">44c6ec9</span><span class="msg"><b>sudo-tracking</b> — a conducted shell blocked at a <code>[sudo]</code> prompt publishes <code>needsSudo</code> (a 🔒 badge), children-gated so <code>sudo nixos-rebuild</code> with cached creds doesn't false-fire. <small>Maps onto A2A <code>AUTH_REQUIRED</code>.</small></span></div>
-      <div class="centry"><span class="hash">9606a76</span><span class="msg"><b>A2A phase F</b> — the librarian documented the door across the wiki (new <code>concepts/orchestration/A2A-Door.md</code> + two→three-door updates to Agent-Interface, Governance, Gadget-Dock, aoide-cli, …), committed. <b>A2A workstream complete, A–F — all code and docs landed.</b></span></div>
-      <div class="centry"><span class="hash">1919a7e</span><span class="msg"><b>A2A phase D</b> — the client side: <code>a2a agent add/list/remove/send</code> registers external agents in <code>state/a2a-agents.json</code>, folds them into the DAG as <code>kind:"a2a"</code> nodes, and drives them. <b>aoide is now a fully bidirectional A2A peer</b> — live-verified registering + driving its own server. 56 tests.</span></div>
-      <div class="centry"><span class="hash">ebf5115</span><span class="msg"><b>A2A phase C</b> — SSE streaming: <code>message/stream</code> (send-then-stream) + <code>tasks/resubscribe</code>, emit-on-change with a <code>final:true</code> terminal event, 10-min/64-conn bounded so a stream can't hold a thread forever. <code>AgentCard.streaming → true</code>. 32 tests.</span></div>
-      <div class="centry"><span class="hash">dff3af6</span><span class="msg"><b>A2A phase A</b> — the contract: CONTRACTS §6, <code>aoide.a2a.*</code> options, <code>kind:"a2a"</code>, command stubs (38→42).</span></div>
-      <div class="centry"><span class="hash">8388e44</span><span class="msg"><b>A2A phase B</b> — the server MVP: a hand-rolled zero-dep JSON-RPC/HTTP door (AgentCard + <code>tasks/get</code>), hardened against untrusted input; <code>aoide-a2a.service</code>.</span></div>
-      <div class="centry"><span class="hash">fa365f5</span><span class="msg"><b>A2A phase B2</b> — <code>message/send</code> inject + spawn (configured agent). Landed; reviewed security-clean (configured-agent invariant holds, no client data reaches argv/env, <code>--yes</code> scope bounded). 27/27 tests.</span></div>
-      <div class="centry"><span class="hash">4deab78</span><span class="msg"><b>context widget</b> — per-session context-window fill: <code>contextTokens</code> from the transcript → a <code>[▓▓░░] 361k · 36%</code> meter on each roster row, accent→urgent at 85%. Also fixed a latent <code>rosterSig</code> hot-reload bug. 13/13 tests. <small>Light/dark vision-check pending on next switch.</small></span></div>
-      <div class="centry"><span class="hash">2e2d9b2</span><span class="msg"><b>conductor context rollups</b> — the conductor gadget now groups by <b>project</b> (collapsible headers, loads <code>projects.json</code>, anchors by longest-cwd-prefix) with context rollups at three levels: session fill · project header <b>max-fill + token sum</b> · fleet footer. qmllint-clean. <small>Vision-check + taste calls (header accent, indent, badge) pending on switch.</small></span></div>
-      <div class="centry"><span class="hash">0a2a113</span><span class="msg"><b>usage groundwork</b> — <code>aoide usage</code>: local token/cost rollup (today/week from <code>~/.claude</code> transcripts) → new isolated gitignored <code>state/usage.json</code> (<code>CONTRACTS §2</code>); <code>aoide.usage.enable</code> toggle + poller; approximate pricing. Live <code>oauth/usage</code> fetch left as a stub seam. 9 tests, zero deps.</span></div>
-      <div class="centry"><span class="hash">641778a</span><span class="msg"><b>usage widget</b> — <code>UsageGadget</code>, a togglable dock gadget (in <code>AoidePanel</code>) reading <code>state/usage.json</code>: local today/week tile now, <b>live-ready</b> (plan · weekly · credits light up unchanged once the live block fills). Gated on file presence = the toggle. <small>Light vision-check pending on switch.</small></span></div>
-      <div class="centry"><span class="hash">e69ff66</span><span class="msg"><b>live oauth/usage fetch</b> — the usage widget is now <b>complete end-to-end</b>. Reads the local OAuth token, calls the unofficial <code>/api/oauth/usage</code> (Claude Code's own <code>/usage</code> source) → real plan · weekly · credits; degrades to a quiet note on any failure. Security-reviewed (no blockers) + hardened: token goes <b>only over curl's stdin</b> (no argv, no temp file, no leak — verified), byte-validated, 401/403 clean-degrades. <em>Unofficial/ToS-gray, off by default.</em> <small>Enable <code>aoide.usage.enable</code>; light vision-check on switch.</small></span></div>
+      <div class="centry"><span class="hash">19ee9e4</span><span class="msg"><b>fugue</b> — a second real song: flat mono counterpoint to sonata's marble (ASCII-only, one typeface, zero radius/shadow/blur, state as a rule not a glow). Dresses <code>bar</code> + <code>herald</code> and deliberately lets everything else fall through the baseline chain — the live proof that a minimal song is complete because the fallback carries it. <small>5a333cb, 82ba5f9, 19ee9e4.</small></span></div>
+      <div class="centry"><span class="hash">b2c33ea</span><span class="msg"><b>widget-record builder</b> — <code>lib/song.nix</code>: a song declares each widget as one nix function (<code>mkWidget</code>), compositions validate at the one choke point overrides cannot bypass (<code>composeSong</code>: closed key set, typed fields, slot-dependency closure). <b>Landed, unwired</b> — nothing imports it yet.</span></div>
+      <div class="centry"><span class="hash">0ae6e4e</span><span class="msg"><b>facet→song split, P0–P2</b> — the paint test engraved (CONTRACTS §0 + slots.md, 2fb9098), then GadgetFrame/BarPopout/AudioColonnade (bb9ed5e) and MorphState/the stele popouts (0ae6e4e) moved to sonata's widgets/. Along the way: a moved uppercase helper stops being a QML type under <code>qs:</code> URLs — fixed by generating a per-song <code>qmldir</code> (e1900ad). P3, the facet switch, is the gate for the rest.</span></div>
+      <div class="centry"><span class="hash">a1867ff</span><span class="msg"><b>takes, marks, and <code>rice back</code></b> — every draft write mints a take (a tree with parent pointers, one monotone counter, never renumbered); <code>rice take mark</code> stamps reviewed states; <code>rice back</code> reverts to a take or mark, snapshotting un-taken drift first; <code>rice take list/diff/prune</code> round it out, with marks protecting their whole ancestry. <small>fccf9a8 … a1867ff.</small></span></div>
+      <div class="centry"><span class="hash">4e09492</span><span class="msg"><b>edit journal + anchored pre-images</b> — on edit-tool hooks, a file's pre-image is stored in the project's own git object store (<code>hash-object -w</code> + a <code>refs/aoide/preimage/*</code> anchor gc cannot collect) and pointed at from <code>state/edits.jsonl</code>. Substrate only — the <code>graph project edits/back</code> verbs are still planned. <small>7b7ab89, 4e09492.</small></span></div>
+      <div class="centry"><span class="hash">99fe051</span><span class="msg"><b>soundcheck</b> — new <code>upkeep</code> crate: report-only working-tree integrity (the half <code>nix flake check</code> structurally cannot see). Names what is out of place, never touches it; the closed root became a machine-readable inventory (b6ed7fe).</span></div>
+      <div class="centry"><span class="hash">23f0a0e</span><span class="msg"><b>A2A bearer auth</b> — the door learns to ask who is knocking: <code>aoide.a2a.tokenFile</code> gates spawn for the first time and strips loopback's automatic trust behind proxies/tunnels; per-peer tokens identify autogated peers by secret, not address. Off-path is byte-identical to before, pinned by tests.</span></div>
+      <div class="centry"><span class="hash">2026-08-14</span><span class="msg"><b>peer federation</b> — aoide-to-aoide: <code>peer add/list/remove/pull/status</code>, one new JSON-RPC method (<code>aoide/graphSummary</code>), a per-peer pull cache with a 5-minute TTL, and the <code>peer:*</code> subtree fold — a peer's whole resolved session graph nests into the local one, stale-but-present when unreachable. Same amendment gated non-loopback <code>message/send</code> through the pending queue.</span></div>
+      <div class="centry"><span class="hash">e502cd6</span><span class="msg"><b>screen family</b> — <code>screen shot/diff/info/ocr/send</code> + nine <code>screen point</code> verbs speaking <code>zwlr_virtual_pointer_v1</code> natively, in-process. Live-proven on Hyprland (pixel-exact moves, real detents, atomic drag); stuck-button recovery verified by manufacturing the hazard; <code>wlrctl</code> retired. Sidecar + scale contract in CONTRACTS §8.</span></div>
+      <div class="centry"><span class="hash">1bb6372</span><span class="msg"><b>livery merge — landed</b> — the standalone Node note engine ported natively into <code>crates/song/src/livery/</code> and renamed <b>livery</b>: one <code>Emitter</code> trait with four pure backends (stage / hyprctl / osc / file-template), the <code>aoide livery emit|resolve|lint</code> verbs, options renamed <code>aoide.livery</code>, songbook + stage files renamed <code>livery.json</code>. Phase 4 dropped the compat mirror; the subdir flake landed the same week — Node left the core entirely. <small>3d2b073, 1bb6372; switched 2026-08-13.</small></span></div>
+      <div class="centry"><span class="hash">ca08b73</span><span class="msg"><b>pi session tracking</b> — the pi coding agent joins the graph as the third <code>AgentProfile</code>: claude-shaped hook event map, a <code>TranscriptSpec</code> tail-reading pi's own jsonl for say/title/model/context. <code>hooks install pi</code> reports declarative — pi's wiring is the dendrite-managed extension, TUI-only so subagent child runs never register. E2E-verified live.</span></div>
+      <div class="centry"><span class="hash">23e945d</span><span class="msg"><b>Kimi's nix package pulled, the profile stays</b> — the <code>pkgs/kimi-code</code> derivation and its dendrite are gone; <code>protocol::agents</code>' kimi profile is untouched. Aoide still hooks/conducts a Kimi session end-to-end — it just no longer ships a house-built binary.</span></div>
+      <div class="centry"><span class="hash">3c46537</span><span class="msg"><b>package restructure, phase 9</b> — the root's remaining handlers moved to their domain crates, the app shell became <code>crates/cli</code> (lib still named <code>aoide</code>, zero caller churn), and the root Cargo.toml went fully virtual. Proven, not assumed: <code>schema --json</code> byte-identical across builds, golden snapshot unchanged, the workspace green. <small>Supersedes phase 6's "cli stays root" finding — recorded both times, not quietly swapped.</small></span></div>
+      <div class="centry"><span class="hash">2a21f80</span><span class="msg"><b>agent-profile seam</b> — every claude-hardcoded fact the bridge carried (hook maps, permission vocab, transcript locators, ceilings, settings specs) extracted behind <code>protocol::agents</code> profiles; the hook door, transcript refresh, window listener, and reaper all dispatch through the table. New harness = one profile entry.</span></div>
+      <div class="centry"><span class="hash">a3f5b84</span><span class="msg"><b>context-ceiling fix</b> — the dock stopped guessing each session's window client-side; <code>aoide</code> computes the ceiling from the model id and publishes it on the session record, re-derived on mid-session model switches.</span></div>
+      <div class="centry"><span class="hash">44c6ec9</span><span class="msg"><b>sudo-tracking</b> — a conducted shell blocked at a <code>[sudo]</code> prompt publishes <code>needsSudo</code> (a lock badge on the roster), children-gated so cached-cred sudo does not false-fire. <small>Maps onto A2A <code>AUTH_REQUIRED</code>.</small></span></div>
+      <div class="centry"><span class="hash">1919a7e</span><span class="msg"><b>A2A phases A–F</b> — contract (dff3af6), server MVP (8388e44), <code>message/send</code> inject+spawn reviewed security-clean (fa365f5), SSE streaming (ebf5115), the client side + DAG fold (1919a7e), wiki (9606a76). <b>Aoide is a fully bidirectional A2A peer</b> — live-verified registering and driving its own server.</span></div>
+      <div class="centry"><span class="hash">e69ff66</span><span class="msg"><b>usage widget, end to end</b> — local today/week rollup from transcripts plus the unofficial <code>oauth/usage</code> fetch (token only ever over curl's stdin; degrades to a quiet note on any failure). Unofficial/ToS-gray, off by default. <small>0a2a113, 641778a, e69ff66.</small></span></div>
     </div>
   </section>
 
-  <p class="foot">AoideOS · nucleus / dendrites / facets · song = rice · three doors, one schema · a living report — updated in place</p>
+  <p class="foot">Aoide · an app server harness · one schema, three doors · the desktop is a client · song = rice · a living report — updated in place</p>
 </div>
