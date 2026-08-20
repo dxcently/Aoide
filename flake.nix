@@ -101,6 +101,29 @@
         }
       );
 
+      # ── Songbook manifest/registry (C4/W3) ──────────────────────────────────
+      # The SAME generator `modules/facets/quickshell/default.nix`'s
+      # `quickshellConfig` derivation uses at build time
+      # (`lib/songbook.nix`), exposed as a lean flake output so
+      # `pkgs/aoide/crates/song/src/widgets.rs` can shell out to `nix eval
+      # --json .#songbookManifest` at RUNTIME and regenerate
+      # `manifest.json`/`registry.json` whole — the hot-sync half of `rice
+      # stage`, no rebuild. Deliberately system-independent (`nixpkgs.lib` is
+      # itself system-independent — no `legacyPackages.${system}` needed) and
+      # deliberately NOT `self.nixosConfigurations.*` or anything under it:
+      # evaluating this attribute must never force a host's full module
+      # system (`config.aoide.*`), only `lib` + `song/songbook/` +
+      # `lib/song.nix` (nix is lazy — the songs loop above is a SEPARATE
+      # thunk this output shares no dependency with beyond `lib`).
+      songbookManifest =
+        let
+          sb = import ./lib/songbook.nix { inherit lib; };
+        in
+        {
+          manifest = sb.manifestAttrs;
+          registry = sb.registryAttrs;
+        };
+
       # ── Checks ─────────────────────────────────────────────────────────────
       # The contractual coupling discipline (lib/checks.nix). They pass
       # trivially now (no facets declare surface owners yet) and become real as
