@@ -740,7 +740,11 @@ persisted "resolved" archive. An entry carries no id of its own; `list`'s
 resolved when the entry was queued; it is carried through `approve`'s
 re-drive so the delivered send still names whoever queued it, not whoever
 approved it, and is absent (never a parse failure) on an entry written
-before this field existed.
+before this field existed. `list`'s HUMAN line renders both the target and
+`from` through the canonical display grammar (petnames plan P3 —
+`<host>/<role>/<petname> (…<tail4>)`, terse petname+tail for `from`); the
+JSON fields `data.pending[].sessionId`/`.from` stay the entry's raw
+canonical ids, verbatim, always.
 
 ```json
 {
