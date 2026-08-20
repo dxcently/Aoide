@@ -722,16 +722,29 @@ entry through the SAME gated injection door with `--yes`, in-process; `deny`
 drops it. Either resolution REMOVES the entry from this file — the record of
 what happened is the audit log (`graph.pending.approve` / `.deny`), not a
 persisted "resolved" archive. An entry carries no id of its own; `list`'s
-`id` is its array position, which shifts on the next resolve.
+`id` is its array position, which shifts on the next resolve. The optional
+`from` field is the sender attribution (`--from`, else `AOIDE_SESSION_ID`)
+resolved when the entry was queued; it is carried through `approve`'s
+re-drive so the delivered send still names whoever queued it, not whoever
+approved it, and is absent (never a parse failure) on an entry written
+before this field existed.
 
 ```json
 {
   "schemaVersion": "0",
   "pending": [
-    { "sessionId": "conduct-6364-1786576226", "text": "/compact keep only operational records", "submit": true, "queuedAt": "2026-08-13T14:01:10Z" }
+    { "sessionId": "conduct-6364-1786576226", "text": "/compact keep only operational records", "submit": true, "queuedAt": "2026-08-13T14:01:10Z", "from": "conduct-1122-1786570000" }
   ]
 }
 ```
+
+`graph send`'s delivered payload carries the same attribution: when a sender
+resolves and the text names the node (see `names_the_node` — a bare keystroke
+answer like a permission-verdict digit never does), the payload is prefixed
+`from <sender>: ` on its first line only, so the receiving agent can see who
+sent it — attribution, not authentication; both `--from` and
+`AOIDE_SESSION_ID` are ordinary same-user process state, spoofable by
+anyone who can already write to the target's control socket.
 
 ### `state/usage.json` — **v0**
 
