@@ -42,8 +42,12 @@
 # `edit` and `open` (the only place `O`'s interactive picker has more than
 # one thing to offer); everything else — images, video/audio, archives —
 # gets `open` explicitly named so it doesn't depend on whatever yazi's own
-# compiled default rule for that type happens to reference; a trailing `*`
-# in append_rules is the safety net for anything not named above.
+# compiled default rule for that type happens to reference; a trailing
+# `url = "*"` in append_rules is the safety net for anything not named
+# above. The rule key is `url` (a path glob), NOT `name` — yazi 26.x renamed
+# it, and a `name = "*"` rule makes the WHOLE yazi.toml fail to parse ("at
+# least one of `url` or `mime` must be specified"), silently dropping every
+# setting in the file back to yazi's compiled presets.
 { config, lib, ... }:
 {
   options.aoide.yazi.enable = lib.mkEnableOption "the yazi terminal file manager";
@@ -142,7 +146,7 @@
             ];
             append_rules = [
               {
-                name = "*";
+                url = "*";
                 use = "open";
               }
             ];
