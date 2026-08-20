@@ -360,7 +360,8 @@
         <text x="280" y="132" text-anchor="middle" font-size="9" fill="var(--muted)">crates/server</text>
         <line x1="350" y1="113" x2="420" y2="113" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f2a)"/>
         <text x="385" y="103" text-anchor="middle" font-size="9" fill="var(--accent-ink)">PARSE + AUTH</text>
-        <text x="385" y="130" text-anchor="middle" font-size="8.5" fill="var(--muted)">bearer · remote queues pending</text>
+        <text x="387" y="158" text-anchor="middle" font-size="8.5" fill="var(--muted)">bearer · origin</text>
+        <text x="387" y="169" text-anchor="middle" font-size="8.5" fill="var(--muted)">remote queues pending</text>
         <rect x="425" y="80" width="140" height="66" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
         <text x="495" y="102" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">DISPATCH</text>
         <text x="495" y="118" text-anchor="middle" font-size="9.5" fill="var(--muted)">one dispatcher</text>
@@ -532,6 +533,156 @@
     </div>
   </section>
 
+  <!-- WHERE A HARNESS ATTACHES -->
+  <section>
+    <div class="plate-label"><span class="no">IV.</span><h2>Where a harness attaches</h2><span class="h-line"></span><span>ingress, from outside</span></div>
+    <p class="caption">Plate II traced one request inward. This is the same spine seen from the <em>outside</em> — every place an external coding harness, or anything else that wants to drive the machine, can attach: what it must speak there, what admits it, what gates it, and what comes back. <b>Five attach points are live today. One — the cue — is designed and not built</b>, and is drawn dashed for exactly that reason.</p>
+    <div class="plate">
+      <svg viewBox="0 0 1010 520" style="min-width:900px" role="img" aria-label="Six attach points for an external harness, the admission and injection gates between them, and the one registry and state plane beneath">
+        <defs>
+          <marker id="f5a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+          <marker id="f5b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--bronze)"/></marker>
+          <marker id="f5m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+        </defs>
+        <text x="20" y="24" font-size="11" letter-spacing="2" fill="var(--accent-ink)">WHAT A HARNESS SPEAKS — SIX ATTACH POINTS</text>
+
+        <!-- attach row -->
+        <rect x="20" y="40" width="150" height="112" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="95" y="64" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)">CLI DOOR</text>
+        <text x="95" y="80" text-anchor="middle" font-size="9" fill="var(--muted)">aoide &lt;cmd&gt;</text>
+        <text x="95" y="95" text-anchor="middle" font-size="8.5" fill="var(--muted)">argv, in-process</text>
+        <text x="95" y="107" text-anchor="middle" font-size="8.5" fill="var(--muted)">no listener at all</text>
+        <rect x="51" y="118" width="88" height="17" rx="8" fill="color-mix(in srgb, var(--good) 16%, transparent)"/>
+        <text x="95" y="130" text-anchor="middle" font-size="8" letter-spacing="1" fill="var(--good)">LIVE</text>
+
+        <rect x="184" y="40" width="150" height="112" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="259" y="64" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)">HOOK DOOR</text>
+        <text x="259" y="80" text-anchor="middle" font-size="9" fill="var(--muted)">hooks install</text>
+        <text x="259" y="95" text-anchor="middle" font-size="8.5" fill="var(--muted)">the harness's own</text>
+        <text x="259" y="107" text-anchor="middle" font-size="8.5" fill="var(--muted)">hooks, piped in</text>
+        <rect x="215" y="118" width="88" height="17" rx="8" fill="color-mix(in srgb, var(--good) 16%, transparent)"/>
+        <text x="259" y="130" text-anchor="middle" font-size="8" letter-spacing="1" fill="var(--good)">LIVE</text>
+
+        <rect x="348" y="40" width="150" height="112" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="423" y="64" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)">MCP DOOR</text>
+        <text x="423" y="80" text-anchor="middle" font-size="9" fill="var(--muted)">mcp serve</text>
+        <text x="423" y="95" text-anchor="middle" font-size="8.5" fill="var(--muted)">one tool per</text>
+        <text x="423" y="107" text-anchor="middle" font-size="8.5" fill="var(--muted)">registry command</text>
+        <rect x="379" y="118" width="88" height="17" rx="8" fill="color-mix(in srgb, var(--good) 16%, transparent)"/>
+        <text x="423" y="130" text-anchor="middle" font-size="8" letter-spacing="1" fill="var(--good)">LIVE</text>
+
+        <rect x="512" y="40" width="150" height="112" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="587" y="64" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)">A2A DOOR</text>
+        <text x="587" y="80" text-anchor="middle" font-size="9" fill="var(--muted)">a2a serve</text>
+        <text x="587" y="95" text-anchor="middle" font-size="8.5" fill="var(--muted)">http · agent card</text>
+        <text x="587" y="107" text-anchor="middle" font-size="8.5" fill="var(--muted)">5 json-rpc methods</text>
+        <rect x="536" y="118" width="102" height="17" rx="8" fill="color-mix(in srgb, var(--good) 16%, transparent)"/>
+        <text x="587" y="130" text-anchor="middle" font-size="8" letter-spacing="1" fill="var(--good)">LIVE · OPT-IN</text>
+
+        <rect x="676" y="40" width="150" height="112" rx="8" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="751" y="64" text-anchor="middle" font-size="11" font-weight="600" fill="var(--muted)">CUE DOOR</text>
+        <text x="751" y="80" text-anchor="middle" font-size="9" fill="var(--muted)">aoide cue · graph join</text>
+        <text x="751" y="95" text-anchor="middle" font-size="8.5" fill="var(--muted)">self-orientation</text>
+        <text x="751" y="107" text-anchor="middle" font-size="8.5" fill="var(--muted)">pull-only, never pushed</text>
+        <rect x="707" y="118" width="88" height="17" rx="8" fill="none" stroke="var(--muted)" stroke-dasharray="3 3"/>
+        <text x="751" y="130" text-anchor="middle" font-size="8" letter-spacing="1" fill="var(--muted)">PLANNED</text>
+
+        <rect x="840" y="40" width="150" height="112" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <text x="915" y="64" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)">STATE PLANE</text>
+        <text x="915" y="80" text-anchor="middle" font-size="9" fill="var(--muted)">stage/*.json + socket</text>
+        <text x="915" y="95" text-anchor="middle" font-size="8.5" fill="var(--muted)">watch to read</text>
+        <text x="915" y="107" text-anchor="middle" font-size="8.5" fill="var(--muted)">one socket to write</text>
+        <rect x="871" y="118" width="88" height="17" rx="8" fill="color-mix(in srgb, var(--good) 16%, transparent)"/>
+        <text x="915" y="130" text-anchor="middle" font-size="8" letter-spacing="1" fill="var(--good)">LIVE</text>
+
+        <!-- descent edges -->
+        <line x1="95" y1="152" x2="95" y2="286" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f5a)"/>
+        <text x="103" y="200" font-size="9" fill="var(--accent-ink)">PARSE ARGV</text>
+        <line x1="259" y1="152" x2="259" y2="286" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f5a)"/>
+        <text x="267" y="200" font-size="9" fill="var(--accent-ink)">HOOK JSON ON STDIN</text>
+        <line x1="423" y1="152" x2="423" y2="286" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f5a)"/>
+        <text x="415" y="228" text-anchor="end" font-size="9" fill="var(--accent-ink)">TOOLS/CALL</text>
+        <line x1="587" y1="152" x2="587" y2="196" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f5a)"/>
+        <text x="579" y="176" text-anchor="end" font-size="9" fill="var(--accent-ink)">PARSE + AUTH</text>
+        <line x1="751" y1="152" x2="751" y2="286" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#f5m)"/>
+        <text x="759" y="228" font-size="8.5" fill="var(--muted)">SAME REGISTRY,</text>
+        <text x="759" y="239" font-size="8.5" fill="var(--muted)">WHEN IT LANDS</text>
+        <line x1="915" y1="152" x2="915" y2="286" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f5a)"/>
+        <text x="923" y="200" font-size="8.5" fill="var(--accent-ink)">NO REGISTRY —</text>
+        <text x="923" y="211" font-size="8.5" fill="var(--accent-ink)">THE OTHER PLANE</text>
+
+        <!-- returns -->
+        <line x1="140" y1="286" x2="140" y2="158" stroke="var(--bronze)" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#f5b)"/>
+        <text x="148" y="256" font-size="8.5" fill="var(--bronze-ink)">OUTCOME JSON</text>
+        <line x1="630" y1="200" x2="630" y2="158" stroke="var(--bronze)" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#f5b)"/>
+        <text x="638" y="184" font-size="8.5" fill="var(--bronze-ink)">TASK + SSE</text>
+        <line x1="880" y1="286" x2="880" y2="158" stroke="var(--bronze)" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#f5b)"/>
+        <text x="872" y="256" text-anchor="end" font-size="8.5" fill="var(--bronze-ink)">STAGE DOCS</text>
+
+        <!-- admission gate (a2a only) -->
+        <rect x="470" y="200" width="234" height="64" rx="8" fill="var(--raised)" stroke="var(--bronze)" stroke-width="1.5"/>
+        <text x="587" y="222" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)">ADMISSION</text>
+        <text x="587" y="238" text-anchor="middle" font-size="8.5" fill="var(--muted)">nix enable (off by default) · bearer</text>
+        <text x="587" y="251" text-anchor="middle" font-size="8.5" fill="var(--muted)">token · loopback vs autogate peer</text>
+        <line x1="587" y1="264" x2="587" y2="286" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f5a)"/>
+
+        <!-- substrate -->
+        <rect x="20" y="290" width="700" height="72" rx="8" fill="color-mix(in srgb, var(--accent) 10%, transparent)" stroke="var(--accent)"/>
+        <text x="370" y="318" text-anchor="middle" font-size="12.5" font-weight="700" letter-spacing="1" fill="var(--ink)">AOIDE-PROTOCOL — ONE REGISTRY</text>
+        <text x="370" y="338" text-anchor="middle" font-size="9.5" fill="var(--muted)">83 commands · Outcome envelope · one dispatcher, injected never depended on</text>
+        <text x="370" y="352" text-anchor="middle" font-size="9" fill="var(--muted)">every call audits through Door::Cli · Mcp · A2a into the one log</text>
+        <rect x="750" y="290" width="240" height="72" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <text x="870" y="316" text-anchor="middle" font-size="11" fill="var(--ink)">song/stage/*.json</text>
+        <text x="870" y="334" text-anchor="middle" font-size="8.5" fill="var(--muted)">shellbridge is the single writer</text>
+        <text x="870" y="348" text-anchor="middle" font-size="8.5" fill="var(--muted)">versioned apart, not registry-derived</text>
+
+        <!-- profile seam -->
+        <rect x="20" y="396" width="400" height="74" rx="10" fill="none" stroke="var(--line-strong)" stroke-dasharray="6 4"/>
+        <rect x="38" y="388" width="270" height="15" fill="var(--plate)"/>
+        <text x="46" y="400" font-size="9.5" letter-spacing="1" fill="var(--muted)">protocol::agents — THE HARNESS SEAM</text>
+        <rect x="34" y="422" width="76" height="34" rx="6" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.2"/>
+        <text x="72" y="443" text-anchor="middle" font-size="9.5" fill="var(--ink)">claude</text>
+        <rect x="118" y="422" width="64" height="34" rx="6" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.2"/>
+        <text x="150" y="443" text-anchor="middle" font-size="9.5" fill="var(--ink)">kimi</text>
+        <rect x="190" y="422" width="54" height="34" rx="6" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.2"/>
+        <text x="217" y="443" text-anchor="middle" font-size="9.5" fill="var(--ink)">pi</text>
+        <text x="262" y="446" text-anchor="middle" font-size="15" fill="var(--muted)">···</text>
+        <rect x="286" y="422" width="120" height="34" rx="6" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="4 4"/>
+        <text x="346" y="443" text-anchor="middle" font-size="8.5" fill="var(--muted)">+ the next harness</text>
+        <line x1="220" y1="396" x2="220" y2="366" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="2 3" marker-end="url(#f5m)"/>
+        <text x="228" y="384" font-size="8.5" fill="var(--muted)">ONE PROFILE = ONE HARNESS</text>
+
+        <!-- injection gate + session -->
+        <rect x="440" y="396" width="300" height="66" rx="8" fill="var(--raised)" stroke="var(--bronze)" stroke-width="1.5"/>
+        <text x="590" y="418" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)">INJECTION GATE</text>
+        <text x="590" y="434" text-anchor="middle" font-size="8.5" fill="var(--muted)">graph::send — --yes · autogate env</text>
+        <text x="590" y="447" text-anchor="middle" font-size="8.5" fill="var(--muted)">· sender is the target's parent</text>
+        <line x1="590" y1="362" x2="590" y2="392" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f5a)"/>
+        <text x="598" y="382" font-size="9" fill="var(--accent-ink)">graph send</text>
+        <rect x="800" y="396" width="190" height="66" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="895" y="422" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)">SESSION</text>
+        <text x="895" y="440" text-anchor="middle" font-size="8.5" fill="var(--muted)">a conducted agent's pty</text>
+        <line x1="740" y1="429" x2="796" y2="429" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f5a)"/>
+        <text x="768" y="420" text-anchor="middle" font-size="8.5" fill="var(--accent-ink)">DELIVER</text>
+        <text x="590" y="490" text-anchor="middle" font-size="9.5" fill="var(--bronze-ink)">no authorisation → held PENDING for a human, never silently dropped</text>
+      </svg>
+    </div>
+    <p class="plate-foot">solid = the way in · dashed = what the harness gets back · dotted = the seam a new harness extends · the cue door is designed, not built</p>
+    <div class="legend">
+      <span><span class="sw solid-accent"></span>server-side process</span>
+      <span><span class="sw kernel"></span>the protocol substrate</span>
+      <span><span class="sw filedoc"></span>published document</span>
+      <span><span class="sw dashed"></span>dashed container = grouping · dashed leaf = not yet real</span>
+    </div>
+    <div class="prose" style="margin-top:1.3rem">
+      <p><b>What a harness must speak: argv and one envelope.</b> The floor is a shell. <code>aoide schema --json</code> enumerates all 83 commands with their args, flags, and gating; <code>aoide guide</code> is the prose companion. Every command answers in the same <code>Outcome</code> shape — <code>status</code>, <code>command</code>, <code>message</code>, <code>gated</code>, a <code>changed</code> list that is empty exactly when nothing happened (the idempotency signal), and an optional <code>data</code> payload (<code>crates/protocol/src/output.rs</code>). A harness that can run a subprocess and parse JSON is already a full client; the other doors add reach, never capability.</p>
+      <p><b>The hook attach point is not a fourth protocol.</b> <code>aoide hooks install claude|kimi|pi</code> merges one entry into the harness's <em>own</em> settings file, and that entry runs <code>aoide graph session hook</code> — the CLI door, one registry verb, the harness's hook payload arriving on stdin (<code>crates/conduct/src/commands/hooks.rs</code>). The payload is treated as data and never propagates as a command. Teaching Aoide a new harness is therefore one entry in <code>protocol::agents</code> — its hook-event map, transcript locator, permission vocabulary, and context ceiling — after which the hook door, the transcript refresh, the window listener, and the reaper all dispatch through the table without a second edit.</p>
+      <p><b>What gates it, in two layers.</b> The <em>capability</em> is admitted at rebuild time: <code>aoide.a2a.enable</code> is off by default and binds loopback, and <code>aoide.a2a.spawnAgent</code> names the only command a spawn may ever run, so a client supplies a prompt and never an argv. Per <em>request</em>, <code>crates/server/src/a2a.rs</code> resolves an origin (loopback vs. remote) and a bearer token; once <code>aoide.a2a.tokenFile</code> is set, loopback stops being a trust signal at all, which is what closed the reverse-proxy hole. Then, inside <code>graph::send</code>, a second and separate gate decides delivery: an explicit <code>--yes</code>, the box-wide <code>AOIDE_CONDUCT_AUTOGATE</code>, or the sender being the target session's parent — an orchestrator freely commanding a child it spawned. Anything else queues in <code>stage/pending.json</code> for a human. That gate applies to every door, not just A2A.</p>
+      <p><b>One honest limit on the wire door.</b> The AgentCard advertises every <em>implemented</em> command as an A2A skill, but the door itself answers exactly five methods — <code>message/send</code>, <code>tasks/get</code>, <code>aoide/graphSummary</code>, and the two SSE methods (<code>message/stream</code>, <code>tasks/resubscribe</code>). Over the wire, A2A drives <em>sessions</em>: inject text into a known one, or spawn the configured agent. Arbitrary-verb dispatch is the CLI door (argv) and the MCP door (stdio) — both local. A remote harness that wants to call <code>rice lint</code> directly does not have a door for it today; it drives a local session that does.</p>
+      <p><b>The seam that makes the philosophical claim true.</b> <code>CONTRACTS.md</code> §0 asserts it as a test, not a slogan: delete every <code>.qml</code> in the repo, and any capability still reachable from a terminal was in the right place. Because a harness attaches through the same doors the painting desktop uses — and the desktop's own return path is the shellbridge socket, one more client verb — an agent driving Aoide can reach the code that builds the OS <em>and</em> the code that builds the door it is speaking through. The seam is real; the limit is deliberate. Authoring the change is ungated; <b>admitting it is not</b> — the rebuild stays user-gated, so an agent can write its own harness and cannot switch the system onto it alone.</p>
+    </div>
+  </section>
+
   <!-- THE CHASSIS -->
   <section>
     <div class="plate-label"><span class="no">§</span><h2>The chassis</h2><span class="h-line"></span><span>Nix · build plane</span></div>
@@ -579,6 +730,144 @@
     </div>
   </section>
 
+  <!-- THE LOOP THAT BUILDS IT -->
+  <section>
+    <div class="plate-label"><span class="no">V.</span><h2>The loop that builds it</h2><span class="h-line"></span><span>process · as architecture</span></div>
+    <p class="caption">Aoide is built by the loop it exists to run — the harness dogfooding itself. The <em>diff</em> in "diff agent loop" is <b>different</b>: the agent that reviews is never the agent that wrote. The value is not a second opinion. It is that <b>the second agent re-derives the first one's claims instead of confirming them</b> — it re-runs the checks in its own worktree rather than reading the report and agreeing.</p>
+    <div class="plate">
+      <svg viewBox="0 0 1000 530" style="min-width:900px" role="img" aria-label="The orchestration loop: an orchestrator briefing a plan, execute, and review chain, with a coaching edge from the reviewer back to the executor and advisors consulted off the chain">
+        <defs>
+          <marker id="f6a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+          <marker id="f6b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--bronze)"/></marker>
+          <marker id="f6m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+        </defs>
+
+        <!-- verdict return, over the top -->
+        <path d="M 954 100 H 984 V 16 H 144 V 40" fill="none" stroke="var(--bronze)" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#f6b)"/>
+        <text x="560" y="11" text-anchor="middle" font-size="9" fill="var(--bronze-ink)">VERDICT + EVIDENCE — CLEAN, OR THE ISSUE LIST</text>
+
+        <!-- orchestrator -->
+        <rect x="30" y="44" width="228" height="112" rx="8" fill="color-mix(in srgb, var(--accent) 18%, transparent)" stroke="var(--accent)" stroke-width="2"/>
+        <text x="144" y="70" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">ORCHESTRATOR</text>
+        <text x="144" y="88" text-anchor="middle" font-size="9" fill="var(--muted)">concretize · dispatch · track</text>
+        <text x="144" y="102" text-anchor="middle" font-size="9" fill="var(--muted)">land, then log the wiki</text>
+        <text x="144" y="120" text-anchor="middle" font-size="8.5" fill="var(--muted)">it does not execute</text>
+        <text x="144" y="132" text-anchor="middle" font-size="8.5" fill="var(--muted)">and does not review</text>
+        <text x="144" y="148" text-anchor="middle" font-size="8.5" fill="var(--accent-ink)">small edits stay here</text>
+
+        <line x1="258" y1="100" x2="312" y2="100" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f6a)"/>
+        <text x="285" y="90" text-anchor="middle" font-size="8.5" fill="var(--accent-ink)">BRIEF</text>
+
+        <!-- dispatch container -->
+        <rect x="300" y="30" width="670" height="330" rx="10" fill="none" stroke="var(--line-strong)" stroke-dasharray="6 4"/>
+        <rect x="318" y="22" width="340" height="15" fill="var(--plate)"/>
+        <text x="326" y="34" font-size="10" letter-spacing="1" fill="var(--muted)">ONE ROLE PER DISPATCH — A DIFFERENT AGENT EACH</text>
+
+        <rect x="316" y="70" width="150" height="96" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="391" y="96" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">PLAN</text>
+        <text x="391" y="113" text-anchor="middle" font-size="9" fill="var(--muted)">opus</text>
+        <text x="391" y="130" text-anchor="middle" font-size="8.5" fill="var(--muted)">scope · files · order</text>
+        <text x="391" y="143" text-anchor="middle" font-size="8.5" fill="var(--muted)">names the gates and</text>
+        <text x="391" y="156" text-anchor="middle" font-size="8.5" fill="var(--muted)">the acceptance evidence</text>
+
+        <rect x="560" y="70" width="150" height="96" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="635" y="96" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">EXECUTE</text>
+        <text x="635" y="113" text-anchor="middle" font-size="9" fill="var(--muted)">sonnet</text>
+        <text x="635" y="130" text-anchor="middle" font-size="8.5" fill="var(--muted)">follows the plan</text>
+        <text x="635" y="143" text-anchor="middle" font-size="8.5" fill="var(--muted)">rather than widening</text>
+        <text x="635" y="156" text-anchor="middle" font-size="8.5" fill="var(--muted)">the scope it was given</text>
+
+        <rect x="804" y="70" width="150" height="96" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="879" y="96" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">REVIEW</text>
+        <text x="879" y="113" text-anchor="middle" font-size="9" fill="var(--muted)">a DIFFERENT sonnet</text>
+        <text x="879" y="130" text-anchor="middle" font-size="8.5" fill="var(--muted)">never the author</text>
+        <text x="879" y="143" text-anchor="middle" font-size="8.5" fill="var(--muted)">grades "is this wrong",</text>
+        <text x="879" y="156" text-anchor="middle" font-size="8.5" fill="var(--muted)">not "did I regress it"</text>
+
+        <line x1="466" y1="102" x2="556" y2="102" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f6a)"/>
+        <text x="511" y="80" text-anchor="middle" font-size="8.5" fill="var(--accent-ink)">THE PLAN</text>
+        <text x="511" y="91" text-anchor="middle" font-size="8.5" fill="var(--accent-ink)">SCOPE · SEQUENCE</text>
+        <line x1="710" y1="102" x2="800" y2="102" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f6a)"/>
+        <text x="755" y="80" text-anchor="middle" font-size="8.5" fill="var(--accent-ink)">THE DIFF</text>
+        <text x="755" y="91" text-anchor="middle" font-size="8.5" fill="var(--accent-ink)">AND ITS REPORT</text>
+
+        <!-- the coaching edge -->
+        <path d="M 800 138 H 714" fill="none" stroke="var(--bronze)" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#f6b)"/>
+        <text x="757" y="154" text-anchor="middle" font-size="8.5" fill="var(--bronze-ink)">COACH: THE FIX,</text>
+        <text x="757" y="165" text-anchor="middle" font-size="8.5" fill="var(--bronze-ink)">AGENT TO AGENT</text>
+
+        <!-- evidence docs -->
+        <rect x="545" y="250" width="180" height="64" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <text x="635" y="274" text-anchor="middle" font-size="10" fill="var(--ink)">the executor's report</text>
+        <text x="635" y="292" text-anchor="middle" font-size="8.5" fill="var(--muted)">the checks it says it ran</text>
+        <text x="635" y="305" text-anchor="middle" font-size="8.5" fill="var(--muted)">and what they showed</text>
+        <line x1="635" y1="166" x2="635" y2="246" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f6a)"/>
+        <text x="643" y="205" font-size="8.5" fill="var(--accent-ink)">CLAIMS</text>
+
+        <rect x="790" y="250" width="180" height="64" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <text x="880" y="274" text-anchor="middle" font-size="10" fill="var(--ink)">the reviewer's own run</text>
+        <text x="880" y="292" text-anchor="middle" font-size="8.5" fill="var(--muted)">its own worktree, its own</text>
+        <text x="880" y="305" text-anchor="middle" font-size="8.5" fill="var(--muted)">build, its own tests</text>
+        <line x1="879" y1="166" x2="879" y2="246" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f6a)"/>
+        <text x="887" y="205" font-size="8.5" fill="var(--accent-ink)">RE-DERIVES</text>
+
+        <line x1="725" y1="282" x2="786" y2="282" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="2 3" marker-end="url(#f6m)"/>
+        <text x="757" y="272" text-anchor="middle" font-size="8.5" fill="var(--muted)">READ AS</text>
+        <text x="757" y="300" text-anchor="middle" font-size="8.5" fill="var(--muted)">A CLAIM</text>
+
+        <!-- land -->
+        <line x1="144" y1="156" x2="144" y2="392" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#f6a)"/>
+        <text x="152" y="266" font-size="8.5" fill="var(--accent-ink)">LAND ONLY WHEN</text>
+        <text x="152" y="277" font-size="8.5" fill="var(--accent-ink)">REVIEW COMES BACK CLEAN</text>
+        <rect x="30" y="396" width="228" height="92" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="144" y="422" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">LAND</text>
+        <text x="144" y="440" text-anchor="middle" font-size="8.5" fill="var(--muted)">git add &lt;pathspec&gt; only</text>
+        <text x="144" y="454" text-anchor="middle" font-size="8.5" fill="var(--muted)">never -A, never stash —</text>
+        <text x="144" y="468" text-anchor="middle" font-size="8.5" fill="var(--muted)">other agents share this index</text>
+        <text x="144" y="482" text-anchor="middle" font-size="8.5" fill="var(--muted)">the wiki logs it the same turn</text>
+
+        <!-- advisors -->
+        <rect x="300" y="396" width="250" height="92" rx="8" fill="var(--raised)" stroke="var(--line-strong)" stroke-width="1.5"/>
+        <text x="425" y="422" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">FABLE — ADVISES</text>
+        <text x="425" y="440" text-anchor="middle" font-size="8.5" fill="var(--muted)">architecture and design</text>
+        <text x="425" y="454" text-anchor="middle" font-size="8.5" fill="var(--muted)">forks · sequencing calls</text>
+        <text x="425" y="468" text-anchor="middle" font-size="8.5" fill="var(--muted)">visual judgement</text>
+        <rect x="572" y="396" width="250" height="92" rx="8" fill="var(--raised)" stroke="var(--line-strong)" stroke-width="1.5"/>
+        <text x="697" y="422" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">OPUS — ADVISES</text>
+        <text x="697" y="440" text-anchor="middle" font-size="8.5" fill="var(--muted)">code judgement</text>
+        <text x="697" y="454" text-anchor="middle" font-size="8.5" fill="var(--muted)">the call the diff alone</text>
+        <text x="697" y="468" text-anchor="middle" font-size="8.5" fill="var(--muted)">cannot settle</text>
+        <text x="842" y="446" text-anchor="middle" font-size="15" fill="var(--muted)">···</text>
+        <rect x="866" y="396" width="104" height="92" rx="8" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="918" y="438" text-anchor="middle" font-size="16" fill="var(--muted)">+</text>
+        <text x="918" y="460" text-anchor="middle" font-size="8.5" fill="var(--muted)">the next</text>
+        <text x="918" y="472" text-anchor="middle" font-size="8.5" fill="var(--muted)">advisor</text>
+        <line x1="425" y1="396" x2="425" y2="364" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="2 3" marker-end="url(#f6m)"/>
+        <text x="433" y="382" font-size="8.5" fill="var(--muted)">ON CALL</text>
+        <line x1="697" y1="396" x2="697" y2="364" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="2 3" marker-end="url(#f6m)"/>
+        <text x="705" y="382" font-size="8.5" fill="var(--muted)">ON CALL</text>
+        <text x="635" y="516" text-anchor="middle" font-size="9.5" fill="var(--muted)">an advisor is consulted and never holds the baton — it does not execute, and it is not the review</text>
+      </svg>
+    </div>
+    <p class="plate-foot">solid = the forward path · dashed = what comes back, including the coaching edge · dotted = consulted, off the chain · the loop's value is the re-derivation, not the second opinion</p>
+    <div class="legend">
+      <span><span class="sw kernel"></span>the orchestrator</span>
+      <span><span class="sw solid-accent"></span>a dispatched agent</span>
+      <span><span class="sw filedoc"></span>evidence produced</span>
+      <span><span class="sw unwired"></span>an advisor, off the chain</span>
+      <span><span class="sw dashed"></span>dashed container = grouping · dashed leaf = extension point</span>
+    </div>
+    <div class="prose" style="margin-top:1.3rem">
+      <p><b>Review is a coaching step, not a verdict slot.</b> The clearest case is <code>fugue</code>, this repo's second song. A Sonnet wrote its bar and herald (<code>82ba5f9</code>); a <em>different</em> Sonnet reviewed and found the new song had reintroduced <b>two bugs sonata had already fixed</b>. <code>bar.qml</code> bound <code>implicitWidth</code> off <code>parent.width</code> while <code>WidgetSlot</code> binds its own width off the loaded item's <code>implicitWidth</code> — a loop that sonata's <code>bar.qml</code> documents and defuses by binding <code>width</code> directly. And <code>herald.qml</code> keyed its dismiss clock on notification id alone, so dunst's <code>stack_duplicates</code> id reuse latched a lapsed toast forever; sonata carries an <code>arrivals</code>/<code>sameArrival</code> re-arm check on <code>receivedAt</code> for exactly that. The executor defended the first as an intentional simplification. <b>The reviewer went and read sonata's fix, rejected the defence on the evidence, and coached the executor straight to the change</b> — agent to agent, not a verdict routed back through the orchestrator. That is <code>19ee9e4</code>.</p>
+      <p><b>Re-derivation, not confirmation.</b> A report is an assertion, and the loop's whole point is to make someone else earn it independently. In <code>8c087ba</code> the executor's central claim was strong and unfalsifiable from the diff alone: sonata's new <code>_widgets/</code> shelf changes <em>nothing</em>, because <code>lib/walk.nix</code> drops any <code>/_</code> path and so the built Quickshell config derivation stays byte-identical, file for file, down to <code>manifest.json</code> and <code>registry.json</code>. The reviewer did not read that and agree. It reproduced the derivation-identity gate in its own worktrees and compared the outputs itself. A reviewer that only checks whether its own suggestions were applied has stopped reviewing; the standing rule is that it grades <em>is this wrong</em>, never <em>did my change regress it</em>.</p>
+      <p><b>Vocabulary is a review surface too.</b> <code>1d1465f</code> renamed a widget record's <code>instruments</code> field to <code>packages</code>: the lexicon reserves <em>instruments</em> for what a <em>venue</em> sounds — which facets and dendrites a host enables — so the field's name meant the wrong thing twice, and implied a song choosing its own facets, which <code>CONTRACTS.md</code> forbids outright. The follow-up (<code>419628a</code>) settled a second review flag in the same area: the guard's error message and the comment above it had hedged between two words, and an unsettled field name reads as an unsettled contract. Neither is a bug; both are the kind of drift only a second reader catches.</p>
+      <p><b>The orchestrator's own test.</b> It concretizes the ask, dispatches one role per unit, tracks, and lands by pathspec — never <code>git add -A</code>, never a stash, because other sessions are committing into this same index concurrently. It does not execute and it does not review. The dividing line for small work is one question: <em>does this need a whole agent?</em> A typo, a margin, a one-line tweak, a config bump — those stay with the orchestrator, because a cold agent would spend more re-deriving the context than the edit is worth.</p>
+      <div class="callout">
+        <b>Where the manual lags practice.</b> <code>docs/Aoide-Wiki/protocol/AOIDE-DEV.md</code> §2.1 is right about the shape — plan, execute, review; "review coaches the executor via SendMessage; it is not a bare pass/fail"; "the orchestrator dispatches and verifies, but does not implement or review" — but it is stale in two places. It assigns review to the <em>flagship</em> tier, where practice is a different <b>mid-tier peer</b> reviewing and the flagships sitting <em>beside</em> the chain as advisors: Fable on architecture and design, an Opus on code judgement. And it says the design advisor is on call only when the User asks for it, which no longer describes how the design passes have actually run. The requirement that the reviewer <em>re-derive</em> rather than accept the report is not written down anywhere yet. This chart is the current truth; the manual is the item to amend.
+      </div>
+    </div>
+  </section>
+
   <!-- WHAT IS PLANNED -->
   <section>
     <div class="plate-label"><span class="no">§</span><h2>What is planned</h2><span class="h-line"></span><span>live vs planned, said plainly</span></div>
@@ -603,6 +892,7 @@
       <div class="lrow"><span class="ph">P3</span><span class="what">The facet switch <small>flip shell.qml's dock/wallpaper/gadget bodies to the staged sonata twins; P4–P7 (delete dead facet bodies, preview harnesses, LiveryState grammar split) queue behind it</small></span><span class="pill active">pending — awaits the User's rebuild</span></div>
       <div class="lrow"><span class="ph">◦</span><span class="what">Wire <code>lib/song.nix</code> <small>the widget-record builder (mkWidget / composeSong) — landed with eval-time guards, but no roll-up imports it yet</small></span><span class="pill active">landed · unwired</span></div>
       <div class="lrow"><span class="ph">◦</span><span class="what">Project-edit verbs <small><code>graph project edits</code> / <code>back</code> — the substrate (edit journal + gc-anchored pre-image blobs) landed in storage; the verbs are not in the registry</small></span><span class="pill active">substrate landed</span></div>
+      <div class="lrow"><span class="ph">◦</span><span class="what">The web app <small>a browser client for processes, drafts, derivations, output, and quickfired commands — no code exists; the command half is a façade, the streaming half is a transport aoide does not have (next section)</small></span><span class="pill wait">described, nothing built</span></div>
       <div class="lrow"><span class="ph">◦</span><span class="what">The rehearsal engagement <small><code>rice score</code> / <code>rehearse begin·end</code> — a step machine over the (live) takes/marks rails; different-session review gate</small></span><span class="pill wait">designed, not locked</span></div>
       <div class="lrow"><span class="ph">◦</span><span class="what">Pickup surfaces <small><code>aoide cue</code> · <code>graph join</code> · the installable pointer-only skill — strictly pull, no session injection</small></span><span class="pill wait">designed, not locked</span></div>
       <div class="lrow"><span class="ph">◦</span><span class="what">The sudo door <small>declared op ids on a nix allowlist, polkit auth at the seat, PAM-owned factors, <code>Door::Sudo</code> audit — never a free argv</small></span><span class="pill wait">designed, not locked</span></div>
@@ -613,6 +903,128 @@
     </div>
     <div class="callout">
       <b>Where the plans live.</b> The rehearsal, cue, sudo-door, and nix-loop designs are captured in <code>docs/Aoide-Wiki/references/fleshing-out-aoide-ricing.md</code> — steered section by section but <em>not yet LOCKED</em>, so nothing there is asserted as existing. The crate deferrals carry their reasoning in <code>docs/architecture/PACKAGE-LAYOUT.md</code>'s status notes. A reader of this report should never mistake either for a running system: if a thing runs, it is in the charts as a solid stroke; if it does not, it is dashed, chipped, or in this section.
+    </div>
+  </section>
+
+  <!-- THE WEB APP -->
+  <section>
+    <div class="plate-label"><span class="no">§</span><h2>The web app — planned, not built</h2><span class="h-line"></span><span>a fourth client · and one real gap</span></div>
+    <p class="caption"><b>Nothing in this section exists.</b> No crate, no route, no file. It is described here because the shape of the ask is architecturally interesting: a browser surface that streams agent processes, drafts, and derivations; logs system output including the diff verbs' output; possibly carries the settings panel; and lets commands be quickfired at the system — "a similar job to what the CLI does, but even more extensive." The claim worth testing is that this is <b>another client of the same server</b>, exactly like the CLI and the desktop, needing no new protocol. <b>Half of that holds and half of it does not</b>, and the honest half is the more useful one.</p>
+    <div class="plate">
+      <svg viewBox="0 0 1000 540" style="min-width:900px" role="img" aria-label="The planned web app drawn entirely dashed, its command lane reaching the live registry through a façade and its stream lane reaching nothing that exists">
+        <defs>
+          <marker id="f7m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+        </defs>
+        <text x="500" y="26" text-anchor="middle" font-size="12" letter-spacing="2" fill="var(--bronze-ink)">PLANNED — NOTHING IN A DASHED BOX EXISTS TODAY</text>
+
+        <!-- the web app itself -->
+        <rect x="20" y="54" width="300" height="396" rx="10" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="6 4"/>
+        <rect x="38" y="46" width="200" height="15" fill="var(--plate)"/>
+        <text x="46" y="58" font-size="9.5" letter-spacing="1" fill="var(--muted)">THE WEB APP — PLANNED</text>
+
+        <rect x="38" y="78" width="264" height="52" rx="6" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="4 4"/>
+        <text x="170" y="100" text-anchor="middle" font-size="10.5" fill="var(--muted)">AGENT PROCESSES</text>
+        <text x="170" y="116" text-anchor="middle" font-size="8.5" fill="var(--muted)">the session graph, as it moves</text>
+        <rect x="38" y="140" width="264" height="52" rx="6" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="4 4"/>
+        <text x="170" y="162" text-anchor="middle" font-size="10.5" fill="var(--muted)">DRAFTS + TAKES</text>
+        <text x="170" y="178" text-anchor="middle" font-size="8.5" fill="var(--muted)">every mint, at the moment it lands</text>
+        <rect x="38" y="202" width="264" height="52" rx="6" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="4 4"/>
+        <text x="170" y="224" text-anchor="middle" font-size="10.5" fill="var(--muted)">DERIVATIONS</text>
+        <text x="170" y="240" text-anchor="middle" font-size="8.5" fill="var(--muted)">what the build is doing, live</text>
+        <rect x="38" y="264" width="264" height="52" rx="6" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="4 4"/>
+        <text x="170" y="286" text-anchor="middle" font-size="10.5" fill="var(--muted)">SYSTEM + DIFF OUTPUT</text>
+        <text x="170" y="302" text-anchor="middle" font-size="8.5" fill="var(--muted)">the log stream, and what diff prints</text>
+        <rect x="38" y="326" width="264" height="52" rx="6" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="4 4"/>
+        <text x="170" y="348" text-anchor="middle" font-size="10.5" fill="var(--muted)">SETTINGS PANEL</text>
+        <text x="170" y="364" text-anchor="middle" font-size="8.5" fill="var(--muted)">possibly — the ask's own hedge</text>
+        <rect x="38" y="388" width="264" height="52" rx="6" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="4 4"/>
+        <text x="170" y="410" text-anchor="middle" font-size="10.5" fill="var(--muted)">QUICKFIRE COMMANDS</text>
+        <text x="170" y="426" text-anchor="middle" font-size="8.5" fill="var(--muted)">any verb, straight at the system</text>
+
+        <!-- command lane -->
+        <line x1="320" y1="168" x2="368" y2="168" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#f7m)"/>
+        <text x="344" y="158" text-anchor="middle" font-size="8.5" fill="var(--muted)">QUICKFIRE</text>
+        <rect x="372" y="120" width="214" height="96" rx="8" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="479" y="150" text-anchor="middle" font-size="10.5" font-weight="600" fill="var(--muted)">AN HTTP COMMAND DOOR</text>
+        <text x="479" y="168" text-anchor="middle" font-size="9" fill="var(--muted)">does not exist</text>
+        <text x="479" y="185" text-anchor="middle" font-size="8.5" fill="var(--muted)">but it is only a façade over</text>
+        <text x="479" y="198" text-anchor="middle" font-size="8.5" fill="var(--muted)">a dispatcher that already runs</text>
+        <line x1="586" y1="168" x2="646" y2="168" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#f7m)"/>
+        <text x="616" y="158" text-anchor="middle" font-size="8" fill="var(--muted)">SAME SCHEMA</text>
+
+        <rect x="650" y="120" width="320" height="96" rx="8" fill="color-mix(in srgb, var(--accent) 18%, transparent)" stroke="var(--accent)" stroke-width="2"/>
+        <text x="810" y="152" text-anchor="middle" font-size="12" font-weight="700" letter-spacing="1" fill="var(--ink)">ONE REGISTRY — LIVE</text>
+        <text x="810" y="172" text-anchor="middle" font-size="9.5" fill="var(--muted)">83 commands · Outcome envelope</text>
+        <text x="810" y="188" text-anchor="middle" font-size="8.5" fill="var(--muted)">the CLI and MCP doors already reach</text>
+        <text x="810" y="201" text-anchor="middle" font-size="8.5" fill="var(--muted)">every one of them — but only locally</text>
+
+        <!-- stream lane -->
+        <line x1="320" y1="340" x2="368" y2="340" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#f7m)"/>
+        <text x="344" y="330" text-anchor="middle" font-size="8.5" fill="var(--muted)">SUBSCRIBE</text>
+        <rect x="372" y="270" width="214" height="200" rx="8" fill="none" stroke="var(--bronze)" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="479" y="300" text-anchor="middle" font-size="10.5" font-weight="600" fill="var(--bronze-ink)">A PUSH TRANSPORT</text>
+        <text x="479" y="318" text-anchor="middle" font-size="9" fill="var(--bronze-ink)">does not exist either</text>
+        <text x="479" y="340" text-anchor="middle" font-size="8.5" fill="var(--muted)">and unlike the command door,</text>
+        <text x="479" y="353" text-anchor="middle" font-size="8.5" fill="var(--muted)">it is not a façade over</text>
+        <text x="479" y="366" text-anchor="middle" font-size="8.5" fill="var(--muted)">something that already runs</text>
+        <text x="479" y="392" text-anchor="middle" font-size="8.5" fill="var(--bronze-ink)">THIS IS THE REAL GAP —</text>
+        <text x="479" y="405" text-anchor="middle" font-size="8.5" fill="var(--bronze-ink)">A NEW CONTRACT, NOT A DOOR</text>
+        <text x="479" y="431" text-anchor="middle" font-size="8.5" fill="var(--muted)">the three below are what</text>
+        <text x="479" y="444" text-anchor="middle" font-size="8.5" fill="var(--muted)">exists, and none of them</text>
+        <text x="479" y="457" text-anchor="middle" font-size="8.5" fill="var(--muted)">carries process output</text>
+
+        <!-- what exists today -->
+        <rect x="660" y="250" width="310" height="230" rx="10" fill="none" stroke="var(--line-strong)" stroke-dasharray="6 4"/>
+        <rect x="678" y="242" width="270" height="15" fill="var(--plate)"/>
+        <text x="686" y="254" font-size="9.5" letter-spacing="1" fill="var(--muted)">WHAT EXISTS TODAY — AND ITS REACH</text>
+        <rect x="678" y="274" width="274" height="58" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="815" y="294" text-anchor="middle" font-size="10" fill="var(--ink)">A2A SSE</text>
+        <text x="815" y="309" text-anchor="middle" font-size="8.5" fill="var(--muted)">message/stream · tasks/resubscribe</text>
+        <text x="815" y="323" text-anchor="middle" font-size="8.5" fill="var(--muted)">per-task STATE, 750 ms poll, 10-min cap</text>
+        <rect x="678" y="344" width="274" height="58" rx="8" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <text x="815" y="364" text-anchor="middle" font-size="10" fill="var(--ink)">song/stage/*.json</text>
+        <text x="815" y="379" text-anchor="middle" font-size="8.5" fill="var(--muted)">atomic documents a client WATCHES</text>
+        <text x="815" y="393" text-anchor="middle" font-size="8.5" fill="var(--muted)">a file watch does not cross a network</text>
+        <rect x="678" y="414" width="274" height="58" rx="8" fill="none" stroke="var(--line-strong)" stroke-width="1.5"/>
+        <text x="815" y="434" text-anchor="middle" font-size="10" fill="var(--muted)">aoided event bus</text>
+        <text x="815" y="449" text-anchor="middle" font-size="8.5" fill="var(--muted)">in-memory, default-deny per class</text>
+        <text x="815" y="463" text-anchor="middle" font-size="8.5" fill="var(--muted)">a skeleton — no transport at all</text>
+
+        <line x1="674" y1="303" x2="590" y2="303" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="2 3" marker-end="url(#f7m)"/>
+        <text x="632" y="294" text-anchor="middle" font-size="8.5" fill="var(--muted)">STATE ONLY</text>
+        <line x1="674" y1="373" x2="590" y2="373" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="2 3" marker-end="url(#f7m)"/>
+        <text x="632" y="364" text-anchor="middle" font-size="8.5" fill="var(--muted)">FILE-LOCAL</text>
+        <line x1="674" y1="443" x2="590" y2="443" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="2 3" marker-end="url(#f7m)"/>
+        <text x="632" y="434" text-anchor="middle" font-size="8.5" fill="var(--muted)">NO WIRE</text>
+
+        <text x="500" y="516" text-anchor="middle" font-size="9.5" fill="var(--muted)">the command plane needs one more façade · the stream plane needs a contract aoide has not written</text>
+      </svg>
+    </div>
+    <p class="plate-foot">dashed = planned, nothing exists · solid = live today · dotted = the reach a live piece actually has · the bronze box is the gap, not a design</p>
+    <div class="legend">
+      <span><span class="sw kernel"></span>live — the protocol substrate</span>
+      <span><span class="sw solid-accent"></span>live — a running surface</span>
+      <span><span class="sw filedoc"></span>live — published document</span>
+      <span><span class="sw dashed"></span>planned — no code exists</span>
+    </div>
+    <div class="prose" style="margin-top:1.3rem">
+      <p><b>The command half of the claim holds.</b> Quickfiring a command from a browser needs no new protocol and no new vocabulary. There is one registry, one dispatcher, one <code>Outcome</code> envelope, and the report's own §I rule applies unchanged: <em>adding a door is a façade; adding a capability is a registry entry</em>. A web command door would be a fourth façade over <code>dispatch()</code> — the same shape <code>mcp serve</code> already is, differing only in transport. On this plane the web app really is another client of the same server, and the settings panel is the easiest case of all: settings are commands, and every one of the 83 already describes itself through <code>schema --json</code>.</p>
+      <p><b>The streaming half does not, and that is the finding.</b> Everything the ask names as a <em>stream</em> — agent processes as they move, drafts as they mint, derivations as they build, system and diff output as it is produced — has no transport today. Three things come close and each falls short for a different reason, verified in the tree:</p>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr><th>What exists</th><th>What it actually carries</th><th>Why it does not reach a browser</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">A2A SSE</td><td><code>message/stream</code> and <code>tasks/resubscribe</code> re-poll one task off the stage every 750 ms and emit only when its A2A <em>state</em> changes, closing on a terminal state or a 10-minute cap.</td><td>It is a five-value state signal for one session — not output, not drafts, not build progress. Nothing streams bytes.</td></tr>
+            <tr><td class="mono">song/stage/*.json</td><td>The real notification stream: atomic documents (sessions, graph, herald, livery, mode, pending, projects, cover, hooks, …) that <code>shellbridge.service</code> is the single writer of.</td><td>Clients consume it by <b>watching files</b> — that is how the Quickshell client works. A file watch does not cross a network, and no route serves these documents.</td></tr>
+            <tr><td class="mono">aoided event bus</td><td>The neutral event stream with default-deny-per-class subscriptions — exactly the right <em>model</em> for this.</td><td>It is a walking skeleton: real in-memory types, a demo loop, and no transport whatsoever. Nothing can subscribe from outside the process.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="margin-top:1.2rem"><b>So the honest statement is a split one.</b> The web app is a door consumer on the command plane and a <em>protocol extension</em> on the state plane. The report has said all along that there are two planes and that the second one — <code>song/stage/*.json</code> plus the shellbridge socket — is versioned separately and is not registry-derived. This is the first ask that lands squarely on that second plane, and it exposes what has been true and unremarked: <b>the state plane has a publication mechanism but no subscription mechanism</b>. Every existing consumer is a local process that can watch a file.</p>
+      <p><b>What that implies, stated as a gap and not as a design.</b> A web app needs a way to subscribe to state-document changes and to process output over a socket — which is a new contract with its own versioning, its own authentication story (the A2A door's bearer and origin rules are per-request and one-shot; a long-lived stream is a different problem), and its own back-pressure and truncation semantics for output that a session can produce faster than a browser consumes. Three pieces of the substrate are already in the right shape to build on and none of them is the thing: shellbridge is a single writer that could publish as well as write; <code>aoided</code>'s default-deny class model is the correct authorisation shape; and the A2A door proves the house can hold an HTTP connection open and stream to it. Deciding which of those becomes the transport is the first real question, and it has not been asked yet.</p>
+      <div class="callout">
+        <b>Read this section as a gap, not a plan.</b> Nothing above is designed, locked, or scheduled — there is no wiki page, no phase list, and no code. Its value is the negative result: the tidy answer ("just another client, no new protocol") is <em>half</em> right, and the half that is wrong is the half that would have been discovered late. If this is built, the streaming contract is the thing to design first, because the command façade is a small, well-understood piece of work and the transport is not.
+      </div>
     </div>
   </section>
 
@@ -631,7 +1043,7 @@
       <div class="centry"><span class="hash">e502cd6</span><span class="msg"><b>screen family</b> — <code>screen shot/diff/info/ocr/send</code> + nine <code>screen point</code> verbs speaking <code>zwlr_virtual_pointer_v1</code> natively, in-process. Live-proven on Hyprland (pixel-exact moves, real detents, atomic drag); stuck-button recovery verified by manufacturing the hazard; <code>wlrctl</code> retired. Sidecar + scale contract in CONTRACTS §8.</span></div>
       <div class="centry"><span class="hash">1bb6372</span><span class="msg"><b>livery merge — landed</b> — the standalone Node note engine ported natively into <code>crates/song/src/livery/</code> and renamed <b>livery</b>: one <code>Emitter</code> trait with four pure backends (stage / hyprctl / osc / file-template), the <code>aoide livery emit|resolve|lint</code> verbs, options renamed <code>aoide.livery</code>, songbook + stage files renamed <code>livery.json</code>. Phase 4 dropped the compat mirror; the subdir flake landed the same week — Node left the core entirely. <small>3d2b073, 1bb6372; switched 2026-08-13.</small></span></div>
       <div class="centry"><span class="hash">ca08b73</span><span class="msg"><b>pi session tracking</b> — the pi coding agent joins the graph as the third <code>AgentProfile</code>: claude-shaped hook event map, a <code>TranscriptSpec</code> tail-reading pi's own jsonl for say/title/model/context. <code>hooks install pi</code> reports declarative — pi's wiring is the dendrite-managed extension, TUI-only so subagent child runs never register. E2E-verified live.</span></div>
-      <div class="centry"><span class="hash">23e945d</span><span class="msg"><b>Kimi's nix package pulled, the profile stays</b> — the <code>pkgs/kimi-code</code> derivation and its dendrite are gone; <code>protocol::agents</code>' kimi profile is untouched. Aoide still hooks/conducts a Kimi session end-to-end — it just no longer ships a house-built binary.</span></div>
+      <div class="centry"><span class="hash">90884a3</span><span class="msg"><b>Kimi's nix package pulled, then put back</b> — <code>23e945d</code> deleted the <code>pkgs/kimi-code</code> derivation and its dendrite; <code>90884a3</code> reverted that the same day, and both are live again, enabled on yomi-strix. The durable point is the one the removal was testing: <code>protocol::agents</code>' kimi profile is independent of the package, so Aoide hooks and conducts a Kimi session end-to-end whether or not it ships the binary. <small>Corrected 2026-08-20 — this entry had recorded only the removal.</small></span></div>
       <div class="centry"><span class="hash">3c46537</span><span class="msg"><b>package restructure, phase 9</b> — the root's remaining handlers moved to their domain crates, the app shell became <code>crates/cli</code> (lib still named <code>aoide</code>, zero caller churn), and the root Cargo.toml went fully virtual. Proven, not assumed: <code>schema --json</code> byte-identical across builds, golden snapshot unchanged, the workspace green. <small>Supersedes phase 6's "cli stays root" finding — recorded both times, not quietly swapped.</small></span></div>
       <div class="centry"><span class="hash">2a21f80</span><span class="msg"><b>agent-profile seam</b> — every claude-hardcoded fact the bridge carried (hook maps, permission vocab, transcript locators, ceilings, settings specs) extracted behind <code>protocol::agents</code> profiles; the hook door, transcript refresh, window listener, and reaper all dispatch through the table. New harness = one profile entry.</span></div>
       <div class="centry"><span class="hash">a3f5b84</span><span class="msg"><b>context-ceiling fix</b> — the dock stopped guessing each session's window client-side; <code>aoide</code> computes the ceiling from the model id and publishes it on the session record, re-derived on mid-session model switches.</span></div>
