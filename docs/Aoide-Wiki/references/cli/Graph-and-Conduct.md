@@ -6,7 +6,7 @@ shape the project/session DAG, inject text into conducted terminals (the
 [[Conductor-Channel]]), jump to windows ([[Terminal-Commander]]), and reap dead
 sessions. `graph session hook` is the [[Agent-Hooking]] door agent harnesses
 (Claude Code, kimi, pi) fire into. Handlers live in
-`pkgs/aoide/crates/conduct/src/graph/{verbs,session_store,send,permit,window,conduct,doc,model,common}.rs`
+`pkgs/aoide/crates/conduct/src/graph/{verbs,session_store,send,pending,spawn,permit,window,conduct,doc,model,common}.rs`
 and `pkgs/aoide/crates/conduct/src/reap.rs`; registrations in
 `pkgs/aoide/crates/conduct/src/commands/graph.rs`.
 
@@ -210,40 +210,135 @@ aoide graph wrap [--agent <name>] [--parent <sessionId>] [--id <id>] -- <command
 - **Notes:** the universal door for hookless agents — anything hookable inside
   can self-report via `graph session phase --id "$AOIDE_SESSION_ID"`.
 
+### aoide graph spawn
+
+```
+aoide graph spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt <text>] -- <command …>
+```
+
+- **Reads:** re-execs `current_exe()` (the running `aoide` binary itself) as
+  `conduct --headless --agent <agent> --id <id> [--parent <p>] -- <command …>`,
+  detached into its own session (`setsid`, stdio nulled) so it OUTLIVES this
+  call — the same self-re-exec idiom `server/src/a2a.rs`'s `do_spawn` and
+  `shellbridge.rs` use.
+- **Writes:** nothing directly — the re-exec'd `conduct --headless` child does
+  all the registration (see below). This process only polls for the child's
+  control socket (`$XDG_RUNTIME_DIR/aoide/session-<id>.sock`) with a real
+  `UnixStream::connect` — never bare file existence, since a SIGKILLed prior
+  session with the same `--id` can leave a stale socket FILE the reaper hasn't
+  swept yet — for up to 3000 ms before giving up and reporting
+  `registered: false` anyway (the spawn itself already succeeded; this is only
+  "is it steerable yet"). A bad `<command>` fails the re-exec'd `conduct`'s own
+  spawn first, so no ghost session is ever registered — the socket simply
+  never appears and `spawn` returns `registered: false` honestly.
+- **Pipes to / output:** `data: {sessionId, agent, socket, logPath,
+  registered, prompt}`. `--prompt`, when given, is injected only AFTER
+  registration succeeds, through the one gated injection door — `graph send
+  --yes --submit`, in-process, the exact re-drive shape `graph pending
+  approve` uses to replay a held entry — never a direct socket write;
+  `data.prompt` reads `none` / `delivered` / `skipped-unregistered` /
+  `failed: <reason>`.
+- **Notes:** the detached counterpart to `conduct`/`wrap` — this call returns
+  immediately while the spawned agent keeps running headless. See "Headless
+  conduct" under [[Conductor-Channel]] for the pty/log mechanism the re-exec'd
+  child uses.
+
 ### aoide graph send
 
 ```
-aoide graph send --id <id> [--submit] [--yes] -- <text …>
+aoide graph send --id <id> [--submit] [--yes] [--from <sender>] -- <text …>
 ```
 
 - **Reads:** `song/stage/sessions.json` (resolves the target's `socket` and
-  `parentSessionId`); env `AOIDE_SESSION_ID` (the sender's own id, for the
-  parent-autogate rule) and `AOIDE_CONDUCT_AUTOGATE` in {1,true,yes,all} (the
-  box-wide orchestration-mode switch).
-- **Writes:** pending path — appends `{sessionId, text, submit, queuedAt}` to
-  `song/stage/pending.json` (atomic, under the stage lock). Delivered path —
-  opens the target's control socket (`$XDG_RUNTIME_DIR/aoide/session-<id>.sock`)
-  and writes `<text>` (+ `\n` on `--submit`); then auto-renames the node
+  `parentSessionId`, and — for the sibling rule — the SENDER's own record from
+  the same already-loaded file); env `AOIDE_SESSION_ID` (the sender's own id,
+  for the parent- and sibling-autogate rules and as the provenance fallback)
+  and `AOIDE_CONDUCT_AUTOGATE` in {1,true,yes,all} (the box-wide
+  orchestration-mode switch) and `AOIDE_CONDUCT_SIBLING_AUTOGATE` in
+  {0,false,no} (the sibling-rule opt-out).
+- **Writes:** pending path — appends `{sessionId, text, submit, queuedAt,
+  from?}` to `song/stage/pending.json` (atomic, under the stage lock; `from`
+  carries the resolved sender attribution when one resolves, omitted
+  otherwise). Delivered path — opens the target's control socket
+  (`$XDG_RUNTIME_DIR/aoide/session-<id>.sock`) and writes `<text>` (+ `\n` on
+  `--submit`), prefixed with `from <sender>: ` on its first line when a sender
+  resolves AND the text names the node (below); then auto-renames the node
   (`title` in `sessions.json` + re-stage) to a one-line ≤60-char form of the
-  text — UNLESS the text carries no letter at all (a bare keystroke answer like
-  `1`), which leaves the title alone. EVERY outcome appends one audit record
-  (`class: "audit"`, `command: "graph.send"`, status
-  `pending|delivered|error`, the text as `untrusted_data` — never the message)
-  to `~/Aoide/log`.
+  UNPREFIXED text — UNLESS the text carries no letter at all (a bare keystroke
+  answer like `1`), which leaves the title alone AND skips the provenance
+  prefix (a `graph permit` verdict digit must land byte-exact, not `from
+  orch-1: 1`). EVERY outcome appends one audit record (`class: "audit"`,
+  `command: "graph.send"`, status `pending|delivered|error`, the unprefixed
+  text as `untrusted_data` — never the message — and the resolved sender, if
+  any, folded into the message) to `~/Aoide/log`.
 - **Output:** pending → exit 0, `data: {id, state: "pending", delivered:
   false, submit, gate}`; delivered → exit 0, `data: {id, state: "delivered",
   delivered: true, submit, title, gate}` with `gate` ∈ `yes | autogate |
-  autogate-parent`. Errors (exit 1, audited): `reason` ∈ `session-not-found`,
-  `not-conductable`, `socket-unreachable`, `socket-write-failed`.
+  autogate-parent | autogate-sibling`. Errors (exit 1, audited): `reason` ∈
+  `session-not-found`, `not-conductable`, `socket-unreachable`,
+  `socket-write-failed`.
 - **Notes:** the one gated injection door. Gate order: `--yes` →
   `AOIDE_CONDUCT_AUTOGATE` → sender-is-the-target's-parent (an orchestrator
-  freely commands children it conducted) → held pending. There is no
-  `graph approve` verb in the schema, and nothing in the Rust tree reads
-  `pending.json` outside tests — approval is re-issuing the send with `--yes`
-  (the send.rs doc comment describes the queue as "staged for the conductor to
-  surface", but that surfacing path is unverified in source). `graph permit`'s
-  verdict and the A2A door both re-enter this same function in-process rather
-  than reimplementing it.
+  freely commands children it conducted) → sender-and-target-are-siblings
+  sharing a live parent (on by default, opt out with
+  `AOIDE_CONDUCT_SIBLING_AUTOGATE`; a self-send is excluded before the sibling
+  check ever runs, so a session can never autogate-deliver to itself) → held
+  pending. `--from` sets the delivered/queued provenance attribution
+  explicitly (sanitized of embedded `\n`/`\r`); omitted, it falls back to
+  `AOIDE_SESSION_ID`; `--from ""` is explicit anonymity and skips that
+  fallback — attribution only, never authentication, since either source is a
+  same-user value any caller can set to whatever it likes. `aoide graph
+  pending list|approve|deny` is the read/resolve surface over the held queue
+  (below) — `approve` re-drives a held entry through this exact door with
+  `--yes` and the entry's own `from`, in-process. `graph permit`'s verdict and
+  the A2A door both re-enter this same function in-process rather than
+  reimplementing it.
+
+### aoide graph pending list
+
+```
+aoide graph pending list [--json]
+```
+
+- **Reads:** `song/stage/pending.json`, raw-JSON — a malformed entry (a bare
+  string, or an object missing `sessionId`) is listed with `state: malformed`
+  rather than failing the whole read.
+- **Output:** text — one line per entry; `data: {pending: [...]}` with each
+  entry's `id` (its array POSITION — the schema carries no id of its own, so
+  positions shift the moment any entry resolves; re-list between multiple
+  resolutions in one breath).
+- **Notes:** read-only. The queue `graph send` parks a held injection in (no
+  `--yes`, no autogate match) and where the A2A door parks its own held
+  injects — previously a write-only dead drop nothing read back.
+
+### aoide graph pending approve
+
+```
+aoide graph pending approve <id> [--json]
+```
+
+- **Reads:** `song/stage/pending.json`; `<id>` is the entry's list position.
+- **Writes:** re-synthesizes and runs the exact `graph send --id <sessionId>
+  --yes -- <text>` (with `--submit`/`--from` carried through) the held entry
+  represents, in-process through `session_send` — the SAME door `graph
+  permit`'s verdict-typing already goes through — then removes the entry from
+  `pending.json` under the stage lock. Resolution is the audit line, not a
+  persisted archive.
+- **Output:** the inner `graph send` outcome. A malformed or out-of-range id
+  fails cleanly (exit 1), leaving the entry untouched — never destroyed on
+  failure.
+
+### aoide graph pending deny
+
+```
+aoide graph pending deny <id> [--json]
+```
+
+- **Reads:** `song/stage/pending.json`; `<id>` is the entry's list position.
+- **Writes:** removes the entry from `pending.json` under the stage lock —
+  injects nothing.
+- **Output:** `data: {id, sessionId}`. A malformed or out-of-range id fails
+  cleanly, leaving the entry untouched.
 
 ### aoide graph permit
 
@@ -362,7 +457,7 @@ aoide graph emit [--json]
 ### aoide conduct
 
 ```
-aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] -- <command …>
+aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -- <command …>
 ```
 
 - **Reads:** env `XDG_RUNTIME_DIR` (socket dir; falls back to
@@ -382,13 +477,31 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] -- <command �
   PTY (`openpty`; `setsid` + `TIOCSCTTY`; slave dup'd over fds 0/1/2) with
   `AOIDE_SESSION_ID` exported, and puts the real tty in raw mode for the
   duration (an RAII guard restores it on every exit path; SIGWINCH resizes are
-  propagated to the PTY master).
+  propagated to the PTY master) — all of that raw-mode/resize handling is
+  interactive-only and skipped entirely under `--headless` (below).
 - **Pipes to / output:** a `poll()` multiplexer shuttles real stdin → PTY
   master → real stdout (the wrapped TUI runs undisturbed), and each accepted
   control-socket connection's bytes → PTY master (that is what `graph send`
   types into). Exit mirrors the child: 0 ok, 1 otherwise, real code in
   `data.exitCode`; envelope `data: {sessionId, agent, exitCode, conductable,
   socket}`.
+- **`--headless`:** a pty session with NO controlling terminal — for a caller
+  (a script, `graph spawn`, an orchestrating agent) that has none to give it.
+  The multiplexer never pushes a stdin pollfd (there is nothing to read from)
+  and the pty-master's output mirrors to an append-only, unrotated per-session
+  log file — `state/sessions/<sessionId>.log` (`$AOIDE_STATE_DIR` else
+  `~/Aoide/state/`) — instead of real stdout; the log's path is recorded on
+  the session record as the additive `logPath` field the moment the file
+  opens. Everything else — registration, the injection socket, `graph send`
+  steering, exit mirroring — is identical to the interactive path. With no
+  controlling tty to query, `openpty` would otherwise get a NULL winsize and
+  leave the pty at 0×0 (full-screen TUIs misrender against or refuse that
+  outright), so a headless pty falls back to a conventional 80×24 instead; the
+  interactive no-tty case (rare, e.g. redirected stdin in a test) keeps its
+  historical `None` unchanged. A log file that can't be opened (an unwritable
+  state dir) degrades to stdout rather than killing the session, the same
+  best-effort posture as the socket bind. See "Headless conduct & `graph
+  spawn`" under [[Conductor-Channel]].
 - **Notes:** defaults: `--id conduct-<pid>-<unixts>`, `--agent` = the command's
   basename (`shell` is special: only a shell agent gets the live-tick state
   driving — agents' states come from hooks). A bind failure leaves the session

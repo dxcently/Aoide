@@ -197,7 +197,7 @@ capable" is the core thesis; `tools`/`skills` need `management`'s host-ops
 verbs, which don't exist yet. The design-decision corpus `canon` would
 formalize (`song/songbook/*/design/*.md`, this wiki's design-language pages)
 is prose today, not structured/checkable records, so there's nothing to wrap
-a crate around yet. Unblocks, in priority order: a decision from khoa on
+a crate around yet. Unblocks, in priority order: a decision from the User on
 whether `steward` is LLM-driven itself or a verb-surface an external agent
 drives via `conduct`; `management` landing; a decision to formalize canon
 into typed primitives.

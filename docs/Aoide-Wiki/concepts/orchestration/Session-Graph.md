@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-13
+updated: 2026-08-20
 tags: [aoide, graph, session, terminal, agent, cli]
 ---
 
@@ -11,8 +11,8 @@ tags: [aoide, graph, session, terminal, agent, cli]
 sessions** — who spawned whom, and which project each session belongs to —
 with a terminal viewer and a management layer behind one CLI group, `aoide
 graph` (real, every subcommand implemented — `view`/`project`/`link`/
-`session`/`wrap`/`send`/`focus`/`prune`/`reap`/`emit`, per `aoide schema
---json`). Like every command it registers into the single `commands/`
+`session`/`wrap`/`spawn`/`send`/`pending`/`focus`/`prune`/`reap`/`emit`, per
+`aoide schema --json`). Like every command it registers into the single `commands/`
 registry (`commands/graph.rs`, thin registrations over the `graph/` domain
 functions — see [[aoide-cli]]), so the CLI door and the MCP door share the
 group ([[Agent-Interface]]).
@@ -101,11 +101,22 @@ the registry entry should follow).
   reaping" below), and children that survive get `parentSessionId` cleared
   (un-orphaned rather than dangling). Everything removed or cleared is
   reported.
+- **`graph spawn`** — the DETACHED, headless variant of `conduct`: re-execs
+  `aoide` as `conduct --headless` in its own session so it outlives the
+  calling process, then waits (via a live socket connect, never bare file
+  existence) for registration. A headless session has no controlling
+  terminal, so its pty-master output mirrors to an append-only log instead of
+  a real screen — `state/sessions/<sessionId>.log` — recorded on the session
+  record as the additive **`logPath`** field the moment the file opens. Full
+  mechanism in [[Conductor-Channel]].
 - **`graph send`** (the gated injection door — full semantics in
   [[Conductor-Channel]]) types into a conducted session's control socket;
   `--submit` appends `\n`. One per-harness operator fact: kimi's TUI submits
   on `\r`, not `\n`, so against a kimi target `--submit` types the line
-  WITHOUT submitting it — deliver `\r` as a separate send.
+  WITHOUT submitting it — deliver `\r` as a separate send. Sends without
+  standing authorization queue in `song/stage/pending.json`; **`graph pending
+  list|approve|deny`** is the resolve surface over that queue — `approve`
+  re-drives a held entry through this same door with `--yes`.
 
 A durability rule spans the layer: the stage rewriters **round-trip unknown
 fields** (serde flatten), so graph management never clobbers fields other
@@ -201,7 +212,9 @@ seeing a stale "haunting" session.
 - `graph.json` v0: `{schemaVersion, nodes: […], edges: [{from, to, kind}]}` —
   fully resolved, so Quickshell never recomputes anchoring.
 - `sessions.json` records carry the **additive** optional `parentSessionId`
-  (no version bump).
+  (no version bump), plus, for a headless-conducted session, an additive
+  optional `logPath` pointing at its `state/sessions/<sessionId>.log`
+  ([[Conductor-Channel]]'s headless mode).
 
 ## Open seams
 

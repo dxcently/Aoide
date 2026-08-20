@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-27
-updated: 2026-08-03
+updated: 2026-08-20
 tags: [aoide, agent, session, conductor, orchestration, graph]
 ---
 
@@ -104,6 +104,29 @@ default, `--yes` (or an autogate policy) delivers it, and every outcome is
 audited. Use `graph wrap` for pure observe-only registration; use `conduct`
 when something (a human via the `conductor` TUI, or another agent) needs to type
 into the session later.
+
+**Headless — no terminal required.** `aoide conduct --headless` runs the
+identical steerable session with no controlling terminal at all: the pty's
+output mirrors to an append-only `state/sessions/<sessionId>.log` instead of a
+real screen, and `aoide graph spawn` is the detached verb that launches one
+and returns immediately (full mechanism in [[Conductor-Channel]]). Both are
+harness-agnostic: the hook door above doesn't care whether its own stdin is a
+real tty, so a headless-launched agent hooks itself onto the graph exactly
+like a foreground one.
+
+**Live-proven 2026-08-20, the three-harness probe.** A headless `claude`
+answered a prompt into its log with its own hook-registered session nested as
+a child of the wrapper session. A headless `kimi` did the same — its harness
+session likewise hooked in as a child, proving the hook door is genuinely
+harness-agnostic rather than claude-shaped-with-kimi-bolted-on. A headless
+`pi` launches and hooks in the same way too, but its provider requests time
+out (3 retries, 3 failures) — a gap in pi's provider-network path, not in the
+launch or hook-registration mechanism; the pi profile and its wiring
+(`hooks install pi`, below) are otherwise unaffected. Separately, a real
+sibling send between two of these sessions delivered with the
+`autogate-sibling` gate label and its provenance prefix visible in the
+receiver's log — see [[Conductor-Channel]] for the gate ladder and the
+attribution-not-security stance behind that prefix.
 
 ## The agent-profile seam — every harness fact behind one table
 
