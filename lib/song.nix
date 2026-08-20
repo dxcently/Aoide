@@ -204,11 +204,17 @@ let
         # :49 lists widgets themselves among the quickshell facet's instruments.
         # A song-side field by that name would also read as the song choosing
         # them, which `CONTRACTS.md:807` forbids outright. This field is the
-        # narrower, song-owned thing: the executables a widget's QML shells out
-        # to, named so a borrowing song can swap one (`pavucontrol` for
-        # `pwvucontrol`) without touching the body.
+        # narrower, song-owned thing: the packages providing the executables a
+        # widget's QML shells out to, named so a borrowing song can swap one
+        # (`pavucontrol` for `pwvucontrol`) without touching the body.
+        #
+        # NOT named `dependencies` either, though `CONTRACTS.md:216` uses that
+        # word for a dendrite's own inputs: this record already carries
+        # `dependsOn` (sibling SLOTS a widget addresses), and two fields a
+        # letter apart meaning different kinds of dependency is a worse trap
+        # than the collision this rename just closed.
         cond = !(isStringList (w.packages or [ ]));
-        msg = "`packages` must be a list of executable/package names, got ${show (w.packages or null)}";
+        msg = "`packages` must be a list of package names, got ${show (w.packages or null)}";
       }
       {
         cond = !(isStringList (w.dependsOn or [ ]));
