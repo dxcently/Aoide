@@ -38,6 +38,120 @@ let
   # whole `songbook` dir) so only this one file gets copied into the store.
   activeSongLivery = songbook + "/${config.aoide.song}/livery.json";
 
+  # ── Songbook manifest, typed (W3a) ──────────────────────────────────────
+  # `manifest.json`'s SOURCE flips here from a jq walk to eval-time nix. Two
+  # paths per song, same as `lib/song.nix`'s header describes:
+  #
+  #   - a `_widgets/` shelf present (sonata only today) — the shelf is
+  #     authoritative: import it, run it through `composeSong` (every guard
+  #     in `lib/song.nix` runs here), and validate the record set against the
+  #     directory scan below.
+  #   - no shelf (fugue, etude, nocturne) — the directory scan below IS the
+  #     record; there is nothing to validate it against.
+  #
+  # `registry.json` is UNCHANGED (still the jq/livery.json walk further down):
+  # nix attrsets carry no key ORDER, only key IDENTITY (`builtins.attrNames`
+  # is always lexicographically sorted, never insertion order), so a
+  # `fromJSON`-then-`toJSON` round-trip of a song's `.widgets` block silently
+  # reorders its fields — verified on etude's `demo` entry, authored `kind,
+  # namespace, layer, shortcut, blur`, which a nix round-trip re-emits `blur,
+  # kind, layer, namespace, shortcut`. No downstream `jq` formatting pass can
+  # recover an order nix's evaluator has already discarded. Since every
+  # committed song's shelf currently composes to an EMPTY declared-widget set
+  # (sonata's 14 records all leave `kind` null) the two mechanisms agree
+  # today regardless — so leaving the untyped livery.json passthrough alone
+  # costs nothing this commit and keeps the manifest's byte-identity gate
+  # honest. Registry's real type flip is W3b/C2's job, where the owner-map
+  # shape is freshly nix-authored and this constraint no longer applies.
+  #
+  # A top-level lowercase-kebab `.qml` under `<song>/widgets/` is a slot —
+  # same rule the shell `case` below still applies to the copied tree/qmldir
+  # (untouched by this commit). `builtins.readDir`'s keys are the FULL
+  # filenames (extension included) and `builtins.attrNames` sorts them
+  # byte-wise, which is the SAME order the old `bash */` glob produced
+  # (verified: "herald-center.qml" sorts before "herald.qml" because '-'
+  # (0x2D) < '.' (0x2E) — sonata's manifest depends on this for two pairs,
+  # herald/herald-center and wallpaper/wallpaper-picker). Deriving the slot
+  # list from the bare slot names instead (e.g. `attrNames composed.manifest`)
+  # sorts alphabetically and silently reorders those two pairs — the scan,
+  # not the shelf's own attrset, is this manifest's ordering source even when
+  # a shelf exists; the shelf is only ever a VALIDATOR of the scan's content.
+  songLib = import ../../../lib/song.nix { inherit lib; };
+
+  songbookNames = builtins.attrNames (
+    lib.filterAttrs (_: t: t == "directory") (builtins.readDir songbook)
+  );
+
+  isSlotFile = name: type: type == "regular" && builtins.match "[a-z0-9].*\\.qml" name != null;
+
+  songMeta = lib.listToAttrs (
+    map (
+      name:
+      let
+        songDir = songbook + "/${name}";
+        widgetsDir = songDir + "/widgets";
+        shelfDir = songDir + "/_widgets";
+        hasShelf = builtins.pathExists shelfDir;
+
+        widgetsEntries = if builtins.pathExists widgetsDir then builtins.readDir widgetsDir else { };
+        scanSlots = map (n: lib.removeSuffix ".qml" n) (
+          builtins.filter (n: isSlotFile n widgetsEntries.${n}) (builtins.attrNames widgetsEntries)
+        );
+      in
+      lib.nameValuePair name (
+        if !hasShelf then
+          scanSlots
+        else
+          let
+            composed = songLib.composeSong (import shelfDir { inherit lib; });
+            shelfSlots = builtins.attrNames composed.manifest;
+
+            # ── shelf-covers-scan, both directions ──────────────────────────
+            # A `.qml` on disk with no matching record, or a record naming a
+            # slot that scanned nothing, are the same drift class: rename the
+            # file, forget the record (or the reverse), and the manifest
+            # silently points at nothing.
+            missingRecord = lib.subtractLists shelfSlots scanSlots;
+            missingFile = lib.subtractLists scanSlots shelfSlots;
+
+            # ── file-exists ──────────────────────────────────────────────────
+            # A record's `file` may in principle name anything (a future
+            # borrow points elsewhere); today every record's `file` is its own
+            # slot's `.qml`, so this is redundant with shelf-covers-scan for
+            # now, but it is the check that stays correct once a borrow lands.
+            missingOnDisk = lib.filter (
+              slot: !builtins.pathExists (widgetsDir + "/${composed.manifest.${slot}.file}")
+            ) shelfSlots;
+          in
+          lib.throwIf (missingRecord != [ ])
+            (
+              "aoide songbook ${name}: widgets/ has slot(s) ${lib.concatStringsSep ", " missingRecord}"
+              + " with no _widgets/ record — add the record or delete the stray .qml"
+            )
+            (
+              lib.throwIf (missingFile != [ ])
+                (
+                  "aoide songbook ${name}: _widgets/ declares slot(s) ${lib.concatStringsSep ", " missingFile}"
+                  + " with no matching widgets/*.qml — the shelf record points at nothing"
+                )
+                (
+                  lib.throwIf (missingOnDisk != [ ]) (
+                    "aoide songbook ${name}: slot(s) ${lib.concatStringsSep ", " missingOnDisk}"
+                    + " name a `file` that does not exist under widgets/"
+                  ) scanSlots
+                )
+            )
+      )
+    ) songbookNames
+  );
+
+  # Only songs with at least one slot appear — matches the old jq walk, which
+  # merged a song's entry into the manifest only when its slot list was
+  # non-empty.
+  manifestAttrs = lib.filterAttrs (_: slots: slots != [ ]) songMeta;
+
+  manifestJsonFile = pkgs.writeText "aoide-quickshell-manifest.json" (builtins.toJSON manifestAttrs);
+
   # ── Seed script for `home.activation.aoideSeedStage` (below) ───────────────
   # Reasserts the ACTIVE song's committed livery into the live stage twin
   # (`song/stage/livery.json`, CONTRACTS.md §4) on every activation, injecting
@@ -83,49 +197,60 @@ let
   # filename is a helper component (QML's own type-file convention — only an
   # uppercase-first name is a valid QML type), carried but never
   # independently a slot; `.gitkeep` is always skipped. A song's other files
-  # (outside widgets/) are ignored. A generated manifest.json records which
-  # songs authored which slots, so runtime QML (the staging engine,
-  # StagingEngine.qml) can check availability without probing the filesystem
-  # per-frame. The wired-slot catalog (which slots an anchor actually
-  # resolves at runtime) lives in qml/slots.md, not here.
+  # (outside widgets/) are ignored. `manifest.json` records which songs
+  # authored which slots (computed above, `manifestJsonFile` — typed nix, see
+  # that comment for the shelf/scan split), so runtime QML (the staging
+  # engine, StagingEngine.qml) can check availability without probing the
+  # filesystem per-frame. The wired-slot catalog (which slots an anchor
+  # actually resolves at runtime) lives in qml/slots.md, not here.
   #
   # ── Declared widget-type registry (Phase 2) ─────────────────────────────
-  # The same per-song walk also generates $out/qml/songs/registry.json,
+  # The per-song walk below also generates $out/qml/songs/registry.json,
   # shaped `{ "<song>": { "<slot>": { …declaration… } } }` — which slots a
   # song declares as widget-TYPE registrations (a rarer, smaller set than
   # manifest.json's "which slot bodies exist"). Read from each committed
   # song's `livery.json` (`.widgets // {}`), never from any nix option:
   # `config.aoide.arrangement.widgets` (Phase 1) only exists for the ACTIVE song
   # at eval time (a song's rice.nix self-gates on `config.aoide.song ==
-  # "<name>"`), so cross-song data has to come from committed FILES, same
-  # reason manifest.json already reads the songbook off disk instead of
-  # nix options. Every committed song gets an entry — `{}` when the song has
-  # no `livery.json` or no `.widgets` key — never an error, never a skipped
-  # song (same optional/empty-registry tolerance used elsewhere). This walk
-  # stays permissive: whatever's under `.widgets` passes through unjudged;
-  # shape validation is Phase 3's job (the Rust-side `rice lint` engine).
+  # "<name>"`), so cross-song data has to come from committed FILES. Every
+  # committed song gets an entry — `{}` when the song has no `livery.json` or
+  # no `.widgets` key — never an error, never a skipped song (same
+  # optional/empty-registry tolerance used elsewhere). This walk stays
+  # permissive: whatever's under `.widgets` passes through unjudged; shape
+  # validation is Phase 3's job (the Rust-side `rice lint` engine).
+  #
+  # UNCHANGED by W3a (see `manifestJsonFile`'s comment above for why): still a
+  # raw jq/livery.json passthrough, not a `_widgets/`-composed value, even for
+  # sonata.
   quickshellConfig = pkgs.runCommand "aoide-quickshell-config" { nativeBuildInputs = [ pkgs.jq ]; } ''
     mkdir -p "$out/qml"
     cp -r ${./qml}/. "$out/qml/"
 
-    # ── Carry over per-song flavor widgets + manifest ──────────────────────
+    # ── Manifest: typed nix, formatted through jq ───────────────────────────
+    # `manifestJsonFile` (above) is the validated, ordered content —
+    # `builtins.toJSON` is compact and this pretty-prints it to match the old
+    # jq-walk's formatting (2-space indent). `jq .` reorders nothing: it
+    # keeps whatever key/element order the input text already has, which here
+    # is nix's (song names — already sorted the way the old glob walked them)
+    # nested in each song's manifest ORDER (a list; jq never reorders array
+    # elements).
+    mkdir -p "$out/qml/songs"
+    manifest="$out/qml/songs/manifest.json"
+    jq . ${manifestJsonFile} > "$manifest"
+    registry="$out/qml/songs/registry.json"
+    echo '{}' > "$registry"
+
+    # ── Carry over per-song flavor widgets + registry ───────────────────────
     # Copy the WHOLE widgets/ dir per song (bring any helper .qml/asset
     # subdirs along — a multi-file widget like sonata's bar.qml needs its
-    # WorkspaceRow.qml helper sitting right beside it), but only MANIFEST
-    # top-level lowercase-kebab .qml files as slots. A file starting
+    # WorkspaceRow.qml helper sitting right beside it). A file starting
     # uppercase is a helper component (QML's own type-file convention: only
     # an uppercase-first filename is a valid QML type name) — carried to
     # disk so the slot file's relative imports resolve, but never
-    # independently resolvable as a slot itself. `.gitkeep` (present so an
-    # empty widgets/ dir survives git) is always skipped.
-    mkdir -p "$out/qml/songs"
-    manifest="$out/qml/songs/manifest.json"
-    echo '{}' > "$manifest"
-    registry="$out/qml/songs/registry.json"
-    echo '{}' > "$registry"
+    # independently resolvable as a slot itself (nix already decided the
+    # slot list, above — this loop no longer re-derives it).
     for d in ${songbook}/*/; do
       name=$(basename "$d")
-      slots=""
       if [ -d "$d/widgets" ]; then
         mkdir -p "$out/qml/songs/$name"
         cp -r "$d/widgets/." "$out/qml/songs/$name/"
@@ -152,27 +277,6 @@ let
           t=$(basename "$h" .qml)
           printf '%s 1.0 %s.qml\n' "$t" "$t" >> "$out/qml/songs/$name/qmldir"
         done
-        for f in "$d/widgets/"*; do
-          [ -e "$f" ] || continue
-          base=$(basename "$f")
-          case "$base" in
-            .gitkeep) continue ;;
-          esac
-          # lowercase-kebab .qml only: starts with [a-z0-9], ends .qml.
-          case "$base" in
-            [a-z0-9]*.qml) ;;
-            *) continue ;;
-          esac
-          slot=$(basename "$base" .qml)
-          slots="$slots $slot"
-        done
-      fi
-      if [ -n "$slots" ]; then
-        slotsJson=$(printf '%s\n' $slots | jq -R . | jq -s .)
-        tmp=$(mktemp)
-        jq --arg name "$name" --argjson slots "$slotsJson" \
-          '.[$name] = $slots' "$manifest" > "$tmp"
-        mv "$tmp" "$manifest"
       fi
 
       # ── Declared widget-type registry entry for this song ────────────────
