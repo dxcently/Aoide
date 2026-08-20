@@ -1461,9 +1461,10 @@ choice of WHICH card. Fixed in `a2a.rs`:
   HTTP status stays `200` and the audit label stays `a2a.agent-card` in both
   arms.
 - What the stripped card WITHHOLDS from an unauthenticated caller: the
-  skills inventory (the full command surface), `version`, and
-  `capabilities`. All four require a valid bearer once a token is
-  configured, same as the Phase G read verbs.
+  skills inventory (the full command surface), `version`, `capabilities`,
+  `description`, `defaultInputModes`, and `defaultOutputModes` — everything
+  that is not one of the three served fields. All of it requires a valid
+  bearer once a token is configured, same as the Phase G read verbs.
 - Off-path (no token, today's default) is byte-identical to before — the
   served card is pinned field-for-field against `agent_card_from_commands`
   directly, the same off-path pin style Phase G used.
