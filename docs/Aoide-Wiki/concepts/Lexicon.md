@@ -68,7 +68,7 @@ The full map lives in [[Song-Vocabulary]]; the logic of the family here. A **ric
 A few terms name the connective tissue rather than either half:
 
 - **conductor** — the ensemble's tool: `aoide conductor`, the TUI that watches the ensemble of running agent terminals and cues between them, with Hyprland as the multiplexer (real windows). The wider **conductor-class** covers every surface with that duty — the Terminal Commander widget, the DAG gadget, the conductor. See [[Terminal-Commander]], [[Session-Graph]].
-- **door** — an entry point into the one dispatch layer: `cli`, `mcp`, `daemon` (and the TUI rides the cli door). Every operation enters through a door and exits into the one audit log. One body, several doors.
+- **door** — an entry point into the one dispatch layer: `cli`, `mcp`, `daemon`, `a2a` (and the TUI rides the cli door). The `a2a` door is the bidirectional interop one — aoide both serves the protocol (`a2a serve`, AgentCard at `/.well-known/agent-card.json`) and speaks it as a client (`a2a agent add|send`) — see [[A2A-Door]]. Every operation enters through a door and exits into the one audit log. One body, several doors.
 - **livery** — the design tokens AND the engine that dresses every surface in them ([[livery]], native in `crates/song/src/livery/`): one name for the whole token layer. Values and engine are one thing: the tokens are livery, resolved/validated/emitted by livery (`stage/livery.json`, hyprctl, OSC).
 - **gate** — the rebuild gate ([[Rebuild-Gate]]): agents propose, the human admits. The single point where the performed half is allowed to re-freeze the crystal.
 - **wiki / vault** — Mneme's memory surfaces: this wiki for design context, the vault for content.

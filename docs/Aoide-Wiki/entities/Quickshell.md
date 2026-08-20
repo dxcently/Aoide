@@ -193,7 +193,7 @@ the sole live painter (Stylix's `hyprpaper` is force-disabled via the
 elsewhere). So a shell crash takes the wallpaper *and* the bar/dock/gadgets with
 it in one stroke — they are one process, not four. The wallpaper's own
 source-of-truth is the live-watched `stage/cover.json` (written by `aoide rice
-preview` or, for a direct hot-swap, `aoide cover set <path-or-name>`), falling
+stage` when the song's cover derives or, for a direct hot-swap, `aoide cover set <path-or-name>`), falling
 back to the baked `AOIDE_WALLPAPER` env store path so the
 background survives reboots/rebuilds even though `stage/` is ephemeral. Swap is a
 hard cut — no crossfade.

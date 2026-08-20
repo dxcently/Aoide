@@ -327,19 +327,21 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   `resolved_parent` pass); the other three seams (a/c/d above) were not
   individually confirmed. Repro: track a session, switch, diff
   `stage/sessions.json` + `aoide graph emit` before/after.
-- **[bug] Melete adapter subscribes to nothing.**
-  `modules/nucleus/melete-adapter.nix` sets
-  `AOIDE_ADAPTER_SUBSCRIBE=rebuild-proposed,rice-preview-ready,notification-action`,
-  but `pkgs/aoide/crates/client/src/adapter.rs::parse_class()` only accepts
-  `audit/gate/rice/content/notification` — every configured name is silently
-  dropped, adapter forwards nothing. Fix: reconcile env values to the
-  parser's vocabulary (or widen the parser). See [[Melete]].
 - ~~**[bug] `lib/vmTest.nix` command-count assertion is stale**~~ **closed**:
   fixed alongside the `rice design` cut / `rice draft` add / `rice gen`
   removal pass (khoa 2026-08-14), then bumped again for the `peer`
   group (§7 below), then again for the new `shell reload` command
   (Quickshell IPC hot-reload trigger) — asserts `cmd_count == 60` now,
   matching `aoide schema --json`. See [[Codebase]].
+- **[bug] `lib/vmTest.nix` command-count assertion has drifted again** — it
+  asserts `cmd_count == 83` while `aoide schema --json` reports **87**
+  commands (source-tree registrations and the installed CLI agree). Bump the
+  assertion; same bug class as the struck entry above.
+- **[bug] Rice keybinds invoke retired verbs.** `modules/dendrites/hyprland.nix`
+  binds `SUPER SHIFT, P` → `aoide rice preview` and `SUPER SHIFT, A` → `aoide
+  rice adopt` — both spellings were retired in the renames (`preview` →
+  `stage`, `adopt` → `declare`; no aliases), so both keybinds are no-ops.
+  Repoint to `rice stage` / `rice declare`. See [[Controls]].
 - **[docs] `README.md` (repo root) lags the wiki.** Known stale points: shipped
   song is `sonata` not `hero`; launcher trigger is `aoide:launcher` not the
   old CLI-stub form; command count is 36 (three gated) not 28; `rice stage`

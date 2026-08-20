@@ -216,7 +216,7 @@ example: it declares one `kind = "surface"` entry (`demo`) and proves the
 whole pipeline — nix option → build-time `registry.json` walk (a build
 artifact parallel to, but never merged into, `manifest.json` — a different
 question: which slots are TYPE declarations, not which slot bodies exist) →
-`rice lint` → `rice stage`/`preview` hot-sync → render — end to end. Full
+`rice lint` → `rice stage` hot-sync → render — end to end. Full
 mechanism: `CONTRACTS.md` §5's "declared widget-type registry" subsection;
 full field/table reference: `modules/facets/quickshell/qml/slots.md`.
 
