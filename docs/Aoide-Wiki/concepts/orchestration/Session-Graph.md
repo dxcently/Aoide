@@ -215,7 +215,8 @@ seeing a stale "haunting" session.
 - `sessions.json` records carry the **additive** optional `parentSessionId`
   (no version bump), plus, for a headless-conducted session, an additive
   optional `logPath` pointing at its `state/sessions/<sessionId>.log`
-  ([[Conductor-Channel]]'s headless mode).
+  ([[Conductor-Channel]]'s headless mode) — the conductor branches Enter on
+  its presence: a tail overlay when set, the window cue when absent.
 
 ## Open seams
 
