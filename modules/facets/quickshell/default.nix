@@ -129,6 +129,29 @@ let
       if [ -d "$d/widgets" ]; then
         mkdir -p "$out/qml/songs/$name"
         cp -r "$d/widgets/." "$out/qml/songs/$name/"
+
+        # ── qmldir: register this song's helper types ────────────────────────
+        # A slot body is loaded by WidgetSlot/SurfaceSlot through
+        # `Qt.createComponent(Qt.resolvedUrl("songs/<song>/<slot>.qml"))`
+        # (StagingEngine.qml's `source`), which yields a `qs:` URL. QML's
+        # implicit "types in my own directory" resolution does NOT apply to a
+        # component loaded from that scheme, and this subdirectory is not on
+        # any import path — so without a qmldir an uppercase sibling is simply
+        # not a type, and the body fails to load with `X is not a type`.
+        #
+        # This is not hypothetical: it is exactly what broke sonata's bar when
+        # the helper components moved out of the facet's own qml/ directory
+        # (which IS the shell's implicit import scope, and is why nobody had
+        # to declare them before) and into the songbook. The failure is loud
+        # in the log but silent on screen — the slot renders nothing.
+        #
+        # Uppercase-first only: lowercase-kebab files are SLOTS, resolved by
+        # URL through the manifest and never by type name.
+        for h in "$d/widgets/"[A-Z]*.qml; do
+          [ -e "$h" ] || continue
+          t=$(basename "$h" .qml)
+          printf '%s 1.0 %s.qml\n' "$t" "$t" >> "$out/qml/songs/$name/qmldir"
+        done
         for f in "$d/widgets/"*; do
           [ -e "$f" ] || continue
           base=$(basename "$f")
