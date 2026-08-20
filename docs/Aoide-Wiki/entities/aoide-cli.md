@@ -48,10 +48,11 @@ offline, vendored dependency set unchanged — the same shape as Hermes-agent's
 self-registering tool registry and Claude Code's discrete-tools-behind-a-thin-
 dispatch design.
 
-The command surface itself is unchanged by this shape: **75 leaves**
-(`aoide schema --json | jq '.commands | length'`). The table below sums to
-74 — the `graph` row still says 15 while `graph.*` is actually 16, one
-short pending `graph permit`'s own docs pass:
+The command surface itself is unchanged by this shape: **83 leaves**
+(`aoide schema --json | jq '.commands | length'`). The per-command dev
+reference — signature, files read, files written, where output pipes to —
+lives at [[references/cli/Index|references/cli/]]; the table below sums
+groups only:
 
 | Group | Leaves | Real / stub |
 |---|---|---|
@@ -67,7 +68,7 @@ short pending `graph permit`'s own docs pass:
 | `make` ([[Widget-Maker]] entry), `onboard` | 2 | stub |
 | `update` | 1 | stub, gated |
 | `mcp serve`, `daemon`, `shellbridge`, `adapter melete` | 4 | real |
-| `graph` group (15 leaves — below) | 15 | real |
+| `graph` group (16 leaves — below) | 16 | real |
 | `conduct` | 1 | real |
 | `conductor` | 1 | real |
 | `a2a serve`, `a2a agent add/list/remove/send` | 5 | real |
@@ -76,6 +77,9 @@ short pending `graph permit`'s own docs pass:
 | `hooks install` | 1 | real |
 | `quickshell reload` | 1 | real — Quickshell IPC hot-reload trigger (`CONTRACTS.md` §5) |
 | `screen` group (14 leaves — below) | 14 | real — desktop capture, OCR, pointer synthesis, act-verification (`CONTRACTS.md` §8) |
+| `herald push` | 1 | real — one notification into the herald ledger via the shellbridge socket |
+| `rice take`/`take list`/`take mark`/`take diff`/`take prune`, `rice back` | 6 | real — the take store: snapshot, rehearse, and roll back a routed draft's live stage |
+| `soundcheck` | 1 | real — report-only mechanical-integrity sweep of the working tree; writes nothing |
 
 The **`a2a`** group is the [[A2A-Door]] — the third door onto aoide. `a2a
 serve` raises the A2A (Agent2Agent) JSON-RPC/HTTP server (a discoverable
@@ -153,10 +157,12 @@ keeping both would be two spellings of "go live with this draft"). See
 
 `view`, `project add`/`remove`/`list`, `link`, `session start`/`phase`/`end`/
 `hook` (takes `--agent <name>`, default `claude` — the payload maps through
-that harness's agent profile, [[Agent-Hooking]]), `focus`, `prune`, `emit`
-are the [[Session-Graph]] viewer +
+that harness's agent profile, [[Agent-Hooking]]), `permit`, `focus`, `prune`,
+`emit` are the [[Session-Graph]] viewer +
 manager feeding the [[Terminal-Commander]] roster (see [[Agent-Hooking]] for
-the session-registration doors). Three commands turn the graph into a
+the session-registration doors). `graph permit --id <id>` answers a harness
+permission prompt inside a conducted session by typing the profile's verified
+permission key (claude's `1`/`3`). Three commands turn the graph into a
 live conductor mesh:
 
 - **`graph wrap`** — spawn any agent command as a registered session
@@ -231,7 +237,9 @@ one audit log can't tell a conductor keypress from a typed command.
 ### The `screen` group — capture, OCR, pointer synthesis, verification
 
 `info` / `shot` / `ocr` / `diff` / `send` plus nine `screen point <verb>`s
-(14 leaves, registered last/newest in `commands::all()`) are aoide's
+(14 leaves, registered after `quickshell reload` in `commands::all()`;
+newer still are `herald push`, the `rice take` group + `rice back`, and
+`soundcheck`) are aoide's
 computer-use surface: shoot a downscaled frame (`shot --fit`), ground a
 target on it (`ocr`, or a picked pixel), act via a real synthesized pointer
 event (`point move`/`click`/`drag`/`hover`/`scroll`/`text` — never a warp),

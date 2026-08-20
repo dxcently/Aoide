@@ -26,7 +26,7 @@ Aoide-Wiki/
   ingest/
     index.md       ← content catalog
     log.md         ← append-only history + Open Threads
-  references/      ← raw sources (AOIDE-HANDOFF.md, AOIDE-DEV.md, pantheon/ stills)
+  references/      ← raw sources (AOIDE-HANDOFF.md, AOIDE-DEV.md, pantheon/ stills) + the dev CLI reference (cli/)
   protocol/        ← the wiki protocol (Mneme/Melete-owned), staged here; not Aoide content
 ```
 
@@ -124,4 +124,11 @@ protocol/_template/ingest/index.md
 protocol/_template/ingest/log.md
 references/AOIDE-HANDOFF.md
 references/AOIDE-DEV.md
+references/cli/Content-and-Hooks.md
+references/cli/Doors-and-Peers.md
+references/cli/Graph-and-Conduct.md
+references/cli/Index.md
+references/cli/Meta-and-Upkeep.md
+references/cli/Rice-and-Livery.md
+references/cli/Screen-Verbs.md
 ```
