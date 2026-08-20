@@ -40,6 +40,16 @@ let
   # `modules/facets/quickshell/default.nix`'s original comment (git history,
   # W3a/W3b) for the full reasoning; this file keeps only what the
   # computation itself needs.
+  #
+  # A shelf record's `owner` need not be `name`: a composition may borrow a
+  # slot from another song's shelf (`sonataWidgets // { bar = fugueWidgets.bar;
+  # }`, the documented idiom). The existence check below is therefore
+  # OWNER-RELATIVE, not composing-song-relative: a borrowed record's `file`
+  # is resolved under the OWNER's `widgets/` directory, because that is
+  # where the borrowed body actually lives — the composing song has no
+  # `widgets/` directory of its own to hold it, and checking against
+  # `widgetsDir` (this song's own) would reject every borrow unconditionally,
+  # which is exactly what happened before this comment existed.
   songMeta = lib.listToAttrs (
     map (
       name:
@@ -80,34 +90,60 @@ let
             composed = songLib.composeSong (import shelfDir { inherit lib; });
             shelfSlots = builtins.attrNames composed.manifest;
 
+            # The slots THIS song actually authors — the only ones the
+            # directory scan (`scanSlots`, this song's own `widgets/`) can
+            # ever corroborate. A borrowed slot's body lives under its
+            # owner's `widgets/`, which this song's scan never looks at.
+            ownSlots = lib.filter (slot: composed.manifest.${slot}.owner == name) shelfSlots;
+
+            # Checked FIRST: a record naming an `owner` with no songbook
+            # directory would otherwise fall through to `missingOnDisk` and
+            # report a missing FILE at a path that was never going to exist
+            # — the typo is in the owner name, not the filename, and the
+            # message should say so.
+            unknownOwner = lib.filter (
+              slot: !builtins.elem composed.manifest.${slot}.owner songbookNames
+            ) shelfSlots;
+
             missingRecord = lib.subtractLists shelfSlots scanSlots;
-            missingFile = lib.subtractLists scanSlots shelfSlots;
+            missingFile = lib.subtractLists scanSlots ownSlots;
 
             missingOnDisk = lib.filter (
-              slot: !builtins.pathExists (widgetsDir + "/${composed.manifest.${slot}.file}")
+              slot:
+              let
+                e = composed.manifest.${slot};
+              in
+              !builtins.pathExists (songbook + "/${e.owner}/widgets/${e.file}")
             ) shelfSlots;
           in
-          lib.throwIf (missingRecord != [ ])
+          lib.throwIf (unknownOwner != [ ])
             (
-              "aoide songbook ${name}: widgets/ has slot(s) ${lib.concatStringsSep ", " missingRecord}"
-              + " with no _widgets/ record — add the record or delete the stray .qml"
+              "aoide songbook ${name}: slot(s) ${lib.concatStringsSep ", " unknownOwner}"
+              + " name an `owner` song with no directory in the songbook"
             )
             (
-              lib.throwIf (missingFile != [ ])
+              lib.throwIf (missingRecord != [ ])
                 (
-                  "aoide songbook ${name}: _widgets/ declares slot(s) ${lib.concatStringsSep ", " missingFile}"
-                  + " with no matching widgets/*.qml — the shelf record points at nothing"
+                  "aoide songbook ${name}: widgets/ has slot(s) ${lib.concatStringsSep ", " missingRecord}"
+                  + " with no _widgets/ record — add the record or delete the stray .qml"
                 )
                 (
-                  lib.throwIf (missingOnDisk != [ ])
+                  lib.throwIf (missingFile != [ ])
                     (
-                      "aoide songbook ${name}: slot(s) ${lib.concatStringsSep ", " missingOnDisk}"
-                      + " name a `file` that does not exist under widgets/"
+                      "aoide songbook ${name}: _widgets/ declares slot(s) ${lib.concatStringsSep ", " missingFile}"
+                      + " with no matching widgets/*.qml — the shelf record points at nothing"
                     )
-                    {
-                      manifest = composed.manifest;
-                      registry = composed.arrangement.widgets;
-                    }
+                    (
+                      lib.throwIf (missingOnDisk != [ ])
+                        (
+                          "aoide songbook ${name}: slot(s) ${lib.concatStringsSep ", " missingOnDisk}"
+                          + " name a `file` that does not exist under their owner's widgets/"
+                        )
+                        {
+                          manifest = composed.manifest;
+                          registry = composed.arrangement.widgets;
+                        }
+                    )
                 )
             )
       )
