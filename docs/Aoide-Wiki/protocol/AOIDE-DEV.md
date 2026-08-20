@@ -55,6 +55,10 @@ Aoide **is** an orchestration core — dogfood it while building it.
 
 ### 2.1 Agent roles and tiers
 
+See [[Loop-Protocol]] for the harness-agnostic loop spec (tier definition,
+two-rung ladder, binding rule, review integrity); this section carries the
+CLI-specific tiering only.
+
 - **Plan → execute → review.** One dispatch per role and unit: flagship plans
   (scope, files/functions, sequence), mid tier executes (code, build/test,
   deploy), flagship reviews (correctness/coherence or vision). Review coaches
@@ -65,7 +69,7 @@ Aoide **is** an orchestration core — dogfood it while building it.
 - **Tiers by CLI:** Claude uses Opus for planning/review and Sonnet for
   execution/librarian; Kimi uses `k3` for planning/review and `k3-256k` for
   execution/librarian, with K2.7 coding aliases as fallback.
-- **Design:** khoa looks first and closes the pass; the advisor is on call
+- **Design:** the User looks first and closes the pass; the advisor is on call
   only when khoa asks. **Wiki:** the mid-tier librarian maintains it (§6),
   outside the orchestrator's context.
 
@@ -279,8 +283,8 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   `SubagentStop`/`PermissionResult` never fire (sub-nodes close on
   PostToolUse(Agent)); `Stop` doesn't fire on Esc interrupt; kimi sub-nodes
   have no transcript probe. Operator facts: kimi TUI submits on `\r` not
-  `\n` (`graph send --submit` types but doesn't submit — send `\r`
-  separately); model aliases are prefixed (`-m kimi-code/kimi-for-coding`);
+  `\n` (`graph send --submit` resolves the submit keystroke from the
+  target's agent profile, so it just works); model aliases are prefixed (`-m kimi-code/kimi-for-coding`);
   one unexplained instant-exit at 02:14, unreproduced. Capture log (Step-4
   evidence, deletable): `~/Aoide/state/kimi-hooks.jsonl`. Test-model note:
   use `kimi-code/kimi-for-coding` (K2.7) for e2e — don't burn K3.
