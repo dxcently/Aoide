@@ -32,13 +32,14 @@ harness's own internal subagent tool (claude's `Task`/`Agent`, kimi's
 `Agent`) and a `graph spawn` session are two BINDINGS of the same tier
 concept. Both hand a role a fresh context, steerable and observable through
 aoide's verbs; neither binding outranks the other. Which binding a given role
-uses is a per-role decision (§4), not a property of the tier itself.
+uses is a per-role decision (see Binding rule), not a property of the tier
+itself.
 
 ## Two-rung ladder
 
 - **R1 TIERED (default).** Each role — planner, executor, reviewer — runs in
   its own fresh-context unit, bound to an internal subagent or a `graph
-  spawn` session per §4.
+  spawn` session per the binding rule.
 - **R2 SINGLE-AGENT (degraded).** One context plans, executes, and reviews
   its own work. R2 applies only when the orchestrator's running harness
   offers no internal subagent tool AND `graph spawn` is unavailable to it.
@@ -89,9 +90,9 @@ like a passed one.
 ## Harness status
 
 **claude** binds R1 through its internal subagent tool (`Task`/`Agent`) or a
-`graph spawn` session, judgment per §4.
+`graph spawn` session, judgment per the binding rule.
 **kimi** binds R1 through its `Agent` tool or a `graph spawn` session,
-judgment per §4.
+judgment per the binding rule.
 **pi holds no rung on the ladder** — see [[Conductor-Channel]]'s headless
 section.
 
