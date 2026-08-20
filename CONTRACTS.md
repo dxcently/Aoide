@@ -1443,6 +1443,39 @@ does the caller hold a valid token when one is required):
   unchanged (it still runs its own `classify_token` internally for
   `effective_origin`, so it is not re-gated in the dispatcher).
 
+**Amendment (2026-08-20): the unauthenticated AgentCard GET is stripped, not
+gated.** Phase G above closed the read verbs but left
+`GET /.well-known/agent-card.json` untouched — it doesn't fit that
+predicate's `-32005` JSON-RPC shape at all: a GET is answered with a card,
+never a JSON-RPC envelope, so there is no error code to return, only a
+choice of WHICH card. Fixed in `a2a.rs`:
+
+- `stripped_card(full)` picks exactly three fields — `name`,
+  `protocolVersion`, `url` — off the FULL card `Value` that
+  `agent_card_from_commands` already builds, rather than re-deriving them, so
+  the stripped shape can never drift from the real card's own field names.
+- `route`'s card arm reuses the SAME `token_authorized`/`classify_token`
+  machinery every other gate in this file uses — no second predicate: when a
+  token is configured and the presented bearer does not classify `Valid`,
+  the response is `stripped_card(&full)`; otherwise it is the full card. The
+  HTTP status stays `200` and the audit label stays `a2a.agent-card` in both
+  arms.
+- What the stripped card WITHHOLDS from an unauthenticated caller: the
+  skills inventory (the full command surface), `version`, and
+  `capabilities`. All four require a valid bearer once a token is
+  configured, same as the Phase G read verbs.
+- Off-path (no token, today's default) is byte-identical to before — the
+  served card is pinned field-for-field against `agent_card_from_commands`
+  directly, the same off-path pin style Phase G used.
+- Known accepted consequence: `aoide a2a agent add` against a
+  token-protected remote records an **empty `description`** today, since
+  `parse_agent_card` only requires `name` (and derives the endpoint from
+  `url` or the fetch origin) — the client presents no `Authorization` bearer
+  when fetching a peer's card (outbound clients send none at all, per the
+  2026-08-19 amendment's grounding), so it only ever sees the stripped
+  shape on a protected peer. Enrollment still succeeds; closing that gap is
+  #47 Phase H, not this amendment.
+
 ### Session-DAG integration (client side)
 
 An external A2A agent, once registered (`aoide a2a agent add <url>`), folds
