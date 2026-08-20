@@ -10,7 +10,7 @@
 # Two exports:
 #
 #   mkWidget owner slot widgetFn -> record
-#   composeSong widgets          -> { arrangement, manifest, instruments,
+#   composeSong widgets          -> { arrangement, manifest, packages,
 #                                     dependsOn }
 #
 # WHY A PLAIN FUNCTION AND NOT A MODULE FRAGMENT. A fragment is only reachable
@@ -29,7 +29,7 @@
 #
 # WHY EVERY GUARD LIVES IN `composeSong` AND NOT IN `mkWidget`. A composition
 # overrides a borrowed widget with plain attrset update — `sonataWidgets //
-# { bar = sonataWidgets.bar // { instruments = [ … ]; }; }` — which is the
+# { bar = sonataWidgets.bar // { packages = [ … ]; }; }` — which is the
 # documented mechanism and runs AFTER `mkWidget` has returned. Guards in
 # `mkWidget` are therefore trivially bypassed by the intended composition idiom:
 # an override can reinstate any value the guard just rejected, and nothing
@@ -54,7 +54,7 @@ let
     "shortcut"
     "blur"
     "order"
-    "instruments"
+    "packages"
     "dependsOn"
     "helpers"
   ];
@@ -198,8 +198,17 @@ let
         msg = "`order` must be null or an int, got ${show (w.order or null)}";
       }
       {
-        cond = !(isStringList (w.instruments or [ ]));
-        msg = "`instruments` must be a list of package/tool names, got ${show (w.instruments or null)}";
+        # NOT named `instruments`. In this tree an instrument is what the VENUE
+        # sounds — `docs/Aoide-Wiki/concepts/song/Song-Vocabulary.md:57` defines
+        # a venue's instruments as "which facets and dendrites are enabled", and
+        # :49 lists widgets themselves among the quickshell facet's instruments.
+        # A song-side field by that name would also read as the song choosing
+        # them, which `CONTRACTS.md:807` forbids outright. This field is the
+        # narrower, song-owned thing: the executables a widget's QML shells out
+        # to, named so a borrowing song can swap one (`pavucontrol` for
+        # `pwvucontrol`) without touching the body.
+        cond = !(isStringList (w.packages or [ ]));
+        msg = "`packages` must be a list of executable/package names, got ${show (w.packages or null)}";
       }
       {
         cond = !(isStringList (w.dependsOn or [ ]));
@@ -277,7 +286,7 @@ in
         inherit (w) file owner;
       }) widgets;
 
-      instruments = lib.unique (lib.concatMap (w: w.instruments or [ ]) (builtins.attrValues widgets));
+      packages = lib.unique (lib.concatMap (w: w.packages or [ ]) (builtins.attrValues widgets));
 
       dependsOn = lib.mapAttrs (_: w: w.dependsOn or [ ]) widgets;
 
@@ -307,7 +316,7 @@ in
         arrangement.widgets = arrangementWidgets;
         inherit
           manifest
-          instruments
+          packages
           dependsOn
           ;
       };
