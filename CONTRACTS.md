@@ -196,6 +196,31 @@ A literal nix path (copied to the store — never a `song/` runtime read). The
 stylix facet bakes it as the base-context image; `null` bakes the solid-colour
 fallback derived from `palette.bg`.
 
+### Override tier (v0 additive — venue recolour, `override.*`)
+
+`aoide.livery.override.{bg,fg,accent,urgent,hot}` (each `nullOr` hex, default
+`null`) is the one tier of the livery the VENUE authors, never the song.
+Semantics — the **recolour rule**: each set anchor rewrites every livery
+colour equal to the song's AUTHORED value for that anchor (palette, base16
+slots, component-tier literals), computed in one simultaneous pass against the
+authored values, in BOTH fan-outs — the baked Stylix scheme and the
+`song/stage/livery.json` activation seed. A recolour, never a re-key: slots
+not carrying an overridden anchor's value stay the song's (the ramp is the
+song's voice; wanting a different ramp is wanting a different song). `hot`
+overridden while the song left it `null` sets `palette.hot` directly.
+Consumers apply the rule through `lib/livery.nix`'s `resolve` — identical
+rules on every consumer, so the fan-outs cannot disagree. Read-side only: the
+option system keeps storing the song's authored values inert; no config-side
+`mkForce`, so no option-system recursion.
+
+| Key                | Type          | Default | Recolours       |
+| ------------------ | ------------- | ------- | ---------------- |
+| `override.bg`      | `nullOr hex`  | `null`  | `palette.bg` and its twins |
+| `override.fg`      | `nullOr hex`  | `null`  | `palette.fg` and its twins |
+| `override.accent`  | `nullOr hex`  | `null`  | `palette.accent` and its twins |
+| `override.urgent`  | `nullOr hex`  | `null`  | `palette.urgent` and its twins |
+| `override.hot`     | `nullOr hex`  | `null`  | `palette.hot` and its twins; sets it directly when the song left it `null` |
+
 **Migration to v1:** the update playbook migrates `song/songbook/*/rice.nix`
 and `livery.json` from v0 to v1 when the design-system workstream lands v1.
 
@@ -808,6 +833,13 @@ Each song's `rice.nix` **self-gates**, exactly like a dendrite:
 - All note values are **literal nix** — a song never reads `song/` runtime
   paths (`stage/` · `auditions/`), same as the standard.
 - Shelving/subfolders follow the walker rules (a `/_` path is skipped).
+- The HOST may additionally set `aoide.livery.override.*` (§1, override tier)
+  to recolour the song it performs — venue paint over the song's notes, in
+  the same one-line register as `aoide.song`. It never edits the songbook. A
+  song must **NEVER** set `aoide.livery.override.*` (a song overriding itself
+  is meaningless and forbidden — same documented-convention rank as the
+  "only defines `aoide.livery`" invariant, `TODO(song-shape v1)` in
+  `lib/checks.nix`).
 
 ### The songbook is versioned score, not runtime
 

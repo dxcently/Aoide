@@ -27,7 +27,10 @@
 }:
 let
   cfg = config.aoide.facets.stylix;
-  t = config.aoide.livery;
+  # Read-side venue recolour (CONTRACTS.md §1, override tier): resolve rewrites
+  # colours equal to an overridden anchor's authored value, in one pass, with
+  # no option-system recursion — the option itself stays inert either way.
+  t = (import ../../../lib/livery.nix { inherit lib; }).resolve config.aoide.livery;
 
   # Stylix rides as a NixOS module only when its input is present (mkHost adds
   # it optionally). Gate on the OPTION being declared — reading `options` (not

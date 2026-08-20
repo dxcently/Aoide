@@ -114,6 +114,8 @@ let
   # per-module isolated eval + option-definition diffing — disproportionate for
   # v0. Until then the invariant is a DOCUMENTED CONVENTION (CONTRACTS.md §5 /
   # docs/BUILD.md), backed by this structural rice.nix-only gate and code review.
+  # Joins that convention: a song must never set `aoide.livery.override.*`
+  # (CONTRACTS.md §5) — the override tier is HOST-set only.
   songShape =
     songbookPaths:
     let

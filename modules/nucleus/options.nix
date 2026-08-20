@@ -137,6 +137,22 @@ let
     };
   };
 
+  # ── Override tier (venue recolour — HOST-set, never song-set) ─────────────
+  # The five palette anchors, each optional. Semantics (CONTRACTS.md §1,
+  # "Override tier"): an overridden anchor rewrites EVERY livery colour equal
+  # to the song's authored value for that anchor — palette, base16, component
+  # tiers — in one simultaneous pass, in BOTH fan-outs (baked Stylix scheme
+  # and the song/stage/livery.json seed). A recolour, never a re-key: slots
+  # not carrying an overridden anchor's value stay the song's. Same
+  # nullOr-hex-per-field shape as the component tier above (mkComponent).
+  overrideType = mkComponent {
+    bg = "Venue recolour of the song's bg anchor (and every slot carrying its value).";
+    fg = "Venue recolour of the song's fg anchor (and every slot carrying its value).";
+    accent = "Venue recolour of the song's accent anchor (and every slot carrying its value).";
+    urgent = "Venue recolour of the song's urgent anchor (and every slot carrying its value).";
+    hot = "Venue recolour of the song's hot anchor; when the song left hot null, sets it directly.";
+  };
+
   # ── Base16 scheme submodule (optional full-scheme tier) ───────────────────
   # A song MAY carry a complete base16 scheme following the base16 standard's
   # slot semantics (https://github.com/chriskempson/base16 — 00..07 the
@@ -360,6 +376,17 @@ in
               "no cover" — the stylix facet falls back to its deterministic
               solid-colour derivation (from palette.bg), so the baked path stays
               buildable with no binary asset.
+            '';
+          };
+          override = mkOption {
+            type = overrideType;
+            default = { };
+            description = ''
+              Venue recolour tier (CONTRACTS.md §1, "Override tier"). Set by
+              the HOST (never by a song) to repaint the performed song's
+              anchors without editing the songbook. Consumers apply it
+              through lib/livery.nix's `resolve` — the option system stores
+              it inert, same posture as the component-tier nulls.
             '';
           };
         };

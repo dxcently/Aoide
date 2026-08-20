@@ -31,7 +31,10 @@
 }:
 let
   cfg = config.aoide.facets.compositor;
-  t = config.aoide.livery;
+  # Read-side venue recolour (CONTRACTS.md §1, override tier): resolve rewrites
+  # colours equal to an overridden anchor's authored value, in one pass, with
+  # no option-system recursion — the option itself stays inert either way.
+  t = (import ../../../lib/livery.nix { inherit lib; }).resolve config.aoide.livery;
   arr = config.aoide.arrangement;
 
   # ── Component-tier fallback helpers ────────────────────────────────────────
