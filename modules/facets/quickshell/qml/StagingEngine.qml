@@ -6,10 +6,13 @@
 // <slot>.qml, plus a generated songs/manifest.json — an OWNER MAP recording
 // which song's manifest entry provides each slot, and which song's directory
 // the body actually lives under — e.g. `{ "sonata": { "calendar": { "owner":
-// "sonata", "file": "calendar.qml" } } }`. Every record's `owner` equals its
-// own song key today (no borrows exist yet), but the shape carries a slot's
-// provenance per-record so a future borrow (one song's manifest pointing at
-// another song's body) is a lookup, not a fallback-chain walk. This singleton
+// "sonata", "file": "calendar.qml" } } }`. A record's `owner` usually equals
+// its own song key, but need not: quodlibet borrows fugue's `bar` and
+// `herald`, so `quodlibet.bar.owner == "fugue"`. Because provenance is
+// recorded per-record, resolving a borrow is a direct lookup rather than a
+// fallback-chain walk — and a borrowed body still receives the BORROWING
+// song's livery, since palette arrives as an injected prop (below) and is
+// never read from disk by the widget. This singleton
 // reads that manifest (hot-reloaded, so a rebuild's new manifest is picked up
 // without restarting Quickshell) and answers the two questions a WidgetSlot
 // needs: does <song> dress <slot> (`has`), and where is its QML (`source`).
@@ -118,8 +121,8 @@ QtObject {
 
     // Resolved URL for <song>'s <slot> widget — only meaningful when has()
     // is true; callers gate on that first. Reads the slot's OWNER out of
-    // <song>'s manifest entry — today always <song> itself (no borrows
-    // exist yet), but a future borrow can name a different song — to find
+    // <song>'s manifest entry — usually <song> itself, but a borrow names a
+    // different song (quodlibet's `bar` is owned by fugue) — to find
     // which song's copied songs/<owner>/ directory the body physically
     // lives under, and the entry's `file` for the body's basename there.
     function source(song, slot) {
