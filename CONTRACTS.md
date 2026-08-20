@@ -1477,6 +1477,53 @@ choice of WHICH card. Fixed in `a2a.rs`:
   shape on a protected peer. Enrollment still succeeds; closing that gap is
   #47 Phase H, not this amendment.
 
+**Amendment (2026-08-20, #50): an unauthenticated `message/send` naming a
+context answers UNIFORMLY, not with a hard gate.** Phase G above closed the
+read verbs and Spawn, but left Inject's `contextId` lookup itself open to two
+problems even with a token configured: `decide_send_action` ran
+`session_ref_lookup` regardless of authentication, so an unauthenticated
+caller could tell a real `contextId` from a bogus one apart by the response
+shape alone (`-32001 task not found` vs a `submitted`/injected Task — an
+**existence oracle** over every local session id), and a REAL id reached
+`do_inject`, which could still **write `pending.json`** with zero credential
+presented at all. A hard `-32005` here, mirroring Spawn, would be the WRONG
+fix: enrolled peers authenticate this call via their OWN per-peer token
+(`Peer.tokenFile` / `is_autogated_peer_token`, 2026-08-19 amendment above),
+never the server-wide one, and aoide's own outbound clients present no
+bearer whatsoever (`commands.rs`/`wire.rs`) — a hard gate would refuse
+correctly-enrolled peers, not just attackers. Fixed in `a2a.rs::message_send`:
+
+- Before `decide_send_action` runs, when a token is configured, the
+  presented bearer does not classify `Valid`, AND neither autogate signal
+  matches (`ip_autogate` nor the per-peer `token_autogate` — the same OR the
+  Inject arm already computed, now hoisted above the decision so it's
+  available before AND after it, at the cost of one `load_peers()` per call
+  instead of a conditional one), a **context-id send**
+  (`context_id.is_some() && !spawn_asked` — the exact negation of
+  `decide_send_action`'s own spawn-vs-lookup split, so the two functions can
+  never classify the same request differently) short-circuits to a synthetic
+  `submitted` Task keyed on the PRESENTED `contextId`, built by the same
+  `submitted_task` helper `do_inject`'s held-pending arm uses (one Task
+  shape, not two that could drift). `session_ref_lookup` never runs,
+  `do_inject` never runs, `pending.json` is never touched.
+- Real, bogus, and known-but-not-conductable ids are now byte-identical from
+  the outside under this arm — no oracle. The queue-write half of the bug is
+  closed the same stroke: an unauthenticated remote can no longer feed the
+  operator's approval queue at all once a token is set (before this
+  amendment, an unauthenticated "loopback-looking" or unmatched-remote
+  caller naming a real conductable session got queued into `pending.json`
+  same as an authenticated one would).
+- The Spawn arm is untouched and keeps its existing `-32005` — this is
+  deliberately the UNIFORM-RESPONSE arm, not a second hard gate; it only
+  ever intercepts a context-id send, which Spawn never is.
+- A caller who DOES present the valid server-wide token, OR whose token/IP
+  matches an autogate-marked peer, is unaffected — falls through to the
+  unchanged `decide_send_action` → Inject/Error path exactly as every
+  amendment above already described.
+- Off-path (no token configured, today's default) is byte-identical to
+  before — the guard's `token_configured` check makes it a no-op by
+  construction, the same off-path-pin discipline as the amendments above.
+
 ### Session-DAG integration (client side)
 
 An external A2A agent, once registered (`aoide a2a agent add <url>`), folds
