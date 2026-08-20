@@ -1519,7 +1519,13 @@ correctly-enrolled peers, not just attackers. Fixed in `a2a.rs::message_send`:
 - A caller who DOES present the valid server-wide token, OR whose token/IP
   matches an autogate-marked peer, is unaffected — falls through to the
   unchanged `decide_send_action` → Inject/Error path exactly as every
-  amendment above already described.
+  amendment above already described. Note the pre-existing (2026-08-19)
+  consequence for the per-peer-token case specifically: with a server-wide
+  token configured and no valid bearer, `effective_origin` still coerces
+  the caller to Unknown, so the autogate exemption reaches the REAL inject
+  machinery but lands held-pending in the approval queue — it does not
+  instant-deliver. Fail-safe, and distinct from the guard's synthetic arm,
+  which never queues at all.
 - Off-path (no token configured, today's default) is byte-identical to
   before — the guard's `token_configured` check makes it a no-op by
   construction, the same off-path-pin discipline as the amendments above.
