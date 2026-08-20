@@ -639,6 +639,16 @@ hook-only agent) never sets it. Absent means "no headless log" (the common
 case); readers must tolerate both forms and round-trip fields they do not
 know.
 
+**Additive in v0:** a session record MAY also carry an optional `petname`
+(string, `<word>-<word>`) — a human-readable display handle minted once, at
+record creation, from a fixed adjective/noun wordlist. Unique only among
+CONCURRENT live sessions (a `state:"done"` record's name is free to reuse);
+never re-minted on a later update/resume/restart, never a lookup key, and
+never encodes the host or a session's role — those are resolved separately at
+render time. `sessionId` stays the sole canonical key everywhere. Absent means
+"minted before this field existed" (a legacy record); readers must tolerate
+both forms and round-trip fields they do not know.
+
 ### `song/stage/projects.json` — **v0**
 
 Registered project anchor roots for the graph. Written by
@@ -672,6 +682,9 @@ unanchored).
   ]
 }
 ```
+
+A session node MAY carry the sessions.json `petname` field above, present
+under the same rule.
 
 ### `song/stage/herald.json` — **v0**
 
