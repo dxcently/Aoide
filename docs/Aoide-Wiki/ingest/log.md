@@ -741,3 +741,35 @@ Wiki: [[A2A-Door]]'s "Security and governance" section rewritten — the old "lo
 ## [2026-08-19] add | dev CLI reference — `references/cli/` (83 commands)
 
 Minted `references/cli/` — the dev-facing command I/O reference the shape reserves `references/` for: a hub ([[references/cli/Index|cli/Index]]) plus six group pages ([[references/cli/Rice-and-Livery|Rice-and-Livery]] 22 verbs, [[references/cli/Graph-and-Conduct|Graph-and-Conduct]] 17, [[references/cli/Screen-Verbs|Screen-Verbs]] 14, [[references/cli/Doors-and-Peers|Doors-and-Peers]] 15, [[references/cli/Content-and-Hooks|Content-and-Hooks]] 7, [[references/cli/Meta-and-Upkeep|Meta-and-Upkeep]] 8), each command carrying signature, files read, files written, and where output pipes to — verified against the Rust source (`pkgs/aoide/crates/`) and `aoide schema --json`, not prose memory. Full coverage of the 83-leaf schema confirmed by a skim review; stubs (`rice declare`/`transpose`, the five `content` verbs, `make`/`update`/`onboard`) documented as contract surface only. The pages flag two source-vs-binary discrepancies (the installed binary predates the `--token-file` flags) and mark the few claims unverifiable in source (`rice transpose`'s `palette/` dir, the content registry path, who drains `stage/pending.json`) instead of inventing. SCHEMA manifest + index updated.
+
+## [2026-08-20] add | Loop-Protocol — the harness-agnostic agent loop spec (#52 Phase 1)
+
+New `concepts/orchestration/Loop-Protocol.md`, minted from the #52 decision
+record (Fable advisor, 2026-08-20): the loop is specified over Aoide's
+existing session primitives (`graph spawn`/`send`/`pending`/`view`/logs/
+transcripts), not a new verb — every consequential judgment in a multi-role
+run (ship vs send-back, coaching, killing an agent) stays with the agent
+exercising it. The page states the tier concept (one fresh-context unit per
+planner/executor/reviewer role; a harness's internal subagents and a `graph
+spawn` session are two bindings of that one concept, neither ranked over the
+other), the two-rung R1-tiered/R2-single-agent degradation ladder and the
+invariant that `graph spawn` makes R1 universally reachable, the binding rule
+(judgment per brief, with long-running-executor/short-scoped-work guidance
+and three conditions that force `graph spawn`), review integrity (the
+reviewer is never the executor's own context; grading discipline travels
+with the brief), the R2 degradation-announcement rule, and each registered
+harness's rung status (claude and kimi bind through either internal
+subagents or `graph spawn`; pi holds no rung, linked to
+[[Conductor-Channel]]'s headless section for the reason rather than
+restating it). Links out to [[Conductor-Channel]], [[Session-Graph]],
+[[Agent-Hooking]], [[Terminal-Commander]] without duplicating any of their
+owned content (the autogate gate ladder, hook mechanics, or the CLI tier
+map).
+
+Wired into `SCHEMA.md` (manifest entry under `concepts/orchestration/`,
+snapshot bumped to 2026-08-20) and `ingest/index.md` (one gloss line under
+Concepts, beside [[Conductor-Channel]]).
+
+**Flag:** the queued installable onboarding skill (agent-read dir, wired via
+hooks/commands) folds this page's spec into itself as part of collapsing the
+AGENTS.md/guide.rs duplication — not done in this pass.

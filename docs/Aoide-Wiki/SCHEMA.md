@@ -58,7 +58,7 @@ This file and every `protocol/OPERATIONS/` page obey the rules they describe. Ch
 
 Snapshot of this wiki's files, diffed on each lint pass and rewritten at the end. The wiki is meant to be read whole; this manifest exists for the lint self-description check, not to spare you the reading.
 
-snapshot: 2026-08-19
+snapshot: 2026-08-20
 
 ### Tags
 
@@ -89,6 +89,7 @@ concepts/orchestration/Agent-Interface.md
 concepts/orchestration/Conductor-3D-DAG.md
 concepts/orchestration/Conductor-Channel.md
 concepts/orchestration/Content-Pipeline.md
+concepts/orchestration/Loop-Protocol.md
 concepts/orchestration/Peer-Federation.md
 concepts/orchestration/Session-Graph.md
 concepts/orchestration/Terminal-Commander.md
