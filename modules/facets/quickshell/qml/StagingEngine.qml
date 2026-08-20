@@ -3,12 +3,16 @@
 //
 // The quickshell facet's build (modules/facets/quickshell/default.nix) carries
 // every committed song's authored widget slots into $out/qml/songs/<name>/
-// <slot>.qml, plus a generated songs/manifest.json recording which songs
-// authored which slots — e.g. `{ "default": ["calendar"], "sonata": ["calendar"] }`.
-// This singleton reads that manifest (hot-reloaded, so a rebuild's new
-// manifest is picked up without restarting Quickshell) and answers the two
-// questions a WidgetSlot needs: does <song> dress <slot> (`has`), and where
-// is its QML (`source`).
+// <slot>.qml, plus a generated songs/manifest.json — an OWNER MAP recording
+// which song's manifest entry provides each slot, and which song's directory
+// the body actually lives under — e.g. `{ "sonata": { "calendar": { "owner":
+// "sonata", "file": "calendar.qml" } } }`. Every record's `owner` equals its
+// own song key today (no borrows exist yet), but the shape carries a slot's
+// provenance per-record so a future borrow (one song's manifest pointing at
+// another song's body) is a lookup, not a fallback-chain walk. This singleton
+// reads that manifest (hot-reloaded, so a rebuild's new manifest is picked up
+// without restarting Quickshell) and answers the two questions a WidgetSlot
+// needs: does <song> dress <slot> (`has`), and where is its QML (`source`).
 //
 // Fixed injected-prop contract (CONTRACTS.md §5 containment): a loaded song
 // widget receives ONLY `livery` (LiveryState) and `bridge` (ShellBridge) —
@@ -48,7 +52,8 @@ QtObject {
     // gaps.
     readonly property string baselineSong: "sonata"
 
-    // { "<song>": ["<slot>", …], … } — empty until the first successful parse.
+    // { "<song>": { "<slot>": { "owner": …, "file": … } }, … } — empty until
+    // the first successful parse.
     property var manifest: ({})
 
     // Declared as a property (not a default-child) because QtObject has no
@@ -102,17 +107,24 @@ QtObject {
         return root.registry[song]
     }
 
-    // Does <song> authored a QML file for <slot>? Bounds-checked: an unknown
-    // song or a song with no manifest entry both cleanly answer false.
+    // Does <song>'s manifest entry provide <slot>? Bounds-checked: an
+    // unknown song or a song with no entry for <slot> both cleanly answer
+    // false. The manifest is an OWNER MAP (`{ "<song>": { "<slot>": {
+    // "owner": …, "file": … } } }`), so this is a direct object lookup, not
+    // the list scan (`indexOf`) the pre-W3b shape needed.
     function has(song, slot) {
-        if (!song || !manifest || !manifest[song]) return false
-        return manifest[song].indexOf(slot) !== -1
+        return !!(song && root.manifest && root.manifest[song] && root.manifest[song][slot])
     }
 
     // Resolved URL for <song>'s <slot> widget — only meaningful when has()
-    // is true; callers gate on that first.
+    // is true; callers gate on that first. Reads the slot's OWNER out of
+    // <song>'s manifest entry — today always <song> itself (no borrows
+    // exist yet), but a future borrow can name a different song — to find
+    // which song's copied songs/<owner>/ directory the body physically
+    // lives under, and the entry's `file` for the body's basename there.
     function source(song, slot) {
-        return Qt.resolvedUrl("songs/" + song + "/" + slot + ".qml")
+        var entry = root.manifest[song][slot]
+        return Qt.resolvedUrl("songs/" + entry.owner + "/" + entry.file)
     }
 
     // ── Baseline-fallback resolution (CONTRACTS.md §5) ──────────────────────
