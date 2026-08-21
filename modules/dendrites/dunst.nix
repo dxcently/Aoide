@@ -62,6 +62,15 @@
 #   aoide.dunst.enable = true;
 #
 # hosts/ knows dendrites; dendrites never know hosts.
+#
+# ── P-A8: also gated on aoide.lyra.enable ──────────────────────────────────
+# The herald-feed rule below hands every notification to `lyra herald push`
+# (pkgs.aoide.rice — a SEPARATE, droppable output as of P-A8's multi-output
+# split); that push is this whole module's reason to exist, so a config that
+# leaves dunst on but turns lyra off would otherwise script an exec against a
+# binary no longer in the closure. Unlike shellbridge (gated on the
+# quickshell facet), dunst carries no facet dependency of its own — it is
+# gated here directly on the lyra flag instead.
 {
   config,
   lib,
@@ -72,7 +81,7 @@
 {
   options.aoide.dunst.enable = lib.mkEnableOption "dunst notification daemon (the herald's delivery backend)";
 
-  config = lib.mkIf config.aoide.dunst.enable {
+  config = lib.mkIf (config.aoide.dunst.enable && config.aoide.lyra.enable) {
     # libnotify rides along for `notify-send`: the stock client the freedesktop
     # world (and aoide's own shellbridge mode-toggle path) reaches for. dunstify
     # alone left it missing on the box.
@@ -144,9 +153,11 @@
           # `herald` left core's registry at P-A5 of the binary-split
           # workstream — it now lives only in `lyra` (crates/lyra/src/
           # registry.rs). Both binaries ship from the same `pkgs.aoide`
-          # derivation (P-A7), so this is still a plain sibling store path.
+          # derivation (P-A7), but as of P-A8 `lyra` lives in that
+          # derivation's separate `rice` output (`pkgs.aoide.rice`) — named
+          # explicitly here, same reasoning as shellbridge.nix's ExecStart.
           script = "${pkgs.writeShellScript "aoide-herald-push" ''
-            exec ${pkgs.aoide}/bin/lyra herald push
+            exec ${pkgs.aoide.rice}/bin/lyra herald push
           ''}";
         };
       };

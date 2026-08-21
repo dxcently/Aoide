@@ -24,6 +24,11 @@
       # user's Aoide clone require it (found live on first switch — dxflake's
       # nucleus had carried it, and the "essentials only" port cut it).
       pkgs.git
-    ];
+    ]
+    # P-A8 of the binary-split workstream: `pkgs.aoide.rice` (the `lyra`
+    # paint binary alone) is a SEPARATE output from `pkgs.aoide` (P-A8's
+    # multi-output split) — installed only when `aoide.lyra.enable` is on,
+    # so a headless closure that never sets it never pulls `lyra` in.
+    ++ lib.optional config.aoide.lyra.enable pkgs.aoide.rice;
   };
 }

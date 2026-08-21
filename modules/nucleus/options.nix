@@ -605,6 +605,27 @@ in
       };
     };
 
+    # ── Lyra paint binary (P-A8 of the binary-split workstream) ────────────
+    lyra = {
+      enable = mkOption {
+        type = types.bool;
+        default = config.aoide.facets.quickshell.enable;
+        defaultText = literalExpression "config.aoide.facets.quickshell.enable";
+        description = ''
+          Install the `lyra` paint/rice binary — `pkgs.aoide.rice`, the
+          separate output P-A8 split off the combined aoide/aoided/lyra
+          derivation so a headless closure never has to carry it. Defaults
+          to whether the quickshell facet is enabled (lyra exists to paint a
+          shell, so a graphical host wants it and a headless one doesn't by
+          default), but is independently overridable: an explicit flag,
+          not only the facet inference, for a future aoide config that wants
+          lyra without quickshell (or vice versa). Every unit that execs
+          `lyra` (shellbridge, the dunst herald feed) gates on this flag too,
+          so flipping it off never leaves a unit pointed at a missing binary.
+        '';
+      };
+    };
+
     auditLog = mkOption {
       type = types.str;
       default = "/home/${config.aoide.user}/Aoide/log";

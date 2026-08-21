@@ -36,7 +36,10 @@
 // `lyra cover set <path>` (Quickshell.execDetached, the same exec idiom
 // ConductorGadget uses) — which atomic-writes stage/cover.json. `cover` left
 // core's registry at P-A5 of the binary-split workstream and lives only in
-// `lyra` now (bare name resolves via PATH, same package as `aoide`).
+// `lyra` now (bare name resolves via PATH: modules/nucleus/packages.nix puts
+// lyra's own droppable output, pkgs.aoide.rice, on systemPackages whenever
+// aoide.lyra.enable is on — P-A8 — which defaults to true here since this
+// widget only exists under the quickshell facet).
 // wallpaper.qml
 // FileView-watches that file and hot-swaps the live wallpaper. No new socket,
 // no QML file write.

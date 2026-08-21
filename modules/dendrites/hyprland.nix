@@ -157,9 +157,10 @@ in
 
         # Rice preview / adopt shortcuts. `rice` left core's registry at P-A5
         # of the binary-split workstream — it lives only in `lyra` now
-        # (bare name resolves via PATH: `lyra` ships alongside `aoide` in the
-        # same package modules/nucleus/packages.nix already puts on
-        # systemPackages).
+        # (bare name resolves via PATH: modules/nucleus/packages.nix puts
+        # `pkgs.aoide.rice` — lyra's own droppable output, P-A8 — on
+        # systemPackages whenever `aoide.lyra.enable` is on, which defaults
+        # to the quickshell facet's enablement).
         bind = SUPER SHIFT, P, exec, lyra rice preview
         bind = SUPER SHIFT, A, exec, lyra rice adopt
 

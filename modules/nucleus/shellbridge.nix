@@ -51,7 +51,18 @@ in
 # units would sit inert while their PATH entries (quickshell, hyprland,
 # hyprlock) drag the whole Qt/Wayland stack into the closure — found live on
 # sakaki, whose only aoide duty is the A2A door.
-lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable) {
+#
+# Also gated on aoide.lyra.enable (P-A8 of the binary-split workstream):
+# ExecStart below execs lyra out of pkgs.aoide.rice, a SEPARATE, droppable
+# output (P-A8's multi-output split). aoide.lyra.enable defaults to the
+# quickshell facet's own enablement, so this changes nothing for an
+# unconfigured host — but without this second gate, a host that left the
+# facet on and explicitly flipped aoide.lyra.enable off would still start
+# this unit and exec a binary no longer in its closure. Least-surprise pick:
+# gate the unit rather than assert the combination is an error, since
+# "quickshell but no lyra" is a legitimate (if unusual) configuration this
+# option exists to allow.
+lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config.aoide.lyra.enable) {
 
   # ── Runtime directories ──────────────────────────────────────────────────
   # song/stage/ is shared with aoided.nix's tmpfiles rules; systemd-tmpfiles
@@ -113,9 +124,12 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable) {
       # workstream — it now lives only in `lyra` (crates/lyra/src/registry.rs;
       # core's registration lines were dropped, per the doc comment at
       # crates/cli/src/commands/mod.rs::all()). Both binaries ship from the
-      # same `pkgs.aoide` derivation (P-A7), so this is still a plain sibling
-      # store path.
-      ExecStart = "${pkgs.aoide}/bin/lyra shellbridge --run";
+      # same `pkgs.aoide` derivation (P-A7), but as of P-A8 `lyra` lives in
+      # that derivation's separate `rice` output (`pkgs.aoide.rice`) —
+      # sibling resolution breaks across store paths (protocol::bin's
+      # resolver walks current_exe's own directory), so this must name the
+      # rice output explicitly rather than lean on that inference.
+      ExecStart = "${pkgs.aoide.rice}/bin/lyra shellbridge --run";
 
       Restart = "on-failure";
       RestartSec = "3s";
@@ -138,9 +152,12 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable) {
         "AOIDE_DEFAULT_SONG=${config.aoide.song}"
         # The process running this unit IS lyra now, so shellbridge's core_bin()
         # re-exec sites (protocol::bin's sibling resolver — the usage/recheck
-        # calls, shellbridge.rs) would already find `aoide` as lyra's sibling
-        # in this same store's bin/ dir; set explicitly anyway (P-A7 of the
-        # binary-split workstream) rather than lean on that inference.
+        # calls, shellbridge.rs) need this set explicitly (P-A7 of the
+        # binary-split workstream). As of P-A8 that is no longer optional
+        # belt-and-suspenders: `lyra` runs out of the `rice` output while
+        # `aoide` stays in `out` — two different store paths — so the
+        # sibling-directory inference would not find `aoide` next to `lyra`
+        # even if left to it.
         "AOIDE_CORE_BIN=${pkgs.aoide}/bin/aoide"
       ];
 
