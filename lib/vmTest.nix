@@ -2,8 +2,10 @@
 # stack.
 #
 # Exercises the walked module tree (same assembly as mkHost), the aoide
-# package, greetd wiring, the aoided + shellbridge user services,
-# and the graph commands — without real hardware or external network access.
+# package, greetd wiring, the aoided user service, and the graph commands —
+# without real hardware or external network access.  shellbridge is NOT
+# exercised: its module gates on the quickshell facet (it exists to feed the
+# quickshell UI), and this VM disables that facet — see the trims below.
 #
 # Wired in flake.nix as:
 #   checks.<system>.vm-boot = import ./lib/vmTest.nix { inherit pkgs inputs lib; };
@@ -18,25 +20,24 @@
 #     Reason: Quickshell sources an upstream flake input with a significant
 #     NixOS Wayland closure; its autostart (`quickshell -c shell.qml`) cannot
 #     render on the virtual GPU.  The compositor facet is KEPT because it wires
-#     greetd + programs.hyprland.
+#     greetd + programs.hyprland.  This also removes shellbridge.service
+#     entirely: shellbridge.nix gates on this facet, so the test neither
+#     starts nor asserts it.
 #
 #   greetd: will attempt to spawn Hyprland on the virtual GPU and loop.
 #     Mitigation: the test asserts the unit exists and is enabled rather than
 #     asserting active state, so a respawn loop does not fail the test.
 #
-#   User services (aoided, shellbridge) are wantedBy graphical-session.target,
-#     which never fires headless.  The test enables-linger and starts them
-#     explicitly via `systemctl --user`.
+#   The aoided user service anchors on a target that never fires in this VM
+#     (graphical-session or default, facet-dependent).  The test enables-linger
+#     and starts it explicitly via `systemctl --user`.
 #
 # ── Stage-dir note ────────────────────────────────────────────────────────────
-#   shellbridge.nix sets AOIDE_STAGE_DIR=%h/Aoide/song/stage.  The systemd
-#   template expands %h to the service user's HOME at runtime:
-#     /home/khoa/Aoide/song/stage
-#   The shellbridge binary also honours AOIDE_STAGE_DIR and falls back to the
-#   same path from aoide_home(), so both agree on the location.
-#   Graph commands are invoked via `su -c` (no login shell), so the user-service
-#   environment is not inherited.  The test therefore passes AOIDE_STAGE_DIR
-#   explicitly on each graph command invocation.
+#   Graph commands are invoked via `su -c` (no login shell), so no user-service
+#   environment is inherited.  The test therefore passes AOIDE_STAGE_DIR
+#   (%h/Aoide/song/stage's expansion, /home/khoa/Aoide/song/stage) explicitly
+#   on each graph command invocation, and the commands create what they need
+#   under that path themselves.
 {
   pkgs,
   inputs,
@@ -173,7 +174,6 @@ pkgs.testers.runNixOSTest {
 
   testScript = ''
     import json
-    import time
 
     # ── 1. multi-user.target reached ────────────────────────────────────────
     machine.wait_for_unit("multi-user.target")
@@ -274,9 +274,13 @@ pkgs.testers.runNixOSTest {
     # asserting active/activating, so a respawn loop does not fail the test.
     machine.succeed("systemctl is-enabled greetd.service")
 
-    # ── 4. User services: aoided + shellbridge ───────────────────────────────
-    # These are wantedBy graphical-session.target which never fires headless.
-    # Enable linger so the user slice persists, then start them explicitly.
+    # ── 4. User service: aoided ──────────────────────────────────────────────
+    # shellbridge.service does not exist in this VM at all: shellbridge.nix
+    # gates the whole module on the quickshell facet (it exists to feed the
+    # quickshell UI), and this VM disables that facet — so only aoided is
+    # started and asserted here, and the stage files shellbridge would seed
+    # are not expected either.
+    # Enable linger so the user slice persists, then start it explicitly.
     machine.succeed("loginctl enable-linger khoa")
 
     # Wait for the khoa user systemd manager to be up.
@@ -296,15 +300,14 @@ pkgs.testers.runNixOSTest {
             f"{cmd}'"
         )
 
-    # Start aoided and shellbridge.
+    # Start aoided.
     machine.succeed(user_cmd("systemctl --user start aoided.service"))
-    machine.succeed(user_cmd("systemctl --user start shellbridge.service"))
 
-    # Assert both services ran successfully.
-    # The current skeleton binaries exit cleanly with code 0 after seeding their
-    # state (daemon prints status JSON; shellbridge writes stage files).  Because
-    # Restart=on-failure only triggers on non-zero exits, the service lands in
-    # inactive(dead) with Result=success rather than remaining active.
+    # Assert the service ran successfully.
+    # The current skeleton binary exits cleanly with code 0 after its
+    # self-check (daemon prints status JSON).  Because Restart=on-failure only
+    # triggers on non-zero exits, the service lands in inactive(dead) with
+    # Result=success rather than remaining active.
     # We therefore assert Result=success (clean run) rather than is-active.
     #
     # If a future Agent B revision makes the daemons long-running, this test
@@ -321,42 +324,11 @@ pkgs.testers.runNixOSTest {
         )
 
     assert_service_ran_ok("aoided.service")
-    assert_service_ran_ok("shellbridge.service")
 
-    # Assert shellbridge seeded its stage files.
-    # AOIDE_STAGE_DIR=%h/Aoide/song/stage in the unit expands to
-    # /home/khoa/Aoide/song/stage (systemd %h = service user HOME).
-    # The binary's fallback from aoide_home() produces the same path.
-    # Give shellbridge up to 15 seconds to write the files.
+    # Stage dir: without shellbridge nothing pre-seeds sessions.json/hooks.json
+    # here; the graph commands below create what they need under this path via
+    # AOIDE_STAGE_DIR.
     stage_dir = "/home/khoa/Aoide/song/stage"
-    for attempt in range(15):
-        try:
-            machine.succeed(f"test -f {stage_dir}/sessions.json")
-            machine.succeed(f"test -f {stage_dir}/hooks.json")
-            break
-        except Exception:
-            time.sleep(1)
-    else:
-        # Last try — will raise with a useful message if files are absent.
-        listing = machine.succeed(f"ls {stage_dir}/ 2>&1 || true")
-        machine.succeed(
-            f"test -f {stage_dir}/sessions.json || "
-            f"{{ echo 'MISSING sessions.json; stage contents: {listing}'; exit 1; }}"
-        )
-
-    # Validate sessions.json: valid JSON + schemaVersion == "0".
-    sess_raw = machine.succeed(f"cat {stage_dir}/sessions.json")
-    sess = json.loads(sess_raw)
-    assert sess.get("schemaVersion") == "0", (
-        f"sessions.json schemaVersion expected '0', got: {sess_raw[:200]}"
-    )
-
-    # Validate hooks.json: valid JSON + schemaVersion == "0".
-    hooks_raw = machine.succeed(f"cat {stage_dir}/hooks.json")
-    hooks = json.loads(hooks_raw)
-    assert hooks.get("schemaVersion") == "0", (
-        f"hooks.json schemaVersion expected '0', got: {hooks_raw[:200]}"
-    )
 
     # ── 5. Graph commands (run as khoa) ──────────────────────────────────────
     # AOIDE_STAGE_DIR is set explicitly because graph commands are invoked via
