@@ -412,18 +412,34 @@ Contract guarantees:
   examples serializes byte-identical to before the field existed; consumers
   simply see the key when present.
 
-**Per-binary schema (forward-looking — lands with the lyra split).** Once
-the two-binary split (`docs/architecture/PACKAGE-LAYOUT.md`, "Two
-binaries") lands, this schema is per-binary rather than singular: `aoide
-schema --json` becomes the core contract (the `protocol`/`storage`/
-`client`/`conduct`/`server`/`conductor`/`upkeep`/`cli` verb surface),
-and `lyra schema --json` becomes the AoideOS-surface contract (rice/
-draft/mode/cover/livery/quickshell/screen/shellbridge/herald). A consumer
-wanting the whole desktop's capability inventory reads both. This is not
-a version bump: `schemaVersion` stays `"0"` — this section has never
-promised a fixed command inventory, only a document SHAPE, and the shape
-above is unchanged. What moves is which binary emits which command's
-entry, not the entry's own structure.
+**Per-binary schema (two binaries, P-A5 of the binary-split workstream,
+`docs/architecture/PACKAGE-LAYOUT.md`, "Two binaries").** This schema is
+per-binary, not singular: each binary's `schema --json` is its OWN
+contract, with its own golden command-path snapshot — the two never
+merge into one document, and neither one's golden test knows the other's
+count.
+
+- `aoide schema --json` — the core contract (the `protocol`/`storage`/
+  `client`/`conduct`/`server`/`conductor`/`upkeep`/`cli` verb surface:
+  conducting, the project/session graph, A2A, peers, the daemon, usage,
+  hooks). **48 commands** (`crates/cli/src/registry.rs`'s golden test).
+  Core is nix-independent (cargo build, no nix shell-outs) — see the
+  HARD CONSTRAINT note in the binary-split plan.
+- `lyra schema --json` — the AoideOS-surface contract: rice/draft/mode/
+  cover/livery/quickshell/screen/shellbridge/herald, the painted surface.
+  **42 commands** (`crates/lyra/src/registry.rs`'s golden test — one more
+  than the group list alone because `mcp.serve` must itself be a
+  registered path for `aoide_protocol::door::parse` to ever reach lyra's
+  `special` closure on `mcp serve --stdio`). Lyra alone may shell out to
+  nix (`song/widgets.rs`).
+
+A consumer wanting the whole desktop's capability inventory reads both.
+This was never a version bump: `schemaVersion` stays `"0"` on both —
+this section has never promised a fixed command inventory, only a
+document SHAPE, and the shape above is unchanged for either binary. The
+A2A AgentCard (§6) advertises whichever registry the serving binary
+assembled — core's card carries only core's 48, since `a2a serve` is
+core-only and lyra never registers it.
 
 ---
 

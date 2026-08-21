@@ -181,7 +181,7 @@ pkgs.testers.runNixOSTest {
     # ── 2. aoide on PATH ────────────────────────────────────────────────────
     machine.succeed("which aoide")
 
-    # `aoide schema --json` must parse and report exactly 76 commands.
+    # `aoide schema --json` must parse and report exactly 48 commands.
     # This is a deliberate drift tripwire: adding or removing a command must
     # consciously update this count (it caught 8 commands that had landed
     # unrecorded — graph wrap/reap/send, conduct, conductor, and the graph session
@@ -240,7 +240,15 @@ pkgs.testers.runNixOSTest {
     # the resulting stage/herald.json) — reached 76; bumped by 7 for the
     # self-ricing take tree and the flake integrity checker (`rice back`,
     # `rice take` and its `list`/`mark`/`diff`/`prune` leaves, and
-    # `soundcheck`) — now 83.
+    # `soundcheck`) — reached 83, though this tripwire had already drifted
+    # to stale-83-vs-actual-87 by the time P-A5 (binary-split workstream)
+    # landed — never bumped for whatever pushed the true count to 87
+    # (task #71 territory). P-A5 removed the 39-path graphical bundle
+    # (rice/draft/mode/cover/livery/shellbridge/quickshell/screen/herald/
+    # take) from `aoide` outright — it now lives ONLY in the separate
+    # `lyra` binary (docs/architecture/PACKAGE-LAYOUT.md, CONTRACTS.md §3)
+    # — landing core at 48. This tripwire is set straight to the current
+    # true count rather than propagating the old drift.
     schema_raw = machine.succeed("aoide schema --json")
     schema_doc = json.loads(schema_raw)
     # schema --json emits a JSON Outcome envelope:
@@ -252,8 +260,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 83, (
-        f"expected 83 commands, got {cmd_count}.  "
+    assert cmd_count == 48, (
+        f"expected 48 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 
