@@ -27,3 +27,6 @@ run/
 # Nix build outputs
 result
 result-*
+
+# Obsidian editor state (workspace layout churns on every open):
+docs/Aoide-Wiki/.obsidian/workspace.json
