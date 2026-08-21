@@ -44,7 +44,14 @@ let
   quickshellPkg = inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 in
 
-lib.mkIf config.aoide.enable {
+# Gated on the quickshell facet, not bare aoide.enable: everything in this
+# file is graphical-session machinery (the bridge serves the painted shell;
+# the reap units are wantedBy/partOf graphical-session.target and never fire
+# headless). On a headless aoide box (aoide.enable + the doors only) these
+# units would sit inert while their PATH entries (quickshell, hyprland,
+# hyprlock) drag the whole Qt/Wayland stack into the closure — found live on
+# sakaki, whose only aoide duty is the A2A door.
+lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable) {
 
   # ── Runtime directories ──────────────────────────────────────────────────
   # song/stage/ is shared with aoided.nix's tmpfiles rules; systemd-tmpfiles
@@ -151,7 +158,7 @@ lib.mkIf config.aoide.enable {
   #
   # Seam: this is the OUT-OF-BAND cleanup path for sessions whose IN-BAND
   # cleanup (do_session_end on normal exit) could not run. It is gated with the
-  # rest of shellbridge on `config.aoide.enable`, ordered into the graphical
+  # rest of shellbridge on the quickshell facet, ordered into the graphical
   # session so it inherits HYPRLAND_INSTANCE_SIGNATURE (the compositor imports
   # its env into the user manager), and shares shellbridge's exact AOIDE_STAGE_DIR.
   systemd.user.services.aoide-graph-reap = {
