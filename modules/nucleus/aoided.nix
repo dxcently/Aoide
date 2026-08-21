@@ -40,10 +40,18 @@ lib.mkIf config.aoide.enable {
   systemd.user.services.aoided = {
     description = "Aoide orchestrator daemon — neutral event stream + policy + audit";
 
-    # Start when the graphical session is ready (Hyprland/Wayland compositor up).
-    wantedBy = [ "graphical-session.target" ];
-    after = [ "graphical-session.target" ];
-    partOf = [ "graphical-session.target" ];
+    # On a painting box, start when the graphical session is ready (compositor
+    # up — the daemon serves the shell, and partOf ties its lifetime to the
+    # session). Headless (quickshell facet off) there is no graphical-session
+    # target to anchor to — PartOf then propagates an immediate stop to a
+    # manually started daemon, and BindsTo drags the a2a/mcp doors down with
+    # it (found live on sakaki). Anchor to default.target instead: with
+    # linger on, the daemon and its doors come up at boot and stay resident.
+    wantedBy = [
+      (if config.aoide.facets.quickshell.enable then "graphical-session.target" else "default.target")
+    ];
+    after = lib.optional config.aoide.facets.quickshell.enable "graphical-session.target";
+    partOf = lib.optional config.aoide.facets.quickshell.enable "graphical-session.target";
 
     serviceConfig = {
       # The `aoide` package installs both the `aoide` CLI and the `aoided`
