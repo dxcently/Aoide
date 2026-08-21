@@ -412,6 +412,19 @@ Contract guarantees:
   examples serializes byte-identical to before the field existed; consumers
   simply see the key when present.
 
+**Per-binary schema (forward-looking — lands with the lyra split).** Once
+the two-binary split (`docs/architecture/PACKAGE-LAYOUT.md`, "Two
+binaries") lands, this schema is per-binary rather than singular: `aoide
+schema --json` becomes the core contract (the `protocol`/`storage`/
+`client`/`conduct`/`server`/`conductor`/`upkeep`/`cli` verb surface),
+and `lyra schema --json` becomes the AoideOS-surface contract (rice/
+draft/mode/cover/livery/quickshell/screen/shellbridge/herald). A consumer
+wanting the whole desktop's capability inventory reads both. This is not
+a version bump: `schemaVersion` stays `"0"` — this section has never
+promised a fixed command inventory, only a document SHAPE, and the shape
+above is unchanged. What moves is which binary emits which command's
+entry, not the entry's own structure.
+
 ---
 
 ## 4. Stage file formats — **v0**

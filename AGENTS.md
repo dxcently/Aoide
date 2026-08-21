@@ -12,6 +12,13 @@ gadgets, the DAG/conductor surfaces) and the specialized ricer (song/notes themi
 Aoide is the engine; AoideOS is the desktop around it. A capability that works
 with only a shell is "Aoide"; one that is desktop/Quickshell/rice is "AoideOS".
 
+That boundary is gaining a binary form (decided; lands with the lyra split —
+`docs/architecture/PACKAGE-LAYOUT.md`, "Two binaries"): core ships as
+`aoide`/`aoided`, and everything desktop/Quickshell/rice-shaped ships as a
+second binary, **`lyra`**. The same line draws the nix boundary too — core
+is cargo-buildable on any Linux, no nix shell-outs, no NixOS assumption;
+only `lyra` (and the deployment modules) may depend on nix.
+
 Orient through four tiers, in order.
 
 ## Tier 0 — onboarding (this file + `aoide guide`)

@@ -309,6 +309,62 @@ this is structure, not features.
   snapshot unchanged, full `cargo test --workspace` green. (No Phase 7/8
   code; Phase 9 numbers after them to keep their DEFER notes stable.)
 
+## Two binaries — `aoide`/`aoided` (core) and `lyra` (paint) — DECIDED, lands starting P-A1
+
+The mapping above is the crate split; this is a narrower, later question it
+doesn't answer on its own — how many *binaries* the crates assemble into.
+**Decided: two.** Recorded here now, ahead of any crate move, so the
+reasoning is fixed before code follows it (Workstream A, phase P-A0 of
+`functional-singing-boole.md`).
+
+Core keeps `aoide`/`aoided` over `protocol` · `storage` · `client` ·
+`conduct` · `server` · `conductor` · `upkeep` · `cli`. A second binary —
+**`lyra`** (crate `aoide-lyra`, `crates/lyra`) — owns the
+rice/draft/mode/cover/livery/quickshell/screen/shellbridge/herald verb
+surface: everything that paints, or that only a desktop needs.
+
+- **Naming.** Muse names (`Aoide`, `Melete`, `Mneme`) name SYSTEMS, not
+  binaries; a binary living inside a system takes an INSTRUMENT name — the
+  desktop is the instrument the muse plays. Considered and rejected:
+  `terpsichore` (spends a muse name on a binary — the wrong tier — and at
+  12 characters is a poor CLI verb prefix); `aoide-rice` (mislabels the
+  ~40% of the surface — screen, shellbridge, herald, quickshell — that
+  isn't rice at all).
+- **`conductor` stays core.** It is the messaging/orchestration surface a
+  headless box needs most, not a painting tool: pure Rust (ratatui), no
+  system-closure weight, and conducting orchestration is Aoide's core
+  identity — see "What Aoide is" above ("she conducts every agent on
+  it"). It ships in `aoide`/`aoided`, never `lyra`.
+- **Charter exceptions (deliberate — recorded here as the smudge they
+  are).** `shellbridge.rs` and `herald.rs` stay as FILES in `conduct` —
+  only their REGISTRY lines (the CLI verbs) move to `lyra` — because both
+  are entangled with core: `permit.rs:413` publishes summons through
+  `herald`, and `conductor/ui.rs:508` reads the socket path `shellbridge`
+  owns. `storage::takes` and `storage::mode` stay in `storage` for the
+  same shape of reason: zero dependency weight, and `mode` is read by
+  `shellbridge`, which itself stays core-crate-resident. None of these
+  four are architecture; they are named, deliberate exceptions to the
+  split's own boundary, not oversights.
+- **Not `management`.** This split is unrelated to the deferred
+  `management` carve-out (see its status note above, under Phase 5) —
+  that crate is still deferred indefinitely, still waiting on real
+  host-ops verbs to exist before there is anything to extract. The
+  two-binary split neither touches it nor resolves it.
+- **Cordis correspondence.** In Cordis's terms (CONTRACTS.md §0): a crate
+  is a package/plugin; an app crate — `cli` today, `lyra` after this
+  split — is a dsh-style BUNDLE, the ordered composition performed at
+  boot; the assembled `Registry` is the plugin tree. An app crate's
+  explicit `register()` list is the bundle's PROFILE, not a violation of
+  "no registry an author must edit to be seen" (CONTRACTS §0) — composing
+  a bundle at its root is how Cordis composes too. Reference:
+  `github.com/deepseek-ai/deepseek-harness`, the repo behind the Cordis
+  paper CONTRACTS §0 already cites.
+- **Nix-independence.** Core (`aoide`/`aoided`) builds with `cargo` and
+  runs on any Linux: no nix shell-outs, no NixOS assumption. `song`'s
+  `widgets.rs` `nix eval` call moves to `lyra` with the split — once the
+  split lands, only `lyra` may be nix-dependent. This is the load-bearing
+  half of "What Aoide is" above, made structural rather than aspirational.
+
 ## Open questions (each tagged with when it must be settled)
 
 - **Naming — DECIDED (hybrid).** Plain names where the concept is universal
