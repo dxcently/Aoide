@@ -43,8 +43,8 @@ is the modifier.
 | `SUPER + SPACE` | Toggle the launcher (`aoide shell launcher toggle`). |
 | `SUPER + G` | Toggle the gadget dock — see [[Gadget-Dock]]. |
 | `SUPER + L` | Lock the screen (`aoide shell lock`). |
-| `SUPER SHIFT + P` | Bound to `aoide rice preview` in `modules/dendrites/hyprland.nix` — a retired verb, so the keybind is a no-op until repointed to `rice stage` (flagged in [[AOIDE-DEV]] §7). |
-| `SUPER SHIFT + A` | Bound to `aoide rice adopt` in `modules/dendrites/hyprland.nix` — a retired verb, so the keybind is a no-op until repointed to `rice declare` (flagged in [[AOIDE-DEV]] §7). |
+| `SUPER SHIFT + P` | Bound to `lyra rice preview` in `modules/dendrites/hyprland.nix` — a retired verb, so the keybind is a no-op until repointed to `rice stage` (flagged in [[AOIDE-DEV]] §7). |
+| `SUPER SHIFT + A` | Bound to `lyra rice adopt` in `modules/dendrites/hyprland.nix` — a retired verb, so the keybind is a no-op until repointed to `rice declare` (flagged in [[AOIDE-DEV]] §7). |
 | `SUPER + RETURN` | Open a terminal (kitty). |
 | `SUPER + Q` | Close the active window. |
 | `SUPER + V` / `SUPER + F` | Toggle floating / fullscreen. |

@@ -1,23 +1,26 @@
 # AGENTS.md — how to drive Aoide
 
-**Aoide (core) vs AoideOS (distribution) — don't conflate the two.** *Aoide* is
-the **orchestration core**: the bridges and APIs between the terminal, shell,
-system, and OS — one interface through which agents are freely orchestrated for
-any task. Any agent with a shell is fully capable, no MCP required, and **every
-terminal is a conductable, tracked session by default** (see Conducting under
-Tier 1). It runs anywhere there is a shell — portable, headless-capable,
-agent-first. *AoideOS* is the **distribution built on that core**: the NixOS
-flake that ADDITIONALLY ships the Quickshell widget-making toolkit (bar, dock,
-gadgets, the DAG/conductor surfaces) and the specialized ricer (song/notes theming).
-Aoide is the engine; AoideOS is the desktop around it. A capability that works
-with only a shell is "Aoide"; one that is desktop/Quickshell/rice is "AoideOS".
+**Aoide (core) vs AoideOS/Lyra (paint) — don't conflate the two.** Aoide's main
+feature is helping conduct orchestration: the `aoide`/`aoided` binaries are the
+bridges and APIs between the terminal, shell, system, and OS — one interface
+through which agents are freely orchestrated for any task. Any agent with a
+shell is fully capable, no MCP required, and **every terminal is a
+conductable, tracked session by default** (see Conducting under Tier 1). It
+runs anywhere there is a shell — portable, headless-capable, agent-first, and
+nix-independent (cargo build, no nix shell-outs, no NixOS assumption). Painting
+is a second binary's job: **`lyra`** owns the Quickshell widget-making toolkit
+(bar, dock, gadgets, the DAG/conductor surfaces) and the specialized ricer
+(song/notes theming) that together make up *AoideOS*, the distribution built
+on the core. Aoide is the engine; AoideOS is the desktop around it, painted by
+lyra. A capability that works with only a shell and touches no paint is
+"Aoide", spoken as `aoide <cmd>`; one that is desktop/Quickshell/rice-shaped is
+"AoideOS", spoken as `lyra <cmd>`.
 
-That boundary is gaining a binary form (decided; lands with the lyra split —
-`docs/architecture/PACKAGE-LAYOUT.md`, "Two binaries"): core ships as
-`aoide`/`aoided`, and everything desktop/Quickshell/rice-shaped ships as a
-second binary, **`lyra`**. The same line draws the nix boundary too — core
-is cargo-buildable on any Linux, no nix shell-outs, no NixOS assumption;
-only `lyra` (and the deployment modules) may depend on nix.
+The boundary has a binary form (`docs/architecture/PACKAGE-LAYOUT.md`, "Two
+binaries"): core ships as `aoide`/`aoided`, and everything desktop/Quickshell/
+rice-shaped ships as `lyra`. The same line draws the nix boundary too — core
+is cargo-buildable on any Linux, no nix shell-outs, no NixOS assumption; only
+`lyra` (and the deployment modules) may depend on nix.
 
 Orient through four tiers, in order.
 
@@ -28,37 +31,20 @@ before acting. The house rules below are non-negotiable.
 
 ## Tier 1 — the CLI (full capability)
 
-`aoide <cmd>` is the **complete** capability surface. The `melete aoide …`
-passthrough routes through the same trunk.
+`aoide <cmd>` is the **complete** orchestration surface (48 commands: conducting,
+the project/session graph, A2A, peers, the daemon, usage, hooks); `lyra <cmd>`
+is the complete painted surface (42 commands: rice/draft/mode/cover/livery/
+quickshell/screen/herald/take/shellbridge — AoideOS). Both are `schema --json`
+backstopped, both carry the same house rules below. The `melete aoide …`
+passthrough routes through the core trunk.
 
 - Every command takes and emits `--json` (structured I/O).
 - Errors are structured with meaningful exit codes.
 - All operations are idempotent and report exactly what changed.
-- `aoide schema --json` is the machine-readable backstop at any tier — the MCP
-  tool list generates from it (see `CONTRACTS.md §3`).
+- `aoide schema --json` / `lyra schema --json` is the machine-readable backstop
+  at any tier — the MCP tool list generates from it (see `CONTRACTS.md §3`).
 
-Rice loop (the headline): `aoide rice compose <name> [--from <song>]`
-(scaffold) → `rice mode stage <name>` (go live, declared) → edit the song's
-files → `rice lint` (validate) → `rice mode draft <draft-name>` (ROUTES the
-stage into a saved draft via a symlink, forking it from the current stage if
-new — every further edit lands directly in the draft, no save step; `rice
-mode draft <other-draft>` switches which one's live) → `rice declare <name>`
-(**user gates this**) → commit + gated rebuild (recording). (`rice gen`/
-`rice preview`/`rice mint`/`rice new`/`rice adopt`/the old copy-based `rice
-draft stage` no longer exist — `rice compose`/`rice stage`/`rice mode
-draft`/`rice declare` are the only spellings for those steps; the CLI
-carries no internal aliases. `rice draft save`/`list`/`drop` remain as a
-separate, mode-independent way to fork/inspect/delete saved snapshots.)
-
-**Staging, declarative, and draft mode.** `rice stage`/`cover set` only
-write while staging (or draft) is UNLOCKED. `aoide rice mode status` reports
-the current mode (**declarative is the default** — nothing has ever
-unlocked staging); if either refuses with `declarative-mode-locked`, run
-`aoide rice mode stage [<name>]` first. `aoide rice mode declarative
-[<name>]` locks back up when
-you're done iterating.
-
-**Conducting — commanding other sessions (the core default).** Every terminal
+**Conducting — commanding other sessions (aoide's headline).** Every terminal
 runs its shell under `aoide conduct`, so it is a conductable, tracked session: it
 registers in the graph AND holds a control socket a central controller can type
 into. To command another session:
@@ -77,6 +63,27 @@ hatch. The desktop's terminals are a mesh of sessions a conductor speaks into.
 A killed terminal (`SIGKILL`/`SUPER+Q`) can never mark itself `done`, so a
 liveness reaper (`aoide graph reap`, on a ~12s systemd timer) sweeps dead
 sessions out-of-band — you never need to `graph prune` a stale session by hand.
+
+**Painting — the AoideOS rice loop (`lyra`'s headline, not aoide's).** `lyra
+rice compose <name> [--from <song>]` (scaffold) → `lyra rice mode stage
+<name>` (go live, declared) → edit the song's files → `lyra rice lint`
+(validate) → `lyra rice mode draft <draft-name>` (ROUTES the stage into a
+saved draft via a symlink, forking it from the current stage if new — every
+further edit lands directly in the draft, no save step; `lyra rice mode draft
+<other-draft>` switches which one's live) → `lyra rice declare <name>` (**user
+gates this**) → commit + gated rebuild (recording). (`rice gen`/`rice
+preview`/`rice mint`/`rice new`/`rice adopt`/the old copy-based `rice draft
+stage` no longer exist — `lyra rice compose`/`rice stage`/`rice mode draft`/
+`rice declare` are the only spellings for those steps; the CLI carries no
+internal aliases. `lyra rice draft save`/`list`/`drop` remain as a separate,
+mode-independent way to fork/inspect/delete saved snapshots.)
+
+**Staging, declarative, and draft mode.** `lyra rice stage`/`cover set` only
+write while staging (or draft) is UNLOCKED. `lyra rice mode status` reports
+the current mode (**declarative is the default** — nothing has ever unlocked
+staging); if either refuses with `declarative-mode-locked`, run `lyra rice
+mode stage [<name>]` first. `lyra rice mode declarative [<name>]` locks back
+up when you're done iterating.
 
 ## Tier 2 — stdio MCP (per-session, optional)
 

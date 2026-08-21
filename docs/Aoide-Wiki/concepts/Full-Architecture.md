@@ -76,6 +76,15 @@ Top is the driver (the agent); bottom is the pixels. Every arrow is a real input
 or output, not an abstraction. Boxes marked *(stub)* exist as schema + audit
 trail but exit 64 today.
 
+**Binary note.** This map predates the two-binary split and still labels
+everything `aoide` for one continuous picture of the data flow. In the
+shipped split (`CONTRACTS.md` §3, [[Package-Layout]]) the AGENT
+INTERFACE/`aoided`/CONTENT PIPELINE/NIX EVAL boxes are `aoide`'s (48
+commands: conducting/orchestration is aoide's identity); the RICE ENGINE,
+LIVERY, Quickshell, and shellbridge boxes below them are `lyra`'s (42
+commands, its own schema and dispatch — routed through the desktop, not
+through `aoided`'s CLI trunk).
+
 ```
                           ┌───────────────────────────┐
                           │           AGENT           │  claude CLI · melete · any shell
@@ -84,7 +93,7 @@ trail but exit 64 today.
                                         ▼            │
    ┌─────────────────────────────────────────────────────────────┐
    │  AGENT INTERFACE            aoide <cmd>   ·   aoide mcp serve │   [[Agent-Interface]]
-   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   38 commands · exit 0/1/2/64
+   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   48 commands · exit 0/1/2/64
    └───────────────────────────────┬─────────────────────────────┘
                                     ▼
    ┌─────────────────────────────────────────────────────────────┐
@@ -133,7 +142,7 @@ draws.
 
 | Subsystem            | Inputs                                         | Outputs                                             | Status                                     |
 | -------------------- | ---------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
-| [[Agent-Interface]]  | agent commands; `aoide schema --json`          | dispatched operations; structured `--json` results  | implemented (77 real verbs, 10 exit 64)    |
+| [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 40 real/8 exit 64; lyra 40 real/2 exit 64) |
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`~/Aoide/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; stage    | mostly real (`declare`/`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all verbs exit 64)                |
@@ -214,7 +223,7 @@ with `declarative-mode-locked` while `rice mode declarative` is locked (the
 default) — see [[Self-Ricing#Staging vs Declarative Mode]].
 
 ```
-  aoide rice compose <name> [--from <song>]
+  lyra rice compose <name> [--from <song>]
         │   scaffolds a new song, reading song/songbook/ (cross-cutting +
         │   the song's own design/) FIRST
         ▼
@@ -232,7 +241,7 @@ default) — see [[Self-Ricing#Staging vs Declarative Mode]].
         │   lands DIRECTLY in the draft file; no save step. Not committed —
         │   durable scratch; switch with another `rice mode draft <name>`.
         ▼
-  aoide rice declare <name>   ◄─── User gates this step
+  lyra rice declare <name>   ◄─── User gates this step
         │
         ▼
   commit to song/songbook/<song>/   ──►  gated rebuild   ──►  RECORDING
@@ -297,33 +306,40 @@ temporal composability|same thesis]] as the walker and the widget slots. See
    agent ──► A2A door ───────┘         (all generated from the same schema)
 ```
 
-This is shipped code: the Rust crate ([[aoide-cli]]) installs two binaries,
-`aoide` and `aoided`. `aoide schema --json` is the machine-readable source of
-truth; the stdio MCP façade (`aoide mcp serve --stdio`) generates its tool list
-from it, and the [[A2A-Door]]'s AgentCard is derived from the same schema — all
-one-to-one. The tree holds **87 commands** — real (77): `guide`,
-`schema`, the 16-verb `rice` group (`lint`, `stage`, `compose`, the 3-verb
-`rice draft` group (`save`/`list`/`drop`), the 4-verb `rice mode`
-group (`status`/`stage`/`declarative`/`draft`), the 5-verb `rice take`
-rehearsal-snapshot group (`take` + `list`/`mark`/`diff`/`prune`), and
-`rice back`), `cover set`, `mcp serve`,
-`daemon`, `shellbridge`, `conduct`, `conductor`, `adapter melete`, the 3-verb
-`livery` group (`lint`/`resolve`/`emit` — the native design-token engine), the 5-verb
-`a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`), the
-5-verb `peer` group (`peer add/list/remove/pull/status` — cross-device peer
-federation, [[Peer-Federation]]), `usage`,
-`hooks install`, `herald push`, `soundcheck`, `quickshell reload` (the Quickshell IPC hot-reload
-trigger — rebuilds the whole scene from `shell.qml` in-process, picking up
-dynamically-loaded widget/facet QML the file watcher can't track), the
-20-verb `graph` group (the
-[[Session-Graph]] DAG viewer + management layer over projects and sessions,
-incl. `graph send`/`wrap`/`reap` and the `graph pending list|approve|deny`
-held-injection queue, all real), and the 14-verb `screen` group (capture,
-OCR, and synthesized-pointer control — [[Screen-Control]]); stubs (10, exit 64):
-`rice declare/transpose`, the 5-verb `content` group, `make`, `update`,
-`onboard`. There is no `rice gen` — cut outright (2026-08-14), not left
-as a stub. Exit codes are contractual: 0 ok, 1 error, 2 usage, 64
-not-implemented.
+This is shipped code, and it is now **two binaries**, per-binary schema
+(`docs/architecture/PACKAGE-LAYOUT.md`, "Two binaries"; `CONTRACTS.md` §3) —
+conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
+
+- **`aoide`/`aoided`** ([[aoide-cli]], [[aoided]]) — the orchestration core.
+  `aoide schema --json` is its machine-readable source of truth; the stdio
+  MCP façade (`aoide mcp serve --stdio`) generates its tool list from it, and
+  the [[A2A-Door]]'s AgentCard is derived from the same schema — all
+  one-to-one. The tree holds **48 commands** — real (40): `guide`, `schema`,
+  `mcp serve`, `daemon`, `conduct`, `conductor`, `adapter melete`, the
+  5-verb `a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`),
+  the 5-verb `peer` group (`peer add/list/remove/pull/status` — cross-device
+  peer federation, [[Peer-Federation]]), `usage`, `hooks install`,
+  `soundcheck`, and the 20-verb `graph` group (the [[Session-Graph]] DAG
+  viewer + management layer over projects and sessions, incl. `graph
+  send`/`wrap`/`reap` and the `graph pending list|approve|deny`
+  held-injection queue, all real); stubs (8, exit 64): the 5-verb `content`
+  group (`register`/`propose`/`ingest`/`query`/`approve`), `make`, `update`,
+  `onboard`. Core is nix-independent: cargo build, zero nix shell-outs.
+- **`lyra`** — the AoideOS paint binary. `lyra schema --json` holds the other
+  **42 commands**: the 16-verb `rice` group (`lint`, `stage`, `compose`, the
+  3-verb `rice draft` group, the 4-verb `rice mode` group, the 5-verb `rice
+  take` rehearsal-snapshot group, `rice back`; `declare`/`transpose` are the
+  2 stubs), `cover set`, the 3-verb `livery` group (`lint`/`resolve`/`emit`
+  — the native design-token engine), `shellbridge`, `quickshell reload` (the
+  Quickshell IPC hot-reload trigger — rebuilds the whole scene from
+  `shell.qml` in-process, picking up dynamically-loaded widget/facet QML the
+  file watcher can't track), `herald push`, and the 14-verb `screen` group
+  (capture, OCR, and synthesized-pointer control — [[Screen-Control]]). Only
+  `lyra` may shell out to nix.
+
+There is no `rice gen` — cut outright (2026-08-14), not left as a stub in
+either binary. Exit codes are contractual, identical in both binaries: 0 ok,
+1 error, 2 usage, 64 not-implemented.
 
 On the host, the plane runs as systemd user units, all from the nucleus:
 `aoided`, `shellbridge` (socket `$XDG_RUNTIME_DIR/aoide/shellbridge.sock`),

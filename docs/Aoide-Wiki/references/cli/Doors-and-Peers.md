@@ -84,10 +84,10 @@ aoide daemon [--audit-log <path>] [--json]
   prints the status JSON to stdout) is the same code path — what a systemd
   unit launches. See [[Governance]].
 
-### aoide shellbridge
+### lyra shellbridge
 
 ```
-aoide shellbridge [--run] [--json]
+lyra shellbridge [--run] [--json]
 ```
 
 - **Reads:** env `$XDG_RUNTIME_DIR` (socket parent; falls back to
@@ -122,8 +122,8 @@ aoide shellbridge [--run] [--json]
   stderr and skipped — nothing kills the accept loop.
 - **Notes:** not gated. The `--run` flag is registered in the schema but the
   handler (`server/src/commands.rs::handle_shellbridge`) never consults it —
-  bare `aoide shellbridge` runs the blocking loop either way. Client half:
-  `shellbridge::send_line` is how `aoide herald push` and `graph permit` reach
+  bare `lyra shellbridge` runs the blocking loop either way. Client half:
+  `shellbridge::send_line` is how `lyra herald push` and `graph permit` reach
   the daemon, which stays the single ledger writer. See [[shellbridge]].
 
 ### aoide adapter melete
@@ -292,7 +292,7 @@ aoide a2a agent send <name> <message> [--json]
   messageId, response}`. Non-200 → `send-http-error`; a JSON-RPC error body on
   HTTP 200 → `agent-error`; unreachable/timeout → `send-failed` (exit 1
   throughout).
-- **Notes:** `aoide screen send --agent` calls this handler in-process with a
+- **Notes:** `lyra screen send --agent` calls this handler in-process with a
   synthesized invocation — same driver, never a second transport.
 
 ### aoide peer add

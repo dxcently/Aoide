@@ -39,7 +39,7 @@ That is the complete install, by design — no dotfile manager, no separate boot
 6. Detect `claude` CLI; offer the stdio MCP registration line and spawn-wrapper install. Other agents get shell instructions.
 7. Offer integration toggles: Mneme source registration, Obsidian (off by default).
 8. Walk an approve-gate demo: register a scratch folder, watch it flow discover → propose → approve → query.
-9. Run `aoide rice stage` on the shipped standard to verify the live loop.
+9. Run `lyra rice stage` on the shipped standard to verify the live loop.
 
 **Done-state check**: bar shows agent session + connection state; a notification round-trips agent → center; `aoide schema --json` validates.
 

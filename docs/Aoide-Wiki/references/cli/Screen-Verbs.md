@@ -4,9 +4,10 @@ The `screen` verb group is the agent-facing desktop eyes-and-hands surface:
 query the compositor (`screen info`), capture pixels (`screen shot`), recover
 text from a capture (`screen ocr`), act by name or pixel (`screen point *`),
 verify an act mechanically (`screen diff`), and hand a capture to another
-agent (`screen send`). Registrations live in
-`pkgs/aoide/crates/conduct/src/commands/screen.rs`; handlers and domain logic
-in `pkgs/aoide/crates/conduct/src/screen/{hypr,capture,point,synth,ocr,diff,text,send}.rs`.
+agent (`screen send`). `screen` is a `lyra` verb group, its own crate since
+P-A1 of the binary-split workstream. Registrations live in
+`pkgs/aoide/crates/screen/src/commands.rs`; handlers and domain logic
+in `pkgs/aoide/crates/screen/src/{hypr,capture,point,synth,ocr,diff,text,send}.rs`.
 See [[Screen-Control]] for the usage narrative; the sidecar field contract,
 the image↔screen scale contract, and the reason-code vocabulary are
 CONTRACTS.md §8.
@@ -53,10 +54,10 @@ vocabulary (`pointer-*`, `sidecar-*`, `from-shot-*`, `text-*`, `diff-*`,
 `capture-*`, `ocr-*`, `hyprctl-*`, plus misc codes); `screen send` is the
 exception and tags its own envelope instead.
 
-### aoide screen info
+### lyra screen info
 
 ```
-aoide screen info [--json]
+lyra screen info [--json]
 ```
 
 - **Reads:** five `hyprctl -j` spawns — `monitors`, `cursorpos`,
@@ -70,10 +71,10 @@ aoide screen info [--json]
 - **Notes:** read-only; writes nothing, touches no synthesis boundary. Any
   hyprctl failure → exit 1, `hyprctl-unavailable`/`hyprctl-failed`.
 
-### aoide screen shot
+### lyra screen shot
 
 ```
-aoide screen shot [--output <name> | --region "X,Y WxH" | --pick | --window <addr> | --session <id>]
+lyra screen shot [--output <name> | --region "X,Y WxH" | --pick | --window <addr> | --session <id>]
   [--format png|jpeg] [--quality 0-100] [--scale F | --fit WxH] [--cursor]
   [--out <path>] [--comment "text"] [--json]
 ```
@@ -109,10 +110,10 @@ aoide screen shot [--output <name> | --region "X,Y WxH" | --pick | --window <add
   as pixel change to `screen diff`. Not idempotent by design — every call is a
   new file.
 
-### aoide screen point move
+### lyra screen point move
 
 ```
-aoide screen point move <x> <y> [--from-shot <capture>] [--json]
+lyra screen point move <x> <y> [--from-shot <capture>] [--json]
 ```
 
 - **Reads:** `hyprctl cursorpos` before and after the move. `--from-shot`
@@ -129,10 +130,10 @@ aoide screen point move <x> <y> [--from-shot <capture>] [--json]
   invalid sidecar scale → `from-shot-bad-scale`; converted point off-layout →
   `from-shot-out-of-bounds`. Writes nothing.
 
-### aoide screen point click
+### lyra screen point click
 
 ```
-aoide screen point click [<button>] [<x> <y>] [--count 1-10] [--from-shot <capture>] [--json]
+lyra screen point click [<button>] [<x> <y>] [--count 1-10] [--from-shot <capture>] [--json]
 ```
 
 - **Reads:** `hyprctl cursorpos` (only when the guard `x y` is given).
@@ -147,10 +148,10 @@ aoide screen point click [<button>] [<x> <y>] [--count 1-10] [--from-shot <captu
   requires both coordinates; `--from-shot` without a guard is a usage error
   (exit 2). Button must be `left|right|middle` (default left).
 
-### aoide screen point drag
+### lyra screen point drag
 
 ```
-aoide screen point drag <x1> <y1> <x2> <y2> [--button left|right|middle] [--steps 1-200] [--from-shot <capture>] [--json]
+lyra screen point drag <x1> <y1> <x2> <y2> [--button left|right|middle] [--steps 1-200] [--from-shot <capture>] [--json]
 ```
 
 - **Reads:** `hyprctl -j monitors` (both endpoints must be on the layout,
@@ -168,10 +169,10 @@ aoide screen point drag <x1> <y1> <x2> <y2> [--button left|right|middle] [--step
 - **Notes:** endpoint off-layout → exit 1, `pointer-out-of-bounds` with
   `wanted`/`bounds`. Writes nothing.
 
-### aoide screen point hover
+### lyra screen point hover
 
 ```
-aoide screen point hover <x> <y> [--settle-ms 1-10000] [--from-shot <capture>] [--json]
+lyra screen point hover <x> <y> [--settle-ms 1-10000] [--from-shot <capture>] [--json]
 ```
 
 - **Reads:** `hyprctl` desktop snapshot (clients + layers) before the move;
@@ -187,10 +188,10 @@ aoide screen point hover <x> <y> [--settle-ms 1-10000] [--from-shot <capture>] [
   refuses (exit 1, `pointer-drift`).
 - **Notes:** writes nothing.
 
-### aoide screen point scroll
+### lyra screen point scroll
 
 ```
-aoide screen point scroll <dy> [<dx>] [--json]
+lyra screen point scroll <dy> [<dx>] [--json]
 ```
 
 - **Reads:** nothing (no cursor read, no sidecar).
@@ -202,10 +203,10 @@ aoide screen point scroll <dy> [<dx>] [--json]
 - **Notes:** both axes clamp to ±100 notches per call; a clamp is announced
   in the message and the `clampedD*`/`requestedD*` data keys. Writes nothing.
 
-### aoide screen point idle
+### lyra screen point idle
 
 ```
-aoide screen point idle [<samples>] [<timeout>] [--json]
+lyra screen point idle [<samples>] [<timeout>] [--json]
 ```
 
 - **Reads:** polls `hyprctl cursorpos` every 250 ms until `<samples>`
@@ -216,10 +217,10 @@ aoide screen point idle [<samples>] [<timeout>] [--json]
 - **Notes:** read-only; never touches the synthesis boundary. A genuine
   "nobody is touching the mouse" gate — hand tremor breaks the streak.
 
-### aoide screen point save
+### lyra screen point save
 
 ```
-aoide screen point save [--json]
+lyra screen point save [--json]
 ```
 
 - **Reads:** `hyprctl cursorpos`.
@@ -229,10 +230,10 @@ aoide screen point save [--json]
 - **Output:** ok → `"saved <x>,<y> to <path>"`; data `{x, y, path}`;
   `changed` lists the file. Write failure → exit 1, `pointer-save-failed`.
 
-### aoide screen point restore
+### lyra screen point restore
 
 ```
-aoide screen point restore [--json]
+lyra screen point restore [--json]
 ```
 
 - **Reads:** `state/pointer-pos.json`; `hyprctl cursorpos` after the warp.
@@ -243,10 +244,10 @@ aoide screen point restore [--json]
 - **Notes:** missing file → exit 1, `pointer-nothing-saved`; unparseable file
   → exit 1, `pointer-state-corrupt`. Writes nothing.
 
-### aoide screen point text
+### lyra screen point text
 
 ```
-aoide screen point text <text> --from-shot <capture> [--nth N] [--button left|right|middle] [--dry-run] [--json]
+lyra screen point text <text> --from-shot <capture> [--nth N] [--button left|right|middle] [--dry-run] [--json]
 ```
 
 - **Reads:** the `--from-shot` capture's sidecar `<capture>.json` — its
@@ -270,10 +271,10 @@ aoide screen point text <text> --from-shot <capture> [--nth N] [--button left|ri
   ordered top-left-first). OCR words carry tesseract's punctuation verbatim —
   `"Save:"` won't match a search for `"Save"`.
 
-### aoide screen ocr
+### lyra screen ocr
 
 ```
-aoide screen ocr <capture> [--json]
+lyra screen ocr <capture> [--json]
 ```
 
 - **Reads:** the capture image and its sidecar `<capture>.json` (required —
@@ -296,10 +297,10 @@ aoide screen ocr <capture> [--json]
   write failure → `sidecar-write-failed` (exit 1; the OCR itself succeeded).
   Re-running is idempotent in effect (same transform, same sidecar field).
 
-### aoide screen diff
+### lyra screen diff
 
 ```
-aoide screen diff <before-capture> [--settle-ms 0-60000] [--threshold 0-255] [--out <path>] [--json]
+lyra screen diff <before-capture> [--settle-ms 0-60000] [--threshold 0-255] [--out <path>] [--json]
 ```
 
 - **Reads:** the before-capture image and its sidecar `<before>.json` —
@@ -328,10 +329,10 @@ aoide screen diff <before-capture> [--settle-ms 0-60000] [--threshold 0-255] [--
   changed mid-flight) → `diff-size-mismatch`; `--out` ending in `.json` is a
   usage error.
 
-### aoide screen send
+### lyra screen send
 
 ```
-aoide screen send <capture> (--session <id> | --agent <name>) [--comment "text"] [--yes] [--json]
+lyra screen send <capture> (--session <id> | --agent <name>) [--comment "text"] [--yes] [--json]
 ```
 
 - **Reads:** the capture (must exist; canonicalized to an absolute path so a

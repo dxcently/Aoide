@@ -4,15 +4,16 @@ created: 2026-08-17
 tags: [aoide, agent, cli, screen, pointer, vision, computer-use]
 ---
 
-# Screen Control — the `aoide screen` family
+# Screen Control — the `lyra screen` family
 
-`aoide screen` is aoide's computer-use surface: an agent's whole loop for
+`lyra screen` is AoideOS's computer-use surface: an agent's whole loop for
 looking at the desktop, grounding a target on it, acting on it, and
 verifying the act landed — fourteen verbs
 (`info`/`shot`/`ocr`/`diff`/`send`, plus nine `screen point <verb>`s) behind
 one CLI group, registered like every other command
-([[aoide-cli]]/[[Agent-Interface]]). Implementation:
-`pkgs/aoide/crates/conduct/src/screen/`. Contract: `CONTRACTS.md` §8 (the
+([[aoide-cli]]/[[Agent-Interface]]). Its own crate since P-A1 of the
+binary-split workstream. Implementation:
+`pkgs/aoide/crates/screen/src/`. Contract: `CONTRACTS.md` §8 (the
 capture sidecar's field shape, the image↔screen scale contract, and the
 full reason-code vocabulary this page's examples draw from).
 
@@ -65,7 +66,7 @@ full reason-code vocabulary this page's examples draw from).
 
 ## Mapping from the Anthropic computer-use vocabulary
 
-| computer-use action | aoide verb(s) |
+| computer-use action | lyra verb(s) |
 | --- | --- |
 | `screenshot` | `screen shot --fit 1280x800` |
 | `left_click(x, y)` | `screen point move x y` then `screen point click left x y` (the second call's `x y` re-verifies the pointer is still exactly there before pressing) |
@@ -151,7 +152,7 @@ result object is written into the AFTER-capture's own sidecar `diff` field.
   every held code and flushes with `WouldBlock` retry before it ever tears
   down the connection. A flush that ultimately fails surfaces as
   `pointer-failed`. See `CONTRACTS.md` §8.
-- **Recovering a stuck button.** Run one full `aoide screen point click
+- **Recovering a stuck button.** Run one full `lyra screen point click
   <button>` for the code that is held. It must be the SAME code — clicking
   a different button leaves the stuck one stuck — and the client sees only
   the release, because the compositor tracks button state per code and

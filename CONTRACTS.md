@@ -166,7 +166,7 @@ validator; the option type is a permissive gate only.
 Additive-optional (same status as the base16 tier): every field is `nullOr`,
 defaulting to `null`. A notes file with no `geometry` block behaves exactly
 as before — the compositor facet applies the fallback, not the option
-system. Rides `song/stage/livery.json` for live application: `aoide rice
+system. Rides `song/stage/livery.json` for live application: `lyra rice
 preview` live-applies this tier (plus `window.border`/`borderInactive`) via
 best-effort, guarded `hyprctl keyword` calls — see §4's staged-geometry
 paragraph — in addition to baking the value at build time into
@@ -470,7 +470,7 @@ transition window, so a running desktop never read a missing stage file. The
 mirror + fallback were dropped in Phase 4 of the livery merge —
 `stage/livery.json` is the sole stage note file.
 
-Beyond `aoide rice preview <name>`/`cover set`/other emitters writing this
+Beyond `lyra rice preview <name>`/`cover set`/other emitters writing this
 live, it is also **seeded from the active song's committed notes on every
 activation** (`home.activation.aoideSeedStage`,
 `modules/facets/quickshell/default.nix`) — so a host that boots without ever
@@ -501,7 +501,7 @@ Writes are atomic (write-temp-then-rename) so a hot-reload never reads a torn
 file.
 
 **Additive in v0:** the staged file MAY carry an optional top-level `song`
-field (string) — the name `aoide rice preview <name>` was invoked with. Set by
+field (string) — the name `lyra rice preview <name>` was invoked with. Set by
 `handle_rice_preview` (mirrors the `parentSessionId` additive precedent in
 §4's sessions.json). Absent means "no song identity" (a notes file staged some
 other way). `LiveryState.qml`'s `songName` property reads it to resolve
@@ -511,7 +511,7 @@ per-song flavor widgets (§5) — readers must tolerate both forms.
 `geometry` block, mirroring §1's geometry tier (`gapsOut`/`gapsIn`/
 `borderSize`/`rounding`/`blurEnabled`/`blurSize`/`blurPasses`, each `nullOr`).
 Absent means "this song carries no geometry opinion" (§1's additive-optional
-tier). `aoide rice preview` reads it (alongside `window.border`/
+tier). `lyra rice preview` reads it (alongside `window.border`/
 `borderInactive`) to build its best-effort `hyprctl keyword` batch — a missing
 block, or a missing/null field within it, is skipped rather than defaulted;
 readers must tolerate both forms.
@@ -719,7 +719,7 @@ under the same rule.
 
 The notification ledger the Quickshell herald draws from. dunst owns
 `org.freedesktop.Notifications` but draws NOTHING (`skip_display` on every
-rule); it hands each notification to `aoide herald push` through its `script`
+rule); it hands each notification to `lyra herald push` through its `script`
 hook, which forwards it over the shellbridge socket. **The shellbridge daemon
 is the single writer** — dunst runs its scripts asynchronously, so two
 notifications arriving together would otherwise race a read-modify-write and
@@ -1006,7 +1006,7 @@ set of "flavor" surfaces — committed files, not nix options:
   "does `<song>` dress `<slot>`"; `WidgetSlot.qml` is the fixed per-slot
   anchor a host surface embeds — it loads the song's file when authored, else
   falls back to shared chrome (or renders nothing, when no fallback exists).
-  `aoide rice preview <name>` (§4) drives this live, no rebuild: it stages
+  `lyra rice preview <name>` (§4) drives this live, no rebuild: it stages
   `song` into `livery.json`, `LiveryState`'s `songName` updates, and every
   `WidgetSlot` re-resolves. **Additive (2026-08-15) — widget bodies ride the
   same call:** `rice stage`/`preview` also syncs the song's whole
@@ -1017,7 +1017,7 @@ set of "flavor" surfaces — committed files, not nix options:
   to an EXISTING widget file reaches Quickshell's own file-watcher live too.
   A brand-new slot file still needs a service restart to be discovered
   (the manifest is only read at startup) — **may no longer require a
-  restart** now that `aoide quickshell reload` (Quickshell IPC hot-reload
+  restart** now that `lyra quickshell reload` (Quickshell IPC hot-reload
   trigger) rebuilds the whole scene fresh from `shell.qml`, which should
   also re-read `manifest.json`; unconfirmed against a live instance, don't
   rely on this until verified.
@@ -1780,7 +1780,7 @@ the called-out §6 amendment).
 
 ## 8. Screen capture sidecar + pointer synthesis — **v0**
 
-The `aoide screen` family (`pkgs/aoide/crates/conduct/src/screen/`) writes a
+The `lyra screen` family (`pkgs/aoide/crates/screen/src/`) writes a
 JSON sidecar (`<capture>.json`, same stem as the image) next to every
 `screen shot`/`screen diff` capture. `screen point` has nine verbs, six of
 which synthesize real pointer input against a native Wayland backend
@@ -1924,7 +1924,7 @@ manufacturing the hazard: a throwaway client pressed a button and called
   (motion arrived at surface coords `-900,280`, far outside that
   window), and no other app receives anything. That grab surviving its
   own presser is what makes a stuck button so damaging.
-- **One full `aoide screen point click <button>` clears it.** Only the
+- **One full `lyra screen point click <button>` clears it.** Only the
   RELEASE reaches the client: the compositor tracks button state per
   code, so the recovery click's press is absorbed as a duplicate and the
   release matches the held state and ends the grab.

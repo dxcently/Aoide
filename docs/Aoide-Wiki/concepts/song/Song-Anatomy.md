@@ -102,7 +102,7 @@ sees a torn file (`CONTRACTS.md §4`). The files:
 
 | File | Holds | Written by |
 |---|---|---|
-| `livery.json` | the fully-resolved livery values (colours concrete, no `null`) | [[livery]] `emit stage` / `aoide rice stage` |
+| `livery.json` | the fully-resolved livery values (colours concrete, no `null`) | [[livery]] `emit stage` / `lyra rice stage` |
 | `sessions.json` | the agent-session roster (`sessionId, agent, windowAddress, workspace, cwd, state, startedAt`, optional `parentSessionId`) | [[shellbridge]] + `aoide graph session` |
 | `hooks.json` | live Claude Code hook phases | shellbridge + `aoide graph session` |
 | `projects.json` | the project-anchor registry | `aoide graph project` |

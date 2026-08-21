@@ -30,7 +30,7 @@ that capability.
 **Provenance.** The desktop, agent, pipeline, and governance items are grounded
 in [[references/AOIDE-HANDOFF]]. The messaging bridge, Cloudflare/Tailscale fleet
 exposure, and the scheduled-jobs widget are **planned** — specified here as
-intended features, not present in `aoide schema --json`'s 87-command surface
+intended features, not present in `aoide schema --json`'s 48-command surface
 today; they extend the handoff rather than describe shipped commands.
 
 ## The bundle
@@ -164,7 +164,7 @@ One spine, so a new integration is always the same shape:
 
 Shipped exemplars plus planned extensions — the [[Widget-Maker|agent generates
 more]] on demand. Rows marked *(planned)* have no command yet in `aoide schema
---json`'s 87-command surface.
+--json`'s 48-command surface.
 
 | Capability | Provided by | Surfaced as | Default | Gate |
 |---|---|---|---|---|
@@ -177,7 +177,7 @@ more]] on demand. Rows marked *(planned)* have no command yet in `aoide schema
 | System timers view *(planned)* | systemd | agenda widget | on (read-only) | — |
 | Vault knowledge | Mneme | pipeline · `aoide …` | via approve gate | approve gate |
 | Autonomous code tasks | Melete | messaging stream · PR | — | rebuild gate |
-| Self-ricing | livery + facets | `aoide rice` (`lint`/`stage`/`compose`/`draft`/`mode`/`take`/`back` real; `declare`/`transpose` exit-64 stubs) | on | rebuild gate |
+| Self-ricing | livery + facets | `lyra rice` (`lint`/`stage`/`compose`/`draft`/`mode`/`take`/`back` real; `declare`/`transpose` exit-64 stubs) | on | rebuild gate |
 | Agent-session terminal commander | shellbridge + aoided watcher | widget · `aoide graph session` · click/keybind jump | on | — |
 
 ## Related

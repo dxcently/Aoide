@@ -71,10 +71,10 @@ aoide content query <query> [--limit <n>] [--json]
 - **Notes:** **stub**, exit 64. Contract surface: queries the content index;
   `--limit` caps the result count. Not gated.
 
-### aoide herald push
+### lyra herald push
 
 ```
-aoide herald push [--json]
+lyra herald push [--json]
 ```
 
 Machine-facing only — dunst runs it per notification as its `script` hook

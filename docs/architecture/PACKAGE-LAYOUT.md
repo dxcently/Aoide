@@ -309,7 +309,7 @@ this is structure, not features.
   snapshot unchanged, full `cargo test --workspace` green. (No Phase 7/8
   code; Phase 9 numbers after them to keep their DEFER notes stable.)
 
-## Two binaries — `aoide`/`aoided` (core) and `lyra` (paint) — DECIDED, lands starting P-A1
+## Two binaries — `aoide`/`aoided` (core) and `lyra` (paint) — LANDED (Workstream A, P-A0-A8)
 
 The mapping above is the crate split; this is a narrower, later question it
 doesn't answer on its own — how many *binaries* the crates assemble into.
@@ -351,9 +351,10 @@ surface: everything that paints, or that only a desktop needs.
   host-ops verbs to exist before there is anything to extract. The
   two-binary split neither touches it nor resolves it.
 - **Cordis correspondence.** In Cordis's terms (CONTRACTS.md §0): a crate
-  is a package/plugin; an app crate — `cli` today, `lyra` after this
-  split — is a dsh-style BUNDLE, the ordered composition performed at
-  boot; the assembled `Registry` is the plugin tree. An app crate's
+  is a package/plugin; an app crate — `cli` (core) and `lyra` (paint),
+  since this split — is a dsh-style BUNDLE, the ordered composition
+  performed at boot; the assembled `Registry` is the plugin tree. An app
+  crate's
   explicit `register()` list is the bundle's PROFILE, not a violation of
   "no registry an author must edit to be seen" (CONTRACTS §0) — composing
   a bundle at its root is how Cordis composes too. Reference:
@@ -361,9 +362,9 @@ surface: everything that paints, or that only a desktop needs.
   paper CONTRACTS §0 already cites.
 - **Nix-independence.** Core (`aoide`/`aoided`) builds with `cargo` and
   runs on any Linux: no nix shell-outs, no NixOS assumption. `song`'s
-  `widgets.rs` `nix eval` call moves to `lyra` with the split — once the
-  split lands, only `lyra` may be nix-dependent. This is the load-bearing
-  half of "What Aoide is" above, made structural rather than aspirational.
+  `widgets.rs` `nix eval` call lives in `lyra` now — only `lyra` may be
+  nix-dependent. This is the load-bearing half of "What Aoide is" above,
+  made structural rather than aspirational.
 
 ## Open questions (each tagged with when it must be settled)
 

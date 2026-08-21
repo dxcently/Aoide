@@ -24,7 +24,7 @@ Since Phases ①–②, the *conducted-agents* plan has landed four more pieces,
 ## Why this layer is new (substrate facts)
 
 - `graph wrap`'s `session_wrap` spawns with **inherited stdio** and only `wait()`s — it holds the `Child` but captures no stdin, so there is no channel to type into the agent (`graph.rs`).
-- **shellbridge's socket is a separate, narrower channel** (`aoide shellbridge --run`): a `{cmd:"focuswindow",address}` line drives `hyprctl dispatch focuswindow`, so the dock/roster row-click jumps end to end through the daemon socket — window-jump only, not injection. Conduct's per-session PTY sockets stay the injection path, built standalone — see [[shellbridge]].
+- **shellbridge's socket is a separate, narrower channel** (`lyra shellbridge --run`): a `{cmd:"focuswindow",address}` line drives `hyprctl dispatch focuswindow`, so the dock/roster row-click jumps end to end through the daemon socket — window-jump only, not injection. Conduct's per-session PTY sockets stay the injection path, built standalone — see [[shellbridge]].
 - **`libc` 0.2.189 is already vendored** (via crossterm's tree) — `openpty`/`forkpty` are ungated, so a PTY is a one-line dep addition of an already-locked crate. No new vendored crate.
 - The conductor already has per-panel key arms, an inline text-input mode with dispatch-on-Enter (the `L` link handler, `app.rs:652-664,724-786`), and one audited `Door::Cli` dispatch seam (`app.rs:522-534`).
 - `session_wrap`/`session_conduct` pass `windowAddress: None` at spawn time (`graph.rs`) — the cue path only gets an address later, from the event listener or hook backfill (see [[Terminal-Commander]]); discovery closes this gap in the same step that reads chat titles.

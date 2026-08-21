@@ -175,9 +175,9 @@ tree inside `crates/song`:
   one `Emitter` trait + registry; a new backend is one file + one registry
   line. The stage backend writes `song/stage/livery.json` (Quickshell; atomic
   write — see `CONTRACTS.md §4`).
-- Verbs: `aoide livery lint|resolve|emit <target>` (the original standalone
-  CLI's surface, native); `rice lint` calls `livery::lint` directly — no binary
-  locate, no PATH shell-out.
+- Verbs: `lyra livery lint|resolve|emit <target>` (the original standalone
+  CLI's surface, native); `lyra rice lint` calls `livery::lint` directly — no
+  binary locate, no PATH shell-out.
 
 Build against **note schema v0** (`CONTRACTS.md §1`): palette is
 base16-closed; component tier is `bar.*` / `notif.*` / `window.*`.

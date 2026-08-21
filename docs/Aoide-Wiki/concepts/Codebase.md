@@ -165,7 +165,7 @@ All nucleus services are user services gated on `aoide.enable`, keyed into
 | Unit | From | Notes |
 |---|---|---|
 | `aoided` | `nucleus/aoided.nix` | runs `${pkgs.aoide}/bin/aoided`; env `AOIDE_AUDIT_LOG`, `AOIDE_USER` |
-| `shellbridge` | `nucleus/shellbridge.nix` | runs `aoide shellbridge --run`; `RuntimeDirectory=aoide` for the socket |
+| `shellbridge` | `nucleus/shellbridge.nix` | runs `lyra shellbridge --run`; `RuntimeDirectory=aoide` for the socket |
 | `aoide-melete-adapter` | `nucleus/melete-adapter.nix` | runs `aoide adapter melete --run`; `AOIDE_ADAPTER_SUBSCRIBE` allow-list |
 | `aoide-mcp` | `nucleus/aoided.nix` | **gated on `aoide.mcp.enable`**; `bindsTo` aoided |
 | `aoide-obsidian-register` | `dendrites/obsidian.nix` | oneshot; registers a window class with shellbridge |

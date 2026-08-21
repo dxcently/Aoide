@@ -1,12 +1,13 @@
 # Rice & Livery Verbs — the Self-Ricing Command Surface
 
-The `rice`, `cover`, and `livery` verb groups drive the [[Self-Ricing]] loop:
+The `rice`, `cover`, and `livery` verb groups are part of `lyra` — the AoideOS
+paint binary, never `aoide`/`aoided` — and drive the [[Self-Ricing]] loop:
 scaffold a song ([[Song-Anatomy]]), hot-load it live, iterate inside a routed
 draft with take history, and validate/resolve/emit its notes through the
 native [[livery]] engine. Handlers live in
 `pkgs/aoide/crates/song/src/commands/{rice,draft,mode,cover,livery,take}.rs`;
 the stub registrations for `rice declare`/`rice transpose` live in
-`pkgs/aoide/crates/cli/src/commands/stubs.rs`.
+`pkgs/aoide/crates/lyra/src/commands/stubs.rs`.
 
 Path resolution (all in `pkgs/aoide/crates/storage/src/fs.rs`): the stage dir
 is `$AOIDE_STAGE_DIR` when set to an absolute path, else `~/Aoide/song/stage/`;
@@ -27,10 +28,10 @@ engine's raw bytes (carried in `data.stdout`) instead of the message in text
 mode — see `livery lint` below. Names (`<name>`, `<song>`, draft names)
 everywhere must match `^[a-z0-9][a-z0-9-]*$`.
 
-### aoide rice lint
+### lyra rice lint
 
 ```
-aoide rice lint [<name>|<path>] [--json]
+lyra rice lint [<name>|<path>] [--json]
 ```
 
 - **Reads:** the target livery file — `<path>` literally if it exists as a
@@ -46,10 +47,10 @@ aoide rice lint [<name>|<path>] [--json]
 - **Notes:** read-only; not gated. Schema failures are `status: "error"`,
   exit 1 — never an `ok` with errors embedded.
 
-### aoide rice stage
+### lyra rice stage
 
 ```
-aoide rice stage [<name>] [--json]
+lyra rice stage [<name>] [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (entrypoint guard), then
@@ -86,10 +87,10 @@ aoide rice stage [<name>] [--json]
   never auto-loads a draft. Nothing is committed. Re-staging identical
   content still writes (and still mints an auto-take in Draft mode).
 
-### aoide rice compose
+### lyra rice compose
 
 ```
-aoide rice compose <name> [--from <song>] [--force] [--json]
+lyra rice compose <name> [--from <song>] [--force] [--json]
 ```
 
 - **Reads:** `song/songbook/<from>/livery.json` (`--from` default `"sonata"`;
@@ -106,10 +107,10 @@ aoide rice compose <name> [--from <song>] [--force] [--json]
   (`from-song-not-found`). Writes stay inside `song/songbook/<name>/` (house
   rule 1). Nothing live is touched; go live with `rice mode stage <name>`.
 
-### aoide rice draft save
+### lyra rice draft save
 
 ```
-aoide rice draft save <name> [--json]
+lyra rice draft save <name> [--json]
 ```
 
 - **Reads:** `song/stage/livery.json` (required — must parse and carry a
@@ -125,10 +126,10 @@ aoide rice draft save <name> [--json]
   `invalid-json`, `no-resolvable-song`, `invalid-name` (exit 1; usage exit 2
   when `<name>` is missing).
 
-### aoide rice draft list
+### lyra rice draft list
 
 ```
-aoide rice draft list [<song>] [--json]
+lyra rice draft list [<song>] [--json]
 ```
 
 - **Reads:** with `<song>`, `song/songbook/<song>/drafts/*/`; without, walks
@@ -142,10 +143,10 @@ aoide rice draft list [<song>] [--json]
 - **Notes:** read-only. An empty scope is `ok` with an empty list, never an
   error.
 
-### aoide rice draft drop
+### lyra rice draft drop
 
 ```
-aoide rice draft drop <name> [--json]
+lyra rice draft drop <name> [--json]
 ```
 
 - **Reads:** `song/stage/livery.json`'s `"song"` field (to resolve which
@@ -157,10 +158,10 @@ aoide rice draft drop <name> [--json]
   draft `rice mode draft` currently routes the stage into; switch modes
   first.
 
-### aoide rice mode status
+### lyra rice mode status
 
 ```
-aoide rice mode status [--json]
+lyra rice mode status [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` only.
@@ -172,10 +173,10 @@ aoide rice mode status [--json]
   `mode == "draft"`. `stagingSong` is the durable "what was I staging" memory
   a bare `rice mode stage` falls back to.
 
-### aoide rice mode stage
+### lyra rice mode stage
 
 ```
-aoide rice mode stage [<name>] [--json]
+lyra rice mode stage [<name>] [--json]
 ```
 
 - **Reads:** `song/stage/mode.json`; for a bare call, resolves the song from
@@ -195,10 +196,10 @@ aoide rice mode stage [<name>] [--json]
   duplicate `shell.qml`, stale `hyprlock` — `pkgs/aoide/crates/song/src/reap.rs`)
   is best-effort, never fatal.
 
-### aoide rice mode declarative
+### lyra rice mode declarative
 
 ```
-aoide rice mode declarative [<name>] [--json]
+lyra rice mode declarative [<name>] [--json]
 ```
 
 - **Reads:** `song/stage/mode.json`; with no `<name>`, resolves the current
@@ -217,10 +218,10 @@ aoide rice mode declarative [<name>] [--json]
   marker. Locking while already locked with nothing resolvable is a no-op
   `ok`.
 
-### aoide rice mode draft
+### lyra rice mode draft
 
 ```
-aoide rice mode draft <name> [--json]
+lyra rice mode draft <name> [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (guard + marker carry-over);
@@ -240,10 +241,10 @@ aoide rice mode draft <name> [--json]
   are gitignored and banned from nix-eval reads (`lib/checks.nix`
   `noSongRead`).
 
-### aoide cover set
+### lyra cover set
 
 ```
-aoide cover set <path|name> [--json]
+lyra cover set <path|name> [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (entrypoint guard); stats the resolved
@@ -262,10 +263,10 @@ aoide cover set <path|name> [--json]
   a wallpaper that can't render. Nothing is committed; the baked
   `AOIDE_WALLPAPER` remains the boot/rebuild fallback.
 
-### aoide livery emit
+### lyra livery emit
 
 ```
-aoide livery emit <target> [<name>|<path>] [--out PATH] [--template STR] [--json]
+lyra livery emit <target> [<name>|<path>] [--out PATH] [--template STR] [--json]
 ```
 
 - **Reads:** the livery file (`<path>` literal if it exists, else
@@ -275,8 +276,8 @@ aoide livery emit <target> [<name>|<path>] [--out PATH] [--template STR] [--json
 - **Writes:** with `--out PATH`, the emitted bytes are atomic-written to PATH
   instead of printed.
 - **Output:** TEXT MODE PRINTS RAW BYTES (from `data.stdout`), not the
-  message line — the CLI special-cases the `livery` group
-  (`pkgs/aoide/crates/cli/src/lib.rs`). Per target
+  message line — lyra special-cases the `livery` group
+  (`pkgs/aoide/crates/lyra/src/lib.rs`). Per target
   (`pkgs/aoide/crates/song/src/livery/emit/`):
   - `stage` — pretty stage JSON: `{schemaVersion, palette, bar, notif,
     window, base16?}`, component fallbacks applied, never null.
@@ -299,10 +300,10 @@ aoide livery emit <target> [<name>|<path>] [--out PATH] [--template STR] [--json
   `rice stage`'s `live::apply_live`). osc/hyprctl outputs are golden-tested
   byte-identical to the former Node engine.
 
-### aoide livery resolve
+### lyra livery resolve
 
 ```
-aoide livery resolve [<name>|<path>] [--json]
+lyra livery resolve [<name>|<path>] [--json]
 ```
 
 - **Reads:** the livery file (same resolution rule as `livery emit`).
@@ -315,10 +316,10 @@ aoide livery resolve [<name>|<path>] [--json]
 - **Notes:** read-only. Byte-identical to the Node engine's
   `JSON.stringify(resolved, null, 2)`.
 
-### aoide livery lint
+### lyra livery lint
 
 ```
-aoide livery lint [<name>|<path>] [--json]
+lyra livery lint [<name>|<path>] [--json]
 ```
 
 - **Reads:** the livery file (same resolution rule).
@@ -333,25 +334,25 @@ aoide livery lint [<name>|<path>] [--json]
   engine but renders the standard Outcome message instead of the raw
   envelope.
 
-### aoide rice declare
+### lyra rice declare
 
 ```
-aoide rice declare <name> [--json]
+lyra rice declare <name> [--json]
 ```
 
 - **Notes:** STUB — `implemented: false`, `gated: true`
-  (`pkgs/aoide/crates/cli/src/commands/stubs.rs`). Dispatch short-circuits
+  (`pkgs/aoide/crates/lyra/src/commands/stubs.rs`). Dispatch short-circuits
   before any handler: returns `status: "not-implemented"`, exit 64, message
-  "`aoide rice declare` is a walking-skeleton stub: arg-parsing and schema
+  "`lyra rice declare` is a walking-skeleton stub: arg-parsing and schema
   are real, the live-system action is not yet implemented.", data `{path,
   args, flags}`. Contract per the schema summary: commit a staged rice into
   declarative state and propose the gated rebuild — the USER gates this step
   ([[Rebuild-Gate]]); the agent proposes, never admits.
 
-### aoide rice transpose
+### lyra rice transpose
 
 ```
-aoide rice transpose <rice> <palette> [--json]
+lyra rice transpose <rice> <palette> [--json]
 ```
 
 - **Notes:** STUB — `implemented: false` (not gated), same not-implemented
@@ -360,10 +361,10 @@ aoide rice transpose <rice> <palette> [--json]
   `song/songbook/<rice>/palette/` directory. That palette directory layout is
   asserted only by the schema summary — unverified elsewhere in source.
 
-### aoide rice take
+### lyra rice take
 
 ```
-aoide rice take [--json]
+lyra rice take [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (must be Draft mode — `resolve_draft`),
@@ -384,10 +385,10 @@ aoide rice take [--json]
   Draft-mode `rice stage` (cause `"stage"`) and `cover set`
   (cause `"cover-set"`).
 
-### aoide rice take list
+### lyra rice take list
 
 ```
-aoide rice take list [--json]
+lyra rice take list [--json]
 ```
 
 - **Reads:** the routed draft's whole `takes/` directory (`NNNN.json`
@@ -403,10 +404,10 @@ aoide rice take list [--json]
   empty store is `ok` with an empty `takes` array. There is exactly one view
   (whole tree); no `--all` flag exists.
 
-### aoide rice take mark
+### lyra rice take mark
 
 ```
-aoide rice take mark <letter> [--take N] [--json]
+lyra rice take mark <letter> [--take N] [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (Draft-mode gate), the target take file
@@ -425,10 +426,10 @@ aoide rice take mark <letter> [--take N] [--json]
   false`). No head/takes at all → `take-not-found`, exit 1. No prompting,
   ever — flags/`--json` only.
 
-### aoide rice take diff
+### lyra rice take diff
 
 ```
-aoide rice take diff [--take N | --mark <letter>] [--json]
+lyra rice take diff [--take N | --mark <letter>] [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (Draft-mode gate), the base take's record
@@ -446,10 +447,10 @@ aoide rice take diff [--take N | --mark <letter>] [--json]
   `--mark <letter>` override (`take-not-found` / `mark-not-found`, exit 1).
   Malformed flags are usage errors (exit 2) checked before the draft gate.
 
-### aoide rice take prune
+### lyra rice take prune
 
 ```
-aoide rice take prune [--older-than <N>d|<N>h] [--keep <N>] [--all-but-marks] [--force] [--json]
+lyra rice take prune [--older-than <N>d|<N>h] [--keep <N>] [--all-but-marks] [--force] [--json]
 ```
 
 - **Reads:** the routed draft's `takes/` store (records, `head.json`,
@@ -476,10 +477,10 @@ aoide rice take prune [--older-than <N>d|<N>h] [--keep <N>] [--all-but-marks] [-
   choosing rows IS the confirm (no y/n prompt), aborting is usage exit 2
   (`no-selection`).
 
-### aoide rice back
+### lyra rice back
 
 ```
-aoide rice back [--take N | --mark <letter>] [--json]
+lyra rice back [--take N | --mark <letter>] [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (Draft-mode gate), the target take

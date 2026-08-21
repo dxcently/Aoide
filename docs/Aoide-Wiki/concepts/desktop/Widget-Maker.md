@@ -144,7 +144,7 @@ file follows: an `Item` root for a `WidgetSlot` widget (sized off its
 unconditionally, any slot-specific extras declared as their own `required
 property`, and never `config.*`.
 
-Because `LiveryState.songName` is what `aoide rice stage <name>` stages,
+Because `LiveryState.songName` is what `lyra rice stage <name>` stages,
 switching the staged song **hot-swaps every anchor's loaded body live — no
 rebuild, no restart** — the same stage-without-rebuild discipline as the
 rice loop itself ([[Self-Ricing]]), just applied to widget bodies instead of
@@ -157,10 +157,10 @@ which never needed a restart. Editing the *content* of an already-carried
 widget file (the same song stays staged, its `widgets/<slot>.qml` changes) is
 a separate case: it used to require a manual `systemctl --user restart
 aoide-quickshell.service`, because Quickshell's built-in file watcher doesn't
-track `Qt.createComponent`-loaded QML at all ([[Quickshell]]). `aoide rice
+track `Qt.createComponent`-loaded QML at all ([[Quickshell]]). `lyra rice
 stage` now closes that gap too — it re-syncs the changed widget file into
 `run/qml/songs/<name>/` and, if that sync actually changed something, triggers
-`AoideIpc.qml`'s `Quickshell.reload(false)` via `aoide quickshell reload` under the
+`AoideIpc.qml`'s `Quickshell.reload(false)` via `lyra quickshell reload` under the
 hood, rebuilding the whole scene fresh so the edit renders without a restart
 (the same IPC hot-reload mechanism described in [[Quickshell]]). The "new
 song's widget files still need a rebuild" caveat above is untouched by

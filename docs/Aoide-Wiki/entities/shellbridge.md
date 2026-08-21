@@ -30,7 +30,7 @@ session-jump) and `song/stage/hooks.json` (live Claude Code hook phases —
 seeds both files with their v0 shapes and keeps them current as sessions come
 and go.
 
-**The socket accept loop is live.** `aoide shellbridge --run` binds the
+**The socket accept loop is live.** `lyra shellbridge --run` binds the
 contract socket and accepts newline-JSON commands: a `{cmd:"focuswindow",
 address}` line drives `hyprctl dispatch focuswindow address:…`, the same
 session-jump primitive `graph focus` uses from the CLI door. This is the verb
@@ -97,7 +97,7 @@ invents IPC. Growing the verb set (prune next) is an open thread, as is
 stamping `parentSessionId` at spawn time.
 
 **Authoritative window capture (the Hyprland event listener).** Alongside the
-socket accept loop, `aoide shellbridge --run` spawns a background thread that
+socket accept loop, `lyra shellbridge --run` spawns a background thread that
 reads Hyprland's `socket2` event stream
 (`$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`). On each
 window lifecycle event it keeps `sessions.json` authoritative: an `openwindow`

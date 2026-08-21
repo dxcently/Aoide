@@ -63,7 +63,7 @@ found via live debugging.
 (`target: "shell"`, one exposed `function reload(): void { Quickshell.reload(false) }`),
 instantiated in `shell.qml` alongside `livery`/`bridge`/`stagingEngine`/`shared`
 — no properties of its own, wired purely for the side effect. `quickshell ipc
-call shell reload` invokes it from outside the process; `aoide quickshell reload`
+call shell reload` invokes it from outside the process; `lyra quickshell reload`
 (`crates/song/src/commands/shell.rs`, `crates/song/src/ipc.rs`) shells out to
 exactly that call, no-oping to a reported (never fatal) `not-running` status
 when `aoide-quickshell.service` isn't up.
@@ -82,7 +82,7 @@ open/closed, calendar selection, any in-memory session data) exactly like a
 restart does — it's just faster, and skips cycling the systemd unit and
 re-registering windows with the compositor.
 
-`aoide rice stage` (`crates/song/src/commands/rice.rs`) auto-triggers this
+`lyra rice stage` (`crates/song/src/commands/rice.rs`) auto-triggers this
 after `sync_song_widgets` reports actually-changed widget files — the
 palette/notes tier is already covered by `LiveryState`'s own watch, so a
 re-stage with no widget-body changes never reloads. Whether this also closes
@@ -192,8 +192,8 @@ the sole live painter (Stylix's `hyprpaper` is force-disabled via the
 `aoide.surfaces.wallpaper` owner registry; no `swww`/`swaybg`/`mpvpaper`
 elsewhere). So a shell crash takes the wallpaper *and* the bar/dock/gadgets with
 it in one stroke — they are one process, not four. The wallpaper's own
-source-of-truth is the live-watched `stage/cover.json` (written by `aoide rice
-stage` when the song's cover derives or, for a direct hot-swap, `aoide cover set <path-or-name>`), falling
+source-of-truth is the live-watched `stage/cover.json` (written by `lyra rice
+stage` when the song's cover derives or, for a direct hot-swap, `lyra cover set <path-or-name>`), falling
 back to the baked `AOIDE_WALLPAPER` env store path so the
 background survives reboots/rebuilds even though `stage/` is ephemeral. Swap is a
 hard cut — no crossfade.

@@ -127,10 +127,10 @@ aoide usage [--json]
   (`reason: "state-write-failed"`). The usage widget ([[Gadget-Dock]]) reads
   the written file and must tolerate `live.ok == false`.
 
-### aoide quickshell reload
+### lyra quickshell reload
 
 ```
-aoide quickshell reload [--json]
+lyra quickshell reload [--json]
 ```
 
 - **Reads:** liveness probe via `systemctl --user show

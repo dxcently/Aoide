@@ -15,22 +15,22 @@ Aoide ships the rice engine as a builtin. The engine provides the loop, the sche
 ## The Rice Loop
 
 ```
-aoide rice compose <name> [--from <song>]   (real — scaffolds a new song, below)
+lyra rice compose <name> [--from <song>]   (real — scaffolds a new song, below)
     ↓  copies palette/window/geometry from --from (default "sonata")
-aoide rice mode stage <name>                (real — unlocks staging, stages declared content)
+lyra rice mode stage <name>                (real — unlocks staging, stages declared content)
     ↓  edit the song's files (hand or agent)
 rice lint                                    (real — livery schema validation)
     ↓  fail → reject + songbook note
-aoide rice mode draft <draft-name>           (real — ROUTES stage/livery.json into a saved
+lyra rice mode draft <draft-name>           (real — ROUTES stage/livery.json into a saved
     ↓                                          draft via a symlink; forks it from the
     ↓                                          current stage if new; see Drafts below)
     ⋯ iterate freely: every future write (rice stage, a hand-edit, Quickshell's own
        reload) lands directly in the draft file — no separate save step; switch to a
        different saved iteration any time with another `rice mode draft <name>` ⋯
-aoide rice mode declarative                  (real — tears the routing down, re-pins
+lyra rice mode declarative                  (real — tears the routing down, re-pins
     ↓                                          the declared truth; the draft itself
     ↓                                          stays saved on disk)
-aoide rice declare <name>                    (planned — User gates this step)
+lyra rice declare <name>                    (planned — User gates this step)
     ↓  committed to song/songbook/<song>/
     ↓  gated rebuild
 ```
@@ -39,7 +39,7 @@ Staging is the sketch — a live compositor call, no rebuild; `aoide.song` selec
 
 ## Composing a song
 
-`aoide rice compose <name> [--from <song>] [--force] [--json]` scaffolds a new committed song directly — the starting point of the rice loop above:
+`lyra rice compose <name> [--from <song>] [--force] [--json]` scaffolds a new committed song directly — the starting point of the rice loop above:
 `song/songbook/<name>/rice.nix` (a self-gating `lib.mkIf (config.aoide.song
 == "<name>")` block copying the `palette`/`window`/`geometry` tiers from
 `--from`, defaulting to `sonata` — the only `.nix` file the scaffold
@@ -179,17 +179,17 @@ else in this section — locked under `declarative`, allowed under
 brand-new widget file is the one thing this doesn't cover: `manifest.json`
 is only read at Quickshell startup, so a new slot still needs a
 `systemctl --user restart aoide-quickshell.service` to be discovered — may
-no longer require a restart now that `aoide quickshell reload` (Quickshell IPC
+no longer require a restart now that `lyra quickshell reload` (Quickshell IPC
 hot-reload trigger) rebuilds the whole scene fresh from `shell.qml`, which
 should also re-read `manifest.json`; unconfirmed against a live instance,
 confirm before relying on this.
 
-`aoide rice mode status` reports the current mode plus, in `staging`/
+`lyra rice mode status` reports the current mode plus, in `staging`/
 `draft`, which song (and, in `draft`, which draft) it is pointed at and
-since when. `aoide rice mode stage [<name>]` unlocks staging AND leaves
+since when. `lyra rice mode stage [<name>]` unlocks staging AND leaves
 `draft` mode if currently in it (tearing the routing symlink down first);
 given a name, it also stages that song's declared content immediately,
-combining unlock-and-stage into one call. `aoide rice mode declarative
+combining unlock-and-stage into one call. `lyra rice mode declarative
 [<name>]` locks staging (also leaving `draft` mode the same way) — with a
 name, or with none: it re-pins `stage/livery.json` to the resolved song's
 committed notes FIRST (the current stage's own song when no name is given,

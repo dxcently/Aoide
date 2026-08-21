@@ -103,7 +103,7 @@ The name keeps reading true past the rename:
 | The livery | The layer |
 |---|---|
 | A livery is what the retinue wears in unison | Stylix bakes it, [[Quickshell]] reads it, hyprctl and the terminal OSC carry it — one identity across the seam. This is the zero-drift guarantee. |
-| A livery dresses the retinue | the engine validates, resolves, emits (`aoide livery lint` assays the set before it circulates). Values and engine share one name because a retinue is inseparable from the household that dresses it. |
+| A livery dresses the retinue | the engine validates, resolves, emits (`lyra livery lint` assays the set before it circulates). Values and engine share one name because a retinue is inseparable from the household that dresses it. |
 | Denomination is tiering | palette → semantic → component: the low tier closed and concrete, the higher tiers referencing it. |
 | Livery travels | a song replays at another venue and the livery still dresses it. Value that holds across contexts is the point of both liveries and [[Self-Ricing]] replay. |
 

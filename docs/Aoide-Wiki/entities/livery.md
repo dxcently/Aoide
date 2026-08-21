@@ -93,7 +93,7 @@ values for `aoide`'s own live-apply seam (below); the staged schema version
 stays `"0"`, the same additive-optional posture as the base16 block.
 
 Staging applies geometry and the window-border colours to the running
-compositor directly: `aoide rice stage` builds one `hyprctl --batch`
+compositor directly: `lyra rice stage` builds one `hyprctl --batch`
 `keyword` list, in a fixed order (gaps → border size → border colours →
 rounding → blur), emitting a keyword only for a field that actually resolves
 — an unset geometry field is skipped, not defaulted, so the call never fights
@@ -130,22 +130,22 @@ split: the emitters only produce bytes; `live::apply_live` /
 
 ## Verbs
 
-The engine's surface is the `aoide livery` verb group (native, inside the
+The engine's surface is the `lyra livery` verb group (native, inside the
 CLI's `Invocation`/`Outcome` shell — the standalone note CLI's
 subcommands, native):
 
-- **`aoide livery lint [<song>|<path>]`** — validate a livery file
+- **`lyra livery lint [<song>|<path>]`** — validate a livery file
   against the authoritative v0 schema. The nix option type in
   `modules/nucleus/options.nix` is a permissive gate; *this* is the real
   validator. It enforces the closed palette tier
   (`bg/fg/accent/urgent`, unknown keys rejected) and the optional component
   tier (`bar.*` / `notif.*` / `window.*`, each field `nullOr` hex), accepting
   both bare hex strings and W3C `{ $value, $type }` token objects, and treating
-  `{group.name}` alias references as valid pending resolution. `aoide rice
+  `{group.name}` alias references as valid pending resolution. `lyra rice
   lint` runs this engine natively — no binary locate, no shell-out.
-- **`aoide livery resolve [<song>|<path>]`** — print the fully-resolved,
+- **`lyra livery resolve [<song>|<path>]`** — print the fully-resolved,
   flattened livery set.
-- **`aoide livery emit <target> [<song>|<path>]`** — run one of the four
+- **`lyra livery emit <target> [<song>|<path>]`** — run one of the four
   emitters (`stage` · `hyprctl` · `osc` · `file`); `--out PATH` writes
   atomically, `--template` supplies the file backend's template.
 

@@ -23,7 +23,7 @@ this fully before touching the repo.
 > capability = "Aoide"; anything needing Quickshell/rice/desktop = "AoideOS";
 > Melete/Mneme are "integrated," never "bundled/vendored."
 
-> **Dev agent vs rice agent.** The *rice agent* (driving `aoide rice
+> **Dev agent vs rice agent.** The *rice agent* (driving `lyra rice
 > compose`/`stage`/`draft`/`declare`) is confined to `song/` (house rule #1,
 > `AGENTS.md`). You are the *dev agent*:
 > your domain is the whole repo. The *gate* rules still bind you — #2 rebuild
@@ -59,18 +59,30 @@ See [[Loop-Protocol]] for the harness-agnostic loop spec (tier definition,
 two-rung ladder, binding rule, review integrity); this section carries the
 CLI-specific tiering only.
 
-- **Plan → execute → review.** One dispatch per role and unit: flagship plans
-  (scope, files/functions, sequence), mid tier executes (code, build/test,
-  deploy), flagship reviews (correctness/coherence or vision). Review coaches
-  the executor via SendMessage; it is not a bare pass/fail. The orchestrator
-  dispatches and verifies, but does not implement or review.
-- **Planning/mapping/designing → flagship.** Small nudges stay with the
-  orchestrator: typo, pixel/margin, one-line tweak, or config bump.
-- **Tiers by CLI:** Claude uses Opus for planning/review and Sonnet for
-  execution/librarian; Kimi uses `k3` for planning/review and `k3-256k` for
-  execution/librarian, with K2.7 coding aliases as fallback.
+- **Architect → design → execute (which reviews itself).** Three tiers.
+  ARCHITECT plans the loops and advises — architecture, phase plans,
+  sequencing — and does not implement. DESIGN owns front-end design passes.
+  EXECUTE both executes and reviews: the review dispatch is always a
+  *different agent* than the one that authored the diff, and that reviewer
+  RE-DERIVES the result from the diff and the repo rather than accepting the
+  executor's own report — this was always the correct behavior, it simply
+  wasn't written down before now (Rider, 2026-08-21). The orchestrator
+  dispatches and verifies, but does not implement, design, or review.
+- **Planning/mapping/designing → architect/design tier.** Small nudges stay
+  with the orchestrator: typo, pixel/margin, one-line tweak, or config bump.
+- **Tiers by CLI.** The model-to-tier mapping below applies to the **Claude
+  harness only** — every other harness is addressed by TIER ROLE
+  (architect/design/execute), not by re-deriving its own model-name mapping
+  here. Claude: Fable architects and advises, Opus designs, Sonnet executes
+  (a second, independent Sonnet dispatch reviews — never the authoring
+  session grading its own diff). Kimi: `k3` for architect/design, `k3-256k`
+  for execute, K2.7 coding aliases as fallback.
+- **Outward-facing artifacts name tiers, never models.** The architecture
+  report (`docs/architecture/aoide-report.html`) and anything else shown
+  outside this protocol doc say ARCHITECT/DESIGN/EXECUTE — never
+  Fable/Opus/Sonnet/Kimi/k3 by name.
 - **Design:** the User looks first and closes the pass; the advisor is on call
-  only when khoa asks. **Wiki:** the mid-tier librarian maintains it (§6),
+  only when khoa asks. **Wiki:** the execute-tier librarian maintains it (§6),
   outside the orchestrator's context.
 
 ### 2.2 Session control and parallelism
@@ -118,7 +130,7 @@ sudo <toplevel>/bin/switch-to-configuration switch
 # desktop-only reloads (no full switch needed for QML/hyprctl-live changes)
 hyprctl reload                                  # compositor rules / plugins
 systemctl --user restart aoide-quickshell.service   # bar / dock / gadgets
-aoide rice stage <song>                         # stage livery.json for hot-reload
+lyra rice stage <song>                         # stage livery.json for hot-reload
 qs -p modules/facets/quickshell/qml/shell.qml   # QML load/parse check
 
 # SHOW the user
@@ -132,9 +144,9 @@ grim out.png ; grim -g "0,0 1920x60" bar.png    # full + crops → read them bac
   compositor rule → `hyprctl reload`; Stylix/base16/kitty → nix-baked, needs
   a rebuild. Values staged via `rice stage` hot-reload without a rebuild.
 - **Staging can be locked.** `rice stage`/`cover set` refuse with
-  `declarative-mode-locked` while `aoide rice mode status` reports
+  `declarative-mode-locked` while `lyra rice mode status` reports
   `declarative` (the default — nothing has unlocked staging yet). Run
-  `aoide rice mode stage [<song>]` first to unlock; `aoide rice mode
+  `lyra rice mode stage [<song>]` first to unlock; `lyra rice mode
   declarative [<song>]` locks it back. See
   [[Self-Ricing#Staging vs Declarative Mode]].
 - **Edit a rice's live state through mode verbs — never by hand.**
@@ -142,7 +154,7 @@ grim out.png ; grim -g "0,0 1920x60" bar.png    # full + crops → read them bac
   can symlink to are CLI-owned: hand-writing them directly bypasses the
   declarative lock check and the draft routing (a draft only receives writes
   because `rice mode draft <name>` pointed the stage path at it). Go through
-  `aoide rice mode stage/draft/declarative`, `rice stage`, or `cover set` —
+  `lyra rice mode stage/draft/declarative`, `rice stage`, or `cover set` —
   never `Write`/`Edit` the stage JSON itself. A song's own
   `song/songbook/<song>/widgets/*.qml` (versioned score, not runtime state) is
   always fair game to edit directly. See AGENTS.md's rice loop and
@@ -158,13 +170,13 @@ grim out.png ; grim -g "0,0 1920x60" bar.png    # full + crops → read them bac
   deployed tree is `run/qml/` (writable working copies) — NOT
   `modules/facets/quickshell/qml/` and NOT `~/Aoide/qml/`.** Sync only the
   files you changed (`cp modules/facets/quickshell/qml/<f> run/qml/<f>` then
-  `aoide quickshell reload`, which now replaces the old
+  `lyra quickshell reload`, which now replaces the old
   `systemctl --user restart aoide-quickshell.service` step — a Quickshell
   IPC call (`quickshell ipc call shell reload`) that rebuilds the whole
   scene in-process, no systemd restart); leave files another
   agent is mid-editing untouched (shared-worktree discipline, §5). **This
   manual `cp` is now UNNECESSARY specifically for SONG widget bodies**
-  (`song/songbook/<song>/widgets/*.qml`) — `aoide rice stage <song>` syncs
+  (`song/songbook/<song>/widgets/*.qml`) — `lyra rice stage <song>` syncs
   those into `run/qml/songs/<song>/` itself, live, no manual copy or
   restart (CONTRACTS.md §5). It is still required for FACET-owned QML
   (`shell.qml`, `StagingEngine.qml`, `WidgetSlot.qml`, `SurfaceSlot.qml`,
@@ -298,7 +310,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   [[Quickshell]].
 - **[cleanup] `lib/checks.nix` carries pre-existing nixfmt-1.4.0 drift** —
   formatting-only pass owed. See [[Self-Ricing]].
-- **[bug] `aoide rice stage <name>` derives cover by song-name convention**
+- **[bug] `lyra rice stage <name>` derives cover by song-name convention**
   instead of reading `aoide.livery.wallpaper`. Mitigated live by
   `AOIDE_WALLPAPER` env baked into the quickshell service; proper fix (stage
   reads the song's wallpaper note) still owed. See [[Self-Ricing]].
@@ -338,7 +350,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   commands (source-tree registrations and the installed CLI agree). Bump the
   assertion; same bug class as the struck entry above.
 - **[bug] Rice keybinds invoke retired verbs.** `modules/dendrites/hyprland.nix`
-  binds `SUPER SHIFT, P` → `aoide rice preview` and `SUPER SHIFT, A` → `aoide
+  binds `SUPER SHIFT, P` → `lyra rice preview` and `SUPER SHIFT, A` → `aoide
   rice adopt` — both spellings were retired in the renames (`preview` →
   `stage`, `adopt` → `declare`; no aliases), so both keybinds are no-ops.
   Repoint to `rice stage` / `rice declare`. See [[Controls]].
@@ -408,7 +420,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   `calendar`/`herald-center`/`bar` slots (`WidgetSlot`) and
   `powermenu`/`launcher` slots (`SurfaceSlot`, window-owning) are the
   anchored catalog, built and live (`StagingEngine.qml`, hot-swaps via
-  `aoide rice stage <name>`) — see `modules/facets/quickshell/qml/slots.md`.
+  `lyra rice stage <name>`) — see `modules/facets/quickshell/qml/slots.md`.
   A song is no longer limited to filling an anchor the facet already wired:
   `aoide.arrangement.widgets.<slot>` (`modules/nucleus/options.nix`) lets a
   song register an entirely new slot via nix (`kind = "surface" | "dock"`),
@@ -505,8 +517,8 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
 | Build the system | `nix build .#nixosConfigurations.yomi-strix.…toplevel` |
 | Activate (gated) | `nix-env --set` + `switch-to-configuration switch` |
 | Reload compositor | `hyprctl reload` |
-| Reload shell | `aoide quickshell reload` (or `systemctl --user restart aoide-quickshell.service`) |
-| Stage a song live | `aoide rice stage <song>` |
+| Reload shell | `lyra quickshell reload` (or `systemctl --user restart aoide-quickshell.service`) |
+| Stage a song live | `lyra rice stage <song>` |
 | Check QML loads | `qs -p …/shell.qml` |
 | Show the user | `grim` → read the PNG back → judge → send |
 | Command a session | `aoide graph send --id <id> [--submit] [--yes] -- <text>` |
