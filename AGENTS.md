@@ -137,6 +137,35 @@ only.
    picks it up second. The test: *delete every `.qml` — is this capability
    still reachable from a terminal?* No means it is in the wrong place.
    `CONTRACTS.md §0` has the full statement and its Cordis citation.
+8. **Docs accompany every code change.** A commit that changes a plugin
+   directory's seams, invariants, or extension points updates that
+   directory's `README.md`/`AGENTS.md` in the SAME commit — never a
+   follow-up. A docs-only pass fixing a stale doc is fine; code that outruns
+   its doc is not.
+
+## Docs layering (dsh/Cordis convention, P-A10)
+
+Every plugin directory carries two files, per `github.com/deepseek-ai/
+deepseek-harness` (the repo behind the Cordis citation in `CONTRACTS.md §0`):
+`README.md` states what the directory IS — charter, named seams/services,
+how it composes (the spatial half) — and `AGENTS.md` states the invariants
+an agent must hold while editing there, its extension points, and what
+needs a docs update in the same commit (the temporal half). `CLAUDE.md` is a
+symlink to `AGENTS.md` at every level that has one — one file, two names.
+
+Three layers, each holding ONLY that level's invariants (no repetition down
+the tree; a leaf may point up one level instead of restating):
+
+```
+AGENTS.md                          (this file — house rules, both binaries)
+pkgs/aoide/crates/AGENTS.md        (cross-crate: registry order, golden
+                                     discipline, no cross-crate copying,
+                                     per-crate tests only)
+  pkgs/aoide/crates/<crate>/{README,AGENTS}.md   (this crate only)
+modules/AGENTS.md                  (cross-module: flags default off, walk
+                                     discipline, "_"-prefix shelving)
+  modules/{nucleus,facets,dendrites}/{README,AGENTS}.md  (this dir only)
+```
 
 See `CONTRACTS.md` for the versioned interfaces (note schema, dendrite shape,
 `schema --json`, stage files) and `docs/BUILD.md` for module-authoring.
