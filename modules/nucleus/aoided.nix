@@ -59,9 +59,16 @@ lib.mkIf config.aoide.enable {
       # even when Agent B hasn't yet realised the package.
       ExecStart = "${pkgs.aoide}/bin/aoided";
 
-      # Restart on failure; don't restart on clean exit or user stop.
-      Restart = "on-failure";
-      RestartSec = "3s";
+      # aoided is still the SKELETON: `daemon::run` performs its policy
+      # self-check, prints the status JSON, and exits 0 in ~25ms — there is
+      # no event loop yet. Declared Type=simple, that clean exit flipped the
+      # unit inactive and BindsTo dragged the a2a/mcp doors down with it
+      # (found live on osaka: door up 25ms then stopped). oneshot +
+      # RemainAfterExit says what the binary actually does and holds the
+      # unit "active (exited)" so the doors it anchors stay up. When the
+      # daemon grows its real loop, revert to Type=simple + Restart.
+      Type = "oneshot";
+      RemainAfterExit = true;
 
       # Audit log path comes from the option contract (modules/nucleus/options.nix).
       # Passed as an environment variable so the daemon picks it up without a
