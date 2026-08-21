@@ -109,7 +109,13 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable) {
       # Type=simple is correct (declared explicitly here) and keeps the unit
       # active on the loop rather than treating an immediate return as done.
       Type = "simple";
-      ExecStart = "${pkgs.aoide}/bin/aoide shellbridge --run";
+      # `shellbridge` left core's registry at P-A5 of the binary-split
+      # workstream — it now lives only in `lyra` (crates/lyra/src/registry.rs;
+      # core's registration lines were dropped, per the doc comment at
+      # crates/cli/src/commands/mod.rs::all()). Both binaries ship from the
+      # same `pkgs.aoide` derivation (P-A7), so this is still a plain sibling
+      # store path.
+      ExecStart = "${pkgs.aoide}/bin/lyra shellbridge --run";
 
       Restart = "on-failure";
       RestartSec = "3s";
@@ -130,6 +136,12 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable) {
         # re-pins to the shipped baseline instead of whatever song happens to
         # be staged.
         "AOIDE_DEFAULT_SONG=${config.aoide.song}"
+        # The process running this unit IS lyra now, so shellbridge's core_bin()
+        # re-exec sites (protocol::bin's sibling resolver — the usage/recheck
+        # calls, shellbridge.rs) would already find `aoide` as lyra's sibling
+        # in this same store's bin/ dir; set explicitly anyway (P-A7 of the
+        # binary-split workstream) rather than lean on that inference.
+        "AOIDE_CORE_BIN=${pkgs.aoide}/bin/aoide"
       ];
 
       # Create the socket directory under XDG_RUNTIME_DIR.

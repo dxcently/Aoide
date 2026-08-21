@@ -155,9 +155,13 @@ in
         # peeks out on its own as an alert when an agent needs a response.
         bind = SUPER, G, global, aoide:dock
 
-        # Rice preview / adopt shortcuts
-        bind = SUPER SHIFT, P, exec, aoide rice preview
-        bind = SUPER SHIFT, A, exec, aoide rice adopt
+        # Rice preview / adopt shortcuts. `rice` left core's registry at P-A5
+        # of the binary-split workstream — it lives only in `lyra` now
+        # (bare name resolves via PATH: `lyra` ships alongside `aoide` in the
+        # same package modules/nucleus/packages.nix already puts on
+        # systemPackages).
+        bind = SUPER SHIFT, P, exec, lyra rice preview
+        bind = SUPER SHIFT, A, exec, lyra rice adopt
 
         # ── Window management (ported from dxflake hyprland dendrite) ────────
         # Normalized to SUPER, matching the Aoide binds above. dxflake exec

@@ -141,8 +141,12 @@
           summary = ".*";
           skip_display = true;
           always_run_script = true;
+          # `herald` left core's registry at P-A5 of the binary-split
+          # workstream — it now lives only in `lyra` (crates/lyra/src/
+          # registry.rs). Both binaries ship from the same `pkgs.aoide`
+          # derivation (P-A7), so this is still a plain sibling store path.
           script = "${pkgs.writeShellScript "aoide-herald-push" ''
-            exec ${pkgs.aoide}/bin/aoide herald push
+            exec ${pkgs.aoide}/bin/lyra herald push
           ''}";
         };
       };

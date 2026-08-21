@@ -33,8 +33,11 @@
 // QML has no file-write primitive and the shellbridge socket only speaks
 // `focuswindow`, so switching the wallpaper cannot write stage/cover.json from
 // here. Instead a pick shells out through the ONE CLI verb built for this —
-// `aoide cover set <path>` (Quickshell.execDetached, the same exec idiom
-// ConductorGadget uses) — which atomic-writes stage/cover.json. wallpaper.qml
+// `lyra cover set <path>` (Quickshell.execDetached, the same exec idiom
+// ConductorGadget uses) — which atomic-writes stage/cover.json. `cover` left
+// core's registry at P-A5 of the binary-split workstream and lives only in
+// `lyra` now (bare name resolves via PATH, same package as `aoide`).
+// wallpaper.qml
 // FileView-watches that file and hot-swaps the live wallpaper. No new socket,
 // no QML file write.
 //
@@ -142,7 +145,7 @@ PanelWindow {
         if (root.selIndex < 0 || root.selIndex >= root.covers.length) return
         var c = root.covers[root.selIndex]
         if (c && c.path)
-            Quickshell.execDetached(["aoide", "cover", "set", c.path])
+            Quickshell.execDetached(["lyra", "cover", "set", c.path])
         root.hide()
     }
     function applyAt(index) {

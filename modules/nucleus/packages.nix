@@ -1,10 +1,11 @@
 # modules/nucleus/packages.nix — the aoide CLI on every PATH.
 #
-# The control plane's binary (`aoide`) is injected into pkgs
-# by mkHost's overlay; this module puts them on the SYSTEM profile so the
-# Hyprland keybinds (`aoide shell …`, `aoide rice …`), agent sessions, and the
-# user at a terminal can all invoke them by name. The systemd units don't need
-# this (they ExecStart absolute store paths) — the interactive session does.
+# The control plane's binaries (`aoide`, `aoided`, `lyra` — one derivation as
+# of P-A7 of the binary-split workstream) are injected into pkgs by mkHost's
+# overlay; this module puts them on the SYSTEM profile so the Hyprland
+# keybinds (`aoide shell …`, `lyra rice …`), agent sessions, and the user at a
+# terminal can all invoke them by name. The systemd units don't need this
+# (they ExecStart absolute store paths) — the interactive session does.
 #
 # Found live on first switch: the vm-boot test node added these to
 # systemPackages itself, masking their absence from the nucleus. The test node
