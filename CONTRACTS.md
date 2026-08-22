@@ -423,7 +423,7 @@ count.
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` verb
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
-  **66 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **67 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -446,7 +446,13 @@ count.
   now PARKS instead of refusing outright (the requesting connection blocks
   until an operator completes the ask, or a configurable timeout elapses);
   see the "Secrets wire" subsection below for the full parked-ask lifecycle
-  and the wire's new `wait`/`pending`/`approve`/`dismiss` shapes.
+  and the wire's new `wait`/`pending`/`approve`/`dismiss` shapes. `secrets
+  watch`, appended newest, tracker #71 Part 1 (+1 → 67) — a foreground,
+  line-mode terminal surface that tail-follows the mirrored aoide log and
+  narrates every broker event (`released`/`parked`/`completed`/`dismissed`/
+  `expired`), prompting inline for a parked ask when stdin is a terminal;
+  `--json` emits one event object per line instead — see `crates/secrets/
+  README.md`'s "Watching events" section for the exact shape.
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
@@ -463,7 +469,7 @@ This was never a version bump: `schemaVersion` stays `"0"` on both —
 this section has never promised a fixed command inventory, only a
 document SHAPE, and the shape above is unchanged for either binary. The
 A2A AgentCard (§6) advertises whichever registry the serving binary
-assembled — core's card carries only core's 66, since `a2a serve` is
+assembled — core's card carries only core's 67, since `a2a serve` is
 core-only and lyra never registers it.
 
 ---
