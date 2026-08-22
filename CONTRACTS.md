@@ -423,7 +423,7 @@ count.
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` verb
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
-  **60 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **61 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -431,7 +431,13 @@ count.
   paths rename in place, registration order and count unchanged; `secrets
   put`, appended newest, Workstream SECRETS P-V4c (+1 → 60) — the write
   half: backend `set` templates plus the built-in `file` backend, both
-  documented in the "Secrets home" subsection below).
+  documented in the "Secrets home" subsection below; `secrets set-totp`,
+  appended newest, Workstream SECRETS P-V4e (+1 → 61) — flips an existing
+  policy's `requireTotp` bit without hand-editing `policy.json`; the same
+  phase also added `secrets enroll --show` (reprint an existing
+  enrollment, no rotation, no new path) and a tty-hidden-input prompt for
+  `secrets put` (no new path either — both ride the existing `enroll`/`put`
+  commands).
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
@@ -448,7 +454,7 @@ This was never a version bump: `schemaVersion` stays `"0"` on both —
 this section has never promised a fixed command inventory, only a
 document SHAPE, and the shape above is unchanged for either binary. The
 A2A AgentCard (§6) advertises whichever registry the serving binary
-assembled — core's card carries only core's 59, since `a2a serve` is
+assembled — core's card carries only core's 61, since `a2a serve` is
 core-only and lyra never registers it.
 
 ---

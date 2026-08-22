@@ -181,7 +181,7 @@ pkgs.testers.runNixOSTest {
     # ── 2. aoide on PATH ────────────────────────────────────────────────────
     machine.succeed("which aoide")
 
-    # `aoide schema --json` must parse and report exactly 60 commands.
+    # `aoide schema --json` must parse and report exactly 61 commands.
     # This is a deliberate drift tripwire: adding or removing a command must
     # consciously update this count (it caught 8 commands that had landed
     # unrecorded — graph wrap/reap/send, conduct, conductor, and the graph session
@@ -253,7 +253,11 @@ pkgs.testers.runNixOSTest {
     # (spelled `vault ...` until the P-V4b rename — paths rename in place,
     # count holds); bumped by 1 for `secrets put` — the write half (backend
     # `set` templates + the built-in `file` backend, Workstream SECRETS
-    # P-V4c) — reached 60.
+    # P-V4c) — reached 60; bumped by 1 for `secrets set-totp` — flips an
+    # existing policy's requireTotp bit without hand-editing policy.json
+    # (Workstream SECRETS P-V4e; the same phase also added `secrets enroll
+    # --show` and a tty-hidden-input prompt for `secrets put`, neither of
+    # which registers a new path) — reached 61.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a verb.
     schema_raw = machine.succeed("aoide schema --json")
@@ -267,8 +271,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 60, (
-        f"expected 60 commands, got {cmd_count}.  "
+    assert cmd_count == 61, (
+        f"expected 61 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 
