@@ -423,7 +423,7 @@ count.
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` verb
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
-  **63 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **66 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -440,7 +440,13 @@ count.
   commands); `secrets automate`/`secrets expose`, appended newest,
   Workstream SECRETS P-N1 (+2 → 63) — the per-secret automation gate
   (`on`/`off`/`grant`/`revoke`, "Secrets wire" subsection below) and the
-  `remote` reachability flag (`on`/`off`, no non-local door reads it yet).
+  `remote` reachability flag (`on`/`off`, no non-local door reads it yet);
+  `secrets pending`/`secrets approve`/`secrets dismiss`, appended newest,
+  Workstream SECRETS P-N2 (+3 → 66) — a TOTP-gated `resolve` with no code
+  now PARKS instead of refusing outright (the requesting connection blocks
+  until an operator completes the ask, or a configurable timeout elapses);
+  see the "Secrets wire" subsection below for the full parked-ask lifecycle
+  and the wire's new `wait`/`pending`/`approve`/`dismiss` shapes.
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
@@ -457,7 +463,7 @@ This was never a version bump: `schemaVersion` stays `"0"` on both —
 this section has never promised a fixed command inventory, only a
 document SHAPE, and the shape above is unchanged for either binary. The
 A2A AgentCard (§6) advertises whichever registry the serving binary
-assembled — core's card carries only core's 61, since `a2a serve` is
+assembled — core's card carries only core's 66, since `a2a serve` is
 core-only and lyra never registers it.
 
 ---
@@ -1014,7 +1020,7 @@ purpose, not an oversight:
   this document's release cadence, and nothing outside the `aoide-secrets`
   crate reads them directly.
 
-### Secrets wire — the machine-consumer contract (P-V4c)
+### Secrets wire — the machine-consumer contract (P-V4c, parking P-N2)
 
 Promoted out of "living in the crate only" (the promotion criterion this
 section states below) because P-V4c makes it explicit: the unix-socket
@@ -1051,6 +1057,87 @@ code"`; `"totp code invalid or expired"`; `"totp code already used"`
 (replay); `"unknown backend `<name>`"`; `"backend `<name>` exited
 <status>"` (the backend's own stderr never rides this reply — it is
 `eprintln!`'d to the broker's own stderr only).
+
+**Parking (P-N2): a `requireTotp` resolve with no code now WAITS instead of
+refusing outright.** Before this phase, `"requireTotp is set but no totp
+code was provided"` was an immediate refusal. Now, when a policy's
+`totp_required` is `true`, an enrollment exists on this host, and `totp` is
+absent/empty on the wire, the broker instead PARKS the ask: it registers
+`{id, secret, consumer, requestedAt}` in an in-memory registry and holds the
+REQUESTING CONNECTION open — never storing or fetching a value at this
+point — until an operator completes it from a SEPARATE connection
+(`approve`/`dismiss` below) or a timeout elapses. The connection's own
+thread blocks on this wait; the broker's accept loop itself never blocks
+(thread-per-connection, `crates/secrets/src/broker.rs`'s module doc), so
+every OTHER connection — including a totally unrelated `resolve` — is
+admitted and served normally while one sits parked. A `resolve` WITH a
+non-empty `totp` is completely unaffected by this phase — same fast path,
+same errors, as before. An `automation`-open listed consumer (the gate
+above) never parks either, exactly as it never required a code before.
+
+`resolve` gained one new optional field:
+```text
+-> {"op":"resolve","secret":"<name>","consumer":"<consumer>","wait":false}
+<- {"ok":false,"error":"requireTotp is set but no totp code was provided"}
+```
+`wait` is optional and defaults to `true` (absent = wait/park, the new
+default behavior) — `wait:false` restores the EXACT pre-P-N2 immediate
+refusal for a machine caller that has no way to type a code. There is no
+CLI flag for this — it is wire-only, reachable only by a direct socket
+speaker (this section's own "first-class API" framing above).
+
+On timeout (default 300 seconds, `AOIDE_SECRETS_PARK_TIMEOUT` env override
+in whole seconds — no config-file knob exists in the secrets home for this;
+env-only, same precedent as `AOIDE_SECRETS_HOME`/`AOIDE_SECRETS_SOCKET`),
+the parked connection gets:
+```text
+<- {"ok":false,"error":"the pending TOTP ask for `<name>` timed out after <N>s (AOIDE_SECRETS_PARK_TIMEOUT to change the default) — resolve again with an inline `--totp <code>`, or approve the next ask before it expires with `aoide secrets approve <id> --totp <code>`"}
+```
+naming the timeout, the env knob, and BOTH completion paths — the ask is
+removed from the registry once timed out (a late `approve`/`dismiss` against
+that id then gets the same `"unknown pending id"` error a never-existed id
+would).
+
+**`pending`** — list every parked ask (never a value):
+```text
+-> {"op":"pending"}
+<- {"ok":true,"pending":[{"id":"<id>","secret":"<name>","consumer":"<consumer>","requestedAt":<unix-seconds>},...]}
+```
+Never errors (an empty queue is `{"ok":true,"pending":[]}`); not audited —
+a read of in-memory state only, same precedent `graph pending list` already
+sets.
+
+**`approve`** — complete a parked ask with a code, releasing the value down
+the ORIGINAL parked connection (never this reply):
+```text
+-> {"op":"approve","id":"<id>","totp":"<code>"}
+<- {"ok":true}
+<- {"ok":false,"error":"<message>"}
+```
+Validated with the SAME RFC 6238 verify + single-use replay ledger an
+inline `resolve` code uses — the code is consumed identically either way.
+An invalid/expired/already-used code leaves the ask PARKED (never removed)
+and the ledger UNBURNED, so a caller can simply retry with the right code;
+only a code that validates resolves the ask one way or another. Errors:
+`"unknown pending id `<id>`"`; `"malformed request: `id` is required"`;
+`"malformed request: `totp` is required"`; plus every `resolve`-shaped TOTP
+error above (`"totp code invalid or expired"`, `"totp code already used"`,
+...). This reply NEVER carries a `value` field — the value only ever
+reaches the ORIGINAL parked connection's own `resolve` reply.
+
+**`dismiss`** — refuse a parked ask outright, no code needed:
+```text
+-> {"op":"dismiss","id":"<id>"}
+<- {"ok":true}
+<- {"ok":false,"error":"unknown pending id `<id>`"}
+```
+The parked connection gets `{"ok":false,"error":"the pending TOTP ask was
+dismissed by an operator before a code was provided"}` on its own `resolve`
+reply; the dismisser's own reply only confirms the dismissal happened.
+
+Audit (both destinations, name-only, same discipline as `resolve`/`put`):
+park/approve/dismiss/timeout each write one line — the id, the secret name,
+the consumer (park only), and the outcome — never a value, never a code.
 
 **The automation gate (P-N1) narrows, never widens, `requireTotp`.** A
 policy's `automation` field (`{"enabled":<bool>,"consumers":[<name>,...]}`,
@@ -1121,10 +1208,12 @@ fields) and the put silently overwrites, exactly as every `put` did before
 this feature — acceptable during a mixed-version deploy window, not a
 regression from before P-67 existed.
 
-**Malformed-request errors** (either op): `"malformed request: not valid
+**Malformed-request errors** (any op): `"malformed request: not valid
 JSON"`; `"malformed request: missing `op`"`; `"unknown op `<name>`"`;
 `"malformed request: `secret` and `consumer` are required"` (`resolve`);
-`"malformed request: `secret` is required"` (`put`).
+`"malformed request: `secret` is required"` (`put`); `"malformed request:
+`id` is required"` (`approve`/`dismiss`); `"malformed request: `totp` is
+required"` (`approve`).
 
 **The trust model — two gates, not one.** Reaching the socket AT ALL is
 gate one: the socket is `0660`, group `aoide-secrets-access` (P-V4's
