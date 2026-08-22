@@ -1049,10 +1049,12 @@ code"`; `"totp code invalid or expired"`; `"totp code already used"`
 <status>"` (the backend's own stderr never rides this reply — it is
 `eprintln!`'d to the broker's own stderr only).
 
-**`put`** — write a secret's value (P-V4c):
+**`put`** — write a secret's value (P-V4c; `overwrite`/`exists`/`replaced`
+added P-67, "warn before overwrite"):
 ```text
--> {"op":"put","secret":"<name>","value":"<value>"}
-<- {"ok":true}
+-> {"op":"put","secret":"<name>","value":"<value>","overwrite":<bool>?}
+<- {"ok":true,"replaced":<bool>}
+<- {"ok":false,"exists":true,"error":"<message>"}
 <- {"ok":false,"error":"<message>"}
 ```
 No `consumer` field, and NEVER gated by `requireTotp` — `put` is CLI-only/
@@ -1064,6 +1066,26 @@ add` owns that — so error strings mirror `resolve`'s policy-side ones:
 `<name>` exited <status>"`. The granted reply carries no `value` field at
 all — nothing to leak, since `put`'s payload flows client-to-broker, never
 back.
+
+`overwrite` is OPTIONAL — absent means `false`. When it is false and the
+named secret ALREADY has a stored value (probed via the SAME `get` template
+`resolve` would run, broker-side only — `crates/secrets/src/backend.rs`'s
+`has_value`), the broker refuses with the distinct `{"exists":true}` flag
+above rather than silently overwriting; a consumer of this wire must check
+`exists`, never string-match the `error` text, to detect this case. Sending
+`overwrite:true` stores unconditionally and reports whether it replaced an
+existing value (`"replaced":true`) or was a first-ever store
+(`"replaced":false`) — `secrets put`'s own `--force` flag is what sets
+`overwrite:true` on the wire; without it, a CLI caller on a terminal is
+prompted `y/N` and, on yes, retried with `overwrite:true` automatically.
+**Wire compatibility**: an OLD client (no `overwrite` field at all) talking
+to a NEW broker now gets the `exists` refusal on a second `put` instead of
+a silent overwrite — a deliberate tightening, not a bug, since absent has
+always meant `false`. A NEW client talking to an OLD broker has its
+`overwrite` field silently ignored (old brokers accept and discard unknown
+fields) and the put silently overwrites, exactly as every `put` did before
+this feature — acceptable during a mixed-version deploy window, not a
+regression from before P-67 existed.
 
 **Malformed-request errors** (either op): `"malformed request: not valid
 JSON"`; `"malformed request: missing `op`"`; `"unknown op `<name>`"`;
