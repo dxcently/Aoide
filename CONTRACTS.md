@@ -423,12 +423,15 @@ count.
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` verb
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
-  **59 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **60 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
   SECRETS P-V3 (+1 → 59); spelled `vault ...` until the P-V4b rename —
-  paths rename in place, registration order and count unchanged).
+  paths rename in place, registration order and count unchanged; `secrets
+  put`, appended newest, Workstream SECRETS P-V4c (+1 → 60) — the write
+  half: backend `set` templates plus the built-in `file` backend, both
+  documented in the "Secrets home" subsection below).
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
@@ -996,11 +999,86 @@ purpose, not an oversight:
   section is the living source of truth, updated in the SAME commit as any
   shape change (this crate's own `AGENTS.md`), rather than a second copy
   here that can drift.
-- The one WIRE shape this repo-wide contract owns regardless of where the
-  files live — the unix-socket JSON-lines resolve request/reply — is
-  documented in `crates/secrets/README.md`'s "The wire" section for the same
-  reason: it changes with the crate, not with this document's release
-  cadence.
+- The FILE shapes (`policy.json`/`backends.json`/`totp.secret`/
+  `totp-replay.json`) stay `crates/secrets/README.md`'s "Named seams"
+  territory, not this document's — they change with the crate, not with
+  this document's release cadence, and nothing outside the `aoide-secrets`
+  crate reads them directly.
+
+### Secrets wire — the machine-consumer contract (P-V4c)
+
+Promoted out of "living in the crate only" (the promotion criterion this
+section states below) because P-V4c makes it explicit: the unix-socket
+JSON-lines wire is a FIRST-CLASS API, not merely `secrets exec`'s private
+implementation detail. A service (verba voluntia, an aoide-side Melete
+model) is meant to speak this wire DIRECTLY — connect the socket, write a
+request line, read a reply line — with no LLM and no `aoide` binary in the
+loop at all; `secrets exec`/`secrets put` are convenience wrappers over the
+same two ops for a human or an agent at a terminal, not the only door onto
+them. The canonical implementation (and the one place a wire CHANGE lands
+first) is still `crates/secrets/src/broker.rs`'s module doc — this section
+restates it for a consumer who never reads this repo's Rust.
+
+**Transport**: connect `$AOIDE_SECRETS_SOCKET` (else
+`$AOIDE_SECRETS_HOME/secrets.sock`, else `/var/lib/aoide-secrets/
+secrets.sock`) as a unix stream socket. One JSON object per line, newline-
+terminated, on both sides — write a request line, read exactly one reply
+line back. The connection may be reused for further request/reply pairs or
+dropped after one; the broker holds no per-connection state either way.
+
+**`resolve`** — read a secret's value:
+```text
+-> {"op":"resolve","secret":"<name>","consumer":"<consumer>","totp":"<code>"?,"argv0":"<cmd>"?}
+<- {"ok":true,"value":"<value>"}
+<- {"ok":false,"error":"<message>"}
+```
+`totp`/`argv0` are optional. Error strings (never containing the secret's
+value): `"secret not found"`; `"consumer not authorized for this secret"`;
+`"requireTotp is set but no TOTP enrollment exists on this host yet"`;
+`"requireTotp is set but no totp code was provided"`; `"malformed totp
+code"`; `"totp code invalid or expired"`; `"totp code already used"`
+(replay); `"unknown backend `<name>`"`; `"backend `<name>` exited
+<status>"` (the backend's own stderr never rides this reply — it is
+`eprintln!`'d to the broker's own stderr only).
+
+**`put`** — write a secret's value (P-V4c):
+```text
+-> {"op":"put","secret":"<name>","value":"<value>"}
+<- {"ok":true}
+<- {"ok":false,"error":"<message>"}
+```
+No `consumer` field, and NEVER gated by `requireTotp` — `put` is CLI-only/
+admin-side (never agent-facing), so there is no separate consumer identity
+to authorize and no code check to run (`crates/secrets/src/broker.rs`'s
+module doc has the full reasoning). `put` never creates a policy — `secrets
+add` owns that — so error strings mirror `resolve`'s policy-side ones:
+`"secret not found"`; `"backend `<name>` has no `set` template"`; `"backend
+`<name>` exited <status>"`. The granted reply carries no `value` field at
+all — nothing to leak, since `put`'s payload flows client-to-broker, never
+back.
+
+**Malformed-request errors** (either op): `"malformed request: not valid
+JSON"`; `"malformed request: missing `op`"`; `"unknown op `<name>`"`;
+`"malformed request: `secret` and `consumer` are required"` (`resolve`);
+`"malformed request: `secret` is required"` (`put`).
+
+**The trust model — two gates, not one.** Reaching the socket AT ALL is
+gate one: the socket is `0660`, group `aoide-secrets-access` (P-V4's
+deployment) — anything that can connect has already proven group
+membership, which is a coarse, host-level "this uid may talk to the
+broker" boundary. `policy.json`'s per-secret `consumers[]` list is gate
+two, finer-grained, keyed on the wire's `consumer` field.
+
+**Honesty note: `consumer` is SELF-ASSERTED.** Nothing on the wire
+authenticates it — any process that has already cleared gate one (socket
+group membership) can claim to be any consumer name and receive that
+name's grants. This is a documented, deliberate limitation, not a bug:
+authenticated consumer identity is a separate, not-yet-planned scope
+(#51-adjacent — the same honesty note the replay ruling in
+`crates/secrets/AGENTS.md` already carries for the identical reason). A
+policy's `consumers[]` list is a courtesy label on top of the real
+boundary (socket group membership), not a cryptographic one, until that
+lands.
 
 If a secrets file shape ever needs to be READ by something outside the
 `aoide-secrets` crate (a future admin tool, a debugging script), that is the
