@@ -423,7 +423,7 @@ count.
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` verb
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
-  **61 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **63 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -437,7 +437,10 @@ count.
   phase also added `secrets enroll --show` (reprint an existing
   enrollment, no rotation, no new path) and a tty-hidden-input prompt for
   `secrets put` (no new path either — both ride the existing `enroll`/`put`
-  commands).
+  commands); `secrets automate`/`secrets expose`, appended newest,
+  Workstream SECRETS P-N1 (+2 → 63) — the per-secret automation gate
+  (`on`/`off`/`grant`/`revoke`, "Secrets wire" subsection below) and the
+  `remote` reachability flag (`on`/`off`, no non-local door reads it yet).
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
@@ -1048,6 +1051,37 @@ code"`; `"totp code invalid or expired"`; `"totp code already used"`
 (replay); `"unknown backend `<name>`"`; `"backend `<name>` exited
 <status>"` (the backend's own stderr never rides this reply — it is
 `eprintln!`'d to the broker's own stderr only).
+
+**The automation gate (P-N1) narrows, never widens, `requireTotp`.** A
+policy's `automation` field (`{"enabled":<bool>,"consumers":[<name>,...]}`,
+absent on an old `policy.json` means `{enabled:false,consumers:[]}`) can
+only ever RELAX the TOTP requirement for the consumers it names — it can
+never impose one, and it never touches the `consumers`-authorization gate
+above it. Gate order is: exists -> consumer authorized -> TOTP required
+(`requireTotp AND NOT (automation.enabled AND the requesting consumer is
+IN automation.consumers)`) -> fetch. When `requireTotp` is `false`,
+automation has nothing to relax and every caller resolves exactly as
+before this field existed; when `requireTotp` is `true` and automation is
+CLOSED (`enabled:false`) or the requesting consumer isn't LISTED, `totp`
+is checked exactly as it always has been. Admin verbs: `secrets automate
+<name> on|off` flips `enabled`; `secrets automate <name> grant|revoke
+<consumer>` edits `consumers` (same name validation as every other
+consumer/secret name in this crate). **Honesty note, same shape as
+`resolve`'s own `consumer` field above:** `automation.consumers` names are
+matched against the SAME self-asserted wire `consumer` field, so an
+automation-open secret is effectively code-free for any local socket
+caller claiming a listed name until authenticated session identity exists
+(#63-adjacent) — this is a documented limitation, not a bug, mirroring the
+replay-ledger ruling `crates/secrets/AGENTS.md` already carries for the
+identical reason.
+
+`policy.json` also gained a `remote` boolean (P-N1, default `false`,
+absent on an old file means `false`). **No behavior change today** — no
+non-local entry point onto this broker exists yet — but it is a crate
+invariant (`crates/secrets/AGENTS.md`): every non-local entry point added
+later (mesh replication, a network door) MUST refuse a secret whose
+`remote` is `false` before ever touching its backend. `secrets expose
+<name> on|off` flips it.
 
 **`put`** — write a secret's value (P-V4c; `overwrite`/`exists`/`replaced`
 added P-67, "warn before overwrite"):
