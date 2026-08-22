@@ -422,8 +422,11 @@ count.
 - `aoide schema --json` — the core contract (the `protocol`/`storage`/
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`cli` verb surface:
   conducting, the project/session graph, A2A, peers, presence, the daemon,
-  usage, hooks). **49 commands** (`crates/cli/src/registry.rs`'s golden
-  test — `who`, appended newest, messaging workstream C2).
+  usage, hooks, the message inbox). **52 commands**
+  (`crates/cli/src/registry.rs`'s golden test — `inbox list|read|clear`,
+  appended newest, messaging workstream C6; the plan's own phase estimate
+  was "+2", the honest count is +3 — one `inbox` verb group is three paths,
+  not two, same shape as A4's 41→42 discrepancy).
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan.
 - `lyra schema --json` — the AoideOS-surface contract: rice/draft/mode/
@@ -439,7 +442,7 @@ This was never a version bump: `schemaVersion` stays `"0"` on both —
 this section has never promised a fixed command inventory, only a
 document SHAPE, and the shape above is unchanged for either binary. The
 A2A AgentCard (§6) advertises whichever registry the serving binary
-assembled — core's card carries only core's 49, since `a2a serve` is
+assembled — core's card carries only core's 52, since `a2a serve` is
 core-only and lyra never registers it.
 
 ---
@@ -795,6 +798,71 @@ answer like a permission-verdict digit never does), the payload is prefixed
 sent it — attribution, not authentication; both `--from` and
 `AOIDE_SESSION_ID` are ordinary same-user process state, spoofable by
 anyone who can already write to the target's control socket.
+
+### `state/inbox.json` — **v0** (messaging plan P-C6, 2026-08-21)
+
+The durable per-host message inbox: every message that actually lands in a
+LOCAL session, filed by `aoide_conduct::graph::send::deliver_local`'s success
+path — the ONE writer that covers a direct `graph send --id`, a `--to`
+resolving local (re-drives `deliver_local` unchanged), a `graph pending
+approve` re-drive, AND the A2A door's own `message/send` Inject arm
+(`crates/server/src/a2a.rs::do_inject`), which builds a `graph send --id`
+invocation and calls `session_send` too — the SAME "one queue, two writers,
+no second implementation" shape `pending.json` (above) already set, except
+here it collapses to ONE writer, because the a2a door never bypasses
+`session_send`. `do_inject` files no entry of its own — see its doc comment.
+An OUTBOUND `--to peer/<x>` send (`deliver_remote`) never files here: the
+message lands in the REMOTE peer's own inbox, via that peer's own
+`do_inject`.
+
+Lives in the gitignored root-runtime `state/` dir (§2), NOT `song/stage/` —
+same tier as `usage.json`/`a2a-agents.json`, never reset by a stage reseed.
+Read/resolved by `aoide inbox list/read/clear`: `list` shows unread entries
+by default (`--all` includes read ones); `read <n>` marks one entry read by
+its array position (`n`, same as `pending list`'s id scheme) — but unlike a
+pending entry, marking read does NOT remove the entry, so positions stay
+stable across repeated `read` calls; the only thing that can still shift a
+position is the 200-entry cap's oldest-drop when a NEW message arrives
+between your `list` and your `read` (same "re-list if you're racing a
+writer" discipline `pending.json` documents, triggered by the cap instead of
+every resolution); `clear` empties the file unconditionally — no `--yes`, no
+gate, matching `graph.prune`'s precedent (the verb name is the whole blast
+radius, nothing selective to confirm, unlike `rice draft drop`/`rice take
+prune` which destroy a NAMED or AMBIGUOUS subset). Capped at 200 entries,
+oldest-drop (`herald::LEDGER_CAP`'s fold-and-cap precedent, CONTRACTS.md §4
+above), atomic writes.
+
+`context` is an OPTIONAL, OPAQUE `serde_json::Value` passthrough — reserved
+for a planned Mneme (memory-manager) integration (#14/#16) that does not
+exist yet. v0 round-trips whatever a future producer sets, byte-for-byte,
+and never reads or interprets it; no call site in this tree sets it today
+(every `inbox::receive` call passes `None`), so the key is absent from every
+entry currently written.
+
+```json
+{
+  "schemaVersion": "0",
+  "entries": [
+    {
+      "from": "conduct-1122-1786570000",
+      "target": "conduct-6364-1786576226",
+      "text": "status update on the migration",
+      "receivedAt": "2026-08-21T14:01:10Z",
+      "read": false
+    }
+  ]
+}
+```
+
+`from` is always present (empty string for an anonymous/unattributed
+sender — never omitted, unlike `pending.json`'s optional `from`): the local
+seam uses the same `resolve_sender` output the audit line and the delivered
+payload's provenance prefix already compute; the A2A seam has no caller
+identity to offer today (#51 owns real cross-host provenance — this never
+invents any) so it is honestly empty. No conductor pane yet (rides a later
+phase) and no outbox retry for a peer that was unreachable at send time (the
+sender already gets a clean error from `deliver_remote`; nothing queues a
+retry) — both deliberately deferred, not built.
 
 ### `state/usage.json` — **v0**
 
