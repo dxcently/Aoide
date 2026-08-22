@@ -421,8 +421,9 @@ count.
 
 - `aoide schema --json` — the core contract (the `protocol`/`storage`/
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`cli` verb surface:
-  conducting, the project/session graph, A2A, peers, the daemon, usage,
-  hooks). **48 commands** (`crates/cli/src/registry.rs`'s golden test).
+  conducting, the project/session graph, A2A, peers, presence, the daemon,
+  usage, hooks). **49 commands** (`crates/cli/src/registry.rs`'s golden
+  test — `who`, appended newest, messaging workstream C2).
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan.
 - `lyra schema --json` — the AoideOS-surface contract: rice/draft/mode/
@@ -438,7 +439,7 @@ This was never a version bump: `schemaVersion` stays `"0"` on both —
 this section has never promised a fixed command inventory, only a
 document SHAPE, and the shape above is unchanged for either binary. The
 A2A AgentCard (§6) advertises whichever registry the serving binary
-assembled — core's card carries only core's 48, since `a2a serve` is
+assembled — core's card carries only core's 49, since `a2a serve` is
 core-only and lyra never registers it.
 
 ---
