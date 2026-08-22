@@ -605,6 +605,39 @@ in
       };
     };
 
+    # ── Vault secrets broker (P-V4 of the vault workstream) ────────────────
+    vault = {
+      enable = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Deploy Aoide's secrets broker (`aoide vault serve`) as a SYSTEM
+          service under its own uid (`aoide-vault`), per the vault design's
+          target topology: vault home `/var/lib/aoide-vault` (0700,
+          vault-uid), socket `/run/aoide-vault/vault.sock` (0660, group
+          `aoide-vault-access`) as the only door. Off by default, same
+          house policy as the MCP façade/A2A door/usage poller above — see
+          `modules/nucleus/vault.nix` for the unit, and
+          `pkgs/aoide/crates/vault/README.md` for the broker itself (the
+          binary is nix-independent; this option is deployment only).
+        '';
+      };
+
+      members = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        example = literalExpression ''[ "khoa" ]'';
+        description = ''
+          User names added to the `aoide-vault-access` group — the socket's
+          group, so membership is what lets an ordinary operator-uid agent
+          connect to `/run/aoide-vault/vault.sock` at all (the policy gate
+          inside the broker still decides per-secret/per-consumer after
+          that). Empty by default: `aoide.vault.enable = true` alone grants
+          nobody access until a host names its operator here.
+        '';
+      };
+    };
+
     # ── Lyra paint binary (P-A8 of the binary-split workstream) ────────────
     lyra = {
       enable = mkOption {
