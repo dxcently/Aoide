@@ -248,8 +248,10 @@ pkgs.testers.runNixOSTest {
     # take) from `aoide` outright — it now lives ONLY in the separate
     # `lyra` binary (docs/architecture/PACKAGE-LAYOUT.md, CONTRACTS.md §3)
     # — landing core at 48. The messaging workstream then added `who` (49)
-    # and `inbox list|read|clear` (52), and the vault workstream added
-    # `vault serve|exec|add|rm|grant|revoke` (58) and `vault enroll` (59).
+    # and `inbox list|read|clear` (52), and the secrets workstream added
+    # `secrets serve|exec|add|rm|grant|revoke` (58) and `secrets enroll` (59)
+    # (spelled `vault ...` until the P-V4b rename — paths rename in place,
+    # count holds).
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a verb.
     schema_raw = machine.succeed("aoide schema --json")

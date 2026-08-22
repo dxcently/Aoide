@@ -420,16 +420,17 @@ merge into one document, and neither one's golden test knows the other's
 count.
 
 - `aoide schema --json` — the core contract (the `protocol`/`storage`/
-  `client`/`conduct`/`server`/`conductor`/`upkeep`/`vault`/`cli` verb
+  `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` verb
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
   **59 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
-  `vault serve|exec|add|rm|grant|revoke`, appended newest, Workstream
-  VAULT P-V2 (+6 → 58); `vault enroll`, appended newest, Workstream VAULT
-  P-V3 (+1 → 59)).
+  `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
+  SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
+  SECRETS P-V3 (+1 → 59); spelled `vault ...` until the P-V4b rename —
+  paths rename in place, registration order and count unchanged).
   Core is nix-independent (cargo build, no nix shell-outs) — see the
-  HARD CONSTRAINT note in the binary-split plan; the vault broker holds
+  HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
 - `lyra schema --json` — the AoideOS-surface contract: rice/draft/mode/
   cover/livery/quickshell/screen/shellbridge/herald, the painted surface.
@@ -975,34 +976,34 @@ know.
 }
 ```
 
-### Vault home — NOT under `state/`, contract lives in `crates/vault/README.md`
+### Secrets home — NOT under `state/`, contract lives in `crates/secrets/README.md`
 
-Workstream VAULT's broker (`aoide vault serve`) keeps `policy.json`,
-`backends.json`, and its own append-only `audit.log` in a VAULT HOME
-directory (`aoide-vault`'s `home::vault_home()`: `$AOIDE_VAULT_HOME` env
-override, else a placeholder default until P-V4's nix module provisions
-`/var/lib/aoide-vault`). Deliberately absent from this section, on
+Workstream SECRETS's broker (`aoide secrets serve`) keeps `policy.json`,
+`backends.json`, and its own append-only `audit.log` in a SECRETS HOME
+directory (`aoide-secrets`'s `home::secrets_home()`: `$AOIDE_SECRETS_HOME`
+env override, else a placeholder default until P-V4's nix module provisions
+`/var/lib/aoide-secrets`). Deliberately absent from this section, on
 purpose, not an oversight:
 
 - It is broker-uid-owned, not operator-uid-owned like every file above —
   `state/` is this box's OPERATOR's gitignored runtime tree
-  (`aoide_protocol::aoide_home()`-relative); the vault home belongs to a
+  (`aoide_protocol::aoide_home()`-relative); the secrets home belongs to a
   DIFFERENT (eventually separately-provisioned) uid entirely once P-V4
   deploys it, so folding it under `state/` would misstate who owns it.
 - Its shapes are still v0 and still change fast (P-V3 added `totp.secret`
   and the replay ledger's `totp-replay.json` persistence; P-V4 fixes the
-  real path and permissions) — `crates/vault/README.md`'s "Named seams"
+  real path and permissions) — `crates/secrets/README.md`'s "Named seams"
   section is the living source of truth, updated in the SAME commit as any
   shape change (this crate's own `AGENTS.md`), rather than a second copy
   here that can drift.
 - The one WIRE shape this repo-wide contract owns regardless of where the
   files live — the unix-socket JSON-lines resolve request/reply — is
-  documented in `crates/vault/README.md`'s "The wire" section for the same
+  documented in `crates/secrets/README.md`'s "The wire" section for the same
   reason: it changes with the crate, not with this document's release
   cadence.
 
-If a vault file shape ever needs to be READ by something outside the
-`aoide-vault` crate (a future admin tool, a debugging script), that is the
+If a secrets file shape ever needs to be READ by something outside the
+`aoide-secrets` crate (a future admin tool, a debugging script), that is the
 signal to promote its shape into a numbered subsection here — nothing
 about "broker-owned" is permanent, only "not yet a cross-crate contract".
 

@@ -605,21 +605,22 @@ in
       };
     };
 
-    # ── Vault secrets broker (P-V4 of the vault workstream) ────────────────
-    vault = {
+    # ── Secrets broker (P-V4 of the secrets workstream, renamed from
+    # "vault" at P-V4b) ──────────────────────────────────────────────────
+    secrets = {
       enable = mkOption {
         type = types.bool;
         default = false;
         description = ''
-          Deploy Aoide's secrets broker (`aoide vault serve`) as a SYSTEM
-          service under its own uid (`aoide-vault`), per the vault design's
-          target topology: vault home `/var/lib/aoide-vault` (0700,
-          vault-uid), socket `/run/aoide-vault/vault.sock` (0660, group
-          `aoide-vault-access`) as the only door. Off by default, same
-          house policy as the MCP façade/A2A door/usage poller above — see
-          `modules/nucleus/vault.nix` for the unit, and
-          `pkgs/aoide/crates/vault/README.md` for the broker itself (the
-          binary is nix-independent; this option is deployment only).
+          Deploy Aoide's secrets broker (`aoide secrets serve`) as a SYSTEM
+          service under its own uid (`aoide-secrets`), per the secrets
+          design's target topology: secrets home `/var/lib/aoide-secrets`
+          (0700, secrets-uid), socket `/run/aoide-secrets/secrets.sock`
+          (0660, group `aoide-secrets-access`) as the only door. Off by
+          default, same house policy as the MCP façade/A2A door/usage
+          poller above — see `modules/nucleus/secrets.nix` for the unit,
+          and `pkgs/aoide/crates/secrets/README.md` for the broker itself
+          (the binary is nix-independent; this option is deployment only).
         '';
       };
 
@@ -628,12 +629,13 @@ in
         default = [ ];
         example = literalExpression ''[ "khoa" ]'';
         description = ''
-          User names added to the `aoide-vault-access` group — the socket's
-          group, so membership is what lets an ordinary operator-uid agent
-          connect to `/run/aoide-vault/vault.sock` at all (the policy gate
-          inside the broker still decides per-secret/per-consumer after
-          that). Empty by default: `aoide.vault.enable = true` alone grants
-          nobody access until a host names its operator here.
+          User names added to the `aoide-secrets-access` group — the
+          socket's group, so membership is what lets an ordinary
+          operator-uid agent connect to `/run/aoide-secrets/secrets.sock`
+          at all (the policy gate inside the broker still decides
+          per-secret/per-consumer after that). Empty by default:
+          `aoide.secrets.enable = true` alone grants nobody access until a
+          host names its operator here.
         '';
       };
     };
