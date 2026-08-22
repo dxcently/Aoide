@@ -802,18 +802,34 @@ anyone who can already write to the target's control socket.
 ### `state/inbox.json` — **v0** (messaging plan P-C6, 2026-08-21)
 
 The durable per-host message inbox: every message that actually lands in a
-LOCAL session, filed by `aoide_conduct::graph::send::deliver_local`'s success
-path — the ONE writer that covers a direct `graph send --id`, a `--to`
-resolving local (re-drives `deliver_local` unchanged), a `graph pending
-approve` re-drive, AND the A2A door's own `message/send` Inject arm
-(`crates/server/src/a2a.rs::do_inject`), which builds a `graph send --id`
-invocation and calls `session_send` too — the SAME "one queue, two writers,
-no second implementation" shape `pending.json` (above) already set, except
-here it collapses to ONE writer, because the a2a door never bypasses
-`session_send`. `do_inject` files no entry of its own — see its doc comment.
+LOCAL session, filed by exactly TWO writers — no third site anywhere in the
+tree:
+
+1. `aoide_conduct::graph::send::deliver_local`'s success path — covers a
+   direct `graph send --id`, a `--to` resolving local (re-drives
+   `deliver_local` unchanged), a `graph pending approve` re-drive, AND the
+   A2A door's own `message/send` Inject arm
+   (`crates/server/src/a2a.rs::do_inject`), which builds a `graph send --id`
+   invocation and calls `session_send` too — the SAME "one queue, two
+   writers, no second implementation" shape `pending.json` (above) already
+   set, except this branch alone collapses to one writer, because the a2a
+   door never bypasses `session_send` for an EXISTING session. `do_inject`
+   files no entry of its own — see its doc comment.
+2. `aoide-server`'s `spawn_inject_prompt` (`crates/server/src/a2a.rs`) — the
+   FIRST turn of a brand-new A2A-spawned session (`do_spawn`, which fires
+   whenever an incoming `message/send` carries no `contextId` or asks to
+   spawn). This canNOT go through writer 1: the target `SessionRecord`
+   isn't in `sessions.json` yet at the moment the prompt is typed — it's
+   written by the spawned CHILD process itself once ITS OWN `aoide conduct`
+   starts up, a race `spawn_inject_prompt`'s own connect-and-retry loop
+   already exists to survive (the socket may not even exist yet). Routing
+   through the session registry here would just trade the socket race for
+   a registration race, so this site talks to the raw socket directly and
+   files its own entry right after the write.
+
 An OUTBOUND `--to peer/<x>` send (`deliver_remote`) never files here: the
-message lands in the REMOTE peer's own inbox, via that peer's own
-`do_inject`.
+message lands in the REMOTE peer's own inbox, via whichever of that peer's
+own two writers actually delivers it.
 
 Lives in the gitignored root-runtime `state/` dir (§2), NOT `song/stage/` —
 same tier as `usage.json`/`a2a-agents.json`, never reset by a stage reseed.
@@ -855,14 +871,16 @@ entry currently written.
 ```
 
 `from` is always present (empty string for an anonymous/unattributed
-sender — never omitted, unlike `pending.json`'s optional `from`): the local
-seam uses the same `resolve_sender` output the audit line and the delivered
-payload's provenance prefix already compute; the A2A seam has no caller
-identity to offer today (#51 owns real cross-host provenance — this never
-invents any) so it is honestly empty. No conductor pane yet (rides a later
-phase) and no outbox retry for a peer that was unreachable at send time (the
-sender already gets a clean error from `deliver_remote`; nothing queues a
-retry) — both deliberately deferred, not built.
+sender — never omitted, unlike `pending.json`'s optional `from`): writer 1's
+LOCAL branch uses the same `resolve_sender` output the audit line and the
+delivered payload's provenance prefix already compute; neither of the two
+A2A-reached filings (`do_inject`'s share of writer 1, and writer 2 —
+`spawn_inject_prompt`) has a caller identity to offer today (#51 owns real
+cross-host provenance — this never invents any) so both are honestly empty.
+No conductor pane yet (rides a later phase) and no outbox retry for a peer
+that was unreachable at send time (the sender already gets a clean error
+from `deliver_remote`; nothing queues a retry) — both deliberately deferred,
+not built.
 
 ### `state/usage.json` — **v0**
 
