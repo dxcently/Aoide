@@ -1038,10 +1038,21 @@ restates it for a consumer who never reads this repo's Rust.
 path `/run/aoide-secrets/secrets.sock`, P-V4d — corrected from an earlier
 secrets-home-relative default after the first live deployment found it sent
 an env-less client to the wrong path) as a unix stream socket. One JSON
-object per line, newline-terminated, on both sides — write a request line,
-read exactly one reply line back. The connection may be reused for further
-request/reply pairs or dropped after one; the broker holds no per-connection
-state either way.
+object per line, newline-terminated, on both sides. The framing (P-N2c,
+FIX 1): write ONE request line, then read **zero or more INTERIM lines
+followed by exactly one FINAL reply line** — an interim line is any line
+whose object carries `"interim":true`; the first line without it is the
+final reply and ends that request. Today the only interim line is the park
+announcement below; a future op/mode extends the wire by adding a new
+interim shape or a new `op`, never by overloading the final-reply shape or
+widening `wait` (a bool, see below) into something richer. The connection
+may be reused for further request/reply pairs or dropped after one — but a
+dropped connection is NOT free of state: a `resolve` that parked (below) IS
+per-connection state, held in the broker's in-memory registry until an
+`approve`/`dismiss` from another connection or the timeout resolves it: it
+is not delivered to a `resolve` reply from any other connection. Dropping
+the parked connection does not cancel the ask — it abandons it, unreachable
+until it times out (a corollary of the ask outliving that one socket).
 
 **`resolve`** — read a secret's value:
 ```text
@@ -1074,6 +1085,43 @@ admitted and served normally while one sits parked. A `resolve` WITH a
 non-empty `totp` is completely unaffected by this phase — same fast path,
 same errors, as before. An `automation`-open listed consumer (the gate
 above) never parks either, exactly as it never required a code before.
+
+**The park announces itself (P-N2c, FIX 1).** The instant an ask parks, the
+broker writes an INTERIM line (this section's Transport paragraph) down the
+SAME requesting connection, before ever blocking on the wait:
+```text
+<- {"interim":true,"parked":true,"id":"<id>","timeoutSecs":<N>}
+```
+then later the final reply (granted/denied/dismissed/timed-out) as
+described below. Without this line a caller has no way to learn its own
+ask's id short of a separate `pending` call raced against the park — `aoide
+secrets exec` prints it to STDERR as `parked as ask <id> — complete with:
+aoide secrets approve <id> --totp <code>  (or dismiss <id>); times out in
+<N>s` so an interactive caller is never left staring at a silent hang
+indistinguishable from a wedged broker.
+
+**Ids are nonce-prefixed (P-N2c, FIX 4), not a bare counter.** An id has the
+shape `<4-hex-nonce>-<counter>` (e.g. `3f2a-7`) — the nonce is 2 random
+bytes read once per broker process start and shared by every id that
+process ever mints; the counter still increments per-ask, unreused, exactly
+as before. This exists so a held id can never silently address a DIFFERENT
+ask after a broker restart: the counter alone would restart at 1, so a
+stale id typed against a freshly-restarted broker could otherwise approve
+an unrelated ask that happens to reuse the same small number. An id whose
+nonce doesn't match the CURRENT process's — including any pre-P-N2c bare-
+counter id — is simply unknown, the same `"unknown pending id"` error a
+never-existed id gets; it is never routed to a same-numbered ask under a
+different nonce.
+
+**A registry-wide cap bounds how many asks may park at once (P-N2c, FIX
+3b)**, default 32, `AOIDE_SECRETS_PARK_CAP` env override (whole number;
+same env-only precedent as the timeout knob below). Beyond the cap, a
+codeless `resolve` gets the SAME immediate refusal `wait:false` produces
+(never a park), with a reason naming the cap and its env knob so a caller
+knows to retry inline or wait for an operator to clear a pending ask. This
+exists because an unbounded in-memory registry is an unbounded-memory
+denial-of-service surface; the cap makes that bound explicit and
+operator-tunable instead of implicit.
 
 `resolve` gained one new optional field:
 ```text
@@ -1125,6 +1173,22 @@ error above (`"totp code invalid or expired"`, `"totp code already used"`,
 ...). This reply NEVER carries a `value` field — the value only ever
 reaches the ORIGINAL parked connection's own `resolve` reply.
 
+**`approve` re-runs the FULL authorization gate at release time (P-N2c, FIX
+2), not just the TOTP check.** Before this fix, `approve` validated only
+the code and then fetched by backend/key — a `secrets revoke` issued WHILE
+an ask sat parked did nothing to stop that ask's eventual release, and the
+same gap would have silently bypassed a future `remote` gate too. Now,
+AFTER the code validates (so it is consumed from the replay ledger either
+way — this is deliberate: a burned code beats a reusable one, even on a
+path that goes on to deny) and BEFORE any value is fetched, the broker
+re-checks the SAME exists + consumer-authorization gate `resolve` itself
+runs, against the ask's STORED consumer. A revoked/removed consumer at this
+point denies BOTH replies — the approver's own `approve` reply and the
+original parked caller's `resolve` reply get the identical
+`"consumer not authorized for this secret"` (or `"secret not found"`)
+error; the ask is removed from the registry either way, never left
+dangling.
+
 **`dismiss`** — refuse a parked ask outright, no code needed:
 ```text
 -> {"op":"dismiss","id":"<id>"}
@@ -1132,8 +1196,11 @@ reaches the ORIGINAL parked connection's own `resolve` reply.
 <- {"ok":false,"error":"unknown pending id `<id>`"}
 ```
 The parked connection gets `{"ok":false,"error":"the pending TOTP ask was
-dismissed by an operator before a code was provided"}` on its own `resolve`
-reply; the dismisser's own reply only confirms the dismissal happened.
+dismissed before a code was provided"}` on its own `resolve` reply (P-N2c:
+no "by an operator" claim — any member of the consumers group that can
+reach the socket can dismiss, not only an operator, so the message no
+longer asserts who); the dismisser's own reply only confirms the dismissal
+happened.
 
 Audit (both destinations, name-only, same discipline as `resolve`/`put`):
 park/approve/dismiss/timeout each write one line — the id, the secret name,
