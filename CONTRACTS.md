@@ -374,7 +374,7 @@ Top-level shape (stable keys):
 ```json
 {
   "schemaVersion": "0",
-  "aoide": "0.0.0",
+  "aoide": "0.0.1",
   "commands": [
     {
       "path": ["rice", "compose"],
@@ -2147,3 +2147,22 @@ manufacturing the hazard: a throwaway client pressed a button and called
 - Bumping any version requires: (1) update this file, (2) add a playbook
   migration, (3) update the corresponding `checks` so the new contract is
   asserted.
+
+### Release version (distinct from a contract version above)
+
+Aoide itself carries a release version — `pkgs/aoide/Cargo.toml`'s
+`[workspace.package].version`, the single source every crate inherits via
+`version.workspace = true` and `pkgs/aoide/default.nix` matches by hand
+(User-directed, 2026-08-22). This is NOT a contract version: bumping it
+never implies a §1–§6 contract broke, and a contract bump never requires a
+release bump either — they move independently.
+
+- **Prebeta is `0.0.X`.** Every release today is `0.0.X`; `0.1.0` is beta,
+  out of scope until the User calls it.
+- **The patch number (`X`) bumps only at a User-directed release point** —
+  never automatically per commit, per phase, or per merge.
+- **`aoide schema --json`'s `"aoide"` field is the runtime-readable
+  version** (`aoide_protocol::registry::AOIDE_VERSION`, itself
+  `env!("CARGO_PKG_VERSION")` off the workspace version above) — the doc
+  example a few sections up in this file tracks it and must be bumped in
+  the same commit as any release bump.
