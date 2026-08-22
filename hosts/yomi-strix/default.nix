@@ -85,6 +85,16 @@
   # venue's own `networking.networkmanager.enable` above).
   aoide.networkmanager.enable = true;
 
+  # A2A door resident (was hand-started in every earlier live test) — this box
+  # and sakaki are mutual peers for the live who/send mesh checks.
+  aoide.a2a.enable = true;
+
+  # Secrets broker (workstream #58, P-V4 deployment): own uid, socket-only
+  # door. The operator joins the access group; enrollment happens only when
+  # the User says connect.
+  aoide.secrets.enable = true;
+  aoide.secrets.members = [ "khoa" ];
+
   # Shipped dendrites (off unless wanted; aoide.mcp.enable stays false — house policy).
   aoide.obsidian.enable = true;
   aoide.firefox.enable = true;
