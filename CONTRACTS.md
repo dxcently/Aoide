@@ -423,11 +423,11 @@ count.
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`vault`/`cli` verb
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
-  **58 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **59 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `vault serve|exec|add|rm|grant|revoke`, appended newest, Workstream
-  VAULT P-V2 (+6 → 58) — the plan's own phase estimate was "~52+6", the
-  honest count matches exactly this time).
+  VAULT P-V2 (+6 → 58); `vault enroll`, appended newest, Workstream VAULT
+  P-V3 (+1 → 59)).
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the vault broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
@@ -989,12 +989,12 @@ purpose, not an oversight:
   (`aoide_protocol::aoide_home()`-relative); the vault home belongs to a
   DIFFERENT (eventually separately-provisioned) uid entirely once P-V4
   deploys it, so folding it under `state/` would misstate who owns it.
-- Its shapes are still v0 and still change fast (P-V3 adds a TOTP secret
-  file + the replay ledger's persistence; P-V4 fixes the real path and
-  permissions) — `crates/vault/README.md`'s "Named seams" section is the
-  living source of truth, updated in the SAME commit as any shape change
-  (this crate's own `AGENTS.md`), rather than a second copy here that can
-  drift.
+- Its shapes are still v0 and still change fast (P-V3 added `totp.secret`
+  and the replay ledger's `totp-replay.json` persistence; P-V4 fixes the
+  real path and permissions) — `crates/vault/README.md`'s "Named seams"
+  section is the living source of truth, updated in the SAME commit as any
+  shape change (this crate's own `AGENTS.md`), rather than a second copy
+  here that can drift.
 - The one WIRE shape this repo-wide contract owns regardless of where the
   files live — the unix-socket JSON-lines resolve request/reply — is
   documented in `crates/vault/README.md`'s "The wire" section for the same
