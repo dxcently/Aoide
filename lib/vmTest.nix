@@ -247,8 +247,11 @@ pkgs.testers.runNixOSTest {
     # (rice/draft/mode/cover/livery/shellbridge/quickshell/screen/herald/
     # take) from `aoide` outright — it now lives ONLY in the separate
     # `lyra` binary (docs/architecture/PACKAGE-LAYOUT.md, CONTRACTS.md §3)
-    # — landing core at 48. This tripwire is set straight to the current
-    # true count rather than propagating the old drift.
+    # — landing core at 48. The messaging workstream then added `who` (49)
+    # and `inbox list|read|clear` (52), and the vault workstream added
+    # `vault serve|exec|add|rm|grant|revoke` (58) and `vault enroll` (59).
+    # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
+    # bump BOTH in the same commit that registers a verb.
     schema_raw = machine.succeed("aoide schema --json")
     schema_doc = json.loads(schema_raw)
     # schema --json emits a JSON Outcome envelope:
@@ -260,8 +263,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 48, (
-        f"expected 48 commands, got {cmd_count}.  "
+    assert cmd_count == 59, (
+        f"expected 59 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 
