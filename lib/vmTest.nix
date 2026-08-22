@@ -181,7 +181,7 @@ pkgs.testers.runNixOSTest {
     # ── 2. aoide on PATH ────────────────────────────────────────────────────
     machine.succeed("which aoide")
 
-    # `aoide schema --json` must parse and report exactly 61 commands.
+    # `aoide schema --json` must parse and report exactly 63 commands.
     # This is a deliberate drift tripwire: adding or removing a command must
     # consciously update this count (it caught 8 commands that had landed
     # unrecorded — graph wrap/reap/send, conduct, conductor, and the graph session
@@ -257,7 +257,9 @@ pkgs.testers.runNixOSTest {
     # existing policy's requireTotp bit without hand-editing policy.json
     # (Workstream SECRETS P-V4e; the same phase also added `secrets enroll
     # --show` and a tty-hidden-input prompt for `secrets put`, neither of
-    # which registers a new path) — reached 61.
+    # which registers a new path) — reached 61; bumped by 2 for
+    # `secrets automate` + `secrets expose` — the per-secret automation
+    # and remote-reachability gates (Workstream SECRETS P-N1) — reached 63.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a verb.
     schema_raw = machine.succeed("aoide schema --json")
@@ -271,8 +273,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 61, (
-        f"expected 61 commands, got {cmd_count}.  "
+    assert cmd_count == 63, (
+        f"expected 63 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 
