@@ -1019,12 +1019,14 @@ them. The canonical implementation (and the one place a wire CHANGE lands
 first) is still `crates/secrets/src/broker.rs`'s module doc — this section
 restates it for a consumer who never reads this repo's Rust.
 
-**Transport**: connect `$AOIDE_SECRETS_SOCKET` (else
-`$AOIDE_SECRETS_HOME/secrets.sock`, else `/var/lib/aoide-secrets/
-secrets.sock`) as a unix stream socket. One JSON object per line, newline-
-terminated, on both sides — write a request line, read exactly one reply
-line back. The connection may be reused for further request/reply pairs or
-dropped after one; the broker holds no per-connection state either way.
+**Transport**: connect `$AOIDE_SECRETS_SOCKET` (else the canonical deployed
+path `/run/aoide-secrets/secrets.sock`, P-V4d — corrected from an earlier
+secrets-home-relative default after the first live deployment found it sent
+an env-less client to the wrong path) as a unix stream socket. One JSON
+object per line, newline-terminated, on both sides — write a request line,
+read exactly one reply line back. The connection may be reused for further
+request/reply pairs or dropped after one; the broker holds no per-connection
+state either way.
 
 **`resolve`** — read a secret's value:
 ```text

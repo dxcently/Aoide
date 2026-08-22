@@ -60,6 +60,17 @@
 
 lib.mkIf (config.aoide.enable && config.aoide.secrets.enable) {
 
+  # ── qrencode on the operator's own PATH ──────────────────────────────────
+  # `secrets enroll` (run by the operator, not the broker service — see
+  # "Admin verbs" below) renders its `otpauth://` URI as a QR code only when
+  # `qrencode` is reachable on PATH (`enroll::render_qr`'s feature-detect,
+  # not a Cargo dependency); without it the URI/base32 still print, just no
+  # QR. The first live enrollment attempt (yomi-strix, P-V4d) found
+  # `qrencode` missing from an ordinary operator shell. Not on the broker
+  # unit's own `path` above — enrollment is invoked by hand, never by the
+  # service itself.
+  environment.systemPackages = [ pkgs.qrencode ];
+
   # ── The broker's own uid + the two groups it needs ───────────────────────
   # `aoide-secrets` (the service's own group, home-dir ownership) is separate
   # from `aoide-secrets-access` (the socket's group — who may CONNECT, wired
@@ -92,6 +103,23 @@ lib.mkIf (config.aoide.enable && config.aoide.secrets.enable) {
 
     wantedBy = [ "multi-user.target" ];
     after = [ "multi-user.target" ];
+
+    # P-V4d, live-found on yomi-strix: a systemd unit's default PATH carries
+    # no `sh` — every backend template (`backend.rs`'s `fetch_value`/
+    # `store_value`) runs via `sh -c`, so with NO path at all the broker
+    # bound its socket fine, passed the policy gate, and then failed every
+    # resolve/put with "spawning backend `file`: No such file or directory".
+    # `bash` supplies `sh` (verified: nixpkgs' bash output carries a `sh`
+    # binary alongside `bash` itself); `coreutils` covers `cat`/`mkdir`/
+    # `install`, the three tools the built-in `file` backend's own
+    # GET/SET templates shell out to (`backend.rs`'s `FILE_BACKEND_GET`/
+    # `FILE_BACKEND_SET`). A `pass`/`gopass`/`bw`/`sops` backend template
+    # reaching further than that is the operator's own PATH concern, same as
+    # any other preset (README's "Backend presets").
+    path = [
+      pkgs.bash
+      pkgs.coreutils
+    ];
 
     serviceConfig = {
       # See the module-doc "headless service-anchoring lesson" above:
@@ -127,9 +155,11 @@ lib.mkIf (config.aoide.enable && config.aoide.secrets.enable) {
       # The env tier exists exactly for this (crates/secrets/src/home.rs's
       # module doc: "Set AOIDE_SECRETS_SOCKET/AOIDE_SECRETS_HOME ... on any host
       # that hasn't run P-V4's module yet") — set explicitly rather than
-      # relying on the code's own placeholder default, even though the home
-      # path happens to match it today: a unit that names its own paths
-      # keeps working if the crate's placeholder default ever changes.
+      # relying on the code's own defaults, even though BOTH paths below now
+      # match the code's own defaults exactly (`home.rs`'s placeholder and,
+      # as of P-V4d, `socket.rs`'s canonical `/run` path too): a unit that
+      # names its own paths keeps working if either crate default ever
+      # changes.
       Environment = [
         "AOIDE_SECRETS_HOME=/var/lib/aoide-secrets"
         "AOIDE_SECRETS_SOCKET=/run/aoide-secrets/secrets.sock"
