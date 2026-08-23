@@ -1049,7 +1049,26 @@ restates it for a consumer who never reads this repo's Rust.
 path `/run/aoide-secrets/secrets.sock`, P-V4d — corrected from an earlier
 secrets-home-relative default after the first live deployment found it sent
 an env-less client to the wrong path) as a unix stream socket. One JSON
-object per line, newline-terminated, on both sides. The framing (P-N2c,
+object per line, newline-terminated, on both sides.
+
+**The events feed (P-G4, task #77) is a sibling FILE beside this socket, not
+a second wire op.** A machine consumer that wants a PUSH signal instead of
+polling `resolve`/`pending` may instead tail-follow
+`$AOIDE_SECRETS_EVENTS` (else `socket_path`'s own parent directory joined
+with `events.jsonl` — the default deployed path is
+`/run/aoide-secrets/events.jsonl`, next to `secrets.sock`): one JSON object
+per line, the exact bare `{"event": "<kind>", ...}` payload shapes
+`crates/secrets/README.md`'s "Broker notifications" documents, capped at
+1 MiB (a truncate-to-empty in place past the cap, never rotated — a
+consumer tailing it must treat any shrink as "reopen and read from the
+new start," the same handling `aoide-secrets`'s own `watch::Follower`
+gives it). This exists because the deployed broker unit's
+`ProtectHome=true` blocks the OTHER mirrored destination below
+(`~/Aoide/log`) from ever landing — see that crate's `README.md` for the
+full incident and mechanism; this paragraph only states the shape for a
+consumer that never reads this repo's Rust.
+
+The framing (P-N2c,
 FIX 1): write ONE request line, then read **zero or more INTERIM lines
 followed by exactly one FINAL reply line** — an interim line is any line
 whose object carries `"interim":true`; the first line without it is the
