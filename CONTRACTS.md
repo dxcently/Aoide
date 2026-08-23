@@ -1031,6 +1031,64 @@ purpose, not an oversight:
   this document's release cadence, and nothing outside the `aoide-secrets`
   crate reads them directly.
 
+### Secrets backends — `file`/`age` are the only supported implementations (P-G1, task #70)
+
+`aoide`'s own two built-in backends — `file` (plain `0600` files under
+`<secrets_home>/store/`) and `age` (age-encrypted `0600` files under
+`<secrets_home>/values/`, decrypted with an identity this crate lazily
+mints on the first `age`-backed `put`, never on a `get`) — are the ONLY
+backend IMPLEMENTATIONS this crate supports (User ruling 2026-08-23).
+`pass`/`gopass`/`bw`/`sops` remain DOCUMENTATION-ONLY presets
+(`crates/secrets/README.md`'s "Backend presets"): copy the shape into
+`backends.json` by hand, but integrating with any of those tools is
+unsupported, untested territory this crate makes no promise about —
+`backend.rs` carries no per-backend knowledge of any of the four and no
+test in this crate exercises them.
+
+`secrets add` with no `--backend` flag records `age` — the DEFAULT since
+P-G1 (`file` was the sole implementation, and a hard requirement, before
+it); `--backend file` is the explicit fallback. The default only affects a
+brand-new `add`; an already-recorded policy's `backend` field is never
+touched by it. A `Backend` may also carry an OPTIONAL third template,
+`has` (`#[serde(default)]`, task #70) — `has_value` runs it directly (exit
+0 = has a value) when present, falling back to the pre-existing
+`get`-and-discard probe when absent, so a `backends.json` written before
+this phase loads and behaves identically either way.
+
+**Bounded backend shell-outs (task #74).** Every backend `get`/`set`/`has`
+template shell-out, and the `age` backend's own `age-keygen` identity
+mint, routes through one bound (`backend::run_backend_command`/
+`backend::wait_bounded`): `AOIDE_SECRETS_BACKEND_TIMEOUT` (whole seconds,
+env-only, default 10s) caps how long a template may run. Past the
+deadline, the WHOLE PROCESS GROUP the shell-out spawned is `SIGKILL`ed —
+never just the immediate `sh`, so a pipeline the template itself forked
+can't survive as an orphan — and reaped, and the caller gets a taught
+error naming the backend, the op (`get`/`set`/`has`), and the env knob —
+never the template text, which can't carry a secret value in the first
+place (a value only ever rides a template's own stdin/stdout, never its
+command line).
+
+**`secrets migrate <name> [--backend <target>]` (P-G2, task #72)** moves a
+secret's stored value from its policy's current backend to a target one
+(default `age`) with a fixed ordering, never reordered: fetch from the
+source → (mint the target identity if needed) → store on the TARGET →
+flip and durably save `policy.json` → remove the OLD value LAST. A failure
+before the policy save leaves everything untouched (old value in place,
+policy unflipped); removing the old value only ever happens after the
+flip has already saved, and is BEST-EFFORT — a removal failure is
+reported honestly in the success message but never rolls back or blocks
+the already-successful migration. Old-value removal is
+BUILT-IN-SOURCE-ONLY and path-derived, never a guess: it recognizes
+exactly `file` and `age` as source backends (the same paths their own
+`set` templates write to) and does nothing for any other backend name,
+built-in or not — a `pass`/`gopass`/`bw`/`sops` row, or an operator-custom
+entry, is never touched or removed by `migrate`. `migrate` is an admin
+verb (euid-guarded exactly like `add`/`rm`/`grant`, direct-home, no
+socket) with NO cross-process lock against a concurrently-running broker
+daemon — a `migrate` racing a live `secrets put`/`exec` against the same
+secret through the running daemon is an unprotected window, a known
+limitation, not fixed here.
+
 ### Secrets wire — the machine-consumer contract (P-V4c, parking P-N2)
 
 Promoted out of "living in the crate only" (the promotion criterion this
@@ -1066,7 +1124,13 @@ gives it). This exists because the deployed broker unit's
 `ProtectHome=true` blocks the OTHER mirrored destination below
 (`~/Aoide/log`) from ever landing — see that crate's `README.md` for the
 full incident and mechanism; this paragraph only states the shape for a
-consumer that never reads this repo's Rust.
+consumer that never reads this repo's Rust. `aoide secrets watch` (the
+in-crate consumer) surfaces a parked ask through this feed in about a
+second; its own `client::pending` poll remains the AUTHORITY, reconciling
+once at startup and again on a 30-second safety tick that is a
+RECONCILIATION BACKSTOP (a missed line, a truncation, a broker restart),
+not the primary delivery path — see that crate's README's "Watching
+events" for the full mechanism.
 
 The framing (P-N2c,
 FIX 1): write ONE request line, then read **zero or more INTERIM lines
