@@ -69,7 +69,18 @@ lib.mkIf (config.aoide.enable && config.aoide.secrets.enable) {
   # `qrencode` missing from an ordinary operator shell. Not on the broker
   # unit's own `path` above — enrollment is invoked by hand, never by the
   # service itself.
-  environment.systemPackages = [ pkgs.qrencode ];
+  environment.systemPackages = [
+    pkgs.qrencode
+  ]
+  # ── zenity for `secrets watch --popup` ───────────────────────────────────
+  # Same shape as qrencode above: a hand-invoked verb (`watch --popup`,
+  # crates/secrets/src/watch.rs) feature-detects a PATH binary
+  # (`zenity_available`) and prints a taught install hint when absent — not a
+  # Cargo dependency, not on the broker unit's `path`. Gated on the
+  # quickshell facet because the popup is a desktop surface: a headless box
+  # (sakaki) enables the broker but has no display for a dialog, and
+  # ungated zenity would drag GTK into its closure.
+  ++ lib.optional config.aoide.facets.quickshell.enable pkgs.zenity;
 
   # ── The broker's own uid + the two groups it needs ───────────────────────
   # `aoide-secrets` (the service's own group, home-dir ownership) is separate
