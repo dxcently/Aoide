@@ -130,6 +130,13 @@ lib.mkIf (config.aoide.enable && config.aoide.secrets.enable) {
     path = [
       pkgs.bash
       pkgs.coreutils
+      # AGE LANE (P-G1): the built-in age backend's templates shell out to
+      # `age`/`age-keygen` AS THE BROKER (encrypt/decrypt/lazy identity mint
+      # all happen on the broker side of the socket), so the binary belongs
+      # on the UNIT's path — not systemPackages; the operator's shell never
+      # runs age itself. The code stays nix-independent: a missing binary
+      # earns a taught install-hint error, this line is just one packaging.
+      pkgs.age
     ];
 
     serviceConfig = {
