@@ -16,7 +16,11 @@ start at [[aoide-cli]] and the group pages linked below.
   record to `~/Aoide/log` (`$AOIDE_AUDIT_LOG` / `--audit-log` override).
 - **Gating:** exactly three commands carry `gated: true` (`rice declare`,
   `content approve`, `update`) — the user rebuild gate ([[Rebuild-Gate]]).
-  `graph send` and `screen send` hold pending approval internally instead.
+  `graph send` and `screen send` hold pending approval internally instead;
+  `secrets exec` holds the same way when a TOTP code is required and
+  absent — the connection PARKS until a separate `secrets approve`/
+  `dismiss` call or a timeout, rather than carrying `gated: true`
+  ([[Secrets-Broker]]).
 - **Runtime roots:** repo-relative paths below resolve under `~/Aoide/` —
   `state/` via `$AOIDE_STATE_DIR`, `song/stage/` via `$AOIDE_STAGE_DIR`.
   Stage/state writes are atomic temp-then-rename.

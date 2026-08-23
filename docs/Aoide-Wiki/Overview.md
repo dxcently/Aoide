@@ -31,6 +31,7 @@ As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switch
 - [[Song-Vocabulary]] — the performed-half naming map: key, melody, component tier, instruments, design, songbook, cover, chimes, stage, rehearsal, recording
 - [[Agent-Interface]] — the CLI-first capability surface: `aoide <cmd>`, MCP as a generated façade, guide tiers, and agent-first ergonomics
 - [[A2A-Door]] — aoide's third door: the bidirectional Agent2Agent (JSON-RPC/HTTP) interop wire — a discoverable A2A agent (server) and an A2A client that drives external agents, all from the one command registry
+- [[Secrets-Broker]] — the credential door: a socket-only broker under its own uid, TOTP-gated resolves that park until an operator approves or dismisses them, an automation gate for named consumers, and an age-encrypted default backend
 - [[Desktop-Architecture]] — how aoided, shellbridge, Quickshell, and the compositor compose into a single agent-ready desktop body
 - [[Content-Pipeline]] — the discover → propose → approve → ingest → lint → query pipeline; the approve gate, quarantine branch, and Mneme integration
 - [[Governance]] — the rebuild gate (polkit pattern), the single audit log, and the mutation policy encoded in radial distance from the nucleus

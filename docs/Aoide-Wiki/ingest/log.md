@@ -818,3 +818,37 @@ assertion both stale — is renamed
 kimi's keys instead of asserting they're absent; pi's stay `None` (no live
 probe yet). `references/cli/Graph-and-Conduct.md`'s `graph permit` entry
 corrected to match — no other page asserted kimi refuses a summons.
+
+## [2026-08-23] ingest | Workstream SECRETS (pkgs/aoide/crates/secrets/{README,AGENTS}.md, CONTRACTS.md's Secrets wire subsection)
+
+- 1 concept page created: [[Secrets-Broker]] — identity + release-to-client
+  flow, policy (`consumers[]`/`requireTotp`/`automation`/`remote`), the
+  parked-TOTP-resolve lifecycle (`pending`/`approve`/`dismiss`), `secrets
+  watch`/`--popup`, the `file`/`age` backends and `secrets migrate`, and
+  deployment (`aoide-secrets-serve`, `ProtectHome=true`, the events feed).
+- Pages updated: `Overview.md` (Concepts list), `entities/aoide-cli.md`
+  (the `aoide_secrets` registry entry, the leaf table's missing `secrets`
+  row, a new `secrets` paragraph, the stale `48 leaves`/`63 leaves` count
+  corrected to the live `secrets migrate`-inclusive total), `concepts/
+  Full-Architecture.md` (the command-tree breakdown gained `secrets`, the
+  systemd-units paragraph gained the broker's own SYSTEM service), `concepts/
+  governance/Governance.md` (the secrets broker mirrors into the same audit
+  log; its gate is parking, not the rebuild gate), `references/cli/Index.md`
+  (the Gating bullet gained `secrets exec`'s park-instead-of-`gated:true`
+  shape), `ingest/index.md` (new gloss + the `aoide-cli` gloss's stale
+  `83-command tree` figure dropped, its own count never having matched
+  either binary's real total).
+- Subjects deferred to mentions, not their own page: TOTP/RFC 6238,
+  `secrets put`'s overwrite-warning flow, and the age-identity lazy-mint —
+  folded into [[Secrets-Broker]]'s own sections rather than split out.
+- Not touched (drift spotted, out of this pass's scope): `aoide-cli.md`'s
+  and `Full-Architecture.md`'s command counts were already short by an
+  `inbox` (3-verb) and a `who` (1-verb) group predating this pass — flagged
+  in both pages' own prose rather than silently absorbed into the corrected
+  secrets-inclusive totals; `references/fleshing-out-aoide-ricing.md`
+  asserts "aoide implements no authentication and holds no secret" in two
+  places, now superseded by this broker — not a wiki content page under
+  this pass's naming convention (a `references/` design doc), left
+  unedited; `Full-Architecture.md`'s own tree diagram still calls
+  `pkgs/aoide` "one crate today", stale against the landed pi-style crate
+  split (secrets included) — unrelated to this pass, left unedited.

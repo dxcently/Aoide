@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-08-21
+updated: 2026-08-23
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
@@ -43,8 +43,11 @@ Each DOMAIN crate contributes its own entries through its own
 composition root); `cli/src/commands/mod.rs::all()` assembles the full
 registry in the historical `schema --json` order, calling into
 `aoide_server`, `aoide_conduct`, `aoide_client`, `aoide_conductor`,
-`aoide_storage`, and `aoide_upkeep` in turn, plus its own root-coupled
-`meta`/`stubs`/`infra` groups. P-A5 of the binary-split workstream removed
+`aoide_storage`, `aoide_upkeep`, and `aoide_secrets` in turn, plus its own
+root-coupled `meta`/`stubs`/`infra` groups. `aoide_secrets::commands::
+register` is appended newest — the [[Secrets-Broker]] group (`serve`/
+`exec`/`add`/`rm`/`grant`/`revoke`/`enroll`/`put`/`set-totp`/`automate`/
+`expose`/`migrate`/`pending`/`approve`/`dismiss`/`watch`). P-A5 of the binary-split workstream removed
 the 11 register lines for the painted bundle (rice/draft/mode/cover/livery/
 rice-late-stubs/shellbridge/quickshell/screen/herald/take) from this list —
 those 39 command paths now live only in `crates/lyra/src/commands/mod.rs::all()`.
@@ -60,11 +63,13 @@ shows as a deliberate, visible diff against that pinned snapshot — the same
 shape as Hermes-agent's self-registering tool registry and Claude Code's
 discrete-tools-behind-a-thin-dispatch design.
 
-The command surface: **48 leaves** (`aoide schema --json | jq '.commands |
-length'`; `lyra schema --json` carries the other 42 — see above). The
-per-command dev reference — signature, files read, files written, where
+The command surface holds **64 leaves across the groups this page tracks**;
+`aoide schema --json | jq '.commands | length'` reports a higher live
+count, since two further groups (`inbox`, `who`) exist and are not yet
+covered here. `lyra schema --json` carries the painted surface — see above.
+The per-command dev reference — signature, files read, files written, where
 output pipes to — lives at [[references/cli/Index|references/cli/]]; the
-table below sums groups only:
+table below sums the groups it documents:
 
 | Group | Leaves | Real / stub |
 |---|---|---|
@@ -80,6 +85,7 @@ table below sums groups only:
 | `conductor` | 1 | real |
 | `a2a serve`, `a2a agent add/list/remove/send` | 5 | real |
 | `peer add/list/remove/pull/status` | 5 | real (same-network federation — `CONTRACTS.md` §7) |
+| `secrets serve/exec/add/rm/grant/revoke/enroll/put/set-totp/automate/expose/migrate/pending/approve/dismiss/watch` | 16 | real ([[Secrets-Broker]] — TOTP-gated resolves, socket-only, own uid) |
 | `usage` | 1 | real |
 | `hooks install` | 1 | real |
 | `soundcheck` | 1 | real — report-only mechanical-integrity sweep of the working tree; writes nothing |
@@ -90,7 +96,13 @@ AgentCard + `message/send` + `tasks/get` + SSE streaming, off by default,
 loopback-bound); the four `a2a agent` verbs are the client side, registering
 and driving external A2A agents through `state/a2a-agents.json`. **`usage`**
 computes the local token/cost rollup that backs the opt-in claude.ai usage
-gadget ([[Gadget-Dock]]). **`hooks install <agent> [--capture]`** is the
+gadget ([[Gadget-Dock]]). **`secrets`** is the credential door: `secrets
+exec`/`secrets put` release a value into the caller's own process without
+ever logging it, gated by per-secret `consumers[]` and an optional TOTP
+code; `secrets pending`/`approve`/`dismiss` complete or refuse a codeless
+TOTP resolve that PARKED instead of refusing outright; `secrets watch
+[--popup]` is the terminal (or zenity) surface that completes a parked ask
+live. See [[Secrets-Broker]]. **`hooks install <agent> [--capture]`** is the
 hook-installer verb: it merges aoide's hook wiring into the named harness's
 settings file (path + format come from the harness's `AgentProfile` — claude:
 JSON merge into `~/.claude/settings.json`; kimi: text-level `[[hooks]]`
@@ -252,6 +264,7 @@ the log location, else the `aoide.auditLog` default applies.
 - [[Agent-Interface]]
 - [[A2A-Door]]
 - [[Peer-Federation]]
+- [[Secrets-Broker]]
 - [[Screen-Control]]
 - [[Session-Graph]]
 - [[Terminal-Commander]]

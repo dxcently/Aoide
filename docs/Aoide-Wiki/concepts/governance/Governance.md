@@ -3,7 +3,7 @@ type: concept
 created: 2026-07-25
 tags: [aoide, governance, policy]
 source: "[[references/AOIDE-HANDOFF]]"
-updated: 2026-08-13
+updated: 2026-08-23
 ---
 
 # Governance — Gates, Contracts, Audit
@@ -19,6 +19,14 @@ the MCP façade, and the [[A2A-Door]] — inherit the same gate and write to the
 same audit log at `~/Aoide/log`, each dispatch tagged with the door it came
 through (`Door::Cli` / `Door::Mcp` / `Door::A2a`). There is no separate audit
 path per interface — divergence between the doors is structurally impossible.
+
+The [[Secrets-Broker]] mirrors its own resolve/put/approve/dismiss
+decisions into the same log, tagged `Secret`, broker-side only — a value
+itself never rides an audit line, only the grant/deny outcome and the
+names involved. Its gate is a distinct mechanism from the rebuild gate
+below: a codeless TOTP resolve PARKS a connection open until a separate
+`secrets approve`/`dismiss` call or a timeout, rather than admitting at
+rebuild time.
 
 ## Admission across the doors
 
@@ -59,4 +67,5 @@ Neither Aoide nor Melete run background self-update processes. All updates — f
 - [[Clone-and-Run]]
 - [[Agent-Interface]]
 - [[A2A-Door]]
+- [[Secrets-Broker]]
 - [[Content-Pipeline]]

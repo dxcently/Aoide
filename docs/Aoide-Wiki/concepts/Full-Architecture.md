@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-14
+updated: 2026-08-23
 tags: [aoide, architecture, desktop, livery, pipeline]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -314,17 +314,22 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   `aoide schema --json` is its machine-readable source of truth; the stdio
   MCP façade (`aoide mcp serve --stdio`) generates its tool list from it, and
   the [[A2A-Door]]'s AgentCard is derived from the same schema — all
-  one-to-one. The tree holds **48 commands** — real (40): `guide`, `schema`,
+  one-to-one. This page tracks **64 commands** — real (56): `guide`, `schema`,
   `mcp serve`, `daemon`, `conduct`, `conductor`, `adapter melete`, the
   5-verb `a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`),
   the 5-verb `peer` group (`peer add/list/remove/pull/status` — cross-device
-  peer federation, [[Peer-Federation]]), `usage`, `hooks install`,
-  `soundcheck`, and the 20-verb `graph` group (the [[Session-Graph]] DAG
-  viewer + management layer over projects and sessions, incl. `graph
-  send`/`wrap`/`reap` and the `graph pending list|approve|deny`
-  held-injection queue, all real); stubs (8, exit 64): the 5-verb `content`
-  group (`register`/`propose`/`ingest`/`query`/`approve`), `make`, `update`,
-  `onboard`. Core is nix-independent: cargo build, zero nix shell-outs.
+  peer federation, [[Peer-Federation]]), the 16-verb `secrets` group
+  (`serve`/`exec`/`add`/`rm`/`grant`/`revoke`/`enroll`/`put`/`set-totp`/
+  `automate`/`expose`/`migrate`/`pending`/`approve`/`dismiss`/`watch` — the
+  socket-only credential broker under its own uid, [[Secrets-Broker]]),
+  `usage`, `hooks install`, `soundcheck`, and the 20-verb `graph` group (the
+  [[Session-Graph]] DAG viewer + management layer over projects and
+  sessions, incl. `graph send`/`wrap`/`reap` and the `graph pending
+  list|approve|deny` held-injection queue, all real); stubs (8, exit 64):
+  the 5-verb `content` group (`register`/`propose`/`ingest`/`query`/
+  `approve`), `make`, `update`, `onboard`. Two further groups (`inbox`,
+  `who`) exist beyond what this page tracks. Core is nix-independent: cargo
+  build, zero nix shell-outs.
 - **`lyra`** — the AoideOS paint binary. `lyra schema --json` holds the other
   **42 commands**: the 16-verb `rice` group (`lint`, `stage`, `compose`, the
   3-verb `rice draft` group, the 4-verb `rice mode` group, the 5-verb `rice
@@ -346,7 +351,11 @@ On the host, the plane runs as systemd user units, all from the nucleus:
 `aoide-melete-adapter`, and `aoide-mcp` (gated on `aoide.mcp.enable`, default
 false) — plus the opt-in `aoide-a2a` ([[A2A-Door]], gated on `aoide.a2a.enable`)
 and `aoide-usage` (gated on `aoide.usage.enable`) units, and the
-`aoide-obsidian-register` oneshot from the shipped dendrite.
+`aoide-obsidian-register` oneshot from the shipped dendrite. The
+[[Secrets-Broker]] runs separately, as its own SYSTEM (not user) service —
+`aoide-secrets-serve`, gated on `aoide.secrets.enable`, own uid
+`aoide-secrets` — anchored to `multi-user.target` rather than a graphical
+session.
 Live state lands in `song/stage/{livery,sessions,hooks,projects,graph}.json`
 (the last two from the [[Session-Graph]] layer). `lib/mkHost.nix`
 injects `pkgs.aoide` by overlay from the **same**
@@ -427,4 +436,5 @@ headless boot of the assembled stack) fail eval on violation.
 - [[Content-Pipeline]]
 - [[Agent-Interface]]
 - [[Governance]]
+- [[Secrets-Broker]]
 - [[Song-Vocabulary]]
