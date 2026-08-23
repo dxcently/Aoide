@@ -235,6 +235,29 @@ more robust idiom, not a fix for a broken binding.)
   and force itself closed when the count hits zero ("no stuck-open empty
   popout").
 
+**SNI dbusmenus and popup keyboard input** (the network/tray pass,
+2026-08-23, all hit live):
+
+- **`QsMenuAnchor.open()` hard-errors unless quickshell runs in QApplication
+  mode** — `ERROR: Cannot call QsMenuAnchor.open() as quickshell was not
+  started in QApplication mode.` The fix is `//@ pragma UseQApplication` at
+  the top of the ROOT file (`shell.qml`, facet-side) and a real
+  `aoide-quickshell.service` restart — a reload does not re-create the
+  application object. No other behavior difference observed after the switch.
+- **`onlyMenu`/ItemIsMenu is NOT a usable discriminator for "click should
+  open the menu".** nm-applet publishes a `Menu` object path and NO
+  ItemIsMenu property at all (busctl-verified), and libayatana items never
+  implement Activate — so gating the menu on `onlyMenu` reproduces the exact
+  silent click it was meant to fix. The tray row goes menu-first on both
+  buttons whenever `hasMenu`; only menu-less items get activate/
+  secondaryActivate.
+- **Keyboard never reaches an xdg_popup without a compositor focus grab.**
+  The bar's layer surface takes no keys and neither does its popup chain, so
+  a `TextInput` in a popout (the DIKTYON PSK line) needs
+  `HyprlandFocusGrab { windows: [ QsWindow.window ]; active: … }` around its
+  open state. Bonus: the grab clearing on an outside click IS the dismiss
+  gesture — fold the input in `onCleared`.
+
 **Files:** `FileView` with `watchChanges: true` + `onFileChanged: reload()`;
 parse inside `try/catch` and HOLD the last good value on garbage rather than
 resetting to zero.

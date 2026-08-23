@@ -1,4 +1,11 @@
+//@ pragma UseQApplication
 // shell.qml — Aoide Quickshell root.
+//
+// QApplication mode (the pragma above, 2026-08-23): required so
+// QsMenuAnchor.open() can show platform menus — the bar's tray popout opens
+// SNI items' dbusmenus (nm-applet first); quickshell hard-errors the call in
+// its default QGuiApplication mode. Costs a restart to take effect; no other
+// behavior difference observed on this rig.
 //
 // Entry point for the Quickshell session. Instantiates all surface widgets
 // and wires the shared livery loader (LiveryState) so every widget hot-reloads

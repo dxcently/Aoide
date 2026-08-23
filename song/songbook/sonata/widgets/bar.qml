@@ -150,8 +150,12 @@
 //                  own `api.bluez5.profile` property (the profile READ).
 //   - Bluetooth  → bluez adapter power + connected device (Quickshell 0.3.0).
 //   - UPower     → display-device battery.
-//   - Network    → /proc/net/route via FileView (files-not-processes rule).
-//   - SystemTray → StatusNotifier items (the collapsible tray).
+//   - Network    → /proc/net/route via FileView (files-not-processes rule)
+//                  for the GLYPH; Quickshell.Networking (native NM binding)
+//                  for the DIKTYON picker stele — scan/join/forget/PSK.
+//   - SystemTray → StatusNotifier items (the collapsible tray); rows open
+//                  their dbusmenu via QsMenuAnchor (needs the shell.qml
+//                  UseQApplication pragma — see hazards.md §4).
 //   - Sessions   → song/stage/sessions.json + hooks.json via FileView.
 
 import QtQuick
@@ -163,6 +167,7 @@ import Quickshell.Bluetooth
 import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
 import Quickshell.Services.SystemTray
+import Quickshell.Networking
 // Reaches the facet's shared, reusable `WidgetSlot` — none of it is
 // bar-specific content, so it stays in the facet rather than moving here.
 // BarPopout and AudioColonnade moved to sonata/widgets/ in P1, StelePopout
@@ -1022,11 +1027,18 @@ component WorkspaceRow: Item {
         Component.onCompleted: hooksFile.reload()
     }
 
-    // ── Network (procfs FileView — no NM service at this rev) ───────────────
+    // ── Network (glyph: procfs FileView · stele: Quickshell.Networking) ─────
     // /proc/net/route lists every iface that has a route; the default route is
     // the row whose Destination field is "00000000". Reading a kernel file (not
     // spawning a process) keeps us inside the no-shell-out rule. Real iface
     // names — classified wifi vs ethernet by prefix (wl* → wifi).
+    //
+    // The GLYPH keeps this procfs read (cheap, service-independent, proven);
+    // the DIKTYON popout below reads Quickshell.Networking instead — the
+    // native NM binding this Quickshell rev ships (a service call in the
+    // SystemTray/UPower class, sanctioned by hazards.md §5, not a shell-out).
+    // The two disagree only in the window where NM knows something the route
+    // table doesn't yet, which is exactly when the popout is the truth.
     property string netKind: "down"   // "wifi" | "eth" | "down"
     function parseRoute(text) {
         if (!text) return "down"
@@ -1063,6 +1075,43 @@ component WorkspaceRow: Item {
         if (kind === "wifi") return "wifi"
         if (kind === "eth")  return "eth"
         return "off"
+    }
+
+    // DIKTYON popout state + native device handles. Same hand-scan idiom as
+    // the Bluetooth block above (_rescanBt): rescan on model edges, plus a
+    // zero-size watcher Repeater for the property changes the model itself
+    // is silent on. First device of each type wins — this rig carries one
+    // wifi radio and one NIC, and a second of either is a redesign, not a
+    // loop tweak.
+    property bool netOpen: false
+    property var wifiDev: null
+    property var wiredDev: null
+    function _rescanNetDevices() {
+        var vals = (Networking.devices && Networking.devices.values)
+                   ? Networking.devices.values : []
+        var w = null, e = null
+        for (var i = 0; i < vals.length; i++) {
+            var d = vals[i]
+            if (!d) continue
+            if (!w && d.type === DeviceType.Wifi)  w = d
+            if (!e && d.type === DeviceType.Wired) e = d
+        }
+        wifiDev = w
+        wiredDev = e
+    }
+    Connections {
+        target: Networking.devices
+        function onObjectInsertedPost(obj, index) { root._rescanNetDevices() }
+        function onObjectRemovedPost(obj, index)  { root._rescanNetDevices() }
+    }
+    // Active scanning only while the stele is open — WifiDevice.scannerEnabled
+    // asks NM for a live scan loop; leaving it on full-time burns radio time
+    // for a closed popout. `when` guards the null window before NM reports.
+    Binding {
+        target: root.wifiDev
+        property: "scannerEnabled"
+        value: root.netOpen
+        when: root.wifiDev !== null
     }
 
     // ── Rice mode vocabulary (Aoide-native — livery.riceMode) ───────────────
@@ -1128,7 +1177,7 @@ component WorkspaceRow: Item {
     function rollKaomoji() {
         root.kaomojiIdx = Math.floor(Math.random() * root.kaomojiSet.length)
     }
-    Component.onCompleted: { rollKaomoji(); _recountTray() }
+    Component.onCompleted: { rollKaomoji(); _recountTray(); _rescanNetDevices() }
     // Re-roll on every active-window change — so landing on an empty workspace
     // shows a freshly-random face (it's only displayed when the title is empty).
     Connections {
@@ -1589,14 +1638,25 @@ component WorkspaceRow: Item {
         }
 
         // Network — black ink; a live link is full-strength, a dead link falls
-        // to a dim rest (𝄽) at reduced opacity.
+        // to a dim rest (𝄽) at reduced opacity. Click toggles the DIKTYON
+        // stele (StelePopout in the POPOUTS section) — an open cell takes the
+        // accent + underline, the volume/tray open convention. Before
+        // 2026-08-23 this cell was a bare Text with NO MouseArea at all —
+        // "clicking it does nothing" was literal, not a wiring bug.
         Text {
+            id: netText
             anchors.verticalCenter: parent.verticalCenter
             text: root.netGlyph(root.netKind) + " " + root.netLabel(root.netKind)
-            color: root.livery.paletteFg
-            opacity: root.netKind === "down" ? 0.5 : 1.0
+            color: root.netOpen ? root.livery.paletteAccent : root.livery.paletteFg
+            opacity: root.netOpen ? 1.0 : (root.netKind === "down" ? 0.5 : 1.0)
             font.family: "monospace"
             font.pixelSize: 14
+            font.underline: root.netOpen
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.netOpen = !root.netOpen
+            }
         }
 
         // ── System tray — the fermata toggle ───────────────────────────────
@@ -2365,11 +2425,17 @@ component WorkspaceRow: Item {
     //
     // Wiring, grounded: the Repeater binds SystemTray.items (the ObjectModel)
     // directly, never a .values.slice() copy (design/hazards.md §4). Left
-    // click → activate(), right → secondaryActivate(); this Quickshell rev
-    // exposes no tertiaryActivate. modelData.icon is already an image URL,
-    // rendered straight in an Image. Every rare glyph rides a NAMED face at
-    // REGULAR weight — the fermata pair's bold-monospace invisibility scar
-    // is documented on the toggle above.
+    // click → activate() — UNLESS the item is menu-only (onlyMenu, the
+    // appindicator/dbusmenu breed: nm-applet is one), where Activate is not
+    // implemented at all and the old unconditional activate() clicked into
+    // silence (the User's 2026-08-23 "clicking it does nothing"). Menu-only
+    // items open their dbusmenu through a QsMenuAnchor instead; right click
+    // prefers the menu whenever one exists, falling back to
+    // secondaryActivate(). This Quickshell rev exposes no tertiaryActivate.
+    // modelData.icon is already an image URL, rendered straight in an Image.
+    // Every rare glyph rides a NAMED face at REGULAR weight — the fermata
+    // pair's bold-monospace invisibility scar is documented on the toggle
+    // above.
     StelePopout {
         cell: trayToggle
         shown: root.trayOpen && root.trayCount > 0
@@ -2625,18 +2691,45 @@ component WorkspaceRow: Item {
                                     }
                                 }
 
+                                // The item's dbusmenu, hung under this row.
+                                // anchor.item gives QsMenuAnchor both the
+                                // window (the StelePopout popup) and the
+                                // rect; the menu opens as its own popup
+                                // below the row.
+                                QsMenuAnchor {
+                                    id: rowMenu
+                                    menu: trayRow.modelData ? trayRow.modelData.menu : null
+                                    anchor.item: trayRow
+                                    anchor.edges: Edges.Bottom
+                                    anchor.gravity: Edges.Bottom
+                                }
+
                                 MouseArea {
                                     id: rowMa
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                                     cursorShape: Qt.PointingHandCursor
+                                    // Menu-first on BOTH buttons when a menu
+                                    // exists: onlyMenu (ItemIsMenu) cannot be
+                                    // trusted as the discriminator — nm-applet
+                                    // publishes a Menu path and NO ItemIsMenu
+                                    // property at all (busctl-verified live,
+                                    // 2026-08-23), and libayatana items never
+                                    // implement Activate, so gating the menu
+                                    // on onlyMenu re-created the exact silent
+                                    // click this fixes. An item with no menu
+                                    // still gets its activate pair.
                                     onClicked: function(mouse) {
-                                        if (!trayRow.modelData) return
-                                        if (mouse.button === Qt.RightButton)
-                                            trayRow.modelData.secondaryActivate()
-                                        else
-                                            trayRow.modelData.activate()
+                                        var m = trayRow.modelData
+                                        if (!m) return
+                                        if (m.hasMenu) {
+                                            rowMenu.open()
+                                        } else if (mouse.button === Qt.RightButton) {
+                                            m.secondaryActivate()
+                                        } else {
+                                            m.activate()
+                                        }
                                     }
                                 }
                             }
@@ -2694,6 +2787,691 @@ component WorkspaceRow: Item {
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: 1
                             height: 1; color: tstele.withA(tstele.sig, 0.55)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── DIKTYON — the network stele (native NM picker) ─────────────────────
+    // Toggled by the network cell (root.netOpen). Hosted BARE via StelePopout
+    // (khoa's 2026-07-31 standing direction). Born 2026-08-23 from the User's
+    // "clicking it does nothing, and I cannot quick add networks/discover
+    // them": the answer is not nm-applet's GTK menu but a native stele over
+    // Quickshell.Networking — discovery (live scan while open), quick-join
+    // (click a row; a secured unknown row unrolls an inline PSK line), and
+    // the wifi kill-switch, all in the house grammar. nm-applet stays in the
+    // RETINUE for what the native API doesn't reach (VPNs, hidden-SSID add) —
+    // its dbusmenu now actually opens from there.
+    //
+    //   · ORDER     — the shared eleven-part stele at the shared sizes
+    //                 (design/making-a-widget.md §1); the body is one
+    //                 manuscript-ruled line per heard network — the
+    //                 launcher/tray row idiom, no invented layout.
+    //   · SIGNATURE — clay (livery.base09). Murex went to the colonnade
+    //                 (2026-08-16), verdigris to the tray, rust to the
+    //                 herald; clay held two steles at once until the
+    //                 colonnade moved off it, so the sharing precedent is
+    //                 clay's own (calendar keeps it too). Aegean was the
+    //                 poetic pick (δίκτυον, the fisherman's net) and is
+    //                 REJECTED: the grammar caps holoBlue at information,
+    //                 never chrome (greek-grammar.md §5).
+    //   · CROWN     — 𝄌 coda: the jump-mark that binds two distant points
+    //                 of a score into one performance — a network. Renders
+    //                 live in powermenu.qml (LOGOUT) at this face.
+    //   · FRIEZE    — a beacon course: repeated three-arc signal fans,
+    //                 Canvas, 10px, lineWidth 1.2, in the signature.
+    //   · STATES    — signal strength is spoken in DYNAMICS (𝆏𝆏…𝆑𝆑, the
+    //                 meters.qml scale, proven on screen); the connected
+    //                 row's name takes the accent (open/active/live);
+    //                 a connecting row wears 𝄐 + the 600ms pulse (the
+    //                 awaiting register); hover is the one laurel (rule +
+    //                 margin ♪, the launcher/tray selection).
+    //
+    // Grounded: Networking.devices/WifiDevice/WifiNetwork per the compiled
+    // quickshell-network.qmltypes (connect/connectWithPsk/forget/disconnect,
+    // connectionFailed(NoSecrets) → the PSK line opens itself). The sorted
+    // list rides a ScriptModel — it diffs by object identity, so a re-sort
+    // does not tear down every delegate the way a bare .values.slice() model
+    // would (hazards.md §4). Silent property changes (strength/connected/
+    // known) re-sort through a zero-size watcher Repeater bound to the
+    // ObjectModel directly — the Bluetooth block's idiom.
+    StelePopout {
+        cell: netText
+        shown: root.netOpen
+
+        Item {
+            id: nstele
+            width: 320
+            implicitHeight: netBody.height + 5   // +5 clears the cast shadow
+
+            // type voices — shared across the pantheon (greek-grammar.md §1)
+            readonly property string faceSerif: "Noto Serif"
+            readonly property string faceMono:  "JetBrainsMono Nerd Font"
+            readonly property string faceMusic: "Noto Music"
+
+            // this stele's signature — CLAY (base09)
+            readonly property color sig: root.livery.base09
+            readonly property color ink: root.livery.paletteFg
+
+            function withA(cstr, a) {
+                var c = Qt.color(cstr)
+                return Qt.rgba(c.r, c.g, c.b, a)
+            }
+
+            // ── data shaping ────────────────────────────────────────────
+            property var wifiSorted: []
+            property var pskTarget: null    // WifiNetwork the PSK line asks for
+            property string lastFail: ""    // one line, terracotta, cleared on retry
+
+            function resort() {
+                var dev = root.wifiDev
+                var vals = (dev && dev.networks && dev.networks.values)
+                           ? dev.networks.values : []
+                var arr = vals.slice()
+                arr.sort(function(a, b) {
+                    if (a.connected !== b.connected) return a.connected ? -1 : 1
+                    if (a.known !== b.known) return a.known ? -1 : 1
+                    return b.signalStrength - a.signalStrength
+                })
+                wifiSorted = arr
+            }
+            // NM reports strength as 0–100; the binding docs say double, so
+            // normalize defensively instead of trusting either convention.
+            function pct(s) {
+                var v = s <= 1.0 ? s * 100 : s
+                return Math.max(0, Math.min(100, Math.round(v)))
+            }
+            function dynGlyph(p) {           // the meters.qml dynamics scale
+                if (p >= 85) return "𝆑𝆑"
+                if (p >= 65) return "𝆑"
+                if (p >= 45) return "𝆐"
+                if (p >= 25) return "𝆏"
+                return "𝆏𝆏"
+            }
+            function secWord(s) {
+                if (s === WifiSecurityType.Open) return "open"
+                if (s === WifiSecurityType.Owe) return "owe"
+                if (s === WifiSecurityType.Sae
+                    || s === WifiSecurityType.Wpa3SuiteB192) return "wpa3"
+                if (s === WifiSecurityType.Wpa2Psk
+                    || s === WifiSecurityType.Wpa2Eap) return "wpa2"
+                if (s === WifiSecurityType.WpaPsk
+                    || s === WifiSecurityType.WpaEap) return "wpa"
+                return "wep"
+            }
+            function secured(s) {
+                return s !== WifiSecurityType.Open && s !== WifiSecurityType.Owe
+            }
+            function openPsk(n) { pskTarget = n }
+            function clearPsk() { pskTarget = null }
+            function connWord() {
+                var c = Networking.connectivity
+                if (c === NetworkConnectivity.Full)    return "full"
+                if (c === NetworkConnectivity.Limited) return "limited"
+                if (c === NetworkConnectivity.Portal)  return "portal"
+                if (c === NetworkConnectivity.None)    return "cut"
+                return "?"
+            }
+            // one mood face, keyed on the live connectivity read
+            function kaomojiFor() {
+                if (!Networking.wifiEnabled && !root.wiredDev) return "( ´ω` )zZ"
+                var c = Networking.connectivity
+                if (c === NetworkConnectivity.Full)    return "( ｀･ω･´)"
+                if (c === NetworkConnectivity.None)    return "( ´･ω･` )"
+                return "( ･ω･ )?"
+            }
+
+            // re-sort on arrivals/departures…
+            Connections {
+                target: root.wifiDev ? root.wifiDev.networks : null
+                function onObjectInsertedPost(obj, index) { nstele.resort() }
+                function onObjectRemovedPost(obj, index)  { nstele.resort() }
+            }
+            // …and on the changes the model is silent about (strength sways,
+            // a join lands) — the Bluetooth watcher idiom.
+            Repeater {
+                model: root.wifiDev ? root.wifiDev.networks : null
+                delegate: Item {
+                    required property var modelData
+                    width: 0; height: 0; visible: false
+                    readonly property real sway: modelData ? modelData.signalStrength : 0
+                    readonly property bool conn: modelData ? modelData.connected : false
+                    readonly property bool kn:   modelData ? modelData.known : false
+                    onSwayChanged: nstele.resort()
+                    onConnChanged: nstele.resort()
+                    onKnChanged:   nstele.resort()
+                    Component.onCompleted: nstele.resort()
+                }
+            }
+            // closing the stele folds the PSK line and drops the fail note
+            Connections {
+                target: root
+                function onNetOpenChanged() {
+                    if (!root.netOpen) { nstele.clearPsk(); nstele.lastFail = "" }
+                }
+            }
+            // Keyboard reaches an xdg_popup only under a compositor focus
+            // grab — the bar's layer surface never takes keys, and without
+            // this every PSK keystroke would land in whatever toplevel held
+            // focus (verified reachable: no keyboardFocus anywhere in the
+            // popout chain). Grab exactly while a PSK line is open; a click
+            // anywhere outside clears the grab, which folds the line — the
+            // dismiss gesture falls out of the same mechanism.
+            HyprlandFocusGrab {
+                windows: [ nstele.QsWindow.window ]
+                active: nstele.pskTarget !== null
+                onCleared: nstele.clearPsk()
+            }
+
+            // cast shadow — shared pantheon idiom
+            Rectangle {
+                anchors.fill: netBody
+                anchors.leftMargin: 4; anchors.topMargin: 5
+                anchors.rightMargin: -4; anchors.bottomMargin: -5
+                radius: 0
+                color: nstele.withA(nstele.ink, 0.22)
+            }
+
+            // the stele — opaque marble body, 2px ink border, inset keyline
+            Rectangle {
+                id: netBody
+                width: parent.width
+                anchors.top: parent.top
+                radius: 0
+                color: root.livery.paletteBg
+                border.color: nstele.ink
+                border.width: 2
+                height: netContent.implicitHeight + 20
+
+                Rectangle {                        // inset clay keyline
+                    anchors.fill: parent; anchors.margins: 4
+                    radius: 0; color: "transparent"
+                    border.color: nstele.sig; border.width: 1
+                }
+
+                Column {
+                    id: netContent
+                    anchors { left: parent.left; right: parent.right; top: parent.top }
+                    anchors.margins: 10
+                    spacing: 4
+
+                    // ── ENTABLATURE: crown + carved name + protocol tag ─────
+                    Item {
+                        width: parent.width; height: 24
+                        Text {
+                            id: netCrown
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "𝄌"
+                            font.family: nstele.faceMusic
+                            font.pixelSize: 22
+                            color: nstele.sig
+                        }
+                        Text {
+                            anchors.left: netCrown.right; anchors.leftMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "DIKTYON"
+                            font.family: nstele.faceSerif
+                            font.pixelSize: 15
+                            font.weight: Font.DemiBold
+                            font.letterSpacing: 4
+                            color: nstele.ink
+                        }
+                        Text {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "[ nm ]"
+                            font.family: nstele.faceMono
+                            font.pixelSize: 10
+                            color: nstele.withA(nstele.sig, 0.9)
+                        }
+                    }
+
+                    // ── FRIEZE: the beacon course — three-arc signal fans ───
+                    Canvas {
+                        width: parent.width; height: 10
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.reset()
+                            ctx.strokeStyle = "" + nstele.sig
+                            ctx.lineWidth = 1.2
+                            for (var x = 8; x < width - 8; x += 26) {
+                                for (var r = 3; r <= 9; r += 3) {
+                                    ctx.beginPath()
+                                    ctx.arc(x, height, r, Math.PI * 1.25, Math.PI * 1.75)
+                                    ctx.stroke()
+                                }
+                            }
+                        }
+                        Component.onCompleted: requestPaint()
+                        onWidthChanged: requestPaint()
+                    }
+
+                    // ── TOP FRAME — and the wifi kill-switch lives in it ────
+                    // ┌─┤ wifi on ├────────────┐  · the ├ label ┤ is the one
+                    // control this frame line carries: click flips
+                    // Networking.wifiEnabled. Gold while on (open/active/
+                    // live), dim ink while off — state readable sans colour
+                    // by the word itself.
+                    Item {
+                        width: parent.width; height: 15
+                        Text {
+                            id: netTfL
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "┌─┤"
+                            font.family: nstele.faceMono; font.pixelSize: 11
+                            color: nstele.withA(nstele.sig, 0.95)
+                        }
+                        Text {
+                            id: wifiSwitch
+                            anchors.left: netTfL.right; anchors.leftMargin: 5
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: Networking.wifiEnabled ? "wifi on" : "wifi off"
+                            font.family: nstele.faceMono; font.pixelSize: 11
+                            font.underline: wsMa.containsMouse
+                            color: Networking.wifiEnabled
+                                   ? root.livery.paletteAccent
+                                   : nstele.withA(nstele.ink, 0.5)
+                            MouseArea {
+                                id: wsMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: Networking.wifiEnabled = !Networking.wifiEnabled
+                            }
+                        }
+                        Text {
+                            id: netTfL2
+                            anchors.left: wifiSwitch.right; anchors.leftMargin: 5
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "├"
+                            font.family: nstele.faceMono; font.pixelSize: 11
+                            color: nstele.withA(nstele.sig, 0.95)
+                        }
+                        Text {
+                            id: netTfR
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "┐"
+                            font.family: nstele.faceMono; font.pixelSize: 11
+                            color: nstele.withA(nstele.sig, 0.95)
+                        }
+                        Rectangle {
+                            anchors.left: netTfL2.right; anchors.right: netTfR.left
+                            anchors.leftMargin: 2; anchors.rightMargin: 2
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: 1
+                            height: 1; color: nstele.withA(nstele.sig, 0.55)
+                        }
+                    }
+
+                    // ── THE BODY ────────────────────────────────────────────
+                    // the wired line first (steady ground under the air), then
+                    // one manuscript-ruled line per heard wifi network.
+                    Column {
+                        width: parent.width
+
+                        // wired — present only when a NIC exists; no click,
+                        // nothing to choose. 𝆺𝅥𝅯 is the bar's own eth glyph.
+                        Item {
+                            visible: root.wiredDev !== null
+                            width: parent.width; height: visible ? 30 : 0
+                            Rectangle {
+                                anchors.left: parent.left; anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                height: 1; color: nstele.withA(nstele.ink, 0.13)
+                            }
+                            Row {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 8
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 14; horizontalAlignment: Text.AlignHCenter
+                                    text: "·"
+                                    font.family: nstele.faceMusic; font.pixelSize: 13
+                                    color: nstele.withA(nstele.ink, 0.3)
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 24
+                                    text: "𝆺𝅥𝅯"
+                                    font.family: nstele.faceMusic; font.pixelSize: 13
+                                    color: (root.wiredDev && root.wiredDev.hasLink)
+                                           ? nstele.ink : nstele.withA(nstele.ink, 0.4)
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: root.wiredDev ? ("" + root.wiredDev.name) : ""
+                                    font.family: nstele.faceSerif; font.pixelSize: 13
+                                    font.weight: (root.wiredDev && root.wiredDev.connected)
+                                                 ? Font.Bold : Font.Medium
+                                    color: (root.wiredDev && root.wiredDev.connected)
+                                           ? root.livery.paletteAccent : nstele.ink
+                                    elide: Text.ElideRight
+                                }
+                            }
+                            Text {
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.wiredDev
+                                      ? (root.wiredDev.hasLink
+                                         ? (root.wiredDev.linkSpeed > 0
+                                            ? root.wiredDev.linkSpeed + " Mb/s" : "link")
+                                         : "no link")
+                                      : ""
+                                font.family: nstele.faceMono; font.pixelSize: 10
+                                color: nstele.withA(root.livery.holoBlue, 0.8)
+                            }
+                        }
+
+                        // taught empty states — a rest must still read (§4)
+                        Item {
+                            visible: Networking.backend === NetworkBackendType.None
+                            width: parent.width; height: visible ? 30 : 0
+                            Text {
+                                anchors.centerIn: parent
+                                text: "no NetworkManager on this bus"
+                                font.family: nstele.faceSerif; font.pixelSize: 12
+                                font.italic: true
+                                color: nstele.withA(nstele.ink, 0.5)
+                            }
+                        }
+                        Item {
+                            visible: Networking.backend !== NetworkBackendType.None
+                                     && !Networking.wifiEnabled
+                            width: parent.width; height: visible ? 30 : 0
+                            Text {
+                                anchors.centerIn: parent
+                                text: "the air is switched off — wifi on above rekindles it"
+                                font.family: nstele.faceSerif; font.pixelSize: 12
+                                font.italic: true
+                                color: nstele.withA(nstele.ink, 0.5)
+                            }
+                        }
+                        Item {
+                            visible: Networking.wifiEnabled
+                                     && nstele.wifiSorted.length === 0
+                                     && Networking.backend !== NetworkBackendType.None
+                            width: parent.width; height: visible ? 30 : 0
+                            Text {
+                                anchors.centerIn: parent
+                                text: "listening for beacons…"
+                                font.family: nstele.faceSerif; font.pixelSize: 12
+                                font.italic: true
+                                color: nstele.withA(nstele.ink, 0.5)
+                            }
+                        }
+
+                        // the heard networks
+                        Repeater {
+                            model: ScriptModel { values: nstele.wifiSorted }
+                            delegate: Item {
+                                id: netRow
+                                required property var modelData
+                                width: parent ? parent.width : 0
+
+                                readonly property bool hovered: nrMa.containsMouse
+                                readonly property bool conn:
+                                    netRow.modelData && netRow.modelData.connected
+                                readonly property bool busy:
+                                    netRow.modelData && netRow.modelData.stateChanging
+                                readonly property bool asking:
+                                    nstele.pskTarget === netRow.modelData
+                                readonly property int strength:
+                                    netRow.modelData
+                                    ? nstele.pct(netRow.modelData.signalStrength) : 0
+
+                                height: asking ? 64 : 30
+                                Behavior on height {
+                                    NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+                                }
+                                clip: true
+
+                                // NoSecrets → the PSK line opens itself; any
+                                // failure inks one terracotta line below.
+                                Connections {
+                                    target: netRow.modelData
+                                    function onConnectionFailed(reason) {
+                                        var n = netRow.modelData
+                                        nstele.lastFail = ("" + n.name) + " — "
+                                            + ConnectionFailReason.toString(reason)
+                                        if (reason === ConnectionFailReason.NoSecrets)
+                                            nstele.openPsk(n)
+                                    }
+                                }
+
+                                // the ruling — ignites laurel on hover
+                                Rectangle {
+                                    anchors.left: parent.left; anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: netRow.hovered ? 2 : 1
+                                    color: netRow.hovered ? root.livery.paletteHot
+                                                          : nstele.withA(nstele.ink, 0.13)
+                                    Behavior on color { ColorAnimation { duration: 150 } }
+                                }
+
+                                Row {
+                                    id: nrLine
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    height: 30
+                                    spacing: 8
+
+                                    Text {   // margin mark: · rest / ♪ hover / 𝄐 joining
+                                        id: nrMark
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 14
+                                        horizontalAlignment: Text.AlignHCenter
+                                        text: netRow.busy ? "𝄐"
+                                              : netRow.hovered ? "♪" : "·"
+                                        font.family: nstele.faceMusic
+                                        font.pixelSize: netRow.hovered && !netRow.busy ? 15 : 13
+                                        color: netRow.busy ? root.livery.paletteUrgent
+                                               : netRow.hovered ? root.livery.paletteHot
+                                               : nstele.withA(nstele.ink, 0.3)
+                                        SequentialAnimation on opacity {
+                                            running: netRow.busy
+                                            loops: Animation.Infinite
+                                            alwaysRunToEnd: true
+                                            NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
+                                            NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
+                                        }
+                                    }
+                                    Text {   // strength, spoken in dynamics
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 24
+                                        text: nstele.dynGlyph(netRow.strength)
+                                        font.family: nstele.faceMusic
+                                        font.pixelSize: 13
+                                        color: nstele.withA(nstele.sig,
+                                                   0.5 + 0.5 * (netRow.strength / 100))
+                                    }
+                                    Text {   // the SSID — gold when it's the one playing
+                                        id: nrName
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: netRow.modelData ? ("" + netRow.modelData.name) : ""
+                                        color: netRow.conn ? root.livery.paletteAccent
+                                                           : nstele.ink
+                                        opacity: netRow.conn ? 1.0
+                                                 : (netRow.modelData && netRow.modelData.known)
+                                                   ? 0.95 : 0.75
+                                        font.family: nstele.faceSerif
+                                        font.pixelSize: 13
+                                        font.weight: (netRow.conn || netRow.hovered)
+                                                     ? Font.Bold : Font.Medium
+                                        elide: Text.ElideRight
+                                        width: Math.min(implicitWidth, parent.width * 0.5)
+                                    }
+                                    Text {   // informational gloss — aegean, never chrome
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.verticalCenterOffset: 1
+                                        text: {
+                                            var n = netRow.modelData
+                                            if (!n) return ""
+                                            var bits = [nstele.secWord(n.security),
+                                                        netRow.strength + ""]
+                                            if (n.known && !n.connected) bits.push("known")
+                                            if (n.connected) bits.push("joined")
+                                            return bits.join(" · ")
+                                        }
+                                        font.family: nstele.faceMono
+                                        font.pixelSize: 10
+                                        color: nstele.withA(root.livery.holoBlue, 0.8)
+                                        elide: Text.ElideRight
+                                        width: Math.max(0, parent.width - nrMark.width
+                                                        - 24 - nrName.width - 40)
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: nrMa
+                                    anchors.left: parent.left; anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    height: 30
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: function(mouse) {
+                                        var n = netRow.modelData
+                                        if (!n) return
+                                        if (mouse.button === Qt.RightButton) {
+                                            if (n.known) n.forget()
+                                            return
+                                        }
+                                        nstele.lastFail = ""
+                                        if (netRow.asking) { nstele.clearPsk(); return }
+                                        if (n.connected) { n.disconnect(); return }
+                                        if (!n.known && nstele.secured(n.security)) {
+                                            nstele.openPsk(n)
+                                            return
+                                        }
+                                        n.connect()
+                                    }
+                                }
+
+                                // ── the PSK line — unrolls under a secured
+                                // unknown row. Enter joins, Esc folds it.
+                                Rectangle {
+                                    visible: netRow.asking
+                                    anchors.left: parent.left; anchors.right: parent.right
+                                    anchors.leftMargin: 22; anchors.rightMargin: 4
+                                    anchors.top: nrLine.bottom; anchors.topMargin: 4
+                                    height: 24
+                                    radius: 0
+                                    color: "transparent"
+                                    border.color: nstele.withA(nstele.sig, 0.8)
+                                    border.width: 1
+                                    TextInput {
+                                        id: pskInput
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 8; anchors.rightMargin: 64
+                                        verticalAlignment: TextInput.AlignVCenter
+                                        echoMode: TextInput.Password
+                                        font.family: nstele.faceMono
+                                        font.pixelSize: 11
+                                        color: nstele.ink
+                                        clip: true
+                                        onAccepted: {
+                                            var n = nstele.pskTarget
+                                            if (n && text.length > 0) {
+                                                n.connectWithPsk(text)
+                                                text = ""
+                                                nstele.clearPsk()
+                                            }
+                                        }
+                                        Keys.onEscapePressed: {
+                                            text = ""
+                                            nstele.clearPsk()
+                                        }
+                                        // focus the line the moment it unrolls
+                                        Connections {
+                                            target: netRow
+                                            function onAskingChanged() {
+                                                if (netRow.asking) pskInput.forceActiveFocus()
+                                                else pskInput.text = ""
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        anchors.right: parent.right; anchors.rightMargin: 6
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "⏎ join"
+                                        font.family: nstele.faceMono; font.pixelSize: 9
+                                        color: nstele.withA(nstele.ink, 0.5)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // one terracotta line when a join fails — cleared on retry
+                    Text {
+                        visible: nstele.lastFail !== ""
+                        width: parent.width
+                        text: nstele.lastFail
+                        font.family: nstele.faceMono; font.pixelSize: 10
+                        color: root.livery.paletteUrgent
+                        elide: Text.ElideRight
+                    }
+
+                    // ── ledger: kaomoji + the interaction hint ──────────────
+                    Item {
+                        width: parent.width; height: 16
+                        Rectangle {
+                            anchors.top: parent.top
+                            anchors.left: parent.left; anchors.right: parent.right
+                            height: 1; color: nstele.withA(nstele.sig, 0.3)
+                        }
+                        Text {
+                            anchors.left: parent.left; anchors.bottom: parent.bottom
+                            text: nstele.kaomojiFor()
+                            font.pixelSize: 11
+                            color: nstele.withA(nstele.sig, 0.9)
+                        }
+                        Text {
+                            anchors.right: parent.right; anchors.bottom: parent.bottom
+                            text: "click · join   right · forget"
+                            font.family: nstele.faceMono; font.pixelSize: 9
+                            color: nstele.withA(nstele.ink, 0.5)
+                        }
+                    }
+
+                    // ── box-drawing bottom frame — live figures, closing 𝄂 ──
+                    Item {
+                        width: parent.width; height: 18
+                        Text {
+                            id: netFfL
+                            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                            text: "└─┤ " + nstele.wifiSorted.length + " heard · "
+                                  + nstele.connWord() + " ├"
+                            font.family: nstele.faceMono; font.pixelSize: 11
+                            color: nstele.withA(nstele.ink, 0.8)
+                        }
+                        Text {
+                            id: netFfCorner
+                            anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                            text: "┘"; font.family: nstele.faceMono; font.pixelSize: 11
+                            color: nstele.withA(nstele.sig, 0.95)
+                        }
+                        Text {
+                            id: netFfBar
+                            anchors.right: netFfCorner.left; anchors.rightMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "𝄂"; font.family: nstele.faceMusic; font.pixelSize: 16
+                            color: root.livery.paletteAccent
+                        }
+                        Rectangle {
+                            anchors.left: netFfL.right; anchors.right: netFfBar.left
+                            anchors.leftMargin: 2; anchors.rightMargin: 6
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: 1
+                            height: 1; color: nstele.withA(nstele.sig, 0.55)
                         }
                     }
                 }

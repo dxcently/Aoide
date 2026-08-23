@@ -180,9 +180,9 @@ Full derivation of the hues in `intent.md`; this is which role plays what.
 | `paletteHot` | base0B | laurel leaf-green | THE ONE BLAZE — the selected/traced element, nothing else |
 | `wireCyan` | base0C | bronze-verdigris | structural chrome: column rails, title rules, inner illuminated borders |
 | `holoBlue` | base0D | aegean deep-blue | preview / information — hover-preview ring, mic cell, lunar layer, generic-name gloss. NOT chrome. Also the `stopped` state colour (§3) |
-| `violet` | base0E | Tyrian / murex | DAG project steles; powermenu SUSPEND signature |
+| `violet` | base0E | Tyrian / murex | DAG project steles; AudioColonnade's signature (2026-08-16, off clay); powermenu SUSPEND signature |
 | `glitchPink` | base08 | terracotta | urgent pulse (identical hue to `paletteUrgent` in this key) |
-| `base09` | base09 | clay / amber | calendar's rubric, AudioColonnade's signature |
+| `base09` | base09 | clay / amber | calendar's rubric; DIKTYON (network stele) signature — clay is the precedented shared-signature hue |
 | `base0F` | base0F | rust | notifications' signature |
 | `noteColor(id)` | base08–base0F | the 8-hue accent spread | one distinct hue per small integer id (bar workspaces) |
 
