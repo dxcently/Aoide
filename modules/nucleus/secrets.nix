@@ -71,6 +71,14 @@ lib.mkIf (config.aoide.enable && config.aoide.secrets.enable) {
   # service itself.
   environment.systemPackages = [
     pkgs.qrencode
+    # AGE LANE judge finding #2: `secrets migrate` is a direct-home admin op
+    # (sudo -u aoide-secrets, never the socket), so its age/age-keygen
+    # shell-outs run under sudo's secure_path — the unit-path entry above
+    # covers only the broker's own resolve/put. Without this, the lane's
+    # headline verb fails on every deployed box with the taught
+    # missing-binary hint. Same class as the qrencode lesson at the top of
+    # this list.
+    pkgs.age
   ]
   # ── zenity for `secrets watch --popup` ───────────────────────────────────
   # Same shape as qrencode above: a hand-invoked verb (`watch --popup`,
