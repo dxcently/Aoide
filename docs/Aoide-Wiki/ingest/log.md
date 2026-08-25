@@ -1211,3 +1211,83 @@ filler goes.
   sweep, and the transient-read grace during a compositor reload/restart)
   goes beyond what this trim pass folded in — `crates/conduct/src/reap.rs`'s
   module doc comment has the full shape if a future ingest wants it.
+
+## [2026-08-25] refactor | de-slop sweep 6
+
+De-slopped the five orchestration-B concept pages
+(`concepts/orchestration/{A2A-Door,Peer-Federation,Secrets-Broker,
+Screen-Control,Conductor-3D-DAG}.md`), architectural depth kept — mechanisms,
+invariants, failure modes, and wire contracts survive verbatim in meaning,
+only filler goes.
+
+- A2A-Door.md (TRIM+VERIFY): verified and documented task #84's inbound
+  bearer mechanism — `a2a serve --bearer-secret <name>` /
+  `AOIDE_A2A_BEARER_SECRET` resolves a secret through the local
+  [[Secrets-Broker]] as consumer `a2a-door`, fresh per connection (never
+  cached, unlike the pre-existing `tokenFile`), fails CLOSED with a
+  per-call sentinel on a broker-resolve failure, and takes precedence over
+  `tokenFile` when set (`crates/server/src/a2a.rs`'s `resolve_bearer_secret`/
+  `resolve_inbound_bearer`/`resolve_failure_sentinel`). No nix option wires
+  it yet — CLI flag/env-var only. Added the matching outbound half —
+  `peer add --bearer-secret <name>` resolved as consumer `a2a-client`
+  (`crates/client/src/commands.rs`'s `resolve_peer_bearer`) — as a short
+  cross-link to [[Peer-Federation]] rather than duplicating its contract.
+  Re-verified the A2A task-state strings are lowercase-kebab
+  (`auth-required`, `input-required`) against `a2a_task_state` and its test
+  assertions — already correct on this page (sweep 5 fixed the sibling
+  Terminal-Commander.md instance and flagged this page as unchecked; now
+  checked, no fix needed). Split two S1 em-dash/comma-chain sentences (the
+  `a2a serve` server description, the `message/stream` bullet) to one claim
+  each. 166 → 182 lines; growth is the two verified bearer-mechanism
+  additions, not filler.
+- Peer-Federation.md (TRIM+VERIFY): added the `graph send --to
+  peer/<query>` cross-instance send path sweep 5 flagged as missing here —
+  verified against `commands/graph.rs`'s registered `--to` flag,
+  `graph/send.rs`, and `storage/src/addr.rs`'s tier-5 `peer/<rest>`
+  resolution; new "Sending across the fold" section, cross-linked to
+  [[Conductor-Channel]] and [[A2A-Door]]. Added the `bearerSecret` field to
+  the `state/peers.json` registry section (task #84's outbound half,
+  `peer_store::Peer.bearer_secret` — the previously-undocumented opposite
+  number to the existing `tokenFile` field) and the `--bearer-secret` flag
+  to the CLI-surface line. Verified `CONTRACTS.md` §7 (2026-08-14) and the
+  `peer_connectivity.rs` integration test both exist as cited. Split one S1
+  em-dash-chain sentence (the integration-test paragraph, five clauses on
+  one dash) into two. 205 → 225 lines.
+- Secrets-Broker.md (TRIM+VERIFY): verified every numeric/name constant this
+  page states against `crates/secrets` at HEAD — `DEFAULT_PARK_TIMEOUT_SECS`
+  = 300 (`park.rs`), `DEFAULT_PARK_CAP` = 32 (`park.rs`),
+  `DEFAULT_BACKEND_TIMEOUT_SECS` = 10 (`backend.rs`), `DEFAULT_BACKEND` =
+  `"age"` (`commands.rs`), `LOCKOUT_SECS` = 10 /
+  `POPUP_KILL_LOCKOUT_SECS` = 15, the 1s→60s zenity spawn backoff, and the
+  five broker event kinds `released`/`parked`/`completed`/`dismissed`/
+  `expired` (`watch.rs`'s `emit_event` doc) — all already correct, no
+  drift. Fixed one clarity bug: the event-kind list punctuated `completed`'s
+  "(a successful `approve`)" gloss as a stray sixth list item instead of a
+  parenthetical on `completed`; reflowed to match the other four glossed
+  kinds' parenthetical form. Frontmatter had no `updated:` field; added one.
+  236 → 238 lines.
+- Screen-Control.md (TRIM+VERIFY): verified the fourteen-verb roster exactly
+  against `crates/screen/src/commands.rs`'s registrations (`info`/`shot`/
+  `ocr`/`diff`/`send` + nine `point` subverbs: `move`/`click`/`drag`/
+  `hover`/`scroll`/`idle`/`save`/`restore`/`text`) and that the crate
+  registers under `lyra`, not `aoide` (`crates/lyra/src/commands/mod.rs`),
+  matching the page's `lyra screen` framing. `CONTRACTS.md` §8 exists as
+  cited. No drift, no slop pattern found; zero edits.
+- Conductor-3D-DAG.md (KEEP): verified no `spatial.rs` or any 3D-projector
+  module exists anywhere under `pkgs/aoide/crates` — the page's
+  "Status: PLANNED … Not yet implemented" line remains accurate. Zero edits.
+- Claims left unverified: none — every claim this sweep touched or
+  spot-checked (CONTRACTS.md §6/§7 section numbers, `modules/nucleus/
+  secrets.nix`'s `ProtectHome`/`members` option, the secrets AGENTS.md
+  self-asserted-consumer note) resolved against the repo at HEAD
+  (2f23210 at sweep start).
+- Out-of-scope drift spotted, not fixed: `aoide.a2a.bearerSecret` (the new
+  inbound broker-bearer mechanism) has no nix option yet — it is reachable
+  only via `--bearer-secret`/`AOIDE_A2A_BEARER_SECRET`, unlike every other
+  `a2a serve` setting, which is nix-configured; a future nix-module pass
+  could close that gap or the wiki could note it as a deliberate CLI-only
+  surface. `concepts/Peer-Federation.md`'s "Security" section still
+  describes only the pre-#84 `tokenFile` autogate match; the new
+  `bearerSecret` field is now documented in the registry section above it
+  but not folded into that section's own autogate-match prose — a small
+  follow-up, not done here to stay inside this sweep's page list.

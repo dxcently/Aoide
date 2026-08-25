@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-15
-updated: 2026-08-19
+updated: 2026-08-25
 tags: [aoide, agent, a2a, orchestration, interop, federation]
 ---
 
@@ -27,11 +27,11 @@ plain URL — the protocol itself carries no notion of "same LAN" vs.
 house runs peers over Tailscale (addressed by tailnet MagicDNS hostname),
 but nothing here is tailnet-specific. The integration test
 (`pkgs/aoide/crates/cli/tests/peer_connectivity.rs`) proves the real
-mechanism end to end — two actual `a2a::serve()` instances, a genuine `curl`
+mechanism end to end: two actual `a2a::serve()` instances, a genuine `curl`
 AgentCard fetch for `peer add`, a genuine `curl` POST of `aoide/graphSummary`
-for `peer pull`, a genuine cache write, a genuine graph fold — but both
-binds stay strictly loopback (`127.0.0.1:<port>`), same-subnet HTTP
-reachability standing in for "two boxes on the same network." **WAN /
+for `peer pull`, a genuine cache write, a genuine graph fold. Both binds stay
+strictly loopback (`127.0.0.1:<port>`), same-subnet HTTP reachability
+standing in for "two boxes on the same network." **WAN /
 NAT-traversal / relay reachability for a peer that is NOT on the same
 network is explicitly out of scope for this v0** — a later, separate
 contract amendment, not designed or assumed here.
@@ -68,6 +68,14 @@ Bearer <token>` — a per-peer credential that identifies WHICH registered
 peer is calling once address alone can't (behind a proxy or tunnel every
 caller's address looks the same). Absent by default: an unmarked peer
 authenticates by address only.
+
+`bearerSecret` (`peer add --bearer-secret <name>`, optional) is the opposite
+direction: the name of a secret THIS instance resolves through its own local
+[[Secrets-Broker]], as consumer `a2a-client`, and presents as `Authorization:
+Bearer <value>` on every OUTBOUND call to that peer's A2A door. It is
+resolved fresh on every request, never cached in `peers.json` or anywhere
+else, so revoking the underlying secret takes effect on the very next call.
+Absent by default: an unmarked peer's outbound requests carry no bearer.
 
 ## The cache — `state/peer-cache/<name>.json`
 
@@ -149,11 +157,23 @@ a session id they could match.
 
 ## CLI surface
 
-`aoide peer add <name> <url> [--autogate] [--token-file <path>]` / `list` /
-`remove <name>` / `pull [<name>]` / `status` — see
+`aoide peer add <name> <url> [--autogate] [--token-file <path>] [--bearer-secret
+<name>]` / `list` / `remove <name>` / `pull [<name>]` / `status` — see
 [[aoide-cli#The `peer` group — aoide-to-aoide federation]] for the per-verb
 behavior. Registered as its own group, directly after `a2a agent
 add/list/remove/send` in `schema --json`'s order.
+
+## Sending across the fold — `graph send --to peer/<query>`
+
+[[Conductor-Channel|`graph send`]]'s `--to` flag resolves a target name
+through the same tiered address grammar `graph who` uses; a `peer/<query>`
+form is its remote tier. It resolves `<query>` against a registered peer's
+CACHED graph (the same `state/peer-cache/<name>.json` the fold above reads)
+and, on a match, delivers the message over A2A `message/send` instead of
+queuing a local pending send. The call is always attempted: the receiving
+peer gates its own delivery through its own [[A2A-Door]] security model, so
+a remote send never sits in the sender's local pending queue. `--to` and
+`--id` are mutually exclusive on `graph send`.
 
 ## Security — the non-loopback pending-gate amendment
 

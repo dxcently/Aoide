@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-01
-updated: 2026-08-19
+updated: 2026-08-25
 tags: [aoide, agent, a2a, orchestration, interop]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -25,9 +25,9 @@ The door is **bidirectional**. aoide is both:
 ## Server — aoide as a discoverable agent
 
 `aoide a2a serve` (and the `aoide-a2a.service` user unit) raises a hand-rolled,
-dependency-free JSON-RPC-2.0-over-HTTP server — a blocking accept loop and a
-hand-parsed HTTP/1.1 layer, no new crates, the same offline-lock discipline the
-CLI and MCP servers keep. It is **off by default** (`aoide.a2a.enable = false`,
+dependency-free JSON-RPC-2.0-over-HTTP server: a blocking accept loop over a
+hand-parsed HTTP/1.1 layer, no new crates. It keeps the same offline-lock
+discipline the CLI and MCP servers hold. It is **off by default** (`aoide.a2a.enable = false`,
 the same house policy as the MCP façade) and **loopback-bound**
 (`aoide.a2a.bindAddress` defaults to `127.0.0.1`, `aoide.a2a.port` to `8710`);
 exposing it to a network is a deliberate per-host choice, never the default.
@@ -48,9 +48,9 @@ The server serves:
   supplies only the prompt. See [[#Security and governance]].
 - **`message/stream`** and **`tasks/resubscribe`** — Server-Sent-Events
   streaming of task-status updates. A stream emits on state change, marks the
-  terminal frame `final: true`, polls the stage on a short tick, and is bounded
-  in lifetime, so a never-terminal session (an idle agent) still closes cleanly
-  at the cap and frees its connection slot.
+  terminal frame `final: true`, and polls the stage on a short tick. It is
+  bounded in lifetime, so a never-terminal session (an idle agent) still
+  closes cleanly at the cap and frees its connection slot.
 
 ## Client — aoide driving external agents
 
@@ -132,6 +132,17 @@ to **rebuild time** instead.
   `-32005`. With no token configured, Spawn reads neither origin nor token at
   all: any caller reaching the port may run the configured agent, bounded
   only by `spawnAgent` naming the command, never the client.
+- **A secrets-broker-resolved bearer takes precedence over the file.**
+  `a2a serve --bearer-secret <name>` (or `AOIDE_A2A_BEARER_SECRET`) names a
+  secret this door resolves through the local [[Secrets-Broker]] as consumer
+  `a2a-door`, fresh on every connection rather than once at launch — the
+  point of routing it through the broker is that a `secrets rm` or policy
+  edit takes effect immediately, with no daemon restart. A broker resolve
+  failure (unreachable, denied, or a 2-second timeout) fails CLOSED: the door
+  substitutes a per-call unguessable sentinel value as the expected token
+  rather than falling back to no-token-configured behavior, so every bearer
+  check on that connection is denied. When `bearer-secret` is unset, the
+  file mechanism above is unchanged.
 - **Loopback is trusted unconditionally only while no token is configured.**
   `effective_origin(origin, token_configured, token_state)`
   coerces any caller — loopback included — that did not present the valid
@@ -150,6 +161,11 @@ to **rebuild time** instead.
   match is the OR of the address check and this token check — a shared
   secret could never tell two peers apart, so identifying which peer called
   needs one file per peer, not one flag for the whole door.
+- **The outbound direction has its own bearer.** `peer add --bearer-secret
+  <name>` records a secret THIS instance resolves through the local secrets
+  broker, as consumer `a2a-client`, on every outbound call to that peer —
+  the opposite direction from `Peer.tokenFile` above (what the peer presents
+  to us). See [[Peer-Federation]] for the registry shape.
 - **Audited.** Every inject, spawn, and error — including Spawn's new
   `-32005` rejection — writes to the single audit log as `Door::A2a`, the
   same log every other door writes. Loopback by default, off by default.

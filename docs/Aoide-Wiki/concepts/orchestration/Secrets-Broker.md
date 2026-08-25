@@ -1,6 +1,7 @@
 ---
 type: concept
 created: 2026-08-23
+updated: 2026-08-25
 tags: [aoide, agent, cli, secrets, totp, security, broker]
 ---
 
@@ -138,8 +139,9 @@ beyond it, a codeless resolve gets the immediate refusal instead of a park.
 `aoide secrets watch` is a foreground, line-mode surface that tails a
 broker-owned events feed (a JSON-lines file living beside the broker's own
 socket, capped at 1 MiB and truncated in place past the cap) and narrates
-five event kinds: `released` (a TOTP-free grant), `parked`, `completed`, a
-successful `approve`, `dismissed`, and `expired` (a park that timed out). On
+five event kinds: `released` (a TOTP-free grant), `parked`,
+`completed` (a successful `approve`), `dismissed`, and `expired` (a park that
+timed out). On
 a terminal, a parked ask prompts inline — `[a]` approve with a hidden code
 prompt, `[d]` dismiss, `[i]` ignore for this session only (the ask stays
 parked, completable from elsewhere) — FIFO by whichever ask is closest to
