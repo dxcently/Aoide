@@ -423,7 +423,7 @@ count.
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` verb
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
-  **68 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **69 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -457,7 +457,15 @@ count.
   secret's stored value from its policy's current backend to a target one
   (default `age`) and flips the policy row, an admin verb mirroring
   `add`/`rm`/`grant`'s direct-home shape — see `crates/secrets/README.md`'s
-  "Migrating a secret between backends" section for the full flow.
+  "Migrating a secret between backends" section for the full flow;
+  `events tail`, appended newest, P-D3 (`docs/architecture/AOIDED.md`)
+  (+1 → 69) — a foreground, line-mode follow of `aoided`'s own events feed
+  (the secrets-feed mirror's name-only lines, the #69 hand-edit watcher,
+  and any future tick producer), `--class` filtering to matching event
+  classes (comma-separated), blocking until Ctrl-C; CLI-only, the same
+  door-policy shape `secrets watch` already holds for a foreground/
+  blocking verb — see `crates/server/README.md`'s "Named seams" section
+  for the producer/tail mechanism.
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
@@ -474,7 +482,7 @@ This was never a version bump: `schemaVersion` stays `"0"` on both —
 this section has never promised a fixed command inventory, only a
 document SHAPE, and the shape above is unchanged for either binary. The
 A2A AgentCard (§6) advertises whichever registry the serving binary
-assembled — core's card carries only core's 68, since `a2a serve` is
+assembled — core's card carries only core's 69, since `a2a serve` is
 core-only and lyra never registers it.
 
 ---

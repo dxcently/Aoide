@@ -262,7 +262,13 @@ pkgs.testers.runNixOSTest {
     # and remote-reachability gates (Workstream SECRETS P-N1) — reached 63;
     # bumped by 3 for `secrets pending`/`approve`/`dismiss` — the parked-ask
     # lifecycle (P-N2) — reached 66; bumped by 1 for `secrets watch` — the
-    # terminal surface over parked asks and broker events — reached 67.
+    # terminal surface over parked asks and broker events — reached 67;
+    # bumped by 1 for `secrets migrate` — moves a secret's stored value
+    # between backends (P-G2, task #72) — reached 68 (this assert was
+    # updated to 68 with that landing, though this historical comment
+    # wasn't extended to say so until now); bumped by 1 for `events tail`
+    # — the aoided event bus's own terminal-reachable follow verb (P-D3,
+    # docs/architecture/AOIDED.md) — reached 69.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a verb.
     schema_raw = machine.succeed("aoide schema --json")
@@ -276,8 +282,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 68, (
-        f"expected 68 commands, got {cmd_count}.  "
+    assert cmd_count == 69, (
+        f"expected 69 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

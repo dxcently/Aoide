@@ -31,8 +31,9 @@ before acting. The house rules below are non-negotiable.
 
 ## Tier 1 — the CLI (full capability)
 
-`aoide <cmd>` is the **complete** orchestration surface (68 commands: conducting,
-the project/session graph, A2A, peers, the daemon, usage, hooks); `lyra <cmd>`
+`aoide <cmd>` is the **complete** orchestration surface (69 commands: conducting,
+the project/session graph, A2A, peers, the daemon, its own event bus, usage,
+hooks); `lyra <cmd>`
 is the complete painted surface (42 commands: rice/draft/mode/cover/livery/
 quickshell/screen/herald/take/shellbridge — AoideOS). Both are `schema --json`
 backstopped, both carry the same house rules below. The `melete aoide …`
