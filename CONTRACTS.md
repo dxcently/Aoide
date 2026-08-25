@@ -714,6 +714,51 @@ render time. `sessionId` stays the sole canonical key everywhere. Absent means
 "minted before this field existed" (a legacy record); readers must tolerate
 both forms and round-trip fields they do not know.
 
+**Additive in v0:** a session record MAY also carry an optional `kind`
+(string) — what KIND of thing the record is, published so a widget never
+infers it from the `agent` string: `agent` (a Claude/agent session), `shell`
+(a conducted terminal), `subagent` (a Task the agent spawned — a leaf of the
+conductor tree, its own child record with its own harness-native-subagent
+classifier, parented to the harness session from the hook payload, closed on
+its own stop event and swept if its parent ends), or `a2a` (§6 — an external
+A2A agent folded into the session DAG). Absent means "unclassified" (a
+legacy record); `upsert_session` backfills it once, at the next touch, from
+`agent != "shell"`. `conductable` (bool) marks a session spawned under `aoide
+conduct` (it owns a PTY + control socket) — the same-window eviction and the
+reaper's own dedup pass both treat a `conductable` record as the control-
+socket owner, never a foreground-agent duplicate, regardless of its
+published `kind`.
+
+**Additive in v0 (task #89):** a session record MAY also carry an optional
+`hookAncestry` (array of integer pids, at most 8, self-first) — the
+hook-firing process's own `/proc` `ppid` walk, stamped ONCE at a hook
+session's own SessionStart/self-heal registration (`aoide graph session
+hook`) and never re-stamped afterward (a birth fact, not a live signal). A
+later `wrap`/`conduct`/`spawn` registration with no explicit `--parent` walks
+ITS OWN `/proc` ancestry and looks for a live, not-`done`, agent-kind session
+whose `hookAncestry` intersects it — the closest (deepest) matching ancestor
+wins as parent, so a nested headless `conduct`/`spawn` launched from inside
+an agent's shell tool lands as that agent's CHILD rather than, via a stale
+ambient `AOIDE_SESSION_ID`, as a sibling of the enclosing terminal. Absent
+means "no ancestry recorded" (a legacy record, or any non-hook registration);
+readers must tolerate both forms and round-trip fields they do not know.
+Consumed internally for parent resolution only — never rendered.
+
+**Windowless lineage (task #89):** the hook-time `windowAddress` backfill
+(`aoide graph session hook`, and the shellbridge window-event listener) MUST
+skip a session outright — no `windowAddress`, no window-owning pid — when
+its `parentSessionId` chain passes through a conducted (`conductable`)
+session whose OWN `windowAddress` is empty: that session is windowless BY
+CONSTRUCTION (a nested headless `conduct`/`spawn`), and a pid-ancestry walk
+from it would otherwise resolve to the ENCLOSING terminal's window instead
+of "no window at all". A session with no parent, or whose chain anchors in a
+windowed conducted session directly, keeps the ordinary backfill. The
+same-window eviction (immediately above `graph.json`'s render, below) is
+lineage-safe on top of this: it never retires a member of the newly
+registering session's own lineage (every ancestor AND descendant, walking
+`parentSessionId`), only a same-window record with NO lineage relation to
+it — the legitimate compact/resume-twin case.
+
 ### `song/stage/projects.json` — **v0**
 
 Registered project anchor roots for the graph. Written by
