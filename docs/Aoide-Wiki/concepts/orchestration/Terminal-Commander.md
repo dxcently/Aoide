@@ -1,25 +1,24 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-13
+updated: 2026-08-25
 tags: [aoide, widget, terminal, agent, session]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
 
 # Terminal Commander — the Agent-Session Widget
 
-A flagship shipped widget (conductor-class): a live roster of the terminals running
-agents, so you always know what is running where — and can **jump to any of them
-by click or keybind**. Agents spawn terminals faster than a human tracks them;
-the terminal commander is the single pane that herds them. It is also the cleanest
-exemplar of the [[Widget-Maker]] thesis — a watcher + a widget + a keybind, all
-declarative and themed by [[livery]].
+A shipped widget (conductor-class): a live roster of the terminals running
+agents — what is running where, and **jump to any of them by click or
+keybind**. Agents spawn terminals faster than a human tracks them; the
+terminal commander is the pane that herds them. It exemplifies the
+[[Widget-Maker]] thesis: a watcher, a widget, and a keybind, declarative and
+themed by [[livery]].
 
-The herdr multiplexer is the prior-art pattern (an external tool — agent-terminal
-herding; not part of the Aoide vocabulary, whose word for this duty is
-conductor-class — see [[Lexicon]]); Aoide ships this as a first-class widget,
-and the agent can regenerate or extend it like any other integration. The TUI
-sibling is [[Lexicon|the conductor]] (`aoide conductor`).
+herdr (an external agent-terminal-herding tool) is the prior art; Aoide's own
+vocabulary calls this duty conductor-class (see [[Lexicon]]) and ships it as
+a first-class widget the agent can regenerate or extend like any other
+integration. The TUI sibling is the conductor (`aoide conductor`).
 
 ## What it watches
 
@@ -98,7 +97,7 @@ An `awaiting-input` row can also raise a chime or fire the notification →
 messaging bridge ([[Feature-Set]]), so a stalled agent reaches you off-screen.
 A conducted shell blocked at a `sudo` **password** prompt carries the distinct
 `needsSudo` signal — surfaced as the dock's [[Gadget-Dock|sudo lock badge]],
-and the same signal the [[A2A-Door]] reports as the `AUTH_REQUIRED` task state.
+and the same signal the [[A2A-Door]] reports as the `auth-required` task state.
 
 Conduct-by-default means every closed or killed terminal is also a roster row
 to clean up — a `SUPER+Q` or SIGKILL tears the wrap process down uncatchably,

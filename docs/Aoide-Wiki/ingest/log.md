@@ -1119,3 +1119,95 @@ corrected to match — no other page asserted kimi refuses a summons.
   either binary's registry (a stale code comment, not wiki content, but
   the root cause of the Controls.md launcher/dock drift this sweep
   fixed).
+
+## [2026-08-25] refactor | de-slop sweep 5
+
+De-slopped the six orchestration concept pages
+(`concepts/orchestration/{Session-Graph,Conductor-Channel,
+Terminal-Commander,Agent-Interface,Loop-Protocol,Content-Pipeline}.md`),
+architectural depth kept — mechanisms/invariants/failure modes stay, only
+filler goes.
+
+- Session-Graph.md (TRIM+VERIFY): cut the S5 status-brag opener line
+  ("Verified green…") that also carried a stale implementation path
+  (`pkgs/aoide/src/graph.rs`; the real location is
+  `pkgs/aoide/crates/conduct/src/graph/` + `.../src/reap.rs`). Verb roster
+  was missing `permit` (`graph permit` — a herald permission-card verb, real
+  per `commands/graph.rs`) — added, with a one-line description. Verified
+  the liveness reaper against `crates/conduct/src/reap.rs` at HEAD: it now
+  fires on THREE independent signals (window gone / pid gone / sustained
+  staleness past a state-dependent band — 72h at rest, 7 days mid-turn, 2h
+  for a stranded subagent), not the two the page described; added the third
+  signal and the window-owner-map veto that makes it safe. Fixed the
+  same-window duplicate keeper-rank order — the page said "the one with a
+  real on-disk transcript" wins; the code (`superseded_agent_duplicates`)
+  ranks newest `startedAt` first, transcript second. Fixed the
+  registration-time eviction carve-out — the page said it spares only the
+  new record's own `parentSessionId`; per `pkgs/aoide/crates/conduct/
+  CLAUDE.md` and `CONTRACTS.md` §4 (task #89) it now spares the record's
+  WHOLE lineage (every ancestor and descendant via `parentSessionId`), and
+  a nested headless session is windowless-by-lineage so it can no longer be
+  mistaken for the enclosing terminal's duplicate. Added the `hookAncestry`
+  automatic-parenting fact (CONTRACTS.md §4) to the graph model and
+  contracts sections, and folded it into the "Open seams" note on
+  spawn-time parenting. Trimmed S1/S6 in the intro and viewer section.
+  267 lines (was 246) — net growth is the three corrected/added facts above,
+  not filler; every added line is load-bearing per the VERIFY note in the
+  sweep brief.
+- Conductor-Channel.md (TRIM+VERIFY): split every line over 250 chars (the
+  worst was 1231) into normal prose width without cutting substance; removed
+  the scattered inline "(SHIPPED)"/"(SHIPPED, 2026-08-20)" status tags in
+  favor of the page's single top-of-page **Status:** line (S8) and present
+  indicative throughout. Verified `AOIDE_CONDUCT_AUTOGATE`/
+  `AOIDE_CONDUCT_SIBLING_AUTOGATE`/`AOIDE_NO_CONDUCT` and the kitty-wrapper
+  branch order against `pkgs/aoide/crates/conduct/src/graph/send.rs` and
+  `modules/dendrites/kitty.nix` — all real, unchanged. Added the `--to
+  <name>` flag on `graph send` (local id/tail4/petname or `peer/<query>`,
+  folding a remote send through A2A) — present in `commands/graph.rs`'s
+  registered summary but absent from the page; linked to [[Peer-Federation]]
+  rather than duplicating its contract. 142 → 308 lines; the growth is
+  entirely line-wrap of previously-unwrapped giant lines, not new prose.
+- Terminal-Commander.md (TRIM): softened marketing framing ("flagship
+  shipped widget" → "shipped widget", "cleanest exemplar" → "exemplifies")
+  and collapsed a doubled [[Lexicon]] cross-ref (S6) in the herdr paragraph.
+  Fixed a verified factual error: the A2A task-state string is
+  `auth-required` (kebab-case, per `crates/server/src/a2a.rs`'s
+  `a2a_task_state` and its own test assertions), not `AUTH_REQUIRED` as the
+  page had it.
+- Agent-Interface.md (TRIM+VERIFY): verified the four-tier guidance ladder
+  against the repo root `AGENTS.md` — matches; compressed the page's
+  restated copy of the tier list to a pointer (S12), keeping only the
+  wiki-side Tier-3-connector elaboration AGENTS.md doesn't carry. Fixed a
+  real drift: "One implementation, three doors" described the `protocol`
+  crate as a "target blueprint" that "would hold" the registry/schema/door
+  types (future tense) — `pkgs/aoide/crates/protocol/` already exists with
+  exactly that content (`registry.rs`, `door.rs`, confirmed against
+  `concepts/Package-Layout.md`'s own crate table, which already lists
+  `protocol` as `landed`). Rewrote to present indicative. Normalized
+  `protocol::agents` → `aoide_protocol::agents` (the real crate name).
+- Loop-Protocol.md (TRIM): already close to the style standard; split two
+  S1 em-dash-chain sentences (the "Framing" intro's three-item dash list,
+  and the R1-universally-reachable sentence) into a lead sentence + trailing
+  list / two sentences. No factual claim changed — `graph spawn`/`graph
+  send`/`graph pending`/`graph view` all re-verified live in the registry.
+- Content-Pipeline.md (KEEP): re-verified all five verbs (`content
+  register/propose/approve/ingest/query`) against
+  `pkgs/aoide/crates/cli/src/commands/stubs.rs` — `implemented: false` on
+  all five, confirming the page's "exit-64 stub" status claim exactly.
+  Nothing failed verification; zero edits made.
+- Claims left unverified: none outright — every command/path/flag/behavior
+  claim touched this sweep resolved against the repo one way or the other
+  (per the brief's note that the graph/conduct area is mid-fix, `reap.rs`
+  and the eviction carve-out were re-read fresh at HEAD rather than reused
+  from an earlier pass).
+- Out-of-scope drift spotted, not fixed: `concepts/Peer-Federation.md` (not
+  in this sweep's page list) documents `peer add`/`peer pull`/`peer status`
+  but not the `graph send --to peer/<query>` cross-instance send path that
+  `commands/graph.rs` already registers — a gap for a future pass on that
+  page. `concepts/A2A-Door.md` was not re-verified this sweep for the
+  `auth-required` task-state string now fixed here in Terminal-Commander.md
+  — worth a matching check there. The Session-Graph reaper's newly-verified
+  depth (pre-boot-ghost detection, orphaned-subagent sweep, orphan-socket
+  sweep, and the transient-read grace during a compositor reload/restart)
+  goes beyond what this trim pass folded in — `crates/conduct/src/reap.rs`'s
+  module doc comment has the full shape if a future ingest wants it.

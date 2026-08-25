@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-13
+updated: 2026-08-25
 tags: [aoide, agent, cli]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -10,7 +10,10 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 ## CLI as the capability surface
 
-`aoide <cmd>` is the complete capability surface. Any agent that has a shell is fully capable — no MCP required. The `melete aoide …` passthrough form works identically, so Melete's own tooling routes through the same trunk.
+`aoide <cmd>` is the complete orchestration surface: any agent with a shell
+is fully capable, no MCP required (the house rule stated in full in the repo
+root `AGENTS.md`). The `melete aoide …` passthrough form works identically,
+so Melete's own tooling routes through the same trunk.
 
 ## One implementation, three doors
 
@@ -18,10 +21,10 @@ Three doors open onto aoide — the CLI trunk, the MCP façade, and the
 [[A2A-Door|A2A door]] — and all three derive from the one command schema
 (`aoide schema --json`). There is one implementation; the doors cannot drift.
 The CLI is the complete surface; the other two are generated from it and
-**off by default**. The target crate-layout blueprint ([[Package-Layout]])
-carries this invariant into a structural boundary: a `protocol` crate would
-hold the registry, schema, and door types, so every door depends on the one
-contract rather than converging on it by convention.
+**off by default**. The crate layout ([[Package-Layout]]) carries this
+invariant into a structural boundary: the `aoide-protocol` crate holds the
+registry, schema, and door types, so every door depends on the one contract
+rather than converging on it by convention.
 
 MCP is generated as a façade from the same command schema that backs the CLI.
 The MCP layer is deliberately optional and agent-added:
@@ -46,18 +49,21 @@ concept mapping, and its security model.
 
 ## Guidance tiers
 
-Agents orient through four tiers, in order:
-
-0. `aoide guide` (and `AGENTS.md` at a well-known path) — tier-0 onboarding
-1. CLI — full capability
-2. stdio MCP — structured tool layer, per-session
-3. Network MCP (tailnet/funnel) — user-enabled only
-
-`aoide schema --json` is the machine-readable backstop at any tier; the MCP tool list generates from it.
+The four-tier onboarding ladder (0: `aoide guide` + `AGENTS.md` · 1: CLI,
+full capability · 2: stdio MCP, per-session · 3: network MCP, user-enabled
+only) is specified in the repo root `AGENTS.md`. `aoide schema --json` is the
+machine-readable backstop at any tier; the MCP tool list generates from it.
 
 ### Tier 3: the Aoide connector
 
-Tier 3 is the **Aoide MCP connector** — a dedicated user-enabled connector, separate from the [[Mneme]] connector (the vault door) and the [[Melete]] connector (the doer harness), scoped specifically to managing Aoide and its components: the rice loop, widget-maker, content pipeline, and daemon status. The same one-schema-two-doors rule applies: it is the same generated MCP façade as the stdio path, just network-exposed by the user (Tailscale tailnet or Cloudflare funnel). It is never agent-enabled; the user enables it once and it stays up.
+Tier 3 is the **Aoide MCP connector**: a dedicated user-enabled connector,
+separate from the [[Mneme]] connector (the vault door) and the [[Melete]]
+connector (the doer harness), scoped specifically to managing Aoide and its
+components — the rice loop, widget-maker, content pipeline, and daemon
+status. The same one-schema-two-doors rule applies: it is the same generated
+MCP façade as the stdio path, just network-exposed by the user (Tailscale
+tailnet or Cloudflare funnel). It is never agent-enabled; the user enables it
+once and it stays up.
 
 ## Agent-first ergonomics
 
@@ -71,7 +77,8 @@ Every `aoide` command is designed as an API that happens to be typeable:
 ## The hooked agents: claude and kimi
 
 Two harnesses are first-class agent paths through the hook door, dispatched
-through per-harness profiles (`protocol::agents`, see [[Agent-Hooking]]). A
+through per-harness profiles (`aoide_protocol::agents`, see
+[[Agent-Hooking]]). A
 spawn wrapper registers the agent session and window address with
 [[shellbridge]]; the harness's hooks post state after each operation — claude
 via `Notification` / `Stop` / `Pre-PostToolUse`, kimi via the same core events

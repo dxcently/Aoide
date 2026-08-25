@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-20
-updated: 2026-08-20
+updated: 2026-08-25
 tags: [aoide, agent, orchestration, harness, session]
 ---
 
@@ -13,9 +13,10 @@ The loop protocol is a specification of role, gate, and degradation behavior
 laid over primitives Aoide already has — `graph spawn`, `graph send`, `graph
 pending list|approve|deny`, `graph view`, a session's log, a session's
 transcript — not a command of its own. Every consequential step a multi-role
-run takes — ship a change versus send it back, coach an executor mid-flight,
-kill a stuck agent — is a judgment call, exercised by an agent reading the
-brief in front of it. The protocol leaves that judgment exactly where it is
+run takes is a judgment call, exercised by an agent reading the brief in
+front of it: ship a change versus send it back, coach an executor
+mid-flight, kill a stuck agent. The protocol leaves that judgment exactly
+where it is
 exercised, and hands it only the primitives it acts through: `graph spawn`
 opens a fresh-context unit, `graph send` and the pending queue steer or hold
 one, `graph view` and a unit's log or transcript observe one. Roles, gates,
@@ -45,9 +46,9 @@ itself.
   offers no internal subagent tool AND `graph spawn` is unavailable to it.
 
 `graph spawn` runs against any conducted harness, so R1 is universally
-reachable: "tiered is the default" is a rule — run R1 unless the harness in
-front of you genuinely offers neither binding — not a per-harness
-declaration requiring a lookup table.
+reachable. "Tiered is the default" is a rule: run R1 unless the harness in
+front of you genuinely offers neither binding, not a per-harness declaration
+requiring a lookup table.
 
 ## Binding rule
 
