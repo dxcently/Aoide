@@ -28,7 +28,7 @@
 // elsewhere fall straight through; exclusiveZone 0 reserves nothing.
 //
 // `reveal` is driven by `dockOpen = shown || hotEdge || overPanel`:
-//   · shown    — the pinned toggle (SUPER+P / show()/hide()/toggle()); stays out.
+//   · shown    — the pinned toggle (SUPER+G / show()/hide()/toggle()); stays out.
 //   · hotEdge  — pointer inside the thin left hot strip (hover-peek).
 //   · overPanel— pointer anywhere over the drawn codex (keeps a peek open).
 // A ~450ms auto-hide grace after the hover union drops keeps it from flapping;

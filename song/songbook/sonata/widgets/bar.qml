@@ -491,7 +491,7 @@ component WorkspaceRow: Item {
     // lines up: ShellBridge is OUTBOUND-only by design (hazards.md §5,
     // AoidePanel.qml's own header — "no inbound CLI verb to toggle a
     // surface"), and adding one here would be a second, inconsistent path to
-    // the exact toggle GlobalShortcut (SUPER+P → aoide:dock) already owns
+    // the exact toggle GlobalShortcut (SUPER+G → aoide:dock) already owns
     // cleanly. Fixed the same way powermenu was: call .toggle() on the
     // injected instance directly.
     required property var dock

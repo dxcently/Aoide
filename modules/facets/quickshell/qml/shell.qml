@@ -154,7 +154,7 @@ ShellRoot {
     // The temple's home: four self-framed stele gadgets (Conductor, Terminals,
     // Meters, Power) stacked into one summoned column pinned to the LEFT edge,
     // vertically centred. Owns its own PanelWindow + WlrLayershell + toggle
-    // GlobalShortcut (SUPER+P → aoide:dock) internally — shell.qml just hands it
+    // GlobalShortcut (SUPER+G → aoide:dock) internally — shell.qml just hands it
     // the shared singletons. Replaces the old AoideAgentWidgets hot-edge drawer.
     AoidePanel {
         id: aoidePanel
