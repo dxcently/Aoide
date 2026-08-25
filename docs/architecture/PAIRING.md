@@ -83,29 +83,71 @@ there is no "this peer may spawn, that one may not."
 
 ## The ceremony
 
+A commit-then-reveal handshake (the Bluetooth SSP idiom), not a single
+round trip carrying both sides' pubkeys and nonces in the clear: only the
+first mover (A, the requester) commits to its own nonce before revealing
+it, so an on-path attacker who observes the request can never control
+enough of the SAS transcript to force the same code onto both operators
+while sitting between them. B, the approver, may reveal its own nonce
+immediately in its synchronous response — A's nonce is already fixed by
+A's commitment and stays unknown to anyone until A's own reveal lands two
+messages later.
+
 ```
 box A                                      box B
 aoide peer pair request <url> [--name b]
-  → POST pairing request to B's door ────► parks pending (id, A's pubkey,
-     (A's pubkey, A's name, nonce)          A's claimed name, origin addr)
+  → POST commitment to B's door ─────────► parks pending, UNREVEALED
+     (A's pubkey, A's name,                (id, A's pubkey, A's claimed
+      commit = H(pubkey_A, nonce_A))        name, origin addr, commit)
+  ◄── B's pubkey + B's own nonce ─────────┘
+  → POST reveal ──────────────────────────► verifies H(pubkey_A, nonce_A)
+     (id, nonce_A)                             == commit; stores nonce_A
+                                              on match — drops the parked
+                                              entry outright on mismatch
+both sides now display the SAME SAS, derived from (pubkey_A, pubkey_B,
+nonce_A, nonce_B) — B's copy only computable once the reveal landed
                                            operator: CLI prompt on next
                                            `aoide peer pair pending` /
                                            popup via the events feed
-both sides display: SAS code derived from (pubkey_A, pubkey_B, nonces)
 human confirms codes match (CLI y/N or popup confirm)
                                            aoide peer pair approve <id>
-  ◄── B's pubkey + approval ──────────────┘
-peer records written BOTH ends: pubkey, verified=true,
-allows=["read","spawn"], names bound
+  B's own peer record commits HERE — pubkey, verified=true,
+  allows=["read","spawn"], A's name bound
+  ◄── B's pubkey + approval callback ─────┘   (aoide/pairApprove)
+A's outbound entry now shows the SAME SAS a second time (`peer pair
+pending`, state awaiting-confirm); A's own operator confirms it
+independently (`aoide peer pair approve <id>`, run a SECOND time, now
+against the outbound queue) — ONLY THEN does A's own peer record commit.
+`aoide peer pair reject <id>` on A's outbound entry aborts at any point
+before that second confirm, with no wire call and no record on either end.
 ```
 
 - The short authentication string (SAS) is derived from a transcript
-  hash over both public keys + both nonces (executor states the exact
-  derivation; standard SAS construction, no invention).
-- A pairing request that is never approved expires (timeout knob,
-  default generous — hours, not minutes; it waits for a human).
+  hash over both public keys + both nonces — SHA-256 over the four
+  fields, lowercased/trimmed/NUL-separated, truncated mod 1,000,000
+  (`aoide_storage::pairing::derive_sas`; the exact derivation and its
+  pinned vectors live in CONTRACTS §6's "Pairing wire" subsection —
+  standard SAS construction, no invention).
+- A pairing request that is never approved (or never confirmed on A's
+  own side) expires (timeout knob, default generous — hours, not
+  minutes; it waits for a human, twice).
+- **The two ends commit asymmetrically, on purpose.** B's peer record
+  for A exists the moment B's own operator approves; A's peer record
+  for B exists only once A's own operator confirms afterward, over the
+  SAME code. A never-confirmed A simply leaves B holding a verified peer
+  that answers nothing — visible on B's own `peer status`, resolved by
+  an ordinary expiring re-pair, never a silent one-sided pairing. This
+  is decision 4's mutual confirmation carried all the way through: a
+  code shown once and accepted once was never actually a MUTUAL
+  confirmation, only a promise that the other side would eventually
+  agree.
 - Re-pairing an existing peer replaces the key material only after
   the same confirmation — never silently.
+- The inbound park queue is capped (`AOIDE_PAIRING_PARK_CAP`, default
+  32) — an unauthenticated door refusing to park indefinitely, the same
+  discipline the secrets broker's own ask-park queue holds. Outbound
+  entries are operator-created, one per `peer pair request` invocation,
+  and carry no cap.
 
 ## Wire authentication (paired peers)
 

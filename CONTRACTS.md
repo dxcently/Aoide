@@ -423,7 +423,7 @@ count.
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` verb
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
-  **72 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **76 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -495,15 +495,28 @@ count.
   wire/storage shape.
   `peer pair request|pending|approve|reject`, appended newest, P-P2
   (`docs/architecture/PAIRING.md`) (+4 → 76) — the pairing ceremony's CLI
-  half: `request <url>` sends `aoide/pairRequest` to another instance's A2A
-  door and parks the answer locally (`aoide_storage::pairing`); `pending`
-  lists this instance's own parked inbound requests, each with its own
-  independently-derived SAS; `approve <id>` re-derives the SAS, requires an
-  explicit `y`/`yes` confirmation (`--yes` for scripted use), and on
-  confirmation delivers `aoide/pairApprove` before writing a `pubkey`/
-  `verified` peer record on this end; `reject <id>` is a clean local
-  refusal, no wire call, no peer record. See §6's "Pairing wire" and §7's
-  "Peer record" subsections below for the exact wire shapes and SAS
+  half, both directions behind the SAME four verbs (no fifth verb for the
+  requester's own confirm step — golden count unchanged by the
+  review-bounce fix forward on P-P2's first commit): `request <url>` sends
+  a commitment (`aoide/pairRequest`) to another instance's A2A door,
+  immediately reveals it (`aoide/pairReveal`, same invocation, two
+  sequential POSTs), and parks the outbound half locally
+  (`aoide_storage::pairing`); `pending` lists BOTH this instance's own
+  parked INBOUND requests (no SAS until revealed — an unrevealed entry
+  shows `"revealed": false`) and its own OUTBOUND requests (`"direction":
+  "outbound"`, SAS always shown, tagged with the entry's own `state`);
+  `approve <id>` tries the inbound queue first — refusing an unrevealed
+  entry outright — then the outbound queue, re-deriving the SAS either way
+  and requiring an explicit `y`/`yes` confirmation (`--yes` for scripted
+  use) before anything commits: on the inbound (approver) side confirmation
+  delivers `aoide/pairApprove` before writing a `pubkey`/`verified` peer
+  record on this end; on the outbound (requester) side, reached only once
+  B's own callback has already landed, confirmation commits the peer
+  record directly with no further wire call; `reject <id>` is a clean local
+  refusal on either queue, no wire call, no peer record — on an outbound
+  entry this doubles as the ceremony's abort verb, usable at any stage. See
+  §6's "Pairing wire" and §7's "Peer record" subsections below for the
+  exact wire shapes, the commitment/reveal construction, and SAS
   derivation.
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
@@ -2672,16 +2685,29 @@ field existed.
 
 ### Pairing wire (P-P2, `docs/architecture/PAIRING.md`)
 
-Two new methods on the SAME existing A2A JSON-RPC/HTTP door (§6) — no new
-transport, no new server, no new port. Both are **deliberately
-unauthenticated** (`read_ok`/bearer gating never applies to either): the
-ceremony's whole point is establishing a credential where none exists yet,
-so gating it on one would be circular. A parked or approved request grants
-NOTHING beyond a peer record with `verified: true` — it flips no gate,
-touches no `allows`/permission (P-P3's lane), and changes no spawn/bearer
-behavior. Unknown methods still get the standard `-32601`; malformed params
-on either method get `-32602` before anything is parked, persisted, or
-committed.
+Three new methods on the SAME existing A2A JSON-RPC/HTTP door (§6) — no new
+transport, no new server, no new port. All three are **deliberately
+unauthenticated** (`read_ok`/bearer gating never applies to any of them):
+the ceremony's whole point is establishing a credential where none exists
+yet, so gating it on one would be circular. A parked, revealed, or approved
+request grants NOTHING beyond a peer record with `verified: true` — it
+flips no gate, touches no `allows`/permission (P-P3's lane), and changes no
+spawn/bearer behavior. Unknown methods still get the standard `-32601`;
+malformed params get `-32602` before anything is parked, persisted, or
+committed; a park-queue-full refusal is the distinct `-32000` (the park cap
+below); a reveal's commitment mismatch is the distinct `-32002`.
+
+The ceremony is a standard **commit-then-reveal** handshake (the Bluetooth
+SSP idiom) rather than a single round trip carrying both sides' pubkeys and
+nonces in the clear: only the first mover (A, the requester) commits to its
+own nonce before revealing it, closing the active-MITM gap a single-round-
+trip design leaves open (an on-path attacker who sees both real values in
+one message controls four of the SAS's six transcript-shaping fields and
+can brute-force a 6-digit code against fast SHA-256). B, the approver, may
+reveal its own nonce immediately in its synchronous response — a
+counterpart choosing its own values only AFTER seeing that response still
+cannot force a chosen SAS to match, because A's nonce is fixed by A's
+commitment and unknown to anyone until A's own reveal lands.
 
 **`aoide/pairRequest`** — the REQUESTER's box (A) POSTs this to the
 APPROVER's box (B)'s A2A door:
@@ -2689,22 +2715,26 @@ APPROVER's box (B)'s A2A door:
 ```json
 { "jsonrpc": "2.0", "id": 1, "method": "aoide/pairRequest",
   "params": { "pubkeyHex": "<64 lowercase hex>", "name": "box-a",
-              "nonceHex": "<32 lowercase hex>", "url": "http://box-a:8710/" } }
+              "commitHex": "<64 lowercase hex>", "url": "http://box-a:8710/" } }
 ```
 
 `pubkeyHex` is A's own ed25519 public key (P-P1's `identity::load_or_mint`,
 minted on first use if absent); `name` is A's claimed nickname for B's own
 registry entry — validated server-side against the same `valid_peer_name`
 `peer add`/`peer remove` already enforce, since `peer pair approve` reuses
-it verbatim with no separate override; `nonceHex` is a fresh random value
-(`aoide_storage::pairing::random_hex(16)`) feeding the SAS transcript below;
-`url` is A's own advertised A2A door URL, for B's later approval callback.
+it verbatim with no separate override; `url` is A's own advertised A2A door
+URL, for B's later approval callback. `commitHex` is
+`SHA256(pubkeyHex || 0x00 || nonceHex || 0x00)`, hex-encoded
+(`aoide_storage::pairing::derive_commit`, the same canonical
+lowercased/trimmed/NUL-separated field style `derive_sas` already used) —
+A's own nonce itself is chosen locally and does NOT ride this message.
+
 B parks the request (`aoide_storage::pairing::park_inbound`, disk-persisted
 under `state/peer-pairing-inbound.json`, STABLE non-array-position ids —
 correlation must survive both processes exiting and an async callback
-arriving arbitrarily later, unlike `song/stage/pending.json`'s idiom) and
-answers SYNCHRONOUSLY with its own public identity and a fresh nonce of its
-own, so A can derive its copy of the SAS with no further round trip:
+arriving arbitrarily later, unlike `song/stage/pending.json`'s idiom, and
+capped — see below) and answers SYNCHRONOUSLY with its own public identity
+and a fresh nonce of its own:
 
 ```json
 { "jsonrpc": "2.0", "id": 1,
@@ -2716,9 +2746,36 @@ Expiry is generous by design (hours, not minutes — a human has to relay a
 code out-of-band): `AOIDE_PAIRING_TIMEOUT` in seconds, else a 4-hour
 default (`aoide_storage::pairing::DEFAULT_PAIRING_TIMEOUT_SECS`). Expired
 entries are swept lazily on the next `list`/`take` call, never a background
-timer. `peer pair pending`/`approve`/`reject` (CLI surface below) are B's
-own local half; nothing about parking ever appears in `state/peers.json`
-until an explicit approval.
+timer. Nothing about parking ever appears in `state/peers.json` until an
+explicit approval and confirm (below).
+
+**`aoide/pairReveal`** — A's SECOND POST, sent to the SAME door immediately
+after the response above, inside the SAME `peer pair request` invocation
+(two sequential POSTs, then the CLI prints the SAS):
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "method": "aoide/pairReveal",
+  "params": { "id": "<the id aoide/pairRequest returned>",
+              "nonceHex": "<A's 32-hex nonce>" } }
+```
+
+B recomputes `SHA256(pubkeyHex || 0x00 || nonceHex || 0x00)` against the
+parked entry's own `commitHex` (`aoide_storage::pairing::reveal_inbound`).
+On a match, B stores A's nonce on the entry and answers:
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "result": { "ok": true } }
+```
+
+On a mismatch B DROPS the parked entry outright (unlike
+`aoide/pairApprove`'s pubkey-mismatch handling below, a false commitment is
+not a recoverable data hiccup — it's the exact shape an active attacker's
+forced retry would take) and answers `-32002`. An unknown/expired id is
+`-32001`. An inbound entry that has not yet been revealed shows in `peer
+pair pending` with no SAS (`"revealed": false`); `peer pair approve`
+against it refuses outright with a taught "awaiting reveal" error — there
+is nothing to confirm until A's nonce is known, since the SAS transcript
+needs it.
 
 **`aoide/pairApprove`** — once B's operator confirms the SAS (below) B
 POSTs this back to the URL A supplied in its original request:
@@ -2729,29 +2786,55 @@ POSTs this back to the URL A supplied in its original request:
               "pubkeyHex": "<B's 64-hex pubkey>" } }
 ```
 
-A looks up its own outbound-parked entry by `id`
-(`aoide_storage::pairing::take_outbound`); an unknown/expired id is
+A looks up its own outbound-parked entry by `id`; an unknown/expired id is
 `-32001`. A then checks `pubkeyHex` against the value B's OWN synchronous
-`aoide/pairRequest` answer already gave it — a mismatch re-parks the
-outbound entry (never destroys it, so a legitimate retry after a transient
-data hiccup isn't permanently broken) and answers `-32602`. On a match, A
-commits its own `pubkey`/`verified` peer record for B (§7's "Peer record"
-below) and answers:
+`aoide/pairRequest` answer already gave it — a mismatch leaves the outbound
+entry untouched (still `awaiting-approval`, never re-parked, never dropped
+— a legitimate retry after a transient data hiccup is not permanently
+broken) and answers `-32602`. On a match, A does **not** yet commit a peer
+record: A transitions its outbound entry to `awaiting-confirm`
+(`aoide_storage::pairing::mark_outbound_awaiting_confirm`) and answers:
 
 ```json
 { "jsonrpc": "2.0", "id": 1, "result": { "ok": true, "name": "box-b" } }
 ```
 
-B commits its OWN peer record for A only once this callback succeeds
-(`aoide-client::commands::handle_peer_pair_approve` calls out BEFORE
-writing anything local) — an unreachable A leaves BOTH ends unpaired,
-never just one.
+**The commit asymmetry is deliberate (review-bounce Finding 2 — decision
+4's mutual confirmation, for real).** B already committed its OWN peer
+record for A the moment B's own operator ran `peer pair approve <id>`
+(BEFORE this callback was ever sent — `aoide-client::commands::
+approve_inbound` calls out BEFORE writing anything local, unchanged from
+before). A commits its OWN record only later, once A's own operator runs
+`peer pair approve <id>` a SECOND time — now against the outbound queue,
+reached only once this callback has landed — re-derives the SAS from
+values already held locally (no further wire call needed, since B already
+committed its own side), and confirms it themselves. Both humans now see
+and confirm the SAME code before either side calls the pairing done on
+their own end. A never-confirmed A leaves B holding a `verified: true`
+peer that simply answers nothing until A confirms; the fix is a visible,
+expiring outbound entry (`peer pair pending`) and an ordinary re-pair, not
+a special recovery path. `peer pair reject <id>` against an outbound entry
+aborts it at ANY stage (`awaiting-approval` or `awaiting-confirm`) — no
+wire call, no peer record — doubling as the ceremony's own missing abort
+verb.
 
-**SAS derivation** — a standard numeric-comparison Short Authentication
-String (Bluetooth-SSP-style), no invented cryptography: SHA-256
-(`aoide_storage::pairing::derive_sas`, the sanctioned `sha2` dependency,
-PAIRING.md decision 1) over the four public transcript values, each
-lowercased/trimmed and NUL-separated:
+**Park cap (review-bounce Finding 3).** `park_inbound` refuses beyond
+`AOIDE_PAIRING_PARK_CAP` concurrently parked inbound requests (default 32,
+`aoide_storage::pairing::DEFAULT_PAIRING_PARK_CAP`), checked under ONE lock
+acquisition immediately before insert — the same check-then-insert
+discipline `aoide-secrets::park::park_if_room` already holds, closing the
+same unauthenticated-and-unbounded-queue shape that function was built to
+close. The refusal is the distinct `-32000`, a taught error naming the cap
+and its override env var. Outbound entries are operator-created (one `peer
+pair request` invocation each, never wire-driven) and carry no cap.
+
+**SAS derivation** — UNCHANGED by this ceremony rework: a standard
+numeric-comparison Short Authentication String (Bluetooth-SSP-style), no
+invented cryptography, still SHA-256 (`aoide_storage::pairing::derive_sas`,
+the sanctioned `sha2` dependency, PAIRING.md decision 1) over the same four
+public transcript values, each lowercased/trimmed and NUL-separated — only
+how the two nonces REACH each side changed (commit-then-reveal instead of
+one round trip), never the hash, the field order, or the truncation:
 
 ```
 digest = SHA256(requesterPubkeyHex || 0x00 || approverPubkeyHex || 0x00
@@ -2759,20 +2842,24 @@ digest = SHA256(requesterPubkeyHex || 0x00 || approverPubkeyHex || 0x00
 sas    = (be_u32(digest[0..4]) mod 1_000_000) formatted "%03d-%03d"
 ```
 
-Both sides compute this independently from values they already hold
-(never trusting a wire-carried SAS) — A from its own request plus B's
-`aoide/pairRequest` answer, B from the parked inbound entry plus its own
-identity. Pinned stability test vectors
+Both sides compute this independently from values they already hold (never
+trusting a wire-carried SAS) — A from its own request plus B's
+`aoide/pairRequest` answer, B from the parked-and-revealed inbound entry
+plus its own identity. Pinned stability test vectors
 (`aoide-storage::pairing::tests::derive_sas_stability_vectors_never_drift`):
 `derive_sas("a"*64, "b"*64, "c"*16, "d"*16) == "740-729"`; swapping
 requester/approver roles on the same four values yields a DIFFERENT code
 (`"847-405"`) — the transcript is order-sensitive, not a set.
 
-This subsection is **additive**: it introduces `aoide/pairRequest` and
-`aoide/pairApprove` on the existing A2A door plus
+This subsection is **additive**: it introduces `aoide/pairReveal` alongside
+`aoide/pairRequest`/`aoide/pairApprove` on the existing A2A door, and
 `state/peer-pairing-inbound.json`/`state/peer-pairing-outbound.json` (§4
-shape, both gitignored root-runtime state, both tolerate-missing-as-empty),
-carries no version bump to §1–§6, and needs no playbook migration entry.
+shape, both gitignored root-runtime state, both tolerate-missing-as-empty)
+gain `commitHex`/`requesterNonceHex` (now optional, absent until revealed)
+on the inbound side and `approverNonceHex`/`state` on the outbound side —
+all additive, `#[serde(default)]` where a legacy record could otherwise
+fail to parse. Carries no version bump to §1–§6 and needs no playbook
+migration entry.
 
 ---
 
