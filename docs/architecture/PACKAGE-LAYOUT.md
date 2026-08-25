@@ -102,7 +102,7 @@ pkgs/aoide/
   crates/
     protocol/                   # one schema, N doors — THE contract
       src/ registry · schema · envelope(Outcome) · canonical_state
-           · door(Cli|Mcp|A2a) · audit · wire/{a2a-jsonrpc, mcp}
+           · door(Cli|Mcp|A2a) · audit · feed · wire/{a2a-jsonrpc, mcp}
            · cmd!/arg!/flag! registration macros (Phase 9)
       CONTRACTS.md              # (moves here — protocol's spec)
     conduct/                    # PTY multiplexer + session DAG + hooks
@@ -144,7 +144,7 @@ pkgs/aoide/
 
 | crate | charter | maps-from (today) | status |
 |---|---|---|---|
-| **protocol** | The single contract: registry, schema doc, `Outcome` envelope + exit codes, `canonical_state`, `Door`, audit event classes, the A2A-JSON-RPC / MCP wire types, and the `cmd!`/`arg!`/`flag!` registration macros. Every door depends on it; it depends on nothing aoide-specific. | `registry.rs`, `output.rs`, `daemon.rs`(Door/audit), a2a/mcp wire types, `CONTRACTS.md`, `commands/meta.rs`(schema) | landed (Phase 2); macros + `audit_log_path` folded in (Phase 9) |
+| **protocol** | The single contract: registry, schema doc, `Outcome` envelope + exit codes, `canonical_state`, `Door`, audit event classes, the `feed` primitives (`FeedWriter`/`Follower` — the append-only JSON-lines event-feed spine, same cross-cutting shape as `audit`), the A2A-JSON-RPC / MCP wire types, and the `cmd!`/`arg!`/`flag!` registration macros. Every door depends on it; it depends on nothing aoide-specific. | `registry.rs`, `output.rs`, `daemon.rs`(Door/audit), a2a/mcp wire types, `CONTRACTS.md`, `commands/meta.rs`(schema) | landed (Phase 2); macros + `audit_log_path` folded in (Phase 9) |
 | **conduct** | The session core: PTY-backed `conduct` wrap, the session DAG, hook ingestion, liveness reaping — plus its CLI verbs (`graph *`, `conduct`, `hooks install`). Makes every terminal a tracked, conductable session. | `graph/` (conduct·send·model·doc·window·verbs·common), `shellbridge.rs`, `reap.rs`, `commands/graph.rs`, `commands/hooks.rs` | landed (Phase 3b); commands landed (Phase 9) |
 | **server** | `aoided` and the door serve-loops: MCP-over-stdio, A2A JSON-RPC/HTTP/SSE, listeners, sessions, snapshots, the audit sink — plus its CLI verbs (`daemon`, `shellbridge`, `a2a serve`). Untrusted input stops here. | `daemon.rs`, `mcp.rs`, `a2a.rs`(serve half), `commands/infra.rs`(server half), `commands/a2a.rs`(serve verb) | landed (Phase 4c); commands landed (Phase 9) |
 | **client** | Outbound: the A2A client registry + send, the melete adapter (neutral-event consumer), transports — plus its CLI verbs (`a2a agent *`, `adapter melete`). Drives external agents and speaks to `aoided`. | `a2a.rs`(client half), `adapter.rs`, `commands/a2a.rs`(agent verbs), `commands/infra.rs`(adapter verb) | landed (Phase 4b); commands landed (Phase 9) |
