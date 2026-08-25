@@ -1376,11 +1376,14 @@ would).
 **`pending`** — list every parked ask (never a value):
 ```text
 -> {"op":"pending"}
-<- {"ok":true,"pending":[{"id":"<id>","secret":"<name>","consumer":"<consumer>","requestedAt":<unix-seconds>},...]}
+<- {"ok":true,"pending":[{"id":"<id>","secret":"<name>","consumer":"<consumer>","requestedAt":<unix-seconds>,"peerUid":<uid-or-null>},...]}
 ```
 Never errors (an empty queue is `{"ok":true,"pending":[]}`); not audited —
 a read of in-memory state only, same precedent `graph pending list` already
-sets.
+sets. `peerUid` (task #73) is ADDITIVE over the pre-#73 shape — the
+kernel-truth `SO_PEERCRED` uid of the connection that parked this ask
+(`null` when it could not be read), alongside the pre-existing
+self-asserted `consumer` name; see "Peer identity" below.
 
 **`approve`** — complete a parked ask with a code, releasing the value down
 the ORIGINAL parked connection (never this reply):
@@ -1416,18 +1419,30 @@ original parked caller's `resolve` reply get the identical
 error; the ask is removed from the registry either way, never left
 dangling.
 
-**`dismiss`** — refuse a parked ask outright, no code needed:
+**`dismiss`** — refuse a parked ask outright, no code needed, and
+**peer-uid-gated (task #73)**:
 ```text
 -> {"op":"dismiss","id":"<id>"}
 <- {"ok":true}
 <- {"ok":false,"error":"unknown pending id `<id>`"}
+<- {"ok":false,"error":"<peer-uid-mismatch refusal, names both uids>"}
 ```
 The parked connection gets `{"ok":false,"error":"the pending TOTP ask was
 dismissed before a code was provided"}` on its own `resolve` reply (P-N2c:
 no "by an operator" claim — any member of the consumers group that can
 reach the socket can dismiss, not only an operator, so the message no
 longer asserts who); the dismisser's own reply only confirms the dismissal
-happened.
+happened. **Task #73 narrows who "any member... that can reach the socket"
+actually means**: the dismissing connection's own kernel-truth peer uid
+(`SO_PEERCRED`, "Peer identity" below) must match the ask's OWN stamped
+peer uid (recorded at park time), or the broker's own effective uid — an
+unmatched dismiss is refused with a taught error naming both uids, and the
+ask is left exactly where it was (never consumed by a failed unauthorized
+attempt). An unidentified dismissing connection (peer cred unreadable) is
+NEVER authorized, even against an ask whose own peer uid is also
+unidentified — fail closed, never open, on a missing kernel fact. `approve`
+is UNCHANGED by this — it stays open to any local caller reaching the
+socket; the TOTP code is its gate, not identity.
 
 Audit (both destinations, name-only, same discipline as `resolve`/`put`):
 park/approve/dismiss/timeout each write one line — the id, the secret name,
@@ -1525,7 +1540,22 @@ authenticated consumer identity is a separate, not-yet-planned scope
 `crates/secrets/AGENTS.md` already carries for the identical reason). A
 policy's `consumers[]` list is a courtesy label on top of the real
 boundary (socket group membership), not a cryptographic one, until that
-lands.
+lands. **Task #73 does not change this** — see "Peer identity" immediately
+below for the separate, orthogonal fact it DOES add.
+
+**Peer identity (`SO_PEERCRED`, task #73).** Every accepted connection's
+kernel-truth `uid`/`gid`/`pid` is read once, at connection start, via
+`SO_PEERCRED` (`crates/secrets/src/peercred.rs`) — the connecting
+process's REAL uid, verified by the kernel, independent of anything the
+wire request itself claims. A read failure is an UNIDENTIFIED connection
+(`None`), never a panic, never a fabricated uid; every decision keyed on it
+fails CLOSED, never open. This is recorded ALONGSIDE the self-asserted
+`consumer` name above, never in place of it — `consumer` is still
+unauthenticated; the peer uid is a separate fact. Two places this fact is
+used: `pending`'s reply carries each ask's stamped `peerUid`
+(additive field, above), and `dismiss` is gated on it (above) — every
+resolve/park/approve/dismiss/put audit line also carries the acting
+connection's peer uid now, alongside the pre-existing self-asserted name.
 
 If a secrets file shape ever needs to be READ by something outside the
 `aoide-secrets` crate (a future admin tool, a debugging script), that is the
