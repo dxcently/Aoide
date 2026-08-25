@@ -1557,6 +1557,49 @@ used: `pending`'s reply carries each ask's stamped `peerUid`
 resolve/park/approve/dismiss/put audit line also carries the acting
 connection's peer uid now, alongside the pre-existing self-asserted name.
 
+**Admin mutations (task #79) — a new op family, built on Peer identity
+above.** Every admin CRUD verb (`add`/`rm`/`grant`/`revoke`/`set-totp`/
+`automate`/`expose`/`migrate`) is now reachable over this SAME socket, as
+the daemon's SINGLE-WRITER path — the live broker becomes the one process
+serializing every `policy.json`/backend-store mutation, closing the TOCTOU
+a concurrent `put`/`exec` and an admin verb used to have when both raced a
+direct-home write:
+```text
+-> {"op":"admin","verb":"add","name":"<name>","backend":"<backend>","key":"<key>","requireTotp":<bool>?,"consumers":[<name>,...]?}
+-> {"op":"admin","verb":"rm","name":"<name>"}
+-> {"op":"admin","verb":"grant"|"revoke","name":"<name>","consumer":"<consumer>"}
+-> {"op":"admin","verb":"set-totp"|"expose","name":"<name>","state":"on"|"off"}
+-> {"op":"admin","verb":"automate","name":"<name>","action":"on"|"off"|"grant"|"revoke","consumer":"<consumer>"?}
+-> {"op":"admin","verb":"migrate","name":"<name>","target":"<backend>"}
+<- {"ok":true,"message":"<summary>","changed":["policy:<name>"]}
+<- {"ok":false,"error":"<message>"}
+```
+`changed` is empty on an idempotent no-op, the same discipline every CLI
+`Outcome` already holds.
+
+**Gate: ONLY the broker's own effective uid, full stop — stricter than
+`dismiss`'s.** Where `dismiss` (above) admits either the ask's own stamped
+peer uid or the broker's own uid, `{"op":"admin"}` admits ONLY the
+broker's own effective uid — reusing the SAME wording the direct-write
+path's admin-identity guard already gives (root explicitly refused, not a
+bypass — "plain `sudo` runs as root, and root CAN write here regardless of
+file ownership"), so a refusal here teaches the identical fix. An
+unidentified connection (peer cred unreadable) is refused outright, the
+same fail-closed default `dismiss` holds.
+
+**The CLI tries this socket FIRST; a direct write is the no-daemon
+fallback, never a silent downgrade past a live one.** `aoide secrets
+<verb>` connects and sends the `{"op":"admin"}` request above; only when
+the connect itself fails with "nothing is listening" (no socket file, or a
+stale one with nothing behind it) does the CLI fall back to writing
+`policy.json` directly (the pre-#79 behavior, still euid-guarded the same
+way). Any OTHER socket failure — including the broker's own authoritative
+`{"ok":false}` denial — is reported as the command's result outright,
+never silently downgraded into the fallback; a live-but-sick daemon can
+never be bypassed into a direct write racing underneath it. Every admin
+verb's `Outcome` names which path actually ran (`data: {"path":"broker"}`
+or `{"path":"direct"}`).
+
 If a secrets file shape ever needs to be READ by something outside the
 `aoide-secrets` crate (a future admin tool, a debugging script), that is the
 signal to promote its shape into a numbered subsection here — nothing
