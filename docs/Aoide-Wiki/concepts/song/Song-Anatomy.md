@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-28
-updated: 2026-08-19
+updated: 2026-08-25
 tags: [aoide, song, rice, architecture]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -33,13 +33,10 @@ Only `stage/` and `auditions/` are gitignored — those two are the whole runtim
 surface; everything else under `song/` is versioned score.
 
 > **The shipped standard song lives in the songbook like any other.**
-> `aoide.song`'s default, `"sonata"`, is `song/songbook/sonata/`. It is
-> upstream-owned and evolving — like any other upstream-owned tree (nucleus,
-> facets), upstream MAY still update or iterate on it, by git merge-base, not
-> by path ([[Governance]]). Every OTHER song — anything composed via
-> `rice compose` under a different name — is clone-owned instead: an agent
-> adopts *new* songs alongside the standard but upstream never overwrites
-> them, and a bad generation can never replace what you've composed.
+> `aoide.song`'s default, `"sonata"`, is `song/songbook/sonata/` —
+> upstream-owned and evolving; every other song is clone-owned, and upstream
+> never touches it. See [[Self-Ricing#The Shipped Baseline Is Guarded, Not
+> Frozen]] for the full guarantee.
 
 ## Committed score — the versioned half
 
@@ -85,9 +82,10 @@ the "self" in [[Self-Ricing]].
 Rice design memory lives in the songbook, per song: each song's current
 design elements live in its own `design/intent.md` (sonata's
 records the key, the glass values, and the surface elements as performed).
-The cross-cutting Pantheon grammar the retired `default` song once owned is
-no longer live in any song's design folder — kept as historical reference at
-`docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`.
+The cross-cutting Pantheon grammar belonging to the retired `default` song
+lives only as historical reference, at
+`docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md` — not in any
+live song's design folder.
 The wiki carries only the protocol ([[Ricing-Protocol|Ricing Protocol]], in
 `concepts/song/`) — design content about a rice goes to that rice's `design/`
 folder in the repo, not the wiki.

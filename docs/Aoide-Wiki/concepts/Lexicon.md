@@ -1,13 +1,13 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-16
+updated: 2026-08-25
 tags: [aoide, naming, meta, architecture]
 ---
 
 # Lexicon — the Vocabulary, the Flow, and Why the Words
 
-Every name in Aoide is load-bearing. This page is the one place that explains the whole vocabulary at once: where each word family comes from, what it names, and how the named things flow into each other. The families are three — **the Muses** (who acts), **the snowflake** (what is frozen), and **the song** (what is performed) — plus the small set of **machinery words** that connect them.
+Every name in Aoide is load-bearing. This page explains the whole vocabulary at once: where each word family comes from, what it names, how the named things flow into each other. Three families — **the Muses** (who acts), **the snowflake** (what is frozen), **the song** (what is performed) — plus the **machinery words** connecting them.
 
 ## The Greek stuff — the three original Muses
 
@@ -15,33 +15,31 @@ Before the familiar nine, Greek tradition (Pausanias, describing the cult at Mou
 
 | Muse | Greek | Domain | In this system |
 |---|---|---|---|
-| **Aoide** | Ἀοιδή | song, voice | the running, performing system — the orchestration core singing, whether headless or as the full AoideOS desktop; the core runs shell-only too |
-| **Melete** | Μελέτη | practice, exercise | [[Melete]] — the integrated (not vendored) coding agent, the **doer**: it practices, writes, builds, rehearses |
-| **Mneme** | Μνήμη | memory | [[Mneme]] — the integrated (not vendored) knowledge server, the **rememberer**: the vault, the wiki, what was learned |
+| **Aoide** | Ἀοιδή | song, voice | the running, performing system — the orchestration core singing, headless or as the full AoideOS desktop |
+| **Melete** | Μελέτη | practice, exercise | [[Melete]] — the coding agent, the **doer**: it practices, writes, builds, rehearses |
+| **Mneme** | Μνήμη | memory | [[Mneme]] — the knowledge server, the **rememberer**: the vault, the wiki, what was learned |
 
-The selection is the thesis: **song is what happens when practice and memory perform together.** A desktop that rices itself needs an actor that does (Melete), a store that remembers (Mneme), and a body that sings what they make (Aoide). The three original Muses are reunited as one system — the software wears the oldest names for the three faculties it actually has.
-
-The naming is a **theme**: Melete and Mneme are **independently-owned systems** Aoide integrates and launches (the nucleus carries a melete-adapter; `pkgs/{melete,mneme}` are launchers for their self-updating runtimes; the wiki you are reading is served through Mneme). They are the other two thirds of the *name*; they are not sub-components of the Aoide program, and the arrow can run the other way — `melete aoide …` means Melete drives Aoide. The three-Muses trio is why the words fit.
+The selection is the thesis: **song is what happens when practice and memory perform together.** A desktop that rices itself needs an actor that does (Melete), a store that remembers (Mneme), a body that sings what they make (Aoide). Melete and Mneme are independently-owned systems Aoide integrates and launches, not sub-components ([[Melete]], [[Mneme]]); the arrow can run the other way too — `melete aoide …` means Melete drives Aoide.
 
 ## Architecture is frozen music
 
-The engraved thesis (after Goethe's *"Architektur ist erstarrte Musik"* — architecture is frozen music) splits the system into two halves along one seam:
+The engraved thesis (after Goethe's *"Architektur ist erstarrte Musik"*) splits the system into two halves along one seam:
 
-- **The frozen half** — the nix layer. Immutable, crystalline, evaluated. It is the **score**: it determines everything and performs nothing.
-- **The performed half** — the running desktop. Live, hot-reloadable, ephemeral. It is the **performance**: what the score sounds like tonight, at this venue.
+- **The frozen half** — the nix layer. Immutable, evaluated. The **score**: determines everything, performs nothing.
+- **The performed half** — the running desktop. Live, hot-reloadable, ephemeral. The **performance**: what the score sounds like tonight, at this venue.
 - **The seam** — [[livery]]. Livery values are frozen into the crystal at build time *and* sounded live at runtime (`stage/livery.json`, hyprctl, OSC). Both fan-outs derive from the same `aoide.livery`, so the baked theme and the live preview cannot drift.
 
-Each half gets its own word family, so you always know which side of the seam a sentence is standing on.
+Each half gets its own word family, so a sentence always names which side of the seam it stands on.
 
 ## The frozen family — snowflake morphology
 
-Chosen because Nix's own logo is a snowflake, because crystals grow by **local accretion from a nucleus outward** — exactly how the dendritic walker composes modules — and because no two crystals are alike: same physics (shared upstream flake), unique host instances. See [[Snowflake-Anatomy]] for the full anatomy; the map:
+Chosen because Nix's own logo is a snowflake, because crystals grow by local accretion from a nucleus outward — the same shape as the dendritic walker composing modules — and because no two crystals are alike: same physics (shared upstream flake), unique host instances. Full anatomy: [[Snowflake-Anatomy]].
 
 | Term | Names | Why this word |
 |---|---|---|
 | **nucleus** | `modules/nucleus/` — daemon, CLI, policy | the seed crystal everything condenses around |
 | **dendrite** | `modules/dendrites/` — opt-in feature branches | crystal branches grow outward by accretion; adding one never reshapes the core |
-| **facet** | `modules/facets/` — render surfaces (quickshell, stylix, compositor) | the crystal's faces — the only planes that catch light (render appearance), each reading only livery |
+| **facet** | `modules/facets/` — render surfaces (quickshell, stylix, compositor) | the crystal's faces — the only planes that catch light, each reading only livery |
 | **walker** | `lib/walk.nix` | walks the tree; every file under a walked dir self-registers, no import lists |
 | **snowflake** | your clone | same physics as upstream, unique instance — the point of [[Clone-and-Run]] |
 
@@ -49,7 +47,7 @@ Radial distance from the nucleus encodes the mutation policy ([[Governance]]): t
 
 ## The performed family — song vocabulary
 
-The full map lives in [[Song-Vocabulary]]; the logic of the family here. A **rice is a song**: a thing the system *performs*, differently at each venue. Once that identification is made, the rest of the vocabulary falls out mechanically — which is the reason it was selected: **one metaphor, extended consistently, is a namespace.** Nobody has to invent or memorize arbitrary names; if you know what a liner or a cover is for an album, you know what it is here.
+Full map: [[Song-Vocabulary]]. A **rice is a song**: a thing the system *performs*, differently at each venue. One metaphor, extended consistently, is a namespace — if you know what a liner or a cover is for an album, you know what it is here.
 
 | Term | Is | Term | Is |
 |---|---|---|---|
@@ -65,58 +63,30 @@ The full map lives in [[Song-Vocabulary]]; the logic of the family here. A **ric
 
 ## The machinery words
 
-A few terms name the connective tissue rather than either half:
+Terms naming the connective tissue rather than either half:
 
-- **conductor** — the ensemble's tool: `aoide conductor`, the TUI that watches the ensemble of running agent terminals and cues between them, with Hyprland as the multiplexer (real windows). The wider **conductor-class** covers every surface with that duty — the Terminal Commander widget, the DAG gadget, the conductor. See [[Terminal-Commander]], [[Session-Graph]].
-- **door** — an entry point into the one dispatch layer: `cli`, `mcp`, `daemon`, `a2a` (and the TUI rides the cli door). The `a2a` door is the bidirectional interop one — aoide both serves the protocol (`a2a serve`, AgentCard at `/.well-known/agent-card.json`) and speaks it as a client (`a2a agent add|send`) — see [[A2A-Door]]. Every operation enters through a door and exits into the one audit log. One body, several doors.
-- **livery** — the design tokens AND the engine that dresses every surface in them ([[livery]], native in `crates/song/src/livery/`): one name for the whole token layer. Values and engine are one thing: the tokens are livery, resolved/validated/emitted by livery (`stage/livery.json`, hyprctl, OSC).
+- **conductor** — the ensemble's tool: `aoide conductor`, the TUI that watches running agent terminals and cues between them, Hyprland as the multiplexer. The conductor-class covers every surface with that duty: the Terminal Commander widget, the DAG gadget, the conductor itself. See [[Terminal-Commander]], [[Session-Graph]].
+- **door** — an entry point into the one dispatch layer: `cli`, `mcp`, `daemon`, `a2a` (the TUI rides the cli door). The `a2a` door is bidirectional — aoide serves the protocol and speaks it as a client ([[A2A-Door]]). Every operation enters through a door and exits into the one audit log.
+- **livery** — the design tokens AND the engine that dresses every surface in them ([[livery]], `crates/song/src/livery/`): one name for the whole token layer, resolved/validated/emitted by livery (`stage/livery.json`, hyprctl, OSC).
 - **gate** — the rebuild gate ([[Rebuild-Gate]]): agents propose, the human admits. The single point where the performed half is allowed to re-freeze the crystal.
 - **wiki / vault** — Mneme's memory surfaces: this wiki for design context, the vault for content.
 
 ## Why the seam is a livery
 
-Because it is a **token** layer. The industry term for this layer is *design tokens*,
-and the container is the W3C design-tokens format (`CONTRACTS.md` §1). But a
-token names a single value, and the engine dresses
-*every* surface in the one song's identity — a token does not clothe a
-stage. A **livery** is exactly that: the single set of house colours a whole
-retinue wears in unison, so a servant, a ship, and a herald are read at a
-glance as one household's. One word for the
-values *and* the act of stamping them, naming the whole reach.
+A **livery** is the single set of house colours a whole retinue wears in unison — a servant, a ship, a herald read at a glance as one household's. The industry term for this layer is *design tokens* (W3C design-tokens format, `CONTRACTS.md` §1), but a token names a single value; the engine dresses *every* surface in one song's identity, which a token alone doesn't capture. One word covers both the values and the act of stamping them.
 
-Which is why the seam needs no musical word — it is not on the music axis:
-
-- **The Greek axis** names *who acts* — Aoide, Melete, Mneme.
-- **The music axis** names *what is made and performed* — score, song, key, melody, instruments, venue, rehearsal, recording.
-
-livery sits at the seam — one axis, not a third. `aoide.arrangement` sits there
-too, livery's structural sibling: where livery is the song's DRESS (palette ·
-base16 · component tiers · geometry · cover), arrangement is its STRUCTURE —
-which widget/surface TYPES a song brings into existence
-(`modules/nucleus/options.nix`), stored in the same `livery.json` (a flat
-`.widgets` key) and read under the same enumerated, closed facet whitelist
-(AGENTS.md house rule 5) — a second seam-level namespace, not a third axis
-either.
-
-The name keeps reading true past the rename:
-
-| The livery | The layer |
-|---|---|
-| A livery is what the retinue wears in unison | Stylix bakes it, [[Quickshell]] reads it, hyprctl and the terminal OSC carry it — one identity across the seam. This is the zero-drift guarantee. |
-| A livery dresses the retinue | the engine validates, resolves, emits (`lyra livery lint` assays the set before it circulates). Values and engine share one name because a retinue is inseparable from the household that dresses it. |
-| Denomination is tiering | palette → semantic → component: the low tier closed and concrete, the higher tiers referencing it. |
-| Livery travels | a song replays at another venue and the livery still dresses it. Value that holds across contexts is the point of both liveries and [[Self-Ricing]] replay. |
+The seam sits on neither of the two existing axes — the Greek axis (who acts) or the music axis (what is made and performed) — a seam-level name of its own. `aoide.arrangement` sits at the same seam, livery's structural sibling: livery is the song's DRESS (palette · base16 · component tiers · geometry · cover), arrangement is its STRUCTURE — which widget/surface TYPES a song brings into existence (`modules/nucleus/options.nix`), stored in the same `livery.json` and read under the same closed facet whitelist (`AGENTS.md` house rule 5).
 
 ## How it all flows
 
-One loop, told in the vocabulary:
+One loop, in the vocabulary:
 
-1. **Melete practices.** The agent writes — a new song in `song/songbook/`, a new dendrite branch, a new widget. Everything it does enters through a door and lands in the audit log.
-2. **The walker freezes.** The nix layer picks up what was written by accretion — dendrites and songs self-register, no import lists — and the score now contains it.
-3. **Rehearsal sounds it.** Before any rebuild, the live side performs the livery from `stage/livery.json` — quickshell surfaces and hyprctl repaint in place. The frozen side is untouched; this is the performance testing the score.
-4. **The gate records it.** If the human admits the rebuild, the rehearsed state is recorded — baked through the stylix facet and the compositor, committed to the clone. Rehearsal and recording derive from the same livery, so they cannot disagree.
-5. **Mneme remembers.** The liner and songbook take the design decisions; the wiki takes the architecture; the next practice session starts from memory instead of from zero.
-6. **Aoide sings.** The desktop is the sum of frozen score and live performance — and the loop starts again, one radial layer at a time.
+1. **Melete practices.** The agent writes — a new song, a new dendrite branch, a new widget — entering through a door, landing in the audit log.
+2. **The walker freezes.** The nix layer picks up what was written by accretion; the score now contains it.
+3. **Rehearsal sounds it.** Before any rebuild, the live side performs the livery from `stage/livery.json` — quickshell surfaces and hyprctl repaint in place, the frozen side untouched.
+4. **The gate records it.** On human admission, the rehearsed state bakes through the stylix facet and the compositor, committed to the clone. Rehearsal and recording derive from the same livery, so they cannot disagree.
+5. **Mneme remembers.** The liner and songbook take the design decisions, the wiki takes the architecture; the next practice session starts from memory.
+6. **Aoide sings.** The desktop is the sum of frozen score and live performance, and the loop starts again.
 
 <!-- narrative -->
 ## Why a vocabulary at all

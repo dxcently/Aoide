@@ -1,16 +1,16 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-14
+updated: 2026-08-25
 tags: [aoide, rice, agent]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
 
-# Self-Ricing — the Headline Feature
+# Self-Ricing — the Rice Loop
 
 Aoide ships the rice engine as a builtin. The engine provides the loop, the schema, and the staging mechanism. Everything else — the songs, the preferences, the accumulated taste — it learns by doing.
 
-**Status today:** the loop below is real end to end except its final commit step. `rice lint` (runs the native [[livery]] engine), `rice stage`, `rice compose`, the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, and geometry + window-border colours apply to the running compositor over `hyprctl` in the same step (terminal-OSC fan-out is not yet wired into it) — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, `stage/livery.json` is also reseeded from the active song's committed notes on every activation ([[Codebase#Runtime contracts (socket + stage files)]]), so a host that boots without ever staging still carries the correct stage twin. `rice declare` and `rice transpose` are declared but not yet implemented (stub, exit `64`) — narrate those as planned, not as a working pipeline. There is no `rice gen`: a speculative prompt/wallpaper generator was scoped early on but never built and cut outright (khoa 2026-08-14) rather than left as a permanent stub with no design behind it — `rice compose` is the real, working scaffolding entry point.
+**Status today:** the loop below is real end to end except its final commit step. `rice lint` (runs the native [[livery]] engine), `rice stage`, `rice compose`, the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, and geometry + window-border colours apply to the running compositor over `hyprctl` in the same step (terminal-OSC fan-out is not yet wired into it) — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, `stage/livery.json` is also reseeded from the active song's committed notes on every activation ([[Codebase#Runtime contracts (socket + stage files)]]), so a host that boots without ever staging still carries the correct stage twin. `rice declare` and `rice transpose` are declared but not yet implemented (stub, exit `64`) — narrate those as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
 
 ## The Rice Loop
 
@@ -107,11 +107,6 @@ the stage at it.
   routing down), then drop it; a `drop` that also silently changed your
   mode would be the more surprising behavior.
 
-There used to be a fourth verb, `rice draft stage <name>` (copy-based: read
-the draft, write it into the stage as a one-shot snapshot). It's gone,
-fully superseded by `rice mode draft`'s routing — keeping both would be two
-spellings of "go live with this draft."
-
 **Leaving `Draft` mode:** `rice mode stage`/`rice mode declarative` both
 tear the routing symlink down FIRST (removing it, so their own
 declared-content write creates a real file) before doing anything else —
@@ -178,11 +173,10 @@ else in this section — locked under `declarative`, allowed under
 `staging`/`draft` — so there is no separate lock to reason about. A
 brand-new widget file is the one thing this doesn't cover: `manifest.json`
 is only read at Quickshell startup, so a new slot still needs a
-`systemctl --user restart aoide-quickshell.service` to be discovered — may
-no longer require a restart now that `lyra quickshell reload` (Quickshell IPC
-hot-reload trigger) rebuilds the whole scene fresh from `shell.qml`, which
-should also re-read `manifest.json`; unconfirmed against a live instance,
-confirm before relying on this.
+`systemctl --user restart aoide-quickshell.service` to be discovered.
+Whether `lyra quickshell reload` (which rebuilds the whole scene from
+`shell.qml`) also re-reads `manifest.json` and closes this gap is
+unconfirmed against a live instance.
 
 `lyra rice mode status` reports the current mode plus, in `staging`/
 `draft`, which song (and, in `draft`, which draft) it is pointed at and
@@ -248,13 +242,12 @@ evolving: like any other upstream-owned tree (nucleus, facets), upstream
 MAY update or iterate on it.
 
 Every OTHER song — anything composed via `rice compose` under a name other
-than `sonata` — upstream never touches. That guarantee is absolute and
-unchanged by `sonata` itself being both the shipped baseline and actively
-iterated. What actually protects a song from being clobbered was never
-"upstream doesn't touch this path" in the first place — it's that nothing
-in this system overwrites silently: `rice compose` without `--force`
-refuses to touch a song that already exists, no generator writes into a
-song unprompted, and `rice declare` (planned) is User-gated by design.
+than `sonata` — upstream never touches, a guarantee unchanged by `sonata`
+itself being both the shipped baseline and actively iterated. What protects
+a song from being clobbered is that nothing in this system overwrites
+silently: `rice compose` without `--force` refuses to touch a song that
+already exists, no generator writes into a song unprompted, and
+`rice declare` (planned) is User-gated by design.
 
 ## Songbook Discipline — the "Self" in Self-Ricing
 
@@ -273,19 +266,23 @@ The discipline is already in use: the retired `default` song's declared aestheti
 
 ## Declare, Select, Replay
 
-**Declare** (planned) commits a staged rice to `song/songbook/<song>/` — it becomes durable, versioned fleet-available score. Every host that pulls the clone can then perform it.
-
-**`aoide.song`** is the per-host selector (str, default `"sonata"`). A single line in `hosts/<host>/default.nix` selects which song the host performs:
+**Declare** (planned) commits a staged rice to `song/songbook/<song>/` as
+durable, versioned, fleet-available score. **`aoide.song`** is the per-host
+selector (str, default `"sonata"`) — one line in `hosts/<host>/default.nix`:
 
 ```nix
 aoide.song = "sonata";
 ```
 
-Songs self-register via the `song/songbook/` walk in `lib/mkHost.nix`; each song's `rice.nix` guards itself with `lib.mkIf (config.aoide.song == "<name>")`. No explicit import list: committing a song makes it available to all hosts. (This walker/registration mechanism is real and shipped — only `rice declare`/`rice transpose` are stubbed.)
+**Replay** is performing a declared song at a different host: the song
+carries only livery (palette + component tiers), the host supplies its own
+specifics (hardware, monitors) and enabled instruments (facets, dendrites).
+A host lacking an instrument does not sound that part.
 
-**Replay** is performing a declared song at a different host. The song carries only livery (palette + component tiers); the host supplies its own specifics (hardware, monitors) and its own enabled instruments (facets, dendrites). A host lacking an instrument does not sound that part — coverage degrades gracefully with what's actually instrumented.
-
-**Transpose** vs **replay**: transpose = same venue, new key (new palette). Replay = same score, new venue (different host). Both are one-line operations on a declared song (`rice transpose` itself is planned; the replay declaration — `aoide.song = "<name>";` — is real).
+**Transpose** vs **replay**: transpose is same venue, new key (new
+palette); replay is same score, new venue (different host). Both are
+one-line operations on a declared song — the replay declaration
+(`aoide.song = "<name>";`) is real, `rice transpose` itself is planned.
 
 ## Keys and Transposition
 

@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-13
+updated: 2026-08-25
 tags: [aoide, features, integration, melete, mneme]
 ---
 
@@ -21,16 +21,14 @@ Every integration is a dendrite ([[Snowflake-Anatomy]]): opt-in, flag-toggled,
 themed by [[livery]], and — where it touches the outside world —
 `enable = false` by default and behind the [[Governance|gate]].
 
-**A specialized widget maker.** This list is what ships. The *point* of Aoide
-is that it is a **specialized widget maker**: because its agent ([[Melete]])
-is a coding agent, new integrations are **generated declaratively, on
-demand**. See [[Widget-Maker]]. Everything below is an exemplar of
-that capability.
+This list is what ships. Because its agent ([[Melete]]) is a coding agent,
+new integrations are generated declaratively, on demand — see
+[[Widget-Maker]]; everything below is an exemplar of that capability.
 
-**Provenance.** The desktop, agent, pipeline, and governance items are grounded
-in [[references/AOIDE-HANDOFF]]. The messaging bridge, Cloudflare/Tailscale fleet
-exposure, and the scheduled-jobs widget are **planned** — specified here as
-intended features, not present in `aoide schema --json`'s 48-command surface
+The desktop, agent, pipeline, and governance items are grounded in
+[[references/AOIDE-HANDOFF]]. The messaging bridge, Cloudflare/Tailscale fleet
+exposure, and the scheduled-jobs widget are planned — specified here as
+intended features, not present in `aoide schema --json`'s 68-command surface
 today; they extend the handoff rather than describe shipped commands.
 
 ## The bundle
@@ -54,14 +52,14 @@ single source of desktop events. A **notification-bridge dendrite** mirrors
 chosen event classes to a messaging app — **Telegram first**, pluggable (Signal /
 Matrix / Discord / …).
 
-- **Outbound:** Melete already streams job + commit updates to Telegram; the
+- Outbound: Melete already streams job + commit updates to Telegram; the
   bridge generalizes this to any desktop notification, filtered by [[aoided]]'s
   default-deny-per-class policy so an OSD flood can't spam your phone.
-- **Inbound:** replies from the messaging app become agent actions — **as
-  untrusted data, never executed as commands** (the hard trust boundary from
+- Inbound: replies from the messaging app become agent actions, as untrusted
+  data, never executed as commands (the hard trust boundary from
   [[Desktop-Architecture]]).
-- **Surfaced as:** a bar connection/notification widget; a planned `aoide notify …` verb (not yet in the command schema).
-- **Default:** `enable = false` (an external surface); target app + token are
+- Surfaced as a bar connection/notification widget; a planned `aoide notify …` verb (not yet in the command schema).
+- Default `enable = false` (an external surface); target app + token are
   user-provided.
 
 ### 2. Fleet & networking — Tailscale + Cloudflare
@@ -72,16 +70,16 @@ planned, not present in `aoide schema --json`.
 
 Remote access and controlled exposure are first-class, user-gated features.
 
-- **Tailscale:** tailnet membership; **network MCP served over the tailnet**
+- Tailscale: tailnet membership; network MCP served over the tailnet
   (user-only, never agent-enabled — [[Agent-Interface]]); `ssh_exec` across fleet
   hosts (Melete).
-- **Cloudflare:** tunnels / funnel to expose chosen services publicly; funnel as
+- Cloudflare: tunnels / funnel to expose chosen services publicly; funnel as
   the alternative network-MCP door.
-- **Fleet management:** inventory, drift check, backups, per-host command
+- Fleet management: inventory, drift check, backups, per-host command
   dispatch (Melete `fleet_inventory` · `ssh_exec` · `check_drift` · backups).
-- **Surfaced as:** a planned `aoide fleet …` verb (not yet in the command
+- Surfaced as a planned `aoide fleet …` verb (not yet in the command
   schema); a panel fleet widget (host list + reachability).
-- **Default:** exposure toggles are `enable = false`; every enable is a
+- Default: exposure toggles are `enable = false`; every enable is a
   [[Governance|gated]] action.
 
 ### 3. Scheduled jobs & timers (with a widget)
@@ -93,16 +91,16 @@ present in `aoide schema --json`.
 
 The design surfaces **both** agent schedules and system timers in one place.
 
-- **Agent schedules (Melete):** `schedule_code_task` / `schedule_code_batch`
+- Agent schedules (Melete): `schedule_code_task` / `schedule_code_batch`
   (delayed), `schedule_recurring` (fixed cadence), job chaining (`after` + `on`),
   one-shot `schedule_rune_script`.
-- **System timers:** systemd timers surfaced read-only alongside.
-- **Widget:** a Quickshell **agenda / timers widget** reads a `song/stage/*.json`
+- System timers: systemd timers surfaced read-only alongside.
+- Widget: a Quickshell agenda/timers widget reads a `song/stage/*.json`
   state file and shows pending one-shots, recurring cadences, chained jobs
   ("waiting on `<id>`"), and system timers — live, themed by livery.
-- **Governance:** scheduled *coding* runs still route their result through the
-  rebuild gate; **no background self-updaters** ([[Governance]]).
-- **Surfaced as:** a planned `aoide sched …` verb (list / create / cancel, not
+- Governance: scheduled *coding* runs still route their result through the
+  rebuild gate; no background self-updaters ([[Governance]]).
+- Surfaced as a planned `aoide sched …` verb (list / create / cancel, not
   yet in the command schema) + the widget.
 
 ### 4. Knowledge & content (Mneme)
@@ -130,14 +128,14 @@ The design surfaces **both** agent schedules and system timers in one place.
 A live roster of the terminals running agents — spawned by [[Melete]] or any other
 agent — with **jump by click or keybind**. Full page: [[Terminal-Commander]].
 
-- **Watches:** new agent terminals via a watcher dendrite on [[aoided]]'s event
+- Watches: new agent terminals via a watcher dendrite on [[aoided]]'s event
   stream; sessions register their window address with [[shellbridge]] at spawn.
-- **Shows:** one row per session (agent · repo/cwd · state · elapsed), live from
+- Shows: one row per session (agent · repo/cwd · state · elapsed), live from
   `song/stage/*.json`; an `awaiting-input` row can chime or hit the messaging
   bridge.
-- **Jump:** click → `hyprctl dispatch focuswindow address:…` (one hop); or a
+- Jump: click → `hyprctl dispatch focuswindow address:…` (one hop); or a
   [[Hyprland]] keybind to cycle agent terminals / pop the roster.
-- **Surfaced as:** the terminal-commander widget + the real `aoide graph
+- Surfaced as the terminal-commander widget + the real `aoide graph
   session …` command group.
 
 ## How every feature hooks into the system
@@ -151,20 +149,20 @@ One spine, so a new integration is always the same shape:
   systemd timers)           fleet-adapter, …         policy · gate · audit    CLI: aoide <cmd>
 ```
 
-- **In:** external events enter as *data* through an adapter; [[aoided]] applies
+- In: external events enter as *data* through an adapter; [[aoided]] applies
   default-deny-per-class before anything reaches an agent.
-- **Out:** state is written atomically to `song/stage/` by [[shellbridge]];
+- Out: state is written atomically to `song/stage/` by [[shellbridge]];
   widgets read it; nothing in QML speaks an agent protocol.
-- **Control:** every capability is one `aoide <cmd>` (+ generated MCP façade);
+- Control: every capability is one `aoide <cmd>` (+ generated MCP façade);
   every mutation and exposure passes the [[Governance|gate]] and lands in the
   single audit log.
-- **Toggle:** each is a dendrite flag; external-facing ones default off.
+- Toggle: each is a dendrite flag; external-facing ones default off.
 
 ## Feature matrix
 
 Shipped exemplars plus planned extensions — the [[Widget-Maker|agent generates
 more]] on demand. Rows marked *(planned)* have no command yet in `aoide schema
---json`'s 48-command surface.
+--json`'s 68-command surface.
 
 | Capability | Provided by | Surfaced as | Default | Gate |
 |---|---|---|---|---|

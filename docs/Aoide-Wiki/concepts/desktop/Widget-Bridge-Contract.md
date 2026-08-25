@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-30
-updated: 2026-08-13
+updated: 2026-08-25
 tags: [aoide, bridge, desktop, widget, quickshell, session, ipc]
 ---
 
@@ -221,21 +221,20 @@ for Quickshell: render surfaces only]]) applied to the roster widgets:
 
 ## Rebuild-transparency (no nix hack)
 
-The tracking is undisturbed by a `nixos switch` by construction, not by a service
-flag: state lives in files under `$HOME`, its producers are per-hook (short-lived
-processes) and per-terminal (`conduct`, which a switch does not kill), and
+The tracking survives a `nixos switch` by construction: state lives in files
+under `$HOME`, its producers are per-hook (short-lived processes) and
+per-terminal (`conduct`, which a switch does not kill), and
 `seed_if_absent` preserves the roster across the seconds-long shellbridge restart.
 Concurrent writers are serialised by an `flock`'d stage lock (atomic rename stops
 torn reads; the lock stops lost updates).
 
-**Status:** live on yomi-strix. The bridge/schema half (canonical state, live
+**Status:** live on yomi-strix — the bridge/schema half (canonical state, live
 cwd/command, `activity`/`kind`/`title`, the sub-agent tree, the `focussession`
-verb, the `flock` lock, the wired tool/notification hooks) and the widget
-pure-view conformance (the beamed tree, the `awaiting`-driven dock peek) landed in
-the Phase 0–3 pass; a follow-up added `say` (agent + Task words from the
-transcript), the `custom-title` session name, the same-window agent dedup
-(registration + reaper), the Conductor-as-agent-tree / Terminals-as-process-view
-split, and the reaper's own `crate::reap` module — all switched in and verified.
+verb, the `flock` lock, the wired tool/notification hooks), the widget
+pure-view conformance (the beamed tree, the `awaiting`-driven dock peek), `say`,
+the `custom-title` session name, the same-window agent dedup, the
+Conductor-as-agent-tree / Terminals-as-process-view split, and the reaper's
+`crate::reap` module are all switched in.
 
 ## Related
 

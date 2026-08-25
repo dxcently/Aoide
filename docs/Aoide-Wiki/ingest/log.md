@@ -1428,3 +1428,142 @@ last verification.
   `CONTRACTS.md` §4 entry and is not mentioned on any page touched this
   sweep — left out of the stage-file lists added above rather than guessed
   at.
+
+## [2026-08-25] refactor | de-slop sweep 8
+
+- Widget-Maker.md (REWRITE): 246 → 94 lines. Worst-offender page for
+  marketing register (S7): cut the "headline capability", "the real
+  product is", "**that is the leverage**" framing from the intro and the
+  "Why Aoide can do this" section, replacing with a flat statement of what
+  the mechanism does. Kept the make-a-widget loop diagram and the hard-line
+  rule verbatim, per the plan. Compressed the staging-engine and
+  declared-widget-registry sections (the page's real payload) by cutting
+  redundant restatement rather than facts — e.g. collapsing the
+  "song-switch case" vs "content-edit case" split into one paragraph now
+  that the new-song-still-needs-a-rebuild fact is already stated once
+  earlier on the page. Fixed a real drift while verifying against
+  `modules/facets/quickshell/qml/slots.md`: the page claimed "Five slots
+  are wired today: calendar, notifications, bar … powermenu and launcher"
+  — `notifications` was retired 2026-08-16 and superseded by `herald`/
+  `herald-center` (confirmed in `slots.md`'s own table); corrected to "six
+  slots… calendar, herald-center, bar … herald, powermenu, launcher",
+  matching Song-Anatomy.md's already-correct count. Fixed "used to need a
+  manual restart" (Assertion clause 2) to present-tense "needs no restart".
+  Cut the stale "Gadget-Dock's seven gadgets… are the shipped proof the
+  pattern works" status-brag/count (S5); Gadget-Dock's own page counts six
+  baseline gadgets, not seven — reworded to drop the invented number
+  entirely rather than swap in an unverified one.
+- Feature-Set.md (TRIM): 194 → 192 lines. Fixed the stale "48-command
+  surface" claim (two occurrences) to 68, verified via `aoide schema
+  --json | jq '.commands | length'` (68) against the installed binary,
+  which matches repo HEAD (`git log -1` == working tree, no uncommitted
+  changes to the CLI crates). Stripped S2 bullet-bolding across four
+  feature-group sections (Outbound/Inbound/Surfaced-as/Default,
+  Tailscale/Cloudflare/Fleet-management, Agent-schedules/System-timers/
+  Widget/Governance, Watches/Shows/Jump, In/Out/Control/Toggle) — none were
+  contract-term first-definitions, all were label-bolding on ordinary
+  bullets. Cut the "**A specialized widget maker.**"/"the *point* of
+  Aoide" marketing paragraph (S7), keeping its one factual clause. Verified
+  the `lyra rice` verb-implementedness matrix row
+  (lint/stage/compose/draft/mode/take/back real, declare/transpose exit-64)
+  against `lyra schema --json` — exact match, no edit needed.
+- Gadget-Dock.md (TRIM+VERIFY): 126 → 126 lines. Verified the keybind
+  claim against the repo and found a real drift: the page said **SUPER+P**
+  for the dock toggle; `modules/dendrites/hyprland.nix:158` binds `SUPER,
+  G, global, aoide:dock` — SUPER+G is what the compositor actually runs.
+  (The QML side's own comments in `AoidePanel.qml`, `shell.qml`, and
+  `song/songbook/sonata/widgets/bar.qml` all say SUPER+P too — stale
+  repo-side comments, flagged below, not fixed here.) Corrected to
+  SUPER+G. Re-verified the "four core gadgets + opt-in Usage stele" count
+  against `AoidePanel.qml` (Conductor/Terminals/Meters/Power + Usage,
+  gadgetW=360 block) — unchanged from the prior sweep's finding, no edit
+  needed. No other slop pattern found; page was already tight.
+- Widget-Bridge-Contract.md (TRIM+VERIFY): 244 → 243 lines. Field contract
+  table and hook→state-machine section kept intact in meaning, per the
+  plan. Verified the canonical state vocabulary (`working`/`awaiting`/
+  `stopped`/`idle`/`done`) and the legacy shim (`running`→working,
+  `blocked`→awaiting, `waiting`→idle) against
+  `pkgs/aoide/crates/conduct/src/graph/model.rs`'s own test module — exact
+  match. Condensed the closing landed-features "Status:" paragraph (S5-
+  adjacent: read as a status list more than a single status line) into one
+  sentence without dropping any named capability. Fixed one contrast-
+  framing sentence ("undisturbed by a `nixos switch` … not by a service
+  flag") to a positive statement (Assertion clause 2).
+- Desktop-Architecture.md (KEEP, verify, edit only what fails): 65 → 65
+  lines. Verified against source: Hyprland-only-multiplexer claim, the
+  `SUPER+SPACE` launcher bind (`hyprland.nix:137`), the `aoide.dunst`
+  dendrite option name (`modules/dendrites/dunst.nix:82`), and the
+  `[[Controls]]` related-link target (page exists) — all correct, no edit.
+  Found and fixed one real internal contradiction: the surface table's
+  "Notification daemon | Native `org.freedesktop.Notifications`
+  implementation" row directly contradicted the very next paragraph on the
+  same page ("dunst holds the notification-delivery role") — Quickshell's
+  own `NotificationServer` was retired 2026-08-16 (`slots.md`); dunst owns
+  the bus name now, Quickshell only draws the herald popup/ledger from its
+  history. Row corrected to name the actual surface (Herald) and its real
+  relationship to dunst.
+- Self-Ricing.md (TRIM+VERIFY): 320 → 317 lines. Lifecycle diagram and the
+  three-mode (`Staging`/`Declarative`/`Draft`) machine kept intact in
+  meaning, per the plan. Verified the verb roster against `lyra schema
+  --json`: `compose`/`stage`/`mode draft`/`mode declarative`/`declare` all
+  present as named; `declare`/`transpose` confirmed `implemented: false`
+  (exit 64); no `gen`/`preview`/`mint`/`adopt`/`new` subcommand exists
+  under `rice` — the page's own "There is no `rice gen`" claim confirmed
+  true. Fixes: retitled "Self-Ricing — the Headline Feature" (S7 marketing
+  register in the H1 itself) to "Self-Ricing — the Rice Loop"; deleted a
+  pure-history paragraph about the removed `rice draft stage` verb
+  (Assertion clause 2 — "There used to be a fourth verb… it's gone"); fixed
+  a "was never X in the first place — it's Y" contrast-framing sentence
+  (Assertion clause 2) in the Shipped-Baseline section to a positive
+  statement; tightened a speculative "may no longer require a restart …
+  unconfirmed" hedge into a plain present-tense fact plus one flagged
+  open question; removed a real-name attribution ("khoa 2026-08-14") from
+  a sentence about the cut `rice gen` prototype, per house rule 12 — the
+  surrounding history narrative was cut too (Assertion clause 2), not just
+  the name. Trimmed the Declare/Select/Replay section's restatement of the
+  songbook walker-registration mechanism (already stated in this page's
+  own Rice Loop section and canonically owned by Song-Anatomy.md) down to
+  a cross-reference. Did not reach the ~250-line target: nearly the entire
+  page is the mode-machine/drafts-routing mechanism the plan explicitly
+  protects (symlink semantics, the round-trip demo, the reap sweep), and
+  rule 16 (never cut a fact to hit a number) took precedence over the line
+  target once the marketing/history/hedge material was gone.
+- Song-Anatomy.md (TRIM): 155 → 152 lines. Verified the "sonata's widgets/
+  holds fourteen bodies" count (14 named files) and the "six wired to a
+  live host anchor" count (`calendar`, `herald`, `herald-center`,
+  `powermenu`, `launcher`, `bar`) against `modules/facets/quickshell/qml/
+  slots.md`'s own slot table — both exact matches, this page already had
+  the correct post-`notifications`-retirement figures (unlike the stale
+  Widget-Maker.md claim fixed above). Fixed one "no longer" construction
+  (Assertion clause 2) describing the retired `default` song's Pantheon
+  grammar to a present-tense "lives only as historical reference…, not in
+  any live song's design folder". Compressed the shipped-standard-song
+  blockquote's guarantee explanation (S3 catechism repetition with
+  Self-Ricing.md's own "Shipped Baseline" section) to one clause plus a
+  `[[Self-Ricing#The Shipped Baseline Is Guarded, Not Frozen]]` link.
+- Lexicon.md (TRIM): 132 → 102 lines. Kept the `<!-- narrative -->`-marked
+  "Why a vocabulary at all" section untouched, per the plan. Compressed
+  "Why the seam is a livery" from ~34 lines (prose essay + a four-row
+  recap table restating the same content) to ~10: the token-vs-livery
+  definition, the two-axes placement, the `aoide.arrangement` sibling —
+  dropped the "name keeps reading true past the rename" table entirely as
+  the redundant "heraldry essay" the plan called out. Trimmed the Greek-
+  Muses section's "integrated (not vendored)" paragraph to one clause per
+  house rule 7 (that catechism's home is `entities/Melete.md`/
+  `entities/Mneme.md`). Every table and one rationale paragraph per word
+  family preserved, per the plan.
+- Claims left unverified: Self-Ricing.md's "unconfirmed against a live
+  instance" flag on whether `lyra quickshell reload` also re-reads
+  `manifest.json` for brand-new widget files — left as an open technical
+  question, not resolved (would need a live Quickshell instance to test,
+  out of scope for a wiki sweep).
+- Out-of-scope drift spotted, not fixed: `modules/facets/quickshell/
+  qml/AoidePanel.qml` (comment), `modules/facets/quickshell/qml/shell.qml`
+  (comment), and `song/songbook/sonata/widgets/bar.qml` (comment) all say
+  "SUPER+P" for the dock toggle — stale against `hyprland.nix`'s actual
+  `SUPER, G` bind; these are repo-side QML comments, not wiki pages, and
+  three separate files would need the same fix. `entities/aoide-cli.md`
+  (flagged in sweep 7 too, still unfixed, not in this sweep's page list)
+  likely still carries the stale 48/64-command framing fixed in
+  Feature-Set.md here. `concepts/Session-Graph.md` (also flagged in sweep
+  7, also not in this sweep's list) was not checked this pass either.
