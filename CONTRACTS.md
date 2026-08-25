@@ -1222,14 +1222,19 @@ neither can be wedged parked on a misconfigured `requireTotp` secret the way
 a human at a terminal might tolerate. **The CONNECT itself is bounded too
 (rider task, alongside #75/#81/#82)** — every client-side op in
 `aoide_secrets::client` (`resolve`/`resolve_bounded`/`put`/`pending`/
-`approve`/`dismiss`) connects through a hand-rolled 5-second bound
-(`client::connect_bounded`, nonblocking-connect-then-poll over `libc`,
-since `std`'s `UnixStream` has no `connect_timeout`), not only the reads
-`resolve_bounded`'s own `set_read_timeout` already bounded — a machine
-consumer hitting a broker with a saturated accept backlog (plausible when
-many callers legitimately hold a parked connection for up to
-`park::park_timeout()`, default 300s) now fails fast instead of hanging on
-the connect syscall itself.
+`approve`/`dismiss`) connects through a hand-rolled 5-second overall bound
+(`client::connect_bounded`, over `libc`, since `std`'s `UnixStream` has no
+`connect_timeout`), not only the reads `resolve_bounded`'s own
+`set_read_timeout` already bounded — a machine consumer hitting a broker
+with a saturated accept backlog (plausible when many callers legitimately
+hold a parked connection for up to `park::park_timeout()`, default 300s)
+now fails fast instead of hanging on the connect syscall itself. The
+mechanism is a BOUNDED RETRY of the `connect(2)` syscall on `EAGAIN` (what
+Linux actually returns for a saturated `AF_UNIX` backlog — immediately,
+never `EINPROGRESS`, so there is no fd event to wait on), plus `poll()` on
+`EINPROGRESS` (a genuine half-open connection) — not a single poll loop;
+an earlier version of this function handled only the `EINPROGRESS` case
+and made the saturated-backlog scenario worse, caught and fixed on review.
 
 **Transport**: connect `$AOIDE_SECRETS_SOCKET` (else the canonical deployed
 path `/run/aoide-secrets/secrets.sock`, P-V4d — corrected from an earlier
