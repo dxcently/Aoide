@@ -923,7 +923,12 @@ record); readers must tolerate both forms. Unlike `resumedFrom`, `origin`
 gets NO `graph.json` projection — like `headless`/`hookAncestry`, it is
 consumed internally (projected verbatim into `state/session-ledger.jsonl`'s
 own `origin` field at session exit, below) rather than rendered into the
-live graph.
+live graph. `origin` is attribution, not authentication — any same-uid
+process can set `AOIDE_SESSION_ORIGIN` before running `aoide conduct` and
+forge `"peer:X"` with no door involved at all, the same ordinary
+spoofable same-user process state `--from`/`AOIDE_SESSION_ID` already are
+(`pending.json`'s own note below); nothing may ever gate on it without
+upgrading it to an authenticated channel first (task #63's lane).
 
 **Windowless lineage (task #89, corrected in review round 2):** a session is
 windowless BY CONSTRUCTION — no `windowAddress`, no window-owning pid ever
@@ -2639,10 +2644,10 @@ peers, not just attackers. Fixed in `a2a.rs::message_send`:
   construction, the same off-path-pin discipline as the amendments above.
 
 **Amendment (2026-08-25, P-P3): the Spawn arm's gate flips from "holds a
-valid door-wide bearer" to "resolves to a PAIRED peer whose `allows`
-contains `spawn`."** Every amendment above this one gated Spawn on
-`spawn_authorized`/`token_authorized` alone — any caller holding the
-server-wide bearer (`aoide.a2a.tokenFile`/`bearerSecret`) could launch
+valid door-wide bearer" to "resolves, via its OWN token, to a PAIRED peer
+whose `allows` contains `spawn`."** Every amendment above this one gated
+Spawn on `spawn_authorized`/`token_authorized` alone — any caller holding
+the server-wide bearer (`aoide.a2a.tokenFile`/`bearerSecret`) could launch
 `aoide.a2a.spawnAgent`, whether or not it corresponded to a peer the
 operator had ever actually paired with (`peer pair request`/`approve`,
 P-P2, decisions above). `docs/architecture/PAIRING.md` decisions 5–7 close
@@ -2656,46 +2661,61 @@ refusing an unknown peer or unknown capability. Fixed in `a2a.rs::
 message_send`:
 
 - `resolve_peer(peers, addr, presented_token)` (`aoide_storage::peer_store`)
-  is the new caller-identity ladder Spawn keys off: a presented bearer
-  matched against ANY registered peer's own `tokenFile` first, the
-  connection's origin address matched against a peer's `url` second —
-  unlike `is_autogated_peer_token`/`is_autogated_peer_addr` above, it
-  checks EVERY registered peer, not only ones marked `autogate`, since
-  "which peer is this" is a different question from "should this peer skip
-  the pending queue."
-- `SendAction::Spawn` now requires `resolve_peer(..).filter(|p|
-  p.verified && p.allows.contains("spawn"))` to yield `Some` before
-  `do_spawn` runs. A caller that resolves to no peer at all, an unpaired
-  peer, or a paired peer whose `allows` lacks `spawn` all refuse with the
-  SAME new taught error (`-32006`, distinct from `-32005`'s "no/bad
-  token"): *"spawn refused: the caller does not resolve to a PAIRED peer
-  whose `allows` includes `spawn` — pair first via `peer pair request`,
-  then `peer allow <name> spawn on`."* The door-wide bearer alone no
-  longer reaches the spawn arm at all — it is necessary (Phase G above
-  still gates Spawn's entry point when a token is configured) but no
-  longer sufficient.
+  is the caller-identity ladder — a presented bearer matched against ANY
+  registered peer's own `tokenFile` first, the connection's origin address
+  matched against a peer's `url` second — unlike `is_autogated_peer_token`/
+  `is_autogated_peer_addr` above, it checks EVERY registered peer, not only
+  ones marked `autogate`, since "which peer is this" is a different
+  question from "should this peer skip the pending queue." It returns
+  WHICH rung matched alongside the peer (`PeerRung::Token` /
+  `PeerRung::Addr`) — the two are not interchangeable strength: `Token` is
+  possession of that peer's own `tokenFile` secret, `Addr` is a bare
+  TCP-source-IP-vs-`url` match, spoofable by anyone who can reach the door
+  from that address or who merely sits behind the same NAT/reverse-proxy as
+  the real peer.
+- `SendAction::Spawn` requires `spawn_admitted`, which accepts ONLY a
+  `PeerRung::Token` resolution to a peer that is both `verified` and
+  carries `spawn` in `allows` — `PeerRung::Addr` never reaches `do_spawn`,
+  regardless of `allows`. The `Addr` rung remains fully valid for
+  Inject's attribution and for the ordinary autogate question below; it is
+  excluded from Spawn specifically, because a bare source-address match
+  carries no possession proof, and behind any NAT/reverse-proxy deployment
+  would otherwise let a shared source address spawn a process attributed
+  to whichever peer's `url` it happens to match — a straight line from
+  "message delivered a little faster" (the address rung's original,
+  legitimate purpose) to "spawn a session as someone else." A caller that
+  resolves to no peer at all, an unpaired peer, a paired peer whose
+  `allows` lacks `spawn`, or a peer resolved only via the address rung all
+  refuse with the SAME taught error (`-32006`, distinct from `-32005`'s
+  "no/bad token"): *"spawn refused: spawn requires the caller be
+  identified via its own `token_file` (an address match alone never admits
+  spawn) — pair first via `peer pair request`, set `peer add --token-file
+  <path>` if not already configured, then `peer allow <name> spawn on`."*
+  The door-wide bearer alone no longer reaches the spawn arm at all — it
+  is necessary (Phase G above still gates Spawn's entry point when a token
+  is configured) but no longer sufficient.
 - **HONESTY NOTE — P-P4 (signed per-request wire authentication) has NOT
-  landed.** `resolve_peer`'s ladder rides the SAME two unforged-but-
-  unsigned signals every earlier amendment in this section already used
-  for the unrelated autogate question — a bearer string compared
-  byte-for-byte against a file on disk, and a TCP origin address compared
-  against a peer's registered URL. Neither is cryptographically bound to
-  the caller identity it resolves to: a leaked `tokenFile` value or a
-  spoofed/proxied origin address resolves to that peer exactly as
-  successfully as the real one would. This phase does NOT invent an
-  interim signature or per-request token scheme to close that gap — doing
-  so would be exactly the kind of hand-rolled crypto the kill-list in
-  `docs/architecture/PAIRING.md` forbids outside the ceremony's own
-  `ed25519-dalek` use. The gate is real and closes the "any door-wide
-  bearer holder can spawn" hole this amendment targets; it does not yet
-  make spawn caller-identity unforgeable end-to-end — that is P-P4's job.
+  landed.** Even narrowed to the token rung, `resolve_peer`'s match rides
+  the SAME unforged-but-unsigned signal every earlier amendment in this
+  section already used for the unrelated autogate question — a bearer
+  string compared byte-for-byte against a file on disk. It is not
+  cryptographically bound to the caller identity it resolves to: a leaked
+  `tokenFile` value resolves to that peer exactly as successfully as the
+  real one would, and identically across every request either sends. This
+  phase does NOT invent an interim signature or per-request token scheme
+  to close that gap — doing so would be exactly the kind of hand-rolled
+  crypto the kill-list in `docs/architecture/PAIRING.md` forbids outside
+  the ceremony's own `ed25519-dalek` use. The gate is real and closes both
+  the "any door-wide bearer holder can spawn" hole AND the "a bare address
+  match can spawn" hole; it does not yet make spawn caller-identity
+  unforgeable end-to-end — that is P-P4's job.
 - Inject's own gate (`should_deliver_now`/autogate/pending-queue) is
   UNTOUCHED by this amendment — only the Spawn arm's admission changed.
   Inject instead gains attribution: a held-pending send from a
-  `resolve_peer`-resolved (but non-autogated, non-deliver-now) sender
-  carries `"from": "peer:<name>"` in its `pending.json` entry, reusing
-  `graph send --from`'s existing attribution field verbatim rather than
-  inventing a new one — scoped to the QUEUED path only
+  `resolve_peer`-resolved (either rung, non-autogated, non-deliver-now)
+  sender carries `"from": "peer:<name>"` in its `pending.json` entry,
+  reusing `graph send --from`'s existing attribution field verbatim rather
+  than inventing a new one — scoped to the QUEUED path only
   (`!deliver_now`), never applied to an auto-delivered message, so no
   delivered payload's bytes change (`autogated_peer_delivers_despite_
   being_non_loopback`'s exact-bytes pin stays green).
@@ -3051,24 +3071,37 @@ and leaves it untouched on a LATER re-pairing of an already-verified
 name — a revoked capability survives key rotation. An unpaired (`peer add`)
 peer and a legacy record predating this field both load `allows: []`. The
 A2A door's Spawn arm (§6's P-P3 amendment above) is the one thing gating on
-it today: `resolve_peer` (below) resolves a caller to a `Peer`, and Spawn
-requires that peer to be `verified` with `"spawn"` in `allows`. `peer allow
-<name> <cap> on|off` (§3's command list, §7's CLI surface below) is the
-ONLY other writer — idempotent, refuses an unknown peer or an unknown
-capability.
+it today: `resolve_peer` (below) resolves a caller to a `Peer` AND which
+rung matched, and Spawn requires that peer to be `verified` with `"spawn"`
+in `allows` **AND** the resolution to be the TOKEN rung specifically —
+never the address one, regardless of `allows`. `peer allow <name> <cap>
+on|off` (§3's command list, §7's CLI surface below) is the ONLY other
+writer — idempotent, refuses an unknown peer or an unknown capability.
 
 `resolve_peer(peers, addr, presented_token)` (`aoide_storage::peer_store`,
-P-P3 decision 6) is the caller-identity ladder the Spawn gate keys off: a
-presented bearer matched against ANY registered peer's own `tokenFile`
-first, the connection's origin address matched against a peer's `url`
-second. Unlike `is_autogated_peer_token`/`is_autogated_peer_addr` (§6's
+P-P3 decision 6) is the caller-identity ladder — a presented bearer matched
+against ANY registered peer's own `tokenFile` first (`PeerRung::Token` on a
+hit), the connection's origin address matched against a peer's `url`
+second (`PeerRung::Addr` on a hit); it returns which rung matched alongside
+the `Peer`. Unlike `is_autogated_peer_token`/`is_autogated_peer_addr` (§6's
 2026-08-19 amendment), it checks every registered peer, not only ones
 marked `autogate` — "which peer is this" is a different question from
-"should this peer skip the pending queue." Neither signal is
+"should this peer skip the pending queue." The two rungs are not
+interchangeable strength: `Token` is possession of that peer's own
+`tokenFile` secret; `Addr` is a bare TCP-source-IP-vs-`url` match,
+spoofable by anyone who can reach the door from that address or who sits
+behind the same NAT/reverse-proxy as the real peer. Both rungs resolve a
+peer identity fine for attribution (Inject's `from` field, origin-stamping)
+and for the ordinary autogate question; the Spawn gate is the one consumer
+narrow enough to require `Token` specifically (§6's P-P3 amendment). Ties
+resolve deterministically: `peer add` refuses only a duplicate NAME, never
+a duplicate `url` host or `tokenFile` content, so two peers CAN share
+either — `resolve_peer` then answers with whichever matches FIRST in
+registry (array) order, not the last, not random. Neither rung is
 cryptographically bound to the caller — see §6's P-P3 amendment for the
-full honesty note on why this is not yet unforgeable (P-P4, signed
-per-request wire authentication, is what closes that gap; not landed
-here).
+full honesty note on why even the token rung is not yet unforgeable (P-P4,
+signed per-request wire authentication, is what closes that gap; not
+landed here).
 
 `autogate` (bool, default `false`) is the cross-device analogue of `graph
 send`'s local "sender is the target's own parent" rule (§6's amendment
@@ -3244,10 +3277,12 @@ graph fold all run. The pairing ceremony (P-P2) is real too: `pubkey`/
 `aoide/pairRequest`/`aoide/pairApprove` A2A methods (§6's "Pairing wire"
 subsection) all run end to end. The `allows` closed set, `peer allow`, and
 the A2A door's Spawn-arm hard gate (P-P3) are real too, end to end — a
-paired peer's `allows` now genuinely gates the spawn arm (§6's P-P3
-amendment above), with the honesty note there on exactly what identity
-signal that gate still rides (P-P4's signed per-request wire
-authentication remains ahead, not this phase's job). **Out of scope for
+paired peer's `allows` genuinely gates the spawn arm, and ONLY when that
+peer resolved via its own token (§6's P-P3 amendment above, `PeerRung::
+Token` specifically — the address rung never admits spawn), with the
+honesty note there on exactly what identity signal that gate still rides
+(P-P4's signed per-request wire authentication remains ahead, not this
+phase's job). **Out of scope for
 v0** (explicitly, not an oversight): WAN/NAT-traversal/relay reachability
 for peers not on the same network; Melete-side consumption (a polling Rune
 skill, first-class `graph_view` rendering) — later, separately-directed
