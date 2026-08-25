@@ -159,6 +159,7 @@
     <div class="plate-label"><span class="no">§</span><h2>Why Aoide</h2><span class="h-line"></span><span>the thesis</span></div>
     <div class="prose">
       <p><b>Aoide is an agent gateway.</b> The problem it exists for: every agent harness is an island. Each owns a model loop but not the machine — capability arrives as a per-harness MCP list configured over and over, two agents in adjacent terminals cannot see or command each other, and nothing records what any of them did. Aoide puts <b>one gateway between agents and the machine</b>: every terminal runs conducted — registered in a live session graph <em>and</em> holding a control socket another agent can type into — every capability is one registry entry served through every door at once (argv, MCP, A2A), and agent-commands-agent goes through one gated, audited path. The floor is a shell: any agent that can run a subprocess and parse JSON is already a full client, no MCP required.</p>
+      <p>It does not replace those loops — it <em>wraps</em> them. <code>aoide conduct -- &lt;cmd&gt;</code> runs the harness you already use, model loop untouched, and puts the machine around it: a session id, a control socket, a place in the graph, an audit trail. <b>A harness for your harnesses</b> — and on a NixOS venue, the control it hands them is <b>OS-level</b>, because the same declaration that dresses a bar also sets the compositor, the system theme, and the generation you can roll back to.</p>
     </div>
     <div class="plate">
       <svg viewBox="0 0 960 460" style="min-width:820px" role="img" aria-label="Agent harnesses each alone, contrasted with the same harnesses speaking through the Aoide gateway">
@@ -197,20 +198,20 @@
         <!-- ══ divider ══ -->
         <line x1="480" y1="60" x2="480" y2="410" stroke="var(--line)"/>
         <!-- ══ right panel: through the gateway ══ -->
-        <text x="530" y="30" font-size="11" letter-spacing="2" fill="var(--accent-ink)">THROUGH THE GATEWAY</text>
+        <text x="524" y="30" font-size="10.5" letter-spacing="1.8" fill="var(--accent-ink)">THROUGH THE GATEWAY — A HARNESS FOR YOUR HARNESSES</text>
         <rect x="520" y="42" width="420" height="380" rx="12" fill="var(--surface)" stroke="var(--accent)"/>
         <!-- the same three, now conducted -->
         <rect x="540" y="70" width="115" height="72" rx="8" fill="var(--raised)" stroke="var(--ink)" stroke-width="1.5"/>
         <text x="597" y="96" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">claude</text>
-        <text x="597" y="112" text-anchor="middle" font-size="9" fill="var(--muted)">conducted</text>
+        <text x="597" y="112" text-anchor="middle" font-size="9" fill="var(--muted)">own loop, still</text>
         <text x="597" y="126" text-anchor="middle" font-size="9" fill="var(--muted)">tracked · steerable</text>
         <rect x="672" y="70" width="115" height="72" rx="8" fill="var(--raised)" stroke="var(--ink)" stroke-width="1.5"/>
         <text x="729" y="96" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">kimi</text>
-        <text x="729" y="112" text-anchor="middle" font-size="9" fill="var(--muted)">conducted</text>
+        <text x="729" y="112" text-anchor="middle" font-size="9" fill="var(--muted)">own loop, still</text>
         <text x="729" y="126" text-anchor="middle" font-size="9" fill="var(--muted)">tracked · steerable</text>
         <rect x="804" y="70" width="115" height="72" rx="8" fill="var(--raised)" stroke="var(--ink)" stroke-width="1.5"/>
         <text x="861" y="96" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">pi</text>
-        <text x="861" y="112" text-anchor="middle" font-size="9" fill="var(--muted)">conducted</text>
+        <text x="861" y="112" text-anchor="middle" font-size="9" fill="var(--muted)">own loop, still</text>
         <text x="861" y="126" text-anchor="middle" font-size="9" fill="var(--muted)">tracked · steerable</text>
         <!-- agent-commands-agent, THROUGH the gateway: down, across, up -->
         <path d="M 597 142 L 597 176 L 729 176 L 729 146" fill="none" stroke="var(--accent)" stroke-width="1.4"/>
@@ -239,42 +240,141 @@
     </div>
     <div class="prose" style="margin-top:1.3rem">
       <p><b>And then the differentiator: AoideOS.</b> The gateway alone is the core — it cargo-builds on any Linux, runs headless, and assumes no desktop. What nothing else ships is the layer <em>added on top</em>: <b><code>lyra</code>, the paint binary</b>, whose bar, dock, conductor surfaces, and rice engine are all <em>clients of the gateway</em> — the desktop reads the same stage files and speaks the same verbs an agent does. What the two provide <em>together</em>, in the OS, is the differentiator: <b>a declarative, scalable, composable, hot-swappable rice mechanic with first-class agent integration</b>. Declarative — a song is a committed score, and the mode lock means nothing drifts from what is declared. Composable — songs, widgets, facets, and dendrites all enter by existing at a path and leave without a trace. Hot-swappable — any committed song stages live, no rebuild, because every song's surfaces ship at once and slots re-resolve on a name change. And agent-first throughout: the same verbs that paint are the verbs an agent already speaks, gated and audited like everything else. <b>AoideOS</b> is not a desktop with an agent bolted on; it is a desktop that is itself one more thing the gateway serves.</p>
+      <p>That claim is worth drawing rather than asserting, because the difference is <em>structural</em>. A dotfiles rice runs on <b>one plane</b>: the file you edit is the running state, so there is nowhere to stand between "trying it" and "meaning it". AoideOS runs on <b>two</b> — a declared plane (git and nix, frozen, user-gated) and a live plane (stage files, hot) — with a seam between them that both a human and an agent cross by naming a verb.</p>
     </div>
+    <p class="caption">The mechanics of each, side by side. Left: what a rice <em>is</em> when the config is the state — one value in four syntaxes, one reload per app, nothing between an edit and the running desktop. Right: the two planes and the seam. Everything drawn on the right runs today; the verbs are the ones <code>lyra</code> actually registers.</p>
     <div class="plate">
-      <svg viewBox="0 0 920 330" style="min-width:760px" role="img" aria-label="A conventional desktop where the UI is the product, contrasted with AoideOS as lyra layered on the Aoide gateway">
-        <!-- left: conventional desktop -->
-        <text x="30" y="30" font-size="11" letter-spacing="2" fill="var(--muted)">A CONVENTIONAL DESKTOP</text>
-        <rect x="20" y="42" width="390" height="240" rx="12" fill="var(--surface)" stroke="var(--line)"/>
-        <rect x="60" y="80" width="310" height="96" rx="8" fill="var(--raised)" stroke="var(--muted)" stroke-width="1.5"/>
-        <text x="215" y="116" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">THE UI IS THE PRODUCT</text>
-        <text x="215" y="136" text-anchor="middle" font-size="9.5" fill="var(--muted)">bar · theme · launcher · config, fused</text>
-        <text x="215" y="152" text-anchor="middle" font-size="9.5" fill="var(--muted)">new capability = edit the core</text>
-        <text x="215" y="216" text-anchor="middle" font-size="10.5" fill="var(--muted)">delete the UI — nothing remains</text>
-        <text x="215" y="234" text-anchor="middle" font-size="10.5" fill="var(--muted)">an agent drives it by scraping configs</text>
-        <!-- divider -->
-        <line x1="460" y1="60" x2="460" y2="270" stroke="var(--line)"/>
-        <!-- right: AoideOS = aoide + lyra -->
-        <text x="520" y="30" font-size="11" letter-spacing="2" fill="var(--accent-ink)">AOIDEOS = AOIDE + LYRA</text>
-        <rect x="510" y="42" width="390" height="240" rx="12" fill="var(--surface)" stroke="var(--accent)"/>
-        <!-- lyra layer on top -->
-        <rect x="550" y="66" width="310" height="62" rx="8" fill="var(--raised)" stroke="var(--ink)" stroke-width="1.5"/>
-        <text x="705" y="90" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">LYRA — THE PAINT</text>
-        <text x="705" y="108" text-anchor="middle" font-size="9.5" fill="var(--muted)">declarative · composable · hot-swappable rice — every surface a client</text>
-        <!-- mounts-on ties -->
-        <line x1="625" y1="128" x2="625" y2="152" stroke="var(--line-strong)" stroke-width="1.4"/>
-        <line x1="785" y1="128" x2="785" y2="152" stroke="var(--line-strong)" stroke-width="1.4"/>
-        <text x="705" y="146" text-anchor="middle" font-size="8.5" fill="var(--muted)">mounts on</text>
-        <!-- the gateway beneath -->
-        <rect x="550" y="152" width="310" height="62" rx="10" fill="color-mix(in srgb, var(--accent) 18%, transparent)" stroke="var(--accent)" stroke-width="2"/>
-        <text x="705" y="176" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">AOIDE — THE GATEWAY</text>
-        <text x="705" y="194" text-anchor="middle" font-size="9.5" fill="var(--muted)">runs anywhere there is a shell — no desktop assumed</text>
-        <text x="705" y="238" text-anchor="middle" font-size="10.5" fill="var(--muted)">delete every .qml — the gateway still stands</text>
-        <text x="705" y="256" text-anchor="middle" font-size="10.5" fill="var(--muted)">an agent drives the desktop through the same doors it uses for everything</text>
+      <svg viewBox="0 0 1000 600" style="min-width:900px" role="img" aria-label="The mechanics of a dotfiles rice on one plane, contrasted with AoideOS as a declared plane and a live plane joined by the mode seam">
+        <defs>
+          <marker id="w1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+          <marker id="w1m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+        </defs>
+        <!-- ══ left panel: a dotfiles rice, one plane ══ -->
+        <text x="30" y="30" font-size="11" letter-spacing="2" fill="var(--muted)">A DOTFILES RICE — ONE PLANE</text>
+        <rect x="20" y="42" width="330" height="528" rx="12" fill="var(--surface)" stroke="var(--line)"/>
+        <!-- the "no registry" rail -->
+        <line x1="32" y1="200" x2="32" y2="400" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="2 3"/>
+        <text x="32" y="300" text-anchor="middle" font-size="8.5" letter-spacing="1.4" fill="var(--muted)" transform="rotate(-90 32 300)">NO MODE · NO GATE · NO AUDIT</text>
+        <!-- the edit -->
+        <rect x="45" y="64" width="280" height="48" rx="8" fill="var(--raised)" stroke="var(--muted)" stroke-width="1.5"/>
+        <text x="185" y="88" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">HAND EDIT</text>
+        <text x="185" y="104" text-anchor="middle" font-size="9" fill="var(--muted)">a human — or an agent typing blind</text>
+        <line x1="185" y1="112" x2="185" y2="148" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#w1m)"/>
+        <!-- the single plane -->
+        <rect x="45" y="154" width="280" height="252" rx="10" fill="none" stroke="var(--line-strong)" stroke-width="1.5" stroke-dasharray="6 4"/>
+        <rect x="60" y="146" width="234" height="15" fill="var(--plate)"/>
+        <text x="68" y="158" font-size="9.5" letter-spacing="1" fill="var(--muted)">ONE PLANE — THE CONFIG IS THE STATE</text>
+        <rect x="62" y="180" width="124" height="66" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <text x="124" y="202" text-anchor="middle" font-size="10" fill="var(--ink)">bar config</text>
+        <text x="124" y="217" text-anchor="middle" font-size="8.5" fill="var(--muted)">its own format</text>
+        <text x="124" y="232" text-anchor="middle" font-size="8.5" fill="var(--muted)">accent #89b4fa</text>
+        <rect x="194" y="180" width="124" height="66" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <text x="256" y="202" text-anchor="middle" font-size="10" fill="var(--ink)">compositor conf</text>
+        <text x="256" y="217" text-anchor="middle" font-size="8.5" fill="var(--muted)">its own format</text>
+        <text x="256" y="232" text-anchor="middle" font-size="8.5" fill="var(--muted)">accent #89b4fa</text>
+        <rect x="62" y="258" width="124" height="66" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <text x="124" y="280" text-anchor="middle" font-size="10" fill="var(--ink)">terminal rc</text>
+        <text x="124" y="295" text-anchor="middle" font-size="8.5" fill="var(--muted)">its own format</text>
+        <text x="124" y="310" text-anchor="middle" font-size="8.5" fill="var(--muted)">accent #89b4fa</text>
+        <rect x="194" y="258" width="124" height="66" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <text x="256" y="280" text-anchor="middle" font-size="10" fill="var(--ink)">gtk / css theme</text>
+        <text x="256" y="295" text-anchor="middle" font-size="8.5" fill="var(--muted)">its own format</text>
+        <text x="256" y="310" text-anchor="middle" font-size="8.5" fill="var(--muted)">accent #89b4fa</text>
+        <text x="185" y="348" text-anchor="middle" font-size="9.5" fill="var(--muted)">one value, four syntaxes, four copies</text>
+        <text x="185" y="366" text-anchor="middle" font-size="9.5" fill="var(--muted)">add a widget = edit the bar's own config</text>
+        <text x="185" y="384" text-anchor="middle" font-size="9.5" fill="var(--muted)">remove it = remember every line you added</text>
+        <line x1="185" y1="406" x2="185" y2="440" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#w1m)"/>
+        <text x="193" y="426" font-size="9" letter-spacing="1" fill="var(--muted)">RELOAD EACH APP</text>
+        <rect x="45" y="444" width="280" height="52" rx="8" fill="var(--surface)" stroke="var(--muted)" stroke-width="1.5"/>
+        <text x="185" y="468" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">THE RUNNING DESKTOP</text>
+        <text x="185" y="484" text-anchor="middle" font-size="9" fill="var(--muted)">no live twin — the file you edit is the state</text>
+        <text x="185" y="518" text-anchor="middle" font-size="9.5" fill="var(--muted)">revert = git checkout, then reload it all again</text>
+        <text x="185" y="536" text-anchor="middle" font-size="9.5" fill="var(--muted)">nothing stands between trying it and meaning it</text>
+        <text x="185" y="554" text-anchor="middle" font-size="9.5" fill="var(--muted)">an agent drives it by editing text, blind</text>
+        <!-- ══ divider ══ -->
+        <line x1="372" y1="60" x2="372" y2="550" stroke="var(--line)"/>
+        <!-- ══ right panel: AoideOS — two planes, one seam ══ -->
+        <text x="406" y="30" font-size="11" letter-spacing="2" fill="var(--accent-ink)">AOIDEOS — TWO PLANES, ONE SEAM</text>
+        <rect x="396" y="42" width="584" height="528" rx="12" fill="var(--surface)" stroke="var(--accent)"/>
+        <!-- the one-registry rail -->
+        <line x1="408" y1="76" x2="408" y2="544" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="2 3"/>
+        <text x="408" y="310" text-anchor="middle" font-size="8.5" letter-spacing="1.4" fill="var(--muted)" transform="rotate(-90 408 310)">AGENT OR HUMAN, THE SAME VERBS · ONE REGISTRY · ONE AUDIT LOG</text>
+        <!-- ── band A: the declared plane ── -->
+        <rect x="418" y="64" width="546" height="196" rx="10" fill="color-mix(in srgb, var(--accent) 7%, transparent)" stroke="var(--accent)" stroke-width="1.5"/>
+        <rect x="434" y="56" width="266" height="15" fill="var(--plate)"/>
+        <text x="442" y="68" font-size="9.5" letter-spacing="1" fill="var(--accent-ink)">THE DECLARED PLANE — GIT + NIX, FROZEN</text>
+        <rect x="436" y="88" width="160" height="76" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <text x="516" y="110" text-anchor="middle" font-size="10" fill="var(--ink)">song/songbook/&lt;name&gt;/</text>
+        <text x="516" y="126" text-anchor="middle" font-size="9" fill="var(--muted)">rice.nix · livery.json</text>
+        <text x="516" y="140" text-anchor="middle" font-size="9" fill="var(--muted)">widgets/&lt;slot&gt;.qml</text>
+        <text x="516" y="155" text-anchor="middle" font-size="9" fill="var(--muted)">a song is a folder</text>
+        <line x1="596" y1="126" x2="636" y2="126" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#w1a)"/>
+        <text x="616" y="116" text-anchor="middle" font-size="8.5" fill="var(--accent-ink)">WALKED</text>
+        <rect x="640" y="88" width="200" height="76" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="740" y="110" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)">NIX BUILD</text>
+        <text x="740" y="127" text-anchor="middle" font-size="9" fill="var(--muted)">lib/walk.nix — a capability</text>
+        <text x="740" y="140" text-anchor="middle" font-size="9" fill="var(--muted)">enters by existing at a path</text>
+        <text x="740" y="155" text-anchor="middle" font-size="9" fill="var(--muted)">no import list to edit</text>
+        <line x1="840" y1="126" x2="866" y2="126" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#w1a)"/>
+        <rect x="870" y="88" width="80" height="76" rx="8" fill="color-mix(in srgb, var(--accent) 18%, transparent)" stroke="var(--accent)" stroke-width="2"/>
+        <text x="910" y="114" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--ink)">USER</text>
+        <text x="910" y="129" text-anchor="middle" font-size="9" fill="var(--muted)">GATES THE</text>
+        <text x="910" y="142" text-anchor="middle" font-size="9" fill="var(--muted)">REBUILD</text>
+        <text x="910" y="156" text-anchor="middle" font-size="8" fill="var(--muted)">house rule 2</text>
+        <line x1="910" y1="164" x2="910" y2="180" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#w1a)"/>
+        <rect x="436" y="182" width="514" height="68" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <text x="693" y="204" text-anchor="middle" font-size="10.5" fill="var(--ink)">run/qml/songs/&lt;name&gt;/ · songs/manifest.json</text>
+        <text x="693" y="221" text-anchor="middle" font-size="9" fill="var(--muted)">every committed song's widget QML lands at once — not just the active one</text>
+        <text x="693" y="237" text-anchor="middle" font-size="9" fill="var(--muted)">rsynced over run/qml, so the store reasserts truth · the generation rolls back</text>
+        <!-- ── crossing 1: declared → live, and back ── -->
+        <line x1="520" y1="260" x2="520" y2="298" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#w1a)"/>
+        <text x="530" y="274" font-size="9.5" fill="var(--accent-ink)">lyra rice stage &lt;name&gt;</text>
+        <text x="530" y="288" font-size="8.5" fill="var(--muted)">score → live twin</text>
+        <line x1="880" y1="298" x2="880" y2="260" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#w1a)"/>
+        <text x="870" y="274" text-anchor="end" font-size="9.5" fill="var(--accent-ink)">commit + gated rebuild</text>
+        <text x="870" y="288" text-anchor="end" font-size="8.5" fill="var(--muted)">live → frozen</text>
+        <!-- ── band B: the seam ── -->
+        <rect x="418" y="300" width="546" height="68" rx="10" fill="color-mix(in srgb, var(--accent) 16%, transparent)" stroke="var(--accent)" stroke-width="2"/>
+        <text x="691" y="325" text-anchor="middle" font-size="12.5" font-weight="700" letter-spacing="1" fill="var(--ink)">THE SEAM — song/stage/mode.json</text>
+        <text x="691" y="344" text-anchor="middle" font-size="9" fill="var(--muted)">declarative (default — live writers refuse) · staging (unlocked) · draft (routed via symlink)</text>
+        <text x="691" y="359" text-anchor="middle" font-size="9" fill="var(--muted)">the same lock answers the human and the agent — nothing goes live until someone unlocks it</text>
+        <!-- ── crossing 2: seam → live, and back ── -->
+        <line x1="520" y1="368" x2="520" y2="412" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#w1a)"/>
+        <text x="530" y="386" font-size="9.5" fill="var(--accent-ink)">atomic write</text>
+        <text x="530" y="400" font-size="8.5" fill="var(--muted)">no rebuild, no restart</text>
+        <line x1="880" y1="412" x2="880" y2="368" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#w1a)"/>
+        <text x="870" y="386" text-anchor="end" font-size="9.5" fill="var(--accent-ink)">lyra rice back — takes</text>
+        <text x="870" y="400" text-anchor="end" font-size="8.5" fill="var(--muted)">revert inside the draft</text>
+        <!-- ── band C: the live plane ── -->
+        <rect x="418" y="416" width="546" height="140" rx="10" fill="color-mix(in srgb, var(--accent) 7%, transparent)" stroke="var(--accent)" stroke-width="1.5"/>
+        <rect x="434" y="408" width="242" height="15" fill="var(--plate)"/>
+        <text x="442" y="420" font-size="9.5" letter-spacing="1" fill="var(--accent-ink)">THE LIVE PLANE — HOT, NO REBUILD</text>
+        <rect x="436" y="440" width="170" height="72" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+        <text x="521" y="462" text-anchor="middle" font-size="10" fill="var(--ink)">song/stage/livery.json</text>
+        <text x="521" y="478" text-anchor="middle" font-size="9" fill="var(--muted)">atomic write, never torn</text>
+        <text x="521" y="492" text-anchor="middle" font-size="9" fill="var(--muted)">in draft mode a symlink into</text>
+        <text x="521" y="504" text-anchor="middle" font-size="9" fill="var(--muted)">drafts/&lt;name&gt;/livery.json</text>
+        <line x1="606" y1="476" x2="640" y2="476" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#w1a)"/>
+        <text x="623" y="466" text-anchor="middle" font-size="8.5" fill="var(--accent-ink)">WATCHED</text>
+        <rect x="644" y="440" width="176" height="72" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="732" y="462" text-anchor="middle" font-size="10" fill="var(--ink)">LiveryState.songName</text>
+        <text x="732" y="479" text-anchor="middle" font-size="9" fill="var(--muted)">StagingEngine</text>
+        <text x="732" y="492" text-anchor="middle" font-size="9" fill="var(--muted)">.resolveSong(song, slot)</text>
+        <text x="732" y="505" text-anchor="middle" font-size="9" fill="var(--muted)">active → sonata → fallback</text>
+        <line x1="820" y1="476" x2="850" y2="476" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#w1a)"/>
+        <rect x="854" y="440" width="96" height="72" rx="8" fill="var(--raised)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="902" y="466" text-anchor="middle" font-size="10" font-weight="600" fill="var(--ink)">WidgetSlot</text>
+        <text x="902" y="482" text-anchor="middle" font-size="9" fill="var(--muted)">rebuilds</text>
+        <text x="902" y="495" text-anchor="middle" font-size="9" fill="var(--muted)">in place</text>
+        <text x="691" y="536" text-anchor="middle" font-size="9.5" fill="var(--muted)">another song's widgets are already on disk — the swap is a name change, never a build</text>
       </svg>
     </div>
+    <p class="plate-foot">every path on the right runs today · the seam is the whole difference — one plane cannot hold a state that is live but not yet meant · <code>rice declare</code> is designed and still a stub, so a commit is what declares</p>
     <div class="legend">
-      <span><span class="sw kernel"></span>the gateway (core)</span>
-      <span><span class="sw solid-ink"></span>lyra, the paint layer</span>
+      <span><span class="sw solid-accent"></span>a mechanism that runs today</span>
+      <span><span class="sw kernel"></span>the seam — the mode lock and the rebuild gate</span>
+      <span><span class="sw filedoc"></span>a file on disk</span>
+      <span><span class="sw dashed"></span>a single plane — edit, state, and truth fused</span>
     </div>
     <div class="prose" style="margin-top:1.3rem">
       <p><b>Everything mounts, everything reverts.</b> Capabilities enter the server by <em>existing</em>: <code>lib/walk.nix</code> discovers dendrites, facets, packages, and songs by walking the tree, so a new capability is a new folder — never an edit to an import list — and removing it leaves no trace. The doctrine has a temporal half too: every effect is revertible. Drafts route through a symlink, every draft write mints a take, <code>rice back</code> restores the live stage exactly, and beneath it all NixOS generations make the frozen half atomically reversible. The repo names its source — Cordis's spatial and temporal composability, adopted as <code>CONTRACTS.md</code> §0: <em>when a design choice is open, take the one that can be deleted.</em></p>
