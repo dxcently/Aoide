@@ -1101,7 +1101,18 @@ loop at all; `secrets exec`/`secrets put` are convenience wrappers over the
 same two ops for a human or an agent at a terminal, not the only door onto
 them. The canonical implementation (and the one place a wire CHANGE lands
 first) is still `crates/secrets/src/broker.rs`'s module doc — this section
-restates it for a consumer who never reads this repo's Rust.
+restates it for a consumer who never reads this repo's Rust. **The A2A door
+and its client are the first real machine consumers of this wire**
+(`aoide_secrets::client::resolve_bounded`, exported from this crate as a
+library function rather than copied into either caller, per the cross-crate
+"no copying" discipline `pkgs/aoide/crates/AGENTS.md` holds): the door
+resolves its own inbound `Authorization: Bearer` expectation as consumer
+`a2a-door` (§6's security posture), and its outbound peer client resolves a
+per-peer bearer to present as consumer `a2a-client` (§7's `Peer.bearerSecret`)
+— both self-asserted, both subject to the "consumer is self-asserted" honesty
+note below, both using `resolve_bounded`'s bounded, `wait:false` shape so
+neither can be wedged parked on a misconfigured `requireTotp` secret the way
+a human at a terminal might tolerate.
 
 **Transport**: connect `$AOIDE_SECRETS_SOCKET` (else the canonical deployed
 path `/run/aoide-secrets/secrets.sock`, P-V4d — corrected from an earlier
@@ -1909,13 +1920,31 @@ proxied or not, could already launch the operator's configured
 `aoide.a2a.spawnAgent` with an attacker-chosen prompt, with zero gate beyond
 that command being non-empty. Fixed in `a2a.rs`:
 
-- `aoide.a2a.tokenFile` (nix option; `--token-file` flag /
+- The server's own expected token comes from either of two sources.
+  `aoide.a2a.tokenFile` (nix option; `--token-file` flag /
   `AOIDE_A2A_TOKEN_FILE` env at the `a2a serve` layer, mirroring
   `resolve_spawn_agent`'s exact flag→env→default precedence) names a file
-  holding the server's own expected token, read ONCE at launch
-  (`resolve_token_file`/`read_expected_token`). Empty (the default) is
-  **the off-path**: every decision below becomes a no-op and behavior is
-  byte-identical to before this amendment — pinned by
+  holding it, read ONCE at launch (`resolve_token_file`/
+  `read_expected_token`). `aoide.a2a.bearerSecret` (`--bearer-secret` flag /
+  `AOIDE_A2A_BEARER_SECRET` env, the same precedence shape) instead names a
+  SECRET, resolved through the local secrets broker's unix-socket wire
+  (this section's own "Secrets wire" subsection —
+  `aoide_secrets::client::resolve_bounded`, self-asserted consumer
+  `a2a-door`) — and takes precedence over `tokenFile` when set. Unlike the
+  file, it is resolved FRESH on every connection, never once and cached
+  (`a2a.rs::resolve_inbound_bearer`): revoking the underlying secret
+  (`secrets rm`, a policy edit) takes effect on the very next request, no
+  daemon restart, the one deliberate difference between the two
+  mechanisms. A broker resolve failure — unreachable, denied, or a bounded
+  ~2s socket-read timeout (the wire's own `wait:false` keeps a
+  misconfigured `requireTotp` secret from ever parking this door's
+  connection the way a human-facing `secrets exec` might tolerate) — FAILS
+  CLOSED: every bearer check on that connection denies, the identical
+  `-32005`/stripped-card shape a wrong token gets, never a silent fallback
+  to the file mechanism or to the pre-token open behavior. Neither source
+  configured (the default) is **the off-path**: every decision below
+  becomes a no-op and behavior is byte-identical to before this amendment
+  — pinned by
   `effective_origin_is_the_identity_function_when_no_token_is_configured`
   and `token_authorized_always_allows_when_no_token_is_configured`
   (`a2a.rs` tests), on top of the existing unmodified
@@ -2031,9 +2060,12 @@ shape alone (`-32001 task not found` vs a `submitted`/injected Task — an
 presented at all. A hard `-32005` here, mirroring Spawn, would be the WRONG
 fix: enrolled peers authenticate this call via their OWN per-peer token
 (`Peer.tokenFile` / `is_autogated_peer_token`, 2026-08-19 amendment above),
-never the server-wide one, and aoide's own outbound clients present no
-bearer whatsoever (`commands.rs`/`wire.rs`) — a hard gate would refuse
-correctly-enrolled peers, not just attackers. Fixed in `a2a.rs::message_send`:
+never the server-wide one, and aoide's own outbound clients send no bearer
+by default (`commands.rs`/`wire.rs` — a per-peer `Peer.bearerSecret`, set via
+`peer add --bearer-secret <name>` and resolved fresh through the secrets
+broker at request time, is the opt-in exception; unconfigured stays the
+default, no-bearer behavior) — a hard gate would refuse correctly-enrolled
+peers, not just attackers. Fixed in `a2a.rs::message_send`:
 
 - Before `decide_send_action` runs, when a token is configured, the
   presented bearer does not classify `Valid`, AND neither autogate signal
@@ -2168,6 +2200,26 @@ address alone is dead behind any proxy/tunnel. Absent by default; an
 unmarked peer is identified by address only, exactly as before this field
 existed.
 
+`bearerSecret` (string, optional, additive; set via `peer add --bearer-secret
+<name>`) is the mirror-image field, for the OTHER direction: the name of a
+secret THIS instance resolves through the local secrets broker's unix-socket
+wire (this document's "Secrets wire" subsection, self-asserted consumer
+`a2a-client`) and presents as `Authorization: Bearer <value>` on every
+OUTBOUND call to this peer's own A2A door (`peer pull`, `graph send --to`,
+and `who`'s live presence probe — `aoide-client::commands::
+resolve_peer_bearer`/`post_json`). Resolved fresh on every request, never
+cached; a resolve failure (broker unreachable, denied, or a bounded ~2s
+timeout) fails the outbound call outright with a message naming the secret
+and the broker socket, rather than silently sending it unauthenticated. The
+resolved value is presented via curl's `-H @-` (read from this process's own
+stdin) rather than an argv literal, so it never appears in the outbound curl
+child's own `/proc/<pid>/cmdline`; the JSON-RPC body rides a short-lived
+scratch file in that case instead of stdin. Absent by default (today's
+behavior, unchanged): an unmarked peer's outbound requests carry no
+`Authorization` header at all. `bearerSecret` and `tokenFile` answer
+different questions and are independent of each other — `tokenFile` is what
+THIS peer must present TO us; `bearerSecret` is what we present TO it.
+
 `aoide peer add <name> <url> [--autogate]` verifies the peer FIRST — fetches
 its `/.well-known/agent-card.json` (mirroring `a2a agent add`'s
 verification-before-registering pattern exactly) — and only registers on
@@ -2270,11 +2322,12 @@ could ever match.
 
 ### CLI surface
 
-`aoide peer add <name> <url> [--autogate]` / `list` / `remove <name>` / `pull
-[<name>]` / `status` — registered as their own command group, directly after
-`a2a agent add/list/remove/send` in `schema --json`'s order (nothing
-existing reorders). `peer pull` with no name pulls EVERY registered peer;
-with a name, just that one.
+`aoide peer add <name> <url> [--autogate] [--token-file <path>]
+[--bearer-secret <name>]` / `list` / `remove <name>` / `pull [<name>]` /
+`status` — registered as their own command group, directly after `a2a agent
+add/list/remove/send` in `schema --json`'s order (nothing existing
+reorders). `peer pull` with no name pulls EVERY registered peer; with a
+name, just that one.
 
 ### Status
 
