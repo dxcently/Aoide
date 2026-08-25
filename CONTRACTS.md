@@ -1219,7 +1219,17 @@ per-peer bearer to present as consumer `a2a-client` (§7's `Peer.bearerSecret`)
 — both self-asserted, both subject to the "consumer is self-asserted" honesty
 note below, both using `resolve_bounded`'s bounded, `wait:false` shape so
 neither can be wedged parked on a misconfigured `requireTotp` secret the way
-a human at a terminal might tolerate.
+a human at a terminal might tolerate. **The CONNECT itself is bounded too
+(rider task, alongside #75/#81/#82)** — every client-side op in
+`aoide_secrets::client` (`resolve`/`resolve_bounded`/`put`/`pending`/
+`approve`/`dismiss`) connects through a hand-rolled 5-second bound
+(`client::connect_bounded`, nonblocking-connect-then-poll over `libc`,
+since `std`'s `UnixStream` has no `connect_timeout`), not only the reads
+`resolve_bounded`'s own `set_read_timeout` already bounded — a machine
+consumer hitting a broker with a saturated accept backlog (plausible when
+many callers legitimately hold a parked connection for up to
+`park::park_timeout()`, default 300s) now fails fast instead of hanging on
+the connect syscall itself.
 
 **Transport**: connect `$AOIDE_SECRETS_SOCKET` (else the canonical deployed
 path `/run/aoide-secrets/secrets.sock`, P-V4d — corrected from an earlier
