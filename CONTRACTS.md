@@ -1153,6 +1153,28 @@ never the template text, which can't carry a secret value in the first
 place (a value only ever rides a template's own stdin/stdout, never its
 command line).
 
+**Atomic SET + code-owned built-in templates (task #82).** Both built-in
+`set` templates write to a `.tmp` (`file`) / `.age.tmp` (`age`) sibling in
+the SAME directory first, then `mv` it over the real destination path — a
+`set` interrupted at any point (broker killed, disk full, a timed-out
+template) leaves either the OLD value completely intact or a harmless
+orphaned `.tmp`/`.age.tmp` file, never a torn value at the real path. A
+future `get`/`has` never sees a partial file, and a failed `set` can no
+longer destroy a good existing value on its way to failing.
+**`backends.json`'s `file`/`age` entries are CODE-OWNED, not
+operator-editable** — `backend::resolve_backend` is the one seam
+`fetch_value`/`has_value`/`store_value` route through: for these two
+recognized built-in names, the `get`/`set`/`has` TEXT stored on disk is
+ignored in favor of this binary's own current compiled default, so a
+template fix or improvement (this task's atomicity change, or a future
+one) reaches every already-deployed `backends.json` the moment the broker
+restarts, with no migration step. Presence of the name in `backends.json`
+is UNCHANGED — still required, still what `seed_default_backends`/
+`backfill_missing_backends` guarantee — only the TEXT under those two
+names stops being authoritative. Any OTHER backend name (`pass`/`gopass`/
+`bw`/`sops`, or an operator-custom entry) is read from `backends.json`
+exactly as stored, unaffected.
+
 **`secrets migrate <name> [--backend <target>]` (P-G2, task #72)** moves a
 secret's stored value from its policy's current backend to a target one
 (default `age`) with a fixed ordering, never reordered: fetch from the
