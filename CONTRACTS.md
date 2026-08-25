@@ -423,7 +423,7 @@ count.
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` verb
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
-  **69 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **70 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -465,7 +465,13 @@ count.
   classes (comma-separated), blocking until Ctrl-C; CLI-only, the same
   door-policy shape `secrets watch` already holds for a foreground/
   blocking verb — see `crates/server/README.md`'s "Named seams" section
-  for the producer/tail mechanism.
+  for the producer/tail mechanism; `peer hub`, appended newest, P-D5
+  (`docs/architecture/AOIDED.md`'s "The hub option") (+1 → 70) — designates
+  one registered peer as THE hub (`peer_store::Peer.hub`, additive/v0-safe,
+  same discipline `SessionRecord.headless` set the precedent for);
+  `--clear` removes the designation; both directions are idempotent and
+  report exactly what changed (set/moved/cleared/no-op) — see §6's "Remote
+  reach" subsection for how the hub composes with the rest of the mesh.
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
@@ -482,7 +488,7 @@ This was never a version bump: `schemaVersion` stays `"0"` on both —
 this section has never promised a fixed command inventory, only a
 document SHAPE, and the shape above is unchanged for either binary. The
 A2A AgentCard (§6) advertises whichever registry the serving binary
-assembled — core's card carries only core's 69, since `a2a serve` is
+assembled — core's card carries only core's 70, since `a2a serve` is
 core-only and lyra never registers it.
 
 ### Daemon wire — the fourth door (`docs/architecture/AOIDED.md`, P-D2/P-D4)
@@ -2381,6 +2387,53 @@ execution, above) all run. The CLIENT side is now **real** too (Phase D):
 (§4) and `a2a agent send` drives a registered agent. This section is
 **additive**: it introduces a new contract, carries no version bump to §1–§5,
 and needs no playbook migration entry (nothing existing changed shape).
+
+### Remote reach (P-D5, `docs/architecture/AOIDED.md`'s L3)
+
+`aoided` — the resident daemon (P-D2/P-D4) — grows **no network listener of
+its own, ever**: `bin/aoided.rs` runs only `aoide_server::daemon::run_loop`,
+whose `bind_socket` (`daemon.rs`) is a plain `std::os::unix::net::
+UnixListener` on a local socket path, nothing else. Verified directly against
+`crates/server/src/`: the only `TcpListener::bind` anywhere in that source
+tree belongs to `a2a.rs`'s `a2a serve` — a SEPARATE, existing, already-gated
+door (`aoide.a2a.enable`, above) a session opts into explicitly, not
+something the resident daemon ever stands up on its own.
+
+Composed, an operator's remote reach into the mesh from claude.ai runs
+entirely over doors this contract and root `AGENTS.md` already name, in one
+fixed order, with no new transport at any hop:
+
+```
+claude.ai
+  │  Tier-3 Aoide MCP connector (tailnet/funnel, user-enabled ONLY —
+  │  root AGENTS.md Tier 3 — never enabled by an agent)
+  ▼
+some mesh host's aoided-adjacent session
+  │  aoide who / peer registry (peer_store::PeerRegistry) enumerates
+  │  the mesh — no second inventory (§7)
+  ▼
+graph send --to peer/<query>  (aoide_storage::addr::resolve)
+  ▼
+message/send over THIS door (§6 above), bearer-authenticated
+  (token_authorized / Peer.tokenFile / Peer.bearerSecret) — tunneled to
+  whichever registered peers are themselves enabled, one A2A hop per peer
+```
+
+The hub (`Peer.hub`, P-D5 — `peer_store::set_hub`/`clear_hub`, driven by
+`aoide peer hub <name> [--clear]`) is the last-resort address-resolution
+preference this route composes with when a `--to` query names nothing else
+reachable: `aoide_storage::addr::resolve_with_hub` wraps `resolve` and
+substitutes a designated hub peer only on that function's own `NotFound` —
+every earlier precedence tier (exact id, tail4, petname, host/role compound,
+`peer/<rest>`) is untouched (`addr.rs`'s own grammar doc). As of this phase
+`resolve_with_hub` is a tested library function in `aoide-storage`, not yet
+threaded through `graph send`'s live `--to` call site (`aoide-conduct::graph
+::send`, which still calls plain `resolve`) — the same "land the pure
+function first, wire a real caller in later" order `addr.rs`'s own tier-5
+`peer/<rest>` grammar went through (P-C1 landed it library-only; C3 wired
+`graph send` to it). It never adds a network hop, never opens a port, and is
+pure preference: a mesh with no hub set resolves exactly as before this
+field existed.
 
 ---
 

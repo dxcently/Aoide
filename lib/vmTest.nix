@@ -268,7 +268,10 @@ pkgs.testers.runNixOSTest {
     # updated to 68 with that landing, though this historical comment
     # wasn't extended to say so until now); bumped by 1 for `events tail`
     # — the aoided event bus's own terminal-reachable follow verb (P-D3,
-    # docs/architecture/AOIDED.md) — reached 69.
+    # docs/architecture/AOIDED.md) — reached 69; bumped by 1 for `peer hub`
+    # — designates at most one registered peer as the hub address
+    # resolution prefers as a last-resort remote target (P-D5,
+    # docs/architecture/AOIDED.md) — reached 70.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a verb.
     schema_raw = machine.succeed("aoide schema --json")
@@ -282,8 +285,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 69, (
-        f"expected 69 commands, got {cmd_count}.  "
+    assert cmd_count == 70, (
+        f"expected 70 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 
