@@ -142,6 +142,12 @@ only.
    directory's `README.md`/`AGENTS.md` in the SAME commit — never a
    follow-up. A docs-only pass fixing a stale doc is fine; code that outruns
    its doc is not.
+9. **Docs are timeless; changes go to the log.** Edit a document integrally
+   so the page reads as if it was always the way it is — never append dated
+   "UPDATE"/"AMENDMENT" sections or addendum blocks unless the user asks for
+   an append. The decisioning and the change record belong in the log
+   instead: the commit message, the changelog, the session ledger. Ledgers
+   and logs themselves are exempt — they ARE the log, append-only.
 
 ## Docs layering (dsh/Cordis convention, P-A10)
 
