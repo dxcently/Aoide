@@ -2694,8 +2694,9 @@ message_send`:
   The door-wide bearer alone no longer reaches the spawn arm at all — it
   is necessary (Phase G above still gates Spawn's entry point when a token
   is configured) but no longer sufficient.
-- **HONESTY NOTE — P-P4 (signed per-request wire authentication) has NOT
-  landed.** Even narrowed to the token rung, `resolve_peer`'s match rides
+- **HONESTY NOTE (superseded by the Amendment (2026-08-25, P-P4) below) —
+  at the time this P-P3 amendment landed, signed per-request wire
+  authentication had NOT yet landed.** Even narrowed to the token rung, `resolve_peer`'s match rides
   the SAME unforged-but-unsigned signal every earlier amendment in this
   section already used for the unrelated autogate question — a bearer
   string compared byte-for-byte against a file on disk. It is not
@@ -2730,6 +2731,180 @@ message_send`:
 - Every outcome (the new `-32006` refusal included) still audits through
   the SAME `Door::A2a` log every other §6 outcome already uses — no second
   logging path.
+
+**Amendment (2026-08-25, P-P4): per-request signed wire authentication for
+paired peers — closes the honesty note above.** `docs/architecture/
+PAIRING.md`'s "Wire authentication (paired peers)" section: a verified
+peer's outbound A2A POSTs are now bound, per request, to a detached ed25519
+signature over that exact request's method/path/timestamp/nonce/body —
+unforgeable and non-replayable, unlike the token rung's bare shared-secret
+comparison. Landed in `aoide_storage::wire_auth` (the shared canonical-
+string + sign/verify logic — neither `aoide-client` nor `aoide-server`
+touches `ed25519_dalek` directly), `aoide-client::commands::
+sign_headers_for_peer` (the signer), and `aoide-server::a2a::
+verify_signed_request` (the verifier).
+
+**Headers** — four new ones on any peer POST to the existing `/` A2A door,
+present together or not at all:
+
+| Header | Carries |
+| --- | --- |
+| `X-Aoide-Peer` | The signer's claimed peer name — `peer_store::valid_peer_name`-shaped. This instance's OWN local `Peer.name` for the counterpart, which the pairing ceremony's single shared `name` value (§6's "Pairing wire (P-P2)" subsection above) makes identical to the string the counterpart's own registry resolves back to this instance. |
+| `X-Aoide-Timestamp` | ISO-8601 UTC, the moment the signer minted this request. |
+| `X-Aoide-Nonce` | A fresh random hex value per request (`aoide_storage::pairing::random_hex(16)`, the same mint the pairing ceremony already uses). |
+| `X-Aoide-Signature` | The ed25519 signature over the canonical string below, hex-encoded (128 hex chars). |
+
+A request presenting SOME but not all four headers is a malformed signed
+request — refused outright (`-32007`), never silently downgraded to the
+unsigned/token/addr ladder.
+
+**Canonical string** (`aoide_storage::wire_auth::canonical_string`) — the
+exact bytes the signature covers, following P-P2's `derive_sas`/
+`derive_commit` field-hashing style verbatim (no reason found to diverge):
+five fields — `method`, `path`, `timestamp`, `nonce`, and the request
+body's SHA-256 digest (hex) — each trimmed and lowercased, NUL-separated
+(`\x00`) after EVERY field including the last:
+
+```
+canonical = lower(trim(method))    || 0x00
+         || lower(trim(path))      || 0x00
+         || lower(trim(timestamp)) || 0x00
+         || lower(trim(nonce))     || 0x00
+         || lower(hex(SHA256(body))) || 0x00
+```
+
+The signature itself is `ed25519_dalek::Signer::sign` over these bytes
+directly (EdDSA hashes its own message internally via SHA-512 — wrapping
+the canonical string in a second SHA-256 first, the way `transcript_digest`
+does for the SAS, would add nothing here and would only obscure the pinned
+vectors). `path` is `aoide_storage::peer_store::url_path(&peer.url)` on the
+signer's side and the HTTP request's own parsed path on the verifier's side
+— both derive it the same way a bare loopback/tunnel/reverse-proxy `POST /`
+already does, so the two must and do agree byte-for-byte.
+
+**Pinned stability vectors**
+(`aoide-storage::wire_auth::tests::canonical_string_stability_vectors_never_drift`;
+a future change to the field order, the separator, the case-folding, or
+the digest algorithm must move this table in the same commit):
+
+```
+canonical_string("POST", "/", "2026-08-25T00:00:00Z", "abcd1234", b"{}")
+  == "post\x00/\x002026-08-25t00:00:00z\x00abcd1234\x00\
+      44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\x00"
+```
+(`sha256("{}") == 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a`,
+independently verifiable.) Case and surrounding whitespace on
+method/path/timestamp/nonce never change the canonical string; a different
+body, or a different path, always does (via the digest, and directly).
+
+**Inbound verification** (`aoide-server::a2a::verify_signed_request`, called
+once per connection in `handle_connection`, strictly before EITHER the
+streaming or the plain-JSON-RPC dispatch path) — checks run cheapest-first,
+never spending a signature verification on a request already disqualified
+for a cheaper reason:
+
+1. All four headers present, else `-32007`.
+2. `X-Aoide-Peer` is a well-formed name, else `-32007`.
+3. Resolves to a peer in `state/peers.json`, else `-32007` ("unknown peer").
+4. That peer is `verified`, else `-32007`.
+5. That peer has a stored `pubkey`, else `-32007`.
+6. `X-Aoide-Timestamp` parses as ISO-8601, else `-32007`.
+7. **Replay guard, timestamp half**: the timestamp is within
+   `aoide_storage::wire_auth::signature_skew_secs()` of this instance's own
+   "now" (±120s default, `AOIDE_SIGNATURE_SKEW_SECS` overrides) — else
+   `-32008`, a taught error naming BOTH timestamps (the request's claimed
+   time and this instance's own "now") and the configured window.
+8. The signature verifies against the canonical string rebuilt from the
+   VERIFIER's own parsed request (never trusting a wire-carried canonical
+   string) and the peer's stored `pubkey` — else `-32007` ("signature
+   verification failed").
+9. **Replay guard, nonce half**: `(peer name, nonce)` has not been seen
+   before by this server process — else `-32009`. The nonce is recorded
+   ONLY after every earlier check (including the signature itself) passes,
+   so a forged or garbage nonce never consumes a cache slot.
+
+A request that fails ANY of these fails CLOSED — no fallthrough to the
+addr/token resolution ladder for a request that claims to be a paired
+peer's signed request and isn't one; `handle_connection` returns the
+refusal directly rather than continuing to `route`/`stream_task`. A request
+carrying NONE of the four headers is untouched by any of this — the
+existing token/addr resolution ladder and the door-wide bearer path (read
+arms, `tasks/get`, the AgentCard GET) apply exactly as before this phase,
+for every caller that never signs.
+
+**Nonce cache** (`aoide-server::a2a::NONCE_CACHE`) — a bounded, in-memory,
+PER-`a2a serve`-PROCESS `VecDeque<(peer, nonce)>`, capped at 4096 entries
+(`NONCE_CACHE_CAP`), FIFO-evicting the oldest entry once full. No file
+behind it, unlike everything else this door's peer/pairing state persists
+— an `a2a serve` restart clears it outright, a known and accepted
+limitation (the same "process-local guard" shape `aoide_storage::pairing`'s
+own `PARK_LOCK` already carries): a replay that arrives after a restart
+isn't caught by the cache, only by the timestamp window, which is why both
+checks run independently rather than either alone. The cap sizes against
+plausible signed-request volume within one skew window, not against any
+particular deployment's real traffic — bounding worst-case memory against a
+hostile or malfunctioning peer, never expected to be reached in normal
+operation.
+
+**New JSON-RPC error codes**: `-32007` (signature verification failed —
+covers every malformed-header/unknown-peer/unverified-peer/no-pubkey/bad-
+signature shape above), `-32008` (clock skew beyond the window), `-32009`
+(nonce replay).
+
+**Spawn gate narrows again: PeerRung::Signature only.** `aoide_storage::
+peer_store::PeerRung` gains a third variant, `Signature` — the new
+STRONGEST rung, never produced by `resolve_peer` itself (which has no
+access to the raw HTTP request a signature needs); it is yielded only by
+`a2a.rs`'s own `verify_signed_request` → `message_send`'s resolution,
+which — when `signed_peer_name` is `Some` — resolves EXCLUSIVELY against
+that name (`PeerRung::Signature`), with NO fallback to the addr/token
+ladder even on a registry-lookup miss (fail-closed: a request that
+`verify_signed_request` already proved came from peer X is never silently
+re-resolved as if it came from whoever's address or token happens to
+match). `spawn_admitted` now accepts ONLY `PeerRung::Signature` — the
+Token rung, sufficient after the P-P3 amendment above, no longer reaches
+`do_spawn` at all. The `-32006` refusal message is now shape-specific: a
+genuinely paired peer resolved via the (now-insufficient) Token rung is
+told plainly that its aoide is too old to sign requests, or is failing to
+sign them, and to upgrade the caller — not told to re-pair, since pairing
+already succeeded and the only gap is the missing signature; a Signature-
+resolved peer whose `allows` simply lacks `spawn` is told the exact `peer
+allow <name> spawn on` fix; every other shape (Addr rung, no resolution,
+an unverified Token match) gets the original "pair first, then allow"
+message, now naming the signature requirement too. The CODE stays `-32006`
+across every shape (existing callers already match on it). Inject's `from`
+attribution and the address/token resolution ladder for every other
+purpose are UNCHANGED — this narrowing is scoped to the Spawn arm alone,
+exactly as the P-P3 amendment scoped its own narrowing.
+
+**Outbound (client side)** — `aoide-client::commands::sign_headers_for_peer`
+is the ONE production call site that ever builds these headers: for a
+`peer.verified == true` target it loads this instance's own P-P1 identity
+(`aoide_storage::identity::load_or_mint`), mints a nonce, stamps "now,"
+signs the canonical string, and returns the four header pairs; for an
+unverified/unpaired peer it returns an empty header list, leaving that
+call's transport byte-identical to the pre-P-P4 path. Wired into all three
+real peer-POST call sites (`pull_one_peer`, `pull_peer_live`,
+`send_message_to_peer`) — never into the pairing-ceremony's own three wire
+calls (`aoide/pairRequest`/`aoide/pairReveal`/`aoide/pairApprove`), which
+stay unauthenticated by design (P-P2 above) and always pass an empty
+header slice. `post_json`'s new `extra_headers` parameter rides as plain
+`-H "<name>: <value>"` curl argv literals — unlike the bearer token's
+stdin-hiding trick, nothing in a P-P4 signature header is a secret worth
+hiding from `/proc/<pid>/cmdline`.
+
+**Private key discipline unchanged.** No new `Serialize`/`Deserialize`
+type was added anywhere signing touches; `identity.rs`'s own mechanical
+`no_private_material_in_any_serialize_type` gate (P-P1) stays green
+untouched. Signing happens in-process, in `aoide-client`, via
+`aoide_storage::identity::Keypair::sign` — the raw signing key never
+crosses a socket, an `Outcome`, or a log; only the resulting signature
+(public, verifiable material) rides the wire.
+
+This subsection is **additive**: four new headers, three new error codes,
+one new `PeerRung` variant, and an in-memory-only nonce cache with no
+stage-file shape of its own. Carries no version bump to §1–§6 and needs no
+playbook migration entry.
 
 ### Session-DAG integration (client side)
 
@@ -3070,38 +3245,41 @@ stamps it `["read","spawn"]` the moment a peer FIRST becomes `verified`
 and leaves it untouched on a LATER re-pairing of an already-verified
 name — a revoked capability survives key rotation. An unpaired (`peer add`)
 peer and a legacy record predating this field both load `allows: []`. The
-A2A door's Spawn arm (§6's P-P3 amendment above) is the one thing gating on
-it today: `resolve_peer` (below) resolves a caller to a `Peer` AND which
-rung matched, and Spawn requires that peer to be `verified` with `"spawn"`
-in `allows` **AND** the resolution to be the TOKEN rung specifically —
-never the address one, regardless of `allows`. `peer allow <name> <cap>
-on|off` (§3's command list, §7's CLI surface below) is the ONLY other
-writer — idempotent, refuses an unknown peer or an unknown capability.
+A2A door's Spawn arm (§6's P-P3/P-P4 amendments above) is the one thing
+gating on it today: Spawn requires that peer to be `verified` with
+`"spawn"` in `allows` **AND** the caller to have resolved via the
+SIGNATURE rung specifically (§6's P-P4 amendment) — neither the address
+rung nor the (now-insufficient) token rung, regardless of `allows`. `peer
+allow <name> <cap> on|off` (§3's command list, §7's CLI surface below) is
+the ONLY other writer — idempotent, refuses an unknown peer or an unknown
+capability.
 
 `resolve_peer(peers, addr, presented_token)` (`aoide_storage::peer_store`,
-P-P3 decision 6) is the caller-identity ladder — a presented bearer matched
-against ANY registered peer's own `tokenFile` first (`PeerRung::Token` on a
-hit), the connection's origin address matched against a peer's `url`
-second (`PeerRung::Addr` on a hit); it returns which rung matched alongside
-the `Peer`. Unlike `is_autogated_peer_token`/`is_autogated_peer_addr` (§6's
-2026-08-19 amendment), it checks every registered peer, not only ones
-marked `autogate` — "which peer is this" is a different question from
-"should this peer skip the pending queue." The two rungs are not
-interchangeable strength: `Token` is possession of that peer's own
-`tokenFile` secret; `Addr` is a bare TCP-source-IP-vs-`url` match,
-spoofable by anyone who can reach the door from that address or who sits
-behind the same NAT/reverse-proxy as the real peer. Both rungs resolve a
-peer identity fine for attribution (Inject's `from` field, origin-stamping)
-and for the ordinary autogate question; the Spawn gate is the one consumer
-narrow enough to require `Token` specifically (§6's P-P3 amendment). Ties
-resolve deterministically: `peer add` refuses only a duplicate NAME, never
-a duplicate `url` host or `tokenFile` content, so two peers CAN share
-either — `resolve_peer` then answers with whichever matches FIRST in
-registry (array) order, not the last, not random. Neither rung is
-cryptographically bound to the caller — see §6's P-P3 amendment for the
-full honesty note on why even the token rung is not yet unforgeable (P-P4,
-signed per-request wire authentication, is what closes that gap; not
-landed here).
+P-P3 decision 6) is the caller-identity ladder for the TWO unsigned rungs
+— a presented bearer matched against ANY registered peer's own `tokenFile`
+first (`PeerRung::Token` on a hit), the connection's origin address matched
+against a peer's `url` second (`PeerRung::Addr` on a hit); it returns which
+rung matched alongside the `Peer`. Unlike `is_autogated_peer_token`/
+`is_autogated_peer_addr` (§6's 2026-08-19 amendment), it checks every
+registered peer, not only ones marked `autogate` — "which peer is this" is
+a different question from "should this peer skip the pending queue." The
+three rungs `PeerRung` now carries are NOT interchangeable strength:
+`Addr` is a bare TCP-source-IP-vs-`url` match, spoofable by anyone who can
+reach the door from that address or who sits behind the same
+NAT/reverse-proxy as the real peer; `Token` is possession of that peer's
+own `tokenFile` secret — unforgeable by mere network position, but a bare
+shared secret, replayable and identical across every request; `Signature`
+(P-P4, the strongest — §6's own amendment for the full wire shape) is
+never produced by `resolve_peer` itself, only by `a2a.rs`'s own
+`verify_signed_request`, since it needs the raw HTTP request a bearer/addr
+resolve never sees. `Addr` and `Token` both resolve a peer identity fine
+for attribution (Inject's `from` field, origin-stamping) and for the
+ordinary autogate question; Spawn is the one consumer narrow enough to
+require `Signature` specifically. Ties resolve deterministically: `peer
+add` refuses only a duplicate NAME, never a duplicate `url` host or
+`tokenFile` content, so two peers CAN share either — `resolve_peer` then
+answers with whichever matches FIRST in registry (array) order, not the
+last, not random.
 
 `autogate` (bool, default `false`) is the cross-device analogue of `graph
 send`'s local "sender is the target's own parent" rule (§6's amendment
@@ -3276,13 +3454,16 @@ graph fold all run. The pairing ceremony (P-P2) is real too: `pubkey`/
 `verified` on `Peer`, `peer pair request|pending|approve|reject`, and both
 `aoide/pairRequest`/`aoide/pairApprove` A2A methods (§6's "Pairing wire"
 subsection) all run end to end. The `allows` closed set, `peer allow`, and
-the A2A door's Spawn-arm hard gate (P-P3) are real too, end to end — a
-paired peer's `allows` genuinely gates the spawn arm, and ONLY when that
-peer resolved via its own token (§6's P-P3 amendment above, `PeerRung::
-Token` specifically — the address rung never admits spawn), with the
-honesty note there on exactly what identity signal that gate still rides
-(P-P4's signed per-request wire authentication remains ahead, not this
-phase's job). **Out of scope for
+the A2A door's Spawn-arm hard gate (P-P3, narrowed again by P-P4) are real
+too, end to end — a paired peer's `allows` genuinely gates the spawn arm,
+and ONLY when that peer resolved via a per-request ed25519 SIGNATURE (§6's
+P-P4 amendment above, `PeerRung::Signature` specifically — neither the
+address rung nor a bare token match admits spawn any more). Signed wire
+authentication (P-P4) is real end to end too: outbound signing
+(`aoide-client::commands::sign_headers_for_peer`), inbound verification
+with replay/skew guards (`aoide-server::a2a::verify_signed_request`), and
+the pinned canonical-string vectors (§6's P-P4 amendment above) all run.
+**Out of scope for
 v0** (explicitly, not an oversight): WAN/NAT-traversal/relay reachability
 for peers not on the same network; Melete-side consumption (a polling Rune
 skill, first-class `graph_view` rendering) — later, separately-directed
