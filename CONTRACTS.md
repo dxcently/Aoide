@@ -485,6 +485,46 @@ A2A AgentCard (§6) advertises whichever registry the serving binary
 assembled — core's card carries only core's 69, since `a2a serve` is
 core-only and lyra never registers it.
 
+### Daemon wire — the fourth door (`docs/architecture/AOIDED.md`, P-D2/P-D4)
+
+`aoided`'s own control socket (`$AOIDE_DAEMON_SOCKET`, else
+`$XDG_RUNTIME_DIR/aoide/aoided.sock`, `0600` user-private — no cross-uid
+audience) speaks the secrets wire's framing verbatim: one newline-delimited
+JSON request line → zero or more interim lines (`"interim":true`) → exactly
+one final reply line. Three ops, a closed set:
+
+```json
+{"v":0,"op":"ping"}
+{"v":0,"op":"subscribe","classes":["secret","gate"]}
+{"v":0,"op":"dispatch","path":["graph","view"],"args":[],"flags":{"json":"true"}}
+```
+
+- `ping` → `{"ok":true,"daemon":"aoided","pid":…,"version":"…"}` — the
+  liveness probe.
+- `subscribe` → the connection becomes a one-way stream: each event on the
+  daemon's own events feed (§1's event-bus record shape, name-only) whose
+  `class` is in the request's `classes` array is written as an interim
+  line as it happens. An empty/absent `classes` delivers NOTHING —
+  default-deny per class, the same posture `Subscription` already models.
+- `dispatch` (P-D4 — the fourth door onto the one schema this section
+  already documents: CLI, MCP, A2A, and now Daemon) → `path`/`args`/`flags`
+  build an `Invocation { door: Door::Daemon, .. }` LITERALLY — no dotted
+  tool-name lookup the way MCP's `tools/call` resolves one. The final
+  reply is one `{"outcome": <the full Outcome envelope, this section's own
+  shape>}` line.
+
+**No new allowlist.** `Door::Daemon` (`aoide-protocol`) is audited exactly
+like the other three; the per-verb door policy already in force for
+MCP/A2A — a CLI-only admin verb's refusal, a gated command's `gated: true`,
+a long-running server verb's (`mcp.serve`/`a2a.serve`) non-Cli metadata
+reply — applies unchanged, since `dispatch` routes through the SAME
+dispatcher every door calls. This module introduces no daemon-specific
+permission table, and none is planned. Untrusted input stops at the parse/
+validate boundary: a malformed line gets one error reply and the connection
+survives; a request line over the 1 MiB cap is dropped mid-stream (checked
+incrementally, not only after a `\n` finally arrives) with one error reply
+first when a peer is still there to receive it.
+
 ---
 
 ## 4. Stage file formats — **v0**
