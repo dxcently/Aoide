@@ -79,10 +79,10 @@ aoide daemon [--audit-log <path>] [--json]
   (`pkgs/aoide/crates/server/src/daemon.rs`).
 - **Notes:** walking skeleton — the audit append and the gate are real code
   paths; the event bus and subscription model are in-memory types, and the
-  full event loop is future work. The standalone `aoided` binary
+  full event loop is not implemented. The standalone `aoided` binary
   (`pkgs/aoide/crates/cli/src/bin/aoided.rs`, takes `--audit-log <path>`,
-  prints the status JSON to stdout) is the same code path — what a systemd
-  unit launches. See [[Governance]].
+  prints the status JSON to stdout) is the same code path a systemd unit
+  launches. See [[Governance]].
 
 ### lyra shellbridge
 
@@ -121,8 +121,8 @@ lyra shellbridge [--run] [--json]
   (`graph::run_hypr_window_listener`). Malformed/unknown lines are logged to
   stderr and skipped — nothing kills the accept loop.
 - **Notes:** not gated. The `--run` flag is registered in the schema but the
-  handler (`server/src/commands.rs::handle_shellbridge`) never consults it —
-  bare `lyra shellbridge` runs the blocking loop either way. Client half:
+  handler (`conduct/src/commands/shellbridge.rs::handle_shellbridge`) never
+  consults it — bare `lyra shellbridge` runs the blocking loop either way. Client half:
   `shellbridge::send_line` is how `lyra herald push` and `graph permit` reach
   the daemon, which stays the single ledger writer. See [[shellbridge]].
 
@@ -189,7 +189,7 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
   autogate-marked peer's own `tokenFile`, read fresh off disk per request).
   The `aoide-a2a` systemd unit (`modules/nucleus/aoided.nix`) sets
   `AOIDE_A2A_BIND`/`PORT`/`SPAWN_AGENT`/`TOKEN_FILE` from the nix options;
-  `AOIDE_A2A_PEER_NAME` is currently flag/env-only.
+  `AOIDE_A2A_PEER_NAME` is flag/env-only.
 - **Writes:** an audit record (door `a2a`) for every handled request, spawn,
   and SSE open/close in the audit log; the `message/send` inject path reuses
   `graph send`'s `session_send`, so a held send writes the session's
@@ -340,8 +340,9 @@ aoide peer remove <name> [--json]
   `state/peer-cache/<name>.json` if present (best-effort), so a peer re-added
   under the same name never starts from a stale leftover.
 - **Output:** data `{removed: true, name, count}`. A missing name is an
-  error (`reason: unknown-peer`, exit 1) — deliberately NOT idempotent-silent,
-  the documented divergence from `a2a agent remove` (CONTRACTS.md §7).
+  error (`reason: unknown-peer`, exit 1) — deliberately not
+  idempotent-silent, the documented divergence from `a2a agent remove`
+  (CONTRACTS.md §7).
 - **Notes:** not gated.
 
 ### aoide peer pull

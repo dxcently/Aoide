@@ -1,8 +1,8 @@
 # Meta & Upkeep Verbs — Guide, Schema, Soundcheck
 
-The meta verbs orient an agent (`guide`, `schema`), the three walking-skeleton
-stubs (`make`, `update`, `onboard`) reserve the contract surface for planned
-flows, and the upkeep verbs (`usage`, `quickshell reload`, `soundcheck`)
+The meta verbs (`guide`, `schema`) orient an agent. The stubs (`make`,
+`update`, `onboard`) are walking-skeleton reservations of schema surface for
+planned flows. The upkeep verbs (`usage`, `quickshell reload`, `soundcheck`)
 maintain local state and sweep the working tree. Handlers live in
 `pkgs/aoide/crates/cli/src/commands/meta.rs` (`guide`/`schema`),
 `pkgs/aoide/crates/cli/src/commands/stubs.rs` (the stubs),

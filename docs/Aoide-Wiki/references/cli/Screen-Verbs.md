@@ -1,18 +1,17 @@
 # Screen Verbs — Capture, OCR & Pointer Synthesis
 
-The `screen` verb group is the agent-facing desktop eyes-and-hands surface:
-query the compositor (`screen info`), capture pixels (`screen shot`), recover
-text from a capture (`screen ocr`), act by name or pixel (`screen point *`),
-verify an act mechanically (`screen diff`), and hand a capture to another
-agent (`screen send`). `screen` is a `lyra` verb group, its own crate since
-P-A1 of the binary-split workstream. Registrations live in
+The `screen` verb group covers the desktop see-and-act surface: query the
+compositor (`screen info`), capture pixels (`screen shot`), recover text from
+a capture (`screen ocr`), act by name or pixel (`screen point *`), verify an
+act mechanically (`screen diff`), and hand a capture to another agent
+(`screen send`). It is a `lyra` verb group. Registrations live in
 `pkgs/aoide/crates/screen/src/commands.rs`; handlers and domain logic
 in `pkgs/aoide/crates/screen/src/{hypr,capture,point,synth,ocr,diff,text,send}.rs`.
 See [[Screen-Control]] for the usage narrative; the sidecar field contract,
 the image↔screen scale contract, and the reason-code vocabulary are
 CONTRACTS.md §8.
 
-Boundaries, all confirmed in source:
+Boundaries:
 
 - **Compositor queries and the one warp** shell out to `hyprctl -j
   <monitors|cursorpos|activeworkspace|clients|layers>` and `hyprctl dispatch
@@ -48,7 +47,7 @@ Every command takes `--json`. Without it the CLI prints the human `message`
 line on stdout; with it, an envelope `{status, command, message, gated,
 changed?, data?}` (`pkgs/aoide/crates/protocol/src/output.rs`). Exit codes:
 0 ok, 1 error, 2 usage, 64 not-implemented. All fourteen verbs below are
-`implemented: true` and `gated: false` in the schema — none are stubs.
+`implemented: true` and `gated: false` in the schema.
 Structured errors carry a machine-checkable `data.reason` from the §8
 vocabulary (`pointer-*`, `sidecar-*`, `from-shot-*`, `text-*`, `diff-*`,
 `capture-*`, `ocr-*`, `hyprctl-*`, plus misc codes); `screen send` is the

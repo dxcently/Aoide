@@ -1,11 +1,11 @@
 # Graph & Conduct Verbs — the Session-Graph Command Surface
 
-The `graph` verb group plus the top-level `conduct` command drive the
-[[Session-Graph]]: they register and resolve sessions in the stage registries,
-shape the project/session DAG, inject text into conducted terminals (the
-[[Conductor-Channel]]), jump to windows ([[Terminal-Commander]]), and reap dead
-sessions. `graph session hook` is the [[Agent-Hooking]] door agent harnesses
-(Claude Code, kimi, pi) fire into. Handlers live in
+The `graph` verb group plus the top-level `conduct` command are the
+[[Session-Graph]]'s command surface: session registration and the
+project/session DAG, injection into conducted terminals
+([[Conductor-Channel]]), window jumps ([[Terminal-Commander]]), and the
+dead-session reaper. `graph session hook` is the [[Agent-Hooking]] door agent
+harnesses (Claude Code, kimi, pi) fire into. Handlers live in
 `pkgs/aoide/crates/conduct/src/graph/{verbs,session_store,send,pending,spawn,permit,window,conduct,doc,model,common}.rs`
 and `pkgs/aoide/crates/conduct/src/reap.rs`; registrations in
 `pkgs/aoide/crates/conduct/src/commands/graph.rs`.
@@ -26,8 +26,9 @@ Every command takes `--json`: without it the CLI prints the human `message`
 line (plus a `changed:` trailer); with it, an envelope `{status, command,
 message, gated, changed, data?}` (`pkgs/aoide/crates/protocol/src/output.rs`).
 Exit codes: 0 ok, 1 error, 2 usage, 64 not-implemented (none in this group).
-None of these verbs is `gated: true` in the schema — `graph send`'s
-pending-approval gate is an internal policy, not the user rebuild gate.
+No verb in this group is `gated: true` in the schema; `graph send`'s
+pending-approval hold is an internal policy, separate from the user rebuild
+gate the flag denotes.
 
 ### aoide graph view
 
@@ -246,7 +247,7 @@ aoide graph spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt 
 ### aoide graph send
 
 ```
-aoide graph send --id <id> [--submit] [--yes] [--from <sender>] -- <text …>
+aoide graph send (--id <id> | --to <name>) [--submit] [--yes] [--from <sender>] -- <text …>
 ```
 
 - **Reads:** `song/stage/sessions.json` (resolves the target's `socket` and
@@ -294,7 +295,10 @@ aoide graph send --id <id> [--submit] [--yes] [--from <sender>] -- <text …>
   (below) — `approve` re-drives a held entry through this exact door with
   `--yes` and the entry's own `from`, in-process. `graph permit`'s verdict and
   the A2A door both re-enter this same function in-process rather than
-  reimplementing it.
+  reimplementing it. `--to` resolves a name (local id, tail4, or petname;
+  `peer/<query>` targets a remote session over A2A) in place of a raw `--id`,
+  and the two are mutually exclusive. A remote send is always attempted and
+  never queues locally; the receiving peer gates its own delivery.
 
 ### aoide graph pending list
 
@@ -311,7 +315,7 @@ aoide graph pending list [--json]
   resolutions in one breath).
 - **Notes:** read-only. The queue `graph send` parks a held injection in (no
   `--yes`, no autogate match) and where the A2A door parks its own held
-  injects — previously a write-only dead drop nothing read back.
+  injects.
 
 ### aoide graph pending approve
 
@@ -501,8 +505,7 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
   controlling tty to query, `openpty` would otherwise get a NULL winsize and
   leave the pty at 0×0 (full-screen TUIs misrender against or refuse that
   outright), so a headless pty falls back to a conventional 80×24 instead; the
-  interactive no-tty case (rare, e.g. redirected stdin in a test) keeps its
-  historical `None` unchanged. A log file that can't be opened (an unwritable
+  interactive no-tty case (rare, e.g. redirected stdin in a test) keeps `None`. A log file that can't be opened (an unwritable
   state dir) degrades to stdout rather than killing the session, the same
   best-effort posture as the socket bind. See "Headless conduct & `graph
   spawn`" under [[Conductor-Channel]].

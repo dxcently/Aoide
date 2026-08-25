@@ -1,11 +1,10 @@
 # Content, Herald & Hooks Verbs
 
 Three surfaces in one page: the `content` verb group (the [[Content-Pipeline]]
-admission/index flow — all five are exit-64 stubs today), `herald push`
-(dunst's `script` hook feeding the notification ledger the Quickshell herald
-draws), and `hooks install` (wiring an agent harness's settings file into the
-[[Agent-Hooking]] door). Handlers and registrations live in
-`pkgs/aoide/crates/conduct/src/commands/{herald,hooks}.rs`,
+admission/index flow), `herald push` (dunst's `script` hook feeding the
+notification ledger the Quickshell herald draws), and `hooks install` (wiring
+an agent harness's settings file into the [[Agent-Hooking]] door). Handlers and
+registrations live in `pkgs/aoide/crates/conduct/src/commands/{herald,hooks}.rs`,
 `pkgs/aoide/crates/conduct/src/herald.rs`, and (content stubs)
 `pkgs/aoide/crates/cli/src/commands/stubs.rs`.
 
@@ -77,9 +76,9 @@ aoide content query <query> [--limit <n>] [--json]
 lyra herald push [--json]
 ```
 
-Machine-facing only — dunst runs it per notification as its `script` hook
-(`modules/dendrites/dunst.nix`, every rule sets `skip_display`); a human never
-types it. To *send* a notification use `notify-send`.
+Machine-facing only: dunst runs it per notification as its `script` hook
+(`modules/dendrites/dunst.nix`, a single catch-all rule with `skip_display`).
+To *send* a notification use `notify-send`.
 
 - **Reads:** the `DUNST_*` environment dunst sets: `DUNST_ID`, `DUNST_APP_NAME`,
   `DUNST_SUMMARY`, `DUNST_BODY`, `DUNST_ICON_PATH`, `DUNST_URGENCY`

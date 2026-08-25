@@ -1,7 +1,7 @@
 # Rice & Livery Verbs — the Self-Ricing Command Surface
 
-The `rice`, `cover`, and `livery` verb groups are part of `lyra` — the AoideOS
-paint binary, never `aoide`/`aoided` — and drive the [[Self-Ricing]] loop:
+The `rice`, `cover`, and `livery` verb groups are part of `lyra`, the AoideOS
+paint binary ([[Overview]]), and drive the [[Self-Ricing]] loop:
 scaffold a song ([[Song-Anatomy]]), hot-load it live, iterate inside a routed
 draft with take history, and validate/resolve/emit its notes through the
 native [[livery]] engine. Handlers live in
@@ -298,7 +298,7 @@ lyra livery emit <target> [<name>|<path>] [--out PATH] [--template STR] [--json]
 - **Notes:** pure emit only — these backends produce bytes; they never apply
   anything to the host (no `hyprctl` is spawned here; live apply is
   `rice stage`'s `live::apply_live`). osc/hyprctl outputs are golden-tested
-  byte-identical to the former Node engine.
+  byte-identical against the Node-engine fixtures.
 
 ### lyra livery resolve
 
@@ -346,7 +346,7 @@ lyra rice declare <name> [--json]
   "`lyra rice declare` is a walking-skeleton stub: arg-parsing and schema
   are real, the live-system action is not yet implemented.", data `{path,
   args, flags}`. Contract per the schema summary: commit a staged rice into
-  declarative state and propose the gated rebuild — the USER gates this step
+  declarative state and propose the gated rebuild — the User gates this step
   ([[Rebuild-Gate]]); the agent proposes, never admits.
 
 ### lyra rice transpose

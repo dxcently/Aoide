@@ -886,3 +886,47 @@ corrected to match — no other page asserted kimi refuses a summons.
   `concepts/desktop/Controls.md`, `concepts/orchestration/Screen-Control.md`,
   and `concepts/orchestration/Secrets-Broker.md`; repo `AGENTS.md` still
   counts aoide at 48 commands.
+
+## [2026-08-25] refactor | de-slop sweep 2
+
+- Pages touched (all `references/cli/`, KEEP+VERIFY — headnote trims only;
+  verb-block shapes untouched): `Graph-and-Conduct.md` (525→528),
+  `Rice-and-Livery.md` (521→521), `Screen-Verbs.md` (376→375),
+  `Doors-and-Peers.md` (396→397), `Content-and-Hooks.md` (173→172),
+  `Meta-and-Upkeep.md` (202→202).
+- Verified against `aoide schema --json` / `lyra schema --json` and the
+  repo: every verb roster on all six pages (21 graph/conduct verbs, 22
+  rice/cover/livery verbs, 14 screen verbs, 16 door/peer verbs, 7
+  content/herald/hooks verbs, 7 meta/upkeep verbs); all flags, args,
+  gated/implemented status, and exit-code maps; all cited handler file
+  paths; the `claude|kimi|pi` agent roster and per-agent submit
+  keystrokes; the ~12 s reap timer; MCP `2024-11-05` and AgentCard
+  `0.3.0`; a2a bind/port defaults and hardening caps; `PEER_CACHE_TTL_SECS
+  = 300`; herald `LEDGER_CAP = 20`; the name regex
+  `^[a-z0-9][a-z0-9-]*$`; `usage`'s env vars, OAuth endpoint, and pricing
+  fallback; `soundcheck`'s C1–C3 finding classes.
+- Claims corrected: `graph send` gained the schema's `--to <name>` flag
+  (mutually exclusive with `--id`; `peer/<query>` remote targeting, never
+  queued locally) in signature and Notes; the shellbridge handler path
+  moved to `conduct/src/commands/shellbridge.rs::handle_shellbridge`
+  (P-A2 binary split); dunst herald feed is a single catch-all rule, not
+  multiple `skip_display` rules; "the USER gates this step" → "the User".
+- Slop removed: headnote contrast framing and history asides ("not the
+  user rebuild gate", "previously a write-only dead drop", "historical
+  `None`", "former Node engine", "stubs today", "is currently
+  flag/env-only", "future work"); one marketing phrase ("eyes-and-hands
+  surface"); caps emphasis; multi-claim intro sentences split.
+- Claims left unverified (left as-written): exact numeric flag bounds on
+  `screen point`/`diff`; env-var value sets (`AOIDE_CONDUCT_AUTOGATE` et
+  al.); permit-card field claims; a2a task-state map and JSON-RPC error
+  assignments; herald ledger replace-branch semantics; `graph reap`
+  staleness constants; deep behavioral Notes inside verb blocks (no
+  schema surface contradicts them).
+- Out-of-scope drift spotted, not fixed: repo working tree has
+  uncommitted `peer add --bearer-secret` / outbound Bearer support (the
+  page matches HEAD today; revisit on commit); schema summaries for
+  `rice stage` and `rice take list` carry stale/history framing in
+  source; `lyra/src/registry.rs:63` test comment cites an 87/48-path
+  golden count stale against 68/42; `quickshell.rs:3` doc comment uses a
+  real first name; `graph/` crate dir holds `who.rs`/`testutil.rs`
+  unlisted in the page's handler roster.
