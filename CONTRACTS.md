@@ -423,7 +423,7 @@ count.
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` verb
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
-  **76 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **77 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -518,6 +518,20 @@ count.
   §6's "Pairing wire" and §7's "Peer record" subsections below for the
   exact wire shapes, the commitment/reveal construction, and SAS
   derivation.
+  `peer allow <name> <cap> on|off`, appended newest, P-P3
+  (`docs/architecture/PAIRING.md` decision 5) (+1 → 77) — flips one
+  capability in a peer's own closed `allows` set (`"read"`/`"spawn"`,
+  `aoide_storage::peer_store::PEER_CAPABILITIES` — never a per-capability
+  serde bool scatter); idempotent (`on` on an already-on capability, or
+  `off` on an already-off one, both report a no-op), refuses an unknown
+  peer or an unknown capability string with a distinct taught error for
+  each (the capability check runs before the peer lookup). A paired peer
+  is stamped `["read","spawn"]` by default the moment it FIRST becomes
+  verified (`upsert_paired_peer`, both ceremony commit sites) — this verb
+  is for narrowing or widening that grant afterward, and is the ONLY other
+  writer of the field. See §6's "Security posture" (the P-P3 amendment)
+  and §7's "Peer record" subsections below for the gate this feeds and
+  the wire shape.
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
@@ -534,7 +548,7 @@ This was never a version bump: `schemaVersion` stays `"0"` on both —
 this section has never promised a fixed command inventory, only a
 document SHAPE, and the shape above is unchanged for either binary. The
 A2A AgentCard (§6) advertises whichever registry the serving binary
-assembled — core's card carries only core's 76, since `a2a serve` is
+assembled — core's card carries only core's 77, since `a2a serve` is
 core-only and lyra never registers it.
 
 ### Daemon wire — the fourth door (`docs/architecture/AOIDED.md`, P-D2/P-D4)
@@ -892,6 +906,24 @@ additive `resumed` edge (see `graph.json` below) beside the ordinary
 `spawned`/`anchors` edges. Absent means "not a resurrection" (the ordinary
 case, and every legacy record); readers must tolerate both forms and
 round-trip fields they do not know.
+
+**Additive in v0 (P-P3, `docs/architecture/PAIRING.md` decision 7):** a
+session record MAY also carry an optional `origin` (string) —
+`"peer:<name>"` for a session `aoide-server`'s A2A door spawned on behalf
+of an identified, PAIRED peer (§6's P-P3 amendment above), stamped once by
+`aoide_conduct::graph::session_store::stamp_origin` right after
+registration, the same change-once discipline `headless` already holds.
+`aoide-server`'s `a2a::do_spawn` threads the value in via the
+`AOIDE_SESSION_ORIGIN` env var it sets on the child it launches — this
+crate has no direct dependency on `aoide-server`, so the env var is the
+seam, mirroring how `AOIDE_AUDIT_LOG` already threads a per-child fact the
+same way. Absent means "not a peer-initiated spawn" (a locally-launched
+`conduct`/`wrap`/`graph spawn`, the ordinary case, and every legacy
+record); readers must tolerate both forms. Unlike `resumedFrom`, `origin`
+gets NO `graph.json` projection — like `headless`/`hookAncestry`, it is
+consumed internally (projected verbatim into `state/session-ledger.jsonl`'s
+own `origin` field at session exit, below) rather than rendered into the
+live graph.
 
 **Windowless lineage (task #89, corrected in review round 2):** a session is
 windowless BY CONSTRUCTION — no `windowAddress`, no window-owning pid ever
@@ -1275,7 +1307,7 @@ state — a reader wanting "is this session still running" still asks
 `sessions.json`, never this file.
 
 ```json
-{"v":0,"sessionId":"s1","agent":"claude","harnessSessionId":"claude-uuid-123","cwd":"/home/khoa/Aoide","title":"fix the thing","petname":"brave-otter","startedAt":"2026-08-20T10:00:00Z","endedAt":"2026-08-20T12:00:00Z","resumedFrom":null}
+{"v":0,"sessionId":"s1","agent":"claude","harnessSessionId":"claude-uuid-123","cwd":"/home/khoa/Aoide","title":"fix the thing","petname":"brave-otter","startedAt":"2026-08-20T10:00:00Z","endedAt":"2026-08-20T12:00:00Z","resumedFrom":null,"origin":null}
 ```
 
 Every field serializes unconditionally (no `skip_serializing_if`,
@@ -1285,7 +1317,12 @@ record looked like the instant it exited, not a growing set of optional
 fields a future reader has to guess the absence of. A malformed or
 unparseable line is skipped on read rather than failing the whole file (the
 same read tolerance `pending.json`/`herald.json` already extend to a
-corrupt entry).
+corrupt entry). `origin` (P-P3, decision 7 above) is the one exception to
+"always `null` unless resurrection-related" — it is `"peer:<name>"` for a
+session a paired peer's A2A spawn created, projected verbatim off the live
+`SessionRecord.origin` at the exact moment `ledger_session_exit` appends
+this line, `null` otherwise (including every legacy line written before
+this field existed, tolerated on read the same as any other field here).
 
 ### `state/a2a-agents.json` — **v0**
 
@@ -2601,6 +2638,79 @@ peers, not just attackers. Fixed in `a2a.rs::message_send`:
   before — the guard's `token_configured` check makes it a no-op by
   construction, the same off-path-pin discipline as the amendments above.
 
+**Amendment (2026-08-25, P-P3): the Spawn arm's gate flips from "holds a
+valid door-wide bearer" to "resolves to a PAIRED peer whose `allows`
+contains `spawn`."** Every amendment above this one gated Spawn on
+`spawn_authorized`/`token_authorized` alone — any caller holding the
+server-wide bearer (`aoide.a2a.tokenFile`/`bearerSecret`) could launch
+`aoide.a2a.spawnAgent`, whether or not it corresponded to a peer the
+operator had ever actually paired with (`peer pair request`/`approve`,
+P-P2, decisions above). `docs/architecture/PAIRING.md` decisions 5–7 close
+that gap: `allows` (a closed capability set, `aoide_storage::peer_store::
+PEER_CAPABILITIES` = `"read"`/`"spawn"`, never a per-capability serde bool
+scatter) lives on `Peer`, stamped `["read","spawn"]` by `upsert_paired_peer`
+the moment a peer FIRST becomes verified and left untouched on a later key
+rotation (so a revoked capability survives re-pairing); `peer allow <name>
+<cap> on|off` (§3 above, +1 → 77) is the only other writer, idempotent,
+refusing an unknown peer or unknown capability. Fixed in `a2a.rs::
+message_send`:
+
+- `resolve_peer(peers, addr, presented_token)` (`aoide_storage::peer_store`)
+  is the new caller-identity ladder Spawn keys off: a presented bearer
+  matched against ANY registered peer's own `tokenFile` first, the
+  connection's origin address matched against a peer's `url` second —
+  unlike `is_autogated_peer_token`/`is_autogated_peer_addr` above, it
+  checks EVERY registered peer, not only ones marked `autogate`, since
+  "which peer is this" is a different question from "should this peer skip
+  the pending queue."
+- `SendAction::Spawn` now requires `resolve_peer(..).filter(|p|
+  p.verified && p.allows.contains("spawn"))` to yield `Some` before
+  `do_spawn` runs. A caller that resolves to no peer at all, an unpaired
+  peer, or a paired peer whose `allows` lacks `spawn` all refuse with the
+  SAME new taught error (`-32006`, distinct from `-32005`'s "no/bad
+  token"): *"spawn refused: the caller does not resolve to a PAIRED peer
+  whose `allows` includes `spawn` — pair first via `peer pair request`,
+  then `peer allow <name> spawn on`."* The door-wide bearer alone no
+  longer reaches the spawn arm at all — it is necessary (Phase G above
+  still gates Spawn's entry point when a token is configured) but no
+  longer sufficient.
+- **HONESTY NOTE — P-P4 (signed per-request wire authentication) has NOT
+  landed.** `resolve_peer`'s ladder rides the SAME two unforged-but-
+  unsigned signals every earlier amendment in this section already used
+  for the unrelated autogate question — a bearer string compared
+  byte-for-byte against a file on disk, and a TCP origin address compared
+  against a peer's registered URL. Neither is cryptographically bound to
+  the caller identity it resolves to: a leaked `tokenFile` value or a
+  spoofed/proxied origin address resolves to that peer exactly as
+  successfully as the real one would. This phase does NOT invent an
+  interim signature or per-request token scheme to close that gap — doing
+  so would be exactly the kind of hand-rolled crypto the kill-list in
+  `docs/architecture/PAIRING.md` forbids outside the ceremony's own
+  `ed25519-dalek` use. The gate is real and closes the "any door-wide
+  bearer holder can spawn" hole this amendment targets; it does not yet
+  make spawn caller-identity unforgeable end-to-end — that is P-P4's job.
+- Inject's own gate (`should_deliver_now`/autogate/pending-queue) is
+  UNTOUCHED by this amendment — only the Spawn arm's admission changed.
+  Inject instead gains attribution: a held-pending send from a
+  `resolve_peer`-resolved (but non-autogated, non-deliver-now) sender
+  carries `"from": "peer:<name>"` in its `pending.json` entry, reusing
+  `graph send --from`'s existing attribution field verbatim rather than
+  inventing a new one — scoped to the QUEUED path only
+  (`!deliver_now`), never applied to an auto-delivered message, so no
+  delivered payload's bytes change (`autogated_peer_delivers_despite_
+  being_non_loopback`'s exact-bytes pin stays green).
+- A spawned session's own record carries the resolved peer's name too:
+  `a2a.rs::do_spawn` sets `AOIDE_SESSION_ORIGIN=peer:<name>` on the child
+  process it launches; `aoide-conduct`'s `session_conduct` reads that env
+  var right after registration and stamps `SessionRecord.origin`
+  (`stamp_origin`, mirroring `stamp_headless`'s change-once discipline) —
+  see §7's "Peer record" subsection and `state/session-ledger.jsonl`'s own
+  entry above for the full `origin` field shape and its projection into
+  the durable ledger at session exit.
+- Every outcome (the new `-32006` refusal included) still audits through
+  the SAME `Door::A2a` log every other §6 outcome already uses — no second
+  logging path.
+
 ### Session-DAG integration (client side)
 
 An external A2A agent, once registered (`aoide a2a agent add <url>`), folds
@@ -2689,10 +2799,15 @@ Three new methods on the SAME existing A2A JSON-RPC/HTTP door (§6) — no new
 transport, no new server, no new port. All three are **deliberately
 unauthenticated** (`read_ok`/bearer gating never applies to any of them):
 the ceremony's whole point is establishing a credential where none exists
-yet, so gating it on one would be circular. A parked, revealed, or approved
-request grants NOTHING beyond a peer record with `verified: true` — it
-flips no gate, touches no `allows`/permission (P-P3's lane), and changes no
-spawn/bearer behavior. Unknown methods still get the standard `-32601`;
+yet, so gating it on one would be circular. A parked or revealed request
+grants nothing at all — only a fully APPROVED request commits a peer
+record, and that record's own `verified: true` plus its default `allows`
+(`["read","spawn"]`, P-P3, stamped by `upsert_paired_peer` the moment the
+peer first becomes verified) is the entire grant this ceremony makes; the
+wire methods themselves flip no OTHER gate and change no spawn/bearer
+behavior beyond that one stamp — narrowing or widening `allows` afterward
+is `peer allow`'s job (§3 above), never re-run by re-pairing. Unknown
+methods still get the standard `-32601`;
 malformed params get `-32602` before anything is parked, persisted, or
 committed; a park-queue-full refusal is the distinct `-32000` (the park cap
 below); a reveal's commitment mismatch is the distinct `-32002`.
@@ -2907,7 +3022,8 @@ fields they do not know.
 {
   "schemaVersion": "0",
   "peers": [
-    { "name": "yomi-strix", "url": "http://yomi-strix:8710/", "autogate": false, "addedAt": "2026-08-14T00:00:00Z" }
+    { "name": "yomi-strix", "url": "http://yomi-strix:8710/", "autogate": false, "addedAt": "2026-08-14T00:00:00Z" },
+    { "name": "watching-peer", "url": "http://watching-peer:8710/", "autogate": false, "addedAt": "2026-08-24T00:00:00Z", "pubkey": "a1b2…", "verified": true, "allows": ["read", "spawn"] }
   ]
 }
 ```
@@ -2922,10 +3038,37 @@ the SAME registry, two separate paths onto it: `peer add` for the
 hand-set-URL escape hatch, `peer pair` for the one ceremony that verifies a
 public key on both ends. Re-pairing an EXISTING peer name replaces only
 `pubkey`/`verified`/`url` — never `autogate`/`tokenFile`/`bearerSecret`/
-`hub` — and only after a fresh SAS confirmation (`peer pair approve`'s own
-y/N gate), never silently. Neither field is read by anything gating
-`allows`/permissions (P-P3's lane) or spawn/bearer behavior in this phase —
-`verified: true` marks a key relationship exists, nothing more, yet.
+`hub`/`allows` — and only after a fresh SAS confirmation (`peer pair
+approve`'s own y/N gate), never silently.
+
+`allows` (array of strings, additive per P-P3, `docs/architecture/
+PAIRING.md` decision 5; omitted from the wire when empty) is a CLOSED
+capability set — `aoide_storage::peer_store::PEER_CAPABILITIES` = `"read"`,
+`"spawn"`, never a per-capability serde bool scatter. `upsert_paired_peer`
+stamps it `["read","spawn"]` the moment a peer FIRST becomes `verified`
+(both ceremony commit sites — `approve_inbound` and `approve_outbound`),
+and leaves it untouched on a LATER re-pairing of an already-verified
+name — a revoked capability survives key rotation. An unpaired (`peer add`)
+peer and a legacy record predating this field both load `allows: []`. The
+A2A door's Spawn arm (§6's P-P3 amendment above) is the one thing gating on
+it today: `resolve_peer` (below) resolves a caller to a `Peer`, and Spawn
+requires that peer to be `verified` with `"spawn"` in `allows`. `peer allow
+<name> <cap> on|off` (§3's command list, §7's CLI surface below) is the
+ONLY other writer — idempotent, refuses an unknown peer or an unknown
+capability.
+
+`resolve_peer(peers, addr, presented_token)` (`aoide_storage::peer_store`,
+P-P3 decision 6) is the caller-identity ladder the Spawn gate keys off: a
+presented bearer matched against ANY registered peer's own `tokenFile`
+first, the connection's origin address matched against a peer's `url`
+second. Unlike `is_autogated_peer_token`/`is_autogated_peer_addr` (§6's
+2026-08-19 amendment), it checks every registered peer, not only ones
+marked `autogate` — "which peer is this" is a different question from
+"should this peer skip the pending queue." Neither signal is
+cryptographically bound to the caller — see §6's P-P3 amendment for the
+full honesty note on why this is not yet unforgeable (P-P4, signed
+per-request wire authentication, is what closes that gap; not landed
+here).
 
 `autogate` (bool, default `false`) is the cross-device analogue of `graph
 send`'s local "sender is the target's own parent" rule (§6's amendment
@@ -3084,25 +3227,39 @@ local, and only on that callback's success commits a `pubkey`/`verified`
 peer record on this end. `reject` is a clean local refusal — no wire call,
 no peer record, `state/peer-pairing-inbound.json`'s entry simply removed.
 
+`aoide peer allow <name> <cap> on|off` (P-P3, `docs/architecture/
+PAIRING.md` decision 5, appended newest directly after `peer pair reject`
+— §6's P-P3 amendment above and this section's "Peer record" subsection
+have the full gate/wire-shape reasoning) flips one capability in a peer's
+own closed `allows` set. Idempotent — `on` on an already-granted
+capability or `off` on an already-revoked one both report a no-op, never
+an error; refuses an unknown peer name or an unknown capability string
+(checked before the peer lookup) with a distinct taught error for each.
+
 ### Status
 
 Real: the registry, the cache, `aoide/graphSummary`, the CLI verbs, and the
 graph fold all run. The pairing ceremony (P-P2) is real too: `pubkey`/
 `verified` on `Peer`, `peer pair request|pending|approve|reject`, and both
 `aoide/pairRequest`/`aoide/pairApprove` A2A methods (§6's "Pairing wire"
-subsection) all run end to end. **Out of scope for v0** (explicitly, not an
-oversight): WAN/NAT-traversal/relay reachability for peers not on the same
-network; Melete-side consumption (a polling Rune skill, first-class
-`graph_view` rendering); a paired peer's key changing anything about
-`allows`/permissions or the spawn/bearer gates — that is P-P3's lane, not
-this one's — both are later, separately-directed work. This section is
-**additive**: it introduces `state/peers.json` + `state/peer-cache/`, the
-`aoide/graphSummary` method, and the `peer:*` node-id convention; P-P2
-additively introduces `Peer.pubkey`/`Peer.verified`,
-`state/peer-pairing-inbound.json`/`-outbound.json` (§4), and the pairing
-wire (§6). Amends §6's `message/send` gating behavior (dated above) — no
-version bump to §1–§6, no playbook migration entry (nothing existing
-changed shape beyond the called-out §6 amendments).
+subsection) all run end to end. The `allows` closed set, `peer allow`, and
+the A2A door's Spawn-arm hard gate (P-P3) are real too, end to end — a
+paired peer's `allows` now genuinely gates the spawn arm (§6's P-P3
+amendment above), with the honesty note there on exactly what identity
+signal that gate still rides (P-P4's signed per-request wire
+authentication remains ahead, not this phase's job). **Out of scope for
+v0** (explicitly, not an oversight): WAN/NAT-traversal/relay reachability
+for peers not on the same network; Melete-side consumption (a polling Rune
+skill, first-class `graph_view` rendering) — later, separately-directed
+work. This section is **additive**: it introduces `state/peers.json` +
+`state/peer-cache/`, the `aoide/graphSummary` method, and the `peer:*`
+node-id convention; P-P2 additively introduces `Peer.pubkey`/
+`Peer.verified`, `state/peer-pairing-inbound.json`/`-outbound.json` (§4),
+and the pairing wire (§6); P-P3 additively introduces `Peer.allows`,
+`SessionRecord.origin`/`LedgerEntry.origin` (§4), and `peer allow`. Amends
+§6's `message/send` gating behavior (dated above) — no version bump to
+§1–§6, no playbook migration entry (nothing existing changed shape beyond
+the called-out §6 amendments).
 
 ---
 
