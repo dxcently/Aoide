@@ -275,7 +275,9 @@ pkgs.testers.runNixOSTest {
     # resurrect` — revives a project's most recently-ended resumable
     # session off the durable session ledger, the ledger/resume phase of
     # harness summoning (P-D8, docs/architecture/AOIDED.md's "L5") —
-    # reached 71.
+    # reached 71; bumped by 1 for `identity` — this instance's lazily-minted
+    # ed25519 identity show verb (P-P1, docs/architecture/PAIRING.md) —
+    # reached 72.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a verb.
     schema_raw = machine.succeed("aoide schema --json")
@@ -289,8 +291,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 71, (
-        f"expected 71 commands, got {cmd_count}.  "
+    assert cmd_count == 72, (
+        f"expected 72 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

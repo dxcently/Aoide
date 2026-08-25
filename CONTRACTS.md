@@ -423,7 +423,7 @@ count.
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` verb
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
-  **71 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **72 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -485,6 +485,14 @@ count.
   Also the command core the daemon's own boot-time auto-resume trigger
   calls in-process — see `song/stage/projects.json`'s `autoResume`
   paragraph below for that trigger's own contract.
+  `identity`, appended newest, P-P1 (`docs/architecture/PAIRING.md`) (+1 →
+  72) — this instance's lazily-minted ed25519 keypair (`aoide-storage`'s
+  new `identity` module, `state/identity/`): prints the public key
+  (hex), a short display fingerprint, and the mint timestamp; minting on
+  the first call is a `changed` entry, every later call an idempotent
+  read. The private key never appears in `schema --json`, an `Outcome`,
+  or any log — see §4's "`state/identity/`" subsection below for the
+  wire/storage shape.
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
@@ -501,7 +509,7 @@ This was never a version bump: `schemaVersion` stays `"0"` on both —
 this section has never promised a fixed command inventory, only a
 document SHAPE, and the shape above is unchanged for either binary. The
 A2A AgentCard (§6) advertises whichever registry the serving binary
-assembled — core's card carries only core's 71, since `a2a serve` is
+assembled — core's card carries only core's 72, since `a2a serve` is
 core-only and lyra never registers it.
 
 ### Daemon wire — the fourth door (`docs/architecture/AOIDED.md`, P-D2/P-D4)
@@ -1277,6 +1285,41 @@ know.
   ]
 }
 ```
+
+### `state/identity/` — **v0** (P-P1, `docs/architecture/PAIRING.md`)
+
+This instance's ed25519 keypair (`aoide-storage::identity`, the pairing
+workstream's substrate — the ceremony itself is P-P2, not yet landed). Two
+files, NOT one JSON record — deliberately split so the sensitive half never
+shares a file with anything derivable:
+
+- `ed25519.key` — the raw 32-byte private seed, written ONCE at mint via
+  `aoide_storage::fs::atomic_write_private` (atomic write, then locked to
+  `0600`) and never rewritten after. **Never a JSON value, never inside a
+  `Serialize`/`Deserialize` type, never printed, never logged, never on any
+  wire** (`PAIRING.md`'s kill-list) — `aoide identity`'s `--json` output
+  below is the ONLY externally-visible shape this identity has.
+- `created_at` — a plain ISO-8601 UTC string, `0644` (not sensitive),
+  written once alongside the key.
+
+Lazy-minted on first need (`aoide identity`, or a future `peer pair` — both
+route through the same `identity::load_or_mint`); every call after the
+first is an idempotent read of the same two files. `aoide identity --json`:
+
+```json
+{
+  "pubkeyHex": "676d9f745100a03b0a9832e9a8ebb36a140d964289b2d65076c71a7f6b9c36a",
+  "fingerprint": "67:6d:9f:74:51:00:a0:3b",
+  "createdAt": "2026-08-25T00:00:00Z"
+}
+```
+
+`pubkeyHex` is the full 32-byte public key, hex, no separator.
+`fingerprint` is the same key's first 8 bytes, hex, colon-separated — a
+short display label, distinct from P-P2's SAS (short authentication
+string), which is derived from BOTH sides' keys plus nonces at pairing
+time, not from one side's key alone. Nothing here is authenticated against
+a peer yet — that is exactly what P-P2's ceremony adds.
 
 ### Secrets home — NOT under `state/`, contract lives in `crates/secrets/README.md`
 
