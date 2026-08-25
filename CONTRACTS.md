@@ -496,8 +496,8 @@ count.
   `peer pair request|pending|approve|reject`, appended newest, P-P2
   (`docs/architecture/PAIRING.md`) (+4 → 76) — the pairing ceremony's CLI
   half, both directions behind the SAME four verbs (no fifth verb for the
-  requester's own confirm step — golden count unchanged by the
-  review-bounce fix forward on P-P2's first commit): `request <url>` sends
+  requester's own confirm step — `approve`/`reject` dispatch by
+  direction): `request <url>` sends
   a commitment (`aoide/pairRequest`) to another instance's A2A door,
   immediately reveals it (`aoide/pairReveal`, same invocation, two
   sequential POSTs), and parks the outbound half locally
@@ -2770,8 +2770,12 @@ On a match, B stores A's nonce on the entry and answers:
 On a mismatch B DROPS the parked entry outright (unlike
 `aoide/pairApprove`'s pubkey-mismatch handling below, a false commitment is
 not a recoverable data hiccup — it's the exact shape an active attacker's
-forced retry would take) and answers `-32002`. An unknown/expired id is
-`-32001`. An inbound entry that has not yet been revealed shows in `peer
+forced retry would take) and answers `-32002`. The reveal is
+unauthenticated like the rest of the bootstrap, so a third party who
+obtains a live pending id can destroy that one ceremony attempt with a
+bogus reveal — an accepted denial-of-one-attempt (never an
+impersonation); the operators re-run the ceremony. An unknown/expired id
+is `-32001`. An inbound entry that has not yet been revealed shows in `peer
 pair pending` with no SAS (`"revealed": false`); `peer pair approve`
 against it refuses outright with a taught "awaiting reveal" error — there
 is nothing to confirm until A's nonce is known, since the SAS transcript
@@ -2799,8 +2803,8 @@ record: A transitions its outbound entry to `awaiting-confirm`
 { "jsonrpc": "2.0", "id": 1, "result": { "ok": true, "name": "box-b" } }
 ```
 
-**The commit asymmetry is deliberate (review-bounce Finding 2 — decision
-4's mutual confirmation, for real).** B already committed its OWN peer
+**The commit asymmetry is deliberate (decision 4's mutual
+confirmation).** B already committed its OWN peer
 record for A the moment B's own operator ran `peer pair approve <id>`
 (BEFORE this callback was ever sent — `aoide-client::commands::
 approve_inbound` calls out BEFORE writing anything local, unchanged from
@@ -2818,7 +2822,7 @@ aborts it at ANY stage (`awaiting-approval` or `awaiting-confirm`) — no
 wire call, no peer record — doubling as the ceremony's own missing abort
 verb.
 
-**Park cap (review-bounce Finding 3).** `park_inbound` refuses beyond
+**Park cap.** `park_inbound` refuses beyond
 `AOIDE_PAIRING_PARK_CAP` concurrently parked inbound requests (default 32,
 `aoide_storage::pairing::DEFAULT_PAIRING_PARK_CAP`), checked under ONE lock
 acquisition immediately before insert — the same check-then-insert
