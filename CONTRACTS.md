@@ -1293,9 +1293,12 @@ workstream's substrate — the ceremony itself is P-P2, not yet landed). Two
 files, NOT one JSON record — deliberately split so the sensitive half never
 shares a file with anything derivable:
 
-- `ed25519.key` — the raw 32-byte private seed, written ONCE at mint via
-  `aoide_storage::fs::atomic_write_private` (atomic write, then locked to
-  `0600`) and never rewritten after. **Never a JSON value, never inside a
+- `ed25519.key` — the raw 32-byte private seed, written ONCE at mint into
+  `identity/` (locked to `0700` via `aoide_storage::fs::secure_private_dir`
+  before anything is written into it) via
+  `aoide_storage::fs::atomic_write_private` — the temp file is created
+  ALREADY at `0600` and renamed into place, never `0600`'d after the fact
+  — and never rewritten after. **Never a JSON value, never inside a
   `Serialize`/`Deserialize` type, never printed, never logged, never on any
   wire** (`PAIRING.md`'s kill-list) — `aoide identity`'s `--json` output
   below is the ONLY externally-visible shape this identity has.
