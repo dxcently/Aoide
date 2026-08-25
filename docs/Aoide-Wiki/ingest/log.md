@@ -1034,3 +1034,88 @@ corrected to match — no other page asserted kimi refuses a summons.
   reload` (stale in-repo comment, not wiki content); repo `AGENTS.md`
   still counts aoide at 48 commands (carried from sweep 1, still
   unfixed).
+
+## [2026-08-25] refactor | de-slop sweep 4
+
+- Pages touched: `entities/Melete.md` (119→114, TRIM), `entities/Mneme.md`
+  (97→95, TRIM), `entities/Hyprland.md` (29→29, KEEP — one fact fixed),
+  `entities/Stylix.md` (KEEP — verified, zero edits), `entities/dxflake.md`
+  (KEEP — verified, zero edits), `concepts/desktop/Controls.md` (95→103,
+  KEEP+VERIFY), `concepts/song/Ricing-Protocol.md` (140→124, TRIM+VERIFY),
+  `concepts/song/Song-Vocabulary.md` (KEEP — verified, zero edits).
+- Melete.md / Mneme.md: the muse-lore paragraph in each collapsed to one
+  clause + a [[Lexicon]] link (S3 catechism rule) — Lexicon.md is now the
+  sole home for the full three-Boeotian-Muses table. "Integrates"/"door"
+  restated without the bold-emphasis inflation; an em-dash appositive
+  chain in Melete.md's adapter-allow-list paragraph split into two
+  sentences; a rule-3-flavored pre-emptive parenthetical ("as if Melete
+  were 'my shell, over MCP'") cut to a direct statement.
+- Controls.md (KEEP+VERIFY): verified every keybind against
+  `modules/dendrites/hyprland.nix` and `modules/dendrites/bash.nix`.
+  Corrections: (1) keybinds live in the `hyprland` dendrite, not the
+  compositor facet as the page claimed — the compositor facet owns only
+  livery-derived appearance; (2) launcher/dock are Hyprland global
+  shortcuts (`aoide:launcher`/`aoide:dock`) with no CLI verb involved,
+  not `aoide shell launcher toggle` as written; (3) lock moved from
+  `SUPER+L` to `SUPER+ESCAPE` (freeing `L` for `movefocus`/`movewindow`
+  right, giving full H/J/K/L parity on those two rows) — `SUPER+ESCAPE`
+  execs `aoide shell lock`, and no `shell` command group exists in either
+  binary's registry, so this is a genuine dead keybind, reported not
+  repointed; (4) two undocumented binds added: `SUPER+W` (wallpaper
+  picker) and `SUPER+C` (clipboard history); (5) the bar cell interaction
+  table and its file pointer were stale — the bar moved from
+  `modules/facets/quickshell/qml/AoideBar.qml` to
+  `song/songbook/sonata/widgets/bar.qml` (facet→song migration), the
+  clock cell sits LEFT not center, volume click now opens the audio
+  colonnade (mute moved into it) rather than muting directly, and
+  battery/network split into hover-only vs click-only rather than
+  sharing one "hover popout" description. `adrebuild`/`adtest`/etc. and
+  the shell QoL aliases matched `bash.nix` exactly — zero changes there.
+- Ricing-Protocol.md (TRIM+VERIFY): every verb checked against
+  `pkgs/aoide/crates/song/src/commands/{rice,mode,draft,cover,livery}.rs`
+  and `crates/lyra/src/commands/stubs.rs` — `rice compose`/`rice
+  stage`/`rice lint`/`rice mode {status,stage,declarative,draft}`/`rice
+  draft {save,list,drop}`/`cover set`/`livery {emit,resolve,lint}` are
+  real; `rice declare`/`rice transpose` are registered but
+  `implemented: false` (stubs); `rice gen`/`preview`/`adopt`/`mint`/`new`
+  do not exist anywhere in the registry, matching the page's existing
+  "cut outright" claim almost verbatim against the source comment in
+  `rice.rs`. No retired-verb claim survived because none was live to
+  begin with. Trimmed the opening scope blockquote (S11 empty framing),
+  an em-dash appositive chain, and an aphorism ("'Close' beats
+  'identical-on-paper but wrong on screen.'") that added no checkable
+  fact. The `wireCyan`/`violet`/`holoBlue`/`glitchPink` role-palette claim
+  in the vision-check section was verified live against
+  `LiveryState.qml` and current gadget QML — still real, unchanged.
+- Hyprland.md (KEEP): one claim failed verification — "consuming
+  `aoide.livery` … and touches nothing else" is incomplete; the
+  compositor facet's own header states it also reads `aoide.arrangement`
+  (house rule 5's full whitelist). Fixed to name both. `github:hyprwm/
+  Hyprland` as the flake input, and the `yomi-strix` host lineage,
+  verified against `flake.nix`/`hosts/yomi-strix/` and left as-written.
+- Stylix.md / dxflake.md / Song-Vocabulary.md: every checkable claim
+  verified against the repo (surface-ownership assertion in
+  `lib/checks.nix`, the `hyprwm/Hyprland` input, `lib/mkHost.nix`'s
+  walker + song-guard pattern matching `dxflake`'s "hosts know dendrites,
+  dendrites never know hosts" line verbatim, the `noSongRead` boundary
+  covering only `stage/`/`auditions/`) — nothing failed, zero edits made
+  to any of the three pages. dxflake.md's claims about the external
+  `dxcently/dxflake` repo's own internals (aggregation role names, the
+  walker's exact filter) are outside this repo and were left as-written,
+  unverified (prior-art citation, not a Aoide-repo fact).
+- Claims left unverified: none outright — every command/path/flag claim
+  touched this sweep resolved against the repo one way or the other.
+- Out-of-scope drift spotted, not fixed: `concepts/Lexicon.md` still
+  spells out "integrated (not vendored)" for both Melete and Mneme
+  (lines 19–20) even though this sweep's plan designates
+  `entities/Melete.md`/`entities/Mneme.md` as that phrase's sole home —
+  Lexicon.md was not in scope to edit; rice verbs live in the `lyra`
+  crate per the binary split (P-A5) but no `lyra-cli` entity page exists
+  in the wiki, so Ricing-Protocol.md's `[[aoide-cli]]` link for `rice
+  gen`'s history points at a page that no longer owns that command
+  group; `modules/dendrites/hyprland.nix`'s own in-repo comments claim
+  `aoide shell launcher`/`aoide shell dock` are "unimplemented stub[s]"
+  when no such command is registered as a stub or otherwise anywhere in
+  either binary's registry (a stale code comment, not wiki content, but
+  the root cause of the Controls.md launcher/dock drift this sweep
+  fixed).

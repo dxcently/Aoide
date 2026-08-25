@@ -1,29 +1,25 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-08-14
+updated: 2026-08-25
 aliases: [Melete daemon, melete.service]
 tags: [aoide, melete, agent, coding-agent, harness, integration]
 ---
 
 # Melete
 
-The coding harness AoideOS **integrates and launches** — the **doer**. Melete is
-an independently-owned, long-running daemon (its own self-updating runtime; the
-repo ships only the launcher `modules/dendrites/melete.nix` + the
+The coding harness AoideOS integrates and launches — the **doer**. Melete is an
+integrated, independently-owned, long-running daemon (its own self-updating
+runtime; the repo ships only the launcher `modules/dendrites/melete.nix` + the
 `melete-adapter`, not Melete's source) that dispatches autonomous coding runs,
 executes shell commands, drives a headless `claude` CLI, and reaches out to
 GitHub and a rented fleet. It is the engine that makes AoideOS a declarative
 [[Widget-Maker|widget maker]]: because Melete writes code, new integrations are
-*generated*. The relationship runs both ways — `melete aoide …` routes into
+generated. The relationship runs both ways — `melete aoide …` routes into
 Aoide's CLI trunk, so Melete can also drive Aoide.
 
-**The muse.** Melete, Mneme, and **Aoide** are the three Boeotian (pre-Olympian)
-Muses: **Melete** = practice/rehearsal, **Mneme** = memory, **Aoide** = song.
-The division of labor is literal — Melete *does* (dispatches, executes, builds),
-[[Mneme]] *remembers* (the vault and its history), and Aoide is the *song*: the
-performed desktop the other two act upon. Aoide is the third muse the pair were
-missing.
+**The muse.** Melete is the *practice* Muse in the three-Boeotian-Muses naming
+scheme — see [[Lexicon]] for the full vocabulary and the [[Mneme]]/Aoide split.
 
 ## What it is
 
@@ -49,11 +45,10 @@ missing.
   a box. `run_shell`/`ssh_exec` exist too, but only as a secondary, attended
   surface for box work around the vault. An agent already running on a box
   (an Aoide dev session included) has a real shell and uses it directly,
-  always — it never routes its own command execution through Melete's
-  `run_shell` as if Melete were "my shell, over MCP." (This repo's own dev
-  sessions never invoke the real Melete connector at all — an earlier
-  session informally, incorrectly used "Melete" as a codename for a local
-  `Agent`-tool coding subagent; see `AOIDE-DEV.md` §2.)
+  never routing its own command execution through Melete's `run_shell`. (This
+  repo's own dev sessions never invoke the real Melete connector: an earlier
+  session used "Melete" as an informal codename for a local `Agent`-tool
+  coding subagent; see `AOIDE-DEV.md` §2.)
 - **Declarative surface:** one `config.toml`; self-update swaps which Nix store
   path the service points at (a `canary` channel — a flake-generation rollback in
   spirit).
@@ -89,12 +84,12 @@ missing.
 - **On the event spine.** A `melete-adapter` consumes [[aoided]]'s neutral event
   stream and translates events into job dispatch ([[Desktop-Architecture]]). It
   runs as the `aoide-melete-adapter` systemd user unit via `aoide adapter melete
-  --run`; its allow-list arrives through the `AOIDE_ADAPTER_SUBSCRIBE` env var —
-  default-deny, comma-separated event *classes* (`audit`/`gate`/`rice`/
-  `content`/`notification`; unrecognized names are silently dropped, allowing
-  nothing) — and forwarded notifications reach it as metadata only
-  (`{ actionId, appName }`), never the raw body — the security boundary as a
-  real code path ([[Codebase]]).
+  --run`. Its allow-list arrives through the `AOIDE_ADAPTER_SUBSCRIBE` env
+  var: default-deny, comma-separated event classes
+  (`audit`/`gate`/`rice`/`content`/`notification`; unrecognized names are
+  silently dropped, allowing nothing). Forwarded notifications reach it as
+  metadata only (`{ actionId, appName }`), never the raw body — the security
+  boundary as a real code path ([[Codebase]]).
 - **Behind the exemplar features** ([[Feature-Set]]): its Telegram streaming backs
   the notification → messaging bridge; `schedule_*` + `recur` back the
   scheduled-jobs/timers widget; `ssh_exec` + `fleet_inventory` back fleet

@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-28
-updated: 2026-08-13
+updated: 2026-08-25
 tags:
   - aoide
   - rice
@@ -18,29 +18,14 @@ A first-class house rule: ricing is not "pick some hex codes and hope."
 It is a small protocol with a separation of concerns, and one mandatory
 check whenever a rice or song changes.
 
-> **What this page is — and where the design *memory* lives.** This page is
-> **protocol**: the dev wiki's job is architecture and rules, so it documents
-> *how* a rice is made and kept honest — the creation/application split and the
-> mandatory vision-check. It is **not** the store of any one song's design
-> decisions. Those — a palette's rationale, the exact opacity that reads right
-> for a given key, the round-by-round iteration log — are **per-song design
-> memory**, and they belong to the **song agent** in a **songbook under
-> `song/`**, not in the dev wiki:
-> - **cross-cutting design memory** → `song/songbook/` (learnings, preferences,
->   the update playbook — see [[Self-Ricing#Songbook Discipline — the "Self" in Self-Ricing]]);
-> - **per-song notes** → `song/songbook/<name>/design/` (intent, palette
->   rationale, iteration log).
->
-> The worked examples below (the `sonata` opacity numbers, the derivation
-> notes) are shown here to make the *protocol* legible — they are illustrations
-> of what the songbook records, **mirrored** from the song agent's domain, not
-> this page's to own. The songbook holds that memory now: the cross-cutting
-> house grammar the retired `default` song once owned lives on only as
-> historical reference (`docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`),
-> and `song/songbook/sonata/design/intent.md` states the shipped key (the
-> light dusk key read from `song/covers/yuki-sonata.png`, region by region,
-> with computed contrast and the current surface elements). `song/` is the
-> destination of record; this page points there.
+> **Scope.** This page is protocol: how a rice is made and kept honest — the
+> creation/application split and the mandatory vision-check. Per-song design
+> memory (a palette's rationale, the iteration log) lives in the songbook, not
+> here: cross-cutting memory in `song/songbook/` (see
+> [[Self-Ricing#Songbook Discipline — the "Self" in Self-Ricing]]), per-song
+> notes in `song/songbook/<name>/design/`. The worked examples below (the
+> `sonata` derivation) illustrate the protocol; the songbook is the record —
+> `song/songbook/sonata/design/intent.md` states the shipped key in full.
 
 ## 1. Two separated concerns: creating a base16, and applying it
 
@@ -84,16 +69,15 @@ a stray literal) rather than creation (the sixteen slots themselves).
 
 ## 2. The mandatory vision-check
 
-**Whenever a rice or song changes, vision-check it before calling it done —
-a compile-clean rebuild is not the same as a rice that reads correctly.**
-Two things to look at, side by side, on the live desktop:
+Whenever a rice or song changes, vision-check it before calling it done — a
+compile-clean rebuild is not the same as a rice that reads correctly. Two
+things to look at, side by side, on the live desktop:
 
 1. **Terminals and the shell UI agree on light/dark.** A rice keys
    `stylix.polarity` (`"light"` or `"dark"`) once; every surface must read as
-   the *same* polarity — checked by eye every time, because opacity + blur +
-   gloss gradients can each independently push a surface's apparent brightness
-   away from its declared polarity. "Close" beats "identical-on-paper but
-   wrong on screen." The light key holds a bright cream Aero-glass terminal
+   the *same* polarity, checked by eye every time — opacity, blur, and gloss
+   gradients can each independently push a surface's apparent brightness away
+   from its declared polarity. The light key holds a bright cream Aero-glass terminal
    (kitty `background_opacity` 0.86) next to a cream frosted-glass bar and its
    popouts at their own, more transparent opacity (0.45 / 0.45); the cream `base00` is
    `#f4e9e2` (sonata's peach-cream). **Brightness is opacity, not colour**: how much of the dim

@@ -35,42 +35,50 @@ make it stick. The rebuild itself is the **user-gated** step — see
 
 ## Desktop keybinds
 
-Compositor keybinds live in `modules/facets/compositor/default.nix`. `SUPER`
-is the modifier.
+Keybinds are host-invariant behaviour, so they live in
+`modules/dendrites/hyprland.nix`, not the compositor facet (which owns only
+livery-derived appearance — gaps, borders, layerrules). `SUPER` is the
+modifier.
 
 | Keybind | Action |
 |---|---|
-| `SUPER + SPACE` | Toggle the launcher (`aoide shell launcher toggle`). |
-| `SUPER + G` | Toggle the gadget dock — see [[Gadget-Dock]]. |
-| `SUPER + L` | Lock the screen (`aoide shell lock`). |
+| `SUPER + SPACE` | Toggle the launcher — a Hyprland global shortcut (`global, aoide:launcher`) reaching the QML surface directly; no CLI verb. |
+| `SUPER + W` | Toggle the wallpaper picker (`global, aoide:wallpaper`); picking a cover shells `aoide cover set <path>`. |
+| `SUPER + G` | Toggle the gadget dock (`global, aoide:dock`) — see [[Gadget-Dock]]. |
+| `SUPER + C` | Toggle clipboard history — opens the launcher on its clipboard chapter (`global, aoide:clipboard`). |
+| `SUPER + ESCAPE` | Lock the screen — `exec, aoide shell lock`; no `shell` command group exists in either binary's registry, so this binding is dead (report only, not repointed). |
 | `SUPER SHIFT + P` | Bound to `lyra rice preview` in `modules/dendrites/hyprland.nix` — a retired verb, so the keybind is a no-op until repointed to `rice stage` (flagged in [[AOIDE-DEV]] §7). |
-| `SUPER SHIFT + A` | Bound to `lyra rice adopt` in `modules/dendrites/hyprland.nix` — a retired verb, so the keybind is a no-op until repointed to `rice declare` (flagged in [[AOIDE-DEV]] §7). |
+| `SUPER SHIFT + A` | Bound to `lyra rice adopt` in `modules/dendrites/hyprland.nix` — a retired verb, so the keybind is a no-op until repointed to `rice declare` (a stub — `implemented: false`; flagged in [[AOIDE-DEV]] §7). |
 | `SUPER + RETURN` | Open a terminal (kitty). |
 | `SUPER + Q` | Close the active window. |
 | `SUPER + V` / `SUPER + F` | Toggle floating / fullscreen. |
-| `SUPER + arrows` (or `H/J/K`) | Move focus (arrows: full set; H/J/K: vim left/down/up — right is arrow-only, `SUPER + L` stays lock). |
-| `SUPER SHIFT + arrows` (or `H/J/K`) | Move the window. |
-| `SUPER ALT + arrows` (or `H/J/K`) | Resize the window (repeats while held). |
+| `SUPER + arrows` (or `H/J/K/L`) | Move focus — full parity between arrows and the vim set (lock moved off `L` to `ESCAPE`, freeing it for `movefocus, r`). |
+| `SUPER SHIFT + arrows` (or `H/J/K/L`) | Move the window — same full parity. |
+| `SUPER ALT + arrows` (or `H/J/K`) | Resize the window (repeats while held) — `L` is unbound here; ALT+right is arrow-only. |
 | `SUPER + 1–0` | Switch to workspace 1–10. |
 | `SUPER SHIFT + 1–0` | Move window to workspace 1–10. |
 | `ALT + Tab` | Previous workspace. |
 | `SUPER + X` / `SUPER + Z` | Toggle special workspace `magic` / `scratch` (`SHIFT` = move window there). |
 | `SUPER + leftdrag` / `rightdrag` | Move / resize window with the mouse. |
 
-> The `aoide shell *` verbs the launcher/lock keybinds call are not yet in the
-> command schema — a documented open seam (the bridge path is stubbed). The
-> hot-edge and pure-QML paths work today regardless.
+> Launcher/dock/wallpaper/clipboard route entirely through Hyprland global
+> shortcuts consumed by QML — no CLI verb, no inbound socket. Lock is the one
+> holdout still exec'ing a CLI form (`aoide shell lock`) that resolves to
+> nothing in the command registry.
 
 ### Bar cell interactions
 
-`modules/facets/quickshell/qml/AoideBar.qml`:
+`song/songbook/sonata/widgets/bar.qml` (the bar moved out of the facet into
+the song; see [[Song-Anatomy]]):
 
 | Cell | Interaction |
 |---|---|
-| Clock (center) | Click → anchored calendar month-grid popup. |
-| Volume (right) | Scroll = adjust, click = mute, hover = slider. |
-| Sessions (`✎`, left) | Click → toggle the gadget dock. |
-| Battery / network | Hover popout; note-glyph icons. |
+| Sessions (`✎N`, left) | Click → toggle the gadget dock. |
+| Clock + date (left) | Click → toggle the calendar popout, if the active song authors one. |
+| Volume / mic (right) | Scroll = adjust, click = toggle the audio colonnade, hover = a cue readout (no separate slider). |
+| Battery (right) | Hover → time-remaining + charge-bar popout; no click. |
+| Network (right) | Click → toggle the DIKTYON network stele; no hover popout. |
+| Tray (right) | Click → toggle the held-icons popout. |
 
 ## Shell QoL aliases (`bash` dendrite)
 

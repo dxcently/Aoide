@@ -1,14 +1,14 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-07-28
+updated: 2026-08-25
 aliases: [Mneme Vault Server, mneme.service]
 tags: [aoide, mneme, knowledge, vault, mcp, content]
 ---
 
 # Mneme
 
-The knowledge server AoideOS **integrates** — the **door**. Mneme is an
+The knowledge server AoideOS integrates — the **door**. Mneme is an integrated,
 independently-owned vault API for the client that has no shell (the repo ships
 the launcher `modules/dendrites/mneme.nix`, not Mneme's source). It serves a
 folder of text notes over MCP: read, write, snapshot, search, and serve
@@ -16,10 +16,8 @@ conventions and skills — CRUD over a directory, with version history and trash
 In AoideOS it is the substrate behind the [[Content-Pipeline]] and the
 [[Wiki-Protocol]].
 
-**The muse.** Mneme = **memory**, the counterpart to [[Melete]] = practice and
-**Aoide** = song (the three Boeotian Muses). Practice *acts*; memory *persists
-what practice produced*; the song is *performed* on top. Aoide is the third muse
-that completes the triad.
+**The muse.** Mneme is the *memory* Muse in the three-Boeotian-Muses naming
+scheme — see [[Lexicon]] for the full vocabulary and the [[Melete]]/Aoide split.
 
 ## The one governing fact — doer vs. door
 
