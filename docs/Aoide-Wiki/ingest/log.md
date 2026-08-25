@@ -1567,3 +1567,52 @@ last verification.
   likely still carries the stale 48/64-command framing fixed in
   Feature-Set.md here. `concepts/Session-Graph.md` (also flagged in sweep
   7, also not in this sweep's list) was not checked this pass either.
+
+## [2026-08-25] refactor | de-slop sweep 9
+
+- `protocol/AOIDE-DEV.md` (TRIM, final sweep): 535 → 528 lines. Deliberately
+  the most conservative pass of the nine — the page's §7 "Open flags — live
+  ledger" is a quoted, cross-referenced record and was left completely
+  untouched (verified: `diff` of the section's exact line range between HEAD
+  and the edited file is empty). Trimmed only the manual sections around it
+  (§1–6, §8, Related): compressed the header's "Canonical framing"
+  blockquote from an 11-line em-dash-chained/bold-inflated restatement of
+  Aoide-vs-AoideOS (S1, S2, S3 — the catechism's home page is `Overview.md`,
+  confirmed by grep) to 5 lines pointing at [[Overview]], keeping only the
+  one fact `Overview.md` doesn't carry (the bidirectional `melete aoide …`
+  passthrough); reflowed the "Dev agent vs rice agent" blockquote's stray
+  mid-sentence colon-break. Fixed three real-name slips inside the
+  trimmable zone — "khoa asks" / "khoa's request" / "khoa looks first" — to
+  "the User" per house rule 6, leaving every `khoa` mention inside the
+  frozen §7 range and the two technical config facts (the literal unix
+  username in the §3 build-recipe header, the literal git-push identity in
+  §5) untouched, since those name the actual required value rather than
+  narrating who decided something. Fixed three Assertion-clause-1 "now"/
+  "old" constructions in §3's live-deploy paragraph ("`lyra quickshell
+  reload`, which now replaces the old `systemctl --user restart` step" →
+  present-tense with the old command kept as a stated fallback; "is now
+  UNNECESSARY" → "is unnecessary") and cut one pure contrast-framing tail
+  ("happens on the render, not the diff" → "happens on the render") without
+  touching the paragraph's genuine NOT-warning (the `run/qml/` vs
+  `modules/facets/quickshell/qml/` deploy-path disambiguation stays, since
+  that's a hazard warning agents actually trip on, not rhetorical framing).
+  Retitled the "Living report" subheading and its opening sentence out of a
+  repeated three-times "X, not chat/not repeated/doesn't replace" contrast
+  pattern (S8) into one positive statement plus a single non-repeating
+  clause each. `updated:` stamped 2026-08-25 in frontmatter (previously
+  unset). Left `[[Loop-Protocol]]`, `[[Ricing-Protocol]]`, `[[Self-Ricing]]`,
+  and every other wikilink and command/code block byte-exact per the plan;
+  the §3 recipe block and its three sibling code fences were not opened for
+  editing.
+- Drift found, not fixed (outside the one-minute verify budget): §7's own
+  two live command-count entries already contradict each other pre-sweep
+  (`cmd_count == 60` in the struck-through closed entry vs `cmd_count == 83`
+  vs `aoide schema --json` reporting 87 in the entry below it) — this is
+  §7 content, frozen for this sweep by the brief's own constraint, not
+  edited or restruck.
+- No other drift found in the trimmable zone: the page carries no other
+  count/verb claims outside §7 to check (grepped for digits excluding
+  dates; every hit outside §7 was a section-number cross-reference, a
+  house-rule number, or a code snippet).
+- Sole page touched. `docs/Aoide-Wiki/protocol/OPERATIONS/*`, `PROTOCOL.md`,
+  `SHAPE.md`, and `_template` were not opened, per the brief's scope.
