@@ -117,6 +117,9 @@ pkgs/aoide/
     storage/                    # durable session data + memory persistence
       src/ session-store · transcript-index · stage-state · migrations · search
            · commands (usage — Phase 9)
+    secrets/                    # the secrets broker — policy-gated resolve
+      src/ policy · broker · client · backend · enroll(totp) · store · socket
+           · commands.rs (secrets * — broker admin + resolve verbs)
     test-support/        (Phase 9)  # shared test rig — DEV-dependency only
       src/ scratch-dirs · EnvSaver · fixture payloads · env_lock
     steward/             ★NEW   # the STEWARD — system-management agent
@@ -149,6 +152,7 @@ pkgs/aoide/
 | **server** | `aoided` and the door serve-loops: MCP-over-stdio, A2A JSON-RPC/HTTP/SSE, listeners, sessions, snapshots, the audit sink — plus its CLI verbs (`daemon`, `shellbridge`, `a2a serve`). Untrusted input stops here. | `daemon.rs`, `mcp.rs`, `a2a.rs`(serve half), `commands/infra.rs`(server half), `commands/a2a.rs`(serve verb) | landed (Phase 4c); commands landed (Phase 9) |
 | **client** | Outbound: the A2A client registry + send, the melete adapter (neutral-event consumer), transports — plus its CLI verbs (`a2a agent *`, `adapter melete`). Drives external agents and speaks to `aoided`. | `a2a.rs`(client half), `adapter.rs`, `commands/a2a.rs`(agent verbs), `commands/infra.rs`(adapter verb) | landed (Phase 4b); commands landed (Phase 9) |
 | **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, migrations, search — plus its CLI verb (`usage`). The steward's `canon` and session memory persist through here. | `graph/session_store.rs`, `song/stage/*`, `state/*`, `commands/usage.rs` | landed (Phase 3a); backend is still file-first (seed → build); commands landed (Phase 9) |
+| **secrets** | The secrets broker: policy-gated resolve over a unix socket, TOTP enrollment, pluggable backends (`file` built-in), admin verbs — plus its CLI verbs (`secrets *`). A secret's value never crosses into a `Serialize`/`Deserialize` type; audit happens broker-side only. | `crates/secrets/` (broker·client·policy·backend·enroll·store·commands) | landed (Workstream SECRETS, P-V1–P-V4f) |
 | **test-support** | Shared test rig (scratch dirs, `EnvSaver`, fixture payloads, the single `env_lock`). **Dev-dependency only** — never a production edge. | `commands/mod.rs::test_support`, root `env_lock` | landed (Phase 9) |
 | **steward** ★ | A system-management agent driven by the conductor. Runs a harness loop; its tools act on the host via `management`/`conduct`/`song`; it remembers design primitives in `canon`; it self-audits against canon + contracts. | *(new)* | skeleton — DEFER (Phase 7) |
 | **song** | The ricing / design engine: the native livery engine (`src/livery/` — schema · resolve · emit; formerly a standalone Node package), apply songs, mint palettes, write the stage, the Pantheon design language — plus its CLI verbs (`rice *`, `livery *`, `cover set`). **Rices portably** — applies a song on generic Linux too, not only via Stylix/NixOS modules. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs` | landed (Phase 5a+5b); commands landed (Phase 9) |

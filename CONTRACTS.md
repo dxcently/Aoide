@@ -573,11 +573,11 @@ transition window, so a running desktop never read a missing stage file. The
 mirror + fallback were dropped in Phase 4 of the livery merge —
 `stage/livery.json` is the sole stage note file.
 
-Beyond `lyra rice preview <name>`/`cover set`/other emitters writing this
+Beyond `lyra rice stage <name>`/`cover set`/other emitters writing this
 live, it is also **seeded from the active song's committed notes on every
 activation** (`home.activation.aoideSeedStage`,
 `modules/facets/quickshell/default.nix`) — so a host that boots without ever
-running `rice preview` still has a correct live stage twin from boot.
+running `rice stage` still has a correct live stage twin from boot.
 
 **Additive in v0:** this path MAY be a SYMLINK rather than a plain file —
 `rice mode draft <name>` (§4's `stage/mode.json` entry) routes it into a
@@ -604,8 +604,8 @@ Writes are atomic (write-temp-then-rename) so a hot-reload never reads a torn
 file.
 
 **Additive in v0:** the staged file MAY carry an optional top-level `song`
-field (string) — the name `lyra rice preview <name>` was invoked with. Set by
-`handle_rice_preview` (mirrors the `parentSessionId` additive precedent in
+field (string) — the name `lyra rice stage <name>` was invoked with. Set by
+`handle_rice_stage` (mirrors the `parentSessionId` additive precedent in
 §4's sessions.json). Absent means "no song identity" (a notes file staged some
 other way). `LiveryState.qml`'s `songName` property reads it to resolve
 per-song flavor widgets (§5) — readers must tolerate both forms.
@@ -614,7 +614,7 @@ per-song flavor widgets (§5) — readers must tolerate both forms.
 `geometry` block, mirroring §1's geometry tier (`gapsOut`/`gapsIn`/
 `borderSize`/`rounding`/`blurEnabled`/`blurSize`/`blurPasses`, each `nullOr`).
 Absent means "this song carries no geometry opinion" (§1's additive-optional
-tier). `lyra rice preview` reads it (alongside `window.border`/
+tier). `lyra rice stage` reads it (alongside `window.border`/
 `borderInactive`) to build its best-effort `hyprctl keyword` batch — a missing
 block, or a missing/null field within it, is skipped rather than defaulted;
 readers must tolerate both forms.
@@ -1040,6 +1040,37 @@ answer like a permission-verdict digit never does), the payload is prefixed
 sent it — attribution, not authentication; both `--from` and
 `AOIDE_SESSION_ID` are ordinary same-user process state, spoofable by
 anyone who can already write to the target's control socket.
+
+### `song/stage/grimoire.json` — **v0**
+
+The Grimoire launcher's own usage ledger (`GrimoireLedger.qml`), separate
+from every other stage file in this section: it is QML-created, not staged
+by `aoided`, and has no CLI verb of its own — a fresh install has no
+`grimoire.json` until the first launch. Tracks how often each `.desktop`
+entry is launched so the Grimoire's frequency chapter ("most commonly
+opened") can rank real usage instead of guessing. Song-agnostic by design:
+the ledger is a data seam, not chrome, so launch-frequency history stays
+put across a `rice stage`/song switch rather than moving with the song.
+
+**The single writer is the QML itself** — `GrimoireLedger.qml` calls
+`DesktopEntry.execute()` directly with no `aoided` verb in between (the
+same no-new-verb idiom `launcher.qml` already established) and persists
+through a `FileView` with `atomicWrites: true` (write-temp-then-rename, so a
+hot-reload or a crash mid-write never reads a torn file). Parsing follows
+`LiveryState.qml`'s `FileView` idiom: a guarded try/catch degrades a
+missing/garbage file to an empty map rather than throwing. Capped at the
+top 200 entries by count so a machine with years of uptime doesn't grow the
+file unbounded; pruning only ever drops the coldest tail, never an entry a
+chapter/search is about to render.
+
+```json
+{
+  "schemaVersion": "0",
+  "launches": {
+    "firefox": { "count": 22, "lastAt": "2026-08-25T04:18:38.610Z" }
+  }
+}
+```
 
 ### `state/inbox.json` — **v0** (messaging plan P-C6, 2026-08-21)
 
@@ -1882,10 +1913,10 @@ set of "flavor" surfaces — committed files, not nix options:
   "does `<song>` dress `<slot>`"; `WidgetSlot.qml` is the fixed per-slot
   anchor a host surface embeds — it loads the song's file when authored, else
   falls back to shared chrome (or renders nothing, when no fallback exists).
-  `lyra rice preview <name>` (§4) drives this live, no rebuild: it stages
+  `lyra rice stage <name>` (§4) drives this live, no rebuild: it stages
   `song` into `livery.json`, `LiveryState`'s `songName` updates, and every
   `WidgetSlot` re-resolves. **Additive (2026-08-15) — widget bodies ride the
-  same call:** `rice stage`/`preview` also syncs the song's whole
+  same call:** `rice stage` also syncs the song's whole
   `widgets/` tree into `run/qml/songs/<name>/` (`crate::widgets` in
   `crates/song/`, byte-compared so an unchanged file is never rewritten —
   avoids flicker/reload of every widget on a palette-only stage) and

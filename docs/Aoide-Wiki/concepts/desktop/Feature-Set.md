@@ -28,7 +28,7 @@ new integrations are generated declaratively, on demand — see
 The desktop, agent, pipeline, and governance items are grounded in
 [[references/AOIDE-HANDOFF]]. The messaging bridge, Cloudflare/Tailscale fleet
 exposure, and the scheduled-jobs widget are planned — specified here as
-intended features, not present in `aoide schema --json`'s 68-command surface
+intended features, not present in `aoide schema --json`'s 71-command surface
 today; they extend the handoff rather than describe shipped commands.
 
 ## The bundle
@@ -162,7 +162,7 @@ One spine, so a new integration is always the same shape:
 
 Shipped exemplars plus planned extensions — the [[Widget-Maker|agent generates
 more]] on demand. Rows marked *(planned)* have no command yet in `aoide schema
---json`'s 68-command surface.
+--json`'s 71-command surface.
 
 | Capability | Provided by | Surfaced as | Default | Gate |
 |---|---|---|---|---|

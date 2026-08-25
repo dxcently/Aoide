@@ -194,13 +194,18 @@ address first (`a2a::classify_origin` → `PeerOrigin`: `Loopback` /
 - **`Unknown`** (the caller's address couldn't be read at all) — never
   auto-delivered, failing safe the same as an unmatched `Remote`.
 - **`Loopback`** — delivers immediately, admission stays at rebuild time,
-  **only while no server-wide `aoide.a2a.tokenFile` is configured**
-  ([[A2A-Door#Security and governance]]). Once one is, a caller — loopback
-  included — that does not present the valid token is coerced to `Unknown`
-  before this classification is even consulted: behind a reverse proxy or
-  tunnel every caller's connection looks loopback to the server, so an
-  unconditional loopback trust hands a remote attacker the operator's own
-  standing.
+  **only while no server-wide inbound bearer gate is configured**
+  ([[A2A-Door#Security and governance]]). The operator has two ways to set
+  that gate, wired through the `aoide-a2a` unit: `aoide.a2a.bearerSecret` (a
+  secret NAME resolved fresh on every request through the local
+  [[Secrets-Broker]], consumer `a2a-door`, failing closed on a resolve
+  failure) takes precedence over `aoide.a2a.tokenFile` (a path read once at
+  `a2a serve` launch) when both are set; either alone is sufficient to close
+  the gate. Once one is configured, a caller — loopback included — that does
+  not present the valid token is coerced to `Unknown` before this
+  classification is even consulted: behind a reverse proxy or tunnel every
+  caller's connection looks loopback to the server, so an unconditional
+  loopback trust hands a remote attacker the operator's own standing.
 
 This is the one interactive per-request gate the wire otherwise lacks —
 added specifically for the case the original loopback-only design didn't

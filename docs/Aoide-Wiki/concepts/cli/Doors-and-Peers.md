@@ -444,6 +444,26 @@ aoide peer status [--json]
 - **Notes:** read-only. TTL constant: `PEER_CACHE_TTL_SECS` in
   `pkgs/aoide/crates/storage/src/peer_store.rs`.
 
+### aoide peer hub
+
+```
+aoide peer hub <name> [--clear]
+```
+
+- **Reads:** `state/peers.json`.
+- **Writes:** designates `name` as THE hub — at most one peer holds the
+  designation; setting a new hub moves it, clearing the previous holder in
+  the same write (P-D5, `docs/architecture/AOIDED.md`'s "The hub option").
+  `--clear` removes the designation from `name` instead, if it currently
+  holds it. Idempotent both directions — a no-op never touches disk.
+- **Output:** `data: {name, change}` where `change` is `set` / `moved` /
+  `cleared` / `no-op`; the human message names the prior holder on a move
+  (`"hub moved from <old> to <new>"`).
+- **Notes:** the hub is a last-resort address-resolution preference, not a
+  trust or autogate grant — resolution reaches for it only when nothing
+  else matches, never shadowing a real registered name. See
+  [[Peer-Federation]].
+
 ## Related
 
 - [[A2A-Door]] — the inbound A2A contract (CONTRACTS.md §6)

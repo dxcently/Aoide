@@ -14,7 +14,7 @@ project/session DAG, injection into conducted terminals
 dead-session reaper, and the `inbox` verbs that read back what `graph send`
 delivered. `graph session hook` is the [[Agent-Hooking]] door agent
 harnesses (Claude Code, kimi, pi) fire into. Handlers live in
-`pkgs/aoide/crates/conduct/src/graph/{verbs,session_store,send,pending,spawn,permit,window,conduct,doc,model,common}.rs`
+`pkgs/aoide/crates/conduct/src/graph/{verbs,session_store,send,pending,spawn,resurrect,permit,window,conduct,doc,model,common}.rs`
 and `pkgs/aoide/crates/conduct/src/reap.rs`; registrations in
 `pkgs/aoide/crates/conduct/src/commands/graph.rs`. `inbox list|read|clear`
 is the one exception: it lives in `pkgs/aoide/crates/storage/src/{inbox,
@@ -253,6 +253,46 @@ aoide graph spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt 
   immediately while the spawned agent keeps running headless. See "Headless
   conduct" under [[Conductor-Channel]] for the pty/log mechanism the re-exec'd
   child uses.
+
+### aoide graph resurrect
+
+```
+aoide graph resurrect --project <name> [--all | --id <ledgerSessionId>] [--json]
+```
+
+- **Reads:** `state/session-ledger.jsonl` (the durable, append-only record
+  written exactly once at roster exit, P-D8) — resolves `--project` against
+  `projects.json` by exact name, then filters ledger entries anchored to it
+  via the SAME longest-cwd-prefix rule `graph emit`'s `anchor_for` uses.
+  Candidates: the single most recent by default, every anchored entry with
+  `--all`, or one specific ledger `sessionId` with `--id` (mutually
+  exclusive with `--all`; `--id` wins if both are given). Each candidate is
+  filtered through its harness's `AgentProfile.resume_args` — a harness
+  with no verified resume argv (unregistered, or never confirmed against
+  the real binary) is skipped, not guessed at.
+- **Writes:** spawns each surviving candidate via the windowed path (the
+  same mechanism `graph spawn --windowed` uses — a fresh terminal from
+  `$AOIDE_TERMINAL` running `<harness> --resume <id>` in the ledger entry's
+  own `cwd`). A resurrected session always mints a NEW `sessionId` — ledger
+  ids are never recycled — and is stamped `resumedFrom` naming the ledger
+  entry's own id; `build_graph` projects that as a `resumed` edge beside
+  `spawned`/`anchors` (CONTRACTS.md §4).
+- **Pipes to / output:** `data: {project, resurrected: [...], skipped:
+  [...], failed: [...]}`. Never a hard error over a per-candidate spawn
+  failure (a headless host with no `$AOIDE_TERMINAL`/display) — that
+  candidate folds into `failed` instead, so a `--all` batch keeps going
+  past one bad candidate. Only genuine usage problems (`--project` missing,
+  an unknown project name, an `--id` naming no anchored ledger entry) are
+  `Outcome::usage`/`error`.
+- **Notes:** the same command core also backs the daemon's own boot-time
+  auto-resume trigger — a project's `autoResume` flag (`graph project add
+  --auto-resume`, only ever set true by the CLI) fires `graph resurrect
+  --project <name>` once per boot on `aoided` start (P-D8, `docs/
+  architecture/AOIDED.md`'s "L5 — harness summoning"). This is the revival
+  half of the liveness story `graph reap` sweeps the other side of: a
+  session a killed terminal could never mark `done` gets reaped off the
+  live roster, and its ledger entry is what `graph resurrect` can later
+  bring back in a fresh terminal.
 
 ### aoide graph send
 

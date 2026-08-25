@@ -32,7 +32,7 @@ start at [[aoide-cli]] and the group pages linked below.
 - **Runtime roots:** repo-relative paths below resolve under `~/Aoide/` —
   `state/` via `$AOIDE_STATE_DIR`, `song/stage/` via `$AOIDE_STAGE_DIR`.
   Stage/state writes are atomic temp-then-rename.
-- **Two registries, one convention:** `aoide schema --json` holds 69
+- **Two registries, one convention:** `aoide schema --json` holds 71
   command paths, `lyra schema --json` holds 42 — every group page prefixes
   each heading `aoide `/`lyra ` so the binary a verb belongs to is never
   ambiguous.
@@ -45,8 +45,9 @@ start at [[aoide-cli]] and the group pages linked below.
   `rice take` groups, `rice back`, `cover set`, and the `livery` engine verbs.
   Stage files: `song/stage/{livery,cover,mode}.json`; songbook and drafts trees.
 - [[Graph-and-Conduct|Graph-and-Conduct]] — the session DAG:
-  `graph view/project/link/session/wrap/send/permit/focus/prune/reap/emit`,
-  `conduct`, and `inbox list/read/clear` (the receive half of `graph send`).
+  `graph view/project/link/session/wrap/spawn/resurrect/send/permit/focus/
+  prune/reap/emit`, `conduct`, and `inbox list/read/clear` (the receive
+  half of `graph send`).
   Stage files: `song/stage/{sessions,hooks,projects,graph,pending,
   herald}.json`, `state/inbox.json`; control sockets at
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock`.

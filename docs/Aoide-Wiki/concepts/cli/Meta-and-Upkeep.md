@@ -58,7 +58,7 @@ aoide schema [--json]
   backstop every tier generates from — the MCP tool list derives from it
   ([[Agent-Interface]]). `lyra schema` mirrors it for the paint side: its own
   registry, its own golden snapshot (42 command paths, evolving independently
-  of core's 69 — see [[lyra]]).
+  of core's 71 — see [[lyra]]).
 
 ### aoide make
 
