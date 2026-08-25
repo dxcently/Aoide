@@ -3,7 +3,7 @@ type: concept
 created: 2026-07-25
 tags: [aoide, governance, policy]
 source: "[[references/AOIDE-HANDOFF]]"
-updated: 2026-08-23
+updated: 2026-08-25
 ---
 
 # Governance — Gates, Contracts, Audit
@@ -17,8 +17,8 @@ Every NixOS rebuild is **user-gated**. The pattern follows sakaki's agent-sudo d
 Policy, lint, and audit all live in [[aoided]] core. All three doors — the CLI,
 the MCP façade, and the [[A2A-Door]] — inherit the same gate and write to the
 same audit log at `~/Aoide/log`, each dispatch tagged with the door it came
-through (`Door::Cli` / `Door::Mcp` / `Door::A2a`). There is no separate audit
-path per interface — divergence between the doors is structurally impossible.
+through (`Door::Cli` / `Door::Mcp` / `Door::A2a`). One audit path for every
+interface: divergence between the doors is structurally impossible.
 
 The [[Secrets-Broker]] mirrors its own resolve/put/approve/dismiss
 decisions into the same log, tagged `Secret`, broker-side only — a value
@@ -33,12 +33,12 @@ rebuild time.
 The gate meets the interactive doors as a per-operation prompt (the agent
 proposes, the user admits). The [[A2A-Door]] cannot: a JSON-RPC
 request/response cannot block on a human clicking "approve", so its admission
-moves entirely to **rebuild time**. Enabling the door and setting its spawn
+moves entirely to rebuild time. Enabling the door and setting its spawn
 target are rebuild-gated nix options (`aoide.a2a.enable` /
 `aoide.a2a.spawnAgent`), so turning them on is the user's admission, made once.
-Per request the door is **bounded** — a spawn runs only the configured agent,
+Per request the door is bounded — a spawn runs only the configured agent,
 and a forwarded message is data, never executed — and every inject, spawn, and
-error is **audited** as `Door::A2a`, loopback by default.
+error is audited as `Door::A2a`, loopback by default.
 
 ## Contractual core stability
 

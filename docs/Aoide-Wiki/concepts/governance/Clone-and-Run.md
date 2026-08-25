@@ -1,22 +1,22 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-14
+updated: 2026-08-25
 tags: [aoide, onboarding, deployment]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
 
 # Clone-and-Run — Installing Aoide
 
-Aoide is a framework you clone and run, not a package you install. The upstream repo ships the shape-making machinery (engine, contracts, walker, facets, management tools) but never the shapes themselves. Your clone is your instance.
+Aoide is a framework you clone and run. The upstream repo ships the shape-making machinery (engine, contracts, walker, facets, management tools) but never the shapes themselves. Your clone is your instance.
 
 ## Why Shared History
 
 - **Shared history with upstream**: `aoide update` is a real `git merge`, not a package upgrade. Improvements flow in; your personal commits never conflict with upstream additions because growth is additive.
-- **Reproducibility**: every default and generated rice is committed and versioned. A rebuild from the clone reproduces the entire riced system on any box. Gitignored runtime dirs (`stage/`, `auditions/`) hold ephemera only — nothing reproduction needs lives there.
-- **Your dendrites and songs are ordinary local commits**: `modules/dendrites/` growth is additive by construction, and `song/songbook/` is your writable domain — a plain clone carries them with no fork required. Committed songs under `song/songbook/` are versioned score — every host that pulls the clone can perform any of them. One line in `hosts/<host>/default.nix` (`aoide.song = "<name>";`) selects which song a host performs. This is how replay works across the fleet. See [[Song-Vocabulary#Replay — any song, any host]].
+- **Reproducibility**: every default and generated rice is committed and versioned. A rebuild from the clone reproduces the entire riced system on any box. Gitignored runtime dirs (`stage/`, `auditions/`) hold ephemera only.
+- **Your dendrites and songs are ordinary local commits**: `modules/dendrites/` growth is additive by construction, and `song/songbook/` is your writable domain. Committed songs are versioned score — every host that pulls the clone can perform any of them. One line in `hosts/<host>/default.nix` (`aoide.song = "<name>";`) selects which song a host performs. See [[Song-Vocabulary#Replay — any song, any host]].
 - **A remote fork is optional**: add your own remote only to back up your instance, sync songs across your machines, or open contributions upstream. The instance itself needs nothing but the clone.
-- **Module import stays possible** but secondary. The clone is the primary deployment model.
+- **Module import stays possible** but secondary; the clone is the primary deployment model.
 
 ## Install in Two Steps
 
@@ -25,13 +25,13 @@ git clone <upstream> ~/Aoide
 aoide onboard
 ```
 
-That is the complete install, by design — no dotfile manager, no separate bootstrap script. **Status:** `aoide onboard` is declared in the schema but not yet implemented (stub, exit `64`); the flow below is the target shape, not a working install path today.
+That is the complete install. **Status:** `aoide onboard` is declared in the schema but not yet implemented (stub, exit `64`); the flow below is the target shape, not a working install path today.
 
 ## First-Boot Onboarding Flow
 
 `aoide onboard` is designed to be idempotent, running through these steps:
 
-1. Generate `hosts/<hostname>/` from the shelved skeletons (`hosts/_desktop`, `_laptop`, or `_server` — `_mac` is the forward-looking darwin one, pending the `mkHost` class seam); create `song/` runtime dirs (gitignored).
+1. Generate `hosts/<hostname>/` from the shelved skeletons (`hosts/_desktop`, `_laptop`, or `_server`; `_mac` is the darwin skeleton, pending the `mkHost` class seam); create `song/` runtime dirs (gitignored).
 2. Install the shipped standard rice + wallpaper as the active baseline; link `~/song` → `~/Aoide/song`.
 3. Confirm the upstream remote (the clone already tracks it as `origin`); offer adding a personal remote for backup/fleet sync.
 4. Seed `songbook/` with starter files and the update playbook.
@@ -49,9 +49,7 @@ That is the complete install, by design — no dotfile manager, no separate boot
 
 `aoide update` fetches upstream, merges framework paths, runs the flake's `checks`, then proposes the gated rebuild — the clone updates itself, but the gate still decides. No background updaters, by house policy.
 
-Merge hygiene is enforced by a merge-base divergence lint inside `aoide update` plus a commit-hook warning on edits to inherited files. Path guards are not used; provenance is the mechanism.
-
-Contract-breaking changes (livery schema, dendrite shape, stage file formats) are versioned in `CONTRACTS.md`. `aoide update` detects contract bumps and routes them through the update playbook before the rebuild can discover them.
+Merge hygiene (the merge-base divergence lint and commit-hook warning) and contract-bump detection are specified under [[Governance]]; contract-breaking changes are versioned in `CONTRACTS.md` and routed through the update playbook before the rebuild can discover them.
 
 ## Related
 

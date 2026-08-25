@@ -8,7 +8,7 @@ The standalone wiki for the Aoide project — the agent-agnostic Hyprland/Quicks
 
 ## Read the whole thing
 
-Working entry cost, in order: `Overview.md` → every page under `concepts/` (including its `orchestration/`, `desktop/`, `song/`, and `governance/` subfolders) and `entities/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; `AOIDE-DEV.md` — the development agent's operating manual; `pantheon/` — the design reference stills). The wiki is deliberately small enough to read end to end. Note: **rice design memory lives in the songbook under `song/`, per song** — each song's current elements in `song/songbook/<name>/design/` ([[Song-Anatomy]]). The cross-cutting house grammar the shipped `default` song used to own is retired now that `default` is (renamed to `sonata`, which draws its own grammar); the old grammar lives on as historical reference at `references/pantheon/pantheon-grammar.md`, not in the songbook. The wiki's `concepts/song/Ricing-Protocol.md` carries protocol only; design content written about a rice goes to that rice's `design/` folder in the repo, not here.
+Working entry cost, in order: `Overview.md` → every page under `concepts/` (including its `orchestration/`, `desktop/`, `song/`, and `governance/` subfolders) and `entities/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; the handoff and ricing design docs; `pantheon/` — the design reference stills; `cli/` — the dev CLI reference). The development agent's operating manual is `protocol/AOIDE-DEV.md`. The wiki is deliberately small enough to read end to end. **Rice design memory lives in the songbook under `song/`, per song** — each song's current elements in `song/songbook/<name>/design/` ([[Song-Anatomy]]). The cross-cutting house grammar is historical reference at `references/pantheon/pantheon-grammar.md`; `concepts/song/Ricing-Protocol.md` carries protocol only. Design content written about a rice goes to that rice's `design/` folder in the repo, not here.
 
 ## The shape
 
@@ -26,13 +26,13 @@ Aoide-Wiki/
   ingest/
     index.md       ← content catalog
     log.md         ← append-only history + Open Threads
-  references/      ← raw sources (AOIDE-HANDOFF.md, AOIDE-DEV.md, pantheon/ stills) + the dev CLI reference (cli/)
-  protocol/        ← the wiki protocol (Mneme/Melete-owned), staged here; not Aoide content
+  references/      ← raw sources (AOIDE-HANDOFF.md, the handoff + ricing design docs, pantheon/ stills + grammar) + the dev CLI reference (cli/)
+  protocol/        ← the wiki protocol (Mneme/Melete-owned) staged here + AOIDE-DEV.md (the dev agent's operating manual); not Aoide content
 ```
 
 ## The wiki protocol
 
-This shape is not bespoke — it comes from the **wiki protocol**, a shipped shape + rule set that Mneme/Melete use to mint and keep project wikis. Aoide's own wiki is the self-managed exception: it lives in the Aoide repo. Mneme/Melete own the protocol; it is staged under `protocol/` and the relocation to them is an Open Thread in `ingest/log.md`. See [[Wiki-Protocol]] for the concept and `protocol/PROTOCOL.md` for the mint/convert procedure. The rules this wiki is kept by live in `protocol/OPERATIONS/`: [[Ingest]], [[Indexing]], [[Lint]], [[Self-Update]], [[Frontmatter]], [[Naming]], [[Wikilinks]], [[Assertion]].
+This shape comes from the **wiki protocol**, a shipped shape + rule set that Mneme/Melete use to mint and keep project wikis. Aoide's own wiki is the self-managed exception: it lives in the Aoide repo. Mneme/Melete own the protocol; it is staged under `protocol/` and the relocation to them is an Open Thread in `ingest/log.md`. See [[Wiki-Protocol]] for the concept and `protocol/PROTOCOL.md` for the mint/convert procedure. The rules this wiki is kept by live in `protocol/OPERATIONS/`: [[Ingest]], [[Indexing]], [[Lint]], [[Self-Update]], [[Frontmatter]], [[Naming]], [[Wikilinks]], [[Assertion]].
 
 ## Two ways you act
 
@@ -58,7 +58,7 @@ This file and every `protocol/OPERATIONS/` page obey the rules they describe. Ch
 
 Snapshot of this wiki's files, diffed on each lint pass and rewritten at the end. The wiki is meant to be read whole; this manifest exists for the lint self-description check, not to spare you the reading.
 
-snapshot: 2026-08-20
+snapshot: 2026-08-25
 
 ### Tags
 
@@ -110,6 +110,7 @@ entities/livery.md
 entities/shellbridge.md
 ingest/index.md
 ingest/log.md
+protocol/AOIDE-DEV.md
 protocol/OPERATIONS/Assertion.md
 protocol/OPERATIONS/Frontmatter.md
 protocol/OPERATIONS/Indexing.md
@@ -124,7 +125,7 @@ protocol/_template/Overview.md
 protocol/_template/ingest/index.md
 protocol/_template/ingest/log.md
 references/AOIDE-HANDOFF.md
-references/AOIDE-DEV.md
+references/AOIDE-VS-LANGCHAIN-HANDOFF.md
 references/cli/Content-and-Hooks.md
 references/cli/Doors-and-Peers.md
 references/cli/Graph-and-Conduct.md
@@ -132,4 +133,6 @@ references/cli/Index.md
 references/cli/Meta-and-Upkeep.md
 references/cli/Rice-and-Livery.md
 references/cli/Screen-Verbs.md
+references/fleshing-out-aoide-ricing.md
+references/pantheon/pantheon-grammar.md
 ```

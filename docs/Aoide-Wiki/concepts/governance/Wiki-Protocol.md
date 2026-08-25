@@ -1,23 +1,22 @@
 ---
 type: concept
 created: 2026-07-25
+updated: 2026-08-25
 tags: [aoide, wiki, meta]
 ---
 
 # Wiki Protocol — Standalone Project Wikis
 
-## Decision (2026-07-25)
-
-The wiki capability is **a protocol**: a shipped shape + rule set that any project's wiki conforms to. Each project keeps its own **standalone** wiki, and the protocol is what makes every one the same shape.
+The wiki capability is **a protocol**: a shipped shape + rule set that any project's wiki conforms to. Each project keeps its own **standalone** wiki; the protocol is what makes every one the same shape.
 
 ## Ownership
 
-- **Mneme/Melete ship and manage the protocol** and use it to mint, convert, and keep most projects' wikis.
-- **Aoide's own wiki is the exception** — it lives in the Aoide repo and Aoide manages it itself (this wiki, `Aoide-Wiki`).
+- Mneme/Melete ship and manage the protocol and use it to mint, convert, and keep most projects' wikis.
+- Aoide's own wiki is the exception: it lives in the Aoide repo and Aoide manages it itself (this wiki, `Aoide-Wiki`).
 
 ## Default location
 
-A wiki lives **in its project's own repo**, wherever a wiki is needed — default `<repo>/wiki/`. It is versioned with the project and travels with it; there is no fixed central directory.
+A wiki lives in its project's own repo — default `<repo>/wiki/`. It is versioned with the project and travels with it.
 
 ## The protocol bundle
 
@@ -37,7 +36,7 @@ Staged here under `protocol/`; Mneme/Melete own it, and the relocation to them i
 
 ## This wiki
 
-`Aoide-Wiki` is the reference case: the standalone wiki for Aoide itself, self-managed in the Aoide repo at `docs/Aoide-Wiki/`. Because it is small and self-contained, the working rule is to **read the whole wiki** when working on Aoide — see [[SCHEMA]].
+`Aoide-Wiki` is the reference case: the standalone wiki for Aoide itself, self-managed in the Aoide repo at `docs/Aoide-Wiki/`. Because it is small and self-contained, the working rule is to read the whole wiki when working on Aoide — see [[SCHEMA]].
 
 ## Dogfooding
 

@@ -1,56 +1,57 @@
 ---
 type: overview
 created: 2026-07-25
+updated: 2026-08-25
 ---
 
 # Aoide — Overview
 
-**Aoide (the core) vs AoideOS (the distribution) — don't conflate the two.** Aoide is the **orchestration core**: the bridges and APIs between the terminal, the shell, the system, and the OS — one interface through which any agent is freely orchestrated for any task, no MCP required. It runs anywhere there is a shell — portable, headless-capable, agent-first — and as of the [[Conductor-Channel|conductor channel]], **every terminal is a conductable, tracked session by default**. AoideOS is the **distribution built on that core**: this repo, the NixOS flake that ADDITIONALLY ships the [[Quickshell]] widget-making toolkit (bar, dock, gadgets, the DAG/conductor surfaces) and the specialized ricer (the song/livery theming engine, see [[Self-Ricing]] and [[Ricing-Protocol|Ricing Protocol]]). A capability that works with only a shell is "Aoide"; one that needs the desktop/Quickshell/rice is "AoideOS". This wiki documents AoideOS end to end, since the flake is the concrete running instance of the core.
+**Aoide** is the orchestration core: the bridges and APIs between terminal, shell, system, and OS — one interface through which any agent is orchestrated for any task, no MCP required, runnable anywhere there is a shell. Every terminal is a conductable, tracked session by default ([[Conductor-Channel]]). **AoideOS** is the distribution built on that core: this repo's NixOS flake, which additionally ships the [[Quickshell]] widget surfaces (bar, dock, gadgets, conductor views) and the song/livery ricer ([[Self-Ricing]]). A capability that works with only a shell is Aoide; one that needs desktop, Quickshell, or rice is AoideOS. This wiki documents AoideOS end to end, the flake being the core's concrete running instance.
 
-**AoideOS** is the agent-agnostic NixOS desktop distribution built on that core — Hyprland compositor, Quickshell shell, an orchestrator daemon, a content pipeline, and a self-ricing engine — that you clone and run. Upstream ships the shape-making machinery (the rice engine, contracts, walker, and management tools) but never the shapes; your clone is your instance, self-updating from upstream and self-configuring to your preferences. The naming thesis: architecture is frozen music — the nix layer is the score, the running desktop is the performance, and a rice is a song the system sings.
+AoideOS pairs a Hyprland compositor with a Quickshell shell, an orchestrator daemon, a content pipeline, and a self-ricing engine. Upstream ships the shape-making machinery (rice engine, contracts, walker, management tools) but never the shapes; your clone is your instance ([[Clone-and-Run]]). The frozen/performed naming thesis lives in [[Lexicon]].
 
-Beyond the desktop, **AoideOS is a specialized widget maker**: it **integrates and launches** (it does not vendor) the independently-owned [[Melete]] coding harness and [[Mneme]] knowledge server, and because that agent writes code, you extend the system by having it generate new **declarative** integrations — widgets, adapters, dendrites — rather than hunting for plugins. The Aoide·Melete·Mneme (three-Muses) naming is a *theme*; the primary agent is the claude CLI, with Melete as the coding harness you can also drive it with. See [[Widget-Maker]] and [[Feature-Set]].
+AoideOS is also a specialized widget maker: it integrates and launches the independently-owned [[Melete]] coding harness and [[Mneme]] knowledge server, and new integrations are written by that agent as declarative nix + QML + adapter rather than selected from a plugin registry. See [[Widget-Maker]] and [[Feature-Set]].
 
-As of 2026-07-26 Aoide is not just built but **running live**: yomi-strix switched onto the flake (from [[dxflake]]) through the [[Rebuild-Gate]] — see [[Full-Architecture]] for the status and [[Codebase]] for the switch detail.
+**Status:** yomi-strix runs the Aoide flake at HEAD. See [[Full-Architecture]] for subsystem status and [[Codebase]] for the host profile.
 
 ## Concepts
 
-- [[Full-Architecture]] — the whole-body map: every subsystem, its inputs/outputs, and how the frozen and performed halves meet at the livery seam
-- [[Plugin-Architecture]] — the design philosophy every contract is downstream of: a capability enters by existing at a conventional path and is removable without a trace; Quickshell paints and is never where a capability lives
-- [[Codebase]] — how the built repo actually works: the flake, the `lib/` walker + overlay, the option contract, the systemd/service map, socket + stage-file contracts, and what is real vs stubbed at the walking-skeleton milestone
-- [[Widget-Maker]] — the core thesis: Aoide as an extensible, declarative widget maker; the coding agent writes new integrations rather than selecting plugins
-- [[Feature-Set]] — what ships in the box (Melete + Mneme integrated) and the exemplar features: messaging bridge, fleet management, scheduled-job widget
-- [[Terminal-Commander]] — the agent-session widget (conductor-class): watch the terminals running agents and jump to any by click or keybind
-- [[Session-Graph]] — the project/session DAG grown from the flat roster: `aoide graph` viewer + management (anchors + spawned edges, prune, liveness-checked focus, atomic graph.json emit) — rendered via `graph view`/`--json` and the `aoide conductor` TUI; the desktop's Conductor gadget gives the at-a-glance agent-tree view instead of a standalone DAG overlay
-- [[Gadget-Dock]] — the agentWidgets surface realized: `AoidePanel.qml`, a left-edge panel holding four core gadgets (Conductor, Terminals, Meters, Power) plus an opt-in Usage stele, colours entirely from livery — its fore-edge peeks at rest and it opens fully on hot-edge hover or SUPER+G
-- [[Controls]] — the day-to-day reference: the `ad*` rebuild aliases, compositor keybinds, bar cell interactions, and shell QoL aliases
-- [[Lexicon]] — the whole vocabulary in one place: the three original Muses (Aoide · Melete · Mneme), the frozen/performed split, why each word family was selected, and the loop that ties them together
-- [[Snowflake-Anatomy]] — the layered structure of the Aoide flake: nucleus, dendrites, and facets; why Nix's snowflake logo maps to the repo's growth model
-- [[Clone-and-Run]] — the install model: clone upstream to `~/Aoide`, run `aoide onboard`; shared history enables clean upstream merges, and a remote fork stays optional
-- [[Self-Ricing]] — the headline feature: the agent generates, lints, previews, and adopts rices; songbook write-back is the "self" in self-ricing
+- [[Full-Architecture]] — the whole-body map: every subsystem, its inputs/outputs, and where the frozen and performed halves meet at the livery seam
+- [[Plugin-Architecture]] — the design philosophy behind every contract: a capability enters by existing at a conventional path and is removable without a trace; Quickshell only paints
+- [[Codebase]] — repo composition: flake outputs, the `lib/` walker + overlay, the option contract, the systemd map, socket/stage contracts, real vs stubbed
+- [[Widget-Maker]] — Aoide as an extensible, declarative widget maker; the coding agent writes new integrations instead of selecting plugins
+- [[Feature-Set]] — what ships in the box (Melete + Mneme) and the exemplar features: messaging bridge, fleet management, scheduled-job widget
+- [[Terminal-Commander]] — the conductor-class agent-session widget: watch terminals running agents, jump to any by click or keybind
+- [[Session-Graph]] — the project/session DAG and its `aoide graph` CLI; rendered via `graph view`/`--json` and the `aoide conductor` TUI
+- [[Gadget-Dock]] — `AoidePanel.qml`, a left-edge panel holding four core gadgets (Conductor, Terminals, Meters, Power) plus an opt-in Usage stele; opens on hot-edge hover or SUPER+G
+- [[Controls]] — the day-to-day reference: `ad*` rebuild aliases, compositor keybinds, bar cell interactions, shell QoL aliases
+- [[Lexicon]] — the whole vocabulary in one place: the three Muses, the frozen/performed split, why each word family was chosen
+- [[Snowflake-Anatomy]] — the flake's structural layers (nucleus, dendrites, facets) and how the walker registers modules automatically
+- [[Clone-and-Run]] — the install model: clone upstream to `~/Aoide`, run `aoide onboard`; shared history enables clean upstream merges
+- [[Self-Ricing]] — the agent generates, lints, previews, and adopts rices; songbook write-back is the "self" in self-ricing
 - [[Song-Vocabulary]] — the performed-half naming map: key, melody, component tier, instruments, design, songbook, cover, chimes, stage, rehearsal, recording
-- [[Agent-Interface]] — the CLI-first capability surface: `aoide <cmd>`, MCP as a generated façade, guide tiers, and agent-first ergonomics
-- [[A2A-Door]] — aoide's third door: the bidirectional Agent2Agent (JSON-RPC/HTTP) interop wire — a discoverable A2A agent (server) and an A2A client that drives external agents, all from the one command registry
-- [[Secrets-Broker]] — the credential door: a socket-only broker under its own uid, TOTP-gated resolves that park until an operator approves or dismisses them, an automation gate for named consumers, and an age-encrypted default backend
-- [[Desktop-Architecture]] — how aoided, shellbridge, Quickshell, and the compositor compose into a single agent-ready desktop body
-- [[Content-Pipeline]] — the discover → propose → approve → ingest → lint → query pipeline; the approve gate, quarantine branch, and Mneme integration
-- [[Governance]] — the rebuild gate (polkit pattern), the single audit log, and the mutation policy encoded in radial distance from the nucleus
-- [[Rebuild-Gate]] — how agents rebuild: the default propose-then-human-`switch` path, and the opt-in `aoide.rebuild` passwordless-narrow polkit capability
-- [[Wiki-Protocol]] — the shipped protocol (Mneme/Melete-owned) that gives each project a standalone wiki in a shared shape; Aoide's own wiki is the self-managed exception; default location is the project's repo
-- [[Package-Layout]] — the current layout: `pkgs/aoide` split into pi-style single-charter crates (protocol, storage, client, conduct, screen, server, song, conductor, upkeep, cli, lyra), the per-crate charter, and the two-binary split (`aoide`/`aoided` core vs `lyra` paint) landed on top of it
+- [[Agent-Interface]] — the CLI-first capability surface: `aoide <cmd>`, MCP as a generated façade, guide tiers, agent-first ergonomics
+- [[A2A-Door]] — aoide's third door: bidirectional Agent2Agent (JSON-RPC/HTTP) interop, a discoverable server and a client driving external agents, from one command registry
+- [[Secrets-Broker]] — the credential door: a socket-only broker under its own uid, TOTP-gated resolves that park for operator approval, an age-encrypted default backend
+- [[Desktop-Architecture]] — how aoided, shellbridge, Quickshell, and the compositor compose into a single agent-ready desktop
+- [[Content-Pipeline]] — discover → propose → approve → ingest → lint → query, with the approve gate, quarantine branch, and Mneme integration
+- [[Governance]] — the rebuild gate (polkit pattern), the single audit log, and mutation policy by radial distance from the nucleus
+- [[Rebuild-Gate]] — how agents rebuild: the default propose-then-human-`switch` path and the opt-in `aoide.rebuild` passwordless-narrow polkit capability
+- [[Wiki-Protocol]] — the Mneme/Melete-owned protocol giving each project a standalone wiki in a shared shape; this wiki is the self-managed exception
+- [[Package-Layout]] — `pkgs/aoide` as pi-style single-charter crates and the two-binary split: `aoide`/`aoided` core vs `lyra` paint
 
 ## Entities
 
-- [[aoide-cli]] — the `aoide` binary: the CLI trunk (48-command tree — `guide`, `schema`, `mcp serve`, `daemon`, the `content` group, `make`, `onboard`, `update`, the `graph` group, `conduct`, `conductor`, `adapter melete`, the `a2a` group, the `peer` group, `usage`, `hooks install`, `soundcheck`), `schema --json` as single source of truth, the stdio MCP façade, structured exit codes, and the `aoided` daemon binary. Everything that paints — `rice`, `cover`, `livery`, `quickshell`, `screen`, `shellbridge`, `herald`, `take` — is `lyra`'s, not aoide's; see [[aoide-cli]] and [[references/cli/Rice-and-Livery|Rice-and-Livery]]
-- [[livery]] — the design-token layer *and* the engine that stamps it: the immutable seam between nix structure and runtime rendering (schema tiers, the two-fan-out model), native Rust inside `crates/song/src/livery/` — `lyra livery emit|resolve|lint` — writing stage/livery.json, hyprctl, terminal OSC, and file-template outputs
-- [[aoided]] — the orchestrator daemon: neutral event stream, policy, lint, audit log, and the gated rebuild pipeline
+- [[aoide-cli]] — the `aoide` CLI trunk (68 commands per `aoide schema --json`) and the `aoided` daemon binary; `schema --json` is the single source of truth behind the MCP façade. Paint commands (`rice`, `cover`, `livery`, `screen`, …) are `lyra`'s
+- [[livery]] — the design-token layer and its engine: the immutable seam between nix structure and runtime rendering, native in `crates/song/src/livery/` as `lyra livery emit|resolve|lint`
+- [[aoided]] — the orchestrator daemon: neutral event stream, policy, lint, audit log, gated rebuild pipeline
 - [[shellbridge]] — the daemon-to-desktop bridge: atomic JSON state files out, unix-socket commands in, Hyprland IPC consumed
-- [[Quickshell]] — the QML shell runtime (nine surfaces declared, eight with a live QML body): bar, notification daemon, gadget dock, launcher, OSD, lockscreen, greeter, wallpaper layer, session-graph (declared, no QML body today)
+- [[Quickshell]] — the QML shell runtime: nine surfaces declared, eight with a live QML body (session-graph declared only)
 - [[Hyprland]] — the Wayland compositor; Aoide's only multiplexer, driven live via hyprctl
 - [[Stylix]] — base16 whole-system theming; the baked fan-out from `rice.nix` to every nix-manageable target
-- [[dxflake]] — the dendritic auto-discovery flake that is Aoide's prior art and adoption target for the nucleus + dendrite walker
-- [[Melete]] — the integrated (not vendored) coding harness (the "doer"): autonomous coding runs, shell, GitHub, fleet, scheduling — an independent agent AoideOS launches and can be driven by; the engine behind AoideOS's widget-making
-- [[Mneme]] — the integrated (not vendored) knowledge server (the "door"): the vault's MCP API behind the content pipeline and the wiki protocol
+- [[dxflake]] — the dendritic auto-discovery flake; Aoide's prior art and adoption target for the nucleus + dendrite walker
+- [[Melete]] — the integrated coding harness: autonomous coding runs, shell, GitHub, fleet, scheduling; the engine behind AoideOS's widget-making
+- [[Mneme]] — the integrated knowledge server: the vault's MCP API behind the content pipeline and the wiki protocol
 
 ## Sources
 

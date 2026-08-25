@@ -1,8 +1,9 @@
 # CLI Reference — aoide Command I/O Index
 
-Dev-facing reference for the `aoide` command surface: for every command, what
+Dev-facing reference for the `aoide` and `lyra` command surfaces: for every command, what
 it reads, what files it writes, and where its output pipes to. Grounded in the
-Rust source (`pkgs/aoide/crates/`) and `aoide schema --json` — the pages state
+Rust source (`pkgs/aoide/crates/`), `aoide schema --json`, and `lyra schema
+--json` — the pages state
 the system at HEAD, not the design intent. For the concepts behind the verbs,
 start at [[aoide-cli]] and the group pages linked below.
 

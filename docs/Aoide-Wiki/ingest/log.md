@@ -852,3 +852,37 @@ corrected to match — no other page asserted kimi refuses a summons.
   unedited; `Full-Architecture.md`'s own tree diagram still calls
   `pkgs/aoide` "one crate today", stale against the landed pi-style crate
   split (secrets included) — unrelated to this pass, left unedited.
+
+## [2026-08-25] refactor | de-slop sweep 1
+
+- Pages touched: `Overview.md` (rewrite — the Aoide-vs-AoideOS distinction
+  now stated once, tightly; every concept/entity annotation cut to one line
+  ≤20 words), `ingest/index.md` (rewrite — every "answers:" run-on cut to
+  one line ≤25 words), `SCHEMA.md` (trim + manifest drift fixes),
+  `references/cli/Index.md` (keep + verify; intro now names both binaries),
+  `concepts/governance/Wiki-Protocol.md` (trim — the dated "## Decision
+  (2026-07-25)" header folded into present indicative; the date lives here
+  in the log), `concepts/governance/Governance.md`, `Rebuild-Gate.md`
+  (polkit mechanism detail kept intact), `Clone-and-Run.md` (trims).
+- Verified against `aoide schema --json` / `lyra schema --json` and the repo:
+  aoide 68 commands / lyra 42; the gated trio (`content approve`, `update`,
+  `rice declare`); exit codes 0/1/2/64; the content/make/update/onboard and
+  `rice declare`/`transpose` stubs; four core gadgets in `AoidePanel.qml`;
+  `aoide.a2a.enable`/`aoide.a2a.spawnAgent` present, `aoide.rebuild` absent.
+- Claims corrected: Overview's "48-command tree" → 68 (schema-verified);
+  `SCHEMA.md` manifest — `references/AOIDE-DEV.md` → `protocol/AOIDE-DEV.md`,
+  added `references/AOIDE-VS-LANGCHAIN-HANDOFF.md`,
+  `references/fleshing-out-aoide-ricing.md`,
+  `references/pantheon/pantheon-grammar.md`; the "Read the whole thing"
+  section's `references/` roster fixed the same way and its
+  retired-`default`-song grammar paragraph rewritten in present indicative;
+  the index's Package-Layout gloss no longer calls the landed crate split
+  unbuilt; the index's `aoide-cli` gloss (which listed paint verbs as
+  aoide's) replaced by the registry/exit-code summary.
+- Out-of-scope drift spotted, not fixed: `concepts/desktop/Widget-Maker.md`
+  still says "seven gadgets" (four core at HEAD);
+  `concepts/desktop/Feature-Set.md` and `concepts/Full-Architecture.md`
+  still cite the 48-command surface; the manifest still lacks
+  `concepts/desktop/Controls.md`, `concepts/orchestration/Screen-Control.md`,
+  and `concepts/orchestration/Secrets-Broker.md`; repo `AGENTS.md` still
+  counts aoide at 48 commands.
