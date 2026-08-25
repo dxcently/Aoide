@@ -1,14 +1,14 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-13
+updated: 2026-08-25
 tags: [aoide, architecture, nix]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
 
 # Snowflake Anatomy — the Frozen Half
 
-Aoide names its nix layer after snowflake morphology. The metaphor is not decorative: Nix's own logo is a snowflake, crystals grow by local accretion from a nucleus outward (exactly how dendritic self-registration works), and no two crystals are alike — same physics (shared upstream flake), unique host instances.
+Aoide names its nix layer after snowflake morphology — see [[Lexicon#The frozen family — snowflake morphology]] for why.
 
 ## The Three Layers
 
@@ -18,7 +18,7 @@ Aoide names its nix layer after snowflake morphology. The metaphor is not decora
 | Opt-in branches, chosen per host | **dendrites** | `modules/dendrites/` — one tree, all branches (shipped + personal); each host enables the ones it wants. |
 | Render surfaces that sound a rice | **facets** | `modules/facets/` — quickshell, stylix, compositor. The machinery that renders a song, reading its ricing elements from the songbook via `aoide.livery`. |
 
-The split the metaphor encodes: **nucleus is the shared core every host inherits; dendrites are the opt-in branches each host chooses.** Facets are the *machinery* of ricing — the surfaces that sound a song — but they embed no ricing content: every palette, sound, icon, widget body, and the shipped standard rice (`sonata`) lives in `song/songbook/`; covers (wallpapers) live in the shared `song/covers/` library any song references by path (see [[Song-Anatomy]], [[Song-Vocabulary]]). There is no separate "rice engine" layer: a song is *activated* by the walker (`lib/mkHost.nix` picks up the selected `rice.nix`), *resolved and emitted* by the native livery engine ([[livery]] — lint → resolve → emit → `stage/livery.json`), and *rendered* by the facets. All three layers live under `modules/` in `~/Aoide` — one walked module tree, the same grouping [[dxflake]] uses. Facets are the only nix that renders appearance, and each reads only the `aoide.livery` option — no module reads another module.
+**Nucleus is the shared core every host inherits; dendrites are the opt-in branches each host chooses.** Facets are the *machinery* of ricing, the surfaces that sound a song, but they embed no ricing content: every palette, sound, icon, widget body, and the shipped standard rice (`sonata`) lives in `song/songbook/`; covers (wallpapers) live in the shared `song/covers/` library any song references by path (see [[Song-Anatomy]]). There is no separate "rice engine" layer. A song is *activated* by the walker (`lib/mkHost.nix` picks up the selected `rice.nix`), *resolved and emitted* by the native livery engine ([[livery]] — lint → resolve → emit → `stage/livery.json`), and *rendered* by the facets. All three layers live under `modules/` in `~/Aoide`, one walked module tree, the same grouping [[dxflake]] uses. Facets are the only nix that renders appearance, and each reads only `aoide.livery` and `aoide.arrangement` — no module reads another module.
 
 ## Mutation Policy
 
@@ -49,7 +49,7 @@ The composition engine is an in-house dendritic walker: every file placed under 
 ├── hosts/
 │   ├── common/     cross-machine baseline
 │   └── <host>/     machine-specific picks
-├── pkgs/           aoide CLI (Rust)
+├── pkgs/           aoide, hyprglass, kimi-code, melete, mneme (walker-discovered)
 ├── lib/            dendritic walker + helpers (checks ride as a flake output)
 ├── docs/
 └── song/           the performed half (see [[Song-Vocabulary]])

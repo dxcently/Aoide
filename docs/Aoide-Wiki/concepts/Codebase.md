@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-14
+updated: 2026-08-25
 tags: [aoide, architecture, nix, flake, rust, node]
 ---
 
@@ -12,10 +12,6 @@ flake, the walker, the option contract, the systemd/service map, the runtime
 contracts, and what is real versus stubbed. It is the map from the design
 concepts ([[Snowflake-Anatomy]], [[Full-Architecture]]) to the files on disk.
 
-*Everything verifies green (cargo tests, flake check, vm-boot), and the
-profile **runs live** on yomi-strix — the graphical session (greetd →
-Hyprland → Quickshell) included.*
-
 ## The flake
 
 `flake.nix` is the fixed skeleton — later waves ADD files in their own dirs and
@@ -25,11 +21,11 @@ Outputs, all tolerant of empty layers so eval stays robust:
 
 - `nixosConfigurations.yomi-strix` — assembled by `lib/mkHost.nix`.
 - `packages` — **auto-discovered** by `lib/pkgs.nix` from `pkgs/<name>/default.nix`
-  (`callPackage`, `_`-shelving); currently `{aoide, melete, mneme}` plus
-  `default` (= aoide). Adding a package is one folder — this file never changes.
+  (`callPackage`, `_`-shelving); currently `{aoide, hyprglass, kimi-code,
+  melete, mneme}` plus `default` (= aoide). Adding a package is one folder —
+  this file never changes.
 - `checks` — the three coupling assertions, one auto-generated `pkg-<name>` per
-  discovered package (`pkg-aoide`/`pkg-melete`/`pkg-mneme`), plus
-  the `vm-boot` headless boot test (below).
+  discovered package, plus the `vm-boot` headless boot test (below).
 - `devShells.default` — Rust (cargo/rustc/clippy/rust-analyzer) + nix
   tooling (nixfmt/nil/deadnix/statix).
 - `formatter` — nixfmt.
@@ -68,6 +64,15 @@ harness vs the nixpkgs `melete` font — is an `intentionalShadows` exemption). 
 fleet-available and a single `aoide.song` declaration in `hosts/<host>/default.nix`
 selects which one a host performs (see [[Song-Vocabulary#Replay — any song, any host]]).
 
+**`lib/songbook.nix`** is the songbook manifest/registry generator (the one
+generator two callers share: the quickshell facet's build-time `manifest.json`/
+`registry.json` derivation, and the `songbookManifest` flake output
+[[Self-Ricing|`rice stage`]] shells out to via `nix eval --json` for its
+hot-sync half). **`lib/livery.nix`** resolves `aoide.livery.override.*`, the
+host-set venue-recolour tier (`CONTRACTS.md` §1). **`lib/song.nix`** builds
+each song's widget records from its `_widgets/<slot>.nix` functions — the nix
+analogue of `WidgetSlot.qml`.
+
 **`lib/checks.nix`** rides as flake `checks` — the contractual coupling
 discipline, written to throw legibly at eval time on a violation:
 
@@ -92,7 +97,7 @@ home-manager/stylix modules, the pkgs overlay, and mirrored `specialArgs`
 (`host = "vm-test"`, inputs, username, system; `node.pkgsReadOnly = false`
 so the overlay applies) — so the test boots the real assembly, not a
 replica. It asserts: `multi-user.target` reached; `aoide` on
-PATH with `schema --json` reporting exactly 60 commands (a hardcoded
+PATH with `schema --json` reporting exactly 68 commands (a hardcoded
 drift-tripwire figure, [[AOIDE-DEV]] §7) and `guide` exiting
 0; greetd enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
 linger active with the `aoided` and `shellbridge` user units finishing
@@ -124,11 +129,15 @@ no behaviour, so an empty config evaluates. The surface:
   with `lib.mkIf (config.aoide.song == "<name>")`. See [[Song-Vocabulary#Replay — any song, any host]].
 - `aoide.livery` — the v0 livery schema: closed `palette.{bg,fg,accent,urgent}`
   (base16, permissive hex type) + optional component tiers `bar.*` / `notif.*` /
-  `window.*` (each `nullOr` hex, `null` → palette). This is the **only** thing
-  facets read.
+  `window.*` (each `nullOr` hex, `null` → palette), plus an `override.*` venue
+  tier (host-set only, [[livery|resolved by `lib/livery.nix`]]).
+- `aoide.arrangement` — the v1 arrangement schema: which widget/surface types
+  a song brings into existence. `aoide.livery` and `aoide.arrangement` are the
+  whole facet-read whitelist — no module reads another module's options.
 - `aoide.surfaces.<name>.owner` — the surface-ownership registry.
-- `aoide.mcp.enable` (default false — house policy), `aoide.auditLog` (default
-  `/home/<user>/Aoide/log`).
+- `aoide.mcp.enable`, `aoide.a2a.enable`, `aoide.usage.enable`,
+  `aoide.secrets.enable` — each off by default (house policy); `aoide.auditLog`
+  (default `/home/<user>/Aoide/log`).
 
 ## The host profile — yomi-strix is real
 
@@ -166,8 +175,12 @@ All nucleus services are user services gated on `aoide.enable`, keyed into
 |---|---|---|
 | `aoided` | `nucleus/aoided.nix` | runs `${pkgs.aoide}/bin/aoided`; env `AOIDE_AUDIT_LOG`, `AOIDE_USER` |
 | `shellbridge` | `nucleus/shellbridge.nix` | runs `lyra shellbridge --run`; `RuntimeDirectory=aoide` for the socket |
+| `aoide-graph-reap` | `nucleus/shellbridge.nix` | timer, ~12s interval; the liveness reaper sweeping sessions a killed terminal could never mark `done` |
 | `aoide-melete-adapter` | `nucleus/melete-adapter.nix` | runs `aoide adapter melete --run`; `AOIDE_ADAPTER_SUBSCRIBE` allow-list |
 | `aoide-mcp` | `nucleus/aoided.nix` | **gated on `aoide.mcp.enable`**; `bindsTo` aoided |
+| `aoide-a2a` | `nucleus/aoided.nix` | **gated on `aoide.a2a.enable`**; the [[A2A-Door]] serve unit |
+| `aoide-usage` + timer | `nucleus/aoided.nix` | **gated on `aoide.usage.enable`**; runs `aoide usage` on `aoide.usage.interval` |
+| `aoide-secrets-serve` | `nucleus/secrets.nix` | **gated on `aoide.secrets.enable`**; SYSTEM (not user) service, own uid `aoide-secrets`, anchored to `multi-user.target` — see [[Secrets-Broker]] |
 | `aoide-obsidian-register` | `dendrites/obsidian.nix` | oneshot; registers a window class with shellbridge |
 
 `systemd.user.tmpfiles.rules` create `~/Aoide/log` (0700) and
@@ -206,9 +219,14 @@ Live-side state, all gitignored, none load-bearing for the build:
   `sessions.json` (agent session roster, written by
   [[shellbridge]]; records may carry an additive optional `parentSessionId`),
   `hooks.json` (live Claude Code hook phases), `projects.json` (the project
-  registry, kept by `aoide graph project`), and `graph.json` (the resolved
+  registry, kept by `aoide graph project`), `graph.json` (the resolved
   project/session DAG, written by `aoide graph emit` for Quickshell — see
-  [[Session-Graph]]). Each has a v0 shape in `CONTRACTS.md §4`; writes are
+  [[Session-Graph]]), `cover.json` (the wallpaper note, written by `cover
+  set`), `herald.json` (the notification ledger the Quickshell herald draws
+  from — the shellbridge daemon is the single writer), and `pending.json`
+  (the held-injection queue `graph send`/the A2A door write when their gate
+  doesn't clear immediate delivery, resolved by `graph pending
+  list/approve/deny`). Each has a v0 shape in `CONTRACTS.md §4`; writes are
   atomic (write-temp-then-rename), and the graph rewriters round-trip unknown
   fields so concurrent writers never lose data.
 - **Stage-dir resolution** (`CONTRACTS.md §4`): every stage
@@ -219,10 +237,11 @@ Live-side state, all gitignored, none load-bearing for the build:
 
 ## Repo-file roles
 
-- **`CONTRACTS.md`** — the five versioned contracts: livery schema v0, dendrite
-  shape v0, `aoide schema --json` output v0, stage-file formats v0, song shape
-  v0 (§5). The `checks` fail a merge that breaks one; bumping a version needs a
-  playbook migration.
+- **`CONTRACTS.md`** — §0 design philosophy plus the versioned contracts §1–8:
+  note schema, dendrite shape, `aoide schema --json` output, stage-file
+  formats, song shape, A2A door, peer federation, screen capture + pointer
+  synthesis. The `checks` fail a merge that breaks one; bumping a version
+  needs a playbook migration.
 - **`AGENTS.md`** — the tier-0 four-tier agent guide (onboarding → CLI → stdio
   MCP → network MCP) plus the six non-negotiable house rules. `aoide guide`
   prints the same map at runtime.
@@ -236,31 +255,28 @@ cd ~/Aoide
 nix flake check                                       # both assertions + both packages build
 nix build .#aoide                                # the package
 nix eval .#nixosConfigurations.yomi-strix.config.system.build.toplevel.drvPath
-cargo test                                             # schema / dispatch / mcp unit tests
+cargo test -p aoide-cli                                # per-crate only — see below
 nix build .#checks.x86_64-linux.vm-boot -L             # headless QEMU boot test
 ```
 
-The Rust crate carries unit tests for the schema (valid JSON, stable top-level
-keys, every command carries `--json` + exit codes, unique paths), the MCP
-door (tool list is one-to-one with the schema; `tools/call` dispatches into the
-same handlers), and the graph domain (`pkgs/aoide/src/graph.rs` is a thin
-re-export root over `graph/{model,doc,common,verbs,window,session_store,
-conduct,send}.rs` plus a shared `testutil` — pure cores plus handlers for all
-15 `graph` subcommands: cycle rejection, anchoring, a deterministic render
-snapshot, edge shape, prune orphan-clearing, unknown-field round-trip, a
-serialized stage-dir precedence test, and the pure focus-liveness helpers
-`normalize_addr`/`window_present`) — 63 unit tests across the crate at last
-count. The split mirrors `conductor.rs` + `conductor/`: the public
-`crate::graph::*` surface `dispatch`/`reap`/`conductor`/`shellbridge` reach is
-unchanged by it. One noted hazard: the env-var test mutex in `shellbridge.rs`
-is module-local — fine while it is the only module with env-touching tests.
+**Per-crate tests only.** `cargo test -p <crate>`, never `cargo test
+--workspace`: `aoide-conduct`/`aoide-server` bind real sockets and a
+workspace-wide run deadlocks on this machine. Each crate carries its own
+`registry.rs` golden test pinning its exact command-path set (`aoide-cli`:
+68 paths; `aoide-lyra`: 42), plus schema validity, exit-code, and MCP
+tool-list-parity tests; the conduct crate's graph domain
+(`crates/conduct/src/graph/{model,doc,common,verbs,window,session_store,
+conduct,send}.rs`) carries handlers for all 20 `graph` subcommands: cycle
+rejection, anchoring, a deterministic render snapshot, edge shape, prune
+orphan-clearing, unknown-field round-trip, a serialized stage-dir precedence
+test, and the pure focus-liveness helpers `normalize_addr`/`window_present`.
+One noted hazard: the env-var test mutex in `shellbridge.rs` is module-local
+— fine while each domain crate coordinates its own env-touching tests via
+`aoide-test-support::env_lock()`.
 
-`pkgs/aoide` is **one crate today**. A target blueprint for splitting it into
-pi-style single-charter crates (`protocol`, `conduct`, `server`, `client`,
-`storage`, `steward`, `song`, `management`, `evals`, `conductor`,
-`cli`) under a `[workspace]` is specified but not built — see
-[[Package-Layout]] for the target tree, per-crate charter, and the phased
-migration.
+`pkgs/aoide` is a 13-crate workspace across two binaries — see
+[[Package-Layout]] for the full crate roster, per-crate charter, and the
+two-binary split.
 
 ## Walking-skeleton status — real vs stubbed
 
@@ -271,9 +287,10 @@ append, user gate, default-deny event bus); shellbridge (atomic writer, seeded
 stage files, and a live socket accept loop — `focuswindow`); the melete-adapter skeleton (env-driven
 subscription, metadata-only notification boundary); all four livery emitters; the
 QML shell skeleton; the baked Stylix and compositor fan-outs; and the whole
-`aoide graph` group — 15 subcommands (`view`, `project add/remove/list`,
+`aoide graph` group — 20 subcommands (`view`, `project add/remove/list`,
 `link`, `session start/phase/end/hook`, `wrap`, `send`, `focus`, `prune`,
-`reap`, `emit`), none a stub (see [[Session-Graph]]) — plus the separate
+`reap`, `emit`, `permit`, `pending list/approve/deny`), none a stub (see
+[[Session-Graph]]) — plus the separate
 `aoide conductor` command (also real; the liveness-reap predicate now lives in
 its own `reap.rs` module, split out of `graph.rs`). `pkgs.aoide` carries unit
 tests across the crate (above). The QML tree's non-stub surfaces: the
@@ -285,15 +302,17 @@ song's `widgets/notifications.qml`) —
 across the facet's nine `owner = "quickshell"` surfaces (bar, notifications,
 launcher, osd, lockscreen, greeter, wallpaper, agentWidgets, sessionGraph; see
 [[Full-Architecture]]). `sessionGraph` is declared but has no QML body today
-— the standalone DAG overlay and its shared `GraphModel.qml` are no longer
-in the QML tree ([[Session-Graph]]). The bootable yomi-strix profile and the
+— the DAG renders via `aoide graph view`/`aoide conductor`, not a desktop
+overlay ([[Session-Graph]]). The bootable yomi-strix profile and the
 vm-boot check (above) are likewise real.
 
-**The dendrite set** now spans twenty entries in `modules/dendrites/`: bash
+**The dendrite set** now spans 27 entries in `modules/dendrites/`: bash
 (the `ad*` nh alias family replacing `dx*`), nh, git, kitty, neovim-via-nvf,
 starship, mcfly, btop, yazi, fastfetch, devtools, cli, fonts, hyprland,
-obsidian, melete, mneme, firefox, screenshot, and vision — ported from
-[[dxflake]]'s prior rig into Aoide shape. `hyprland` is the host-invariant
+obsidian, melete, mneme, firefox, screenshot, vision, audio, claude-code,
+clipboard, dunst, kimi-code, networkmanager, and pi-coding-agent — the first
+twenty ported from [[dxflake]]'s prior rig into Aoide shape, the rest grown
+since. `hyprland` is the host-invariant
 half of the compositor: keybinds, input devices, tiling layout, misc, and
 behavioural window rules, split out so a re-rice cannot disturb them (the
 compositor facet keeps the livery-derived look and the session plumbing). The `nvf` flake input threads to home-manager via

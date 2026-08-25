@@ -1,31 +1,25 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-23
+updated: 2026-08-25
 tags: [aoide, architecture, desktop, livery, pipeline]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
 
 # Full Architecture — the Whole Body
 
-One page that stitches the individual concepts into a single picture: the
-subsystems, their boundaries, and the inputs and outputs that connect them. Each
-subsystem has a dedicated page; this is the map of how they wire together. Read
-it after [[Overview]] to see the seams, then drill into the linked pages for the
-detail.
+The subsystems, their boundaries, and the inputs and outputs that connect them.
+Each subsystem has a dedicated page; read this one after [[Overview]] for the
+seams, then drill into the linked pages for detail.
 
 The organizing thesis (see [[Song-Vocabulary]]): architecture is frozen music.
 The **frozen half** is the nix layer — the score. The **performed half** is the
 running desktop — the performance. **Livery** is the one seam where they meet.
 
-*Everything verifies green (flake check + the vm-boot check) — and the stack
-**runs live** on yomi-strix.*
-
 ## Status — running live on yomi-strix
 
-Aoide is a **built, switched, and logged-into walking skeleton**:
 `nix flake check` is green, both packages build, the stack boots
-headless in the `vm-boot` QEMU check — and yomi-strix runs it as its daily
+headless in the `vm-boot` QEMU check, and yomi-strix runs it as its daily
 graphical session. Live now: greetd → Hyprland → Quickshell (bar, dock,
 gadgets, launcher, notifications, wallpaper — all one process, see
 [[Quickshell]]), NetworkManager, zram, the Strix Halo amdgpu params, the aoide
@@ -46,9 +40,8 @@ marked on one of three rungs:
 - **Future** — v1 livery tiers, `rice declare`/`rice transpose` (still
   stubs), the network-exposed Aoide connector.
 
-The repo is deliberately **local-only** for now: no git remote, so [[Melete]]
-fleet registration and its code-task flow wait until one exists. File-level
-detail lives in [[Codebase]]; this page stays at the map altitude.
+The repo tracks a git remote (`origin`). File-level detail lives in
+[[Codebase]]; this page stays at the map altitude.
 
 ## The two halves and the seam
 
@@ -76,14 +69,13 @@ Top is the driver (the agent); bottom is the pixels. Every arrow is a real input
 or output, not an abstraction. Boxes marked *(stub)* exist as schema + audit
 trail but exit 64 today.
 
-**Binary note.** This map predates the two-binary split and still labels
-everything `aoide` for one continuous picture of the data flow. In the
-shipped split (`CONTRACTS.md` §3, [[Package-Layout]]) the AGENT
-INTERFACE/`aoided`/CONTENT PIPELINE/NIX EVAL boxes are `aoide`'s (48
-commands: conducting/orchestration is aoide's identity); the RICE ENGINE,
-LIVERY, Quickshell, and shellbridge boxes below them are `lyra`'s (42
-commands, its own schema and dispatch — routed through the desktop, not
-through `aoided`'s CLI trunk).
+**Binary note.** The map below draws both binaries as one continuous picture
+of the data flow, labeled `aoide` throughout for readability. Ownership
+(`CONTRACTS.md` §3, [[Package-Layout]]): the AGENT INTERFACE/`aoided`/CONTENT
+PIPELINE/NIX EVAL boxes are `aoide`'s (68 commands: conducting/orchestration
+is aoide's identity); the RICE ENGINE, LIVERY, Quickshell, and shellbridge
+boxes below them are `lyra`'s (42 commands, its own schema and dispatch,
+routed through the desktop, not through `aoided`'s CLI trunk).
 
 ```
                           ┌───────────────────────────┐
@@ -93,7 +85,7 @@ through `aoided`'s CLI trunk).
                                         ▼            │
    ┌─────────────────────────────────────────────────────────────┐
    │  AGENT INTERFACE            aoide <cmd>   ·   aoide mcp serve │   [[Agent-Interface]]
-   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   48 commands · exit 0/1/2/64
+   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   68 commands · exit 0/1/2/64
    └───────────────────────────────┬─────────────────────────────┘
                                     ▼
    ┌─────────────────────────────────────────────────────────────┐
@@ -137,12 +129,11 @@ through `aoided`'s CLI trunk).
 ## Subsystem I/O — inputs, outputs, and status at a glance
 
 Each row is one subsystem: what flows in, what flows out, and where it stands on
-the implemented/stubbed ladder. This is the connective tissue the master map
-draws.
+the implemented/stubbed ladder.
 
 | Subsystem            | Inputs                                         | Outputs                                             | Status                                     |
 | -------------------- | ---------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
-| [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 40 real/8 exit 64; lyra 40 real/2 exit 64) |
+| [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 60 real/8 exit 64; lyra 40 real/2 exit 64) |
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`~/Aoide/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; stage    | mostly real (`declare`/`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all verbs exit 64)                |
@@ -250,9 +241,9 @@ default) — see [[Self-Ricing#Staging vs Declarative Mode]].
               ← the "self" in self-ricing
 ```
 
-`song/` is the agent's **only** writable domain.
+`song/` is the agent's only writable domain.
 
-**Song replay is implemented.** `aoide.song` (nucleus option, default
+Song replay is implemented: `aoide.song` (nucleus option, default
 `"sonata"`) selects the song a host performs; `lib/mkHost.nix` walks
 `song/songbook/` exactly as it walks `modules/`, so a committed song
 self-registers and self-gates on `config.aoide.song == "<name>"` — the same
@@ -262,7 +253,7 @@ other upstream-owned tree (nucleus, facets): upstream MAY still update or
 iterate on it. Every OTHER song — anything composed via `rice compose`
 under a different name — is clone-owned; upstream never touches it, an
 absolute guarantee unchanged by `sonata` being both shipped and actively
-iterated. The song carries **livery only**; the host is the
+iterated. The song carries livery only; the host is the
 venue — its specifics and which instruments (facets, dendrites) are enabled.
 Replay = same song, new venue (one line in `hosts/<host>/default.nix`);
 transpose = new key, same venue. The `song-shape` check asserts every walked
@@ -306,7 +297,7 @@ temporal composability|same thesis]] as the walker and the widget slots. See
    agent ──► A2A door ───────┘         (all generated from the same schema)
 ```
 
-This is shipped code, and it is now **two binaries**, per-binary schema
+This is shipped code, now two binaries, per-binary schema
 (`docs/architecture/PACKAGE-LAYOUT.md`, "Two binaries"; `CONTRACTS.md` §3) —
 conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
 
@@ -314,7 +305,7 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   `aoide schema --json` is its machine-readable source of truth; the stdio
   MCP façade (`aoide mcp serve --stdio`) generates its tool list from it, and
   the [[A2A-Door]]'s AgentCard is derived from the same schema — all
-  one-to-one. This page tracks **64 commands** — real (56): `guide`, `schema`,
+  one-to-one. **68 commands** — real (60): `guide`, `schema`,
   `mcp serve`, `daemon`, `conduct`, `conductor`, `adapter melete`, the
   5-verb `a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`),
   the 5-verb `peer` group (`peer add/list/remove/pull/status` — cross-device
@@ -322,16 +313,17 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   (`serve`/`exec`/`add`/`rm`/`grant`/`revoke`/`enroll`/`put`/`set-totp`/
   `automate`/`expose`/`migrate`/`pending`/`approve`/`dismiss`/`watch` — the
   socket-only credential broker under its own uid, [[Secrets-Broker]]),
-  `usage`, `hooks install`, `soundcheck`, and the 20-verb `graph` group (the
+  `usage`, `hooks install`, `soundcheck`, `who` (live presence over sessions
+  and registered peers), the 3-verb `inbox` group (`list`/`read`/`clear`, the
+  durable per-host message store), and the 20-verb `graph` group (the
   [[Session-Graph]] DAG viewer + management layer over projects and
   sessions, incl. `graph send`/`wrap`/`reap` and the `graph pending
   list|approve|deny` held-injection queue, all real); stubs (8, exit 64):
   the 5-verb `content` group (`register`/`propose`/`ingest`/`query`/
-  `approve`), `make`, `update`, `onboard`. Two further groups (`inbox`,
-  `who`) exist beyond what this page tracks. Core is nix-independent: cargo
+  `approve`), `make`, `update`, `onboard`. Core is nix-independent: cargo
   build, zero nix shell-outs.
 - **`lyra`** — the AoideOS paint binary. `lyra schema --json` holds the other
-  **42 commands**: the 16-verb `rice` group (`lint`, `stage`, `compose`, the
+  **42 commands**: the 18-verb `rice` group (`lint`, `stage`, `compose`, the
   3-verb `rice draft` group, the 4-verb `rice mode` group, the 5-verb `rice
   take` rehearsal-snapshot group, `rice back`; `declare`/`transpose` are the
   2 stubs), `cover set`, the 3-verb `livery` group (`lint`/`resolve`/`emit`
@@ -348,6 +340,8 @@ either binary. Exit codes are contractual, identical in both binaries: 0 ok,
 
 On the host, the plane runs as systemd user units, all from the nucleus:
 `aoided`, `shellbridge` (socket `$XDG_RUNTIME_DIR/aoide/shellbridge.sock`),
+the `aoide-graph-reap` timer (the liveness reaper, ~12s interval, sweeps
+sessions a killed terminal could never mark `done`),
 `aoide-melete-adapter`, and `aoide-mcp` (gated on `aoide.mcp.enable`, default
 false) — plus the opt-in `aoide-a2a` ([[A2A-Door]], gated on `aoide.a2a.enable`)
 and `aoide-usage` (gated on `aoide.usage.enable`) units, and the
@@ -356,11 +350,12 @@ and `aoide-usage` (gated on `aoide.usage.enable`) units, and the
 `aoide-secrets-serve`, gated on `aoide.secrets.enable`, own uid
 `aoide-secrets` — anchored to `multi-user.target` rather than a graphical
 session.
-Live state lands in `song/stage/{livery,sessions,hooks,projects,graph}.json`
-(the last two from the [[Session-Graph]] layer). `lib/mkHost.nix`
+Live state lands in `song/stage/*.json` (livery, mode, sessions, hooks,
+projects, graph, cover, herald, pending, and the [[Session-Graph]] DAG
+layer's own files). `lib/mkHost.nix`
 injects `pkgs.aoide` by overlay from the **same**
 `callPackage` paths as the flake's `packages` output, so the units and the
-flake build one binary, not two.
+flake always build the same binaries, never a drifted copy.
 
 - **Three connectors, three roles.** The [[Mneme]] connector is the vault door
   (knowledge); the [[Melete]] connector is the doer harness (jobs); the
@@ -394,21 +389,24 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 ├── modules/         the snowflake — walker-discovered layers
 │   ├── nucleus/     options.nix (THE contract) · aoided · shellbridge · melete-adapter
 │   │                · packages.nix (aoide + git on PATH) · nix.nix (flakes on)
-│   ├── dendrites/   20 opt-in features (bash, nh, git, kitty, neovim, starship,
+│   ├── dendrites/   27 opt-in features (bash, nh, git, kitty, neovim, starship,
 │   │                mcfly, btop, yazi, fastfetch, devtools, cli, fonts, hyprland,
-│   │                obsidian, melete, mneme, firefox, screenshot, vision) ← additive
+│   │                obsidian, melete, mneme, firefox, screenshot, vision, audio,
+│   │                claude-code, clipboard, dunst, kimi-code, networkmanager,
+│   │                pi-coding-agent) ← additive
 │   └── facets/      quickshell · compositor · stylix          ← render surfaces (livery-only)
 ├── hosts/           common/ + yomi-strix/ (flags + the aoide.song selector; a real
 │                    hardware profile, switched live and running as the daily desktop)
-├── pkgs/            aoide/ (Rust: aoide + aoided; one crate today — a pi-
-│                    style single-charter crate split is a target blueprint,
-│                    not yet built, see [[Package-Layout]])
+├── pkgs/            aoide/ (Rust workspace, 13 crates over two binaries —
+│                    aoide/aoided core + lyra paint, see [[Package-Layout]])
 ├── song/            songbook/sonata/ (shipped standard) — rice.nix · livery.json ·
 │                    palette/ · sounds/ · icons/ · widgets/ · design/ (per song);
 │                    covers/ — shared wallpaper library, referenced by rice.nix;
 │                    stage/ + auditions/ runtime (gitignored)
 ├── docs/BUILD.md    module-authoring conventions
-├── CONTRACTS.md     versioned contracts (livery · dendrite · schema · stage · song shape)
+├── CONTRACTS.md     §0 design philosophy + the versioned contracts §1–8 (note
+│                    schema · dendrite shape · schema output · stage files ·
+│                    song shape · A2A door · peer federation · screen capture)
 ├── AGENTS.md        tier-0 agent guide (aoide guide prints the same map)
 └── log              single audit log — runtime, gitignored
 ```
@@ -418,7 +416,8 @@ Runtime dirs (`song/{stage,auditions}`, root `log`, `index/`,
 versioned score, legitimately walked at eval.
 
 `hosts/` knows dendrites; dendrites never know hosts. Facets read only
-`aoide.livery` (and declare `aoide.surfaces`); no module reads another module.
+`aoide.livery` and `aoide.arrangement` (and declare `aoide.surfaces`); no
+module reads another module.
 The coupling discipline is contractual — the flake's checks (`surface-ownership`,
 `no-song-read`, `song-shape`, plus building both packages, plus the `vm-boot`
 headless boot of the assembled stack) fail eval on violation.

@@ -1291,3 +1291,140 @@ only filler goes.
   `bearerSecret` field is now documented in the registry section above it
   but not folded into that section's own autogate-match prose — a small
   follow-up, not done here to stay inside this sweep's page list.
+
+## [2026-08-25] refactor | de-slop sweep 7
+
+De-slopped the five deepest architecture pages (`concepts/{Full-Architecture,
+Codebase,Package-Layout,Plugin-Architecture,Snowflake-Anatomy}.md`);
+mechanism depth (diagrams, tables, invariants) kept everywhere, only filler
+and stale facts went. This sweep's VERIFY pass surfaced far more drift than
+usual — the crate split (7 → 13 crates) and the two-binary split had never
+been folded into `Codebase.md`, and several counts had drifted since their
+last verification.
+
+- Full-Architecture.md (TRIM+VERIFY): 441 → 439 lines. Cut the status-brag
+  italic lead and the redundant "built, switched, and logged-into walking
+  skeleton" framing (S5/S2/S10) from the Status section. Rewrote the
+  "Binary note" out of predates-the-split framing (Assertion clause 1) into
+  present-tense ownership language. Verified and fixed: aoide's command
+  total was stated as 48/64 in three places, actual is **68** (60 real + 8
+  stub, confirmed against `crates/cli/src/registry.rs`'s golden snapshot
+  AND `lib/vmTest.nix`'s `cmd_count == 68` drift-tripwire assertion — the
+  page previously undercounted by not folding in the `who`/`inbox.*`
+  groups); lyra's `rice` group was stated as 16-verb, actual is
+  **18-verb** (confirmed against `crates/lyra/src/registry.rs`'s golden
+  snapshot). Fixed the repo-tree line claiming `pkgs/aoide` is "one crate
+  today" — it is a 13-crate workspace over two binaries (verified `ls
+  pkgs/aoide/crates/`). Fixed the dendrite tree line: 20 named entries,
+  actual is **27** (`modules/dendrites/` now also carries audio,
+  claude-code, clipboard, dunst, kimi-code, networkmanager,
+  pi-coding-agent). Fixed the CONTRACTS.md line: "five versioned contracts"
+  is stale, actual is §0 (philosophy) + §1–8 (eight versioned contracts,
+  including A2A door/peer federation/screen capture, added since). Fixed
+  the systemd unit list: added the `aoide-graph-reap` liveness-reap timer
+  (missing entirely) and expanded `song/stage/*.json` from the 5 files
+  named to the full set (livery, mode, sessions, hooks, projects, graph,
+  cover, herald, pending). Fixed the facets-read-whitelist line: it named
+  only `aoide.livery`, missing `aoide.arrangement` (verified against
+  `modules/nucleus/options.nix` and house rule 5). **Fixed a real
+  falsehood**: "the repo is deliberately local-only for now: no git
+  remote" — `git remote -v` shows `origin` configured
+  (`git@github.com:dxcently/Aoide.git`); rewrote to state the repo tracks
+  a remote and dropped the now-unverifiable Melete-fleet-registration
+  consequent claim.
+- Codebase.md (TRIM+VERIFY): 336 → 354 lines — net growth because VERIFY
+  turned up more missing facts than there was filler to cut; every added
+  line is a verified correction, not padding. Cut the status-brag italic
+  lead (S5/S2). Fixed the package list: `{aoide, melete, mneme}` was stale,
+  actual is **`{aoide, hyprglass, kimi-code, melete, mneme}`** (verified
+  `ls pkgs/`). Added the three `lib/` files the page never mentioned
+  (`songbook.nix`, `livery.nix`, `song.nix` — verified against their own
+  header comments). Fixed the vm-boot assertion count from "60 commands"
+  to **68** (matches `lib/vmTest.nix`'s literal `cmd_count == 68`). Added
+  the missing option-contract entries (`aoide.arrangement`,
+  `aoide.a2a.enable`, `aoide.usage.enable`, `aoide.secrets.enable`).
+  Rewrote the systemd unit table to add the four units it was missing
+  entirely (`aoide-graph-reap`, `aoide-a2a`, `aoide-usage`+timer,
+  `aoide-secrets-serve`) — verified against every `systemd.user.services.*`/
+  `systemd.services.*` declaration in `modules/nucleus/*.nix`. Expanded the
+  stage-file list from 6 to the verified 9 documented files (added
+  `cover.json`, `herald.json`, `pending.json`, each glossed from
+  `CONTRACTS.md` §4). Fixed the CONTRACTS.md section count (same fix as
+  Full-Architecture, above). **Fixed a latent safety bug in the
+  documentation itself**: the build-and-verify block told a reader to run
+  bare `cargo test`, which is `cargo test --workspace` in a workspace root
+  and is exactly the command `pkgs/aoide/crates/AGENTS.md` says
+  deadlocks on this machine (`aoide-conduct`/`aoide-server` bind real
+  sockets) — changed the example to `cargo test -p aoide-cli` with a
+  one-line explanation. Rewrote the whole "one crate today" / stale
+  `pkgs/aoide/src/graph.rs` paragraph to the landed 13-crate reality,
+  pointing to [[Package-Layout]] instead of duplicating its table. Fixed
+  the `aoide graph` subcommand count from 15 to **20** (added `permit`,
+  `pending list/approve/deny`, missing from the enumerated list). Fixed
+  the dendrite count/list (20 → 27, same fix as Full-Architecture). Fixed
+  one Assertion-clause-2 violation ("no longer in the QML tree" → present
+  indicative).
+- Package-Layout.md (TRIM+VERIFY): 248 → 170 lines. This page was the
+  most out of date of the five — it described the crate split as "seven
+  crates carved out" with `cli` explicitly stated to NOT be a separate
+  crate, no mention of `lyra`/`screen`/`secrets`/`test-support`/`upkeep`
+  anywhere. Verified the actual crate roster against `ls
+  pkgs/aoide/crates/` and each crate's own `Cargo.toml` `name = `: **13
+  crates** (`protocol`, `storage`, `conduct`, `client`, `server`, `song`,
+  `conductor`, `cli`, `test-support`, `upkeep`, `lyra`, `screen`,
+  `secrets`) — the brief's suggested list matched exactly. Rewrote the
+  per-crate charter table with verified command-ownership (cross-checked
+  each crate's `commands::register` call against both `registry.rs` golden
+  snapshots, hand-summed to confirm the 68/42 totals) instead of the stale
+  "maps-from (today)" file-archaeology column, which was history, not
+  present architecture. Added the "Two binaries" section (previously
+  entirely absent from this page despite being the single most consequential
+  fact about the current layout) condensed from `docs/architecture/
+  PACKAGE-LAYOUT.md`'s own "Two binaries" section, including the four
+  named charter exceptions (shellbridge/herald files staying in `conduct`,
+  `storage::takes`/`storage::mode` staying in `storage`). Compressed the
+  blow-by-blow landed-phase commit history (Assertion clause 2 — history
+  belongs in this log, not page prose) to one line; kept the DEFER
+  reasoning for `steward`/`management`/`evals` under present-indicative
+  Status labels, since those are decided-but-unbuilt designs, not history.
+  Dropped the "naming — DECIDED" open question (it isn't open) and the
+  redundant repeat of the crate mapping table's rationale.
+- Snowflake-Anatomy.md (TRIM): 68 → 68 lines. Cut the "the metaphor is not
+  decorative" snowflake-morphology justification essay (S4) — it is
+  byte-for-byte the same reasoning already in `Lexicon.md`'s "The frozen
+  family" section; replaced with one clause + a `[[Lexicon#The frozen
+  family — snowflake morphology]]` link. Split one dense paragraph
+  chaining 3+ wikilinks per clause (S6) into shorter sentences. Fixed the
+  same `aoide.arrangement` omission as the other pages ("each reads only
+  the `aoide.livery` option" → livery **and** arrangement). Fixed the
+  repo-layout tree's `pkgs/` line ("aoide CLI (Rust)" → the actual 5
+  walker-discovered packages).
+- Plugin-Architecture.md (KEEP): 96 lines, zero edits. Verified its two
+  load-bearing claims against the repo: `lib/walk.nix` walking
+  `song/songbook/*/rice.nix` (confirmed — `lib/mkHost.nix` calls the same
+  `walk` function on `../song/songbook`) and the closed facet read-list
+  `aoide.livery`/`aoide.arrangement` (confirmed against
+  `modules/nucleus/options.nix` and `modules/AGENTS.md`). No slop pattern
+  found, no drift found.
+- Claims left unverified (cargo is off-limits this sweep — another agent
+  owns the build directory, and a hygiene batch is actively editing
+  conduct/secrets test files): the exact unit-test counts stated in
+  Codebase.md's prose ("63 unit tests," etc. — left as-is, not
+  independently re-derivable without running `cargo test`).
+- Out-of-scope drift spotted, not fixed: `pkgs/aoide/crates/lyra/AGENTS.md`
+  itself states "cli's 48" commands in its own invariants section — stale
+  against the actual 68, inside the REPO, not the wiki (a bug this sweep
+  cannot fix per its file scope). `docs/architecture/PACKAGE-LAYOUT.md`
+  (the repo doc `Package-Layout.md` mirrors) has no mention of the
+  `secrets` crate anywhere, and mentions `screen` only inside prose, not
+  as a workspace member — that repo doc itself is behind its own tree.
+  `entities/aoide-cli.md` (not in this sweep's page list) almost certainly
+  repeats several of the same stale counts (48/64 commands, single-crate
+  framing) fixed here in Full-Architecture.md and Codebase.md — a strong
+  candidate for the next sweep. `concepts/Session-Graph.md` (also outside
+  this sweep) should be checked for the same "one crate"/command-count
+  drift class. `song/stage/grimoire.json` exists on disk
+  (`modules/facets/quickshell/qml/GrimoireLedger.qml` reads it) but has no
+  `CONTRACTS.md` §4 entry and is not mentioned on any page touched this
+  sweep — left out of the stage-file lists added above rather than guessed
+  at.
