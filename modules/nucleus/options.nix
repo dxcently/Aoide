@@ -580,6 +580,22 @@ in
           at `a2a serve` launch.
         '';
       };
+
+      bearerSecret = mkOption {
+        type = types.str;
+        default = "";
+        description = ''
+          Name of a secret in the local `aoide secrets` broker the A2A door
+          expects as its inbound `Authorization: Bearer` token. Only the
+          NAME crosses this option and the `aoide-a2a` unit's environment
+          (`AOIDE_A2A_BEARER_SECRET`); the door resolves the value fresh on
+          every request through the broker socket (consumer `a2a-door`), and
+          a resolve failure fails closed. Takes precedence over `tokenFile`
+          when set. Empty (the default) leaves the door on the `tokenFile`
+          behavior. The unit's user must be able to reach the broker socket
+          (group `aoide-secrets-access`).
+        '';
+      };
     };
 
     # ── Usage widget + poller (opt-in, off by default) ───────────────────────

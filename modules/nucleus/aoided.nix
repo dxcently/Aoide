@@ -124,10 +124,12 @@ lib.mkIf config.aoide.enable {
   # message/send's spawn path only ever launches `aoide.a2a.spawnAgent` (set
   # below, empty by default = spawning disabled) — never a client-supplied
   # command. Loopback/user-scoped by default — same security posture as
-  # aoide-mcp. `aoide.a2a.tokenFile` (empty by default) is the bearer-token
-  # gate (CONTRACTS.md §6 amendment, 2026-08-18): once set, Spawn requires a
-  # valid token AND loopback stops auto-trusting an unauthenticated caller —
-  # the fix for a reverse proxy/tunnel making a remote caller look loopback.
+  # aoide-mcp. Two bearer gates, `aoide.a2a.bearerSecret` taking precedence:
+  # a broker-resolved secret NAME (value fetched fresh per request, resolve
+  # failure fails closed) or `aoide.a2a.tokenFile`, a path read once at
+  # launch. Either, once set, means Spawn requires a valid token AND loopback
+  # stops auto-trusting an unauthenticated caller — the fix for a reverse
+  # proxy/tunnel making a remote caller look loopback.
   systemd.user.services.aoide-a2a = lib.mkIf config.aoide.a2a.enable {
     description = "Aoide A2A (Agent2Agent) door (loopback by default, user-only)";
 
@@ -144,6 +146,7 @@ lib.mkIf config.aoide.enable {
         "AOIDE_A2A_PORT=${toString config.aoide.a2a.port}"
         "AOIDE_A2A_SPAWN_AGENT=${config.aoide.a2a.spawnAgent}"
         "AOIDE_A2A_TOKEN_FILE=${config.aoide.a2a.tokenFile}"
+        "AOIDE_A2A_BEARER_SECRET=${config.aoide.a2a.bearerSecret}"
         "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
         "AOIDE_USER=${config.aoide.user}"
       ];
