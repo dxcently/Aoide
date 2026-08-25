@@ -59,20 +59,27 @@ lib.mkIf config.aoide.enable {
       # even when Agent B hasn't yet realised the package.
       ExecStart = "${pkgs.aoide}/bin/aoided";
 
-      # aoided is still the SKELETON: `daemon::run` performs its policy
-      # self-check, prints the status JSON, and exits 0 in ~25ms — there is
-      # no event loop yet. Declared Type=simple, that clean exit flipped the
-      # unit inactive and BindsTo dragged the a2a/mcp doors down with it
-      # (found live on osaka: door up 25ms then stopped). oneshot +
-      # RemainAfterExit says what the binary actually does and holds the
-      # unit "active (exited)" so the doors it anchors stay up. When the
-      # daemon grows its real loop, revert to Type=simple + Restart.
-      Type = "oneshot";
-      RemainAfterExit = true;
+      # aoided is the resident daemon (P-D2, docs/architecture/AOIDED.md):
+      # `daemon::run_loop` binds its own control socket, spawns the accept
+      # loop, and ticks forever — it never exits on its own, so Type=simple
+      # is the correct declaration (an EARLIER skeleton build that exited
+      # after one policy self-check needed oneshot+RemainAfterExit instead,
+      # since a clean exit under Type=simple back then flipped the unit
+      # inactive and BindsTo dragged the a2a/mcp doors down with it — found
+      # live on osaka). Restart=on-failure covers a crash (a first-loop bug,
+      # a bind failure) without masking one as permanently "active".
+      Type = "simple";
+      Restart = "on-failure";
+      RestartSec = "5s";
 
       # Audit log path comes from the option contract (modules/nucleus/options.nix).
       # Passed as an environment variable so the daemon picks it up without a
-      # secondary config file at this skeleton stage.
+      # secondary config file. The control socket and events feed need no
+      # entry here — `daemon::socket_path`/`daemon::events_path` default to
+      # `$XDG_RUNTIME_DIR/aoide/aoided.sock`/`events.jsonl` (a systemd user
+      # unit already has `XDG_RUNTIME_DIR` set); `AOIDE_DAEMON_SOCKET`/
+      # `AOIDE_DAEMON_EVENTS` are the override seam for a host that needs
+      # something else, not something this unit has to set.
       Environment = [
         "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
         "AOIDE_USER=${config.aoide.user}"
@@ -86,10 +93,11 @@ lib.mkIf config.aoide.enable {
       StandardError = "journal";
     };
 
-    # Skeleton: a real implementation will also set up the unix socket path,
-    # subscription manifest path, and polkit agent address. Those land when
-    # Agent B ships the daemon binary; the seams (env vars above) are the
-    # real integration points.
+    # The control socket, events feed, and registry dispatch are live
+    # (P-D2/P-D4, docs/architecture/AOIDED.md) — `ping`/`subscribe` today,
+    # `dispatch` (the fourth door) once P-D4 lands. Producers onto the
+    # events feed (the secrets-feed mirror, the #69 hand-edit watcher) are
+    # P-D3, not yet wired into the tick loop.
   };
 
   # ── MCP façade (opt-in, off by default per house policy) ────────────────
