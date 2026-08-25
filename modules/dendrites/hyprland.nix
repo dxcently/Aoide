@@ -143,8 +143,10 @@ in
         # hot-swaps the live wallpaper. No CLI toggle verb, no inbound socket.
         bind = SUPER, W, global, aoide:wallpaper
 
-        # Lock screen
-        bind = SUPER, ESCAPE, exec, aoide shell lock
+        # Lock screen (hyprlock directly — no lock verb exists in either
+        # binary; the shellbridge powermenu's PowerAction::Lock shells the
+        # same locker)
+        bind = SUPER, ESCAPE, exec, hyprlock
 
         # Panel dock (Hyprland global shortcut → the center-left panel's
         # GlobalShortcut toggle). SUPER+G opens/closes the center-left book-edge
