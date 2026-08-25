@@ -292,10 +292,15 @@ projections of daemon state, written by the daemon so every existing reader
 
 ### Routing
 
-The session-write family — `graph session start/phase/end/wrap`,
-`graph session hook`, the `subagent-*` verbs (`conduct/src/graph/
-session_store.rs:41` and siblings), and `graph reap` — routes through a
-thin client:
+The session-write family — `graph session start/phase/end`,
+`graph session hook`, and `graph reap` — routes through a thin client.
+Two members named by the original design deliberately do NOT route:
+`session wrap` spawns a long-lived child with inherited stdio and blocks
+on it, which a stateless request/reply socket cannot carry (its direct
+registration writes are folded by the daemon's tick reconcile like any
+out-of-band write), and the `subagent-*` operations are crate-internal
+helpers reached only through `session hook`'s own mapping, never
+separately dispatched:
 
 ```rust
 // aoide-client (outbound half, per the server/client split)
