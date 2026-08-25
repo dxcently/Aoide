@@ -99,7 +99,7 @@
             # the compositor does the frosting instead. The kitty window class is
             # additionally pinned in the compositor's Aero window rules.
             #
-            # Brightness (khoa): keep the CREAM cell colour (song base00), just
+            # Brightness (the User): keep the CREAM cell colour (song base00), just
             # make the terminal read brighter — a high background_opacity (0.86)
             # so the bright cream dominates over the warm painting behind it
             # instead of the wallpaper muddying it dim; hyprglass then glosses

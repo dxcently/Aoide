@@ -59,7 +59,7 @@ let
   gapOuter = if geo.gapsOut != null then geo.gapsOut else 8;
   gapInner = if geo.gapsIn != null then geo.gapsIn else 6;
   borderWidth = if geo.borderSize != null then geo.borderSize else 2;
-  # Edged windows (khoa, with the bw border key): square corners — the
+  # Edged windows (the User, with the bw border key): square corners — the
   # dxflake read. The Pantheon wireframe language wants hard outlines too.
   rounding = if geo.rounding != null then geo.rounding else 0; # window corner radius (px)
   blurEnabled = if geo.blurEnabled != null then geo.blurEnabled else true;
@@ -169,7 +169,7 @@ let
     # (SteleLayerPopout — not an xdg_popup of aoide-bar) precisely so
     # blur_popups above cannot reach it: its papyrus sheet keeps an opaque
     # marble frame but cuts a transparent window over the day grid, and that
-    # window must show the desktop CRISPLY (khoa, 2026-08-13: "no blur").
+    # window must show the desktop CRISPLY (the User, 2026-08-13: "no blur").
     # An unmatched layer namespace gets no blur by default — this rule pins
     # the exclusion EXPLICITLY so a future blanket layer rule can't silently
     # frost it. Deliberately absent from the hyprglass namespaces below for
@@ -189,7 +189,7 @@ let
     # hyprglass targets LAYER surfaces by namespace (layers { namespaces = … }).
     # For WINDOWS it exposes only a single GLOBAL `manage_window_blur` toggle —
     # there is NO per-class/per-window targeting in v0.7.0 (verified against the
-    # built plugin's config keys). khoa asked for hyprglass on the terminals
+    # built plugin's config keys). The User asked for hyprglass on the terminals
     # (and "any transparent layer") too, so we DO flip manage_window_blur here:
     # this desktop is terminal-centric and the glass shader only paints visible
     # TRANSLUCENT content (it discards fully-transparent/opaque-covered
@@ -223,14 +223,14 @@ let
     # field ... missing a value"). Terminals ONLY — this is not a global
     # inactive_opacity: media/image/video/browser windows carry arbitrary,
     # non-theme-matched content and must stay 1.0/1.0 by never matching a rule.
-    # LEGIBILITY FLOOR (khoa + Fable advisory): 0.80 keeps unfocused terminal
+    # LEGIBILITY FLOOR (the User + Fable advisory): 0.80 keeps unfocused terminal
     # text over the marble field at ≈3.7:1, still glanceable. Fable's floor is
     # 0.75 (≈3.2:1); 0.70 breaks readability outright. If a live vision check
     # ever finds unfocused terminal text hard to read, raise this toward 0.85 —
     # never drop below 0.75. The lines/text stay clean and readable; the
     # transparency serves that, not the other way around.
     windowrule = opacity 1.0 0.80, match:class kitty
-    # Edged everywhere (khoa): hard square corners on the terminal too — the
+    # Edged everywhere (the User): hard square corners on the terminal too — the
     # global decoration rounding is already 0, so this pins kitty to match
     # (the earlier `rounding 3` softened only the terminal; now nothing rounds).
     windowrule = rounding 0, match:class kitty
