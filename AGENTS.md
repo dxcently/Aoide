@@ -31,7 +31,7 @@ before acting. The house rules below are non-negotiable.
 
 ## Tier 1 — the CLI (full capability)
 
-`aoide <cmd>` is the **complete** orchestration surface (72 commands: conducting,
+`aoide <cmd>` is the **complete** orchestration surface (76 commands: conducting,
 the project/session graph, A2A, peers, the daemon, its own event bus, usage,
 hooks); `lyra <cmd>`
 is the complete painted surface (42 commands: rice/draft/mode/cover/livery/
