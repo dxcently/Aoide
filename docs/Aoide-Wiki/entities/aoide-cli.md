@@ -1,30 +1,29 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-08-23
+updated: 2026-08-25
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
 
 # aoide (the CLI binary)
 
-The `aoide` binary is Aoide's core: the orchestration surface — conducting,
-the project/session graph, A2A, peer federation, the daemon, usage, hooks —
-the CLI trunk of [[Agent-Interface]]. It ships two binaries (`aoide` the CLI,
-`aoided` the daemon) from a pi-style split workspace of single-charter crates
+`aoide` is Aoide's core orchestration surface: conducting, the project/
+session graph, A2A, peer federation, the daemon, usage, and hooks. It is the
+CLI trunk of [[Agent-Interface]]. The crate ships two binaries, `aoide` (CLI)
+and `aoided` (daemon), from a pi-style workspace of single-charter crates
 (`protocol`, `storage`, `client`, `conduct`, `server`, `conductor`, `upkeep`,
-`cli` — [[Package-Layout]]). "An API that happens to be typeable": every
-command emits structured `--json`, every command carries meaningful exit
-codes, and the same handlers back the CLI door, the MCP façade, and the
-[[A2A-Door]] so the three can never drift.
+`cli` — [[Package-Layout]]). Every command emits structured `--json` and
+carries a meaningful exit code. The CLI, the MCP façade, and the
+[[A2A-Door]] share the same handlers, so the three doors cannot drift.
 
 Everything that paints — rice/draft/mode/cover/livery/quickshell/screen/
-shellbridge/herald/take, the whole AoideOS surface — ships in a **second
-binary, `lyra`**, not here (`docs/architecture/PACKAGE-LAYOUT.md`, "Two
-binaries"; `CONTRACTS.md` §3). Conducting orchestration is aoide's identity;
-lyra paints. See [[references/cli/Rice-and-Livery|Rice-and-Livery]],
-[[references/cli/Screen-Verbs|Screen-Verbs]], and the other `lyra`-owned
-group pages under `references/cli/` for that surface's per-command detail.
+shellbridge/herald/take, the whole AoideOS surface — ships in a second
+binary, `lyra`. Conducting orchestration is aoide's identity; lyra paints
+(`docs/architecture/PACKAGE-LAYOUT.md` "Two binaries"; `CONTRACTS.md` §3).
+See [[references/cli/Rice-and-Livery|Rice-and-Livery]] and
+[[references/cli/Screen-Verbs|Screen-Verbs]] for that surface's per-command
+detail.
 
 *The crate root lives at `pkgs/aoide/crates/cli/`; it packages via
 `rustPlatform.buildRustPackage` with `meta.mainProgram = "aoide"` and vendored
@@ -35,41 +34,37 @@ to nix.*
 ## The command tree — a self-registering registry
 
 `pkgs/aoide/crates/cli/src/registry.rs` declares the `Command`/`Registry`
-types (path, summary, args, flags, `gated`, `implemented`, a
-`handler: fn(&Invocation) -> Outcome`, an `available` check) plus the
-`cmd!`/`arg!`/`flag!` macros that build one — shared via `aoide-protocol`.
-Each DOMAIN crate contributes its own entries through its own
-`commands::register(&mut Registry)` function (protocol::door's per-binary
-composition root); `cli/src/commands/mod.rs::all()` assembles the full
-registry in the historical `schema --json` order, calling into
-`aoide_server`, `aoide_conduct`, `aoide_client`, `aoide_conductor`,
-`aoide_storage`, `aoide_upkeep`, and `aoide_secrets` in turn, plus its own
-root-coupled `meta`/`stubs`/`infra` groups. `aoide_secrets::commands::
-register` is appended newest — the [[Secrets-Broker]] group (`serve`/
-`exec`/`add`/`rm`/`grant`/`revoke`/`enroll`/`put`/`set-totp`/`automate`/
-`expose`/`migrate`/`pending`/`approve`/`dismiss`/`watch`). P-A5 of the binary-split workstream removed
-the 11 register lines for the painted bundle (rice/draft/mode/cover/livery/
-rice-late-stubs/shellbridge/quickshell/screen/herald/take) from this list —
-those 39 command paths now live only in `crates/lyra/src/commands/mod.rs::all()`.
+types (path, summary, args, flags, `gated`, `implemented`, a handler
+function, an `available` check) and the `cmd!`/`arg!`/`flag!` macros that
+build them, shared via `aoide-protocol`. Each domain crate registers its own
+entries through its own `commands::register(&mut Registry)` function;
+`cli/src/commands/mod.rs::all()` assembles the full registry in `schema
+--json`'s order, calling into `aoide_server`, `aoide_conduct`,
+`aoide_client`, `aoide_conductor`, `aoide_storage`, `aoide_upkeep`, and
+`aoide_secrets` in turn, plus its own `meta`/`stubs`/`infra` groups.
+`aoide_secrets::commands::register` is newest, contributing the
+[[Secrets-Broker]] group (`serve`/`exec`/`add`/`rm`/`grant`/`revoke`/
+`enroll`/`put`/`set-totp`/`automate`/`expose`/`migrate`/`pending`/`approve`/
+`dismiss`/`watch`). P-A5 of the binary-split workstream moved 11 painted
+groups (rice/draft/mode/cover/livery/shellbridge/quickshell/screen/herald/
+take — 39 command paths) into `crates/lyra/src/commands/mod.rs::all()`.
 
-`dispatch()` is a thin lookup against the one process-wide `Registry` (built
-once via `OnceLock`) plus the audit-log append and gate tail — the same
-shape run through by both doors. `schema --json`, the MCP tool list, and the
+`dispatch()` looks up one process-wide `Registry` (built once via
+`OnceLock`), appends to the audit log, and applies the gate — the same path
+run through by both doors. `schema --json`, the MCP tool list, and the
 CLI's own path table all derive from that one registry; there is no second,
-hand-maintained command table anywhere in the crate. A
-`command_paths_match_the_golden_snapshot` unit test in `registry.rs` pins the
-sorted set of every command path, so adding, removing, or renaming a leaf
-shows as a deliberate, visible diff against that pinned snapshot — the same
-shape as Hermes-agent's self-registering tool registry and Claude Code's
-discrete-tools-behind-a-thin-dispatch design.
+hand-maintained command table. A `command_paths_match_the_golden_snapshot`
+unit test in `registry.rs` pins the sorted set of every command path, so
+adding, removing, or renaming a leaf shows as a deliberate diff against that
+snapshot.
 
 The command surface holds **64 leaves across the groups this page tracks**;
-`aoide schema --json | jq '.commands | length'` reports a higher live
-count, since two further groups (`inbox`, `who`) exist and are not yet
-covered here. `lyra schema --json` carries the painted surface — see above.
-The per-command dev reference — signature, files read, files written, where
-output pipes to — lives at [[references/cli/Index|references/cli/]]; the
-table below sums the groups it documents:
+`aoide schema --json | jq '.commands | length'` reports 68, since two
+further groups (`inbox`, `who`) exist and are not yet covered here. `lyra
+schema --json` carries the painted surface — see above. The per-command dev
+reference — signature, files read, files written, where output pipes to —
+lives at [[references/cli/Index|references/cli/]]; the table below sums the
+groups it documents.
 
 | Group | Leaves | Real / stub |
 |---|---|---|
@@ -90,58 +85,62 @@ table below sums the groups it documents:
 | `hooks install` | 1 | real |
 | `soundcheck` | 1 | real — report-only mechanical-integrity sweep of the working tree; writes nothing |
 
-The **`a2a`** group is the [[A2A-Door]] — the third door onto aoide. `a2a
-serve` raises the A2A (Agent2Agent) JSON-RPC/HTTP server (a discoverable
-AgentCard + `message/send` + `tasks/get` + SSE streaming, off by default,
-loopback-bound); the four `a2a agent` verbs are the client side, registering
-and driving external A2A agents through `state/a2a-agents.json`. **`usage`**
-computes the local token/cost rollup that backs the opt-in claude.ai usage
-gadget ([[Gadget-Dock]]). **`secrets`** is the credential door: `secrets
-exec`/`secrets put` release a value into the caller's own process without
-ever logging it, gated by per-secret `consumers[]` and an optional TOTP
-code; `secrets pending`/`approve`/`dismiss` complete or refuse a codeless
-TOTP resolve that PARKED instead of refusing outright; `secrets watch
-[--popup]` is the terminal (or zenity) surface that completes a parked ask
-live. See [[Secrets-Broker]]. **`hooks install <agent> [--capture]`** is the
-hook-installer verb: it merges aoide's hook wiring into the named harness's
-settings file (path + format come from the harness's `AgentProfile` — claude:
-JSON merge into `~/.claude/settings.json`; kimi: text-level `[[hooks]]`
-append into `${KIMI_CODE_HOME:-~/.kimi-code}/config.toml`, never a
-parse-rewrite since that file holds providers/credentials), idempotent and
-reporting exactly which events were added vs already present. `--capture`
-installs a parallel set of entries that tee raw payloads to
-`~/Aoide/state/<agent>-hooks.jsonl` for debugging — a distinct idempotency
-key, so capture entries coexist with the plain ones and are removed manually.
-See [[Agent-Hooking]].
+The **`a2a`** group is the [[A2A-Door]], the third door onto aoide. `a2a
+serve` raises the A2A JSON-RPC/HTTP server (AgentCard, `message/send`,
+`tasks/get`, SSE streaming; off by default, loopback-bound). Its
+`--bearer-secret <name>` names a secret this door requires as the inbound
+`Authorization: Bearer` token, resolved fresh per request through
+[[Secrets-Broker]] and failing closed on a resolve error. The four `a2a
+agent` verbs register and drive external A2A agents through
+`state/a2a-agents.json`.
+
+**`usage`** computes the local token/cost rollup behind the opt-in claude.ai
+usage gadget ([[Gadget-Dock]]).
+
+**`secrets`** is the credential door: `secrets exec`/`secrets put` release a
+value into the caller's own process without logging it, gated by per-secret
+`consumers[]` and an optional TOTP code. `secrets pending`/`approve`/
+`dismiss` complete or refuse a codeless TOTP resolve that parked instead of
+refusing outright. `secrets watch [--popup]` is the terminal (or zenity)
+surface that completes a parked ask live. See [[Secrets-Broker]].
+
+**`hooks install <agent> [--capture]`** merges aoide's hook wiring into the
+named harness's settings file — path and format come from the harness's
+`AgentProfile` (claude: JSON merge into `~/.claude/settings.json`; kimi:
+text-level `[[hooks]]` append into `${KIMI_CODE_HOME:-~/.kimi-code}/
+config.toml`, never a parse-rewrite since that file also holds providers/
+credentials). It is idempotent and reports exactly which events were added
+versus already present. `--capture` installs a parallel set of entries that
+tee raw payloads to `~/Aoide/state/<agent>-hooks.jsonl` for debugging, under
+a distinct idempotency key so capture entries coexist with the plain ones
+(removed manually). See [[Agent-Hooking]].
 
 A stub returns a structured `Outcome` with status `not-implemented` (exit
 `64`), never a crash — arg-parsing, the schema entry, the audit-log append,
-and the gate flag are all real code paths regardless; only the live-system
-action is deferred. Exactly two commands carry `gated: true` in `aoide`
-(`content approve`, `update`) — a third, `rice declare`, is `lyra`'s own
-gated stub — marked so both doors surface the user rebuild gate uniformly —
-nothing here admits a rebuild, which is structurally the user's action
-([[Rebuild-Gate]], [[Governance]]).
+and the gate flag are all real code paths; only the live-system action is
+deferred. Exactly two commands carry `gated: true` in `aoide` (`content
+approve`, `update`); a third, `rice declare`, is `lyra`'s own gated stub —
+both doors surface the user rebuild gate uniformly, and nothing here admits
+a rebuild ([[Rebuild-Gate]], [[Governance]]).
 
 `cover set`/`rice compose`/`rice mode`/`rice draft`/`rice declare`/`rice
 transpose`/`rice take`/`rice back` and the `livery`/`screen`/`herald`/
-`shellbridge`/`quickshell` groups all moved to `lyra` at P-A5 of the
-binary-split workstream — see [[references/cli/Rice-and-Livery|Rice-and-Livery]]
-and [[references/cli/Screen-Verbs|Screen-Verbs]] for their per-command
-reference, and [[Self-Ricing]] for the self-ricing loop's concept-level
-walkthrough.
+`shellbridge`/`quickshell` groups all moved to `lyra` at P-A5 — see
+[[references/cli/Rice-and-Livery|Rice-and-Livery]] and
+[[references/cli/Screen-Verbs|Screen-Verbs]] for their per-command
+reference, and [[Self-Ricing]] for the self-ricing loop's walkthrough.
 
 ### The `graph` group — session/project DAG + the conductor mesh
 
-`view`, `project add`/`remove`/`list`, `link`, `session start`/`phase`/`end`/
-`hook` (takes `--agent <name>`, default `claude` — the payload maps through
-that harness's agent profile, [[Agent-Hooking]]), `permit`, `focus`, `prune`,
-`emit` are the [[Session-Graph]] viewer +
-manager feeding the [[Terminal-Commander]] roster (see [[Agent-Hooking]] for
-the session-registration doors). `graph permit --id <id>` answers a harness
-permission prompt inside a conducted session by typing the profile's verified
-permission key (claude's `1`/`3`). Three commands turn the graph into a
-live conductor mesh:
+`view`, `project add`/`remove`/`list`, `link`, `session start`/`phase`/
+`end`/`hook` (takes `--agent <name>`, default `claude`; the payload maps
+through that harness's agent profile, [[Agent-Hooking]]), `permit`,
+`focus`, `prune`, `emit` are the [[Session-Graph]] viewer and manager
+feeding the [[Terminal-Commander]] roster (see [[Agent-Hooking]] for the
+session-registration doors). `graph permit --id <id>` answers a harness
+permission prompt inside a conducted session by typing the profile's
+verified permission key (claude's `1`/`3`). Three commands turn the graph
+into a live conductor mesh:
 
 - **`graph wrap`** — spawn any agent command as a registered session
   (inherited stdio, `running`→`done` for free, `AOIDE_SESSION_ID` exported to
@@ -164,53 +163,48 @@ terminal; its five failure reasons are `session-not-found` /
 
 ### The `peer` group — aoide-to-aoide federation
 
-`add <name> <url> [--autogate] [--token-file <path>]` / `list` / `remove
-<name>` / `pull [<name>]` / `status` register OTHER aoide instances as **peers** and fold their
-resolved session graphs into this instance's own — the newest door onto
-aoide, built entirely on top of the existing [[A2A-Door]] rather than a new
-transport (`aoide/graphSummary`, one new JSON-RPC method on the same
-server). See [[Peer-Federation]] for the full mechanism (registry/cache
-shapes, the `peer:*` graph-fold convention, and the non-loopback
-pending-gate amendment `message/send` picked up alongside it). Same-network
-only today — real, integration-tested
+`add <name> <url> [--autogate] [--token-file <path>] [--bearer-secret
+<name>]` / `list` / `remove <name>` / `pull [<name>]` / `status` register
+OTHER aoide instances as **peers** and fold their resolved session graphs
+into this instance's own — built entirely on top of the existing
+[[A2A-Door]] rather than a new transport (`aoide/graphSummary`, one new
+JSON-RPC method on the same server). See [[Peer-Federation]] for the full
+mechanism. Same-network only today — real, integration-tested
 (`pkgs/aoide/crates/cli/tests/peer_connectivity.rs` proves two live
-`a2a::serve()` instances talking peer-to-peer end to end) —
-WAN/NAT-traversal reachability for a peer NOT on the same network is out of
-scope for this v0.
+`a2a::serve()` instances talking peer-to-peer end to end); WAN/NAT-traversal
+reachability is out of scope for this v0.
 
 - **`peer add`** — verifies the peer FIRST (fetches its AgentCard, mirroring
-  `a2a agent add`'s verification-before-registering pattern) and only
-  registers on success; a duplicate `name` is rejected rather than
-  repointed, unlike `a2a agent add`'s upsert-on-readd. `--token-file` records
-  a per-peer bearer secret this instance expects that peer to present,
-  identifying WHICH peer is calling once address alone can't (a proxy or
-  tunnel makes every caller's address look loopback) — see
-  [[A2A-Door#Security and governance]].
+  `a2a agent add`) and only registers on success; a duplicate `name` is
+  rejected rather than repointed, unlike `a2a agent add`'s upsert-on-readd.
+  `--token-file` records a per-peer bearer secret this instance expects that
+  peer to present, identifying WHICH peer is calling once address alone
+  can't (a proxy or tunnel makes every caller's address look loopback).
+  `--bearer-secret` is the outbound counterpart: it names a secret,
+  resolved fresh through [[Secrets-Broker]], this instance presents as its
+  own `Authorization: Bearer` header when calling that peer.
 - **`peer remove`** — a missing name is an error, not idempotent-silent
-  (`rice draft drop`'s precedent, a deliberate divergence from `a2a agent
-  remove`'s tolerate-missing stance); also drops that peer's cache file.
+  (`rice draft drop`'s precedent); also drops that peer's cache file.
 - **`peer pull`** — with no name, pulls EVERY registered peer; one peer
   being unreachable never aborts the others, and a failed pull marks the
-  cache `stale` with a reason rather than deleting it, so a transient outage
-  never blanks a peer out of the graph fold.
+  cache `stale` with a reason rather than deleting it.
 - **`peer status`** — each peer's `fresh`/`stale`/`never-pulled`
-  classification (the same one the graph fold itself uses, so the two can
-  never disagree) plus `fetchedAt`/`lastError`.
+  classification (the same one the graph fold itself uses) plus
+  `fetchedAt`/`lastError`.
 
 Registered directly after `a2a agent add/list/remove/send` in `schema
---json`'s order — nothing existing reorders.
+--json`'s order.
 
 ### `conduct` and `conductor`
 
-The two are deliberately distinct parts of speech. **`conduct`** is the verb —
-`graph wrap`'s PTY-backed sibling — same register/wait/end lifecycle, but on a
-controlling tty plus a per-session control socket, so `graph send` can type
-into the running agent while its own TUI runs undisturbed. **`conductor`** is
-the noun — the interactive terminal frontend over the whole trunk: a ratatui
-TUI (DAG / sessions / projects / log / status panels, ~500ms poll, no
-watcher/async runtime) that dispatches every action through the same
-`dispatch()` the CLI and MCP doors use — never a second implementation, so the
-one audit log can't tell a conductor keypress from a typed command.
+The two are deliberately distinct parts of speech. **`conduct`** is the
+verb — `graph wrap`'s PTY-backed sibling, same register/wait/end lifecycle,
+but on a controlling tty plus a per-session control socket, so `graph send`
+can type into the running agent while its own TUI runs undisturbed.
+**`conductor`** is the noun — the interactive terminal frontend over the
+whole trunk: a ratatui TUI (DAG / sessions / projects / log / status
+panels, ~500ms poll, no watcher/async runtime) that dispatches every action
+through the same `dispatch()` the CLI and MCP doors use.
 
 ### Open schema gap
 
@@ -225,39 +219,39 @@ shortcut the panel itself registers (`aoide:dock`), not a CLI verb (see
 
 - **One spelling per command, no internal aliases.** Every command has
   exactly one name; a retired spelling (e.g. the pre-rename `rice preview`/
-  `rice mint`, or the once-aliased `rice new`) becomes a plain unknown
-  command, resolved the same as a typo — never a parse-time alias to a
-  canonical path. The parser carries no alias table.
-- **`--json` everywhere.** A hand-rolled parser (no clap, to keep the offline
-  cargo lock tiny) reads argv against the schema, so the parser and the schema
-  can never disagree about what commands exist. Every outcome renders as either
-  a human line or a pretty-printed JSON envelope.
-- **Exit-code map, identical per command:** `0` ok · `1` error · `2` usage · `64`
-  not-implemented. Serialized into both `schema --json` and every `Outcome`.
-- **`schema --json` is the single source of truth.** It emits the raw contract
-  document at top level (schema version, `aoide` version, `stageNotesVersion`,
-  and the command array) — *not* wrapped in the generic outcome envelope, because
-  external tooling and the MCP tool list parse it directly. The MCP door
-  (`mcp serve --stdio`) is a minimal dependency-free JSON-RPC 2.0 server over
-  newline-delimited stdio: each command becomes one tool named by its dotted path
-  (`graph.view`), args/flags become the `inputSchema`, and `tools/call` dispatches
-  back into the same handlers the CLI uses. `lyra mcp serve --stdio` is the
-  same façade over lyra's own registry.
-- **`stageNotesVersion`** is a top-level field of the schema document (v0),
-  pinning the `song/stage/livery.json` format alongside the command tree so an
-  agent reads one version for the whole contract.
+  `rice mint`) becomes a plain unknown command, resolved the same as a typo.
+  The parser carries no alias table.
+- **`--json` everywhere.** A hand-rolled parser (no clap, to keep the
+  offline cargo lock tiny) reads argv against the schema, so the parser and
+  the schema can never disagree about what commands exist.
+- **Exit-code map, identical per command:** `0` ok · `1` error · `2` usage ·
+  `64` not-implemented. Serialized into both `schema --json` and every
+  `Outcome`.
+- **`schema --json` is the single source of truth.** It emits the raw
+  contract document at top level (`schemaVersion`, `aoide` version,
+  `stageNotesVersion`, and the command array) — not wrapped in the generic
+  outcome envelope, so external tooling and the MCP tool list parse it
+  directly. The MCP door (`mcp serve --stdio`) is a minimal
+  dependency-free JSON-RPC 2.0 server over newline-delimited stdio: each
+  command becomes one tool named by its dotted path (`graph.view`),
+  args/flags become the `inputSchema`, and `tools/call` dispatches back
+  into the same handlers the CLI uses. `lyra mcp serve --stdio` is the same
+  façade over lyra's own registry.
+- **`stageNotesVersion`** pins the `song/stage/livery.json` format alongside
+  the command tree so an agent reads one version for the whole contract.
 - **Single audit log, every door.** Every dispatch — CLI, MCP, or A2A —
-  appends a JSON-lines record to the one audit log (`aoide.auditLog`), tagged
-  with which door it came through (`Door::Cli` / `Door::Mcp` / `Door::A2a`). No
-  door writes a separate log.
+  appends a JSON-lines record to the one audit log (`aoide.auditLog`),
+  tagged with which door it came through (`Door::Cli` / `Door::Mcp` /
+  `Door::A2a`).
 
 ## The second binary — `aoided`
 
-The same crate installs `aoided`, the daemon (see [[aoided]]). It shares the
-audit-log, gate, and neutral-event-stream code with the CLI, so `aoide daemon`
-and the standalone `aoided` binary reach the same code path; the standalone
-binary is what the systemd unit launches. `aoided --audit-log <path>` overrides
-the log location, else the `aoide.auditLog` default applies.
+The same crate installs `aoided`, the daemon (see [[aoided]]). It shares
+the audit-log, gate, and neutral-event-stream code with the CLI, so `aoide
+daemon` and the standalone `aoided` binary reach the same code path; the
+standalone binary is what the systemd unit launches. `aoided --audit-log
+<path>` overrides the log location, else the `aoide.auditLog` default
+applies.
 
 ## Related
 

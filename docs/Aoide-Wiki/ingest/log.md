@@ -930,3 +930,107 @@ corrected to match — no other page asserted kimi refuses a summons.
   golden count stale against 68/42; `quickshell.rs:3` doc comment uses a
   real first name; `graph/` crate dir holds `who.rs`/`testutil.rs`
   unlisted in the page's handler roster.
+
+## [2026-08-25] refactor | de-slop sweep 3
+
+- Pages touched: `entities/aoide-cli.md` (277→271, TRIM+VERIFY),
+  `entities/aoided.md` (45, KEEP — verified, zero edits per the plan's
+  explicit verdict), `entities/shellbridge.md` (136→139, TRIM),
+  `entities/livery.md` (205→192, TRIM+VERIFY — naming-lore section cut,
+  pointed at `concepts/Lexicon.md`), `entities/Agent-Hooking.md`
+  (263→274, TRIM+VERIFY), `entities/Quickshell.md` (219→257,
+  TRIM+VERIFY). Three pages grew: verified corrections restored facts the
+  prior text got wrong or omitted, and length targets are filler
+  ceilings, not deletion quotas (rule 16).
+- Headline finding: `entities/Quickshell.md`'s "nine declared, eight with
+  a live body" surface-registry claim is wrong at HEAD. Checked
+  `modules/facets/quickshell/default.nix`'s `aoide.surfaces` registry
+  against `shell.qml` and every `song/songbook/*/widgets/` tree: nine
+  surfaces are declared (bar, notifications, launcher, osd, lockscreen,
+  greeter, wallpaper, agentWidgets, sessionGraph) but only **five** carry
+  a live QML body (bar, notifications — via dunst-as-daemon +
+  `herald`/`herald-center`, launcher, wallpaper, agentWidgets). `osd`,
+  `lockscreen`, `greeter` are registry-only Stylix stand-down
+  declarations with no facet or song QML anywhere in the repo (no
+  `AoideOsd`/`AoideLockscreen`/`AoideGreeter` file exists, and none ever
+  did per `git log -p`); `sessionGraph` was already correctly noted as
+  bodyless. The page's Implementation/Launcher sections were also
+  rewritten: there is no `AoideLauncher.qml`/`AoideNotifications.qml`
+  facet file — `shell.qml` loads `launcher`/`powermenu`/`herald` through
+  `SurfaceSlot` from `song/songbook/sonata/widgets/{launcher,herald}.qml`
+  (SurfaceSlot/WidgetSlot's baseline-fallback chain), and the "Notification
+  card" section's `song/songbook/sonata/widgets/notifications.qml` path
+  was wrong — the real file is `herald.qml`, `notifications.qml` doesn't
+  exist. Also fixed: `lyra quickshell reload`'s cited handler path
+  (`crates/song/src/commands/shell.rs` → `crates/song/src/commands/
+  quickshell.rs`, the real file). Removed the stale `**Status:** …no
+  actions/inline-reply support…` line, which the page's own Notification
+  card section already contradicted (real approve/deny action buttons
+  are documented there). `Overview.md` and `ingest/index.md` both still
+  carry the old "nine declared, eight live" phrasing — out-of-scope,
+  reported below, not fixed.
+- Second finding: `entities/Agent-Hooking.md`'s agent-profile roster was
+  stale. `pkgs/aoide/crates/protocol/src/agents.rs` registers three
+  profiles (`CLAUDE_PROFILE`, `KIMI_PROFILE`, `PI_PROFILE` — confirmed
+  also by `pkgs/aoide/crates/protocol/AGENTS.md`'s own "beyond
+  `claude`/`kimi`/`pi`" line), not two. Fixed `known_agents()`'s cited
+  roster, the hook-door subheading, the `hook_settings` bullet (added
+  pi's `~/.pi/agent/extensions/aoide-pi-session.ts`, declarative), and
+  a dangling `(hooks install pi, below)` pointer to a Pi recipe
+  subsection that doesn't exist on the page (dropped "below" rather than
+  authoring a new subsection — out of scope for a de-slop pass, reported
+  below). Also cut the dated "Live-proven 2026-08-20, the three-harness
+  probe" status-brag framing (S5/rule 2) down to present-indicative
+  behavior, and collapsed the nine-times-repeated identical claude hook
+  JSON block to one representative entry plus a one-line note.
+- Verified against `aoide schema --json` / `lyra schema --json` and the
+  repo (installed binaries report 68/42 commands, matching sweep 1):
+  `aoide-cli.md`'s full command-tree table (64 leaves this page tracks +
+  `inbox`/`who` = 68), the 20-strong `graph` group, `content approve`/
+  `update`/`rice declare` gated flags, `graph focus`'s five failure
+  reasons (`session-not-found`/`no-window-address`/`hyprctl-unavailable`/
+  `hyprctl-failed`/`window-not-found`, verbatim in
+  `crates/conduct/src/graph/window.rs`), the exit-code map, and the
+  `schema --json` top-level shape (`aoide`/`commands`/`schemaVersion`/
+  `stageNotesVersion`). `livery.md`'s geometry-tier defaults
+  (`8`/`6`/`2`/`0`/`true`/`8`/`3`, matching `compositor/default.nix`
+  exactly), `SCHEMA_VERSION = "0"`, the four emitters
+  (`stage`/`hyprctl`/`osc`/`file`), and the `lyra livery
+  lint`/`resolve`/`emit` verb shapes. `shellbridge.md`'s socket path,
+  `RuntimeDirectory=aoide`, and the `path = [ pkgs.hyprland ]` unit
+  option on both `shellbridge` and `aoide-graph-reap`. `Quickshell.md`'s
+  systemd unit settings (`ConditionPathExists`, `StartLimitIntervalSec =
+  60`, `StartLimitBurst = 5`, `RestartSec = 3`) and `AoideIpc.qml`'s
+  reload contract.
+- Repo-ahead-of-installed-binaries note (per the sweep brief): repo HEAD
+  (commit `4ce2c96`, already committed, not a working-tree diff) adds
+  `--bearer-secret` to both `a2a serve` (inbound bearer, resolved via
+  [[Secrets-Broker]]) and `peer add` (outbound bearer to that peer) —
+  the installed `aoide`/`lyra` binaries' `schema --json` lack the flag.
+  `entities/aoide-cli.md` documents both, sourced from repo, per the
+  brief's "repo wins" instruction.
+- Claims left unverified (left as-written): `Agent-Hooking.md`'s kimi
+  transcript-layout internals (field names, model-ceiling table) and the
+  `autogate-sibling` gate-label mechanics — no schema surface
+  contradicts them, and re-deriving them needs a live kimi transcript,
+  out of scope for this pass.
+- Slop removed: S1 em-dash appositive chains (`aoide-cli.md`'s registry
+  paragraph, `Agent-Hooking.md`'s hook-event-map sentence), S4 naming
+  lore (`livery.md`'s "Why a livery" essay, now one line pointing at
+  [[Lexicon]]), S5 status brag (`Agent-Hooking.md`'s dated probe
+  writeup, `Quickshell.md`'s stale NotificationServer status line), S7
+  marketing register (`aoide-cli.md`'s "An API that happens to be
+  typeable" quote and the Hermes-agent/Claude-Code registry comparison),
+  S9-style index run-on left in place since `ingest/index.md` is out of
+  scope this sweep.
+- Out-of-scope drift spotted, not fixed: `Overview.md` line 49 and
+  `ingest/index.md` line 46 both still say "nine surfaces declared,
+  eight with a live QML body" for Quickshell — now wrong, corrected only
+  on `entities/Quickshell.md` itself (out of the six-page scope for this
+  sweep); `Agent-Hooking.md` has no `### Pi` per-agent recipe subsection
+  though the `PI_PROFILE` and `hooks install pi` are real and referenced
+  elsewhere on the page; `AoideIpc.qml`'s own code comment cites `aoide
+  shell reload` where the real registered command is `lyra quickshell
+  reload` (stale in-repo comment, not wiki content); repo `AGENTS.md`
+  still counts aoide at 48 commands (carried from sweep 1, still
+  unfixed).

@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-27
-updated: 2026-08-20
+updated: 2026-08-25
 tags: [aoide, agent, session, conductor, orchestration, graph]
 ---
 
@@ -13,7 +13,7 @@ tags: [aoide, agent, session, conductor, orchestration, graph]
 
 Pick by what the agent harness can do. All three converge on the same records; all are idempotent upserts.
 
-### 1. The hook door — harnesses with a hook system (claude, kimi)
+### 1. The hook door — harnesses with a hook system (claude, kimi, pi)
 
 Pipe ONE hook payload as JSON on stdin, naming the harness when it isn't the default:
 
@@ -21,9 +21,9 @@ Pipe ONE hook payload as JSON on stdin, naming the harness when it isn't the def
 echo '{"session_id":"…","hook_event_name":"…","cwd":"…","message":"…"}' | aoide graph session hook --agent claude
 ```
 
-`--agent` defaults to `claude`; an unknown name is a structured `unknown-agent` error listing the registered profiles. The door resolves the harness's **agent profile** (the seam below) and maps the payload through it — one contract, per-harness tables behind it.
+`--agent` defaults to `claude`; an unknown name is a structured `unknown-agent` error listing the registered profiles. The door resolves the harness's **agent profile** (the seam below) and maps the payload through it: one contract, per-harness tables behind it.
 
-Each profile's `hook_event_map` collapses its harness's event NAMES onto shared semantic classes, which the door then maps to canonical state — claude's map below; kimi's deltas are in the *Kimi Code* recipe further down (the door is a silent no-op for everything unmapped, and NEVER exits non-zero — safe inside any hook config). The five canonical states are `working`/`awaiting`/`stopped`/`idle`/`done` ([[Widget-Bridge-Contract]]); a legacy `running`/`waiting`/`blocked` write from an older door is folded onto this set by a read-side shim (`canonical_state`) the first time anything touches the file, so no migration step is needed:
+Each profile's `hook_event_map` collapses its harness's event NAMES onto shared semantic classes, which the door then maps to canonical state — claude's map below, kimi's deltas in the *Kimi Code* recipe further down. The door is a silent no-op for everything unmapped and never exits non-zero, so it is safe inside any hook config. The five canonical states are `working`/`awaiting`/`stopped`/`idle`/`done` ([[Widget-Bridge-Contract]]). A legacy `running`/`waiting`/`blocked` write from an older door folds onto this set by a read-side shim (`canonical_state`) the first time anything touches the file, so no migration step is needed:
 
 | event | state |
 |---|---|
@@ -114,18 +114,15 @@ harness-agnostic: the hook door above doesn't care whether its own stdin is a
 real tty, so a headless-launched agent hooks itself onto the graph exactly
 like a foreground one.
 
-**Live-proven 2026-08-20, the three-harness probe.** A headless `claude`
-answered a prompt into its log with its own hook-registered session nested as
-a child of the wrapper session. A headless `kimi` did the same — its harness
-session likewise hooked in as a child, proving the hook door is genuinely
-harness-agnostic rather than claude-shaped-with-kimi-bolted-on. A headless
-`pi` launches and hooks in the same way too, but its provider requests time
-out (3 retries, 3 failures) — a gap in pi's provider-network path, not in the
-launch or hook-registration mechanism; the pi profile and its wiring
-(`hooks install pi`, below) are otherwise unaffected. Separately, a real
-sibling send between two of these sessions delivered with the
-`autogate-sibling` gate label and its provenance prefix visible in the
-receiver's log — see [[Conductor-Channel]] for the gate ladder and the
+A headless `claude`, `kimi`, or `pi` session each hooks into the graph the
+same way: the wrapper session and the harness's own hook-registered session
+nest as parent/child, so the hook door is genuinely harness-agnostic rather
+than claude-shaped with the others bolted on. `pi`'s provider requests can
+time out (3 retries) — a gap in its provider-network path, not in the
+launch or hook-registration mechanism; the pi profile and `hooks install
+pi` are otherwise unaffected. A sibling send between two headless sessions
+delivers with an `autogate-sibling` gate label and a provenance prefix in
+the receiver's log — see [[Conductor-Channel]] for the gate ladder and the
 attribution-not-security stance behind that prefix.
 
 ## The agent-profile seam — every harness fact behind one table
@@ -133,7 +130,7 @@ attribution-not-security stance behind that prefix.
 Everything the bridge knows about a specific agent harness lives on an
 `AgentProfile` (`pkgs/aoide/crates/protocol/src/agents.rs`), looked up by name
 (`agent_profile(name)`; `known_agents()` lists the registered names — today
-`claude` and `kimi`). One profile carries, whole:
+`claude`, `kimi`, and `pi`). One profile carries, whole:
 
 - `hook_event_map` — event name → semantic class (`HookClass`); it also
   classifies a Notification's detail via prefixed keys (`ntype:<raw
@@ -153,7 +150,9 @@ Everything the bridge knows about a specific agent harness lives on an
   transcript layout.
 - `hook_settings` (`SettingsSpec`) — where the harness's hook config lives and
   its format (claude: `~/.claude/settings.json`, JSON; kimi:
-  `${KIMI_CODE_HOME:-~/.kimi-code}/config.toml`, TOML).
+  `${KIMI_CODE_HOME:-~/.kimi-code}/config.toml`, TOML; pi: a generated
+  extension script, `~/.pi/agent/extensions/aoide-pi-session.ts`,
+  declarative).
 
 Every agent-aware consumer dispatches through the profile rather than
 hardcoding a harness: the hook door (`--agent` → `map_hook` and the
@@ -178,24 +177,36 @@ stdin; the door does the mapping:
 ```json
 {
   "hooks": {
-    "SessionStart":     [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
-    "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
-    "PreToolUse":       [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
-    "PostToolUse":      [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
-    "Notification":     [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
-    "SubagentStart":    [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
-    "SubagentStop":     [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
-    "Stop":             [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ],
-    "SessionEnd":       [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ]
+    "SessionStart": [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ]
   }
 }
 ```
 
-Writing it by hand is not required: `aoide hooks install claude` merges the same nine entries into `~/.claude/settings.json` (idempotent JSON merge, the rest of the document preserved — see [[Agent-Interface]]).
+All nine events (`SessionStart`, `UserPromptSubmit`, `PreToolUse`,
+`PostToolUse`, `Notification`, `SubagentStart`, `SubagentStop`, `Stop`,
+`SessionEnd`) carry the identical command shown above, each under its own
+event key. Writing it by hand is not required: `aoide hooks install claude`
+merges the same nine entries into `~/.claude/settings.json` (idempotent
+JSON merge, the rest of the document preserved — see [[Agent-Interface]]).
 
 `Notification` + `PostToolUse` are what make **blocked** visible — without them a session on a permission prompt reads `running` forever. `SubagentStart` / `SubagentStop` are what put a spawned sub-agent (e.g. an `Agent`-tool call) on the graph as its own row, parented to the session that spawned it, rather than folding invisibly into the parent's activity.
 
-**Scope: global vs. project-local.** `.claude/settings.json` can live at project scope (`<repo>/.claude/settings.json`, tracked per-project, `command -v`-resolves `aoide` but can also hardcode a dev build's path) or at user scope (`~/.claude/settings.json`, applies to every Claude Code session on the machine regardless of cwd). **Only the global file covers sessions started outside a project that carries its own `.claude/settings.json`** — a Claude Code session opened in, say, `~/dxflake` never touches this repo's project-local hooks, so it registers on the graph only if `~/.claude/settings.json` also carries the same nine hooks. Without them, that session is invisible to `aoide graph session hook` entirely: Hyprland's window listener still picks up the enclosing terminal as a bare `shell`-kind row (window address, pid, cwd), but the Claude process itself never becomes an `agent`-kind row with turn state, phase, or a spawned-by edge. As of 2026-07-30, `~/.claude/settings.json` carries the same nine hooks as this repo's project-local file (pointed at whatever `aoide` resolves to on `PATH`, no worktree-specific path baked in) — this is a fresh-machine onboarding step for anyone setting up Claude Code as an Aoide harness: the global file needs the hooks too, not just the repo's.
+**Scope: global vs. project-local.** `.claude/settings.json` can live at
+project scope (`<repo>/.claude/settings.json`, tracked per-project) or at
+user scope (`~/.claude/settings.json`, applies to every Claude Code session
+on the machine regardless of cwd). Only the global file covers sessions
+started outside a project that carries its own `.claude/settings.json` — a
+Claude Code session opened in, say, `~/dxflake` never touches this repo's
+project-local hooks, so it registers on the graph only if
+`~/.claude/settings.json` also carries the same nine hooks. Without them,
+that session is invisible to `aoide graph session hook` entirely:
+Hyprland's window listener still picks up the enclosing terminal as a bare
+`shell`-kind row (window address, pid, cwd), but the Claude process itself
+never becomes an `agent`-kind row with turn state, phase, or a spawned-by
+edge. `~/.claude/settings.json` carries the same nine hooks as this repo's
+project-local file, pointed at whatever `aoide` resolves to on `PATH` with
+no worktree-specific path baked in — a fresh machine setting up Claude Code
+as an Aoide harness needs the global file wired too, not just the repo's.
 
 The settings-file split is specific to harnesses that come through the hook door — claude and kimi each keep their own (profile-declared) settings file, and `aoide hooks install <agent>` writes either one. Harnesses wired through this repo's [[aoide-cli|other doors]] (the wrapper, the explicit verbs) don't have a settings-file split like this one.
 

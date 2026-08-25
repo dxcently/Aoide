@@ -1,49 +1,72 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-08-16
+updated: 2026-08-25
 tags: [aoide, shell, ui, qml, quickshell]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
 
 # Quickshell
 
-The shell and UI runtime for Aoide, written in QML. It renders the complete shell surface: workspaces bar (with agent sessions and connection state), notification daemon (implementing `org.freedesktop.Notifications` natively), agent widgets, launcher, OSD, lockscreen, greeter, and wallpaper layer. This replaces the swaync / rofi / hyprlock / swww zoo with a single runtime.
+The shell and UI runtime for Aoide, written in QML. It renders the bar
+(agent sessions, connection state), the notification popup + ledger, the
+launcher, the desktop dock, and the wallpaper layer.
 
-Quickshell reads `stage/livery.json` at runtime, so nearly the full rice — colors, typography, geometry, shell widgets — hot-reloads during rehearsal (preview) without a rebuild. GTK/Qt targets require app restarts and are adopt-only for preview purposes.
+Quickshell reads `stage/livery.json` at runtime, so nearly the full rice —
+colors, typography, geometry, shell widgets — hot-reloads during rehearsal
+(preview) without a rebuild. GTK/Qt targets require app restarts and are
+adopt-only for preview purposes.
 
-Communication discipline: Quickshell reads state files from shellbridge and issues commands via the unix socket. It never speaks an agent protocol or MCP directly.
-
-**Status:** specified; no actions/inline-reply support in the NotificationServer today. The NotificationServer spike (actions + inline reply) is scoped for the yomi-strix session.
+Communication discipline: Quickshell reads state files from shellbridge and
+issues commands via the unix socket. It never speaks an agent protocol or
+MCP directly.
 
 ## Implementation
 
-The QML skeleton is shipped in `modules/facets/quickshell/qml/`. Two singletons
-carry the shared session state: **`LiveryState`** watches `stage/livery.json` via a
-`FileView` and re-binds every surface's colours in one pass on an atomic
-replace (the hot-reload); **`ShellBridge`** is the unix-socket client — the sole
-outbound channel from QML (`focusSession(address)` → shellbridge → hyprctl), no
-MCP/HTTP/shell-exec from QML. `shell.qml` (a `ShellRoot`) instantiates the two
-singletons and the surface widgets (`AoideBar` with the `SessionChip`/
-`WorkspaceRow` session-jump widget, `AoideNotifications` — the notification
-stack + D-Bus server, its per-card body resolved through `WidgetSlot` to the
-active song's `widgets/notifications.qml` (sonata's is the shipped baseline —
-see [[Widget-Maker]]),
-`AoideLauncher`, `AoideOsd`, `AoideLockscreen`, `AoideGreeter`, `AoideWallpaper`)
-— each a stub reading colours from `livery`, kept in a separate file so [[Melete]]
-can swap them independently. The repo root carries no `qml/` directory —
-widget source lives in `modules/facets/quickshell/qml/`, and the facet's
-`home.activation.aoideDeployQml` rsyncs the built config tree (`rsync -a
---delete --chmod=u+w`) into the gitignored `~/Aoide/run/qml/`, which Quickshell
-reads as its entry point (`quickshell -p ~/Aoide/run/qml/shell.qml`). The
-deployed tree is self-healing: hot-editing QML directly under `~/Aoide/run/qml/`
-previews live without a rebuild, and every activation's rsync reasserts the
-store's build over any such edit — the same "switch is the truth, hot edits
-are the sketch" discipline as every other stage/preview seam. Crucially, `hyprland.conf`
-is owned by home-manager's `wayland.windowManager.hyprland`: the compositor facet
-writes livery + keybind fragments with `mkBefore`, and the Quickshell facet appends
-its `exec-once` autostart with `mkAfter`, so the two facets compose the one config
-file without collision.
+The QML skeleton is shipped in `modules/facets/quickshell/qml/`. `shell.qml`
+(a `ShellRoot`) instantiates four shared singletons — **`LiveryState`**
+(watches `stage/livery.json` via a `FileView`, re-binding every surface's
+colours in one pass on an atomic replace, the hot-reload), **`ShellBridge`**
+(the unix-socket client, the sole outbound channel from QML —
+`focusSession(address)` → shellbridge → hyprctl, no MCP/HTTP/shell-exec from
+QML), **`AoideIpc`** (the external-reload IPC target, below), and
+**`StagingEngine`** (resolves which song dresses a slot and where its QML
+lives) — plus a plain `QtObject` holding cross-widget session state (the
+floating-gadget model, the hover-trace link).
+
+Two surfaces are facet-owned `Item`s wrapped in their own `PanelWindow`:
+**`AoideWallpaper`** (the background layer, `WlrLayer.Background`) and the
+**bar** (`WlrLayer.Top`, exclusive height), whose content is a per-song
+widget loaded through `WidgetSlot` (`slot: "bar"`) rather than a facet
+component — the song owns its own footprint. **`AoidePanel`** (the
+[[Gadget-Dock]]) owns its PanelWindow, layer, and toggle shortcut
+internally. Three more surfaces are **`SurfaceSlot`**-rooted overlays —
+`powermenu`, `launcher`, and `herald` (the notification popup) — each
+resolving a song widget through the same baseline-fallback chain
+`WidgetSlot` uses (song override → sonata, the shipped baseline every song
+falls back to → nothing), but as a non-visual `QtObject` sibling instead of
+a sized `Item`, since each slot's root IS its own `PanelWindow` rather than
+content parented into an existing layout. `SongSurfaces` hosts one more
+`SurfaceSlot` per surface-kind entry the active song's `aoide.arrangement`
+declares (empty for sonata today, so a no-op). `AoideClipboard` and
+`GrimoireLedger` are facet-owned utility singletons injected into the
+launcher slot as extras; `AoideWallpaperPicker` is the `SUPER+W` wallpaper
+switcher.
+
+The repo root carries no `qml/` directory — widget source lives in
+`modules/facets/quickshell/qml/` and each active song's `widgets/`, and the
+facet's `home.activation.aoideDeployQml` rsyncs the built config tree
+(`rsync -a --delete --chmod=u+w`) into the gitignored `~/Aoide/run/qml/`,
+which Quickshell reads as its entry point (`quickshell -p
+~/Aoide/run/qml/shell.qml`). The deployed tree is self-healing: hot-editing
+QML directly under `~/Aoide/run/qml/` previews live without a rebuild, and
+every activation's rsync reasserts the store's build over any such edit —
+the same "switch is the truth, hot edits are the sketch" discipline as
+every other stage/preview seam. `hyprland.conf` is owned by
+home-manager's `wayland.windowManager.hyprland`: the compositor facet
+writes livery + keybind fragments with `mkBefore`, and the Quickshell
+facet appends its `exec-once` autostart with `mkAfter`, so the two facets
+compose the one config file without collision.
 
 ### IPC hot-reload — closing the dynamic-load gap
 
@@ -64,7 +87,7 @@ found via live debugging.
 instantiated in `shell.qml` alongside `livery`/`bridge`/`stagingEngine`/`shared`
 — no properties of its own, wired purely for the side effect. `quickshell ipc
 call shell reload` invokes it from outside the process; `lyra quickshell reload`
-(`crates/song/src/commands/shell.rs`, `crates/song/src/ipc.rs`) shells out to
+(`crates/song/src/commands/quickshell.rs`, `crates/song/src/ipc.rs`) shells out to
 exactly that call, no-oping to a reported (never fatal) `not-running` status
 when `aoide-quickshell.service` isn't up.
 
@@ -92,58 +115,73 @@ landing.
 
 ### Notification card — three-tier reading order
 
-The per-card body (`song/songbook/sonata/widgets/notifications.qml`, the
-shipped baseline every song falls back to) reads the `Notification` payload
-into three differentiated tiers, top to bottom: the **program title** (a
-box-drawing frame), the notification's own **title** (bold serif), and the
-**context** (dimmer, indented behind a signature hairline). The program title
-resolves `desktopEntry` (`.desktop` suffix stripped) → `appName` → `"notice"`,
-capped at 28 characters. When a notification's body is empty and its summary
-is a `Title: message` join — multi-word head, 6–59 characters, first `": "` —
-the summary splits into title and context. The join shape is what terminal-
-forwarded OSC-9 notifications produce (kimi emits `ESC ] 9 ; title: body`;
-kitty's OSC 9 handler forwards the whole string as the title with `app_name`
-set to `kitty`, the forwarder — the real program is not in the payload).
-The card never renders a notification's implicit `default` action
-(`identifier == "default"`), which spec senders like kitty attach to every
-forwarded OSC-9/99 notification as the click-anywhere activation — it
+dunst owns notification delivery — the D-Bus bus name, history, stacking, and
+pause levels — but draws nothing (`skip_display` on every rule,
+`modules/dendrites/dunst.nix`). Quickshell owns the surface: the `herald`
+popup slot and the dock's `herald-center` ledger, both drawn from
+`stage/herald.json`. The per-card body
+(`song/songbook/sonata/widgets/herald.qml`, the shipped baseline every song
+falls back to) reads the `Notification` payload into three differentiated
+tiers, top to bottom: the **program title** (a box-drawing frame), the
+notification's own **title** (bold serif), and the **context** (dimmer,
+indented behind a signature hairline). The program title resolves
+`desktopEntry` (`.desktop` suffix stripped) → `appName` → `"notice"`, capped
+at 28 characters. When a notification's body is empty and its summary is a
+`Title: message` join — multi-word head, 6–59 characters, first `": "` — the
+summary splits into title and context. The join shape is what
+terminal-forwarded OSC-9 notifications produce (kimi emits `ESC ] 9 ;
+title: body`; kitty's OSC 9 handler forwards the whole string as the title
+with `app_name` set to `kitty`, the forwarder — the real program is not in
+the payload). The card never renders a notification's implicit `default`
+action (`identifier == "default"`), which spec senders like kitty attach to
+every forwarded OSC-9/99 notification as the click-anywhere activation — it
 showed up live as an empty outlined button. Real action buttons render as
 before, with the laurel standout fill on the first real one. The ledger
 line's right-hand ink is a live arrival clock (HH:MM, gold, refreshed every
 30s while the card lives), and the urgency word appears only in the bottom
-frame label — the duplicate urgency word is gone.
+frame label.
 
-## The registry — nine declared, eight with a live body
+## The registry — nine declared, five with a live body
 
 The facet declares nine `owner = "quickshell"` surfaces
 (`modules/facets/quickshell/default.nix`: bar, notifications, launcher, osd,
-lockscreen, greeter, wallpaper, agentWidgets, sessionGraph):
+lockscreen, greeter, wallpaper, agentWidgets, sessionGraph). Five have a
+live QML body today: **bar** (song `bar.qml` via `WidgetSlot`),
+**notifications** (dunst as daemon, the `herald`/`herald-center` popup and
+ledger as the drawn surface), **launcher** (song
+`launcher.qml` via `SurfaceSlot`, below), **wallpaper** (`AoideWallpaper.qml`),
+and **agentWidgets** (the [[Gadget-Dock]], `AoidePanel.qml`: a left-edge
+panel holding four core self-framed gadgets — Conductor, Terminals, Meters,
+Power — plus an opt-in claude.ai Usage stele; its fore-edge peeks past the
+screen edge at rest, further when a session is `awaiting` and
+unacknowledged, and slides fully in on a 6 px hot-edge hover or on `SUPER+G`,
+an in-process Hyprland global shortcut the panel itself registers
+(`aoide:dock`), not a CLI verb).
 
-- **`agentWidgets`** — the [[Gadget-Dock]], `AoidePanel.qml`: a **left-edge
-  panel** holding four core self-framed gadgets (Conductor, Terminals, Meters,
-  Power) plus an opt-in claude.ai Usage stele. Its fore-edge peeks past the
-  screen edge at rest — further when a
-  session is `awaiting` and unacknowledged — and slides fully in on a 6 px
-  hot-edge hover or on `SUPER+G` (an in-process Hyprland global shortcut the
-  panel itself registers, `aoide:dock`; not a CLI verb). Its Conductor
-  gadget is the desktop's at-a-glance agent view — a beamed session tree,
-  not a literal DAG diagram.
-- **`sessionGraph`** — declared but has **no QML body**: the standalone DAG
-  overlay (`AoideSessionGraph.qml` + `GraphRow.qml`) and the shared
-  `GraphModel.qml` it and the dock's former DAG gadget instantiated are no
-  longer part of the QML tree. `aoide graph view`/`--json` and the `aoide
-  conductor` TUI are the DAG's renderers today ([[Session-Graph]]).
+Four are registry-only, with no QML anywhere in the repo:
 
-## Launcher (surface #3, built out 2026-07-28)
+- **`osd`**, **`lockscreen`**, **`greeter`** — each is a stand-down
+  declaration against [[Stylix]] (`aoide.surfaces.<name>.owner =
+  "quickshell"` tells Stylix not to theme its own equivalent target) with no
+  facet or song QML implementing the surface. greetd launches Hyprland
+  directly as a stub session command; the Quickshell greeter's greetd IPC
+  session is unbuilt.
+- **`sessionGraph`** — declared but has no QML body: the standalone DAG
+  overlay this surface once named is no longer part of the QML tree.
+  `aoide graph view`/`--json` and the `aoide conductor` TUI are the DAG's
+  renderers today ([[Session-Graph]]).
 
-`AoideLauncher.qml` is a working, keyboard-driven app launcher (the rofi
-replacement). It is a summoned `PanelWindow` on
-`WlrLayer.Overlay` (namespace `aoide-launcher`) that takes an **exclusive
-keyboard grab** only while shown and is an inert zero-cost layer at rest. It
-enumerates apps from Quickshell's built-in `DesktopEntries`, filters on a
-prefix-ranked case-insensitive substring as you type, navigates with
-Up/Down + Ctrl+J/K, launches on Enter/click, dismisses on Escape / scrim-click.
-It is a Pantheon pane (`GadgetFrame`, cream Aero glass, `♪` prompt, lowercase
+## Launcher
+
+`song/songbook/sonata/widgets/launcher.qml` is a working, keyboard-driven
+app launcher (the rofi replacement), loaded through the `launcher`
+`SurfaceSlot`. It is a summoned `PanelWindow` on `WlrLayer.Overlay`
+(namespace `aoide-launcher`) that takes an exclusive keyboard grab only
+while shown and is an inert zero-cost layer at rest. It enumerates apps
+from Quickshell's built-in `DesktopEntries`, filters on a prefix-ranked
+case-insensitive substring as you type, navigates with Up/Down + Ctrl+J/K,
+launches on Enter/click, dismisses on Escape / scrim-click. It is a
+Pantheon pane (`GadgetFrame`, cream Aero glass, `♪` prompt, lowercase
 `launcher.summon` callout), colours strictly from `livery`.
 
 Two design decisions worth carrying forward:
@@ -178,7 +216,7 @@ bad load from bringing the desktop down for good:
   existence, not validity.**
 - `Restart = "on-failure"` / `RestartSec = 3` — a genuine crash respawns the
   whole shell instead of leaving the desktop bare until next login.
-- `StartLimitIntervalSec = 60` / `StartLimitBurst = 5` (added 2026-07-28) — the
+- `StartLimitIntervalSec = 60` / `StartLimitBurst = 5` — the
   backstop for the gap the `ConditionPathExists` guard can't cover: a
   `shell.qml` that *exists but won't load* (a QML parse error, or an `ExecStart`
   aimed elsewhere by a stray drop-in) exits 255 every respawn, so without a
@@ -186,7 +224,7 @@ bad load from bringing the desktop down for good:
   systemd parks the unit `failed`. Five tries still absorbs a transient failure
   (e.g. Wayland not ready yet).
 
-**The wallpaper engine *is* this shell** — the wallpaper is a
+**The wallpaper engine *is* this shell.** The wallpaper is a
 `wlr-layer-shell` `Background` surface (`AoideWallpaper.qml` inside `shell.qml`),
 the sole live painter (Stylix's `hyprpaper` is force-disabled via the
 `aoide.surfaces.wallpaper` owner registry; no `swww`/`swaybg`/`mpvpaper`

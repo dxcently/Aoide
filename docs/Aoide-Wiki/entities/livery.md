@@ -1,26 +1,23 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-08-19
+updated: 2026-08-25
 aliases: [aoide-notes, Notes, notes package, note engine]
 tags: [aoide, livery, theming, base16]
 ---
 
 # livery — the design tokens, and the engine that stamps them
 
-`livery` is Aoide's **design-token layer** — one name for the whole thing:
-the values and the act of stamping them are one thing. The same word names
-the native engine that validates, resolves, and emits the tokens. A song
-authors `aoide.livery.*`; facets read `aoide.livery` and nothing else; the
-runtime seam is `stage/livery.json`. "Notes" survives only as the musical
-image ([[Lexicon]]) — the option, the schema, and every shipped artifact are
-`livery`.
+`livery` is Aoide's **design-token layer**: one name for both the values and
+the act of stamping them. The same word names the native engine that
+validates, resolves, and emits the tokens. A song authors `aoide.livery.*`;
+facets read `aoide.livery` and nothing else; the runtime seam is
+`stage/livery.json`. Naming rationale lives in [[Lexicon]].
 
-The livery merge (LIVERY-MERGE.md) ported the
-standalone Node engine into native Rust inside `crates/song/src/livery/`, and
-the engine took the name **livery** across the whole surface — option
-namespace, songbook data files, and the live stage contract — in one pass
-(the previous option namespace kept evaluating via a
+The livery merge (LIVERY-MERGE.md) ported the standalone Node engine into
+native Rust inside `crates/song/src/livery/`, taking the name **livery**
+across the option namespace, songbook data files, and the live stage
+contract in one pass (the previous option namespace kept evaluating via a
 `mkRenamedOptionModule` alias until Phase 4 closed the transition window).
 
 ## The seam between score and performance
@@ -28,15 +25,6 @@ namespace, songbook data files, and the live stage contract — in one pass
 livery is where the frozen nix layer and the live desktop meet: values
 frozen into the crystal, sounded at runtime. The container stays W3C
 design-tokens format; livery is Aoide's name for what fills it.
-
-**Why a livery.** The industry term for this layer is *design tokens*, and a
-token stands for a single value. But the engine dresses *every*
-surface — terminal, compositor, GTK, the Quickshell stage, any config file —
-in the one song's identity, and a token does not clothe a stage. A **livery**
-is the single set of house colours a whole retinue wears in unison, so a
-servant, a ship, and a herald are read at a glance as one household's. One
-word for the values *and* the wearing of them. See [[Lexicon#Why the seam is
-a livery]].
 
 Every facet consumes livery and nothing else. No module reads another
 module. The coupling discipline is contractual, not polite.
@@ -130,9 +118,8 @@ split: the emitters only produce bytes; `live::apply_live` /
 
 ## Verbs
 
-The engine's surface is the `lyra livery` verb group (native, inside the
-CLI's `Invocation`/`Outcome` shell — the standalone note CLI's
-subcommands, native):
+The engine's surface is the `lyra livery` verb group, native inside the
+CLI's `Invocation`/`Outcome` shell:
 
 - **`lyra livery lint [<song>|<path>]`** — validate a livery file
   against the authoritative v0 schema. The nix option type in

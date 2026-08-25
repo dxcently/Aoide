@@ -46,7 +46,7 @@ AoideOS is also a specialized widget maker: it integrates and launches the indep
 - [[livery]] — the design-token layer and its engine: the immutable seam between nix structure and runtime rendering, native in `crates/song/src/livery/` as `lyra livery emit|resolve|lint`
 - [[aoided]] — the orchestrator daemon: neutral event stream, policy, lint, audit log, gated rebuild pipeline
 - [[shellbridge]] — the daemon-to-desktop bridge: atomic JSON state files out, unix-socket commands in, Hyprland IPC consumed
-- [[Quickshell]] — the QML shell runtime: nine surfaces declared, eight with a live QML body (session-graph declared only)
+- [[Quickshell]] — the QML shell runtime: nine surfaces declared, five with a live QML body
 - [[Hyprland]] — the Wayland compositor; Aoide's only multiplexer, driven live via hyprctl
 - [[Stylix]] — base16 whole-system theming; the baked fan-out from `rice.nix` to every nix-manageable target
 - [[dxflake]] — the dendritic auto-discovery flake; Aoide's prior art and adoption target for the nucleus + dendrite walker

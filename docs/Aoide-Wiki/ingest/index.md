@@ -43,7 +43,7 @@ updated: 2026-08-25
 - [[livery]] — the livery schema and tiers, the two-fan-out (stage/livery.json + Stylix), the native `lyra livery` engine and its four emitters
 - [[aoided]] — the orchestrator daemon: event stream, policy, lint, audit log, gated rebuild; per-agent adapters; the notification-text security boundary
 - [[shellbridge]] — daemon↔desktop: JSON state files out, socket commands in, Hyprland IPC; the stage files and the `AOIDE_STAGE_DIR` seam
-- [[Quickshell]] — the QML shell surfaces (nine declared, eight live), livery hot-reload, the `AoidePanel.qml` dock, and the QML deploy path
+- [[Quickshell]] — the QML shell surfaces (nine declared, five live), livery hot-reload, the `AoidePanel.qml` dock, and the QML deploy path
 - [[Hyprland]] — the compositor's role: Aoide's only multiplexer, live hyprctl rendering, shellbridge IPC consumer
 - [[Stylix]] — base16 whole-system theming; surface ownership between Stylix and Quickshell; GTK/Qt preview limitations
 - [[dxflake]] — the dendritic auto-discovery walker (listFilesRecursive, `/_` shelving), flags-only hosts; Aoide's adoption target
