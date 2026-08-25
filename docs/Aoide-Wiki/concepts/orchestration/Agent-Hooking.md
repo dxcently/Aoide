@@ -1,5 +1,5 @@
 ---
-type: entity
+type: concept
 created: 2026-07-27
 updated: 2026-08-25
 tags: [aoide, agent, session, conductor, orchestration, graph]

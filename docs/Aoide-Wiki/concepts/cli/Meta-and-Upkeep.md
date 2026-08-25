@@ -1,3 +1,10 @@
+---
+type: concept
+created: 2026-08-19
+updated: 2026-08-25
+tags: [aoide, cli, meta, upkeep]
+---
+
 # Meta & Upkeep Verbs — Guide, Schema, Soundcheck
 
 The meta verbs (`guide`, `schema`) orient an agent. The stubs (`make`,
@@ -28,7 +35,9 @@ aoide guide [--json]
   `AGENTS.md`. Message `"printed the four-tier onboarding"`; `--json` data
   `{text: <full guide>}`.
 - **Notes:** read-only; not gated. See [[Agent-Interface]] for the tier model
-  the guide describes.
+  the guide describes. `lyra guide` is the paint-side mirror — its own
+  compiled-in constant (`pkgs/aoide/crates/lyra/src/guide.rs`), reading
+  lyra's own registry rather than core's.
 
 ### aoide schema
 
@@ -47,7 +56,9 @@ aoide schema [--json]
   `examples` where declared).
 - **Notes:** read-only; not gated. This document is the machine-readable
   backstop every tier generates from — the MCP tool list derives from it
-  ([[Agent-Interface]]).
+  ([[Agent-Interface]]). `lyra schema` mirrors it for the paint side: its own
+  registry, its own golden snapshot (42 command paths, evolving independently
+  of core's 69 — see [[lyra]]).
 
 ### aoide make
 

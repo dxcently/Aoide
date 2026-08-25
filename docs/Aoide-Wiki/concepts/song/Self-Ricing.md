@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Aoide ships the rice engine as a builtin. The engine provides the loop, the schema, and the staging mechanism. Everything else — the songs, the preferences, the accumulated taste — it learns by doing.
 
-**Status today:** the loop below is real end to end except its final commit step. `rice lint` (runs the native [[livery (rename to lyra)]] engine), `rice stage`, `rice compose`, the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, and geometry + window-border colours apply to the running compositor over `hyprctl` in the same step (terminal-OSC fan-out is not yet wired into it) — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, `stage/livery.json` is also reseeded from the active song's committed notes on every activation ([[Codebase#Runtime contracts (socket + stage files)]]), so a host that boots without ever staging still carries the correct stage twin. `rice declare` and `rice transpose` are declared but not yet implemented (stub, exit `64`) — narrate those as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
+**Status today:** the loop below is real end to end except its final commit step. `rice lint` (runs the native [[livery]] engine), `rice stage`, `rice compose`, the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, and geometry + window-border colours apply to the running compositor over `hyprctl` in the same step (terminal-OSC fan-out is not yet wired into it) — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, `stage/livery.json` is also reseeded from the active song's committed notes on every activation ([[Codebase#Runtime contracts (socket + stage files)]]), so a host that boots without ever staging still carries the correct stage twin. `rice declare` and `rice transpose` are declared but not yet implemented (stub, exit `64`) — narrate those as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
 
 ## The Rice Loop
 
@@ -229,7 +229,7 @@ not on `rice mode declarative`/`rice mode draft`.
 
 A song may set `aoide.livery.geometry` — gaps, border size, rounding, and
 blur, every field optional — alongside its palette and window tiers; see
-[[livery (rename to lyra)#The geometry tier]] for the field list and the fallback/live-apply
+[[livery#The geometry tier]] for the field list and the fallback/live-apply
 mechanism. A song that sets no geometry performs with the compositor
 facet's own defaults, unchanged.
 
@@ -309,7 +309,7 @@ Covers themselves live in the shared `song/covers/` library, not per-song — an
 ## Related
 
 - [[Song-Vocabulary]]
-- [[livery (rename to lyra)]]
+- [[livery]]
 - [[aoided]]
 - [[Content-Pipeline]]
 - [[Snowflake-Anatomy]]

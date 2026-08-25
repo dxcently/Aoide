@@ -36,11 +36,17 @@ updated: 2026-08-25
 - [[Loop-Protocol|Loop Protocol]] — harness-agnostic multi-role agent loops: per-role fresh contexts, the R1/R2 degradation ladder, review integrity
 - [[Conductor-3D-DAG|Conductor 3D DAG]] — the ratatui 3D-wireframe DAG view for `aoide conductor`. Status: specified, not implemented
 - [[Package-Layout]] — the landed pi-style single-charter crate split of `pkgs/aoide`, the per-crate charters, and the two-binary split (`aoide`/`aoided` vs `lyra`)
+- [[Agent-Hooking]] — how any harness registers on the conductor: hook payloads through the `AgentProfile` seam, the `graph session` verbs, the conduct wrapper
+- [[Conductor-TUI]] — the `aoide conductor` interactive terminal frontend: seven panels, keys, what each dispatches
+- [[Secrets-Verbs]] — the `aoide secrets` credential door's 16 verbs: direct-home admin, over-the-socket operator, and the daemon itself
+- [[Controls]] — the day-to-day surface: rebuild aliases, compositor keybinds, the bar's click/scroll/hover interactions, shell aliases
+- [[Screen-Control]] — `lyra screen`, AoideOS's computer-use surface: look, ground, act, verify — fourteen verbs behind one CLI group
 
 ## Entities
 
 - [[aoide-cli]] — the `aoide` binary: the self-registering command registry behind `dispatch()`/`schema --json`/MCP, exit codes 0/1/2/64, and the `aoided` daemon
-- [[livery (rename to lyra)]] — the livery schema and tiers, the two-fan-out (stage/livery.json + Stylix), the native `lyra livery` engine and its four emitters
+- [[lyra]] — the AoideOS paint binary: its own registry, its own 42-command schema, the nix boundary core never crosses
+- [[livery]] — the livery schema and tiers, the two-fan-out (stage/livery.json + Stylix), the native `lyra livery` engine and its four emitters
 - [[aoided]] — the orchestrator daemon: event stream, policy, lint, audit log, gated rebuild; per-agent adapters; the notification-text security boundary
 - [[shellbridge]] — daemon↔desktop: JSON state files out, socket commands in, Hyprland IPC; the stage files and the `AOIDE_STAGE_DIR` seam
 - [[Quickshell]] — the QML shell surfaces (nine declared, five live), livery hot-reload, the `AoidePanel.qml` dock, and the QML deploy path
@@ -49,10 +55,9 @@ updated: 2026-08-25
 - [[dxflake]] — the dendritic auto-discovery walker (listFilesRecursive, `/_` shelving), flags-only hosts; Aoide's adoption target
 - [[Melete]] — the integrated coding harness: daemon + MCP surface, coding dispatch, shell/fleet, skills; Aoide's widget-making engine
 - [[Mneme]] — the integrated knowledge server: the vault API behind the content pipeline and the wiki protocol
-- [[Agent-Hooking]] — how any harness registers on the conductor: hook payloads through the `AgentProfile` seam, the `graph session` verbs, the conduct wrapper
 
 ## References
 
 - [[references/AOIDE-HANDOFF|AOIDE-HANDOFF]] — the original design contract: what Aoide is (the primary source for this wiki)
 - [[AOIDE-DEV|AOIDE-DEV]] — the development agent's operating manual: the prime loop, build/show mechanics, git discipline, the §7 open-flags ledger
-- [[concepts/cli/Index|cli/Index]] — the per-command dev reference: signature, files read/written, output targets; hub page plus six group pages
+- [[CLI-Reference]] — the per-command dev reference: signature, files read/written, output targets; hub page plus eight group pages

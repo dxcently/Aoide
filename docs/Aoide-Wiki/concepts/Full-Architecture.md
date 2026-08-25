@@ -72,7 +72,7 @@ trail but exit 64 today.
 **Binary note.** The map below draws both binaries as one continuous picture
 of the data flow, labeled `aoide` throughout for readability. Ownership
 (`CONTRACTS.md` §3, [[Package-Layout]]): the AGENT INTERFACE/`aoided`/CONTENT
-PIPELINE/NIX EVAL boxes are `aoide`'s (68 commands: conducting/orchestration
+PIPELINE/NIX EVAL boxes are `aoide`'s (69 commands: conducting/orchestration
 is aoide's identity); the RICE ENGINE, LYRA, Quickshell, and shellbridge
 boxes below them are `lyra`'s (42 commands, its own schema and dispatch,
 routed through the desktop, not through `aoided`'s CLI trunk).
@@ -85,7 +85,7 @@ routed through the desktop, not through `aoided`'s CLI trunk).
                                         ▼            │
    ┌─────────────────────────────────────────────────────────────┐
    │  AGENT INTERFACE            aoide <cmd>   ·   aoide mcp serve │   [[Agent-Interface]]
-   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   68 commands · exit 0/1/2/64
+   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   69 commands · exit 0/1/2/64
    └───────────────────────────────┬─────────────────────────────┘
                                     ▼
    ┌─────────────────────────────────────────────────────────────┐
@@ -305,8 +305,9 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   `aoide schema --json` is its machine-readable source of truth; the stdio
   MCP façade (`aoide mcp serve --stdio`) generates its tool list from it, and
   the [[A2A-Door]]'s AgentCard is derived from the same schema — all
-  one-to-one. **68 commands** — real (60): `guide`, `schema`,
-  `mcp serve`, `daemon`, `conduct`, `conductor`, `adapter melete`, the
+  one-to-one. **69 commands** — real (61): `guide`, `schema`,
+  `mcp serve`, `daemon`, `events tail`, `conduct`, `conductor`, `adapter
+  melete`, the
   5-verb `a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`),
   the 5-verb `peer` group (`peer add/list/remove/pull/status` — cross-device
   peer federation, [[Peer-Federation]]), the 16-verb `secrets` group
@@ -326,7 +327,7 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   **42 commands**: the 18-verb `rice` group (`lint`, `stage`, `compose`, the
   3-verb `rice draft` group, the 4-verb `rice mode` group, the 5-verb `rice
   take` rehearsal-snapshot group, `rice back`; `declare`/`transpose` are the
-  2 stubs), `cover set`, the 3-verb `lyra` group (`lint`/`resolve`/`emit`
+  2 stubs), `cover set`, the 3-verb `livery` group (`lint`/`resolve`/`emit`
   — the native design-token engine), `shellbridge`, `quickshell reload` (the
   Quickshell IPC hot-reload trigger — rebuilds the whole scene from
   `shell.qml` in-process, picking up dynamically-loaded widget/facet QML the

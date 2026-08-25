@@ -166,7 +166,7 @@ add/list/remove/send` in `schema --json`'s order.
 ## Sending across the fold — `graph send --to peer/<query>`
 
 [[Conductor-Channel|`graph send`]]'s `--to` flag resolves a target name
-through the same tiered address grammar `graph who` uses; a `peer/<query>`
+through the same tiered address grammar `aoide who` uses; a `peer/<query>`
 form is its remote tier. It resolves `<query>` against a registered peer's
 CACHED graph (the same `state/peer-cache/<name>.json` the fold above reads)
 and, on a match, delivers the message over A2A `message/send` instead of

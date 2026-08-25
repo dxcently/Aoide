@@ -6,7 +6,7 @@
 Deferred (not yet page-worthy): den (dropped prior art), Style Dictionary, the W3C design-tokens format, Magi. Promote to pages if they accrue independent claims. (Melete and Mneme promoted to entity pages 2026-07-26; the herdr agent-guide pattern captured as the [[Terminal-Commander]] concept 2026-07-26.)
 
 ### [2026-07-25] open: livery schema v1
-Provisional v0 in use; design-system v1 supersedes and the update playbook migrates. Close when v1 lands (see [[livery (rename to lyra)]]). (v0 grew two optional tiers 2026-07-27 without a version bump: `palette.hot` and the all-or-nothing `base16` block, both livery-validated — still v0.)
+Provisional v0 in use; design-system v1 supersedes and the update playbook migrates. Close when v1 lands (see [[livery]]). (v0 grew two optional tiers 2026-07-27 without a version bump: `palette.hot` and the all-or-nothing `base16` block, both livery-validated — still v0.)
 
 ### [2026-07-26] open: post-skeleton build backlog
 The walking skeleton (commit f3ceadf, see [[Codebase]]) is complete and verified; the deeper build is queued. Deliberately local for now — the repo has no git remote (user's call), so Melete fleet registration and its code-task flow wait until one exists. The backlog, roughly in order:
@@ -46,7 +46,7 @@ Opened after the live switch (see [[Codebase]], [[Full-Architecture]]); queued f
 - **First-boot desktop verification pending** — the switch is live, but nobody has logged into the greetd → Hyprland → Quickshell session in this state; the surfaces (bar, dock-popup hot edge, launcher) are unproven on real glass.
 
 ### [2026-07-27→28] closed (mostly): page ingest + lint pending for 9e2eb61..8f062df
-The 2026-07-27 log entry below is **log-only**: 37 commits (the port tail, the rice going live, livery, baton-ratatui, the hero song, the four Pantheon rounds, the session write door) are summarized in the log but NOT yet worked into the pages. Pending: concepts/entities updates (at least [[Codebase]], [[Session-Graph]], [[Gadget-Dock]], [[Quickshell]], [[aoide-cli]], [[livery (rename to lyra)]], [[shellbridge]], [[Self-Ricing]], [[Notes]]), `ingest/index.md` glosses, and a lint pass that settles the manifest — `design/Pantheon-Grammar.md`, `design/Baton-3D-DAG.md`, `references/pantheon/**` (13 stills), and `references/dxflake-rice-screenshot.png` are on disk but unmanifested (known drift; `design/` may also need a SCHEMA.md shape decision — it is a new top-level directory).
+The 2026-07-27 log entry below is **log-only**: 37 commits (the port tail, the rice going live, livery, baton-ratatui, the hero song, the four Pantheon rounds, the session write door) are summarized in the log but NOT yet worked into the pages. Pending: concepts/entities updates (at least [[Codebase]], [[Session-Graph]], [[Gadget-Dock]], [[Quickshell]], [[aoide-cli]], [[livery]], [[shellbridge]], [[Self-Ricing]], [[Notes]]), `ingest/index.md` glosses, and a lint pass that settles the manifest — `design/Pantheon-Grammar.md`, `design/Baton-3D-DAG.md`, `references/pantheon/**` (13 stills), and `references/dxflake-rice-screenshot.png` are on disk but unmanifested (known drift; `design/` may also need a SCHEMA.md shape decision — it is a new top-level directory).
 **Closed 2026-07-28** (see the refactor/index/lint entries below): the `design/` shape decision is made — `design/` is now a manifested kind folder (SCHEMA shape + Notes manifest + index `## Design` section), the four design pages carry frontmatter, and the pantheon `.png` stills stay assets (not notes), so they are intentionally unmanifested. livery/sonata/identity/count facts swept across the pages; [[Song-Anatomy]] minted. Residual (still owed): a *deeper* re-ingest of the 37-commit tail into [[Codebase]]/[[Quickshell]]/[[Gadget-Dock]] beyond the surgical fact-fixes done here, and the design/songbook content migration into `song/` (its own `[refactor]` flag in [[AOIDE-DEV]] §7).
 
 ### [2026-07-28] open: unbuilt-and-untracked design items (from the assertion sweep)
@@ -74,7 +74,7 @@ A `WidgetSlot` anchor is unconditional wherever a host surface embeds one — pr
 A per-song `design/palette-usage.md` is proposed — a table mapping each slot/widget to which palette role it draws on (primary bg/fg/accent/hot, a semantic role, or deliberate structural ink), agent-maintained, so a song author knows which widgets to retune when a primary palette changes. Not built; no file exists yet in any song's `design/`.
 
 ### [2026-08-01] closed: `stage/livery.json` is not seeded from the selected song on boot
-~~`stage/livery.json` is written by `rice preview`, `cover set`, and the livery emitters — never automatically from the `aoide.song`-selected song's baked values at activation time, so a host that boots without ever having previewed leaves the stage file stale or absent. Whether/how to seed it at activation is undecided.~~ **Closed 2026-08-01** (`99a8447`): `home.activation.aoideSeedStage` (`modules/facets/quickshell/default.nix`) reasserts the active song's committed notes into `stage/livery.json` on every activation. See [[Codebase]], [[livery (rename to lyra)]], [[Self-Ricing]].
+~~`stage/livery.json` is written by `rice preview`, `cover set`, and the livery emitters — never automatically from the `aoide.song`-selected song's baked values at activation time, so a host that boots without ever having previewed leaves the stage file stale or absent. Whether/how to seed it at activation is undecided.~~ **Closed 2026-08-01** (`99a8447`): `home.activation.aoideSeedStage` (`modules/facets/quickshell/default.nix`) reasserts the active song's committed notes into `stage/livery.json` on every activation. See [[Codebase]], [[livery]], [[Self-Ricing]].
 
 ### [2026-08-01] closed: a `commands/` registry + a `graph.rs` domain split are sketched for `pkgs/aoide`, not started
 ~~`schema.rs`'s command table and `dispatch.rs`'s match are hand-synced (every new command still touches both, even though the CLI/MCP/dispatch surfaces already derive from `schema.rs`); `graph.rs` is over 7,000 lines, more than half the crate. A target shape is sketched: a `commands/` tier where each verb-group module owns its own schema entry, handler, gate, and availability and self-registers into a `Registry` that `dispatch`/`schema --json`/the MCP tool list all derive from, replacing the hand-written table (modeled on Hermes-agent's — github:NousResearch/hermes-agent — self-registering tool registry, and on Claude Code's discrete-tools-behind-a-thin-dispatch shape); explicit aggregation is the mechanism under consideration over `inventory`/`linkme`, since the crate is pure-Nix offline-locked. `graph.rs` would split into a `graph/` domain (`model`/`doc`/`session_store`/`window`/`conduct`/`send` plus `testutil`), mirroring the existing `conductor.rs` + `conductor/` split, behind a stable re-exported public API. The domain split is understood as doable independently and first; the registry to follow once other CLI work settles. Neither has started.~~ **Closed 2026-08-01** (`16b65d6`, `62121a4`): both landed as sketched — `graph.rs` is now a thin re-export root over `graph/{model,doc,common,verbs,window,session_store,conduct,send}.rs`; `registry.rs` + `commands/{meta,rice,cover,stubs,graph,infra}.rs` replace `schema.rs`'s hand-written table, with `dispatch()` reduced to a registry lookup and a golden-snapshot test pinning the command-path set. See [[aoide-cli]], [[Codebase]].
@@ -1616,3 +1616,115 @@ last verification.
   house-rule number, or a code snippet).
 - Sole page touched. `docs/Aoide-Wiki/protocol/OPERATIONS/*`, `PROTOCOL.md`,
   `SHAPE.md`, and `_template` were not opened, per the brief's scope.
+
+## [2026-08-25] refactor | cli-section expansion + section reorg
+
+- New pages minted: `concepts/cli/Conductor-TUI.md` (the `aoide conductor`
+  interactive terminal — seven panels, keys, dispatch, sourced from
+  `pkgs/aoide/crates/conductor/{README,AGENTS}.md` and `src/{lib,app,
+  commands}.rs`; the plan's own outline mis-grouped `h`/`l`/`L` under
+  PROJECTS — verified source shows they belong to SESSIONS'
+  `handle_dag_key`, corrected in the written page) and
+  `concepts/cli/Secrets-Verbs.md` (the `aoide secrets` credential door's 16
+  verbs, sourced from `pkgs/aoide/crates/secrets/{README,AGENTS}.md`).
+- Four moves, `git mv`, history preserved: `entities/Agent-Hooking.md` →
+  `concepts/orchestration/Agent-Hooking.md` (a mechanism, not a named
+  thing — `Indexing.md`'s entity/concept split), `concepts/orchestration/
+  Terminal-Commander.md` → `concepts/desktop/Terminal-Commander.md` (a
+  shipped Quickshell widget, `desktop/`'s domain), `concepts/cli/Index.md`
+  → `concepts/cli/CLI-Reference.md` (`Index` collided with `ingest/
+  index.md`'s basename, forcing every inbound link into path form against
+  `Wikilinks.md`'s bare-name rule), `entities/livery (rename to lyra).md`
+  → `entities/livery.md` (repairs `Wikilinks.md:12`'s own `[[livery]]`
+  example, which resolved to nothing before this move).
+- The livery/lyra split: SPLIT resolution — `entities/livery.md` restored
+  (the palette/design-token engine, native `lyra livery lint|resolve|
+  emit`) and a new `entities/lyra.md` minted (the paint binary itself,
+  mirroring `entities/aoide-cli.md` section-for-section, sourced from
+  `pkgs/aoide/crates/lyra/README.md` and `docs/architecture/
+  PACKAGE-LAYOUT.md`'s "Two binaries" section). 44 occurrences of the
+  marker string swept across 19 files via `sed`, plus three surgical edits
+  inside `ingest/log.md`'s own Open Threads section (the two ranges left
+  deliberately untouched: this file's other dated entries, and
+  `protocol/AOIDE-DEV.md`'s §7 ledger, never opened this pass).
+- Coverage closed: `### aoide who` (full register entry — live per-peer
+  probe, fallback to cache, `<filter>` narrows display only), `--bearer-
+  secret` added to `### aoide a2a serve` (inbound, consumer `a2a-door`,
+  resolved fresh, fails closed) and `### aoide peer add` (outbound,
+  consumer `a2a-client`, mirror direction), `### aoide conductor` shrunk to
+  signature + pointer with the stale "five panels/keys 1–5" replaced by
+  the verified seven/1–7, `### aoide events tail` (new — see the
+  command-count correction below), `### aoide inbox list/read/clear` added
+  to `Graph-and-Conduct.md` (verified against `pkgs/aoide/crates/storage/
+  src/{inbox,commands}.rs`; the crate note — inbox lives in `storage`, not
+  `conduct` — added to that page's scope paragraph), and `lyra guide`/
+  `lyra schema` cross-reference lines added to `Meta-and-Upkeep.md`'s
+  `guide`/`schema` sections.
+- Mid-flight correction, independently verified (not taken on the
+  orchestrator's word): commit `86bb6e2` landed `aoide events tail`
+  between this plan's authoring and its execution, confirmed via `git
+  show 86bb6e2 --stat`, the golden snapshot in `pkgs/aoide/crates/cli/src/
+  registry.rs` (69 paths, `events.tail` present), and `pkgs/aoide/crates/
+  lyra/AGENTS.md`'s own independent line ("lyra's golden is 42 paths, not
+  a subset check against cli's 69"). Every command-count claim this pass
+  touched was written or corrected to 69 (real 61 + stub 8), not the
+  plan's original 68 (real 60 + stub 8): `entities/aoide-cli.md`,
+  `concepts/cli/CLI-Reference.md`, `concepts/Full-Architecture.md` (three
+  spots: the binary-note prose, the AGENT INTERFACE diagram box, and the
+  real/stub breakdown, which now also lists `events tail` among the real
+  verbs). `lyra` stays 42, unchanged, confirmed unaffected. `events tail`
+  was placed in `Doors-and-Peers.md` rather than `Graph-and-Conduct.md` or
+  `Meta-and-Upkeep.md`: it registers in the same crate/file
+  (`server/src/commands.rs`, alongside `daemon`) as this page's other
+  entries, matches the page's own scope statement (the doors onto aoided's
+  policy skeleton), and shares `secrets watch`'s CLI-only-blocking-
+  foreground-follow shape that page's Secrets-Verbs sibling already
+  documents.
+- Two out-of-section one-line fixes (plus two opportunistic 68→69 count
+  fixes at the same file, already open for the mandated edit):
+  `concepts/Full-Architecture.md` "3-verb `lyra` group" → "3-verb `livery`
+  group" (the token-engine group; `lyra` is the binary, not the group
+  name) and `concepts/orchestration/Peer-Federation.md` "`graph who`" →
+  "`aoide who`" (the verb is top-level, not under `graph`).
+- Four considered-and-rejected moves, not re-proposed: grouping the six
+  `concepts/` root pages into `concepts/architecture/` (would strand
+  `Lexicon.md` alone to fix a two-line `SCHEMA.md` staleness — fixed the
+  shape block instead); moving `concepts/orchestration/Screen-Control.md`
+  to `desktop/` (it acts *on* the desktop, `desktop/` holds surfaces
+  themselves); moving `concepts/Package-Layout.md` (the concept page is
+  the wiki's summary of `docs/architecture/PACKAGE-LAYOUT.md`, not a
+  duplicate, and correctly cross-cutting); retiring `concepts/
+  orchestration/Conductor-3D-DAG.md` (out of scope for a reorg; its
+  "specified, not implemented" status line is `Assertion.md`-legal).
+- Drift found and NOT fixed, outside this pass's scope: the 68→69 ripple
+  in `concepts/desktop/Feature-Set.md`, `concepts/Codebase.md`, and
+  `docs/architecture/PACKAGE-LAYOUT.md` (repo-side, not a wiki page) still
+  read the pre-`events tail` count — none were already open for another
+  edit in this pass. `concepts/Full-Architecture.md` lines ~99–153 (the
+  ASCII data-flow diagram plus its subsystem table and "lyra seam" prose)
+  use `lyra`/`aoide.lyra`/`stage/lyra.json` throughout to name what
+  verified source (`modules/AGENTS.md`, `modules/nucleus/README.md`,
+  `pkgs/aoide/crates/song/src/livery/`) confirms is actually `livery`/
+  `aoide.livery`/`stage/livery.json` — `aoide.lyra` is a real, distinct
+  option (`modules/nucleus/packages.nix`, gates installing the `lyra`
+  package) that this diagram is conflating with the palette engine. This
+  is a pre-existing, multi-line ASCII-art and table defect, not the
+  single-line fix this plan scoped; flagged here rather than silently
+  rewritten mid-diagram without a dedicated pass. `entities/livery.md`'s
+  note-era prose beyond the dead aliases line was not audited beyond what
+  the plan already scoped.
+- Manifest rewritten in `SCHEMA.md` from `find . -name '*.md' -not -path
+  './.obsidian/*' | LC_ALL=C sort` (74 files, was 68 — nine `concepts/cli/*`
+  entries added, `entities/Agent-Hooking.md`/`entities/livery (rename to
+  lyra).md`/`references/cli/Index.md` renamed in place rather than added,
+  `entities/lyra.md` and `concepts/desktop/Controls.md`/`concepts/
+  orchestration/Screen-Control.md`/`concepts/orchestration/
+  Secrets-Broker.md` newly present, the four `references/cli/*.md` entries
+  removed since that tree moved to `concepts/cli/` in an earlier commit);
+  `snapshot:` restamped 2026-08-25; `SCHEMA.md`'s §"Read the whole thing"
+  and §"The shape" repointed from `references/…cli/` to `concepts/cli/`,
+  and the `concepts/ (root)` shape line extended with `Package-Layout` and
+  `Plugin-Architecture`. Tags line extended with 17 additions surfaced by
+  the new/edited pages' own frontmatter (`a2a`, `aliases`, `computer-use`,
+  `hooks`, `keybinds`, `lyra`, `notification`, `paint`, `peer`, `pointer`,
+  `reference`, `schema`, `screen`, `secrets`, `totp`, `upkeep`, `vision`).

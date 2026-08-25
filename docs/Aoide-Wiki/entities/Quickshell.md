@@ -251,7 +251,7 @@ the shell — no bar, no dock, no wallpaper. See
 - [[Gadget-Dock]]
 - [[shellbridge]]
 - [[Self-Ricing]]
-- [[livery (rename to lyra)]]
+- [[livery]]
 - [[Codebase]]
 - [[Hyprland]]
 - [[Widget-Bridge-Contract]]

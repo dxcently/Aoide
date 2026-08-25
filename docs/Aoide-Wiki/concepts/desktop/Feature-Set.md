@@ -18,7 +18,7 @@ façade]]). Many capabilities below are Melete's, *surfaced* through AoideOS —
 see the "Provided by" column.
 
 Every integration is a dendrite ([[Snowflake-Anatomy]]): opt-in, flag-toggled,
-themed by [[livery (rename to lyra)]], and — where it touches the outside world —
+themed by [[livery]], and — where it touches the outside world —
 `enable = false` by default and behind the [[Governance|gate]].
 
 This list is what ships. Because its agent ([[Melete]]) is a coding agent,

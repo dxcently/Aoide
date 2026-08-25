@@ -19,7 +19,7 @@ carries a meaningful exit code. The CLI, the MCP façade, and the
 
 Everything that paints — rice/draft/mode/cover/livery/quickshell/screen/
 shellbridge/herald/take, the whole AoideOS surface — ships in a second
-binary, `lyra`. Conducting orchestration is aoide's identity; lyra paints
+binary, [[lyra]]. Conducting orchestration is aoide's identity; lyra paints
 (`docs/architecture/PACKAGE-LAYOUT.md` "Two binaries"; `CONTRACTS.md` §3).
 See [[Rice-and-Livery|Rice-and-Livery]] and
 [[Screen-Verbs|Screen-Verbs]] for that surface's per-command
@@ -59,12 +59,12 @@ adding, removing, or renaming a leaf shows as a deliberate diff against that
 snapshot.
 
 The command surface holds **64 leaves across the groups this page tracks**;
-`aoide schema --json | jq '.commands | length'` reports 68, since two
-further groups (`inbox`, `who`) exist and are not yet covered here. `lyra
-schema --json` carries the painted surface — see above. The per-command dev
-reference — signature, files read, files written, where output pipes to —
-lives at [[concepts/cli/Index|references/cli/]]; the table below sums the
-groups it documents.
+`aoide schema --json | jq '.commands | length'` reports 69, since three
+further groups (`inbox`, `who`, `events tail`) exist and are not yet
+covered here. `lyra schema --json` carries the painted surface — see above.
+The per-command dev reference — signature, files read, files written,
+where output pipes to — lives at [[CLI-Reference]]; the table below sums
+the groups it documents.
 
 | Group | Leaves | Real / stub |
 |---|---|---|
@@ -263,7 +263,8 @@ applies.
 - [[Session-Graph]]
 - [[Terminal-Commander]]
 - [[Gadget-Dock]]
-- [[livery (rename to lyra)]]
+- [[livery]]
+- [[lyra]]
 - [[aoided]]
 - [[shellbridge]]
 - [[Codebase]]

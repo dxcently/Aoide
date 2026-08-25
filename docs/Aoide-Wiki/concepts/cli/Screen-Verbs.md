@@ -1,3 +1,10 @@
+---
+type: concept
+created: 2026-08-19
+updated: 2026-08-25
+tags: [aoide, cli, screen, computer-use]
+---
+
 # Screen Verbs — Capture, OCR & Pointer Synthesis
 
 The `screen` verb group covers the desktop see-and-act surface: query the

@@ -26,7 +26,7 @@ gitignored and created on demand.
 | Subfolder | Role | Committed? | Written by |
 |---|---|---|---|
 | `songbook/` | per-song homes + cross-cutting design memory | **committed** | song agent |
-| `stage/` | live preview/runtime state — the seam the desktop reads | gitignored runtime | [[livery (rename to lyra)]] · [[shellbridge]] · `aoide graph` |
+| `stage/` | live preview/runtime state — the seam the desktop reads | gitignored runtime | [[livery]] · [[shellbridge]] · `aoide graph` |
 | `auditions/` | the propose gate | gitignored runtime | runtime |
 
 Only `stage/` and `auditions/` are gitignored — those two are the whole runtime
@@ -54,7 +54,7 @@ holds:
 | Subfolder/file | Holds |
 |---|---|
 | `rice.nix` | pure nix: sets `aoide.livery.*` (palette + base16 + component tiers + wallpaper) under the `aoide.song` guard. **Only** `aoide.livery` — no host options, no facet toggles — so one score replays at any venue (`CONTRACTS.md §5`, [[Song-Vocabulary#Replay — any song, any host]]). The wallpaper note points at a file in the shared `song/covers/` library (`../../covers/<file>`), not a per-song `assets/` dir. |
-| `livery.json` | the song's resolved livery values — the [[livery (rename to lyra)]] schema: `palette`, `base16`, `bar`/`notif`/`window`. |
+| `livery.json` | the song's resolved livery values — the [[livery]] schema: `palette`, `base16`, `bar`/`notif`/`window`. |
 | `palette/` | this song's transpose keys — the palette variants `rice transpose <song> <key>` swaps among |
 | `sounds/` | notification + system sounds (the chimes dimension) |
 | `icons/` | per-song icon overrides |
@@ -100,7 +100,7 @@ sees a torn file (`CONTRACTS.md §4`). The files:
 
 | File | Holds | Written by |
 |---|---|---|
-| `livery.json` | the fully-resolved livery values (colours concrete, no `null`) | [[livery (rename to lyra)]] `emit stage` / `lyra rice stage` |
+| `livery.json` | the fully-resolved livery values (colours concrete, no `null`) | [[livery]] `emit stage` / `lyra rice stage` |
 | `sessions.json` | the agent-session roster (`sessionId, agent, windowAddress, workspace, cwd, state, startedAt`, optional `parentSessionId`) | [[shellbridge]] + `aoide graph session` |
 | `hooks.json` | live Claude Code hook phases | shellbridge + `aoide graph session` |
 | `projects.json` | the project-anchor registry | `aoide graph project` |
@@ -145,7 +145,7 @@ top-level `song/` dir. The lookup is the Song Map
 - [[Song-Vocabulary]] — the vocabulary these roles are named in
 - [[Snowflake-Anatomy]] — the frozen sibling (`modules/`)
 - [[Self-Ricing]] — the rice loop, songbook discipline, and coverage tiers
-- [[livery (rename to lyra)]] — the engine that resolves/lints/emits the stage file, the `aoide.livery` seam `livery.json` carries
+- [[livery]] — the engine that resolves/lints/emits the stage file, the `aoide.livery` seam `livery.json` carries
 - [[shellbridge]] · [[Session-Graph]] — the writers of the runtime stage files
 - [[Ricing-Protocol]] — the ricing protocol this page's per-song design memory
   supports

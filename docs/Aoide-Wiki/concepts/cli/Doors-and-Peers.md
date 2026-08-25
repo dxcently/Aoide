@@ -1,9 +1,18 @@
+---
+type: concept
+created: 2026-08-19
+updated: 2026-08-25
+tags: [aoide, cli, mcp, a2a, peer, daemon]
+---
+
 # Doors & Federation Verbs — MCP, A2A, Peers, Daemon
 
 This group covers the doors onto the one command schema and the federation
-surface: the stdio [[Agent-Interface|MCP]] façade (`mcp serve`), the [[aoided]]
-policy skeleton (`daemon`, `adapter melete`), the desktop state bridge
-(`shellbridge`), the interactive session UI (`conductor`), the [[A2A-Door]]
+surface: the stdio [[Agent-Interface|MCP]] façade (`mcp serve` — `lyra mcp
+serve` is the same façade over lyra's own 42-path registry), the [[aoided]]
+policy skeleton (`daemon`, `events tail`, `adapter melete`), the desktop
+state bridge (`shellbridge`), the interactive session UI (`conductor`,
+detailed at [[Conductor-TUI]]), live presence (`who`), the [[A2A-Door]]
 server (`a2a serve`) and its outbound client verbs (`a2a agent *`), and
 [[Peer-Federation]] (`peer *`). Handlers are spread across
 `pkgs/aoide/crates/server/src/{commands,mcp,daemon,a2a}.rs` (the server
@@ -153,28 +162,63 @@ aoide adapter melete [--run] [--json]
 aoide conductor [--json]
 ```
 
-- **Reads:** `song/stage/{projects,sessions,hooks}.json` (mtime-polled every
-  ~500 ms), `song/stage/livery.json` (palette → ANSI-256 theme), and the audit
-  log (the LOG panel tails it). Env: `$AOIDE_STAGE_DIR`, `$AOIDE_AUDIT_LOG` —
-  both are honoured, so a tempdir is a full offline test rig
-  (`pkgs/aoide/crates/conductor/src/lib.rs` documents the seed script).
 - **Output:** `run_cli` dispatches the launch first (an audit record), then
-  hands the tty to a ratatui/crossterm loop: alternate screen + raw mode, five
-  panels (DAG, SESSIONS, PROJECTS, LOG, STATUS), keys `1`–`5`/`Tab`/`BackTab`
-  to switch, `j`/`k` select, `?` help, `q`/`Ctrl-C` quit. Terminal state is
-  restored on every exit path including panic (Drop guard + panic hook).
-- **Notes:** not gated. The conductor is a frontend only: every action goes
-  through the same dispatcher as `Door::Cli`, so conductor actions are
-  audited exactly like typed commands. On a non-CLI door (e.g. an MCP
-  `tools/call` for `conductor`) it returns a "run from a terminal" outcome
-  instead of blocking that door. Distinct from `aoide conduct`, which wraps
-  one process into the conductor channel.
+  hands the tty to a ratatui/crossterm loop over seven panels, keys
+  `1`–`7`/`Tab`/`BackTab` to switch. Full panel, key, and dispatch detail:
+  [[Conductor-TUI]].
+- **Notes:** not gated. Distinct from `aoide conduct`, which wraps one
+  process into the conductor channel rather than raising this UI.
+
+### aoide events tail
+
+```
+aoide events tail [--class <c1,c2,…>] [--json]
+```
+
+- **Reads:** follows aoided's own events feed —
+  `$AOIDE_DAEMON_EVENTS` when set, else a sibling of the daemon socket
+  (`$XDG_RUNTIME_DIR/aoide/events.jsonl`). `--class` narrows to a
+  comma-separated set of event classes; omitted or empty prints every
+  class.
+- **Writes:** nothing.
+- **Output:** on the CLI door, one line per event as it arrives; blocks
+  until Ctrl-C. On any other door it returns a "run it from a terminal"
+  outcome instead of blocking that door — the same posture `secrets watch`
+  holds for a foreground follow-style verb.
+- **Notes:** not gated. Narrates the daemon's own tick-driven producers:
+  the secrets-broker events mirror (`released`/`parked`/`completed`/
+  `dismissed`/`expired`, name-only) and the hand-edit watcher over the
+  broker-owned stage files. See [[aoided]].
+
+### aoide who
+
+```
+aoide who [<filter>] [--all] [--json]
+```
+
+- **Reads:** every registered peer, probed LIVE on every invocation — one
+  thread per peer, bounded by curl's own `--max-time` inside
+  `aoide_client::commands::pull_peer_live` (~2 s/peer). A projection, never
+  a store: it never writes `state/peer-cache/<name>.json`; the cache
+  (`state/peer-cache/<name>.json`) is consulted only as the fallback for a
+  peer this invocation's live probe fails to reach, so an unreachable peer
+  still renders. `<filter>` resolves through `storage::addr::resolve`
+  first (a local id/tail4/petname, a host/role/petname line, or
+  `peer/<rest>`), falling back to a substring match.
+- **Writes:** nothing.
+- **Output:** a Unicode roster; `--json` emits the structured presence
+  document. Node presence: `online` / `unreachable` / `never-pulled`.
+  Session presence: `online` / `stale` / `done` (`done` omitted without
+  `--all`).
+- **Notes:** not gated. `<filter>` narrows what is DISPLAYED only — every
+  registered peer is probed regardless. See [[Peer-Federation]].
 
 ### aoide a2a serve
 
 ```
 aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
-                [--peer-name <name>] [--token-file <path>] [--json]
+                [--peer-name <name>] [--token-file <path>]
+                [--bearer-secret <name>] [--json]
 ```
 
 - **Reads:** flag → env → default resolution, once at launch: bind
@@ -183,13 +227,20 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
   `$AOIDE_A2A_SPAWN_AGENT` → empty = spawning disabled), instance name
   (`--peer-name` → `$AOIDE_A2A_PEER_NAME` → OS hostname → `"aoide"`), token
   (`--token-file` → `$AOIDE_A2A_TOKEN_FILE` → empty = no token required; the
-  secret is read off the file once at launch, trimmed, never logged). Per
-  request: `song/stage/sessions.json` (task/session state),
-  `state/peers.json` (autogate match — by caller address, or by an
-  autogate-marked peer's own `tokenFile`, read fresh off disk per request).
-  The `aoide-a2a` systemd unit (`modules/nucleus/aoided.nix`) sets
+  secret is read off the file once at launch, trimmed, never logged),
+  bearer secret (`--bearer-secret` → `$AOIDE_A2A_BEARER_SECRET` → empty —
+  names a secret in the [[Secrets-Broker|secrets broker]] instead of a file,
+  resolved FRESH on every connection as consumer `a2a-door`; takes
+  precedence over `tokenFile` when both are set, and a broker resolve
+  failure — unreachable, denied, or a bounded ~2 s timeout — fails that
+  connection's bearer check closed rather than falling back to the file or
+  the pre-token-open behavior). Per request: `song/stage/sessions.json`
+  (task/session state), `state/peers.json` (autogate match — by caller
+  address, or by an autogate-marked peer's own `tokenFile`, read fresh off
+  disk per request). The `aoide-a2a` systemd unit
+  (`modules/nucleus/aoided.nix`) sets
   `AOIDE_A2A_BIND`/`PORT`/`SPAWN_AGENT`/`TOKEN_FILE` from the nix options;
-  `AOIDE_A2A_PEER_NAME` is flag/env-only.
+  `AOIDE_A2A_PEER_NAME`/`AOIDE_A2A_BEARER_SECRET` are flag/env-only.
 - **Writes:** an audit record (door `a2a`) for every handled request, spawn,
   and SSE open/close in the audit log; the `message/send` inject path reuses
   `graph send`'s `session_send`, so a held send writes the session's
@@ -298,7 +349,8 @@ aoide a2a agent send <name> <message> [--json]
 ### aoide peer add
 
 ```
-aoide peer add <name> <url> [--autogate] [--token-file <path>] [--json]
+aoide peer add <name> <url> [--autogate] [--token-file <path>]
+               [--bearer-secret <name>] [--json]
 ```
 
 - **Reads:** `state/peers.json`; verifies the peer by fetching its AgentCard
@@ -311,12 +363,20 @@ aoide peer add <name> <url> [--autogate] [--token-file <path>] [--json]
   name is rejected cleanly (`reason: duplicate-name`, exit 1) — unlike
   `a2a agent add`'s replace-on-re-add, a nickname is never silently repointed.
 - **Output:** `"registered peer \`<name>\` → <url>[ (autogate)] (<n> total)"`,
-  data `{peer: {name, url, autogate, tokenFile?, addedAt}, count}`.
+  data `{peer: {name, url, autogate, tokenFile?, bearerSecret?, addedAt}, count}`.
 - **Notes:** `--autogate` marks the peer trusted: its inbound `message/send`
   on this instance's A2A door auto-delivers instead of queueing pending,
   matched by caller address or by the per-peer `--token-file` secret (the form
   that survives a reverse proxy/tunnel, where every caller's address is the
-  proxy's). See [[Peer-Federation]].
+  proxy's) — that is what THIS peer must present TO us. `--bearer-secret
+  <name>` is the mirror direction: a secret this instance resolves through
+  the [[Secrets-Broker|secrets broker]] (consumer `a2a-client`, fresh on
+  every request, never cached) and presents as `Authorization: Bearer
+  <value>` on every outbound call to that peer's own A2A door (`peer pull`,
+  `graph send --to`, `who`'s live probe). Absent by default — an unmarked
+  peer's outbound calls carry no bearer header, unchanged. A resolve
+  failure fails that outbound call outright rather than sending it
+  unauthenticated. See [[Peer-Federation]].
 
 ### aoide peer list
 

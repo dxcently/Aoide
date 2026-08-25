@@ -1,3 +1,10 @@
+---
+type: concept
+created: 2026-08-19
+updated: 2026-08-25
+tags: [aoide, cli, content, hooks, notification]
+---
+
 # Content, Herald & Hooks Verbs
 
 Three surfaces in one page: the `content` verb group (the [[Content-Pipeline]]

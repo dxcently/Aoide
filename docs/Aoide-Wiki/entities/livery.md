@@ -2,7 +2,6 @@
 type: entity
 created: 2026-07-26
 updated: 2026-08-25
-aliases: [aoide-notes, Notes, notes package, note engine]
 tags: [aoide, livery, theming, base16]
 ---
 
@@ -137,7 +136,10 @@ CLI's `Invocation`/`Outcome` shell:
   atomically, `--template` supplies the file backend's template.
 
 No argument defaults to the staged livery. Exit codes align with the CLI
-convention: `0` ok · `2` usage · `1` error.
+convention: `0` ok · `2` usage · `1` error. [[Rice-and-Livery]] carries each
+verb's full I/O — reads, writes, output shape. The three verbs ship inside
+[[lyra]], the paint binary that hosts every command this page's engine
+backs.
 
 ## The emitters
 

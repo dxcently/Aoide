@@ -1,14 +1,24 @@
+---
+type: concept
+created: 2026-08-19
+updated: 2026-08-25
+tags: [aoide, cli, session, graph, conductor]
+---
+
 # Graph & Conduct Verbs — the Session-Graph Command Surface
 
 The `graph` verb group plus the top-level `conduct` command are the
 [[Session-Graph]]'s command surface: session registration and the
 project/session DAG, injection into conducted terminals
-([[Conductor-Channel]]), window jumps ([[Terminal-Commander]]), and the
-dead-session reaper. `graph session hook` is the [[Agent-Hooking]] door agent
+([[Conductor-Channel]]), window jumps ([[Terminal-Commander]]), the
+dead-session reaper, and the `inbox` verbs that read back what `graph send`
+delivered. `graph session hook` is the [[Agent-Hooking]] door agent
 harnesses (Claude Code, kimi, pi) fire into. Handlers live in
 `pkgs/aoide/crates/conduct/src/graph/{verbs,session_store,send,pending,spawn,permit,window,conduct,doc,model,common}.rs`
 and `pkgs/aoide/crates/conduct/src/reap.rs`; registrations in
-`pkgs/aoide/crates/conduct/src/commands/graph.rs`.
+`pkgs/aoide/crates/conduct/src/commands/graph.rs`. `inbox list|read|clear`
+is the one exception: it lives in `pkgs/aoide/crates/storage/src/{inbox,
+commands}.rs` — inbox is state, and storage already owns the store.
 
 Path resolution (`pkgs/aoide/crates/storage/src/fs.rs`): the stage dir is
 `$AOIDE_STAGE_DIR` when absolute, else `~/Aoide/song/stage/` — so
@@ -461,6 +471,52 @@ aoide graph emit [--json]
 - **Notes:** redundant in steady state (every mutation already re-stages), kept
   as the explicit staging step; byte-identical to what `graph view --json`
   computes.
+
+### aoide inbox list
+
+```
+aoide inbox list [--all] [--json]
+```
+
+- **Reads:** `state/inbox.json` (absent → empty, never an error) — the
+  durable, per-host, NOT song-scoped record of every message that actually
+  landed in a local session (`pkgs/aoide/crates/storage/src/inbox.rs`,
+  registered in that same crate's `commands.rs`, not `conduct`). Filed at
+  exactly two sites: `graph send`'s local-delivery success path (covers a
+  direct `--id`, a `--to <local target>`, and `pending approve`'s re-drive)
+  and the A2A door's spawn-first-turn path — the receive half of a message
+  that landed, however it got there.
+- **Output:** unread entries only by default, every entry with `--all`; `id`
+  is the entry's position in the full stored array (unlike `pending list`,
+  marking an entry read does not remove it, so positions stay stable across
+  repeated calls — the one thing that CAN still shift a position is the
+  200-entry cap dropping the oldest on a new arrival mid-session).
+- **Notes:** not gated.
+
+### aoide inbox read
+
+```
+aoide inbox read <n> [--json]
+```
+
+- **Reads/writes:** `state/inbox.json`; marks the entry at position `n`
+  (as shown by `inbox list`) read, under the same stage lock every
+  read-modify-write in this tree uses. A bad or out-of-range `n` fails
+  cleanly.
+- **Notes:** not gated. Idempotent — re-marking an already-read entry is a
+  clean no-op, not an error.
+
+### aoide inbox clear
+
+```
+aoide inbox clear [--json]
+```
+
+- **Writes:** empties `state/inbox.json`; reports how many entries were
+  dropped (`0` on an already-empty inbox — a clean no-op, not an error).
+- **Notes:** not gated, unconditional — no `--yes`, matching `graph prune`'s
+  precedent: the verb name is the whole blast radius, nothing selective to
+  confirm.
 
 ### aoide conduct
 

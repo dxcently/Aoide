@@ -73,7 +73,7 @@ The `noSongRead` check guards only the runtime dirs (`stage/`, `auditions/`). Co
 ## Related
 
 - [[Self-Ricing]]
-- [[livery (rename to lyra)]]
+- [[livery]]
 - [[Stylix]]
 - [[Snowflake-Anatomy]]
 - [[Clone-and-Run]]
