@@ -744,20 +744,60 @@ means "no ancestry recorded" (a legacy record, or any non-hook registration);
 readers must tolerate both forms and round-trip fields they do not know.
 Consumed internally for parent resolution only — never rendered.
 
-**Windowless lineage (task #89):** the hook-time `windowAddress` backfill
-(`aoide graph session hook`, and the shellbridge window-event listener) MUST
-skip a session outright — no `windowAddress`, no window-owning pid — when
-its `parentSessionId` chain passes through a conducted (`conductable`)
-session whose OWN `windowAddress` is empty: that session is windowless BY
-CONSTRUCTION (a nested headless `conduct`/`spawn`), and a pid-ancestry walk
-from it would otherwise resolve to the ENCLOSING terminal's window instead
-of "no window at all". A session with no parent, or whose chain anchors in a
-windowed conducted session directly, keeps the ordinary backfill. The
-same-window eviction (immediately above `graph.json`'s render, below) is
-lineage-safe on top of this: it never retires a member of the newly
-registering session's own lineage (every ancestor AND descendant, walking
-`parentSessionId`), only a same-window record with NO lineage relation to
-it — the legitimate compact/resume-twin case.
+**Additive in v0 (task #89, review round 2):** a session record MAY also
+carry an optional `headless` (bool, default/absent means `false`) — a
+PERMANENT, self-reported registration fact stamped exactly once, by `aoide
+conduct --headless` right after registration, and never cleared afterward.
+It is deliberately distinct from "`windowAddress` happens to be empty right
+now": the first implementation of windowless lineage (below) keyed off the
+empty address alone, and on a live compositor a headless wrap's OWN record
+still passes a `/proc` ppid-ancestry walk straight through to its ENCLOSING
+terminal (`setsid()` detaches the tty/session-leader relationship, not the
+OS parent-child one), so the unconditional discovery call would silently
+stamp that terminal's window onto the wrap and re-poison the whole lineage
+chain. `headless` closes that gap: it is `true` for a headless wrap
+regardless of what its `windowAddress` field happens to hold, so an errant
+address can never be mistaken for a real window. Absent means "not a
+headless wrap, or a legacy record" (ordinary address-emptiness still
+applies); readers must tolerate both forms and round-trip fields they do
+not know.
+
+**Windowless lineage (task #89, corrected in review round 2):** a session is
+windowless BY CONSTRUCTION — no `windowAddress`, no window-owning pid ever
+attached to it — in either of two cases: (1) it IS ITSELF a conducted
+(`conductable`) session with `headless == true`, or with `headless` absent
+and its own `windowAddress` empty; or (2) its `parentSessionId` chain passes
+through a session matching case (1). Enforcing this is not "four sites" —
+it is a discovery GATE plus a listener SELF-CHECK plus the four historical
+backfill call sites:
+- the discovery gate: `aoide conduct --headless`'s own registration path
+  never calls window discovery at all when `headless` is set — the
+  unconditional call was the review-round-2 defect; a headless wrap's own
+  record must never even attempt to discover a window, not merely have one
+  filtered out downstream;
+- the listener self-check: the shellbridge window-event listener
+  (`resolve_pending_session_windows`) and every hook-time backfill site
+  (`aoide graph session hook`, `graph/send.rs`'s two `discover_window()`
+  call sites, `graph/window.rs::ensure_session_window`) all route through
+  `windowless_by_lineage`, which now checks the session's OWN record first
+  (case 1 above) before ever walking its parent chain (case 2) — so a
+  headless wrap's own record is caught by the same function that catches
+  its descendants, not by a second parallel mechanism.
+
+A session with no parent, or whose chain anchors in a windowed conducted
+session directly (an interactive `graph wrap`/`conduct` with a real
+`windowAddress`), keeps the ordinary backfill. The same-window eviction
+(immediately above `graph.json`'s render, below) is lineage-safe on top of
+this: it never retires a member of the newly registering session's own
+lineage (every ancestor AND descendant, walking `parentSessionId`), only a
+same-window record with NO lineage relation to it — the legitimate
+compact/resume-twin case. The reaper's own same-window dedup pass
+(`aoide graph reap`'s `superseded_agent_duplicates`) carries the identical
+lineage carve-out as defense in depth: a windowless-by-construction session
+never enters a same-window dedup group in the first place, but if a bug
+upstream ever lets one acquire a window anyway, the dedup pass still will
+not retire its own lineage — only a genuine no-lineage same-window twin
+collapses.
 
 ### `song/stage/projects.json` — **v0**
 
