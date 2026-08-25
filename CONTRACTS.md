@@ -423,7 +423,7 @@ count.
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` verb
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
-  **70 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **71 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -471,7 +471,20 @@ count.
   same discipline `SessionRecord.headless` set the precedent for);
   `--clear` removes the designation; both directions are idempotent and
   report exactly what changed (set/moved/cleared/no-op) — see §6's "Remote
-  reach" subsection for how the hub composes with the rest of the mesh.
+  reach" subsection for how the hub composes with the rest of the mesh;
+  `graph resurrect`, appended newest, P-D8 (`docs/architecture/AOIDED.md`'s
+  "L5 — harness summoning") (+1 → 71) — revives a project's most
+  recently-ended resumable session off the durable session ledger
+  (`state/session-ledger.jsonl`, §4 below), spawning it via the windowed
+  path (P-D7) with the
+  harness's own resume argv; `--project <name>` resolves against
+  `projects.json`, defaulting to the single most recent anchored ledger
+  entry, `--all`/`--id <ledgerSessionId>` widen the selection; a harness
+  with no verified `resume_args` (`aoide_protocol::agents::AgentProfile`)
+  is skipped with a taught message naming it, never a guessed invocation.
+  Also the command core the daemon's own boot-time auto-resume trigger
+  calls in-process — see `song/stage/projects.json`'s `autoResume`
+  paragraph below for that trigger's own contract.
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
@@ -488,7 +501,7 @@ This was never a version bump: `schemaVersion` stays `"0"` on both —
 this section has never promised a fixed command inventory, only a
 document SHAPE, and the shape above is unchanged for either binary. The
 A2A AgentCard (§6) advertises whichever registry the serving binary
-assembled — core's card carries only core's 70, since `a2a serve` is
+assembled — core's card carries only core's 71, since `a2a serve` is
 core-only and lyra never registers it.
 
 ### Daemon wire — the fourth door (`docs/architecture/AOIDED.md`, P-D2/P-D4)
@@ -833,6 +846,20 @@ record yet" (a legacy record, or a wrap with no hook-driven agent inside
 it); readers must tolerate both forms and round-trip fields they do not
 know.
 
+**Additive in v0 (P-D8, `docs/architecture/AOIDED.md`'s "L5"):** a session
+record MAY also carry an optional `resumedFrom` (string) — the durable
+session ledger's `sessionId` (see `state/session-ledger.jsonl` below) this
+record was revived from, stamped once by `aoide graph resurrect` (or the
+daemon's own boot-time auto-resume trigger, which calls the same command
+core in-process) right after the resurrected session registers. Session
+ids are never recycled: a resurrected session always mints a FRESH
+`sessionId`, and `resumedFrom` is the only link back to the ledger entry
+it continues. `aoide graph emit` projects a populated `resumedFrom` as an
+additive `resumed` edge (see `graph.json` below) beside the ordinary
+`spawned`/`anchors` edges. Absent means "not a resurrection" (the ordinary
+case, and every legacy record); readers must tolerate both forms and
+round-trip fields they do not know.
+
 **Windowless lineage (task #89, corrected in review round 2):** a session is
 windowless BY CONSTRUCTION — no `windowAddress`, no window-owning pid ever
 attached to it — in either of two cases: (1) it IS ITSELF a conducted
@@ -880,6 +907,23 @@ Registered project anchor roots for the graph. Written by
 { "schemaVersion": "0", "projects": [ { "name": "aoide", "path": "/home/khoa/Aoide" } ] }
 ```
 
+**Additive in v0 (P-D8, `docs/architecture/AOIDED.md`'s "L5"/"Open
+knobs"):** a project entry MAY also carry an optional `autoResume` (bool,
+default/absent means `false`, `skip_serializing_if` keeps a `false` value
+off the wire — the same additive-bool discipline `SessionRecord.headless`
+set the precedent for). Set via `graph project add --auto-resume`
+(idempotent-upsert; no `graph project set`/`edit` verb exists yet to flip
+it back off — hand-edit `projects.json` in the meantime). Consumed by the
+daemon's own boot-time auto-resume trigger (`aoide-server`'s `daemon.rs`,
+the decided answer to this design's one open knob): once per BOOT — never
+on a same-boot `Restart=on-failure` restart, guarded by a marker recording
+the boot epoch (`btime` out of `/proc/stat`) the trigger last ran under —
+for every `autoResume` project with no live (non-`done`) session anchored
+to it, the daemon calls `aoide graph resurrect --project <name>`
+in-process (`Door::Daemon`), the identical command core the CLI verb runs.
+A per-candidate spawn failure (e.g. a headless host with no
+`$AOIDE_TERMINAL`) degrades gracefully — logged, never a crashed tick.
+
 ### `song/stage/graph.json` — **v0**
 
 The **fully resolved** project/session DAG, written by `aoide graph emit`
@@ -889,6 +933,16 @@ values and computes nothing. Project nodes anchor session nodes by cwd
 edges come from `parentSessionId`. A session with a resolved parent carries
 only its `spawned` edge; root sessions carry an `anchors` edge (or none when
 unanchored).
+
+**Additive edge kind in v0 (P-D8, `docs/architecture/AOIDED.md`'s "L5"):**
+a session node whose `sessionsFile` record carries a populated
+`resumedFrom` (above) ALSO gets a `resumed` edge, `from` the resurrected
+session `to` the ledger `sessionId` it names — beside, never instead of,
+its own `spawned`/`anchors` edge (the ledger `sessionId` it names is not
+itself necessarily a node in the current graph — it may have already been
+pruned from `sessions.json` by the time the resurrection happens, since the
+ledger is exactly the memory that survives that prune; a `resumed` edge's
+`to` is therefore a bare id reference, not a guaranteed node lookup).
 
 ```json
 {
@@ -1136,6 +1190,38 @@ long-running or noisy headless session grows its log without bound. Written
 only by `aoide conduct --headless`; an interactive `conduct` session never
 creates one. The session's `sessions.json` record (above) publishes this
 file's absolute path as `logPath` the moment it's open.
+
+### `state/session-ledger.jsonl` — **v0** (P-D8, `docs/architecture/AOIDED.md`'s "L5")
+
+The durable session HISTORY that survives `sessions.json` pruning —
+`sessions.json` is the live roster (reaping and `session end` both remove a
+record from it); this ledger is append-only memory of every session that
+has ever LEFT the roster, which `aoide graph resurrect` reads to find
+something to revive. Lives under `state_dir` (`aoide_storage::fs::
+state_dir`) alongside `usage.json`/`sessions/<sessionId>.log` — real disk,
+never tmpfs, since it must survive a reboot the way those don't need to.
+
+One line per session, appended at the exact moment it leaves the roster —
+a clean `aoide graph session end` and a `graph reap` sweep are the only two
+producers, both routed through the SAME shared write (never two
+independently-written call sites), so a given session contributes exactly
+one line, never zero, never two, regardless of which path retired it.
+Never truncated, never rewritten in place, and never a lookup key for LIVE
+state — a reader wanting "is this session still running" still asks
+`sessions.json`, never this file.
+
+```json
+{"v":0,"sessionId":"s1","agent":"claude","harnessSessionId":"claude-uuid-123","cwd":"/home/khoa/Aoide","title":"fix the thing","petname":"brave-otter","startedAt":"2026-08-20T10:00:00Z","endedAt":"2026-08-20T12:00:00Z","resumedFrom":null}
+```
+
+Every field serializes unconditionally (no `skip_serializing_if`,
+deliberately unlike the additive-optional fields on `sessions.json`'s live
+records above) — a closed historical shape reflects exactly what the
+record looked like the instant it exited, not a growing set of optional
+fields a future reader has to guess the absence of. A malformed or
+unparseable line is skipped on read rather than failing the whole file (the
+same read tolerance `pending.json`/`herald.json` already extend to a
+corrupt entry).
 
 ### `state/a2a-agents.json` — **v0**
 

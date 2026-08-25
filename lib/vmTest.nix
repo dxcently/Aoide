@@ -271,7 +271,11 @@ pkgs.testers.runNixOSTest {
     # docs/architecture/AOIDED.md) — reached 69; bumped by 1 for `peer hub`
     # — designates at most one registered peer as the hub address
     # resolution prefers as a last-resort remote target (P-D5,
-    # docs/architecture/AOIDED.md) — reached 70.
+    # docs/architecture/AOIDED.md) — reached 70; bumped by 1 for `graph
+    # resurrect` — revives a project's most recently-ended resumable
+    # session off the durable session ledger, the ledger/resume phase of
+    # harness summoning (P-D8, docs/architecture/AOIDED.md's "L5") —
+    # reached 71.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a verb.
     schema_raw = machine.succeed("aoide schema --json")
@@ -285,8 +289,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 70, (
-        f"expected 70 commands, got {cmd_count}.  "
+    assert cmd_count == 71, (
+        f"expected 71 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 
