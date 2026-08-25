@@ -167,7 +167,7 @@ Additive-optional (same status as the base16 tier): every field is `nullOr`,
 defaulting to `null`. A notes file with no `geometry` block behaves exactly
 as before — the compositor facet applies the fallback, not the option
 system. Rides `song/stage/livery.json` for live application: `lyra rice
-preview` live-applies this tier (plus `window.border`/`borderInactive`) via
+stage` live-applies this tier (plus `window.border`/`borderInactive`) via
 best-effort, guarded `hyprctl keyword` calls — see §4's staged-geometry
 paragraph — in addition to baking the value at build time into
 `hyprland.conf`.
@@ -566,7 +566,7 @@ override is what lets the unit — or a test/smoke run — relocate the stage tr
 
 The resolved, flattened note values for Quickshell (QML reads this; hot-reload
 at rehearsal). Derived from the same `aoide.livery` as the baked `rice.nix`
-fan-out, so preview and adopted state cannot diverge. `stage/livery.json` is
+fan-out, so staged and adopted state cannot diverge. `stage/livery.json` is
 the canonical name (the stage file was renamed by the livery merge);
 writers mirrored to the legacy name and readers fell back during the
 transition window, so a running desktop never read a missing stage file. The
@@ -1904,7 +1904,7 @@ set of "flavor" surfaces — committed files, not nix options:
   generated `$out/qml/songs/manifest.json` recording which songs authored
   which slots — ALL songs' bodies land on disk at once (home-manager
   installs the tree recursively), which is what makes cross-song live
-  preview possible. The manifest shape is unchanged (still
+  staging possible. The manifest shape is unchanged (still
   `{ "<song>": ["<slot>", …] }`) by generalizing the walk from a fixed slot
   enum to "every file under `widgets/`" — additive, no contract-version
   bump.
@@ -2041,7 +2041,7 @@ none). The quickshell facet's build
 `livery.json` `.widgets // {}` into `$out/qml/songs/registry.json`, shaped
 `{ "<song>": { "<slot>": {…declaration…} } }` — every committed song gets an
 entry, `{}` when absent, never an error, never a skipped song. `rice
-stage`/`preview` hot-syncs one song's entry live, no rebuild
+stage` hot-syncs one song's entry live, no rebuild
 (`sync_song_registry`, `pkgs/aoide/crates/song/src/widgets.rs`), mirroring
 `sync_song_widgets`'s existing `manifest.json` hot-sync. The compositor
 facet (`modules/facets/compositor/default.nix`) reads `aoide.arrangement.widgets`
@@ -2078,7 +2078,7 @@ declaring a TYPE with no body is inert, not an error.
 `song/songbook/etude/` is the worked, real example: its `rice.nix` declares
 one `kind = "surface"` entry (`demo`), proving the whole pipeline —
 nix option → build-time `registry.json` walk → `rice lint` → `rice
-stage`/`preview` hot-sync → `SongSurfaces.qml` render — end to end. No
+stage` hot-sync → `SongSurfaces.qml` render — end to end. No
 committed song declares a `kind = "dock"` entry yet.
 
 ---
