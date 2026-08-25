@@ -816,6 +816,23 @@ headless wrap, or a legacy record" (ordinary address-emptiness still
 applies); readers must tolerate both forms and round-trip fields they do
 not know.
 
+**Additive in v0 (P-D7, `docs/architecture/AOIDED.md`'s "L5"):** a session
+record MAY also carry an optional `harnessSessionId` (string) — the
+harness's OWN session id, straight off the raw hook payload's own
+`session_id` field. Stamped by `aoide graph session hook` on EVERY event
+that carries one — not only at registration, and not gated on whether the
+event maps to a graph action at all (an event the door has no other use for
+still stamps it, as long as a record with that id already exists) — and
+regardless of whether it equals this record's own `sessionId` (for a
+hook-registered record the two values are the same today, since the record's
+own id is minted FROM this field; the field is still stamped unconditionally
+so a later consumer, e.g. `aoide graph resurrect`'s ledger reader, never has
+to know which registration path produced a given record to find the id a
+harness's own resume flag needs). Absent means "no hook has touched this
+record yet" (a legacy record, or a wrap with no hook-driven agent inside
+it); readers must tolerate both forms and round-trip fields they do not
+know.
+
 **Windowless lineage (task #89, corrected in review round 2):** a session is
 windowless BY CONSTRUCTION — no `windowAddress`, no window-owning pid ever
 attached to it — in either of two cases: (1) it IS ITSELF a conducted
