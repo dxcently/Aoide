@@ -28,26 +28,26 @@ start at [[aoide-cli]] and the group pages linked below.
 
 ## Group pages
 
-- [[references/cli/Rice-and-Livery|Rice-and-Livery]] — the self-ricing loop:
+- [[Rice-and-Livery|Rice-and-Livery]] — the self-ricing loop:
   `rice lint/stage/compose/declare/transpose`, the `rice draft` / `rice mode` /
   `rice take` groups, `rice back`, `cover set`, and the `livery` engine verbs.
   Stage files: `song/stage/{livery,cover,mode}.json`; songbook and drafts trees.
-- [[references/cli/Graph-and-Conduct|Graph-and-Conduct]] — the session DAG:
+- [[Graph-and-Conduct|Graph-and-Conduct]] — the session DAG:
   `graph view/project/link/session/wrap/send/permit/focus/prune/reap/emit` and
   `conduct`. Stage files: `song/stage/{sessions,hooks,projects,graph,pending,
   herald}.json`; control sockets at `$XDG_RUNTIME_DIR/aoide/session-<id>.sock`.
-- [[references/cli/Screen-Verbs|Screen-Verbs]] — computer use: `screen info/
+- [[Screen-Verbs|Screen-Verbs]] — computer use: `screen info/
   shot/ocr/diff/send` and the nine `screen point` verbs. Captures and sidecars
   in `state/captures/`; pointer position in `state/pointer-pos.json`.
-- [[references/cli/Doors-and-Peers|Doors-and-Peers]] — the other doors:
+- [[Doors-and-Peers|Doors-and-Peers]] — the other doors:
   `mcp serve`, `daemon`, `shellbridge`, `adapter melete`, `conductor`, the
   `a2a` server + client group, and the `peer` federation group. Registries:
   `state/{a2a-agents,peers}.json`, `state/peer-cache/<name>.json`.
-- [[references/cli/Content-and-Hooks|Content-and-Hooks]] — the content
+- [[Content-and-Hooks|Content-and-Hooks]] — the content
   pipeline verbs (all stubs today), `herald push` (shellbridge socket →
   `song/stage/herald.json`), and `hooks install` (harness settings merge,
   `--capture` tee to `state/<agent>-hooks.jsonl`).
-- [[references/cli/Meta-and-Upkeep|Meta-and-Upkeep]] — `guide`, `schema`,
+- [[Meta-and-Upkeep|Meta-and-Upkeep]] — `guide`, `schema`,
   `make`/`update`/`onboard` (stubs), `usage` (→ `state/usage.json`),
   `quickshell reload`, `soundcheck` (report-only sweep).
 

@@ -13,7 +13,7 @@ agents — what is running where, and **jump to any of them by click or
 keybind**. Agents spawn terminals faster than a human tracks them; the
 terminal commander is the pane that herds them. It exemplifies the
 [[Widget-Maker]] thesis: a watcher, a widget, and a keybind, declarative and
-themed by [[livery]].
+themed by [[livery (rename to lyra)]].
 
 herdr (an external agent-terminal-herding tool) is the prior art; Aoide's own
 vocabulary calls this duty conductor-class (see [[Lexicon]]) and ships it as
@@ -145,7 +145,7 @@ so the widget need only *tell the bar which workspace to preview* — no
   tint on the note), deliberately a *different kind* of mark from the true active
   workspace's warm-accent swell + filled pill. Both can show at once: if the
   hovered terminal is on the active workspace, the ring simply frames the accent
-  pill. All colour comes from [[livery]] (`aoide.livery` roles) — no
+  pill. All colour comes from [[livery (rename to lyra)]] (`aoide.livery` roles) — no
   hardcoded hex.
 - If a session's window/workspace is not yet resolved (or it is off-screen), its
   `workspace` is `-1` and hovering the row simply highlights nothing — no error.
@@ -184,5 +184,5 @@ The agent can extend it (add columns, filters, per-agent actions) on request.
 - [[Hyprland]]
 - [[Melete]]
 - [[Feature-Set]]
-- [[livery]]
+- [[livery (rename to lyra)]]
 - [[A2A-Door]]

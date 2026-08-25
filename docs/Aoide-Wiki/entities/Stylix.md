@@ -62,6 +62,6 @@ flipping it is cheap — the discipline that makes it *look* right everywhere
 - [[Self-Ricing]]
 - [[Quickshell]]
 - [[Codebase]]
-- [[livery]]
+- [[livery (rename to lyra)]]
 - [[Ricing-Protocol|Ricing Protocol]]
 - [[Song-Anatomy]] — the songbook where the house grammar and per-song design memory live

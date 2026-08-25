@@ -130,7 +130,7 @@ no behaviour, so an empty config evaluates. The surface:
 - `aoide.livery` — the v0 livery schema: closed `palette.{bg,fg,accent,urgent}`
   (base16, permissive hex type) + optional component tiers `bar.*` / `notif.*` /
   `window.*` (each `nullOr` hex, `null` → palette), plus an `override.*` venue
-  tier (host-set only, [[livery|resolved by `lib/livery.nix`]]).
+  tier (host-set only, [[livery (rename to lyra)|resolved by `lib/livery.nix`]]).
 - `aoide.arrangement` — the v1 arrangement schema: which widget/surface types
   a song brings into existence. `aoide.livery` and `aoide.arrangement` are the
   whole facet-read whitelist — no module reads another module's options.
@@ -206,7 +206,7 @@ Live-side state, all gitignored, none load-bearing for the build:
   channel from QML; adapters and widgets bind exactly this path, never compute
   it.
 - **Stage files** under `song/stage/`: `livery.json` (resolved livery colours,
-  written by [[livery]]'s `rice stage`/`cover set`/other emitters at
+  written by [[livery (rename to lyra)]]'s `rice stage`/`cover set`/other emitters at
   rehearsal — both refuse under `rice mode declarative`, see
   [[Self-Ricing#Staging vs Declarative Mode]] — and reseeded from the active
   song's committed
@@ -282,7 +282,7 @@ two-binary split.
 
 **Real code paths:** the whole flake/walker/option/checks layer; both packages
 build; `aoide guide`, `aoide schema --json`, `mcp serve --stdio`, and the audit
-log; `rice lint` (native [[livery]] lint); the daemon skeleton (audit
+log; `rice lint` (native [[livery (rename to lyra)]] lint); the daemon skeleton (audit
 append, user gate, default-deny event bus); shellbridge (atomic writer, seeded
 stage files, and a live socket accept loop — `focuswindow`); the melete-adapter skeleton (env-driven
 subscription, metadata-only notification boundary); all four livery emitters; the
@@ -345,7 +345,7 @@ outright rather than left as a stub with no design behind it.)
 - [[Package-Layout]]
 - [[Session-Graph]]
 - [[aoide-cli]]
-- [[livery]]
+- [[livery (rename to lyra)]]
 - [[aoided]]
 - [[shellbridge]]
 - [[dxflake]]

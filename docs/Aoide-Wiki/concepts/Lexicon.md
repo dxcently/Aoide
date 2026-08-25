@@ -27,7 +27,7 @@ The engraved thesis (after Goethe's *"Architektur ist erstarrte Musik"*) splits 
 
 - **The frozen half** — the nix layer. Immutable, evaluated. The **score**: determines everything, performs nothing.
 - **The performed half** — the running desktop. Live, hot-reloadable, ephemeral. The **performance**: what the score sounds like tonight, at this venue.
-- **The seam** — [[livery]]. Livery values are frozen into the crystal at build time *and* sounded live at runtime (`stage/livery.json`, hyprctl, OSC). Both fan-outs derive from the same `aoide.livery`, so the baked theme and the live preview cannot drift.
+- **The seam** — [[livery (rename to lyra)]]. Livery values are frozen into the crystal at build time *and* sounded live at runtime (`stage/livery.json`, hyprctl, OSC). Both fan-outs derive from the same `aoide.livery`, so the baked theme and the live preview cannot drift.
 
 Each half gets its own word family, so a sentence always names which side of the seam it stands on.
 
@@ -67,7 +67,7 @@ Terms naming the connective tissue rather than either half:
 
 - **conductor** — the ensemble's tool: `aoide conductor`, the TUI that watches running agent terminals and cues between them, Hyprland as the multiplexer. The conductor-class covers every surface with that duty: the Terminal Commander widget, the DAG gadget, the conductor itself. See [[Terminal-Commander]], [[Session-Graph]].
 - **door** — an entry point into the one dispatch layer: `cli`, `mcp`, `daemon`, `a2a` (the TUI rides the cli door). The `a2a` door is bidirectional — aoide serves the protocol and speaks it as a client ([[A2A-Door]]). Every operation enters through a door and exits into the one audit log.
-- **livery** — the design tokens AND the engine that dresses every surface in them ([[livery]], `crates/song/src/livery/`): one name for the whole token layer, resolved/validated/emitted by livery (`stage/livery.json`, hyprctl, OSC).
+- **livery** — the design tokens AND the engine that dresses every surface in them ([[livery (rename to lyra)]], `crates/song/src/livery/`): one name for the whole token layer, resolved/validated/emitted by livery (`stage/livery.json`, hyprctl, OSC).
 - **gate** — the rebuild gate ([[Rebuild-Gate]]): agents propose, the human admits. The single point where the performed half is allowed to re-freeze the crystal.
 - **wiki / vault** — Mneme's memory surfaces: this wiki for design context, the vault for content.
 
@@ -97,6 +97,6 @@ Because agents read this system as much as humans do. A consistent metaphor is c
 
 - [[Song-Vocabulary]] — the performed half, term by term
 - [[Snowflake-Anatomy]] — the frozen half, layer by layer
-- [[livery]] — the seam where they meet
+- [[livery (rename to lyra)]] — the seam where they meet
 - [[Melete]] · [[Mneme]] — the other two Muses
 - [[Governance]] · [[Rebuild-Gate]] — the gate and the policy

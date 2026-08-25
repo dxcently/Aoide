@@ -21,8 +21,8 @@ Everything that paints — rice/draft/mode/cover/livery/quickshell/screen/
 shellbridge/herald/take, the whole AoideOS surface — ships in a second
 binary, `lyra`. Conducting orchestration is aoide's identity; lyra paints
 (`docs/architecture/PACKAGE-LAYOUT.md` "Two binaries"; `CONTRACTS.md` §3).
-See [[references/cli/Rice-and-Livery|Rice-and-Livery]] and
-[[references/cli/Screen-Verbs|Screen-Verbs]] for that surface's per-command
+See [[Rice-and-Livery|Rice-and-Livery]] and
+[[Screen-Verbs|Screen-Verbs]] for that surface's per-command
 detail.
 
 *The crate root lives at `pkgs/aoide/crates/cli/`; it packages via
@@ -63,7 +63,7 @@ The command surface holds **64 leaves across the groups this page tracks**;
 further groups (`inbox`, `who`) exist and are not yet covered here. `lyra
 schema --json` carries the painted surface — see above. The per-command dev
 reference — signature, files read, files written, where output pipes to —
-lives at [[references/cli/Index|references/cli/]]; the table below sums the
+lives at [[concepts/cli/Index|references/cli/]]; the table below sums the
 groups it documents.
 
 | Group | Leaves | Real / stub |
@@ -126,8 +126,8 @@ a rebuild ([[Rebuild-Gate]], [[Governance]]).
 `cover set`/`rice compose`/`rice mode`/`rice draft`/`rice declare`/`rice
 transpose`/`rice take`/`rice back` and the `livery`/`screen`/`herald`/
 `shellbridge`/`quickshell` groups all moved to `lyra` at P-A5 — see
-[[references/cli/Rice-and-Livery|Rice-and-Livery]] and
-[[references/cli/Screen-Verbs|Screen-Verbs]] for their per-command
+[[Rice-and-Livery|Rice-and-Livery]] and
+[[Screen-Verbs|Screen-Verbs]] for their per-command
 reference, and [[Self-Ricing]] for the self-ricing loop's walkthrough.
 
 ### The `graph` group — session/project DAG + the conductor mesh
@@ -263,7 +263,7 @@ applies.
 - [[Session-Graph]]
 - [[Terminal-Commander]]
 - [[Gadget-Dock]]
-- [[livery]]
+- [[livery (rename to lyra)]]
 - [[aoided]]
 - [[shellbridge]]
 - [[Codebase]]

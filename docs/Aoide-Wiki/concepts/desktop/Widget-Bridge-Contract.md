@@ -210,7 +210,7 @@ for Quickshell: render surfaces only]]) applied to the roster widgets:
    as audit/derived.
 4. **Outbound is a narrow socket.** `focussession`/`focuswindow` jumps and
    `graph send` injection — nothing else leaves QML.
-5. **Colour only from [[livery]]**; hard corners; the music-glyph state contract
+5. **Colour only from [[livery (rename to lyra)]]**; hard corners; the music-glyph state contract
    (♪ working · 𝄐 awaiting · 𝄁 stopped · 𝄽 idle · 𝄂 done) is a hard contract.
 6. **Degrade.** An empty/missing stage file is an empty roster; off-Hyprland the
    jump/enumeration simply no-ops.

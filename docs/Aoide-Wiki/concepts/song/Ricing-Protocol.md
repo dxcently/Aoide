@@ -116,7 +116,7 @@ facet reading another module, a surface with two owners); it cannot catch
 ## Related
 
 - [[Stylix]] — the application half: one base16 scheme, baked fan-out.
-- [[livery]] — the livery seam creation writes into and application reads from.
+- [[livery (rename to lyra)]] — the livery seam creation writes into and application reads from.
 - [[Song-Vocabulary]] — key/song/cover vocabulary this protocol operates on.
 - [[Song-Anatomy]] — where the songbook and per-song design memory live under
   `song/`.

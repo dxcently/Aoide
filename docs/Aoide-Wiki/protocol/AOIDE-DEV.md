@@ -472,7 +472,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   (`qml/shell.qml`, `StagingEngine.qml`, `WorkspaceRow.qml`,
   `dendrites/hyprland.nix`, `nucleus/shellbridge.nix`,
   `hosts/yomi-strix/default.nix`) is complete — khoa switched to the Phase-4
-  build 2026-08-13. See [[livery]], [[Self-Ricing]].
+  build 2026-08-13. See [[livery (rename to lyra)]], [[Self-Ricing]].
 - **[landed + switched] Separate Aoide from AoideOS — two flakes.**
   Phase 5 executed 2026-08-13: `pkgs/aoide/flake.nix` (nixpkgs-only) is
   consumed as the `aoide` path input; `lib/pkgs.nix` skips self-flaked package

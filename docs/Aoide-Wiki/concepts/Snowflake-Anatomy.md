@@ -18,7 +18,7 @@ Aoide names its nix layer after snowflake morphology — see [[Lexicon#The froze
 | Opt-in branches, chosen per host | **dendrites** | `modules/dendrites/` — one tree, all branches (shipped + personal); each host enables the ones it wants. |
 | Render surfaces that sound a rice | **facets** | `modules/facets/` — quickshell, stylix, compositor. The machinery that renders a song, reading its ricing elements from the songbook via `aoide.livery`. |
 
-**Nucleus is the shared core every host inherits; dendrites are the opt-in branches each host chooses.** Facets are the *machinery* of ricing, the surfaces that sound a song, but they embed no ricing content: every palette, sound, icon, widget body, and the shipped standard rice (`sonata`) lives in `song/songbook/`; covers (wallpapers) live in the shared `song/covers/` library any song references by path (see [[Song-Anatomy]]). There is no separate "rice engine" layer. A song is *activated* by the walker (`lib/mkHost.nix` picks up the selected `rice.nix`), *resolved and emitted* by the native livery engine ([[livery]] — lint → resolve → emit → `stage/livery.json`), and *rendered* by the facets. All three layers live under `modules/` in `~/Aoide`, one walked module tree, the same grouping [[dxflake]] uses. Facets are the only nix that renders appearance, and each reads only `aoide.livery` and `aoide.arrangement` — no module reads another module.
+**Nucleus is the shared core every host inherits; dendrites are the opt-in branches each host chooses.** Facets are the *machinery* of ricing, the surfaces that sound a song, but they embed no ricing content: every palette, sound, icon, widget body, and the shipped standard rice (`sonata`) lives in `song/songbook/`; covers (wallpapers) live in the shared `song/covers/` library any song references by path (see [[Song-Anatomy]]). There is no separate "rice engine" layer. A song is *activated* by the walker (`lib/mkHost.nix` picks up the selected `rice.nix`), *resolved and emitted* by the native livery engine ([[livery (rename to lyra)]] — lint → resolve → emit → `stage/livery.json`), and *rendered* by the facets. All three layers live under `modules/` in `~/Aoide`, one walked module tree, the same grouping [[dxflake]] uses. Facets are the only nix that renders appearance, and each reads only `aoide.livery` and `aoide.arrangement` — no module reads another module.
 
 ## Mutation Policy
 
@@ -63,6 +63,6 @@ The repo surface is only the subsystem (`modules/`) plus standard flake furnitur
 
 - [[dxflake]]
 - [[Clone-and-Run]]
-- [[livery]]
+- [[livery (rename to lyra)]]
 - [[Self-Ricing]]
 - [[Codebase]]

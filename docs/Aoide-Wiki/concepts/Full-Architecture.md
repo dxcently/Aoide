@@ -2,7 +2,7 @@
 type: concept
 created: 2026-07-26
 updated: 2026-08-25
-tags: [aoide, architecture, desktop, livery, pipeline]
+tags: [aoide, architecture, desktop, lyra, pipeline]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
 
@@ -14,7 +14,7 @@ seams, then drill into the linked pages for detail.
 
 The organizing thesis (see [[Song-Vocabulary]]): architecture is frozen music.
 The **frozen half** is the nix layer — the score. The **performed half** is the
-running desktop — the performance. **Livery** is the one seam where they meet.
+running desktop — the performance. **Lyra** is the one seam where they meet.
 
 ## Status — running live on yomi-strix
 
@@ -28,7 +28,7 @@ stays in the systemd-boot menu as the rollback. Every subsystem below is
 marked on one of three rungs:
 
 - **Implemented** — real code paths: the flake/walker/checks layer, the option
-  contract, the livery plumbing, the CLI trunk + MCP façade, the daemon and
+  contract, the lyra plumbing, the CLI trunk + MCP façade, the daemon and
   bridge skeletons, the three facets, song replay, the launcher, the gadget
   dock.
 - **Stubbed** — the mutating CLI verbs (`rice declare/transpose`,
@@ -37,7 +37,7 @@ marked on one of three rungs:
   (`rice lint`/`rice stage`/`rice compose`/the `rice draft` group are real —
   see [[Self-Ricing]]. There is no `rice gen`: cut outright, not stubbed —
   see [[aoide-cli]].)
-- **Future** — v1 livery tiers, `rice declare`/`rice transpose` (still
+- **Future** — v1 Lyra tiers, `rice declare`/`rice transpose` (still
   stubs), the network-exposed Aoide connector.
 
 The repo tracks a git remote (`origin`). File-level detail lives in
@@ -54,13 +54,13 @@ The repo tracks a git remote (`origin`). File-level detail lives in
    │  hosts    song/songbook       │        │  notifications  widgets           │
    └──────────────┬───────────────┘        └───────────────┬──────────────────┘
                   │                                         │
-                  └──────────────►   LIVERY    ◄──────────────┘
+                  └──────────────►   Lyra    ◄──────────────┘
                                    the only seam
                         values frozen into the crystal,
                              sounded at runtime
 ```
 
-Everything below is one of these two halves, or the livery seam, or the agent
+Everything below is one of these two halves, or the lyra seam, or the agent
 control plane that drives them.
 
 ## Master map — how the subsystems connect
@@ -73,7 +73,7 @@ trail but exit 64 today.
 of the data flow, labeled `aoide` throughout for readability. Ownership
 (`CONTRACTS.md` §3, [[Package-Layout]]): the AGENT INTERFACE/`aoided`/CONTENT
 PIPELINE/NIX EVAL boxes are `aoide`'s (68 commands: conducting/orchestration
-is aoide's identity); the RICE ENGINE, LIVERY, Quickshell, and shellbridge
+is aoide's identity); the RICE ENGINE, LYRA, Quickshell, and shellbridge
 boxes below them are `lyra`'s (42 commands, its own schema and dispatch,
 routed through the desktop, not through `aoided`'s CLI trunk).
 
@@ -96,25 +96,25 @@ routed through the desktop, not through `aoided`'s CLI trunk).
        ▼                       ▼                         ▼
   RICE ENGINE            CONTENT PIPELINE (stub)   NIX EVAL + REBUILD
   [[Self-Ricing]]        [[Content-Pipeline]]      [[Snowflake-Anatomy]]
-   livery·song/          discover→…→query          walker: modules/ +
+   lyra·song/          discover→…→query          walker: modules/ +
    (lint/stage real)           │                    song/songbook/
        │                       ▼                         │
        ▼                  index (points in           resolves
   song/songbook/<song>     place, never copies)          │
-  rice.nix + livery.json                                   ▼
+  rice.nix + lyra.json                                   ▼
   songbook/ (write-back)                          ┌─────────────┐
-       │                                          │   LIVERY    │  aoide.livery — one source
-       └───────────────────────────────────────► └──────┬──────┘  [[livery]]
+       │                                          │   Lyra    │  aoide.lyra — one source
+       └───────────────────────────────────────► └──────┬──────┘  [[lyra]]
                                     two fan-outs         │
                        ┌─────────────────────────────────┴───────────────┐
                        ▼ (rehearsal / live)                (recording / baked) ▼
-        livery emit {stage · hyprctl · osc}        rice.nix → facets + [[Stylix]]
+        lyra emit {stage · hyprctl · osc}        rice.nix → facets + [[Stylix]]
           │              │            │                               │
           ▼              ▼            ▼                               ▼
-  song/stage/livery.json   hyprctl    terminal OSC        hyprland.conf · QML colors ·
+  song/stage/lyra.json   hyprctl    terminal OSC        hyprland.conf · QML colors ·
           │              keywords   (color inject)      base16 for every nix app
           ▼
-   Quickshell — LiveryState.qml watches the stage file (hot-reload)
+   Quickshell — lyraState.qml watches the stage file (hot-reload)
    [[Quickshell]]
       │  ▲
       │  └── reads song/stage/{sessions,hooks,graph}.json (roster + DAG surfaces)
@@ -137,34 +137,34 @@ the implemented/stubbed ladder.
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`~/Aoide/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; stage    | mostly real (`declare`/`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all verbs exit 64)                |
-| [[livery]]           | `aoide.livery` (palette + component tiers)     | `song/stage/livery.json`; baked facets + Stylix     | implemented (v0)                           |
+| [[lyra]]           | `aoide.lyra` (palette + component tiers)     | `song/stage/lyra.json`; baked facets + Stylix     | implemented (v0)                           |
 | [[shellbridge]]      | unix-socket commands; Hyprland IPC             | atomic JSON in `song/stage/`; `hyprctl` dispatch    | implemented (accept loop live: `focuswindow`) |
-| [[Quickshell]]       | `song/stage/*.json` (incl. livery)             | widget socket commands; rendered surfaces            | implemented (9 real surfaces)              |
+| [[Quickshell]]       | `song/stage/*.json` (incl. lyra)             | widget socket commands; rendered surfaces            | implemented (9 real surfaces)              |
 | [[Hyprland]]         | baked config + `hyprctl` keywords              | IPC event/state socket                              | implemented (greetd stubbed)               |
 | [[Stylix]]           | base16 synthesized from the v0 palette         | themed config for every nix app                     | implemented (stands down on owned surfaces) |
 
-## The livery seam in detail — one source, two fan-outs, zero drift
+## The lyra seam in detail — one source, two fan-outs, zero drift
 
 Why preview and adopted state can never diverge: both derive from the same
-`aoide.livery` values. The livery schema v0 (palette `bg/fg/accent/urgent` + component
+`aoide.lyra` values. The lyra schema v0 (palette `bg/fg/accent/urgent` + component
 tiers `bar`/`notif`/`window`, each field `null` → palette, with the fallback
 applied **in the facets**) rides the external W3C design-tokens container
-format; [[livery]] (native Rust in `crates/song/src/livery/`; verbs `lint` /
-`resolve` / `emit {stage,hyprctl,osc,file}`) is the engine. See [[livery]].
+format; [[lyra]] (native Rust in `crates/song/src/lyra/`; verbs `lint` /
+`resolve` / `emit {stage,hyprctl,osc,file}`) is the engine. See [[lyra]].
 
 ```
-                     aoide.livery  (palette → component, v0)
+                     aoide.lyra  (palette → component, v0)
                            │  single source of truth
              ┌─────────────┴──────────────┐
              ▼ REHEARSAL (live, gitignored) ▼ RECORDING (adopted, committed)
-   livery emit                      rice.nix ──► facets + Stylix
-   ├─ stage: song/stage/livery.json            │   (values baked at nix build)
+   lyra emit                      rice.nix ──► facets + Stylix
+   ├─ stage: song/stage/lyra.json            │   (values baked at nix build)
    │         (atomic write; fully resolved)  ▼
    ├─ hyprctl: keyword dispatch         every nix-manageable target
    └─ osc: terminal color inject        GTK/Qt · terminal · editors
              │                          · browser · boot  (needs rebuild)
              ▼
-   Quickshell hot-reload (LiveryState.qml)
+   Quickshell hot-reload (lyraState.qml)
 ```
 
 Rehearsal is the sketch (hot-reloads, no rebuild); recording is the truth
@@ -178,7 +178,7 @@ The baked side is carried by the three facets, all real:
   sessionGraph); QML rsyncs from the store into the gitignored
   `~/Aoide/run/qml/` via home-manager activation (source stays
   `modules/facets/quickshell/qml/`; no `qml/` at the repo root);
-  `LiveryState.qml` watches the stage file for the live fan-out. Eight of
+  `lyraState.qml` watches the stage file for the live fan-out. Eight of
   the nine carry a live QML body: `AoideBar.qml` is the bar (its own popouts
   also carry the calendar and now-playing gadgets); `AoideLauncher.qml` is
   the keyboard-driven launcher (`SUPER+SPACE`); `AoideNotifications.qml` is
@@ -188,12 +188,12 @@ The baked side is carried by the three facets, all real:
   holding four core gadgets (Conductor, Terminals, Meters, Power) plus an
   opt-in Usage stele, a left-edge panel that peeks its fore-edge and opens
   fully on hot-edge hover or
-  `SUPER+G`, all livery-themed; osd, lockscreen, greeter, and wallpaper
+  `SUPER+G`, all lyra-themed; osd, lockscreen, greeter, and wallpaper
   round out the set. `sessionGraph` remains declared but has no QML body —
   the DAG is rendered via `aoide graph view`/`aoide conductor`, not a desktop
   overlay ([[Session-Graph]]).
 - **compositor** — [[Hyprland]]; the system layer holds session/portal wiring,
-  the home-manager layer owns `hyprland.conf` with livery baked at build and
+  the home-manager layer owns `hyprland.conf` with lyra baked at build and
   live-patched via `hyprctl` during rehearsal; greetd is stubbed.
 - **stylix** — [[Stylix]]; a base16 scheme synthesized from the v0 palette,
   with colliding targets stood down on **both** the NixOS and home-manager
@@ -204,10 +204,10 @@ real flake checks.
 
 ## The rice loop — where the agent writes
 
-The self-ricing lifecycle overlays the map above: it produces livery, stages
+The self-ricing lifecycle overlays the map above: it produces lyra, stages
 through the live fan-out, drafts let it iterate without committing, and only
 `declare` commits through the gate. See [[Self-Ricing]]. Today `declare` and
-`transpose` are exit-64 stubs; `rice lint` (native `livery::lint`), `rice
+`transpose` are exit-64 stubs; `rice lint` (native `lyra::lint`), `rice
 stage`, `rice compose`, and the `rice draft`/`rice mode` groups are real.
 There is no `rice gen` — cut outright, not stubbed. `rice stage` refuses
 with `declarative-mode-locked` while `rice mode declarative` is locked (the
@@ -218,7 +218,7 @@ default) — see [[Self-Ricing#Staging vs Declarative Mode]].
         │   scaffolds a new song, reading song/songbook/ (cross-cutting +
         │   the song's own design/) FIRST
         ▼
-  rice mode stage <name>   ──►  song/stage/livery.json  ──►  Quickshell hot-reload
+  rice mode stage <name>   ──►  song/stage/lyra.json  ──►  Quickshell hot-reload
         │              (hyprctl/OSC dispatch not yet wired into stage)
         ▼              (REHEARSAL — nothing committed)
   edit the song's files
@@ -226,8 +226,8 @@ default) — see [[Self-Ricing#Staging vs Declarative Mode]].
   rice lint   ──fail──►  reject + songbook note
         │ pass
         ▼
-  rice mode draft <draft-name>   ──►  ROUTES song/stage/livery.json (symlink) into
-        │   song/songbook/<song>/drafts/<draft-name>/livery.json — forks it from
+  rice mode draft <draft-name>   ──►  ROUTES song/stage/lyra.json (symlink) into
+        │   song/songbook/<song>/drafts/<draft-name>/lyra.json — forks it from
         │   the current stage if new. Every further write (rice stage, a hand-edit)
         │   lands DIRECTLY in the draft file; no save step. Not committed —
         │   durable scratch; switch with another `rice mode draft <name>`.
@@ -253,7 +253,7 @@ other upstream-owned tree (nucleus, facets): upstream MAY still update or
 iterate on it. Every OTHER song — anything composed via `rice compose`
 under a different name — is clone-owned; upstream never touches it, an
 absolute guarantee unchanged by `sonata` being both shipped and actively
-iterated. The song carries livery only; the host is the
+iterated. The song carries lyra only; the host is the
 venue — its specifics and which instruments (facets, dendrites) are enabled.
 Replay = same song, new venue (one line in `hosts/<host>/default.nix`);
 transpose = new key, same venue. The `song-shape` check asserts every walked
@@ -326,7 +326,7 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   **42 commands**: the 18-verb `rice` group (`lint`, `stage`, `compose`, the
   3-verb `rice draft` group, the 4-verb `rice mode` group, the 5-verb `rice
   take` rehearsal-snapshot group, `rice back`; `declare`/`transpose` are the
-  2 stubs), `cover set`, the 3-verb `livery` group (`lint`/`resolve`/`emit`
+  2 stubs), `cover set`, the 3-verb `lyra` group (`lint`/`resolve`/`emit`
   — the native design-token engine), `shellbridge`, `quickshell reload` (the
   Quickshell IPC hot-reload trigger — rebuilds the whole scene from
   `shell.qml` in-process, picking up dynamically-loaded widget/facet QML the
@@ -350,7 +350,7 @@ and `aoide-usage` (gated on `aoide.usage.enable`) units, and the
 `aoide-secrets-serve`, gated on `aoide.secrets.enable`, own uid
 `aoide-secrets` — anchored to `multi-user.target` rather than a graphical
 session.
-Live state lands in `song/stage/*.json` (livery, mode, sessions, hooks,
+Live state lands in `song/stage/*.json` (lyra, mode, sessions, hooks,
 projects, graph, cover, herald, pending, and the [[Session-Graph]] DAG
 layer's own files). `lib/mkHost.nix`
 injects `pkgs.aoide` by overlay from the **same**
@@ -394,12 +394,12 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 │   │                obsidian, melete, mneme, firefox, screenshot, vision, audio,
 │   │                claude-code, clipboard, dunst, kimi-code, networkmanager,
 │   │                pi-coding-agent) ← additive
-│   └── facets/      quickshell · compositor · stylix          ← render surfaces (livery-only)
+│   └── facets/      quickshell · compositor · stylix          ← render surfaces (lyra-only)
 ├── hosts/           common/ + yomi-strix/ (flags + the aoide.song selector; a real
 │                    hardware profile, switched live and running as the daily desktop)
 ├── pkgs/            aoide/ (Rust workspace, 13 crates over two binaries —
 │                    aoide/aoided core + lyra paint, see [[Package-Layout]])
-├── song/            songbook/sonata/ (shipped standard) — rice.nix · livery.json ·
+├── song/            songbook/sonata/ (shipped standard) — rice.nix · lyra.json ·
 │                    palette/ · sounds/ · icons/ · widgets/ · design/ (per song);
 │                    covers/ — shared wallpaper library, referenced by rice.nix;
 │                    stage/ + auditions/ runtime (gitignored)
@@ -416,7 +416,7 @@ Runtime dirs (`song/{stage,auditions}`, root `log`, `index/`,
 versioned score, legitimately walked at eval.
 
 `hosts/` knows dendrites; dendrites never know hosts. Facets read only
-`aoide.livery` and `aoide.arrangement` (and declare `aoide.surfaces`); no
+`aoide.lyra` and `aoide.arrangement` (and declare `aoide.surfaces`); no
 module reads another module.
 The coupling discipline is contractual — the flake's checks (`surface-ownership`,
 `no-song-read`, `song-shape`, plus building both packages, plus the `vm-boot`
@@ -430,7 +430,7 @@ headless boot of the assembled stack) fail eval on violation.
 - [[Package-Layout]]
 - [[Snowflake-Anatomy]]
 - [[Desktop-Architecture]]
-- [[livery]]
+- [[lyra]]
 - [[Self-Ricing]]
 - [[Content-Pipeline]]
 - [[Agent-Interface]]

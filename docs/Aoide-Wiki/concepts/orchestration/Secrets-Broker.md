@@ -235,4 +235,4 @@ trail; only the events feed `watch` tails moved off it.
 - [[Governance]]
 - [[A2A-Door]]
 - [[aoide-cli]]
-- [[references/cli/Index|references/cli/]]
+- [[concepts/cli/Index|references/cli/]]

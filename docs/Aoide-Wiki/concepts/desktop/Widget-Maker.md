@@ -20,7 +20,7 @@ This is the same engine as [[Self-Ricing]], generalized: self-ricing is the agen
 Every integration lands as declarative Nix:
 
 - A new capability is a **dendrite** ([[Snowflake-Anatomy]]) — a nix module the walker auto-registers; enabling it is one host flag, no plugin registry to edit. Packages work the same way: `pkgs/<name>/default.nix` plus `lib/pkgs.nix` self-registers the flake output, host/vm overlays, and a `pkg-<name>` check.
-- Its UI is a **Quickshell widget** ([[Quickshell]]) reading `song/stage/*.json`, themed only by [[livery]].
+- Its UI is a **Quickshell widget** ([[Quickshell]]) reading `song/stage/*.json`, themed only by [[livery (rename to lyra)]].
 - Its wiring is an **adapter** on the [[aoided]] event stream ([[Desktop-Architecture]]).
 - The result is reproducible and diffable, removed by flipping the same flag — system state is always fully described by the flake.
 

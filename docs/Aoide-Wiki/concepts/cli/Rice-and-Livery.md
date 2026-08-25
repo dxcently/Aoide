@@ -4,7 +4,7 @@ The `rice`, `cover`, and `livery` verb groups are part of `lyra`, the AoideOS
 paint binary ([[Overview]]), and drive the [[Self-Ricing]] loop:
 scaffold a song ([[Song-Anatomy]]), hot-load it live, iterate inside a routed
 draft with take history, and validate/resolve/emit its notes through the
-native [[livery]] engine. Handlers live in
+native [[livery (rename to lyra)]] engine. Handlers live in
 `pkgs/aoide/crates/song/src/commands/{rice,draft,mode,cover,livery,take}.rs`;
 the stub registrations for `rice declare`/`rice transpose` live in
 `pkgs/aoide/crates/lyra/src/commands/stubs.rs`.
@@ -516,6 +516,6 @@ lyra rice back [--take N | --mark <letter>] [--json]
 - [[Song-Anatomy]]
 - [[Song-Vocabulary]]
 - [[Ricing-Protocol]]
-- [[livery]]
+- [[livery (rename to lyra)]]
 - [[Rebuild-Gate]]
 - [[aoide-cli]]

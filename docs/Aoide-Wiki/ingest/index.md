@@ -40,7 +40,7 @@ updated: 2026-08-25
 ## Entities
 
 - [[aoide-cli]] — the `aoide` binary: the self-registering command registry behind `dispatch()`/`schema --json`/MCP, exit codes 0/1/2/64, and the `aoided` daemon
-- [[livery]] — the livery schema and tiers, the two-fan-out (stage/livery.json + Stylix), the native `lyra livery` engine and its four emitters
+- [[livery (rename to lyra)]] — the livery schema and tiers, the two-fan-out (stage/livery.json + Stylix), the native `lyra livery` engine and its four emitters
 - [[aoided]] — the orchestrator daemon: event stream, policy, lint, audit log, gated rebuild; per-agent adapters; the notification-text security boundary
 - [[shellbridge]] — daemon↔desktop: JSON state files out, socket commands in, Hyprland IPC; the stage files and the `AOIDE_STAGE_DIR` seam
 - [[Quickshell]] — the QML shell surfaces (nine declared, five live), livery hot-reload, the `AoidePanel.qml` dock, and the QML deploy path
@@ -55,4 +55,4 @@ updated: 2026-08-25
 
 - [[references/AOIDE-HANDOFF|AOIDE-HANDOFF]] — the original design contract: what Aoide is (the primary source for this wiki)
 - [[AOIDE-DEV|AOIDE-DEV]] — the development agent's operating manual: the prime loop, build/show mechanics, git discipline, the §7 open-flags ledger
-- [[references/cli/Index|cli/Index]] — the per-command dev reference: signature, files read/written, output targets; hub page plus six group pages
+- [[concepts/cli/Index|cli/Index]] — the per-command dev reference: signature, files read/written, output targets; hub page plus six group pages
