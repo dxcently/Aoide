@@ -474,18 +474,25 @@ count.
   report exactly what changed (set/moved/cleared/no-op) — see §6's "Remote
   reach" subsection for how the hub composes with the rest of the mesh;
   `graph resurrect`, appended newest, P-D8 (`docs/architecture/AOIDED.md`'s
-  "L5 — harness summoning") (+1 → 71) — revives a project's most
-  recently-ended resumable session off the durable session ledger
-  (`state/session-ledger.jsonl`, §4 below), spawning it via the windowed
-  path (P-D7) with the
+  "L5 — harness summoning") (+1 → 71) — revives a project's resumable
+  sessions off the durable session ledger (`state/session-ledger.jsonl`,
+  §4 below), spawning each via the windowed path (P-D7) with the
   harness's own resume argv; `--project <name>` resolves against
-  `projects.json`, defaulting to the single most recent anchored ledger
-  entry, `--all`/`--id <ledgerSessionId>` widen the selection; a harness
-  with no verified `resume_args` (`aoide_protocol::agents::AgentProfile`)
-  is skipped with a taught message naming it, never a guessed invocation.
-  Also the command core the daemon's own boot-time auto-resume trigger
-  calls in-process — see `song/stage/projects.json`'s `autoResume`
-  paragraph below for that trigger's own contract.
+  `projects.json`. Selection: `--all` widens to every anchored ledger
+  entry, `--id <ledgerSessionId>` narrows to one specific entry, and bare
+  (neither flag) resumes the project's WHOLE carried set
+  (`state/carry.json`, durable-sessions plan P-C4 — see this section's
+  own `state/carry.json` subsection below) — anchored entries currently
+  marked durable, minus any id already alive (non-`done`) in
+  `sessions.json`, deduped by `sessionId` keeping the newest `endedAt`.
+  `--all`/`--id` never consult the carry mark. An empty bare-mode
+  selection is an `Outcome::ok` no-op naming the carried set as empty for
+  the project. A harness with no verified `resume_args`
+  (`aoide_protocol::agents::AgentProfile`) is skipped with a taught
+  message naming it, never a guessed invocation. Also the command core
+  the daemon's own boot-time auto-resume trigger calls in-process — see
+  `song/stage/projects.json`'s `autoResume` paragraph below for that
+  trigger's own contract.
   `identity`, appended newest, P-P1 (`docs/architecture/PAIRING.md`) (+1 →
   72) — this instance's lazily-minted ed25519 keypair (`aoide-storage`'s
   new `identity` module, `state/identity/`): prints the public key
@@ -1027,11 +1034,19 @@ daemon's own boot-time auto-resume trigger (`aoide-server`'s `daemon.rs`,
 the decided answer to this design's one open knob): once per BOOT — never
 on a same-boot `Restart=on-failure` restart, guarded by a marker recording
 the boot epoch (`btime` out of `/proc/stat`) the trigger last ran under —
-for every `autoResume` project with no live (non-`done`) session anchored
-to it, the daemon calls `aoide graph resurrect --project <name>`
-in-process (`Door::Daemon`), the identical command core the CLI command runs.
-A per-candidate spawn failure (e.g. a headless host with no
-`$AOIDE_TERMINAL`) degrades gracefully — logged, never a crashed tick.
+for EVERY `autoResume` project, unconditionally, the daemon calls `aoide
+graph resurrect --project <name>` in-process (`Door::Daemon`), the
+identical command core the CLI command runs. There is no liveness check at
+this layer (durable-sessions plan P-C4): that used to gate on the whole
+project (any non-`done` session anchored to it skipped the call entirely),
+which was wrong once a project could carry MULTIPLE durable sessions — one
+live terminal would have suppressed reviving the rest. Liveness now lives
+inside `graph resurrect`'s own bare-mode selection, per carried candidate
+(see this section's own `graph resurrect` entry above), so a project whose
+whole carried set is already live simply resolves to an empty-set
+`Outcome::ok` no-op. A per-candidate spawn failure (e.g. a headless host
+with no `$AOIDE_TERMINAL`) degrades gracefully — logged, never a crashed
+tick.
 
 ### `song/stage/graph.json` — **v0**
 
@@ -1411,6 +1426,15 @@ and the write leaves the OLD id carried — retryable on the next sweep —
 rather than leaving neither carried, which would be silent loss. A spawn
 that fails outright transfers nothing, for the same reason: the old id
 stays carried so the next sweep retries it.
+
+**Driving selection (P-C4).** `carry.json` is also the fourth reader: bare
+`graph resurrect --project <x>` (no `--all`/`--id`) reads it to resume a
+project's WHOLE carried set rather than a single entry — every anchored
+ledger entry currently in the set, minus any id already alive in
+`sessions.json`, deduped by `sessionId` keeping the newest `endedAt`. See
+this file's `graph resurrect` and `projects.json`/`autoResume` entries
+above for the full selection contract and the daemon's boot-sweep
+consumer.
 
 ### `state/a2a-agents.json` — **v0**
 

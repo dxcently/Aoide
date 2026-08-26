@@ -120,8 +120,11 @@ should follow).
   including one already gone from the roster — no roster lookup gates the
   write, which is what lets a mark be flipped post-mortem, off a bare ledger
   id. Bare and `--self` both resolve the target from `$AOIDE_SESSION_ID`.
-  The mark alone changes nothing yet; it's the input a resurrect-selection
-  and a spawn-time `--carry` flag build on.
+  `graph spawn --carry` marks a session at birth; a bare `graph resurrect
+  --project <x>` (no `--all`/`--id`) resumes a project's whole carried set
+  and transfers the mark from an old id onto the fresh one that replaces
+  it — see [[Graph-and-Conduct]] for the resurrect-selection mechanism and
+  the daemon's boot-time auto-resume sweep.
 
 A durability rule spans the layer: the stage rewriters **round-trip unknown
 fields** (serde flatten), so graph management never clobbers fields other

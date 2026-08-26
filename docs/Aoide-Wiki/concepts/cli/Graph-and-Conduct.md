@@ -192,9 +192,9 @@ aoide graph session carry (on|off) [--self | --id <id>] [--json]
   `--self` and `--id` together is a usage error; neither an `--id` nor a
   resolvable `$AOIDE_SESSION_ID` is likewise a usage error naming both
   flags — never a silent no-op. `live` reports whether the id is currently in
-  `sessions.json`; it is informational only. The mark itself does nothing yet
-  on its own — it is the input a later phase's `graph resurrect` selection
-  and `graph spawn --carry` consume.
+  `sessions.json`; it is informational only. The mark itself is the input
+  bare `graph resurrect`'s selection reads (below) and `graph spawn --carry`
+  writes at birth.
 
 ### aoide graph session hook
 
@@ -292,19 +292,29 @@ aoide graph resurrect --project <name> [--all | --id <ledgerSessionId>] [--json]
   written exactly once at roster exit, P-D8) — resolves `--project` against
   `projects.json` by exact name, then filters ledger entries anchored to it
   via the SAME longest-cwd-prefix rule `graph emit`'s `anchor_for` uses.
-  Candidates: the single most recent by default, every anchored entry with
-  `--all`, or one specific ledger `sessionId` with `--id` (mutually
-  exclusive with `--all`; `--id` wins if both are given). Each candidate is
-  filtered through its harness's `AgentProfile.resume_args` — a harness
-  with no verified resume argv (unregistered, or never confirmed against
-  the real binary) is skipped, not guessed at.
+  Candidates: `--all` widens to every anchored entry, `--id` narrows to one
+  specific ledger `sessionId` (mutually exclusive with `--all`; `--id` wins
+  if both are given), and bare (neither flag) resumes the project's WHOLE
+  carried set (`state/carry.json`, durable-sessions plan P-C4) — anchored
+  entries currently marked durable via `graph session carry on`, minus any
+  id already alive (non-`done`) in `sessions.json`, deduped by `sessionId`
+  keeping the entry with the newest `endedAt` (a carried id resurrected and
+  exited again can appear twice in the append-only ledger). `--all`/`--id`
+  never consult the carry mark. An empty bare-mode selection is an
+  `Outcome::ok` no-op naming the carried set as empty, never a silent
+  success. Each candidate is filtered through its harness's
+  `AgentProfile.resume_args` — a harness with no verified resume argv
+  (unregistered, or never confirmed against the real binary) is skipped,
+  not guessed at.
 - **Writes:** spawns each surviving candidate via the windowed path (the
   same mechanism `graph spawn --windowed` uses — a fresh terminal from
   `$AOIDE_TERMINAL` running `<harness> --resume <id>` in the ledger entry's
   own `cwd`). A resurrected session always mints a NEW `sessionId` — ledger
   ids are never recycled — and is stamped `resumedFrom` naming the ledger
   entry's own id; `build_graph` projects that as a `resumed` edge beside
-  `spawned`/`anchors` (CONTRACTS.md §4).
+  `spawned`/`anchors` (CONTRACTS.md §4). If the old id was carried, the mark
+  transfers onto the new id in the same step (one `save_carry` call, never
+  left on the now-dead old id).
 - **Pipes to / output:** `data: {project, resurrected: [...], skipped:
   [...], failed: [...]}`. Never a hard error over a per-candidate spawn
   failure (a headless host with no `$AOIDE_TERMINAL`/display) — that
@@ -316,7 +326,11 @@ aoide graph resurrect --project <name> [--all | --id <ledgerSessionId>] [--json]
   auto-resume trigger — a project's `autoResume` flag (`graph project add
   --auto-resume`, only ever set true by the CLI) fires `graph resurrect
   --project <name>` once per boot on `aoided` start (P-D8, `docs/
-  architecture/AOIDED.md`'s "L5 — harness summoning"). This is the revival
+  architecture/AOIDED.md`'s "L5 — harness summoning"), unconditionally for
+  every `autoResume` project — the daemon carries no liveness check of its
+  own; a project whose whole carried set is already alive simply resolves
+  to the empty-set no-op above, so one live terminal never suppresses
+  reviving the rest of a multi-session carried set. This is the revival
   half of the liveness story `graph reap` sweeps the other side of: a
   session a killed terminal could never mark `done` gets reaped off the
   live roster, and its ledger entry is what `graph resurrect` can later

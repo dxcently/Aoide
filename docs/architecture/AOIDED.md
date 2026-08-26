@@ -408,24 +408,39 @@ Append-only, never truncated, never a lookup key for live state —
 
 ### `graph resurrect --project <x>`
 
-Resolve `<x>` against `projects.json`, pick the most recent ledger entries
-whose `cwd` anchors to it (the same longest-path-prefix rule `graph emit`
-uses), filter to harnesses with `resume_args`, and spawn each (default: the
-single most recent; `--all`/`--id` widen) via the windowed path with the
-resume argv. Rules:
+Resolve `<x>` against `projects.json` and anchor every ledger entry to it
+(the same longest-path-prefix rule `graph emit` uses). Selection then
+branches on the flags: `--all` widens to every anchored entry, `--id`
+narrows to one specific `sessionId`, and bare (neither flag) resumes the
+project's WHOLE carried set (`state/carry.json`, durable-sessions plan
+P-C4) — every anchored entry currently marked durable
+(`graph session carry on|off`), minus any id already alive (non-`done`) in
+`sessions.json`, deduped by `sessionId` keeping the entry with the newest
+`endedAt` (an id that was resurrected and exited again can appear twice in
+the append-only ledger). `--all` and `--id` are unchanged escapes: both
+widen or narrow past the carried set regardless of the mark. An empty
+bare-mode selection is an honest `Outcome::ok` no-op naming the carried set
+as empty for the project, never a silent success. Every surviving
+candidate is filtered to harnesses with `resume_args` and spawned via the
+windowed path with the resume argv. Rules:
 
 - The revived session is a NEW `sessionId` — ids are never recycled. The
   new record carries additive `resumedFrom: Option<String>` naming the
   ledger entry's sessionId; `graph emit` projects it as a `resumed` edge
   beside `spawned`/`anchors` (`CONTRACTS.md §4`, graph.json — additive edge
-  kind).
+  kind). If the old id was carried, the mark transfers onto the new id in
+  the same step (one `save_carry` call, never left on the now-dead old id).
 - The conductor gains a keybind invoking resurrect for the focused
   project (`conductor/src/commands.rs` — the TUI already maps keys onto
   typed commands).
 - Per-project auto-resume: additive `autoResume: bool` (default false) on
   the `projects.json` entry, set by `graph project add --auto-resume` /
-  a `graph project set` flag. Trigger point: **the one open knob** — see
-  Open knobs; recommended default below.
+  a `graph project set` flag. Trigger point: the daemon's boot sweep
+  (`run_boot_auto_resume`) calls this command core unconditionally for
+  every `autoResume` project — no liveness check of its own; liveness is
+  the bare-mode selection's per-candidate exclusion above, so one live
+  terminal in a project never suppresses reviving the rest of its carried
+  set.
 
 ---
 
@@ -615,13 +630,17 @@ Things this design must never do — each is a review-blocking violation:
 Exactly one:
 
 - **The auto-resume trigger point** (`autoResume`, per-project, default
-  off). Candidates: daemon start, first `graph view` touching the project,
-  compositor session start. **Recommendation: daemon start** — on
-  `run_loop` entry (and only there — never on restart-within-session:
-  guard on "no live session for this project AND no resurrect already
-  performed this boot", using the boot-epoch read the reaper already has,
-  `reap.rs:472`), the daemon resurrects each `autoResume` project's most
-  recent resumable session. It is the one trigger that exists on headless
-  and desktop alike, fires once per boot by construction, and needs no new
-  event source. Decide at P-D8 briefing; everything earlier is
-  trigger-agnostic.
+  off), decided at P-D8's briefing: daemon start. On `run_loop` entry (and
+  only there — never on restart-within-session: guarded on "no resurrect
+  already performed this boot", using the boot-epoch read the reaper
+  already has, `reap.rs:472`), the daemon resurrects every `autoResume`
+  project unconditionally — no liveness check at this layer. Liveness is
+  handled one level down, per candidate, inside `graph resurrect`'s own
+  bare-mode selection (durable-sessions plan P-C4): an already-alive
+  carried id is dropped before anything is spawned, so a project whose
+  whole carried set is already live resolves to an empty-set no-op rather
+  than being skipped wholesale — a project-wide skip here would suppress
+  reviving a multi-session carried set's other, actually-dead members over
+  one live terminal. Daemon start is the one trigger that exists on
+  headless and desktop alike, fires once per boot by construction, and
+  needs no new event source.
