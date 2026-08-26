@@ -8,8 +8,8 @@ tags: [aoide, agent, cli, screen, pointer, vision, computer-use]
 
 `lyra screen` is AoideOS's computer-use surface: an agent's whole loop for
 looking at the desktop, grounding a target on it, acting on it, and
-verifying the act landed — fourteen verbs
-(`info`/`shot`/`ocr`/`diff`/`send`, plus nine `screen point <verb>`s) behind
+verifying the act landed — fourteen commands
+(`info`/`shot`/`ocr`/`diff`/`send`, plus nine `screen point <command>`s) behind
 one CLI group, registered like every other command
 ([[aoide-cli]]/[[Agent-Interface]]). Its own crate since P-A1 of the
 binary-split workstream. Implementation:
@@ -24,7 +24,7 @@ full reason-code vocabulary this page's examples draw from).
 ┌──────────┐  sidecar  ┌──────────┐  screen-px ┌──────────┐  re-shoot ┌──────────┐
 │  screen  │ ────────▶ │ screen   │ ─────────▶ │  screen  │ ────────▶ │  screen  │
 │  shot    │  origin/  │ ocr  or  │  (x,y) or  │  point   │  same rect│  diff    │
-│ --fit    │  scale    │ read the │  a picked  │  <verb>  │           │          │
+│ --fit    │  scale    │ read the │  a picked  │  <command>  │           │          │
 │ 1280x800 │           │  image   │  pixel     │--from-shot│          │changed?  │
 └──────────┘           └──────────┘            └──────────┘           └──────────┘
 ```
@@ -39,15 +39,15 @@ full reason-code vocabulary this page's examples draw from).
    name, or pick a pixel off the (possibly downscaled) image directly. Both
    land in IMAGE space.
 3. **Act** — hand that image-space coordinate to any coordinate-taking
-   `screen point <verb>` with `--from-shot <capture>`: it converts through
+   `screen point <command>` with `--from-shot <capture>`: it converts through
    the same sidecar before moving anything.
 4. **Verify** — `screen diff <before-capture>` re-shoots the identical rect
    and reports whether anything actually changed, mechanically — never an
    LLM guess about whether a click landed.
 
-## Verb reference
+## Command reference
 
-| Verb | Does |
+| Command | Does |
 | --- | --- |
 | `screen info` | Read-only desktop readout: monitors, cursor position, active workspace, its clients, every layer surface — typed `hyprctl -j` parses, no capture involved. |
 | `screen shot` | Capture via grim: full layout, one monitor (`--output`), a rectangle (`--region`), a human-picked region (`--pick`), a window (`--window`), or a conducted session's window (`--session`); writes the JSON sidecar. |
@@ -66,7 +66,7 @@ full reason-code vocabulary this page's examples draw from).
 
 ## Mapping from the Anthropic computer-use vocabulary
 
-| computer-use action | lyra verb(s) |
+| computer-use action | lyra command(s) |
 | --- | --- |
 | `screenshot` | `screen shot --fit 1280x800` |
 | `left_click(x, y)` | `screen point move x y` then `screen point click left x y` (the second call's `x y` re-verifies the pointer is still exactly there before pressing) |
@@ -97,7 +97,7 @@ Two coordinate spaces exist and `screen point`'s `--from-shot <capture>`
 flag is the bridge between them:
 
 - **Screen space** — logical (Hyprland) pixels, what `screen info` reports
-  and what every `screen point` verb ultimately acts in.
+  and what every `screen point` command ultimately acts in.
 - **Image space** — pixels in a capture file, which only equal screen space
   when that capture's `scale` is `1.0` (the default; `--fit`/`--scale`
   change it).
@@ -162,7 +162,7 @@ result object is written into the AFTER-capture's own sidecar `diff` field.
   pointer event system-wide, so no other app can be clicked. The release
   does not have to come from the process that pressed: in the measured run
   the presser was already dead and a separate client's release cleared it,
-  which is why the recovery verb works at all. A human clicking the same
+  which is why the recovery command works at all. A human clicking the same
   physical button should clear it by the same per-code path — inferred from
   that, not separately measured.
 - **What `hover` can and cannot see.** Its inventory delta is built from
@@ -173,7 +173,7 @@ result object is written into the AFTER-capture's own sidecar `diff` field.
   repainted a 34x34 prelight rect that `screen diff` caught while
   `appeared[]` reported nothing. Verify hover effects with `screen diff`;
   read `appeared[]` only for genuinely new windows or layer surfaces.
-- **Live-proof status.** Every `screen point` verb that moves the pointer or
+- **Live-proof status.** Every `screen point` command that moves the pointer or
   presses a button is unit-tested up to the pointer-synthesis boundary AND
   live-verified against Hyprland (2026-08-17), pixel-side and then again at
   the protocol level with a `wl_pointer` event logger as the receiving

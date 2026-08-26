@@ -47,7 +47,7 @@ A development agent builds the same dendrite + widget + adapter by hand, preview
 
 ## The hard line: a widget is a render surface
 
-House rule 7 ([[Plugin-Architecture#The corollary for Quickshell: render surfaces only]]), applied at the widget level. A widget **paints**; it is never where a capability *lives*. State, policy, IPC, and system access sit behind an agnostic bridge — a CLI verb, a stage file (`CONTRACTS.md` §4), an IPC socket — reachable with no desktop running. The widget picks that bridge up by name and draws it: a bridge lands first, the QML picks it up second. The test: delete every `.qml` in the repo — a capability not reachable from a terminal after that was in the wrong place. Sonata's own `design/widget-structure.md` carries the same rule for the ricing agents that read it directly.
+House rule 7 ([[Plugin-Architecture#The corollary for Quickshell: render surfaces only]]), applied at the widget level. A widget **paints**; it is never where a capability *lives*. State, policy, IPC, and system access sit behind an agnostic bridge — a CLI command, a stage file (`CONTRACTS.md` §4), an IPC socket — reachable with no desktop running. The widget picks that bridge up by name and draws it: a bridge lands first, the QML picks it up second. The test: delete every `.qml` in the repo — a capability not reachable from a terminal after that was in the wrong place. Sonata's own `design/widget-structure.md` carries the same rule for the ricing agents that read it directly.
 
 ## The staging engine — a song overrides desktop chrome
 

@@ -130,7 +130,7 @@ same precedence-chain discipline the rest of the server's config resolution
 follows. `instance.url` is this instance's own advertised URL — the same
 string the AgentCard's own `url` field carries. `graph` is EXACTLY what
 `aoide graph view --json` / `graph emit` resolve — the SAME
-`resolve_graph_document` function both those verbs and this method call, so
+`resolve_graph_document` function both those commands and this method call, so
 no second graph vocabulary is invented for the wire.
 
 ## The `peer:*` node convention (graph fold)
@@ -149,9 +149,9 @@ in as a root node, one level richer than the A2A fold:
   "stale"` and no `children`; never a crash, never a silently-dropped peer.
   `error` carries the last pull failure's reason when present.
 
-Local graph verbs (`graph focus`/`prune`/`reap`/`link`) keep ignoring
+Local graph commands (`graph focus`/`prune`/`reap`/`link`) keep ignoring
 `peer:*` ids exactly as they already ignore `a2a:*` ids — none of those
-verbs read `peer_store` (or `a2a_store`) at all, they operate purely on
+commands read `peer_store` (or `a2a_store`) at all, they operate purely on
 `sessions.json`'s `SessionRecord`s, so a `peer:*`/`a2a:*` id is simply never
 a session id they could match.
 
@@ -159,7 +159,7 @@ a session id they could match.
 
 `aoide peer add <name> <url> [--autogate] [--token-file <path>] [--bearer-secret
 <name>]` / `list` / `remove <name>` / `pull [<name>]` / `status` — see
-[[aoide-cli#The `peer` group — aoide-to-aoide federation]] for the per-verb
+[[aoide-cli#The `peer` group — aoide-to-aoide federation]] for the per-command
 behavior. Registered as its own group, directly after `a2a agent
 add/list/remove/send` in `schema --json`'s order.
 
@@ -214,7 +214,7 @@ the single audit log as `Door::A2a`.
 
 ## Status
 
-Real: the registry, the cache, `aoide/graphSummary`, the CLI verbs, and the
+Real: the registry, the cache, `aoide/graphSummary`, the CLI commands, and the
 graph fold all run — proved end to end by the same-network integration
 test. **Out of scope for this v0** (explicitly, not an oversight):
 WAN/NAT-traversal/relay reachability for peers not on the same network;

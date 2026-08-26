@@ -5,9 +5,9 @@ updated: 2026-08-25
 tags: [aoide, cli, rice, livery, song]
 ---
 
-# Rice & Livery Verbs — the Self-Ricing Command Surface
+# Rice & Livery Commands — the Self-Ricing Command Surface
 
-The `rice`, `cover`, and `livery` verb groups are part of `lyra`, the AoideOS
+The `rice`, `cover`, and `livery` command groups are part of `lyra`, the AoideOS
 paint binary ([[Overview]]), and drive the [[Self-Ricing]] loop:
 scaffold a song ([[Song-Anatomy]]), hot-load it live, iterate inside a routed
 draft with take history, and validate/resolve/emit its notes through the
@@ -30,7 +30,7 @@ mutators serialise through a `.stage.lock` `flock` in the stage dir
 Every command takes `--json`. Without it the CLI prints the human `message`
 line; with it, an envelope `{status, command, message, gated, changed?, data?}`
 (`pkgs/aoide/crates/protocol/src/output.rs`). Exit codes: 0 ok, 1 error,
-2 usage, 64 not-implemented. Exception: the three `livery` verbs print the
+2 usage, 64 not-implemented. Exception: the three `livery` commands print the
 engine's raw bytes (carried in `data.stdout`) instead of the message in text
 mode — see `livery lint` below. Names (`<name>`, `<song>`, draft names)
 everywhere must match `^[a-z0-9][a-z0-9-]*$`.
@@ -511,7 +511,7 @@ lyra rice back [--take N | --mark <letter>] [--json]
   never touches. Data `{from, to, mark, drifted, hyprctl, registry}`.
 - **Notes:** Draft mode only. A revert is NOT a take — only the head cursor
   moves; the next snapshot parents off wherever it points (implicit
-  branching, no branch verb). Bare invocation on a real CLI tty opens a
+  branching, no branch command). Bare invocation on a real CLI tty opens a
   numbered picker defaulting to the head's parent (one-step undo = bare
   Enter); off a tty (agent doors, pipes) a bare call refuses with usage
   exit 2 (`no-selection`) — flags/`--json` bypass the picker either way.

@@ -51,7 +51,7 @@ Core interfaces are versioned contracts, not conventions:
 | `aoide schema --json` output | Versioned in `CONTRACTS.md` |
 | Stage file formats | Versioned in `CONTRACTS.md` |
 
-The flake's `checks` fail a merge that breaks any of these. `aoide update` detects contract bumps during upstream merge and routes them through the update playbook before the rebuild discovers them — today the verb is a schema-real, exit-64 stub (arg-parsing and audit trail exist; the merge/detection logic does not yet run).
+The flake's `checks` fail a merge that breaks any of these. `aoide update` detects contract bumps during upstream merge and routes them through the update playbook before the rebuild discovers them — today the command is a schema-real, exit-64 stub (arg-parsing and audit trail exist; the merge/detection logic does not yet run).
 
 ## Merge hygiene
 

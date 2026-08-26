@@ -22,7 +22,7 @@ shellbridge/herald/take, the whole AoideOS surface — ships in a second
 binary, [[lyra]]. Conducting orchestration is aoide's identity; lyra paints
 (`docs/architecture/PACKAGE-LAYOUT.md` "Two binaries"; `CONTRACTS.md` §3).
 See [[Rice-and-Livery|Rice-and-Livery]] and
-[[Screen-Verbs|Screen-Verbs]] for that surface's per-command
+[[Screen-Commands|Screen-Commands]] for that surface's per-command
 detail.
 
 *The crate root lives at `pkgs/aoide/crates/cli/`; it packages via
@@ -91,7 +91,7 @@ serve` raises the A2A JSON-RPC/HTTP server (AgentCard, `message/send`,
 `--bearer-secret <name>` names a secret this door requires as the inbound
 `Authorization: Bearer` token, resolved fresh per request through
 [[Secrets-Broker]] and failing closed on a resolve error. The four `a2a
-agent` verbs register and drive external A2A agents through
+agent` commands register and drive external A2A agents through
 `state/a2a-agents.json`.
 
 **`usage`** computes the local token/cost rollup behind the opt-in claude.ai
@@ -127,7 +127,7 @@ a rebuild ([[Rebuild-Gate]], [[Governance]]).
 transpose`/`rice take`/`rice back` and the `livery`/`screen`/`herald`/
 `shellbridge`/`quickshell` groups all moved to `lyra` at P-A5 — see
 [[Rice-and-Livery|Rice-and-Livery]] and
-[[Screen-Verbs|Screen-Verbs]] for their per-command
+[[Screen-Commands|Screen-Commands]] for their per-command
 reference, and [[Self-Ricing]] for the self-ricing loop's walkthrough.
 
 ### The `graph` group — session/project DAG + the conductor mesh
@@ -198,7 +198,7 @@ Registered directly after `a2a agent add/list/remove/send` in `schema
 ### `conduct` and `conductor`
 
 The two are deliberately distinct parts of speech. **`conduct`** is the
-verb — `graph wrap`'s PTY-backed sibling, same register/wait/end lifecycle,
+command — `graph wrap`'s PTY-backed sibling, same register/wait/end lifecycle,
 but on a controlling tty plus a per-session control socket, so `graph send`
 can type into the running agent while its own TUI runs undisturbed.
 **`conductor`** is the noun — the interactive terminal frontend over the
@@ -209,10 +209,10 @@ through the same `dispatch()` the CLI and MCP doors use.
 ### Open schema gap
 
 The compositor keybind `SUPER+ESCAPE` (lock) still invokes `aoide shell
-lock` — a verb group not among the leaves (open thread). `SUPER+G` (dock
+lock` — a command group not among the leaves (open thread). `SUPER+G` (dock
 toggle) is not part of this gap: like the launcher's `SUPER+SPACE` and the
 wallpaper picker's `SUPER+W`, it triggers an in-process Hyprland global
-shortcut the panel itself registers (`aoide:dock`), not a CLI verb (see
+shortcut the panel itself registers (`aoide:dock`), not a CLI command (see
 [[Quickshell]]).
 
 ## Contract-level conventions

@@ -5,11 +5,11 @@ updated: 2026-08-25
 tags: [aoide, cli, meta, upkeep]
 ---
 
-# Meta & Upkeep Verbs — Guide, Schema, Soundcheck
+# Meta & Upkeep Commands — Guide, Schema, Soundcheck
 
-The meta verbs (`guide`, `schema`) orient an agent. The stubs (`make`,
+The meta commands (`guide`, `schema`) orient an agent. The stubs (`make`,
 `update`, `onboard`) are walking-skeleton reservations of schema surface for
-planned flows. The upkeep verbs (`usage`, `quickshell reload`, `soundcheck`)
+planned flows. The upkeep commands (`usage`, `quickshell reload`, `soundcheck`)
 maintain local state and sweep the working tree. Handlers live in
 `pkgs/aoide/crates/cli/src/commands/meta.rs` (`guide`/`schema`),
 `pkgs/aoide/crates/cli/src/commands/stubs.rs` (the stubs),

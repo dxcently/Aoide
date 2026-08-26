@@ -11,7 +11,7 @@ Dev-facing reference for the `aoide` and `lyra` command surfaces: for every comm
 it reads, what files it writes, and where its output pipes to. Grounded in the
 Rust source (`pkgs/aoide/crates/`), `aoide schema --json`, and `lyra schema
 --json` — the pages state
-the system at HEAD, not the design intent. For the concepts behind the verbs,
+the system at HEAD, not the design intent. For the concepts behind the commands,
 start at [[aoide-cli]] and the group pages linked below.
 
 ## Conventions that apply to every command
@@ -34,15 +34,15 @@ start at [[aoide-cli]] and the group pages linked below.
   Stage/state writes are atomic temp-then-rename.
 - **Two registries, one convention:** `aoide schema --json` holds 71
   command paths, `lyra schema --json` holds 42 — every group page prefixes
-  each heading `aoide `/`lyra ` so the binary a verb belongs to is never
+  each heading `aoide `/`lyra ` so the binary a command belongs to is never
   ambiguous.
-- `secrets exec`'s parking is detailed in [[Secrets-Verbs]].
+- `secrets exec`'s parking is detailed in [[Secrets-Commands]].
 
 ## Group pages
 
 - [[Rice-and-Livery|Rice-and-Livery]] — the self-ricing loop:
   `rice lint/stage/compose/declare/transpose`, the `rice draft` / `rice mode` /
-  `rice take` groups, `rice back`, `cover set`, and the `livery` engine verbs.
+  `rice take` groups, `rice back`, `cover set`, and the `livery` engine commands.
   Stage files: `song/stage/{livery,cover,mode}.json`; songbook and drafts trees.
 - [[Graph-and-Conduct|Graph-and-Conduct]] — the session DAG:
   `graph view/project/link/session/wrap/spawn/resurrect/send/permit/focus/
@@ -51,8 +51,8 @@ start at [[aoide-cli]] and the group pages linked below.
   Stage files: `song/stage/{sessions,hooks,projects,graph,pending,
   herald}.json`, `state/inbox.json`; control sockets at
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock`.
-- [[Screen-Verbs|Screen-Verbs]] — computer use: `screen info/
-  shot/ocr/diff/send` and the nine `screen point` verbs. Captures and sidecars
+- [[Screen-Commands|Screen-Commands]] — computer use: `screen info/
+  shot/ocr/diff/send` and the nine `screen point` commands. Captures and sidecars
   in `state/captures/`; pointer position in `state/pointer-pos.json`.
 - [[Doors-and-Peers|Doors-and-Peers]] — the other doors:
   `mcp serve`, `daemon`, `events tail`, `shellbridge`, `adapter melete`,
@@ -63,14 +63,14 @@ start at [[aoide-cli]] and the group pages linked below.
   terminal frontend: seven panels, keys, what each dispatches. State:
   `song/stage/{projects,sessions,hooks,livery}.json`, the audit log.
 - [[Content-and-Hooks|Content-and-Hooks]] — the content
-  pipeline verbs (all stubs today), `herald push` (shellbridge socket →
+  pipeline commands (all stubs today), `herald push` (shellbridge socket →
   `song/stage/herald.json`), and `hooks install` (harness settings merge,
   `--capture` tee to `state/<agent>-hooks.jsonl`).
 - [[Meta-and-Upkeep|Meta-and-Upkeep]] — `guide`, `schema`,
   `make`/`update`/`onboard` (stubs), `usage` (→ `state/usage.json`),
   `quickshell reload`, `soundcheck` (report-only sweep).
-- [[Secrets-Verbs|Secrets-Verbs]] — the `aoide secrets` credential door: 16
-  verbs across direct-home admin, over-the-socket operator, and the daemon
+- [[Secrets-Commands|Secrets-Commands]] — the `aoide secrets` credential door: 16
+  commands across direct-home admin, over-the-socket operator, and the daemon
   itself. State: `/run/aoide-secrets/{secrets.sock,events.jsonl}`, the
   secrets home.
 

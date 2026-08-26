@@ -70,7 +70,7 @@ The design exists; therefore statements about the design are present-tense true.
 **Status:** specified; no `aoide.rebuild` surface in `modules/nucleus/options.nix`.
 Open Thread: `ingest/log.md` — "rebuild capability".
 
-The design grants a passwordless, narrowly-scoped path to the gated verbs:
+The design grants a passwordless, narrowly-scoped path to the gated commands:
 a dedicated no-login agent user; the rebuild as a fixed systemd oneshot unit …
 ```
 

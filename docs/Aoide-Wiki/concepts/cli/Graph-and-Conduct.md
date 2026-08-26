@@ -5,16 +5,16 @@ updated: 2026-08-25
 tags: [aoide, cli, session, graph, conductor]
 ---
 
-# Graph & Conduct Verbs — the Session-Graph Command Surface
+# Graph & Conduct Commands — the Session-Graph Command Surface
 
-The `graph` verb group plus the top-level `conduct` command are the
+The `graph` command group plus the top-level `conduct` command are the
 [[Session-Graph]]'s command surface: session registration and the
 project/session DAG, injection into conducted terminals
 ([[Conductor-Channel]]), window jumps ([[Terminal-Commander]]), the
-dead-session reaper, and the `inbox` verbs that read back what `graph send`
+dead-session reaper, and the `inbox` commands that read back what `graph send`
 delivered. `graph session hook` is the [[Agent-Hooking]] door agent
 harnesses (Claude Code, kimi, pi) fire into. Handlers live in
-`pkgs/aoide/crates/conduct/src/graph/{verbs,session_store,send,pending,spawn,resurrect,permit,window,conduct,doc,model,common}.rs`
+`pkgs/aoide/crates/conduct/src/graph/{commands,session_store,send,pending,spawn,resurrect,permit,window,conduct,doc,model,common}.rs`
 and `pkgs/aoide/crates/conduct/src/reap.rs`; registrations in
 `pkgs/aoide/crates/conduct/src/commands/graph.rs`. `inbox list|read|clear`
 is the one exception: it lives in `pkgs/aoide/crates/storage/src/{inbox,
@@ -36,7 +36,7 @@ Every command takes `--json`: without it the CLI prints the human `message`
 line (plus a `changed:` trailer); with it, an envelope `{status, command,
 message, gated, changed, data?}` (`pkgs/aoide/crates/protocol/src/output.rs`).
 Exit codes: 0 ok, 1 error, 2 usage, 64 not-implemented (none in this group).
-No verb in this group is `gated: true` in the schema; `graph send`'s
+No command in this group is `gated: true` in the schema; `graph send`'s
 pending-approval hold is an internal policy, separate from the user rebuild
 gate the flag denotes.
 
@@ -188,7 +188,7 @@ aoide graph session hook [--agent <claude|kimi|pi>] [--json]   # reads ONE hook 
 - **Output:** ALWAYS an ok envelope for a payload problem: `data.action:
   "none"` with a `reason` for empty/malformed/unmapped input, or
   `data: {action: "applied", innerStatus, innerData}` wrapping the inner
-  verb's outcome — exit stays 0 so a stage hiccup never breaks the hooked
+  command's outcome — exit stays 0 so a stage hiccup never breaks the hooked
   session. Only a bogus `--agent` is a real error (exit 1,
   `reason: "unknown-agent"`).
 - **Notes:** mapped classes: SessionStart→start, UserPromptSubmit→`working`
@@ -442,7 +442,7 @@ aoide graph focus <node> [--json]
 - **Notes:** errors (exit 1) with `reason` ∈ `session-not-found`,
   `no-window-address`, `hyprctl-unavailable`, `hyprctl-failed`,
   `window-not-found`. The same `focus_window` seam backs the shellbridge's
-  click-to-jump (`focussession`, with a workspace-switch fallback the CLI verb
+  click-to-jump (`focussession`, with a workspace-switch fallback the CLI command
   does not use).
 
 ### aoide graph prune
@@ -493,7 +493,7 @@ aoide graph reap [--announce] [--json]
   orphanSockets, hyprctlAvailable}` (+ `refreshed`, `announced`). NEVER errors
   on nothing-to-reap or an unavailable compositor (exit 0,
   `"nothing to reap (all sessions live)"`).
-- **Notes:** the ~12 s systemd timer runs this verb unannounced; the dock's
+- **Notes:** the ~12 s systemd timer runs this command unannounced; the dock's
   reap control runs it `--announce` via the shellbridge. A false reap of a
   merely-quiet live session self-heals at its next hook event.
 
@@ -555,7 +555,7 @@ aoide inbox clear [--json]
 - **Writes:** empties `state/inbox.json`; reports how many entries were
   dropped (`0` on an already-empty inbox — a clean no-op, not an error).
 - **Notes:** not gated, unconditional — no `--yes`, matching `graph prune`'s
-  precedent: the verb name is the whole blast radius, nothing selective to
+  precedent: the command name is the whole blast radius, nothing selective to
   confirm.
 
 ### aoide conduct

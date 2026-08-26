@@ -34,7 +34,7 @@ serve --stdio`, and raw `guide`/`schema`/`livery` output. `a2a serve` and
 
 Two deliberate charter exceptions carry over from core: `shellbridge.rs`
 and `herald.rs` stay as FILES in `aoide-conduct` — only their registry
-lines (the CLI verbs) move to `lyra` — because both are entangled with
+lines (the CLI commands) move to `lyra` — because both are entangled with
 core (`permit.rs` publishes summons through `herald`; `conductor/ui.rs`
 reads the socket path `shellbridge` owns).
 
@@ -45,14 +45,14 @@ own golden-snapshot test in `crates/lyra/src/registry.rs`.
 
 | Group | Leaves | Detail |
 |---|---|---|
-| `rice` | 18 | `lint`/`stage`/`compose`/`back`/`declare`(stub)/`transpose`(stub); the 3-verb `draft` group; the 4-verb `mode` group; the 5-verb `take` rehearsal-snapshot group — [[Rice-and-Livery]] |
+| `rice` | 18 | `lint`/`stage`/`compose`/`back`/`declare`(stub)/`transpose`(stub); the 3-command `draft` group; the 4-command `mode` group; the 5-command `take` rehearsal-snapshot group — [[Rice-and-Livery]] |
 | `cover set` | 1 | wallpaper staging — [[Rice-and-Livery]] |
 | `livery` | 3 | `lint`/`resolve`/`emit`, the native design-token engine — [[livery]] |
 | `shellbridge` | 1 | the desktop state bridge daemon — [[Doors-and-Peers]] |
 | `quickshell reload` | 1 | the Quickshell IPC hot-reload trigger — [[Meta-and-Upkeep]] |
 | `herald push` | 1 | dunst's notification-ledger hook — [[Content-and-Hooks]] |
-| `screen` | 14 | capture, OCR, and synthesized-pointer control — [[Screen-Verbs]] |
-| `guide`, `schema`, `mcp serve` | 3 | the same verbs as their `aoide` spellings, over lyra's own registry |
+| `screen` | 14 | capture, OCR, and synthesized-pointer control — [[Screen-Commands]] |
+| `guide`, `schema`, `mcp serve` | 3 | the same commands as their `aoide` spellings, over lyra's own registry |
 
 ## The nix boundary
 
@@ -67,7 +67,7 @@ Linux, zero nix shell-outs, no NixOS assumption — the boundary the root
 - [[livery]]
 - [[Package-Layout]]
 - [[Rice-and-Livery]]
-- [[Screen-Verbs]]
+- [[Screen-Commands]]
 - [[Quickshell]]
 - [[shellbridge]]
 - [[CLI-Reference]]

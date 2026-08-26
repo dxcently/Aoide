@@ -265,7 +265,7 @@ workspace-wide run deadlocks on this machine. Each crate carries its own
 `registry.rs` golden test pinning its exact command-path set (`aoide-cli`:
 71 paths; `aoide-lyra`: 42), plus schema validity, exit-code, and MCP
 tool-list-parity tests; the conduct crate's graph domain
-(`crates/conduct/src/graph/{model,doc,common,verbs,window,session_store,
+(`crates/conduct/src/graph/{model,doc,common,commands,window,session_store,
 conduct,send}.rs`) carries handlers for all 20 `graph` subcommands: cycle
 rejection, anchoring, a deterministic render snapshot, edge shape, prune
 orphan-clearing, unknown-field round-trip, a serialized stage-dir precedence
@@ -328,7 +328,7 @@ NowPlaying/Power/Calendar gadgets. Baseline dendrites default on in
 dendrites that need it (devtools, fonts).
 
 **Structured not-implemented stubs (exit 64, 10 total):** the mutating CLI
-verbs — `rice declare/transpose`, the five-verb `content` pipeline, `make`,
+commands — `rice declare/transpose`, the five-command `content` pipeline, `make`,
 `update`, `onboard`. Their arg-parsing, schema, gate flag, and audit trail are
 real; only the live-system action is deferred. (`rice stage`/`rice compose`/
 the `rice draft` group are **real** — `rice stage` stages

@@ -56,10 +56,10 @@ songbook manifest).
 
 ## The 13 landed crates
 
-| crate | charter | app | verbs it registers |
+| crate | charter | app | commands it registers |
 |---|---|---|---|
 | **protocol** | The contract: registry, schema doc, `Outcome` envelope + exit codes, `Door`, audit event classes, A2A-JSON-RPC/MCP wire types, the `cmd!`/`arg!`/`flag!` registration macros. Every door depends on it; it depends on nothing aoide-specific. | both | none (library) |
-| **conduct** | The session core: PTY-backed `conduct` wrap, the session DAG, hook ingestion, liveness reaping. Also owns the `shellbridge`/`herald` implementation files (a deliberate charter exception — both are entangled with core internals even though their CLI verbs register into `lyra`). | both | aoide: `conduct`, `graph.*` (20), `hooks.install`, `who`; lyra: `shellbridge`, `herald.push` |
+| **conduct** | The session core: PTY-backed `conduct` wrap, the session DAG, hook ingestion, liveness reaping. Also owns the `shellbridge`/`herald` implementation files (a deliberate charter exception — both are entangled with core internals even though their CLI commands register into `lyra`). | both | aoide: `conduct`, `graph.*` (20), `hooks.install`, `who`; lyra: `shellbridge`, `herald.push` |
 | **server** | `aoided` and the door serve-loops: MCP-over-stdio, A2A JSON-RPC/HTTP/SSE, listeners, sessions, snapshots, the audit sink. Untrusted input stops here. | aoide | `daemon`, `a2a.serve` |
 | **client** | Outbound: the A2A client registry + send, the melete adapter, transports that drive external agents and speak to `aoided`. | aoide | `adapter.melete`, `a2a.agent.*` (4), `peer.*` (5) |
 | **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, migrations. File-first (seed → build; a real embedded store is the open question below). | aoide | `usage`, `inbox.*` (3) |
@@ -80,7 +80,7 @@ Command totals: **aoide 68** (60 real, 8 stub), **lyra 42** (40 real, 2 stub)
 Core keeps `aoide`/`aoided` over `protocol` · `storage` · `client` ·
 `conduct` · `server` · `conductor` · `upkeep` · `cli`. `lyra` (crate
 `aoide-lyra`) owns the rice/draft/mode/cover/livery/quickshell/screen/
-shellbridge/herald verb surface — everything that paints, or that only a
+shellbridge/herald command surface — everything that paints, or that only a
 desktop needs.
 
 - **Naming.** Muse names (`Aoide`, `Melete`, `Mneme`) name systems, not
@@ -92,13 +92,13 @@ desktop needs.
   identity. It ships in `aoide`/`aoided`, never `lyra`.
 - **Charter exceptions, named as the smudges they are.** `shellbridge.rs`
   and `herald.rs` stay as files in `conduct` — only their registry lines (the
-  CLI verbs) move to `lyra` — because both are entangled with core:
+  CLI commands) move to `lyra` — because both are entangled with core:
   `graph permit` publishes summons through `herald`, and the conductor TUI
   reads the socket path `shellbridge` owns. `storage::takes` and
   `storage::mode` stay in `storage` for the same reason: zero dependency
   weight, and `mode` is read by `shellbridge`, itself core-crate-resident.
 - **`management` is untouched by this split** — still deferred (see below),
-  waiting on real host-ops verbs to exist before there is anything to
+  waiting on real host-ops commands to exist before there is anything to
   extract.
 - **Nix-independence.** Core builds with `cargo` and runs on any Linux — no
   nix shell-outs, no NixOS assumption. This is the structural half of the
@@ -113,7 +113,7 @@ desktop needs.
   pillars are blocked: `harness` would require aoide to adopt an LLM client
   it has explicitly refused to own ("any agent with a shell is fully
   capable" is the core thesis); `tools`/`skills` need `management`'s
-  host-ops verbs, which don't exist. The design-decision corpus `canon`
+  host-ops commands, which don't exist. The design-decision corpus `canon`
   would formalize (`song/songbook/*/design/*.md`, this wiki's design pages)
   is prose today, not structured records — nothing to wrap a crate around
   yet.

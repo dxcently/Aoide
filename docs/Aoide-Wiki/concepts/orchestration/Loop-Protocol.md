@@ -32,7 +32,7 @@ mechanism that opens that fresh context is not part of the definition: a
 harness's own internal subagent tool (claude's `Task`/`Agent`, kimi's
 `Agent`) and a `graph spawn` session are two BINDINGS of the same tier
 concept. Both hand a role a fresh context, steerable and observable through
-aoide's verbs; neither binding outranks the other. Which binding a given role
+aoide's commands; neither binding outranks the other. Which binding a given role
 uses is a per-role decision (see Binding rule), not a property of the tier
 itself.
 

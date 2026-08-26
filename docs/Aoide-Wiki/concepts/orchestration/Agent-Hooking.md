@@ -50,7 +50,7 @@ backfilled on any later hook while still empty) it walks pid-ancestry against
 session (no wrapping, no PTY) still gets a `windowAddress` and is
 focus-jumpable from the roster, same as a conducted one.
 
-### 2. The explicit verbs — anything scriptable
+### 2. The explicit commands — anything scriptable
 
 ```sh
 aoide graph session start --id "$ID" --agent gemini --cwd "$PWD" [--parent "$PARENT_ID"]
@@ -108,7 +108,7 @@ into the session later.
 **Headless — no terminal required.** `aoide conduct --headless` runs the
 identical steerable session with no controlling terminal at all: the pty's
 output mirrors to an append-only `state/sessions/<sessionId>.log` instead of a
-real screen, and `aoide graph spawn` is the detached verb that launches one
+real screen, and `aoide graph spawn` is the detached command that launches one
 and returns immediately (full mechanism in [[Conductor-Channel]]). Both are
 harness-agnostic: the hook door above doesn't care whether its own stdin is a
 real tty, so a headless-launched agent hooks itself onto the graph exactly
@@ -208,7 +208,7 @@ project-local file, pointed at whatever `aoide` resolves to on `PATH` with
 no worktree-specific path baked in — a fresh machine setting up Claude Code
 as an Aoide harness needs the global file wired too, not just the repo's.
 
-The settings-file split is specific to harnesses that come through the hook door — claude and kimi each keep their own (profile-declared) settings file, and `aoide hooks install <agent>` writes either one. Harnesses wired through this repo's [[aoide-cli|other doors]] (the wrapper, the explicit verbs) don't have a settings-file split like this one.
+The settings-file split is specific to harnesses that come through the hook door — claude and kimi each keep their own (profile-declared) settings file, and `aoide hooks install <agent>` writes either one. Harnesses wired through this repo's [[aoide-cli|other doors]] (the wrapper, the explicit commands) don't have a settings-file split like this one.
 
 ### Kimi Code
 
@@ -242,7 +242,7 @@ Running→done for free; the graph shows who is out working even when the agent 
 
 ### A harness with its OWN hook/event system
 
-Map its lifecycle onto the explicit verbs. Example shape (pseudo-config for any harness that can run a shell command on events):
+Map its lifecycle onto the explicit commands. Example shape (pseudo-config for any harness that can run a shell command on events):
 
 ```
 on_start:    aoide graph session start --id "$MY_ID" --agent myagent --cwd "$PWD"
@@ -270,5 +270,5 @@ Pass `--parent "$AOIDE_SESSION_ID"` (or the `--parent` flag on `session start`) 
 - [[Agent-Interface]] — the CLI trunk the hook door and `hooks install` live on.
 - [[Conductor-Channel]] — the send/injection semantics, including per-profile submit keystroke resolution (`\n`, or `\r` for kimi).
 - [[Terminal-Commander]] — the graph concept (projects anchor sessions by cwd).
-- [[shellbridge]] — its socket accept loop is live for the window-jump verb (`focuswindow`), but session *registration* (start/phase/end) still has no socket verb; the CLI doors above remain the writers — and the permanent fallback.
+- [[shellbridge]] — its socket accept loop is live for the window-jump command (`focuswindow`), but session *registration* (start/phase/end) still has no socket command; the CLI doors above remain the writers — and the permanent fallback.
 - [[Widget-Bridge-Contract]] — the full `sessions.json` field contract and canonical-state rules the states above feed.

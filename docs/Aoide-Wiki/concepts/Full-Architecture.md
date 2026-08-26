@@ -31,7 +31,7 @@ marked on one of three rungs:
   contract, the livery plumbing, the CLI trunk + MCP façade, the daemon and
   bridge skeletons, the three facets, song replay, the launcher, the gadget
   dock.
-- **Stubbed** — the mutating CLI verbs (`rice declare/transpose`,
+- **Stubbed** — the mutating CLI commands (`rice declare/transpose`,
   `content *`, `make`, `update`, `onboard`) parse, audit, and exit 64 with a
   structured not-implemented payload; only the live action is deferred.
   (`rice lint`/`rice stage`/`rice compose`/the `rice draft` group are real —
@@ -136,7 +136,7 @@ the implemented/stubbed ladder.
 | [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 63 real/8 exit 64; lyra 40 real/2 exit 64) |
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`~/Aoide/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; stage    | mostly real (`declare`/`transpose` exit 64) |
-| [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all verbs exit 64)                |
+| [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all commands exit 64)                |
 | [[livery]]         | `aoide.livery` (palette + component tiers)   | `song/stage/livery.json`; baked facets + Stylix   | implemented (v0)                           |
 | [[shellbridge]]      | unix-socket commands; Hyprland IPC             | atomic JSON in `song/stage/`; `hyprctl` dispatch    | implemented (accept loop live: `focuswindow`) |
 | [[Quickshell]]       | `song/stage/*.json` (incl. livery)           | widget socket commands; rendered surfaces            | implemented (9 real surfaces)              |
@@ -149,7 +149,7 @@ Why preview and adopted state can never diverge: both derive from the same
 `aoide.livery` values. The livery schema v0 (palette `bg/fg/accent/urgent` + component
 tiers `bar`/`notif`/`window`, each field `null` → palette, with the fallback
 applied **in the facets**) rides the external W3C design-tokens container
-format; [[livery]] (native Rust in `crates/song/src/livery/`; verbs `lint` /
+format; [[livery]] (native Rust in `crates/song/src/livery/`; commands `lint` /
 `resolve` / `emit {stage,hyprctl,osc,file}`) is the engine. See [[livery]].
 
 ```
@@ -267,7 +267,7 @@ from the nucleus — see [[Snowflake-Anatomy]] and [[Governance]].
 ## The content pipeline — how knowledge enters
 
 Runs beside the rice loop off the same daemon. The approve gate is the
-structural break against injection. See [[Content-Pipeline]]. All five verbs
+structural break against injection. See [[Content-Pipeline]]. All five commands
 (`content register/propose/approve/ingest/query`) are schema-real, exit-64
 stubs today.
 
@@ -308,30 +308,30 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   one-to-one. **71 commands** — real (63): `guide`, `schema`,
   `mcp serve`, `daemon`, `events tail`, `conduct`, `conductor`, `adapter
   melete`, the
-  5-verb `a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`),
-  the 5-verb `peer` group (`peer add/list/remove/pull/status` — cross-device
-  peer federation, [[Peer-Federation]]), the 16-verb `secrets` group
+  5-command `a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`),
+  the 5-command `peer` group (`peer add/list/remove/pull/status` — cross-device
+  peer federation, [[Peer-Federation]]), the 16-command `secrets` group
   (`serve`/`exec`/`add`/`rm`/`grant`/`revoke`/`enroll`/`put`/`set-totp`/
   `automate`/`expose`/`migrate`/`pending`/`approve`/`dismiss`/`watch` — the
   socket-only credential broker under its own uid, [[Secrets-Broker]]),
   `usage`, `hooks install`, `soundcheck`, `who` (live presence over sessions
-  and registered peers), the 3-verb `inbox` group (`list`/`read`/`clear`, the
-  durable per-host message store), and the 20-verb `graph` group (the
+  and registered peers), the 3-command `inbox` group (`list`/`read`/`clear`, the
+  durable per-host message store), and the 20-command `graph` group (the
   [[Session-Graph]] DAG viewer + management layer over projects and
   sessions, incl. `graph send`/`wrap`/`reap` and the `graph pending
   list|approve|deny` held-injection queue, all real); stubs (8, exit 64):
-  the 5-verb `content` group (`register`/`propose`/`ingest`/`query`/
+  the 5-command `content` group (`register`/`propose`/`ingest`/`query`/
   `approve`), `make`, `update`, `onboard`. Core is nix-independent: cargo
   build, zero nix shell-outs.
 - **`lyra`** — the AoideOS paint binary. `lyra schema --json` holds the other
-  **42 commands**: the 18-verb `rice` group (`lint`, `stage`, `compose`, the
-  3-verb `rice draft` group, the 4-verb `rice mode` group, the 5-verb `rice
+  **42 commands**: the 18-command `rice` group (`lint`, `stage`, `compose`, the
+  3-command `rice draft` group, the 4-command `rice mode` group, the 5-command `rice
   take` rehearsal-snapshot group, `rice back`; `declare`/`transpose` are the
-  2 stubs), `cover set`, the 3-verb `livery` group (`lint`/`resolve`/`emit`
+  2 stubs), `cover set`, the 3-command `livery` group (`lint`/`resolve`/`emit`
   — the native design-token engine), `shellbridge`, `quickshell reload` (the
   Quickshell IPC hot-reload trigger — rebuilds the whole scene from
   `shell.qml` in-process, picking up dynamically-loaded widget/facet QML the
-  file watcher can't track), `herald push`, and the 14-verb `screen` group
+  file watcher can't track), `herald push`, and the 14-command `screen` group
   (capture, OCR, and synthesized-pointer control — [[Screen-Control]]). Only
   `lyra` may shell out to nix.
 

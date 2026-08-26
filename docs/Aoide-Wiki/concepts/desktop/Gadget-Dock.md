@@ -101,7 +101,7 @@ peeking, and slides fully in on either trigger:
 
 - **Hot edge** — a 6px hover strip on the left screen edge.
 - **SUPER+G** — an in-process Hyprland global shortcut (`aoide:dock`) the
-  panel registers itself, not a CLI verb: it pins the dock open, and a second
+  panel registers itself, not a CLI command: it pins the dock open, and a second
   press dismisses it.
 
 **Pinning.** Pinned, the dock stays put regardless of the pointer.

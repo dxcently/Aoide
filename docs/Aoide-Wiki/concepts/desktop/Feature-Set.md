@@ -44,7 +44,7 @@ today; they extend the handoff rather than describe shipped commands.
 
 ### 1. Notifications → messaging bridge
 
-**Status:** planned; no `notify-bridge` dendrite or `aoide notify` verb in
+**Status:** planned; no `notify-bridge` dendrite or `aoide notify` command in
 `aoide schema --json` yet.
 
 The [[Quickshell]] notification daemon (`org.freedesktop.Notifications`) is the
@@ -58,14 +58,14 @@ Matrix / Discord / …).
 - Inbound: replies from the messaging app become agent actions, as untrusted
   data, never executed as commands (the hard trust boundary from
   [[Desktop-Architecture]]).
-- Surfaced as a bar connection/notification widget; a planned `aoide notify …` verb (not yet in the command schema).
+- Surfaced as a bar connection/notification widget; a planned `aoide notify …` command (not yet in the command schema).
 - Default `enable = false` (an external surface); target app + token are
   user-provided.
 
 ### 2. Fleet & networking — Tailscale + Cloudflare
 
 **Status:** Tailscale's network MCP and Melete's fleet tools are shipped; the
-`aoide fleet` verb, the fleet widget, and Cloudflare public exposure are
+`aoide fleet` command, the fleet widget, and Cloudflare public exposure are
 planned, not present in `aoide schema --json`.
 
 Remote access and controlled exposure are first-class, user-gated features.
@@ -77,7 +77,7 @@ Remote access and controlled exposure are first-class, user-gated features.
   the alternative network-MCP door.
 - Fleet management: inventory, drift check, backups, per-host command
   dispatch (Melete `fleet_inventory` · `ssh_exec` · `check_drift` · backups).
-- Surfaced as a planned `aoide fleet …` verb (not yet in the command
+- Surfaced as a planned `aoide fleet …` command (not yet in the command
   schema); a panel fleet widget (host list + reachability).
 - Default: exposure toggles are `enable = false`; every enable is a
   [[Governance|gated]] action.
@@ -86,7 +86,7 @@ Remote access and controlled exposure are first-class, user-gated features.
 
 **Status:** Melete's schedule tools (`schedule_code_task`,
 `schedule_code_batch`, `schedule_recurring`, `schedule_rune_script`) are
-shipped; the `aoide sched` verb and the agenda/timers widget are planned, not
+shipped; the `aoide sched` command and the agenda/timers widget are planned, not
 present in `aoide schema --json`.
 
 The design surfaces **both** agent schedules and system timers in one place.
@@ -100,7 +100,7 @@ The design surfaces **both** agent schedules and system timers in one place.
   ("waiting on `<id>`"), and system timers — live, themed by livery.
 - Governance: scheduled *coding* runs still route their result through the
   rebuild gate; no background self-updaters ([[Governance]]).
-- Surfaced as a planned `aoide sched …` verb (list / create / cancel, not
+- Surfaced as a planned `aoide sched …` command (list / create / cancel, not
   yet in the command schema) + the widget.
 
 ### 4. Knowledge & content (Mneme)

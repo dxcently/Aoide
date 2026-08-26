@@ -5,9 +5,9 @@ updated: 2026-08-25
 tags: [aoide, cli, content, hooks, notification]
 ---
 
-# Content, Herald & Hooks Verbs
+# Content, Herald & Hooks Commands
 
-Three surfaces in one page: the `content` verb group (the [[Content-Pipeline]]
+Three surfaces in one page: the `content` command group (the [[Content-Pipeline]]
 admission/index flow), `herald push` (dunst's `script` hook feeding the
 notification ledger the Quickshell herald draws), and `hooks install` (wiring
 an agent harness's settings file into the [[Agent-Hooking]] door). Handlers and

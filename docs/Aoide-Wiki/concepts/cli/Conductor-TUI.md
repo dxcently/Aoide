@@ -8,8 +8,8 @@ tags: [aoide, cli, conductor, tui]
 
 The dev-facing reference for the `aoide conductor` interactive terminal UI:
 its panes, its keys, what each key dispatches, what each pane reads. One
-command backs this page, so it is organized by *panel* rather than by verb —
-the one deliberate departure from the per-verb register the other
+command backs this page, so it is organized by *panel* rather than by command —
+the one deliberate departure from the per-command register the other
 `concepts/cli/` pages use. Implementation: `pkgs/aoide/crates/conductor/`
 (`app.rs`, `ui.rs`, `graphview.rs`, `theme.rs`, `logtail.rs`,
 `commands.rs`).
@@ -23,7 +23,7 @@ re-documented: the PTY control socket and the injection door's mechanics
 ([[Conductor-Channel]]), the graph model and liveness reaping
 ([[Session-Graph]]), the 3D-wireframe view ([[Conductor-3D-DAG]], specified
 not implemented), the Quickshell terminal widget ([[Terminal-Commander]]),
-and the full per-verb I/O of `graph prune`/`emit`/`focus`/`send`/`pending *`
+and the full per-command I/O of `graph prune`/`emit`/`focus`/`send`/`pending *`
 ([[Graph-and-Conduct]]).
 
 ### aoide conductor
@@ -66,7 +66,7 @@ earlier panel's key ever shifts.
   `graphview`. Selection walks the same preorder node list the layout
   draws. `Enter` on a node with a session cues it (see "Enter's
   destination" below); `p`/`e` dispatch `graph prune`/`graph emit`, the two
-  graph-wide verbs.
+  graph-wide commands.
 - **SESSIONS (`2`)** — the collapsible terminal roster: project group
   headers interleaved with their session subtrees, one flattened selection
   index over the lot (`App::dag_rows`). `Enter` on a session cues it; on a

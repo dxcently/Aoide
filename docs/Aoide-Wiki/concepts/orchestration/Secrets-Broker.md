@@ -53,7 +53,7 @@ and sending it to the broker over the same socket, never through argv. A
 machine-readable `exists` flag unless the caller passes `--force` — on a
 terminal this becomes a `y/N` confirmation instead of a silent overwrite.
 `put` carries no `consumer` field and is never TOTP-gated: it is a CLI-only,
-operator-side verb (run as `sudo -u aoide-secrets aoide secrets put …` in
+operator-side command (run as `sudo -u aoide-secrets aoide secrets put …` in
 deployment), not an agent-facing one.
 
 ## Policy: consumers, TOTP, automation, and remote reachability
@@ -212,7 +212,7 @@ default off) provisions the `aoide-secrets` system user, the
 dependency — the broker has no business caring whether a desktop session
 exists) with the socket path and secrets home set explicitly.
 `aoide.secrets.members` names which users join `aoide-secrets-access`; no
-sudo rule ships, so every admin verb (`add`/`rm`/`grant`/`revoke`/
+sudo rule ships, so every admin command (`add`/`rm`/`grant`/`revoke`/
 `enroll`/`set-totp`/`automate`/`expose`/`migrate`) runs by hand as
 `sudo -u aoide-secrets aoide secrets …`, refused outright — root included —
 if the invoking uid doesn't own the secrets home. The service's own `path`
@@ -235,5 +235,5 @@ trail; only the events feed `watch` tails moved off it.
 - [[Governance]]
 - [[A2A-Door]]
 - [[aoide-cli]]
-- [[Secrets-Verbs]]
+- [[Secrets-Commands]]
 - [[CLI-Reference]]

@@ -66,7 +66,7 @@ picks the option that can be deleted.
 **Quickshell paints; it never *is* the capability.** Every QML file in
 `modules/facets/quickshell/` and `song/songbook/*/widgets/` is a render
 surface that picks up an agnostic bridge or API by name. State, policy, IPC,
-and system access live behind a bridge — a CLI verb, a stage file
+and system access live behind a bridge — a CLI command, a stage file
 (`CONTRACTS.md` §4), an IPC socket — reachable **with only a shell, no
 desktop running**.
 
@@ -77,7 +77,7 @@ The test, applicable to a file never seen before:
 
 So: a new API lands as a bridge FIRST, and the QML picks it up second — never
 the reverse, never only in QML. A widget may read, arrange, animate, and
-draw; it may not hold the only copy of a fact, shell out to do work a verb
+draw; it may not hold the only copy of a fact, shell out to do work a command
 should do, or decide policy — gates, permissions, and admission live in
 [[aoided]]. [[Widget-Maker#The hard line: a widget is a render surface]] and
 [[Widget-Bridge-Contract#The rules a widget is built by]] carry this rule at

@@ -8,7 +8,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 # Content Pipeline — Discover, Approve, Ingest, Query
 
-**Status: designed, schema-real, exit-64 stub.** All five verbs (`content
+**Status: designed, schema-real, exit-64 stub.** All five commands (`content
 register/propose/approve/ingest/query`) parse, audit, and exit 64 today; the
 live indexing/lint action described below is not yet implemented. See
 [[Codebase]] for the walking-skeleton ladder.

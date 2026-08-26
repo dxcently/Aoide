@@ -83,8 +83,8 @@ concepts/cli/Doors-and-Peers.md
 concepts/cli/Graph-and-Conduct.md
 concepts/cli/Meta-and-Upkeep.md
 concepts/cli/Rice-and-Livery.md
-concepts/cli/Screen-Verbs.md
-concepts/cli/Secrets-Verbs.md
+concepts/cli/Screen-Commands.md
+concepts/cli/Secrets-Commands.md
 concepts/desktop/Controls.md
 concepts/desktop/Desktop-Architecture.md
 concepts/desktop/Feature-Set.md

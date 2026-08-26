@@ -156,7 +156,7 @@ Power — plus an opt-in claude.ai Usage stele; its fore-edge peeks past the
 screen edge at rest, further when a session is `awaiting` and
 unacknowledged, and slides fully in on a 6 px hot-edge hover or on `SUPER+G`,
 an in-process Hyprland global shortcut the panel itself registers
-(`aoide:dock`), not a CLI verb).
+(`aoide:dock`), not a CLI command).
 
 Four are registry-only, with no QML anywhere in the repo:
 
@@ -189,12 +189,12 @@ Two design decisions worth carrying forward:
 - **Trigger is a Hyprland `GlobalShortcut` (`aoide:launcher`), registered
   in-process** — the compositor binds `SUPER+SPACE` to it via `bind = …,
   global, aoide:launcher`. `ShellBridge` is outbound-only, so an in-process
-  global shortcut is the cleanest inbound trigger — no new `aoided` verb, no
+  global shortcut is the cleanest inbound trigger — no new `aoided` command, no
   inbound socket.
 - **Launch is `DesktopEntry.execute()`** — the same Quickshell-native side-effect
   idiom the shell already uses (`WorkspaceRow.activate()`, `ConductorGadget` →
   `execDetached`). Routing app-launch through `aoided` per house rule #6 has
-  no such verb today; flagged, not silently baked. See
+  no such command today; flagged, not silently baked. See
   [[AOIDE-DEV]] §7.
 
 The compositor facet also adds `aoide-launcher` to the blur / `ignore_alpha` /

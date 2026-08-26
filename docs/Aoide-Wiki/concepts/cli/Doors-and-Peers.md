@@ -5,7 +5,7 @@ updated: 2026-08-25
 tags: [aoide, cli, mcp, a2a, peer, daemon]
 ---
 
-# Doors & Federation Verbs — MCP, A2A, Peers, Daemon
+# Doors & Federation Commands — MCP, A2A, Peers, Daemon
 
 This group covers the doors onto the one command schema and the federation
 surface: the stdio [[Agent-Interface|MCP]] façade (`mcp serve` — `lyra mcp
@@ -13,7 +13,7 @@ serve` is the same façade over lyra's own 42-path registry), the [[aoided]]
 policy skeleton (`daemon`, `events tail`, `adapter melete`), the desktop
 state bridge (`shellbridge`), the interactive session UI (`conductor`,
 detailed at [[Conductor-TUI]]), live presence (`who`), the [[A2A-Door]]
-server (`a2a serve`) and its outbound client verbs (`a2a agent *`), and
+server (`a2a serve`) and its outbound client commands (`a2a agent *`), and
 [[Peer-Federation]] (`peer *`). Handlers are spread across
 `pkgs/aoide/crates/server/src/{commands,mcp,daemon,a2a}.rs` (the server
 domain), `pkgs/aoide/crates/client/src/{commands,adapter,peer,wire}.rs`
@@ -38,7 +38,7 @@ Every command takes `--json`. Without it the CLI prints the human `message`
 line; with it, an envelope `{status, command, message, gated, changed?, data?}`
 (`pkgs/aoide/crates/protocol/src/output.rs`). Exit codes: 0 ok, 1 error,
 2 usage, 64 not-implemented (no command on this page is a stub). Outbound HTTP
-in the `a2a agent`/`peer` verbs is `curl -sS --max-time 15` shelled out with
+in the `a2a agent`/`peer` commands is `curl -sS --max-time 15` shelled out with
 the URL/body in argv or on stdin (no local credential is involved).
 
 ### aoide mcp serve
@@ -114,7 +114,7 @@ lyra shellbridge [--run] [--json]
   dispatched command.
 - **Output:** blocks forever serving the socket (systemd unit is
   `Type=simple`); returns an error document only on bind failure
-  (`state: "error"`, data `{socket, stageDir, wrote}`). Socket verbs
+  (`state: "error"`, data `{socket, stageDir, wrote}`). Socket commands
   (`pkgs/aoide/crates/conduct/src/shellbridge.rs`): `focuswindow` /
   `focussession` (Hyprland jump via `crate::graph`), `power`
   (`lock|logout|suspend|hibernate|reboot|shutdown` → spawns `hyprlock`,
@@ -184,7 +184,7 @@ aoide events tail [--class <c1,c2,…>] [--json]
 - **Output:** on the CLI door, one line per event as it arrives; blocks
   until Ctrl-C. On any other door it returns a "run it from a terminal"
   outcome instead of blocking that door — the same posture `secrets watch`
-  holds for a foreground follow-style verb.
+  holds for a foreground follow-style command.
 - **Notes:** not gated. Narrates the daemon's own tick-driven producers:
   the secrets-broker events mirror (`released`/`parked`/`completed`/
   `dismissed`/`expired`, name-only) and the hand-edit watcher over the

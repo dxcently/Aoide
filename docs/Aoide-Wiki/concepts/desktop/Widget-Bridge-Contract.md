@@ -193,7 +193,7 @@ A roster row-click sends `{cmd:"focussession", sessionId}`; the DAEMON resolves
 the id to the session's `windowAddress` (and focuses it, which also brings its
 workspace forward), or falls back to `hyprctl dispatch workspace` when the address
 is not resolved yet. The widget sends only the sessionId it already holds — never
-a stale or empty address. (The bare `focuswindow` verb remains for a window with
+a stale or empty address. (The bare `focuswindow` command remains for a window with
 no session id.)
 
 ## The rules a widget is built by
@@ -230,7 +230,7 @@ torn reads; the lock stops lost updates).
 
 **Status:** live on yomi-strix — the bridge/schema half (canonical state, live
 cwd/command, `activity`/`kind`/`title`, the sub-agent tree, the `focussession`
-verb, the `flock` lock, the wired tool/notification hooks), the widget
+command, the `flock` lock, the wired tool/notification hooks), the widget
 pure-view conformance (the beamed tree, the `awaiting`-driven dock peek), `say`,
 the `custom-title` session name, the same-window agent dedup, the
 Conductor-as-agent-tree / Terminals-as-process-view split, and the reaper's

@@ -23,8 +23,8 @@ scheme — see [[Lexicon]] for the full vocabulary and the [[Mneme]]/Aoide split
 
 ## What it is
 
-- **A fixed verb surface.** There is no REPL to drop into. The command surface
-  is a fixed set of verbs (`code`, `maintain`, `store`, `gh`, `runs`, `recur`,
+- **A fixed command surface.** There is no REPL to drop into. The command surface
+  is a fixed set of commands (`code`, `maintain`, `store`, `gh`, `runs`, `recur`,
   `self-update`, `skill`, …), each a one-shot call over a long-lived `serve`
   daemon (`melete.service`) that holds the scheduler, the run registry, and the
   MCP surface. A shell only ever appears *inside* a job — policy-gated, and the

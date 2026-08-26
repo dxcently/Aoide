@@ -89,7 +89,7 @@ the stage at it.
   draft from the current stage first if it's a new name. Sets the marker to
   `{mode: draft, song, draft: <name>}`. Refuses while `rice mode
   declarative` is locked.
-- **`rice draft save <name>`** — an INDEPENDENT verb: explicitly forks
+- **`rice draft save <name>`** — an INDEPENDENT command: explicitly forks
   whatever's currently live into a new or updated draft snapshot, without
   switching modes. Useful for preserving a second variant while still
   working in a first one, or saving a snapshot from plain `Staging` without

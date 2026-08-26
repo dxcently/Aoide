@@ -13,7 +13,7 @@ interactive conductor console (Phase ③, an `InputKind::Send` key arm in the
 TUI) is the remaining phase — see "Phases" below.
 
 The graph *observes* agents (running · waiting · blocked · done) and can
-*jump* to their windows. The conductor channel adds the missing verb: a
+*jump* to their windows. The conductor channel adds the missing command: a
 central controller sends commands INTO a running wrapped agent, and the
 [[Conductor-3D-DAG|conductor DAG]] is the interactive surface for it. Spawn a
 claude CLI under the conductor and it appears in the graph as a *conductable*
@@ -26,7 +26,7 @@ session out of the box — no opt-in. The parent-autogate rule lets an
 orchestrator freely command the children it spawned; sibling sessions
 (sharing a live parent) autogate each other too. Headless conduct
 (`--headless`, no controlling terminal at all), `graph spawn` (the detached
-launch verb), and sender provenance (a delivered payload carries a `from
+launch command), and sender provenance (a delivered payload carries a `from
 <sender>: ` prefix) round out the no-terminal case without changing the core
 channel's shape: one PTY, one control socket, one gated door per session.
 
@@ -76,7 +76,7 @@ central registry, no single point of failure):
 The wrap process is the natural owner: it already holds the `Child`, already
 threads `AOIDE_SESSION_ID`, already blocks on `wait()`.
 
-## The verbs
+## The commands
 
 - **`aoide conduct [--agent A] [--parent P] [--id I] [--headless] -- <command
   …>`** — the PTY-backed wrap. Same registration semantics as `graph wrap`
@@ -125,7 +125,7 @@ sitting at a terminal — or be a terminal at all — to launch `conduct`.
   instead. Everything else — injection socket, exit mirroring,
   `AOIDE_SESSION_ID` export — is byte-identical to the interactive path.
 - **`aoide graph spawn [--agent A] [--parent P] [--id I] [--prompt T] --
-  <command …>`** — the DETACHED verb over headless conduct. Where
+  <command …>`** — the DETACHED command over headless conduct. Where
   `conduct`/`wrap` block the calling process until the wrapped agent exits,
   `spawn` re-execs the running `aoide` binary as `conduct --headless … --
   <command …>`, detaches it into its own session (`setsid`, stdio nulled) so

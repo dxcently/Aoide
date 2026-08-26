@@ -59,7 +59,7 @@ fetches an external agent's AgentCard (a bare origin has the well-known path
 appended), requires at least a `name`, and registers it into
 `state/a2a-agents.json`. Each registered agent folds into the [[Session-Graph]]
 as a root node of `kind: "a2a"`, so a remote agent appears in the DAG beside
-aoide's own sessions. `agent send <name> <message>` is the **drive verb**: it
+aoide's own sessions. `agent send <name> <message>` is the **drive command**: it
 POSTs a JSON-RPC `message/send` to the agent's endpoint and reports the returned
 Task or Message. The external endpoints carry no local credential, so the fetch
 is a plain user-initiated request; the message text is untrusted data, never

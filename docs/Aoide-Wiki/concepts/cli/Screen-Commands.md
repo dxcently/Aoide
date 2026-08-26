@@ -5,13 +5,13 @@ updated: 2026-08-25
 tags: [aoide, cli, screen, computer-use]
 ---
 
-# Screen Verbs — Capture, OCR & Pointer Synthesis
+# Screen Commands — Capture, OCR & Pointer Synthesis
 
-The `screen` verb group covers the desktop see-and-act surface: query the
+The `screen` command group covers the desktop see-and-act surface: query the
 compositor (`screen info`), capture pixels (`screen shot`), recover text from
 a capture (`screen ocr`), act by name or pixel (`screen point *`), verify an
 act mechanically (`screen diff`), and hand a capture to another agent
-(`screen send`). It is a `lyra` verb group. Registrations live in
+(`screen send`). It is a `lyra` command group. Registrations live in
 `pkgs/aoide/crates/screen/src/commands.rs`; handlers and domain logic
 in `pkgs/aoide/crates/screen/src/{hypr,capture,point,synth,ocr,diff,text,send}.rs`.
 See [[Screen-Control]] for the usage narrative; the sidecar field contract,
@@ -31,7 +31,7 @@ Boundaries:
 - **OCR** shells out to `tesseract <img> stdout --psm 11 tsv`
   (`screen/ocr.rs`), the only place tesseract is named.
 - **Pointer synthesis** is native, in-process `zwlr_virtual_pointer_v1` via
-  `wayland-client` (`screen/synth.rs`) — no shell-out. Each verb assembles a
+  `wayland-client` (`screen/synth.rs`) — no shell-out. Each command assembles a
   `Seq` and hands it to one `synthesize()` call, which opens a Wayland
   connection (`Connection::connect_to_env()` — `$WAYLAND_DISPLAY` /
   `$XDG_RUNTIME_DIR`), creates the virtual pointer with `seat = None` (falling
@@ -53,7 +53,7 @@ fsync, then rename (symlink-transparent; stale temps swept).
 Every command takes `--json`. Without it the CLI prints the human `message`
 line on stdout; with it, an envelope `{status, command, message, gated,
 changed?, data?}` (`pkgs/aoide/crates/protocol/src/output.rs`). Exit codes:
-0 ok, 1 error, 2 usage, 64 not-implemented. All fourteen verbs below are
+0 ok, 1 error, 2 usage, 64 not-implemented. All fourteen commands below are
 `implemented: true` and `gated: false` in the schema.
 Structured errors carry a machine-checkable `data.reason` from the §8
 vocabulary (`pointer-*`, `sidecar-*`, `from-shot-*`, `text-*`, `diff-*`,
@@ -186,7 +186,7 @@ lyra screen point hover <x> <y> [--settle-ms 1-10000] [--from-shot <capture>] [-
   (default 500 ms). `--from-shot` as on `move`.
 - **Output:** ok → `"hover at <x>,<y> — <n> surface(s) appeared, ..."`; data
   `{x, y, appeared, disappeared, retitled}` (plus `image` when converted). A
-  tooltip/menu opening IS a new layer surface — that delta is the verb's
+  tooltip/menu opening IS a new layer surface — that delta is the command's
   purpose. An empty delta's message explicitly warns that `xdg_popup`s
   (tooltips, menus) are invisible to hyprctl and says to verify with
   `screen diff`.
@@ -372,7 +372,7 @@ lyra screen send <capture> (--session <id> | --agent <name>) [--comment "text"] 
   `--session`/`--agent` is required; both or neither is a usage error. The
   global `--audit-log` flag is honoured and forwarded to the session gate.
 - **Notes:** `gated: false` in the schema — the gating lives inside the
-  `graph send` door it reuses, not on this verb. Writes nothing itself.
+  `graph send` door it reuses, not on this command. Writes nothing itself.
 
 ## Related
 

@@ -38,9 +38,9 @@ shapes and keeps them current as sessions come and go.
 The socket accept loop binds the contract socket and accepts newline-JSON
 commands: a `{cmd:"focuswindow", address}` line drives `hyprctl dispatch
 focuswindow address:…`, the same session-jump primitive `graph focus` uses
-from the CLI door. This is the verb the [[Gadget-Dock]]'s terminal-manager
+from the CLI door. This is the command the [[Gadget-Dock]]'s terminal-manager
 gadget and the [[Terminal-Commander]] roster call on a row click — QML
-issues the socket command, never shells out. The verb set is narrow (jump
+issues the socket command, never shells out. The command set is narrow (jump
 only; prune remains an open thread, see below).
 
 **`hyprctl` must be on the service PATH, or every click fails silently.**
@@ -58,7 +58,7 @@ the caller's richer PATH and keeps working while the daemon's minimal PATH
 breaks silently.
 
 Reads and jumps go through the socket; the write door for session state
-remains the CLI. The `aoide graph session` verb family upserts those same
+remains the CLI. The `aoide graph session` command family upserts those same
 stage files atomically (each mutation re-stages `graph.json`, so the read
 path lights up immediately). `session start --id <id> [--agent --cwd
 --window --parent]` upserts a running `sessions.json` record, idempotent —
@@ -95,8 +95,8 @@ module-local — fine while only this module's tests touch env vars, a
 conflict risk if others grow them (open thread).
 
 The [[Gadget-Dock]]'s terminal-manager gadget renders its per-row prune `[x]`
-disabled precisely because no prune verb exists on the socket yet — QML never
-invents IPC. Growing the verb set (prune next) is an open thread, as is
+disabled precisely because no prune command exists on the socket yet — QML never
+invents IPC. Growing the command set (prune next) is an open thread, as is
 stamping `parentSessionId` at spawn time.
 
 **Authoritative window capture.** Alongside the socket accept loop, `lyra

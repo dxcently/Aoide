@@ -31,10 +31,10 @@ This is the only mode until the capability is deliberately turned on.
 
 **Status:** specified; `modules/nucleus/options.nix` declares no `aoide.rebuild` surface today, and the compositor facet marks the polkit prompt explicit future work.
 
-The design grants the agent a passwordless but narrowly-scoped path to the gated verbs:
+The design grants the agent a passwordless but narrowly-scoped path to the gated commands:
 
 - A dedicated no-login agent user with no general `sudo` rights.
-- The rebuild running as a fixed systemd oneshot unit (`aoide-rebuild-{test,switch}.service`) whose flake path, host, and verb are baked into the unit — the agent chooses *which unit to start*, never the command line.
+- The rebuild running as a fixed systemd oneshot unit (`aoide-rebuild-{test,switch}.service`) whose flake path, host, and command are baked into the unit — the agent chooses *which unit to start*, never the command line.
 - A polkit rule letting that user `systemctl start` those units and nothing else, no password — the same polkit pipeline [[Governance]] records as sakaki's agent-sudo design.
 - Every invocation streaming through journald into the single [[aoided]] audit log (`~/Aoide/log`).
 

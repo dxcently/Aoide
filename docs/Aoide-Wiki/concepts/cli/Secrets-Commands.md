@@ -4,10 +4,10 @@ created: 2026-08-25
 tags: [aoide, cli, secrets, totp, security]
 ---
 
-# Secrets Verbs — the `aoide secrets` Command Surface
+# Secrets Commands — the `aoide secrets` Command Surface
 
-The dev-facing reference for the 16 `secrets` verbs: signature, what each
-reads and writes, and where output goes. This page is the verb surface;
+The dev-facing reference for the 16 `secrets` commands: signature, what each
+reads and writes, and where output goes. This page is the command surface;
 [[Secrets-Broker]] is the design — the identity/release-to-client flow, the
 policy model's rationale, the parked-ask design, the age lane, deployment.
 Handlers live in `pkgs/aoide/crates/secrets/src/commands.rs`; the broker
@@ -33,9 +33,9 @@ else a sibling of the socket, `/run/aoide-secrets/events.jsonl`, capped at
   touching `policy.json`/`totp.secret` — root included; plain `sudo`
   (euid 0) is refused the same as any other wrong uid, only `sudo -u
   aoide-secrets` passes. When a broker is listening, every one of these
-  eight verbs routes over the socket FIRST (`{"op":"admin","verb":…}`),
+  eight commands routes over the socket FIRST (`{"op":"admin","command":…}`),
   executed inside the same `put_lock` critical section a `put`/`exec`
-  already runs under — so an admin verb racing a live resolve can no
+  already runs under — so an admin command racing a live resolve can no
   longer interleave. Direct-write-to-`policy.json` survives only as the
   no-daemon fallback, reached only when the socket connect itself fails
   with `ENOENT`/`ConnectionRefused`; any other socket outcome, including
@@ -115,7 +115,7 @@ aoide secrets add <name> [--backend <name>] [--key <key>] [--require-totp] [--co
 - **Notes:** `--backend` defaults to `age` (the built-in age-encrypted
   store) when omitted — an already-recorded policy's backend field is
   never touched by this default; only a brand-new `add` with the flag
-  omitted is affected. Direct-home admin verb (see "Shared facts").
+  omitted is affected. Direct-home admin command (see "Shared facts").
 
 ## aoide secrets rm
 
@@ -127,7 +127,7 @@ aoide secrets rm <name> [--json]
   backend's own store is untouched — this only forgets aoide's policy
   record.
 - **Output:** `data: {path: "broker"|"direct"}`.
-- **Notes:** direct-home admin verb.
+- **Notes:** direct-home admin command.
 
 ## aoide secrets grant
 
@@ -137,7 +137,7 @@ aoide secrets grant <name> <consumer> [--json]
 
 - **Reads/Writes:** adds one consumer to the named policy's `consumers[]`.
 - **Output:** `data: {path: "broker"|"direct"}`.
-- **Notes:** direct-home admin verb.
+- **Notes:** direct-home admin command.
 
 ## aoide secrets revoke
 
@@ -151,7 +151,7 @@ aoide secrets revoke <name> <consumer> [--json]
   against the ask's stored consumer at release time, not merely at the
   moment it parked.
 - **Output:** `data: {path: "broker"|"direct"}`.
-- **Notes:** direct-home admin verb.
+- **Notes:** direct-home admin command.
 
 ## aoide secrets enroll
 
@@ -203,7 +203,7 @@ aoide secrets set-totp <name> on|off [--json]
   `policy.json`.
 - **Output:** idempotent — re-setting the same state reports "unchanged"
   and writes nothing; `data: {path: "broker"|"direct"}` otherwise.
-- **Notes:** direct-home admin verb.
+- **Notes:** direct-home admin command.
 
 ## aoide secrets automate
 
@@ -217,7 +217,7 @@ aoide secrets automate <name> on|off|grant|revoke [<consumer>] [--json]
 - **Output:** idempotent — re-flipping the same state, or granting/revoking
   a consumer already in/out of the list, reports "unchanged" and writes
   nothing.
-- **Notes:** direct-home admin verb. Can only ever relax `requireTotp` for
+- **Notes:** direct-home admin command. Can only ever relax `requireTotp` for
   the listed consumers, never impose it on a policy that doesn't already
   carry it. Checked against the same self-asserted `consumer` wire field
   every other gate trusts — an automation-open secret is effectively
@@ -231,7 +231,7 @@ aoide secrets expose <name> on|off [--json]
 
 - **Reads/Writes:** the named policy's `remote` bit (default `false`).
 - **Output:** idempotent, same discipline as `set-totp`.
-- **Notes:** direct-home admin verb. No behaviour change today — no
+- **Notes:** direct-home admin command. No behaviour change today — no
   non-local entry point onto the broker exists yet; the bit exists so an
   operator can pre-declare which secrets are meant to ever leave the host,
   ahead of one landing.
@@ -247,7 +247,7 @@ aoide secrets pending [--json]
   peerUid}` — `peerUid` is the kernel-truth `SO_PEERCRED` uid stamped on
   the ask's original connection (`null` when unidentified) — never a
   value.
-- **Notes:** over-the-socket operator verb, but NOT an admin/euid verb —
+- **Notes:** over-the-socket operator command, but NOT an admin/euid command —
   it only reads in-memory state, no `policy.json` write.
 
 ## aoide secrets approve
@@ -264,7 +264,7 @@ aoide secrets approve <id> [--totp <code>] [--json]
 - **Output:** ok → `{"ok":true}` to the approver; the value itself never
   rides this reply. An invalid or expired code leaves the ask parked and
   the replay ledger unburned.
-- **Notes:** over-the-socket operator verb.
+- **Notes:** over-the-socket operator command.
 
 ## aoide secrets dismiss
 
@@ -276,7 +276,7 @@ aoide secrets dismiss <id> [--json]
 - **Writes:** removes it from the registry.
 - **Output:** the original requesting connection gets a clean "dismissed"
   refusal, no code needed.
-- **Notes:** over-the-socket operator verb. Peer-uid-gated: an ordinary
+- **Notes:** over-the-socket operator command. Peer-uid-gated: an ordinary
   caller may only dismiss an ask whose stamped `peerUid` matches its own
   connection's peer uid; the broker's own effective uid may dismiss any
   ask.
@@ -323,7 +323,7 @@ aoide secrets migrate <name> [--backend <target>] [--json]
   for a built-in source backend (`file`/`age`) whose on-disk path this
   crate can derive on its own — any other source is left untouched, and
   the migration reports that plainly.
-- **Notes:** direct-home admin verb, no socket round trip — the value
+- **Notes:** direct-home admin command, no socket round trip — the value
   lives only as a local `String` inside the handler, never crossing a
   wire.
 

@@ -143,7 +143,7 @@ grim out.png ; grim -g "0,0 1920x60" bar.png    # full + crops → read them bac
   `lyra rice mode stage [<song>]` first to unlock; `lyra rice mode
   declarative [<song>]` locks it back. See
   [[Self-Ricing#Staging vs Declarative Mode]].
-- **Edit a rice's live state through mode verbs — never by hand.**
+- **Edit a rice's live state through mode commands — never by hand.**
   `song/stage/livery.json` and the `song/songbook/<song>/drafts/*` targets it
   can symlink to are CLI-owned: hand-writing them directly bypasses the
   declarative lock check and the draft routing (a draft only receives writes
@@ -296,7 +296,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
 - **[landed, switched] pi session tracking via the agent-profile seam — committed as `ca08b73` (2026-08-12); the gated switch landed the same day (`392mgwkhf…` toplevel — its `aoide` resolves `--agent pi`; the home re-link deployed `aoide-pi-session.ts` into `~/.pi/agent/extensions/`).** `PI_PROFILE` in `protocol::agents` (claude-shaped hook event map, identity normalize, shared model ceiling, `TranscriptSpec` tail-reading pi's own jsonl at `~/.pi/agent/sessions/--<bucket(cwd)>--/<ts>_<sid>.jsonl` for say/title/model/context — bucket preserves dots per pi's own rule, hook-supplied `transcript_path` hint preferred); `aoide hooks install pi` reports `declarative` (new `SettingsFormat::Declarative` — pi's wiring is the dendrite-managed extension, not a settings file); the `aoide-pi-session.ts` extension (`modules/dendrites/pi-coding-agent.nix`) pipes SessionStart/UserPromptSubmit/Pre/PostToolUse/Stop/SessionEnd into the hook door (tui-mode only — pi-subagents' `--mode json -p` children never register; per-process Set dedupes resume/reload; graceful quit ends the session). E2E-verified live on yomi-strix: idle→working→stopped→done, prompt-named, model (`deepseek/deepseek-v4-flash`) + ctx (`⧉ 11k`) tail-read from the transcript. Operator facts: extensions hot-reload via `/reload` in the TUI (session_start re-fires with reason `reload`; the fresh instance reports — a pre-existing pi process needs `/reload` or restart to track). Known gaps: killed pi (SIGKILL/terminal close) leaks `working` until the reaper's pid/window signal (same as claude/kimi); settings.json `sessionDir`-only configs (no env var) are a transcript-locate miss; `hooks install pi --capture` is N/A (declarative).
 - **[decision] App-launch exec discipline.** `DesktopEntry.execute()` is used
   for app-launch (Quickshell-native idiom) rather than routing through
-  `aoided` (rule #6) — no such verb exists and adding one buys nothing. Open
+  `aoided` (rule #6) — no such command exists and adding one buys nothing. Open
   only as a contract question for khoa: if he wants *all* side effects through
   `aoided`, that's a ruling to make; otherwise closes as-is. Sibling
   `SUPER+ESCAPE → aoide shell lock` is still an unimplemented stub. See
@@ -308,7 +308,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   `AOIDE_WALLPAPER` env baked into the quickshell service; proper fix (stage
   reads the song's wallpaper note) still owed. See [[Self-Ricing]].
 - **[feature, partially resolved] Wallpaper switcher.** `set`/picker UI
-  shipped; still owed: `list`/`next` verbs (only `set` exists), crossfade
+  shipped; still owed: `list`/`next` commands (only `set` exists), crossfade
   transition (currently a hard `source` swap), per-monitor selection once
   multi-output lands. Residual: `qt6.qtimageformats` plugin-path export
   bounds format support — keep it when touching the service.
@@ -342,7 +342,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   asserts `cmd_count == 83` while `aoide schema --json` reports **87**
   commands (source-tree registrations and the installed CLI agree). Bump the
   assertion; same bug class as the struck entry above.
-- **[bug] Rice keybinds invoke retired verbs.** `modules/dendrites/hyprland.nix`
+- **[bug] Rice keybinds invoke retired commands.** `modules/dendrites/hyprland.nix`
   binds `SUPER SHIFT, P` → `lyra rice preview` and `SUPER SHIFT, A` → `aoide
   rice adopt` — both spellings were retired in the renames (`preview` →
   `stage`, `adopt` → `declare`; no aliases), so both keybinds are no-ops.

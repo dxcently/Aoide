@@ -101,7 +101,7 @@ should follow).
   cascade" below), and children that survive get `parentSessionId` cleared
   (un-orphaned rather than dangling). Everything removed or cleared is
   reported.
-- **`graph spawn`** and **`graph send`** — the detached headless-launch verb
+- **`graph spawn`** and **`graph send`** — the detached headless-launch command
   and the gated cross-session injection door. Full mechanism in
   [[Conductor-Channel]].
 - **`graph pending list|approve|deny`** — the resolve surface over sends held
@@ -248,7 +248,7 @@ wrapper stamps `parentSessionId` directly for the common nested-terminal case
 link` is the manual override path for edges outside both, not the only
 source. The dock's `SUPER+G` toggle and the launcher's `SUPER+SPACE` both
 resolve in-process (Hyprland global shortcuts the QML registers itself)
-rather than through an `aoide shell` CLI verb; only `SUPER+ESCAPE` (lock)
+rather than through an `aoide shell` CLI command; only `SUPER+ESCAPE` (lock)
 still execs an `aoide shell lock` command absent from the schema (open
 thread, see [[aoide-cli]]).
 

@@ -118,7 +118,7 @@ window, so the widget just filters and de-dupes that single source rather
 than merging it with Hyprland's own client list. A row's headline is its
 `activity` (the foreground command / edited file, or the bare shell/agent
 process when idle), `cwd` as subtext; click a row to jump. The gadget has no
-prune affordance: the shellbridge socket has no prune verb yet (open thread)
+prune affordance: the shellbridge socket has no prune command yet (open thread)
 — the dock never invents IPC. See [[Widget-Bridge-Contract]] for the full
 field contract.
 

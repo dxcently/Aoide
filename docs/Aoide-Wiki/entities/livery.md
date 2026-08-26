@@ -115,9 +115,9 @@ and staged and adopted state cannot diverge. Pure emit vs. host apply stays
 split: the emitters only produce bytes; `live::apply_live` /
 `shellbridge::atomic_write` are the effectful half.
 
-## Verbs
+## Commands
 
-The engine's surface is the `lyra livery` verb group, native inside the
+The engine's surface is the `lyra livery` command group, native inside the
 CLI's `Invocation`/`Outcome` shell:
 
 - **`lyra livery lint [<song>|<path>]`** — validate a livery file
@@ -137,7 +137,7 @@ CLI's `Invocation`/`Outcome` shell:
 
 No argument defaults to the staged livery. Exit codes align with the CLI
 convention: `0` ok · `2` usage · `1` error. [[Rice-and-Livery]] carries each
-verb's full I/O — reads, writes, output shape. The three verbs ship inside
+command's full I/O — reads, writes, output shape. The three commands ship inside
 [[lyra]], the paint binary that hosts every command this page's engine
 backs.
 

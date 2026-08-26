@@ -14,7 +14,7 @@ updated: 2026-08-25
 - [[Widget-Bridge-Contract]] — widgets as pure views of the bridge: the `sessions.json` field contract, the hook→state machine, and the rules a widget obeys
 - [[Feature-Set]] — what ships in the box (Melete + Mneme integrated) and the exemplar features: messaging bridge, fleet management, scheduled-jobs widget
 - [[Terminal-Commander]] — the agent-session terminal widget: tracks which window runs which agent, jumps by click or keybind
-- [[Session-Graph]] — the project/session DAG: nodes, anchors, spawned edges, the `aoide graph` verbs, the graph.json contracts, and today's render paths
+- [[Session-Graph]] — the project/session DAG: nodes, anchors, spawned edges, the `aoide graph` commands, the graph.json contracts, and today's render paths
 - [[Gadget-Dock]] — the `AoidePanel.qml` left-edge dock: hot-edge hover, SUPER+G, four core gadgets plus an opt-in Usage stele, livery-only colour
 - [[Lexicon]] — the whole vocabulary: the three Muses, the frozen/performed split, the machinery words, and why each word family was chosen
 - [[Snowflake-Anatomy]] — the flake's structural layers (nucleus / dendrites / facets / rime) and how the walker registers modules automatically
@@ -36,11 +36,11 @@ updated: 2026-08-25
 - [[Loop-Protocol|Loop Protocol]] — harness-agnostic multi-role agent loops: per-role fresh contexts, the R1/R2 degradation ladder, review integrity
 - [[Conductor-3D-DAG|Conductor 3D DAG]] — the ratatui 3D-wireframe DAG view for `aoide conductor`. Status: specified, not implemented
 - [[Package-Layout]] — the landed pi-style single-charter crate split of `pkgs/aoide`, the per-crate charters, and the two-binary split (`aoide`/`aoided` vs `lyra`)
-- [[Agent-Hooking]] — how any harness registers on the conductor: hook payloads through the `AgentProfile` seam, the `graph session` verbs, the conduct wrapper
+- [[Agent-Hooking]] — how any harness registers on the conductor: hook payloads through the `AgentProfile` seam, the `graph session` commands, the conduct wrapper
 - [[Conductor-TUI]] — the `aoide conductor` interactive terminal frontend: seven panels, keys, what each dispatches
-- [[Secrets-Verbs]] — the `aoide secrets` credential door's 16 verbs: direct-home admin, over-the-socket operator, and the daemon itself
+- [[Secrets-Commands]] — the `aoide secrets` credential door's 16 commands: direct-home admin, over-the-socket operator, and the daemon itself
 - [[Controls]] — the day-to-day surface: rebuild aliases, compositor keybinds, the bar's click/scroll/hover interactions, shell aliases
-- [[Screen-Control]] — `lyra screen`, AoideOS's computer-use surface: look, ground, act, verify — fourteen verbs behind one CLI group
+- [[Screen-Control]] — `lyra screen`, AoideOS's computer-use surface: look, ground, act, verify — fourteen commands behind one CLI group
 
 ## Entities
 
