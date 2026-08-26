@@ -198,11 +198,61 @@ the full count-site checklist (git show 9c2d05c).
 - **P-P5 — popup + polish (S).** The pairing-request popup surface
   riding the events feed (same seam as secrets asks), legacy-escape
   documentation pass (CONTRACTS + wiki page for the ceremony).
+- **P-P6 — discovery + invite (M).** The multicast beacon
+  (advertise-off-by-default, emitted by `a2a serve`), `peer discover`
+  + `peer invite` (golden +2, full count-site checklist), beacon
+  validation as untrusted input, CONTRACTS §6 beacon format +
+  constants. Tests: beacon round-trip on loopback multicast, malformed
+  beacon dropped, dedupe by fingerprint, invite resolves a heard
+  beacon and refuses an unheard/ambiguous name, advertise knob
+  default-off, discovery writes nothing to the registry.
 
 Live gates at the end of the lane: a real pair between yomi and
 sakaki via the ceremony (codes compared on real terminals), a spawn
 refused for a peer with spawn revoked, a spawn admitted and its
 ledger entry carrying `origin: peer:<name>`.
+
+## Discovery (advertise-but-locked)
+
+User-decided 2026-08-25: on a large network Aoide finds other Aoide —
+but discovery grants NOTHING. Connecting still requires the pairing
+ceremony; discovery only tells you who is there to invite.
+
+- **Transport: Aoide's own UDP multicast beacon** (User-chosen over
+  mDNS — zero new dependencies, cargo-only, nix-independent). One
+  JSON line per beacon on a fixed multicast group+port (the executor
+  pins the constants and documents them in CONTRACTS §6):
+  `{v, name, fpr, url}` — protocol version, instance name, the P-P1
+  identity's public-key fingerprint, and the A2A door URL. Never a
+  credential, never a pubkey in full, never anything that grants.
+- **Advertising is OFF by default.** The beacon is emitted by the
+  `a2a serve` process (the one that actually owns the door URL it
+  advertises) only when the operator opts in — config/env knob
+  (`AOIDE_DISCOVERY_ADVERTISE`, plus the nix option), cadence ~30s,
+  jittered. No resident listener exists: hearing is on-demand.
+- **`aoide peer discover [--secs N]`** joins the group, listens
+  briefly (default a few seconds), dedupes by fingerprint, and
+  prints the table: name, fingerprint, URL, first/last heard. A
+  beacon is UNTRUSTED NETWORK DATA (house rule 4's discipline):
+  every field is validated (name shape, hex fingerprint, http(s)
+  URL, line-size cap) before display, a malformed beacon is dropped
+  and counted, and nothing is ever written to the peer registry by
+  discovery alone.
+- **`aoide peer invite <name>`** is sugar over the ceremony, nothing
+  more: it runs its own discover sweep, resolves `<name>` to the
+  beacon's URL (ambiguous or absent name = taught error listing what
+  WAS heard), shows the fingerprint, and then runs the EXISTING
+  `peer pair request` flow against that URL. One ceremony stays the
+  only verification.
+- **Spoofed beacons are phishing, and the ceremony catches them.** An
+  attacker advertising a victim's name with its own URL can lure an
+  invite — but the SAS confirmation is mutual: the code on the
+  inviter's terminal must match the code on the REAL counterpart's
+  terminal, and the counterpart's operator must approve. A beacon
+  can misdirect a request; it cannot survive the code comparison.
+  The discover table always shows the fingerprint so an operator who
+  already knows a peer's fingerprint can spot the fake before ever
+  inviting.
 
 ## Kill-list
 
