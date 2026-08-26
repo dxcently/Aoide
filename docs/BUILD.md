@@ -242,6 +242,10 @@ session records) are contract §4.
   (`song/songbook/**` is versioned score, legitimately walked).
 - `song-shape` — every walked `song/songbook/**` path is a `rice.nix`
   (host-agnostic song discipline; CONTRACTS.md §5).
+- `phantom-commands` — every backticked `aoide …`/`lyra …` spelling in
+  `AGENTS.md` + `docs/agent/*.md` resolves against the binaries' `schema
+  --json`, built from the checked-out source (no doc may teach a command the
+  registry no longer carries).
 - `pkg-<name>` — one auto-generated check per discovered package builds it
   (currently `pkg-aoide`, `pkg-melete`, `pkg-mneme`). Generated
   by `lib/pkgs.nix`, so a new `pkgs/<name>/` gains its check with no edit here.

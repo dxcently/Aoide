@@ -1,6 +1,6 @@
 # lib/checks.nix — the contractual coupling discipline, as flake checks.
 #
-# Five checks ride as flake `checks` (see concepts/Governance and
+# Six checks ride as flake `checks` (see concepts/Governance and
 # concepts/Notes in the wiki, and the mechanical-integrity design for fmt +
 # discovery specifically):
 #
@@ -27,12 +27,19 @@
 #      discovery rule; a fourth shape is a half-created package that vanishes
 #      from `packages`/`pkg-<name>` silently today.
 #
+#   6. phantom-commands — every backticked `aoide …` / `lyra …` invocation
+#      taught by the agent docs (root AGENTS.md + docs/agent/*.md) resolves
+#      against the right binary's `schema --json`, built from this checked-out
+#      source. A doc teaching a command the registry no longer carries turns
+#      the check red naming the file, line, and spelling — the gate that stops
+#      doc copies of the command surface from growing back.
+#
 # 1–3 and 5 are written so they PASS TRIVIALLY where nothing populates the
 # registry they inspect yet (1) and become real as Wave-1 facets/packages
 # land. Each resolves to a trivial derivation: it either builds (assertion
-# held) or the eval fails with a readable message (assertion broken). 4 is a
-# real `runCommand` — it has to actually run a binary, so it can only fail at
-# build time, not eval time.
+# held) or the eval fails with a readable message (assertion broken). 4 and 6
+# are real `runCommand`s — each has to actually run a binary, so it can only
+# fail at build time, not eval time.
 { lib, pkgs }:
 let
   # A check that succeeds as a buildable derivation, or throws at eval time
@@ -160,6 +167,110 @@ let
     assertCheck "discovery" (
       strays == [ ]
     ) "pkgs/ entries neither a package, shelved, nor self-flaked: ${builtins.toString strays}";
+
+  # ── Check 6: no phantom commands in the agent docs ──────────────────────────
+  # The agent docs (root AGENTS.md + docs/agent/*.md) are the one place the
+  # command surface is still taught in hand-written prose — both binaries'
+  # guide texts are registry-derived, so they cannot drift and are not
+  # re-checked here. Every backticked invocation spelling those docs teach
+  # (`aoide graph send …`, `lyra rice compose <name>`, …) must resolve against
+  # the matching binary's `schema --json`, built from this checked-out source:
+  # the spelled words must be a registered command path, or a prefix of one
+  # (`aoide graph send` validly teaches the `graph.send` leaf; `aoide secrets`
+  # alone validly names a group). A spelling that resolves to nothing fails
+  # the build naming the file, line, and spelling.
+  #
+  # Extraction is precision-over-recall: only inline code spans STARTING with
+  # `aoide `/`lyra ` followed by a lowercase word count as teachings (a span
+  # may wrap across a line break); the path walk stops at the first non-path
+  # token (`<args>`, `[flags]`, `--flags`, `--`, ellipses), and comment lines
+  # inside fenced code blocks are skipped. `src` is the flake's own store
+  # copy, so like Check 4 this scopes to the COMMITTED tree; `aoidePkg` is
+  # the self-flaked core package — `aoide` from its default output, `lyra`
+  # from its `rice` output.
+  phantomCommands =
+    src: aoidePkg:
+    let
+      extract = pkgs.writeText "phantom-commands-extract.pl" ''
+        use strict;
+        use warnings;
+
+        my $file = shift or die "usage: extract.pl FILE\n";
+        open my $fh, '<', $file or die "$file: $!\n";
+        my $text = do { local $/; <$fh> };
+        close $fh;
+
+        # Blank out comment lines inside fenced code blocks, preserving
+        # offsets: fenced commentary may name a spelling without teaching it.
+        my @lines = split /\n/, $text, -1;
+        my $fence = 0;
+        for my $i (0 .. $#lines) {
+          my $l = $lines[$i];
+          if ($l =~ /^\s*(```|~~~)/) { $fence = !$fence; next; }
+          $lines[$i] = ' ' x length($l) if $fence && $l =~ /^\s*#/;
+        }
+        $text = join "\n", @lines;
+
+        # Inline code spans; a span may wrap across a line break.
+        while ($text =~ /`([^`]+)`/g) {
+          my $span = $1;
+          my $at   = pos($text) - length($span) - 2;
+          my $line = 1 + (substr($text, 0, $at) =~ tr/\n//);
+          $span =~ s/\s+/ /g;
+          # Only spans starting with the binary name and a lowercase command
+          # word are invocation teachings; `aoide <cmd>` and prose are not.
+          next unless $span =~ /^(aoide|lyra) [a-z]/;
+          my ($bin, @toks) = split ' ', $span;
+          my @words;
+          for my $t (@toks) {
+            # Stop at the first non-path token: <args>, [flags], --flags,
+            # `--`, ellipses — everything after is invocation tail, not path.
+            last unless $t =~ /^[a-z][a-z-]*$/;
+            push @words, $t;
+          }
+          next unless @words;
+          print join("\t", $file, $line, $bin, "@words"), "\n";
+        }
+      '';
+    in
+    pkgs.runCommand "aoide-check-phantom-commands"
+      {
+        nativeBuildInputs = [
+          pkgs.jq
+          pkgs.perl
+        ];
+      }
+      ''
+        set -euo pipefail
+        export HOME="$TMPDIR"
+
+        # The registered command paths, one per line, straight from each
+        # binary — the same source of truth `schema --json` contracts.
+        ${aoidePkg}/bin/aoide schema --json \
+          | jq -r '.commands[].path | join(" ")' > "$TMPDIR/aoide-paths"
+        ${aoidePkg.rice}/bin/lyra schema --json \
+          | jq -r '.commands[].path | join(" ")' > "$TMPDIR/lyra-paths"
+
+        cd ${src}
+        for doc in AGENTS.md docs/agent/*.md; do
+          perl ${extract} "$doc"
+        done > "$TMPDIR/candidates"
+
+        status=0
+        while IFS="$(printf '\t')" read -r file line bin words; do
+          # Valid iff the spelled words are a registered path or a prefix of
+          # one (word-boundary; the path lists are [a-z- ] so regex-safe).
+          if ! grep -Eq "^$words( |$)" "$TMPDIR/$bin-paths"; then
+            printf 'phantom command: %s:%s teaches `%s %s`, which resolves to no registered command path of %s\n' \
+              "$file" "$line" "$bin" "$words" "$bin" >&2
+            status=1
+          fi
+        done < "$TMPDIR/candidates"
+        [ "$status" -eq 0 ]
+
+        printf 'aoide check phantom-commands: ok (%d spellings checked)\n' \
+          "$(wc -l < "$TMPDIR/candidates")" > "$out"
+      '';
 in
 {
   inherit
@@ -169,5 +280,6 @@ in
     songShape
     fmt
     discovery
+    phantomCommands
     ;
 }

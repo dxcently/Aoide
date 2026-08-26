@@ -166,6 +166,11 @@
           # pkgs/ discovery completeness — see lib/pkgs.nix's `strayEntries`
           # and lib/checks.nix's Check 5.
           discovery = checks.discovery pkgsWalk.strayEntries;
+          # No phantom commands in the agent docs — every backticked
+          # `aoide …`/`lyra …` spelling in AGENTS.md + docs/agent/*.md
+          # resolves against the binaries built from this source (see
+          # lib/checks.nix's Check 6).
+          phantom-commands = checks.phantomCommands self inputs.aoide.packages.${system}.default;
           # VM boot test — boots the Aoide desktop config headless and asserts
           # the stack comes up (multi-user.target, aoide on PATH,
           # greetd enabled, aoided + shellbridge user services active, graph
