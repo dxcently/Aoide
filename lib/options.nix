@@ -7,7 +7,9 @@
 # already rendered as nix SOURCE TEXT (nixpkgs' own doc renderer does the
 # quoting/escaping; the generator pastes it verbatim, never re-serializes a
 # value itself). DERIVED from the option declarations via `lib.evalModules`
-# + `lib.optionAttrSetToDocList` — no hand-list.
+# + `lib.optionAttrSetToDocList` — no hand-list. The emitted JSON deliberately
+# carries only {name, description, default} — no `type` field, since nothing
+# downstream consumes one; a future consumer adds it then, not speculatively.
 #
 # Ladder rung (a) HELD (docs/architecture/ONBOARD.md "The vars-file
 # generator" / P-I3 brief): a bare `lib.evalModules` over the walked module
