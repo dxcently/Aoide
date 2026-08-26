@@ -72,7 +72,9 @@ rice compose <name> [--from <song>]` (scaffold) → `lyra rice mode stage
 saved draft via a symlink, forking it from the current stage if new — every
 further edit lands directly in the draft, no save step; `lyra rice mode draft
 <other-draft>` switches which one's live) → `lyra rice declare <name>` (**user
-gates this**) → commit + gated rebuild (recording). (`rice gen`/`rice
+gates this**; still a stub — exit 64 — so today the loop's last mechanical
+step is the draft, and the commit half is the User's by hand) → commit +
+gated rebuild (recording). (`rice gen`/`rice
 preview`/`rice mint`/`rice new`/`rice adopt`/the old copy-based `rice draft
 stage` no longer exist — `lyra rice compose`/`rice stage`/`rice mode draft`/
 `rice declare` are the only spellings for those steps; the CLI carries no
