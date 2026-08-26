@@ -1,12 +1,17 @@
 # Fleshing out Aoide ricing — the rehearsal, the cue, and the observation stack
 
-Status: a design handout captured from a chat session (2026-08-18), not yet
-built and not yet LOCKED — the User has steered every section at least once, but
-the final "lock" word hasn't been said. Nothing here is asserted as existing
-unless marked EXISTS. A companion command flesh-out was produced by another
-agent in a separate session; it was not found anywhere in the repo at capture
-time, so this handout carries only this session's design — fold that document
-in when it surfaces.
+Status: a design handout captured from a chat session (2026-08-18), not
+LOCKED — the User has steered every section at least once, but the final
+"lock" word hasn't been said. Part of it is now code: the take tree and its
+commands (§5.2, phase A in §10) and the project-revert groundwork (R0–R2,
+§7.2) are landed in the repo; everything else is design. Nothing here is
+asserted as existing unless marked EXISTS or LANDED. Execution ordering
+today: frontend/rice execution is parked behind backend work (the standing
+backend-first rule), so the unbuilt phases wait their turn behind it. A
+companion command flesh-out was produced by another agent in a separate
+session; it was not found anywhere in the repo at capture time, so this
+handout carries only this session's design — fold that document in when it
+surfaces.
 
 ---
 
@@ -24,8 +29,8 @@ The governing principle that survived every revision:
 > about a local agent already lands somewhere free (hook events, on-disk
 > transcripts, a PTY aoide owns). A2A is a chat wire — an agent spends model
 > turns composing protocol replies — so it is never the observation path for
-> anything local. No fourth protocol gets built: the ricing harness is verbs
-> and state files riding the existing three doors (CLI / MCP / A2A, one
+> anything local. No fourth protocol gets built: the ricing harness is
+> commands and state files riding the existing three doors (CLI / MCP / A2A, one
 > schema). ACP is dead (folded into A2A); AG-UI is the wrong layer.
 
 And the discipline added last (the User, closing note of the session):
@@ -70,13 +75,13 @@ for agents aoide can only reach as a *peer* (usually remote):
 |---|---|---|
 | claude, kimi (hook systems) | hook door — `aoide graph session hook` | free |
 | codex, gemini, aider, any CLI | `graph wrap` / `conduct` (PTY) | free |
-| anything scriptable | explicit verbs — `graph session start/phase/end` | free |
+| anything scriptable | explicit commands — `graph session start/phase/end` | free |
 | an A2A-speaking agent (remote, usually) | A2A door — `a2a agent add` / `message/send` | model turns |
 
 All four converge on the same `sessions/hooks/graph.json` records; an
 A2A-registered agent folds in as a `kind: "a2a"` root node beside the hooked
 and wrapped ones. The wiki sentence, once locked: *the conductor hooks every
-local agent mechanically (hooks, PTY, verbs — zero tokens) and speaks A2A
+local agent mechanically (hooks, PTY, commands — zero tokens) and speaks A2A
 outward to whatever it can't touch.* Agent-agnosticism lives in the
 `AgentProfile` seam (EXISTS) — a new harness is one profile entry.
 
@@ -126,7 +131,7 @@ aoide <cmd> runs
      │
      ├─ command's domain has live business for THIS caller?
      │    · engagement active in the domain just touched
-     │      (a rice verb while a rehearsal is running)
+     │      (a rice command while a rehearsal is running)
      │    · a pending graph send addressed to it
      │    · it's marked awaiting and something answered
      │        │
@@ -139,7 +144,7 @@ aoide <cmd> runs
 
 ### 3.3 `graph join` — demand-driven enrollment
 
-`aoide graph join [--agent <name>]` = the explicit-verbs door with
+`aoide graph join [--agent <name>]` = the explicit-commands door with
 auto-detection (pid/cwd/tty, window via the hook door's `hyprctl` walk),
 keyed by pid-ancestry so later calls re-match without an env var. **Nothing
 volunteers it.** Hooking happens top-down, when actually needed:
@@ -220,7 +225,10 @@ lyra rice rehearse begin <song> [--draft <name>]   — enters mode draft
         ▼
 lyra rice rehearse end [--distill]   — draft survives; journal → design log
         ▼
-lyra rice declare                    — unchanged: User-gated, still planned
+lyra rice declare                    — unchanged: User-gated; a stub today
+                                       (exit 64), so the loop's last
+                                       mechanical step is the draft and the
+                                       commit stays the User's by hand
 ```
 
 ### 5.1 `rice score` — the self-describing step
@@ -249,12 +257,18 @@ gate isn't met.
 
 ### 5.2 Takes and marks — mechanical revert
 
+**Status: LANDED** — `rice take`, `rice take mark|list|diff|prune`,
+`rice back`, the auto-take at both write entrypoints, and the bare-tty
+picker are real commands at HEAD (`crates/storage/src/takes.rs`,
+`crates/song/src/commands/take.rs`; phase A, §10). The hook-door drift
+check during an active rehearsal is phase C, still design.
+
 - **Takes** — automatic, append-only, cheap: every write to the routed
   draft snapshots `songbook/<song>/drafts/<name>/takes/NNNN.json` (livery +
   cover + meta: timestamp, session id, cause). Captured at the two write
   entrypoints (`rice stage`, `cover set`) directly; hand-edits caught by a
   content-hash check on every hook-door `PostToolUse` during an active
-  rehearsal AND ambiently on any `lyra rice` verb — a hookless agent's
+  rehearsal AND ambiently on any `lyra rice` command — a hookless agent's
   edits get taken the next time it touches the CLI. Explicit `rice take`
   for paranoia. Leaning toward hashing cover.json alongside livery on every
   check (one extra file read; not finalized).
@@ -271,7 +285,7 @@ gate isn't met.
   ```
 
 - **Branching is implicit.** Revert to a mark, write, and the new take
-  hangs off the mark's take as its `parent`. There is no branch verb, no
+  hangs off the mark's take as its `parent`. There is no branch command, no
   branch name, no branch registry — two takes sharing a parent *is* the
   branch. Takes after the mark are untouched and still selectable; nothing
   on disk is destroyed by reverting past it.
@@ -293,7 +307,7 @@ gate isn't met.
   already in use **moves** to the new take rather than erroring —
   re-marking is a normal correction. Marks live in `takes/marks.json`, not
   on the take record — the record stays write-once. `rice take mark
-  <letter>` is the phase-A verb; the score's `mark` step calls it.
+  <letter>` is the phase-A command; the score's `mark` step calls it.
 
 ```
 lyra rice back                bare, on a tty: the picker (§7), the
@@ -367,7 +381,9 @@ adds enforcement:
 ## 6. Intended siblings — the nix loops (intentions only, not designed)
 
 The engagement layer has two more claimed tenants: a **nix maintenance
-loop** and a **nix development loop**. Neither is designed here — this
+loop** and a **nix development loop**. Neither is designed here; the
+maintenance agent, paired with but separate from the ricing agent, is open
+tracker work (#35). This
 section exists so the rehearsal isn't mistaken for the whole story, and so
 the shapes below constrain what the rehearsal's machinery may assume. An
 engagement is a step table + gates + a journal riding citizenship; what
@@ -413,17 +429,19 @@ codebase that produced it — the source is a GC-able build-time dep. The
 maintenance engagement closes that gap the takes-journal way: set
 `system.configurationRevision = self.rev` so every generation is stamped
 with its commit, journal `{generation, gitRev, flakeLockHash}` at each
-build/switch step, and the intended revert verb (`aoide nix back
+build/switch step, and the intended revert command (`aoide nix back
 --generation N`, name provisional) resolves generation → recorded rev →
 `git checkout` — flake.lock rides along because it lives in the repo. A
 dirty tree builds with `self.rev = null` and cannot round-trip, so the
 build step's gate refuses (or loudly journals) a dirty build. No new
 snapshot machinery: git + generations + one journal line.
 
-## 7. Rollback and pruning — one verb, two modes
+## 7. Rollback and pruning — one command, two modes
 
-Every verb here serves **both audiences from one implementation**. There is
-no human CLI and no agent CLI; there is one verb with two entrances:
+Every command here serves **both audiences from one implementation**. There
+is no human CLI and no agent CLI; there is one command with two entrances
+(`rice back`, `rice take diff`, and the picker are LANDED — phase A, §10;
+the `aoide nix` lane is design):
 
 ```
                        lyra rice back
@@ -455,7 +473,7 @@ the picker and never reads stdin: no selector (`--take`/`--mark`) given is
 a straight usage error naming both flags, so a piped or agent invocation
 can never hang.
 
-| bare verb on a tty | picker rows | on select |
+| bare command on a tty | picker rows | on select |
 |---|---|---|
 | `rice back` | the whole take **tree** (§5.2) rendered flat and numbered for selection, head arrowed, marks bracketed — row 1 is the head's parent, pre-selected — plus a **second lane**, widget commits (recent git commits touching the song's widget bodies) | a take writes through the routing (same as `--take N`); a commit does `git checkout <rev> -- songbook/<song>/…` — working-tree restore, HEAD never moves |
 | `rice take diff` | takes/marks to diff against | the diff, no write |
@@ -469,30 +487,30 @@ Two teeth in that table:
   person; an agent scripting flags can check out code but can never reach
   the switch.
 - The widget-commit lane is the "help with rolling back through git"
-  verb: takes cover the stage-routed files (§5.2), git covers widget
+  command: takes cover the stage-routed files (§5.2), git covers widget
   bodies, and the one picker shows both lanes so the User never has to
   remember which substrate owns which file.
 
-The discipline generalizes as a CLI-wide convention: any verb whose flags
+The discipline generalizes as a CLI-wide convention: any command whose flags
 select one-of-many (a song, a draft, a take, a session id) grows the same
-bare-on-a-tty picker, applied opportunistically as verbs get touched — not
+bare-on-a-tty picker, applied opportunistically as commands get touched — not
 as a big retrofit pass.
 
 ### 7.1 Pruning — nix entirely, never a second store
 
 **Decision: just nix.** Aoide invents no store, no generation format, no
-snapshot layer. Pruning verbs are wrappers whose whole contribution is
+snapshot layer. Pruning commands are wrappers whose whole contribution is
 *selection, correlation, and rails* — nix already does the deleting, and
 `graph prune` (EXISTS — drops finished session records) already sets the
 house meaning of the word.
 
-| verb | wraps | protected by default |
+| command | wraps | protected by default |
 |---|---|---|
-| `rice take prune [--older-than 14d] [--keep 20] [--all-but-marks]` | aoide's own `takes/` dir — its only native storage | **marked** takes (reviewed-good states); `--force` to take one out |
+| `rice take prune [--older-than 14d] [--keep 20] [--all-but-marks]` (LANDED, A9) | aoide's own `takes/` dir — its only native storage | **marked** takes (reviewed-good states); `--force` to take one out |
 | `aoide nix prune [--generations 42,43] [--older-than 30d] [--keep 5]` | `nix-env -p /nix/var/nix/profiles/system --delete-generations …`, then optionally `nix store gc` | current + booted generation (nix refuses these anyway — a free rail); any generation the journal flags `keep` |
 | `aoide graph prune` | EXISTS — done session records | — |
 
-Both prune verbs are dry-run-shaped: they print what would go and what it
+Both prune commands are dry-run-shaped: they print what would go and what it
 frees, and the bare-tty mode is a **multi-select** picker (space toggles,
 Enter confirms) because pruning is the one place selecting several at once
 is the normal case. The symmetry worth keeping: **a mark protects a take
@@ -557,8 +575,11 @@ PostToolUse, same tools
 at a blob (no tree, no commit), and that blob survives `git gc --prune=now`
 — probed 2026-08-18. The anchoring rail this section depends on is not a
 hope; it is a fact checked against this machine's git before the design was
-finalized. Nothing above is mechanized in code yet — the probe is a shell
-transcript, not a shipped feature (phasing, below).
+finalized. The groundwork is LANDED code: the edit journal
+(`crates/storage/src/edits.rs`, R1) and the five-operation git seam
+(`crates/storage/src/git.rs`, R2, with `git` in the package's
+`nativeCheckInputs`). The capture edges and the commands themselves are not
+built (R3–R7 — phasing, below).
 
 Only **five** git operations exist anywhere in this design: `rev-parse
 --show-toplevel` (is this a repo, and where), `hash-object -w` (store a
@@ -585,7 +606,7 @@ one line is far under `PIPE_BUF`, so concurrent hook processes interleave
 atomically without a lock — the same reasoning `with_stage_lock`'s own doc
 comment already carries for why it is *not* used on a pure append.
 
-**The verbs:**
+**The commands (design — none built yet):**
 
 ```
 aoide graph project edits [--project <name>] [--session <id>]
@@ -600,11 +621,11 @@ an unregistered-as-git project exactly as well as a tracked one. `+` marks a
 file whose earliest pre-image is `null` — made through aoide, the ask's own
 phrasing. `back` is the revert; it needs the project's git toplevel and
 refuses cleanly, naming `git init`, when there isn't one — **aoide never runs
-`git init` for the User.** Both verbs are dual-entrance exactly per §7: flags
-and `--json` are the agent door; bare on a tty is the User's door and opens a
-picker (rows = sessions, newest first) — that picker lands only after the
-sibling take-tree picker's `aoide_protocol::pick` groundwork (§10's A8), so
-the flag door ships first and alone.
+`git init` for the User.** Both commands are dual-entrance exactly per §7:
+flags and `--json` are the agent door; bare on a tty is the User's door and
+opens a picker (rows = sessions, newest first) — that picker rides the
+take-tree picker's `aoide_protocol::pick` groundwork (§10's A8, LANDED), and
+still ships after the flag door (R5 before R6).
 
 **Per-session revert is exact only for files nothing has touched since.**
 That is the honest limit, not a bug: two sessions editing one file is a
@@ -665,7 +686,8 @@ is captured before it is overwritten, so **a revert can itself be reverted.**
   (provenance) needs no repo and works identically either way. `back`
   refuses with `not-a-git-repo`, naming `git init`, and never runs it —
   aoide does not create a repository inside a directory the User named
-  without being asked to.
+  without being asked to. (`graph project add|list|remove` are the LANDED
+  registration commands; `edits` and `back` are not built.)
 - **`NotebookEdit` carries `notebook_path`, not `file_path`.** Capture reads
   either key, so a notebook edit is captured like any other rather than
   silently producing nothing under a plausible-looking `edit_tools` entry.
@@ -690,7 +712,7 @@ comparison, never the other system's state. A `rice back` that rewrites a
 livery file reads, to this journal, as an ordinary out-of-view change (the
 second refusal shape, above); a `project back` that rewrites it reads, to
 the takes system, as drift, and gets a drift take on its next touch. No
-coordination verb exists between `rice back` and `project back`, and none is
+coordination command exists between `rice back` and `project back`, and none is
 needed — the two rails already compose without one.
 
 **Not designed here, and explicitly not shipping in v0** (the User's call):
@@ -753,14 +775,16 @@ The rails, each with its one reason:
 
 ### 8.1 The second factor is PAM's job, not aoide's
 
-Aoide implements no authentication and holds no secret. Factors are
+The sudo door implements no authentication and holds no secret of its own
+(the `aoide secrets` broker is a separate, existing door with its own
+storage — this one adds nothing beside it). Factors are
 configured in nix on the PAM stack behind the polkit action —
 `pam_oath` for TOTP, `pam_u2f` for a FIDO2 key, password alone if that is
 what the User wants. The only thing an op declares is an **auth class**
 (`admin`, `admin-2fa`), which selects which polkit action id it goes
 through; strengthening a class is then a nix edit that needs no aoide
 change. This is the same "just nix entirely" answer as §7.1 — the system
-already has an authentication stack, and a second one written by aoide
+already has an authentication stack, and a second one written for this door
 would be strictly worse.
 
 ### 8.2 Reconciling with §6 and §7
@@ -800,7 +824,7 @@ repo-readers. A skill covers everyone else, box-wide — it is the one
 surface that reaches an agent working in a different directory entirely.
 
 **Hard rule: the skill is a pointer, not a payload.** Roughly thirty
-lines — what aoide is in two sentences, `aoide cue` as the one verb to
+lines — what aoide is in two sentences, `aoide cue` as the one command to
 run, and where contracts live (`aoide schema --json`, `aoide guide
 <topic>`). It must never carry step instructions, a command list, or
 contract detail. Those live in the score's step table and the registry;
@@ -828,7 +852,7 @@ aoide skill install --agent claude    idempotent, never-clobbering, reports
 
 Rules that keep it honest:
 
-- **Opt-in, never self-installing.** `skill install` is a User verb (or an
+- **Opt-in, never self-installing.** `skill install` is a User command (or an
   orchestrator's), the same boundary hooks install already respects. An
   installed skill's description line is loaded by the *harness's* own
   relevance trigger, not pushed by aoide — which is why this does not
@@ -836,7 +860,7 @@ Rules that keep it honest:
   decides, and the User chose to put it there.
 - **One skill, not a family.** A skill per domain would mean several
   always-loaded description lines in every agent's context — the
-  front-loading banned in §0. One `aoide` skill, one verb, done. (A
+  front-loading banned in §0. One `aoide` skill, one command, done. (A
   second would only earn its place if a domain's trigger words don't
   overlap "aoide" at all — "rice", "theme", "colors". One line noted;
   not built.)
@@ -847,8 +871,12 @@ Rules that keep it honest:
 
 ## 10. Phasing
 
-Observation lands first (small, orthogonal, and the rehearsal's watch UI
-consumes it); each phase reviewed before the next, house style:
+Each phase is reviewed before the next lands, house style. Status at HEAD:
+**A (all ten steps) and R0–R2 are LANDED**; every other phase is unbuilt,
+and execution is parked behind backend work (the standing backend-first
+rule). The open R steps carry tracker rows: R3 is #6 (gated), R4 is #4, R6
+is #5. Observation (O0–O3) still lands before the rehearsal machinery (B–F)
+— the rehearsal's watch UI consumes it:
 
 - **O0 — the cue**: `aoide cue`, the business-triggered stderr line,
   `graph join`. Pure reuse of existing matching. No injection work.
@@ -856,9 +884,9 @@ consumes it); each phase reviewed before the next, house style:
 - **O2 — PTY tee** in `conduct`: ring-capped `state/output/<id>.log`,
   tail falls back to it, ANSI-strip on read.
 - **O3 — conductor/dock output pane** rendering the same resolver.
-- **A — takes + `rice back`**: the safety floor, serialized as ten steps
-  A0–A9 — one cargo-running executor at a time, each step reviewed before
-  the next lands:
+- **A — takes + `rice back`** (LANDED, all ten steps): the safety floor,
+  serialized as ten steps A0–A9 — one cargo-running executor at a time,
+  each step reviewed before the next:
   - **A0** — this handout amended to the take-tree model (this section
     included). Prose only; lands before any code so every later step
     reads the amended design.
@@ -869,7 +897,7 @@ consumes it); each phase reviewed before the next, house style:
     as pure functions.
   - **A2** — `rice take`: the snapshot core, exposed as unlocked cores
     plus thin `with_stage_lock`-wrapped entrypoints (one lock per
-    mutator, never nested), and the explicit verb.
+    mutator, never nested), and the explicit command.
   - **A3** — auto-take at the write entrypoints (`rice stage`,
     `cover set`) — a snapshot failure is non-fatal, reported in `data`,
     never turns a successful live write into an error.
@@ -890,11 +918,11 @@ consumes it); each phase reviewed before the next, house style:
   - **A9** — `rice take prune` (§7.1): the ancestry splice, marks and the
     head's ancestry protected by default.
 
-  Widget-commit lane of the §7 picker is scoped out of A0–A9 — it needs
-  the first `git` shell-out anywhere in the Rust tree and is orthogonal to
-  branching; it lands as its own later step. §7.2's R2 is where that first
-  `git` shell-out actually lands, for a different reason (project revert);
-  the widget-commit lane can build on the same seam once both exist.
+  Widget-commit lane of the §7 picker is scoped out of A0–A9 — it is
+  orthogonal to branching and lands as its own later step. §7.2's R2
+  (LANDED, `crates/storage/src/git.rs`) carries the tree's first `git`
+  shell-out, for a different reason (project revert); the widget-commit
+  lane builds on that same seam when it lands.
 - **B — the rehearsal state machine**: `rehearse begin/end`, `rice score`
   + step table + `advance`, draft-mode requirement.
 - **C — hook correlation**: auto-take on `PostToolUse` drift, the
@@ -911,8 +939,8 @@ consumes it); each phase reviewed before the next, house style:
 The two cross-cutting additions slot in beside them, both usable long
 before any engagement exists:
 
-- **P — pruning** (§7.1): `rice take prune` with `A`; `aoide nix prune`
-  with the nix loop. Multi-select picker ships with each.
+- **P — pruning** (§7.1): `rice take prune` LANDED with `A`; `aoide nix
+  prune` with the nix loop. Multi-select picker ships with each.
 - **S — the sudo door** (§8): the escalation record, the polkit-backed
   helper, the summons on existing surfaces, `Door::Sudo` audit. Its first
   customer is `aoide nix prune` (deleting system generations needs root),
@@ -920,29 +948,31 @@ before any engagement exists:
 
 **R — project edits and per-session revert** (§7.2): its own serialized
 run, R0–R7, one cargo-running executor at a time same as A0–A9, each step
-reviewed before the next:
+reviewed before the next. R0–R2 are LANDED; R3–R7 are open (tracker: R3 #6,
+R4 #4, R6 #5):
 
-- **R0** — this handout amended with §7.2 (this section). Prose only, lands
-  before any code.
-- **R1** — the edit journal (`aoide-storage`): `EditLine` (with `tuid`),
-  append/read, the pure folds a revert plan and the provenance query both
-  consume.
-- **R2** — the git seam: the five subprocess operations, doc-commented
-  never-stages/never-commits/never-moves-HEAD; `pkgs/aoide/default.nix`
-  gains `git` in `nativeCheckInputs` so the gc-survival test can run under
-  `nix flake check`, not only in a dev shell.
-- **R3** — the capture edges, wired into the hook door's existing payload
-  parse without touching `map_hook`. **Gated: does not start until a
-  one-turn live capture (`aoide hooks install claude --capture`) confirms
-  the shape of a claude `PostToolUse` payload on this box** — the `pre` arm
-  is already grounded in existing code, the `post` arm is not, and R3 is
-  not written against an assumption.
-- **R4** — `aoide graph project edits`, the provenance query, both renders.
+- **R0** (LANDED) — this handout amended with §7.2 (this section). Prose
+  only, landed before any code.
+- **R1** (LANDED) — the edit journal (`aoide-storage`): `EditLine` (with
+  `tuid`), append/read, the pure folds a revert plan and the provenance
+  query both consume.
+- **R2** (LANDED) — the git seam: the five subprocess operations,
+  doc-commented never-stages/never-commits/never-moves-HEAD;
+  `pkgs/aoide/default.nix` carries `git` in `nativeCheckInputs` so the
+  gc-survival test runs under `nix flake check`, not only in a dev shell.
+- **R3** (pending, tracker #6) — the capture edges, wired into the hook
+  door's existing payload parse without touching `map_hook`. **Gated: does
+  not start until a one-turn live capture (`aoide hooks install claude
+  --capture`) confirms the shape of a claude `PostToolUse` payload on this
+  box** — the `pre` arm is already grounded in existing code, the `post`
+  arm is not, and R3 is not written against an assumption.
+- **R4** (pending, tracker #4) — `aoide graph project edits`, the
+  provenance query, both renders.
 - **R5** — `aoide graph project back --session`, flags/`--json` entrance —
   the step that lands the ask.
-- **R6** — the bare-on-a-tty picker lane. **Strictly after the sibling
-  take-tree workstream's A8** (`aoide_protocol::pick`); nothing else in R
-  depends on it, so R7 may land first if A8 slips.
+- **R6** (pending, tracker #5) — the bare-on-a-tty picker lane. Its A8
+  prerequisite (`aoide_protocol::pick`) is landed; nothing else in R
+  depends on it, so R7 may land first.
 - **R7** — `graph project edits prune`: retention for the journal and the
   `refs/aoide/preimage/*` refs no surviving line names.
 
@@ -952,7 +982,7 @@ Decided in-session, one line each:
 
 - Rehearsal **requires** draft mode — takes need a home; routing gives
   revert free; plain staging stays informal.
-- No new protocol — verbs on the existing three doors; ACP dead, AG-UI
+- No new protocol — commands on the existing three doors; ACP dead, AG-UI
   wrong layer; A2A = remote command + status only.
 - Widget bodies revert via git, not takes.
 - Review gate = different-session-id, not different-agent.
@@ -962,7 +992,7 @@ Decided in-session, one line each:
 - PTY tee in `conduct` only; output logs under `state/`.
 - Terse index always, full contract on demand (§0) — applies to the CLI
   help, the MCP tool list, and any context an orchestrator hands a worker.
-- One verb, two entrances (§7) — agents and the User share every verb;
+- One command, two entrances (§7) — agents and the User share every command;
   bare-on-a-tty gets a hand-rolled picker (multi-select where selecting
   several is normal), flags/`--json` bypass it, non-tty never prompts.
 - Pruning is nix entirely (§7.1) — wrap `delete-generations` / `store gc`,
@@ -972,13 +1002,14 @@ Decided in-session, one line each:
   holding a password: declared op ids, nix-admitted allowlist, fresh
   polkit auth per request, single-use default, no free-argv op ever.
   Factors are PAM's (`pam_oath` / `pam_u2f`), selected by an op's auth
-  class — aoide implements no authentication and stores no secret.
+  class — the door implements no authentication and stores no secret of
+  its own.
 - The ban is on an **unattended** switch, not an agent-initiated one
   (§8.2) — an agent may ask; only a live human authentication completes
   it.
 - Tier S: aoide ships as one installable agent skill (§9.1), generated
   from the registry, **pointer-only** (never step instructions or a
-  command list), installed by a User verb into a path the `SkillSpec`
+  command list), installed by a User command into a path the `SkillSpec`
   names. One skill, not a family.
 - No generic engagement framework — the rehearsal is the only **built**
   tenant; nix maintenance and nix development are intended siblings (§6),
@@ -1036,10 +1067,10 @@ Decided in-session, one line each:
   reserved musical candidate if the User ever wants one, matching the
   take-tree's own no-noun-until-asked discipline.
 - No `graph project new` — registration is the only project-level
-  provenance the ask describes; a scaffolding verb is a different feature.
+  provenance the ask describes; a scaffolding command is a different feature.
 - `git merge-file` (a three-way merge on conflict) is rejected as the
   conflict policy — it would land literal conflict markers in the User's
-  source files from what is supposed to be a *safety* verb. All-or-nothing
+  source files from what is supposed to be a *safety* command. All-or-nothing
   refusal with the LIFO hint stands instead.
 - `--force` on `project back` is **kept** — the pre-capture makes it
   non-destructive by construction (discarded bytes stay anchored and named
@@ -1061,8 +1092,10 @@ Open / uncertain:
 - Whether `stage/cover.json` should eventually get symlink routing like
   `livery.json` — a pre-existing asymmetry (§5.2), not blocking; takes
   work correctly either way, and nothing here depends on the answer.
-- The design as a whole awaits the User's explicit LOCK before wiki concept
-  pages assert any of it as existing.
+- The design as a whole awaits the User's explicit LOCK. Landed pieces
+  (the take tree, the edit journal, the git seam) are asserted by the CLI
+  reference pages on the strength of the code, not of a lock; wiki concept
+  pages assert nothing from the unbuilt remainder.
 - Whether a claude `PostToolUse` payload carries `tool_input.file_path` is
   still unconfirmed on this box (§7.2) — the `PreToolUse` arm is grounded in
   existing code, kimi's `PostToolUse` is grounded by a live capture already
