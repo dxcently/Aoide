@@ -89,6 +89,15 @@
   # and sakaki are mutual peers for the live who/send mesh checks.
   aoide.a2a.enable = true;
 
+  # LAN discovery: this box both announces itself and runs `peer discover`.
+  # Advertising is what opens UDP 8711 (aoided.nix wires the firewall off this
+  # flag), and the port has to be open to HEAR beacons as well as send them —
+  # a NixOS default-deny firewall drops even this host's own multicast
+  # loopback copy when it arrives on a real interface (task #98). Discovery
+  # grants nothing on its own: pairing remains the only thing that writes a
+  # peer record.
+  aoide.a2a.discoveryAdvertise = true;
+
   # Secrets broker (workstream #58, P-V4 deployment): own uid, socket-only
   # door. The operator joins the access group; enrollment happens only when
   # the User says connect.
