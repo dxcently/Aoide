@@ -423,7 +423,7 @@ count.
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` verb
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
-  **77 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **78 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -532,6 +532,23 @@ count.
   writer of the field. See §6's "Security posture" (the P-P3 amendment)
   and §7's "Peer record" subsections below for the gate this feeds and
   the wire shape.
+  `peer spawn <name> [--yes] -- <text…>`, appended newest, P-P5b
+  (`docs/architecture/PAIRING.md`) (+1 → 78) — makes the spawn gate above
+  actually REACHABLE: POSTs a signed, spawn-shaped `message/send`
+  (`contextId` omitted) to a PAIRED peer's own A2A door, `<text…>` riding
+  as the prompt `do_spawn` types into the newly spawned session's first
+  turn (which agent runs is the PEER's own configured
+  `aoide.a2a.spawnAgent`, never client-chosen). Refuses an unknown or
+  unpaired peer LOCALLY with a taught error naming `peer pair request`
+  (an unsigned request could never satisfy the remote's `PeerRung::
+  Signature`-only gate anyway); every OTHER refusal (allows lacking
+  `spawn`, an unsigned/too-old caller, clock skew) is the remote door's
+  own call, surfaced verbatim — this verb never re-implements or
+  second-guesses that gate. `--yes` skips a LOCAL `y`/`N` confirmation
+  only (mirrors `peer pair approve`'s idiom); the remote door's own gate
+  is the sole security authority either way. See §6's "Security posture"
+  and §7's "CLI surface" subsections below for the wire shape and the
+  live gate this closes.
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
@@ -2906,6 +2923,75 @@ one new `PeerRung` variant, and an in-memory-only nonce cache with no
 stage-file shape of its own. Carries no version bump to §1–§6 and needs no
 playbook migration entry.
 
+**Amendment (P-P5b, `docs/architecture/PAIRING.md`): a method-honesty fix,
+and `peer spawn` — the first production caller to sign a SPAWN-shaped
+POST.** Two closes, one commit:
+
+- **Method-honesty (P-P4 review finding 2).** `canonical_string`'s
+  `method` field used to be TWO independent hardcoded `"POST"` literals —
+  one at `aoide-client::commands::sign_headers_for_peer` (the signer), one
+  at `aoide-server::a2a::verify_signed_request` (the verifier) — that
+  merely happened to agree, never a value either side actually read off
+  the request it was building/verifying. The module doc's "binds method"
+  claim was true only because nothing today ever signs anything but a
+  POST, not because the code checked it. Fixed by threading the REAL
+  value through instead: the verifier now reads `&req.method` (the
+  HTTP request's own OBSERVED method, already parsed by
+  `parse_http_request` — this crate never lacked it, it just wasn't
+  being used here) rather than a literal; the signer now reads a single
+  named `aoide-client::commands::HTTP_METHOD` constant that ALSO drives
+  `post_json`'s own `-X` argument, so the two can never independently
+  drift again. Every real request today is genuinely a POST, so this
+  changes no byte of any produced canonical string — the pinned vectors
+  above are UNCHANGED, and no vector needed to move.
+- **`peer spawn <name> [--yes] -- <text…>`** (`aoide-client::commands::
+  handle_peer_spawn`, golden 77 → 78, §3 above): the CLI verb that
+  actually reaches the spawn gate this section's P-P3/P-P4 amendments
+  built. Builds the exact spawn-shaped body `do_spawn` consumes —
+  `aoide_client::wire::build_message_send_body(text, messageId, None)`,
+  `contextId` OMITTED (the same shape `decide_send_action` reads as
+  "spawn," regardless of the `aoide/spawn` metadata flag) — and signs it
+  via `sign_headers_for_peer`, the FIRST production call site that ever
+  signs a request carrying no `contextId`; every earlier real caller
+  (`pull_one_peer`, `pull_peer_live`, `send_message_to_peer`) sent a read
+  or an Inject (always `contextId: Some(..)`). The CLIENT gates LOCALLY on
+  exactly one question — is `name` a registered, `verified` peer at all —
+  refusing an unknown or merely-`peer add`-registered (unpaired) name with
+  a taught error naming `peer pair request`, since an unsigned request
+  could never satisfy the remote's `PeerRung::Signature`-only requirement
+  regardless. It gates on NOTHING else: `allows` lacking `spawn`, an
+  unsigned-but-paired caller, clock skew — every other refusal shape is
+  the remote door's own call, and `handle_peer_spawn` surfaces it
+  VERBATIM rather than re-deriving or translating it. `--yes` skips a
+  purely LOCAL `y`/`N` confirmation (`peer pair approve`'s own idiom) —
+  it has no bearing on the remote gate.
+
+**Peer authentication today, one standing paragraph** (gathering what the
+amendments above accreted across P-P3/P-P4 — no behavior change, just one
+place to read it instead of reconstructing it from three dated entries).
+Four rungs answer "who is this caller," and they are NOT interchangeable:
+the **door-wide bearer** (`aoide.a2a.tokenFile`/`bearerSecret`) and a
+peer's own **`token_file`** are both **legacy escapes for an UNPAIRED
+caller** (`docs/architecture/PAIRING.md` decision 2) — they authenticate
+the READ arms (`tasks/get`, the AgentCard GET, `aoide/graphSummary`) and
+Inject's autogate/`effective_origin` coupling, and nothing else; the
+door-wide bearer alone never even resolves a peer IDENTITY, and neither
+has ever been sufficient for Spawn. **`addr`** (`PeerRung::Addr`, a bare
+TCP-source-IP-vs-registered-`url` match) resolves a peer identity for
+ATTRIBUTION only — Inject's `from` field, the autogate question — and is
+never sufficient for Spawn, since it carries no possession proof at all
+(spoofable by anyone who reaches the door from that address, or who sits
+behind the same NAT/proxy as the real peer). **Signature**
+(`PeerRung::Signature`, P-P4's per-request ed25519 binding) is the one
+rung a PAIRED peer earns by completing the ceremony (`peer pair`) and
+signing every request with the identity that ceremony verified —
+strictly stronger than `token_file`'s bare replayable shared secret, and
+the ONLY rung Spawn accepts (`a2a.rs::spawn_admitted`). In short: the
+read arms and attribution tolerate any of the four; Spawn accepts exactly
+one. §7's "`state/peers.json`" subsection below has the full mechanical
+detail (which field backs which rung, `resolve_peer`'s ladder, tie-break
+order).
+
 ### Session-DAG integration (client side)
 
 An external A2A agent, once registered (`aoide a2a agent add <url>`), folds
@@ -3447,6 +3533,20 @@ capability or `off` on an already-revoked one both report a no-op, never
 an error; refuses an unknown peer name or an unknown capability string
 (checked before the peer lookup) with a distinct taught error for each.
 
+`aoide peer spawn <name> [--yes] -- <text…>` (P-P5b, `docs/architecture/
+PAIRING.md`, appended newest directly after `peer allow` — §6's P-P5b
+amendment above has the full body-shape/gating reasoning) POSTs a signed,
+spawn-shaped `message/send` (`contextId` omitted) to a PAIRED peer's own
+A2A door; `<text…>` is the prompt typed as the newly spawned session's
+first turn, never a remote-chosen executable (the PEER's own configured
+`aoide.a2a.spawnAgent` is what actually runs). Refuses an unknown or
+unpaired (`verified: false`) `name` LOCALLY with a taught error naming
+`peer pair request`; every OTHER refusal — `allows` lacking `spawn`, an
+unsigned-but-paired caller, clock skew — is the remote door's own call,
+surfaced verbatim, never re-derived here. `--yes` skips only the LOCAL
+`y`/`N` confirmation (`peer pair approve`'s idiom); it has no bearing on
+the remote gate, which is the sole security authority.
+
 ### Status
 
 Real: the registry, the cache, `aoide/graphSummary`, the CLI verbs, and the
@@ -3463,6 +3563,10 @@ authentication (P-P4) is real end to end too: outbound signing
 (`aoide-client::commands::sign_headers_for_peer`), inbound verification
 with replay/skew guards (`aoide-server::a2a::verify_signed_request`), and
 the pinned canonical-string vectors (§6's P-P4 amendment above) all run.
+`peer spawn` (P-P5b) closes the last gap the P-P4 review found: before it,
+every real client→peer call sent a read or an Inject, so this fully-built,
+fail-closed gate could only be reached by a hand-crafted signed curl —
+`peer spawn` is now the CLI path that actually exercises it.
 **Out of scope for
 v0** (explicitly, not an oversight): WAN/NAT-traversal/relay reachability
 for peers not on the same network; Melete-side consumption (a polling Rune

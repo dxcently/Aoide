@@ -282,7 +282,9 @@ pkgs.testers.runNixOSTest {
     # docs/architecture/PAIRING.md) — reached 76; bumped by 1 for `peer
     # allow` — the closed-capability-set grant/revoke verb backing the A2A
     # spawn arm's hard gate (P-P3, docs/architecture/PAIRING.md decisions
-    # 5/6) — reached 77.
+    # 5/6) — reached 77; bumped by 1 for `peer spawn` — the signed,
+    # spawn-shaped message/send that actually reaches that gate from the
+    # CLI (P-P5b, docs/architecture/PAIRING.md) — reached 78.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a verb.
     schema_raw = machine.succeed("aoide schema --json")
@@ -296,8 +298,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 77, (
-        f"expected 77 commands, got {cmd_count}.  "
+    assert cmd_count == 78, (
+        f"expected 78 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 
