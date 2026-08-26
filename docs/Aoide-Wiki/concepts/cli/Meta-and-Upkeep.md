@@ -31,19 +31,22 @@ aoide guide [--json]
 ```
 
 - **Output:** the tier-0 onboarding text — identity (core vs paint), the
-  four-tier map, and the nine house-rule titles, each with a pointer to its
-  canonical home: rule bodies in the repo's root `AGENTS.md` (same
-  numbering), the read order in `docs/agent/README.md`, long forms in the
-  wiki. A compiled-in constant (`pkgs/aoide/crates/cli/src/guide.rs`) — the
-  crate's build source excludes `docs/`, so the seam is the pointer, not an
-  `include_str!`. It restates no rule body and hand-lists no command;
-  `schema --json` owns the command surface. Message `"printed the four-tier
+  four-tier map, a command-surface table, and the nine house-rule titles,
+  each with a pointer to its canonical home: rule bodies in the repo's root
+  `AGENTS.md` (same numbering), the read order in `docs/agent/README.md`,
+  long forms in the wiki. The prose is compiled in
+  (`pkgs/aoide/crates/cli/src/guide.rs`) — the crate's build source excludes
+  `docs/`, so the seam is the pointer, not an `include_str!` — while the
+  table (per group: command count, stub tally where nonzero; one total line)
+  is derived at print time from the registry the binary assembled at boot,
+  in registry order. It restates no rule body and hand-lists no command;
+  `schema --json` owns the command surface, and the table reads the same
+  `Registry` instance it emits. Message `"printed the four-tier
   onboarding"`; `--json` data `{text: <full guide>}`.
 - **Notes:** read-only; not gated. See [[Agent-Interface]] for the tier model
   the guide describes. `lyra guide` is the paint-side mirror — the same
-  shape from its own compiled-in constant
-  (`pkgs/aoide/crates/lyra/src/guide.rs`), scoped to lyra's side of the
-  boundary.
+  shape from its own `pkgs/aoide/crates/lyra/src/guide.rs` against lyra's
+  own registry, scoped to lyra's side of the boundary.
 
 ### aoide schema
 
