@@ -30,14 +30,20 @@ flag overrides; `pkgs/aoide/crates/protocol/src/audit.rs`).
 aoide guide [--json]
 ```
 
-- **Output:** the tier-0 onboarding text (the four-tier map + house rules) —
-  a compiled-in constant (`pkgs/aoide/crates/cli/src/guide.rs`) mirroring
-  `AGENTS.md`. Message `"printed the four-tier onboarding"`; `--json` data
-  `{text: <full guide>}`.
+- **Output:** the tier-0 onboarding text — identity (core vs paint), the
+  four-tier map, and the nine house-rule titles, each with a pointer to its
+  canonical home: rule bodies in the repo's root `AGENTS.md` (same
+  numbering), the read order in `docs/agent/README.md`, long forms in the
+  wiki. A compiled-in constant (`pkgs/aoide/crates/cli/src/guide.rs`) — the
+  crate's build source excludes `docs/`, so the seam is the pointer, not an
+  `include_str!`. It restates no rule body and hand-lists no command;
+  `schema --json` owns the command surface. Message `"printed the four-tier
+  onboarding"`; `--json` data `{text: <full guide>}`.
 - **Notes:** read-only; not gated. See [[Agent-Interface]] for the tier model
-  the guide describes. `lyra guide` is the paint-side mirror — its own
-  compiled-in constant (`pkgs/aoide/crates/lyra/src/guide.rs`), reading
-  lyra's own registry rather than core's.
+  the guide describes. `lyra guide` is the paint-side mirror — the same
+  shape from its own compiled-in constant
+  (`pkgs/aoide/crates/lyra/src/guide.rs`), scoped to lyra's side of the
+  boundary.
 
 ### aoide schema
 
