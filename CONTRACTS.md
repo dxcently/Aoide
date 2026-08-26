@@ -1371,16 +1371,18 @@ this field existed, tolerated on read the same as any other field here).
 ### `state/carry.json` — **v0** (durable-sessions plan)
 
 The carry mark: the set of session ids marked DURABLE, so a project's whole
-carried set can be resurrected together. `aoide graph session carry on|off`
-is the one writer, and it writes this file alone — no stage lock, no
-`daemon_dispatch` routing, since this is not a `song/stage/` file. Lives under
-`state_dir` (`aoide_storage::fs::state_dir`) alongside `usage.json`/
-`session-ledger.jsonl`, NOT `song/stage/` — a carry mark is durable
-operator state, never staged rehearsal state. Distinct from the ledger
-above: the ledger is an append-only record of every session that has ever
-left the roster, while `carry.json` is a small, freely-mutated SET — marked
-on, marked off, and its entries transferred wholesale when a carried
-session is resurrected under a new id.
+carried set can be resurrected together. Three writers, none routed through
+a stage lock or `daemon_dispatch` (this is not a `song/stage/` file): `aoide
+graph session carry on|off` sets or clears the mark directly; `aoide graph
+spawn --carry` adds the newly spawned id once it registers; `aoide graph
+resurrect` transfers a carried old id onto the freshly spawned session that
+replaces it. Lives under `state_dir` (`aoide_storage::fs::state_dir`)
+alongside `usage.json`/`session-ledger.jsonl`, NOT `song/stage/` — a carry
+mark is durable operator state, never staged rehearsal state. Distinct from
+the ledger above: the ledger is an append-only record of every session that
+has ever left the roster, while `carry.json` is a small, freely-mutated SET
+— marked on, marked off, and its entries transferred wholesale when a
+carried session is resurrected under a new id.
 
 ```json
 { "schemaVersion": "0", "carried": [ { "sessionId": "conduct-1234-1756…", "markedAt": "2026-08-26T10:00:00Z" } ] }
@@ -1395,6 +1397,20 @@ default mode). A carried id is a plain string, meaningful whether the
 session is live, dead-with-a-ledger-line, or dead-without-one. Re-marking
 an already-carried id refreshes its `markedAt` rather than duplicating the
 entry.
+
+**The resurrect transfer.** When `graph resurrect` spawns a replacement for
+a ledger entry whose old `sessionId` is currently carried, it moves the mark
+onto the new id in ONE `save_carry` call — add the new id, then drop the
+old, never two separate writes. The old id must not survive the transfer or
+an ancestor chain would double-resurrect on the next sweep; conversely, an
+old id that was never carried gets no mark on its successor — the transfer
+only fires for a pair that started carried, it never grows the carried set
+on an ordinary `--all`/`--id` revive. Within the single in-memory vector the
+new id is added BEFORE the old one is dropped, so a crash between that edit
+and the write leaves the OLD id carried — retryable on the next sweep —
+rather than leaving neither carried, which would be silent loss. A spawn
+that fails outright transfers nothing, for the same reason: the old id
+stays carried so the next sweep retries it.
 
 ### `state/a2a-agents.json` — **v0**
 
