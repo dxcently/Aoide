@@ -242,9 +242,11 @@ Live-side state, all gitignored, none load-bearing for the build:
   formats, song shape, A2A door, peer federation, screen capture + pointer
   synthesis. The `checks` fail a merge that breaks one; bumping a version
   needs a playbook migration.
-- **`AGENTS.md`** — the tier-0 four-tier agent guide (onboarding → CLI → stdio
-  MCP → network MCP) plus the six non-negotiable house rules. `aoide guide`
-  prints the same map at runtime.
+- **`AGENTS.md`** — the tier-0 agent entry: the core-vs-paint boundary, the
+  nine non-negotiable house rules, and the docs layering, pointing at
+  [[Agent-Interface]] for the four-tier map (onboarding → CLI → stdio MCP →
+  network MCP). `aoide guide` prints the map at runtime; `docs/agent/`
+  routes the read order.
 - **`docs/BUILD.md`** — module-authoring conventions: how the walker discovers,
   the option table, how to author a dendrite/facet, the checks to keep green.
 

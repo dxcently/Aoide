@@ -49,10 +49,22 @@ concept mapping, and its security model.
 
 ## Guidance tiers
 
-The four-tier onboarding ladder (0: `aoide guide` + `AGENTS.md` · 1: CLI,
-full capability · 2: stdio MCP, per-session · 3: network MCP, user-enabled
-only) is specified in the repo root `AGENTS.md`. `aoide schema --json` is the
-machine-readable backstop at any tier; the MCP tool list generates from it.
+This page holds the four-tier onboarding ladder; the repo root `AGENTS.md`
+points here, and `aoide guide` prints the same map at runtime. An agent
+orients through the tiers in order:
+
+| Tier | Surface | Scope |
+|---|---|---|
+| 0 | `aoide guide` + repo root `AGENTS.md` + `docs/agent/` | Onboarding: the core-vs-paint boundary, the house rules, the read order. Read before acting; the house rules are non-negotiable. |
+| 1 | the CLI — `aoide <cmd>` / `lyra <cmd>` | Full capability. `aoide` is the complete orchestration surface, `lyra` the complete painted surface (AoideOS); the registry behind `schema --json` enumerates every command of each. Both carry the same house rules. |
+| 2 | stdio MCP | Per-session, agent-spawned, optional — `aoide mcp serve --stdio`. Off by default. |
+| 3 | network MCP | User-enabled only, never agent-enabled: the dedicated Aoide connector (below). |
+
+`aoide schema --json` / `lyra schema --json` is the machine-readable
+backstop at any tier; the MCP tool list generates from it. Tier 0's
+checkout half is `docs/agent/README.md` (the read-order router) and
+`docs/agent/session.md` (the mechanical session checklist); the house
+rules and docs layering live in the root `AGENTS.md` itself.
 
 ### Tier 3: the Aoide connector
 
