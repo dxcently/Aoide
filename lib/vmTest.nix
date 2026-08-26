@@ -284,7 +284,11 @@ pkgs.testers.runNixOSTest {
     # spawn arm's hard gate (P-P3, docs/architecture/PAIRING.md decisions
     # 5/6) — reached 77; bumped by 1 for `peer spawn` — the signed,
     # spawn-shaped message/send that actually reaches that gate from the
-    # CLI (P-P5b, docs/architecture/PAIRING.md) — reached 78.
+    # CLI (P-P5b, docs/architecture/PAIRING.md) — reached 78; bumped by 2
+    # for `peer discover`/`peer invite` — the LAN discovery beacon's CLI
+    # half, a read-only multicast sweep plus a sugar-over-the-ceremony
+    # invite (P-P6, docs/architecture/PAIRING.md's "Discovery
+    # (advertise-but-locked)" section) — reached 80.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a command.
     schema_raw = machine.succeed("aoide schema --json")
@@ -298,8 +302,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 78, (
-        f"expected 78 commands, got {cmd_count}.  "
+    assert cmd_count == 80, (
+        f"expected 80 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

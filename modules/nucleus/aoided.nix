@@ -137,7 +137,15 @@ lib.mkIf config.aoide.enable {
   # failure fails closed) or `aoide.a2a.tokenFile`, a path read once at
   # launch. Either, once set, means Spawn requires a valid token AND loopback
   # stops auto-trusting an unauthenticated caller — the fix for a reverse
-  # proxy/tunnel making a remote caller look loopback.
+  # proxy/tunnel making a remote caller look loopback. `aoide.a2a.
+  # discoveryAdvertise` (P-P6, docs/architecture/PAIRING.md's "Discovery
+  # (advertise-but-locked)" section) is a THIRD, independent off-by-default
+  # toggle: it starts a background thread inside this SAME process that
+  # sends a one-line LAN multicast beacon (name/fingerprint/url, never a
+  # credential) every ~30s so `aoide peer discover`/`peer invite` on other
+  # boxes can hear this instance — discovery grants nothing by itself, the
+  # pairing ceremony above is still the only thing that ever writes a peer
+  # record.
   systemd.user.services.aoide-a2a = lib.mkIf config.aoide.a2a.enable {
     description = "Aoide A2A (Agent2Agent) door (loopback by default, user-only)";
 
@@ -155,6 +163,7 @@ lib.mkIf config.aoide.enable {
         "AOIDE_A2A_SPAWN_AGENT=${config.aoide.a2a.spawnAgent}"
         "AOIDE_A2A_TOKEN_FILE=${config.aoide.a2a.tokenFile}"
         "AOIDE_A2A_BEARER_SECRET=${config.aoide.a2a.bearerSecret}"
+        "AOIDE_DISCOVERY_ADVERTISE=${if config.aoide.a2a.discoveryAdvertise then "1" else ""}"
         "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
         "AOIDE_USER=${config.aoide.user}"
       ];

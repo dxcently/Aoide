@@ -596,6 +596,24 @@ in
           (group `aoide-secrets-access`).
         '';
       };
+
+      discoveryAdvertise = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Advertise this instance's own LAN discovery beacon (P-P6,
+          docs/architecture/PAIRING.md's "Discovery (advertise-but-locked)"
+          section): `a2a serve` sends a one-line `{v, name, fpr, url}`
+          UDP multicast beacon (name, this instance's identity fingerprint,
+          and its own A2A door url — never a credential, never a full
+          public key) on a fixed group+port, ~30s jittered cadence, for
+          `aoide peer discover`/`peer invite` on the same LAN to hear. Off
+          by default, same house policy as every other A2A knob above —
+          discovery only ever feeds `peer discover`'s table and `peer
+          invite`'s URL resolution; the pairing ceremony above remains the
+          ONLY thing that ever writes a peer record.
+        '';
+      };
     };
 
     # ── Usage widget + poller (opt-in, off by default) ───────────────────────
