@@ -31,7 +31,7 @@ before acting. The house rules below are non-negotiable.
 
 ## Tier 1 — the CLI (full capability)
 
-`aoide <cmd>` is the **complete** orchestration surface (78 commands: conducting,
+`aoide <cmd>` is the **complete** orchestration surface (80 commands: conducting,
 the project/session graph, A2A, peers, the daemon, its own event bus, usage,
 hooks); `lyra <cmd>`
 is the complete painted surface (42 commands: rice/draft/mode/cover/livery/
@@ -157,8 +157,9 @@ deepseek-harness` (the repo behind the Cordis citation in `CONTRACTS.md §0`):
 `README.md` states what the directory IS — charter, named seams/services,
 how it composes (the spatial half) — and `AGENTS.md` states the invariants
 an agent must hold while editing there, its extension points, and what
-needs a docs update in the same commit (the temporal half). `CLAUDE.md` is a
-symlink to `AGENTS.md` at every level that has one — one file, two names.
+needs a docs update in the same commit (the temporal half). `AGENTS.md` is
+the one canonical name — no `CLAUDE.md` copies or symlinks; clients that
+look for another filename are onboarded to read `AGENTS.md`.
 
 Three layers, each holding ONLY that level's invariants (no repetition down
 the tree; a leaf may point up one level instead of restating):
