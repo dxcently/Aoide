@@ -3036,11 +3036,22 @@ behind the same NAT/proxy as the real peer). **Signature**
 rung a PAIRED peer earns by completing the ceremony (`peer pair`) and
 signing every request with the identity that ceremony verified —
 strictly stronger than `token_file`'s bare replayable shared secret, and
-the ONLY rung Spawn accepts (`a2a.rs::spawn_admitted`). In short: the
+the ONLY rung Spawn accepts (`a2a.rs::spawn_admitted`). A verified
+signature also outranks loopback for the Inject gate: an ssh `-L` forward
+(or any other loopback-terminating proxy) delivers a tunneled peer's
+packets from its own end's sshd, so `classify_origin` sees loopback for
+every tunneled request regardless of who is really on the other end — but
+a request `verify_signed_request` already verified is, by construction, a
+remote peer, so `a2a.rs::origin_for_inject` strips `PeerOrigin::Loopback`'s
+free pass from it before `should_deliver_now` ever runs, leaving the
+signature-rung `autogate` flag (folded into `autogate_match` alongside
+`ip_autogate`/`token_autogate`) as the only route back to auto-delivery for
+a signed peer, exactly as an operator already granted it. In short: the
 read arms and attribution tolerate any of the four; Spawn accepts exactly
-one. §7's "`state/peers.json`" subsection below has the full mechanical
-detail (which field backs which rung, `resolve_peer`'s ladder, tie-break
-order).
+one; and once a request is signed, its delivery timing is decided by
+autogate, never by which address it happened to arrive from. §7's
+"`state/peers.json`" subsection below has the full mechanical detail
+(which field backs which rung, `resolve_peer`'s ladder, tie-break order).
 
 ### Session-DAG integration (client side)
 

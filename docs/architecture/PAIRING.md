@@ -165,6 +165,19 @@ peers:
   only, per decision 6). Fail-closed discipline mirrors #84
   (sentinel on resolve failure, constant-time comparisons where
   secrets are still compared).
+- **A verified signature outranks loopback for the Inject delivery
+  gate.** A loopback-terminating transport hop — an ssh `-L` forward
+  is the case that motivates this — delivers a remote peer's request
+  from ITS OWN end's loopback, so the connection's observed origin
+  classifies as loopback exactly like a genuinely local caller. A
+  request whose signature this door already verified is, by
+  construction, never a local caller, so it is treated as remote for
+  the auto-deliver-vs-pending question regardless of which address it
+  arrived from: `state/peers.json`'s per-peer `autogate` flag, not
+  connection origin, decides whether a signed peer's send still
+  auto-delivers. An unsigned request's loopback trust is unaffected —
+  this narrowing only ever removes a free pass a signature was never
+  entitled to in the first place.
 - **`X-Aoide-Peer` carries the caller's own self name**
   (`aoide_storage::display::local_host_name()`), the same value the
   pairing wire's `pairRequest.name` sends — never the caller's local
