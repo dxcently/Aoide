@@ -2565,8 +2565,8 @@ does the caller hold a valid token when one is required):
   so an unauthenticated `message/stream` neither injects nor spawns; the
   `-32005` arrives as the stream's single SSE error event.
 - Off-path (no token, today's default) is byte-identical to before — pinned
-  by `read_verbs_stay_open_when_no_token_is_configured`; the gate itself by
-  `read_verbs_are_token_gated_when_a_token_is_configured`. `message/send` is
+  by `read_commands_stay_open_when_no_token_is_configured`; the gate itself by
+  `read_commands_are_token_gated_when_a_token_is_configured`. `message/send` is
   unchanged (it still runs its own `classify_token` internally for
   `effective_origin`, so it is not re-gated in the dispatcher).
 
@@ -3495,7 +3495,7 @@ fold: `{ id: "peer:<name>", kind: "peer", name, url, state, children? }`.
 
 Local graph commands (`graph focus`/`prune`/`reap`/`link`) keep ignoring
 `peer:*` ids exactly as they already ignore `a2a:*` ids today — confirmed by
-test (`conduct::graph::verbs::tests::local_only_verbs_ignore_peer_ids_exactly_like_a2a_ids_today`),
+test (`conduct::graph::manage::tests::local_only_commands_ignore_peer_ids_exactly_like_a2a_ids_today`),
 not just assumed to generalize: none of those commands read `peer_store` (or
 `a2a_store`) at all, they operate purely on `sessions.json`'s
 `SessionRecord`s, so a `peer:*`/`a2a:*` id is simply never a session id they

@@ -214,7 +214,7 @@ the deep-pantheon crate scheme; offered as the in-voice runner-up.
 - `storage/src/design.rs:98` — `sources: vec!["stage/livery.json"]`.
 - `conductor/src/app.rs:288,295,362,382` — stage reader path → `livery.json` (dual-read, §2.3).
 - `conductor/src/theme.rs:11` — comment.
-- `conduct/src/graph/verbs.rs:256` — comment ("mirrors the `livery emit stage` pattern").
+- `conduct/src/graph/manage.rs:321` — comment ("mirrors the `livery emit stage` pattern").
 - `cli/src/guide.rs:106` — house-rule #5 text (`aoide.livery`).
 - `cli/tests/conductor_integration.rs:57,89,92` + `cli/tests/fixtures/seed.sh` — stage fixture filename + assertion text.
 - `cli/src/registry.rs` — golden command-path snapshot (updates when `livery.*` commands land).
@@ -492,7 +492,7 @@ mint renderer (ATOMIC — keeps `toplevel` eval green).** [SERIAL]
   → `livery.json`, legacy fallback), `crates/conductor/src/app.rs`
   (stage read → `livery.json`, legacy fallback; mtime watches);
   **strings** — `crates/storage/src/design.rs:98`,
-  `crates/conductor/src/theme.rs:11`, `crates/conduct/src/graph/verbs.rs:256`,
+  `crates/conductor/src/theme.rs:11`, `crates/conduct/src/graph/manage.rs:321`,
   `crates/cli/tests/conductor_integration.rs` + `tests/fixtures/seed.sh`.
 - Optional (see §7): rename the QML singleton file → `LiveryState.qml` + its
   ~12 QML importers. **Recommend deferring the QML *file* rename to a
