@@ -58,10 +58,12 @@ unit test in `registry.rs` pins the sorted set of every command path, so
 adding, removing, or renaming a leaf shows as a deliberate diff against that
 snapshot.
 
-The command surface holds **64 leaves across the groups this page tracks**;
-`aoide schema --json | jq '.commands | length'` reports 69, since three
-further groups (`inbox`, `who`, `events tail`) exist and are not yet
-covered here. `lyra schema --json` carries the painted surface — see above.
+The command surface holds **65 leaves across the groups this page tracks**;
+`aoide schema --json | jq '.commands | length'` reports 80, since further
+commands exist that are not yet covered here: the `inbox` group, `who`,
+`events tail`, `identity`, and the `peer` group's `hub`/`allow`/`spawn`,
+`discover`/`invite`, and 4-command `pair` ceremony. `lyra schema --json`
+carries the painted surface — see above.
 The per-command dev reference — signature, files read, files written,
 where output pipes to — lives at [[CLI-Reference]]; the table below sums
 the groups it documents.
@@ -74,7 +76,7 @@ the groups it documents.
 | `make` ([[Widget-Maker]] entry), `onboard` | 2 | stub |
 | `update` | 1 | stub, gated |
 | `mcp serve`, `daemon` | 2 | real |
-| `graph` group (incl. `pending list/approve/deny`, `spawn` — below) | 20 | real |
+| `graph` group (incl. `pending list/approve/deny`, `spawn` — below) | 21 | real |
 | `conduct` | 1 | real |
 | `adapter melete` | 1 | real |
 | `conductor` | 1 | real |

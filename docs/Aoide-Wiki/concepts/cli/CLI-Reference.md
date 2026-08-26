@@ -32,7 +32,7 @@ start at [[aoide-cli]] and the group pages linked below.
 - **Runtime roots:** repo-relative paths below resolve under `~/Aoide/` —
   `state/` via `$AOIDE_STATE_DIR`, `song/stage/` via `$AOIDE_STAGE_DIR`.
   Stage/state writes are atomic temp-then-rename.
-- **Two registries, one convention:** `aoide schema --json` holds 71
+- **Two registries, one convention:** `aoide schema --json` holds 80
   command paths, `lyra schema --json` holds 42 — every group page prefixes
   each heading `aoide `/`lyra ` so the binary a command belongs to is never
   ambiguous.

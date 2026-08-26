@@ -72,7 +72,7 @@ trail but exit 64 today.
 **Binary note.** The map below draws both binaries as one continuous picture
 of the data flow, labeled `aoide` throughout for readability. Ownership
 (`CONTRACTS.md` §3, [[Package-Layout]]): the AGENT INTERFACE/`aoided`/CONTENT
-PIPELINE/NIX EVAL boxes are `aoide`'s (71 commands: conducting/orchestration
+PIPELINE/NIX EVAL boxes are `aoide`'s (80 commands: conducting/orchestration
 is aoide's identity); the RICE ENGINE, LIVERY, Quickshell, and shellbridge
 boxes below them are `lyra`'s (42 commands, its own schema and dispatch,
 routed through the desktop, not through `aoided`'s CLI trunk).
@@ -85,7 +85,7 @@ routed through the desktop, not through `aoided`'s CLI trunk).
                                         ▼            │
    ┌─────────────────────────────────────────────────────────────┐
    │  AGENT INTERFACE            aoide <cmd>   ·   aoide mcp serve │   [[Agent-Interface]]
-   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   71 commands · exit 0/1/2/64
+   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   80 commands · exit 0/1/2/64
    └───────────────────────────────┬─────────────────────────────┘
                                     ▼
    ┌─────────────────────────────────────────────────────────────┐
@@ -133,7 +133,7 @@ the implemented/stubbed ladder.
 
 | Subsystem            | Inputs                                         | Outputs                                             | Status                                     |
 | -------------------- | ---------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
-| [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 63 real/8 exit 64; lyra 40 real/2 exit 64) |
+| [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 72 real/8 exit 64; lyra 40 real/2 exit 64) |
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`~/Aoide/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; stage    | mostly real (`declare`/`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all commands exit 64)                |
@@ -305,18 +305,20 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   `aoide schema --json` is its machine-readable source of truth; the stdio
   MCP façade (`aoide mcp serve --stdio`) generates its tool list from it, and
   the [[A2A-Door]]'s AgentCard is derived from the same schema — all
-  one-to-one. **71 commands** — real (63): `guide`, `schema`,
+  one-to-one. **80 commands** — real (72): `guide`, `schema`,
   `mcp serve`, `daemon`, `events tail`, `conduct`, `conductor`, `adapter
-  melete`, the
+  melete`, `identity`, the
   5-command `a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`),
-  the 5-command `peer` group (`peer add/list/remove/pull/status` — cross-device
-  peer federation, [[Peer-Federation]]), the 16-command `secrets` group
+  the 14-command `peer` group (`peer add/list/remove/pull/status/hub`,
+  `peer allow`/`spawn`, the LAN `peer discover`/`invite` beacon pair, and the
+  4-command `peer pair` ceremony (`request`/`pending`/`approve`/`reject`) —
+  cross-device peer federation, [[Peer-Federation]]), the 16-command `secrets` group
   (`serve`/`exec`/`add`/`rm`/`grant`/`revoke`/`enroll`/`put`/`set-totp`/
   `automate`/`expose`/`migrate`/`pending`/`approve`/`dismiss`/`watch` — the
   socket-only credential broker under its own uid, [[Secrets-Broker]]),
   `usage`, `hooks install`, `soundcheck`, `who` (live presence over sessions
   and registered peers), the 3-command `inbox` group (`list`/`read`/`clear`, the
-  durable per-host message store), and the 20-command `graph` group (the
+  durable per-host message store), and the 21-command `graph` group (the
   [[Session-Graph]] DAG viewer + management layer over projects and
   sessions, incl. `graph send`/`wrap`/`reap` and the `graph pending
   list|approve|deny` held-injection queue, all real); stubs (8, exit 64):

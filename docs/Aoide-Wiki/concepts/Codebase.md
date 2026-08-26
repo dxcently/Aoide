@@ -97,7 +97,7 @@ home-manager/stylix modules, the pkgs overlay, and mirrored `specialArgs`
 (`host = "vm-test"`, inputs, username, system; `node.pkgsReadOnly = false`
 so the overlay applies) — so the test boots the real assembly, not a
 replica. It asserts: `multi-user.target` reached; `aoide` on
-PATH with `schema --json` reporting exactly 71 commands (a hardcoded
+PATH with `schema --json` reporting exactly 80 commands (a hardcoded
 drift-tripwire figure, [[AOIDE-DEV]] §7) and `guide` exiting
 0; greetd enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
 linger active with the `aoided` and `shellbridge` user units finishing
@@ -265,10 +265,10 @@ nix build .#checks.x86_64-linux.vm-boot -L             # headless QEMU boot test
 --workspace`: `aoide-conduct`/`aoide-server` bind real sockets and a
 workspace-wide run deadlocks on this machine. Each crate carries its own
 `registry.rs` golden test pinning its exact command-path set (`aoide-cli`:
-71 paths; `aoide-lyra`: 42), plus schema validity, exit-code, and MCP
+80 paths; `aoide-lyra`: 42), plus schema validity, exit-code, and MCP
 tool-list-parity tests; the conduct crate's graph domain
 (`crates/conduct/src/graph/{model,doc,common,commands,window,session_store,
-conduct,send}.rs`) carries handlers for all 20 `graph` subcommands: cycle
+conduct,send}.rs`) carries handlers for all 21 `graph` subcommands: cycle
 rejection, anchoring, a deterministic render snapshot, edge shape, prune
 orphan-clearing, unknown-field round-trip, a serialized stage-dir precedence
 test, and the pure focus-liveness helpers `normalize_addr`/`window_present`.
@@ -289,9 +289,10 @@ append, user gate, default-deny event bus); shellbridge (atomic writer, seeded
 stage files, and a live socket accept loop — `focuswindow`); the melete-adapter skeleton (env-driven
 subscription, metadata-only notification boundary); all four livery emitters; the
 QML shell skeleton; the baked Stylix and compositor fan-outs; and the whole
-`aoide graph` group — 20 subcommands (`view`, `project add/remove/list`,
-`link`, `session start/phase/end/hook`, `wrap`, `send`, `focus`, `prune`,
-`reap`, `emit`, `permit`, `pending list/approve/deny`), none a stub (see
+`aoide graph` group — 21 subcommands (`view`, `project add/remove/list`,
+`link`, `session start/phase/end/hook`, `wrap`, `spawn`, `resurrect`, `send`,
+`focus`, `prune`, `reap`, `emit`, `permit`, `pending list/approve/deny`),
+none a stub (see
 [[Session-Graph]]) — plus the separate
 `aoide conductor` command (also real; the liveness-reap predicate now lives in
 its own `reap.rs` module, split out of `graph.rs`). `pkgs.aoide` carries unit
