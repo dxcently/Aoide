@@ -175,7 +175,7 @@ tree inside `crates/song`:
   one `Emitter` trait + registry; a new backend is one file + one registry
   line. The stage backend writes `song/stage/livery.json` (Quickshell; atomic
   write — see `CONTRACTS.md §4`).
-- Verbs: `lyra livery lint|resolve|emit <target>` (the original standalone
+- Commands: `lyra livery lint|resolve|emit <target>` (the original standalone
   CLI's surface, native); `lyra rice lint` calls `livery::lint` directly — no
   binary locate, no PATH shell-out.
 

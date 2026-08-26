@@ -18,7 +18,7 @@ The shape, end state:
         │  tail (Follower)         │  tick loop ──┬─ secrets-feed mirror    │
         └─────────────────────────▶│              ├─ hand-edit watcher (#69)│
                                    │              ├─ graph reap             │
-   session verbs / hook door ─────▶│  socket ─────┴─ registry dispatch      │
+   session commands / hook door ──▶│  socket ─────┴─ registry dispatch      │
    (unix socket, fallback: files)  │   $XDG_RUNTIME_DIR/aoide/aoided.sock   │
                                    │              │                         │
                                    │  events.jsonl◀ (append-only, capped)   │
@@ -152,7 +152,7 @@ loop), 250ms backoff on accept error. The `aoided` binary
 (`cli/src/bin/aoided.rs`) calls it with the assembled registry and dispatch
 fn injected — same DI seam as `mcp::serve_stdio`
 (`server/src/mcp.rs:37`; `aoide-server` never reaches for a crate-global
-registry, its `AGENTS.md` invariant). `aoide daemon` (the CLI verb,
+registry, its `AGENTS.md` invariant). `aoide daemon` (the CLI command,
 `server/src/commands.rs:54`) keeps its one-shot self-check semantics on
 non-Cli doors and gains a `--serve` special-case at `run_cli` for parity
 with `a2a serve`; the systemd unit execs the `aoided` binary as today.
@@ -164,7 +164,7 @@ The unit flips per the revert note it carries (`modules/nucleus/aoided.nix`,
 working — a resident daemon is exactly what they were written against.
 
 Terminal reachability (house rule 7's test): `aoide events tail
-[--class <c>...] [--json]` — a new core verb that follows the daemon feed
+[--class <c>...] [--json]` — a new core command that follows the daemon feed
 with a `feed::Follower` and prints matching lines. QML/desktop surfaces
 pick the bus up through this bridge or by tailing the feed file; neither
 needs the daemon socket.
@@ -212,10 +212,10 @@ reply line. One `write_json_line`-shaped formatter, one
 ### Policy: no new allowlist
 
 `Door::Daemon` already exists and is already audited
-(`protocol/src/audit.rs:61`). The per-verb door policy is the handlers'
+(`protocol/src/audit.rs:61`). The per-command door policy is the handlers'
 own, already in force:
 
-- CLI-only verbs refuse with the door-hint `Outcome` — the secrets admin
+- CLI-only commands refuse with the door-hint `Outcome` — the secrets admin
   surface (`require_cli`, `secrets/src/commands.rs:33` and its
   `*_is_cli_only_*` tests at `commands.rs:1171+`) and the long-running
   launches (`handle_a2a_serve`'s non-Cli arm,
@@ -225,7 +225,7 @@ own, already in force:
   `door: daemon` and marks gated commands uniformly
   (`cli/src/dispatch.rs:68-88`). Gated stays gated: the daemon door
   surfaces `gated: true` and never admits — admission remains the user's.
-- `run_cli`'s `special` closure verbs (raw stdout, long-running servers)
+- `run_cli`'s `special` closure commands (raw stdout, long-running servers)
   never reach dispatch specially over this door; their plain handlers'
   non-Cli arms answer, same as MCP today.
 
@@ -273,7 +273,7 @@ standing orchestrator:
 - `Peer` gains `hub: bool` (`#[serde(default)]`, additive/v0-safe — the
   same discipline every `SessionRecord` addition follows,
   `CONTRACTS.md §4`).
-- New verb `aoide peer hub <name> [--clear]` — sets the flag on exactly one
+- New command `aoide peer hub <name> [--clear]` — sets the flag on exactly one
   peer (setting it moves it; `--clear` removes it). Registered in the
   client crate's peer command group, appended last (golden discipline).
 - Consumers: address resolution prefers the hub as the default remote
@@ -336,7 +336,7 @@ The reaper model is untouched: `is_session_dead`'s never-guess predicate,
 the staleness bands, socket-probe liveness, pre-boot ghosts, orphan-socket
 sweep (`conduct/src/reap.rs:151`, `:732`). What changes is only WHERE it
 runs: the ~12s systemd timer keeps firing `aoide graph reap`, which now
-routes through `daemon_dispatch` like every other session verb — daemon up,
+routes through `daemon_dispatch` like every other session command — daemon up,
 the sweep runs in the daemon against its roster; daemon down, the direct
 path runs as today. Additionally the daemon tick runs the same reap
 internally on the same ~12s cadence, making the timer a redundant backstop
@@ -349,7 +349,7 @@ rather than the mechanism. No second liveness mechanism is introduced
 
 ### `graph spawn --windowed`
 
-A core verb flag on the existing `graph spawn`
+A core command flag on the existing `graph spawn`
 (`conduct/src/graph/spawn.rs`): instead of detaching a headless
 `conduct --headless` child, exec a terminal that runs the same conducted
 command.
@@ -465,7 +465,7 @@ restart is transparent to a running `events tail` (the `(dev,ino)` reopen).
 **P-D3 — producers + `events tail`.**
 The secrets-feed mirror (Follower on `/run/aoide-secrets/events.jsonl`,
 name-only re-publish), the #69 hand-edit watcher, and the `aoide events
-tail` verb (new command path → golden +1).
+tail` command (new command path → golden +1).
 Tests: mirror parses the five secrets shapes and never copies unknown
 fields wholesale; hand-edit sweep fires on an out-of-band mtime change and
 not on the daemon's own write; `events tail --class` filters.
@@ -476,8 +476,8 @@ feed, park an ask, see the mirror line).
 `op:"dispatch"` → `Invocation { door: Door::Daemon }` → injected dispatch;
 Outcome envelope as the final reply; interim discipline reserved (no
 interim producers yet). Prove the door policy by test, not new code.
-Tests: a plain verb dispatches and audits `"door":"daemon"`; a CLI-only
-secrets admin verb returns the door-hint and mutates nothing; a gated verb
+Tests: a plain command dispatches and audits `"door":"daemon"`; a CLI-only
+secrets admin command returns the door-hint and mutates nothing; a gated command
 returns `gated: true`; `mcp.serve`/`a2a.serve` return their non-Cli
 outcomes.
 Blast: `aoide-server`, `aoide-cli` (+ `aoide-secrets` tests exercised via
@@ -500,7 +500,7 @@ default off).
 `aoide_client::daemon_dispatch` (connect-or-None), routing in the
 session-write family + `graph reap`, daemon-side roster with
 startup-load/tick-reconcile/projection-write, reap in the daemon tick.
-Tests: routed verb round-trips through a test daemon and the projection
+Tests: routed command round-trips through a test daemon and the projection
 matches the direct-path bytes; fallback path on a dead socket is
 byte-identical to today; out-of-band write is folded (newest-updatedAt) on
 the next tick; reap over the socket reaps.
@@ -583,8 +583,8 @@ Things this design must never do — each is a review-blocking violation:
    tick), but a reconcile bug shows up as ghost/duplicated sessions on the
    live desktop — subtle, stateful, and the reaper's own dedup logic sits
    on top. Mitigation: P-D6's projection-equals-direct-path byte test, the
-   live SUPER+Q/kill-daemon drills in its gate, and shipping routing verb
-   family by verb family rather than all at once if the executor reports
+   live SUPER+Q/kill-daemon drills in its gate, and shipping routing command
+   family by command family rather than all at once if the executor reports
    instability.
 2. **Unit-flip regression (P-D2).** The oneshot workaround exists because
    a clean exit under `Type=simple` cascaded through `BindsTo` and took

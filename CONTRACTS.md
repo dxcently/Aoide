@@ -57,7 +57,7 @@ that can be deleted.
 **Quickshell paints; it never *is* the capability.** Every QML file in
 `modules/facets/quickshell/` and `song/songbook/*/widgets/` is a render surface
 that picks up an agnostic bridge or API by name. State, policy, IPC and system
-access live behind a bridge (a CLI verb, a stage file in §4, an IPC socket) that
+access live behind a bridge (a CLI command, a stage file in §4, an IPC socket) that
 is reachable **with only a shell**.
 
 The test, applicable to a file you have never seen:
@@ -67,7 +67,7 @@ The test, applicable to a file you have never seen:
 
 So: **a new API lands as a bridge first, and the QML picks it up second** — never
 the reverse, and never only in QML. A surface may read, arrange, animate and
-draw; it may not own the only copy of a fact, shell out to do work a verb should
+draw; it may not own the only copy of a fact, shell out to do work a command should
 do, or decide policy.
 
 #### The paint test — facet QML vs song QML
@@ -420,7 +420,7 @@ merge into one document, and neither one's golden test knows the other's
 count.
 
 - `aoide schema --json` — the core contract (the `protocol`/`storage`/
-  `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` verb
+  `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` command
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
   **78 commands** (`crates/cli/src/registry.rs`'s golden test —
@@ -455,7 +455,7 @@ count.
   README.md`'s "Watching events" section for the exact shape; `secrets
   migrate`, appended newest, P-G2 (task #72) (+1 → 68) — moves an existing
   secret's stored value from its policy's current backend to a target one
-  (default `age`) and flips the policy row, an admin verb mirroring
+  (default `age`) and flips the policy row, an admin command mirroring
   `add`/`rm`/`grant`'s direct-home shape — see `crates/secrets/README.md`'s
   "Migrating a secret between backends" section for the full flow;
   `events tail`, appended newest, P-D3 (`docs/architecture/AOIDED.md`)
@@ -464,7 +464,7 @@ count.
   and any future tick producer), `--class` filtering to matching event
   classes (comma-separated), blocking until Ctrl-C; CLI-only, the same
   door-policy shape `secrets watch` already holds for a foreground/
-  blocking verb — see `crates/server/README.md`'s "Named seams" section
+  blocking command — see `crates/server/README.md`'s "Named seams" section
   for the producer/tail mechanism; `peer hub`, appended newest, P-D5
   (`docs/architecture/AOIDED.md`'s "The hub option") (+1 → 70) — designates
   one registered peer as THE hub (`peer_store::Peer.hub`, additive/v0-safe,
@@ -495,7 +495,7 @@ count.
   wire/storage shape.
   `peer pair request|pending|approve|reject`, appended newest, P-P2
   (`docs/architecture/PAIRING.md`) (+4 → 76) — the pairing ceremony's CLI
-  half, both directions behind the SAME four verbs (no fifth verb for the
+  half, both directions behind the SAME four commands (no fifth command for the
   requester's own confirm step — `approve`/`reject` dispatch by
   direction): `request <url>` sends
   a commitment (`aoide/pairRequest`) to another instance's A2A door,
@@ -514,7 +514,7 @@ count.
   B's own callback has already landed, confirmation commits the peer
   record directly with no further wire call; `reject <id>` is a clean local
   refusal on either queue, no wire call, no peer record — on an outbound
-  entry this doubles as the ceremony's abort verb, usable at any stage. See
+  entry this doubles as the ceremony's abort command, usable at any stage. See
   §6's "Pairing wire" and §7's "Peer record" subsections below for the
   exact wire shapes, the commitment/reveal construction, and SAS
   derivation.
@@ -527,7 +527,7 @@ count.
   peer or an unknown capability string with a distinct taught error for
   each (the capability check runs before the peer lookup). A paired peer
   is stamped `["read","spawn"]` by default the moment it FIRST becomes
-  verified (`upsert_paired_peer`, both ceremony commit sites) — this verb
+  verified (`upsert_paired_peer`, both ceremony commit sites) — this command
   is for narrowing or widening that grant afterward, and is the ONLY other
   writer of the field. See §6's "Security posture" (the P-P3 amendment)
   and §7's "Peer record" subsections below for the gate this feeds and
@@ -543,7 +543,7 @@ count.
   (an unsigned request could never satisfy the remote's `PeerRung::
   Signature`-only gate anyway); every OTHER refusal (allows lacking
   `spawn`, an unsigned/too-old caller, clock skew) is the remote door's
-  own call, surfaced verbatim — this verb never re-implements or
+  own call, surfaced verbatim — this command never re-implements or
   second-guesses that gate. `--yes` skips a LOCAL `y`/`N` confirmation
   only (mirrors `peer pair approve`'s idiom); the remote door's own gate
   is the sole security authority either way. See §6's "Security posture"
@@ -597,9 +597,9 @@ one final reply line. Three ops, a closed set:
   shape>}` line.
 
 **No new allowlist.** `Door::Daemon` (`aoide-protocol`) is audited exactly
-like the other three; the per-verb door policy already in force for
-MCP/A2A — a CLI-only admin verb's refusal, a gated command's `gated: true`,
-a long-running server verb's (`mcp.serve`/`a2a.serve`) non-Cli metadata
+like the other three; the per-command door policy already in force for
+MCP/A2A — a CLI-only admin command's refusal, a gated command's `gated: true`,
+a long-running server command's (`mcp.serve`/`a2a.serve`) non-Cli metadata
 reply — applies unchanged, since `dispatch` routes through the SAME
 dispatcher every door calls. This module introduces no daemon-specific
 permission table, and none is planned. Untrusted input stops at the parse/
@@ -767,7 +767,7 @@ draft file, because `aoide_storage::fs::atomic_write` resolves and writes
 through a symlink at its destination rather than letting POSIX `rename()`
 replace it — general behavior in that one function, not draft-specific.
 
-`rice draft save <name>` is a SEPARATE, mode-independent verb: it forks
+`rice draft save <name>` is a SEPARATE, mode-independent command: it forks
 whatever's currently live (reading transparently through a routing symlink
 if one is active) into a new-or-updated draft snapshot without switching
 modes — upserting (re-saving an existing name overwrites its `livery.json`
@@ -999,7 +999,7 @@ knobs"):** a project entry MAY also carry an optional `autoResume` (bool,
 default/absent means `false`, `skip_serializing_if` keeps a `false` value
 off the wire — the same additive-bool discipline `SessionRecord.headless`
 set the precedent for). Set via `graph project add --auto-resume`
-(idempotent-upsert; no `graph project set`/`edit` verb exists yet to flip
+(idempotent-upsert; no `graph project set`/`edit` command exists yet to flip
 it back off — hand-edit `projects.json` in the meantime). Consumed by the
 daemon's own boot-time auto-resume trigger (`aoide-server`'s `daemon.rs`,
 the decided answer to this design's one open knob): once per BOOT — never
@@ -1007,7 +1007,7 @@ on a same-boot `Restart=on-failure` restart, guarded by a marker recording
 the boot epoch (`btime` out of `/proc/stat`) the trigger last ran under —
 for every `autoResume` project with no live (non-`done`) session anchored
 to it, the daemon calls `aoide graph resurrect --project <name>`
-in-process (`Door::Daemon`), the identical command core the CLI verb runs.
+in-process (`Door::Daemon`), the identical command core the CLI command runs.
 A per-candidate spawn failure (e.g. a headless host with no
 `$AOIDE_TERMINAL`) degrades gracefully — logged, never a crashed tick.
 
@@ -1132,7 +1132,7 @@ anyone who can already write to the target's control socket.
 
 The Grimoire launcher's own usage ledger (`GrimoireLedger.qml`), separate
 from every other stage file in this section: it is QML-created, not staged
-by `aoided`, and has no CLI verb of its own — a fresh install has no
+by `aoided`, and has no CLI command of its own — a fresh install has no
 `grimoire.json` until the first launch. Tracks how often each `.desktop`
 entry is launched so the Grimoire's frequency chapter ("most commonly
 opened") can rank real usage instead of guessing. Song-agnostic by design:
@@ -1140,8 +1140,8 @@ the ledger is a data seam, not chrome, so launch-frequency history stays
 put across a `rice stage`/song switch rather than moving with the song.
 
 **The single writer is the QML itself** — `GrimoireLedger.qml` calls
-`DesktopEntry.execute()` directly with no `aoided` verb in between (the
-same no-new-verb idiom `launcher.qml` already established) and persists
+`DesktopEntry.execute()` directly with no `aoided` command in between (the
+same no-new-command idiom `launcher.qml` already established) and persists
 through a `FileView` with `atomicWrites: true` (write-temp-then-rename, so a
 hot-reload or a crash mid-write never reads a torn file). Parsing follows
 `LiveryState.qml`'s `FileView` idiom: a guarded try/catch degrades a
@@ -1202,7 +1202,7 @@ position is the 200-entry cap's oldest-drop when a NEW message arrives
 between your `list` and your `read` (same "re-list if you're racing a
 writer" discipline `pending.json` documents, triggered by the cap instead of
 every resolution); `clear` empties the file unconditionally — no `--yes`, no
-gate, matching `graph.prune`'s precedent (the verb name is the whole blast
+gate, matching `graph.prune`'s precedent (the command name is the whole blast
 radius, nothing selective to confirm, unlike `rice draft drop`/`rice take
 prune` which destroy a NAMED or AMBIGUOUS subset). Capped at 200 entries,
 oldest-drop (`herald::LEDGER_CAP`'s fold-and-cap precedent, CONTRACTS.md §4
@@ -1551,7 +1551,7 @@ exactly `file` and `age` as source backends (the same paths their own
 `set` templates write to) and does nothing for any other backend name,
 built-in or not — a `pass`/`gopass`/`bw`/`sops` row, or an operator-custom
 entry, is never touched or removed by `migrate`. `migrate` is an admin
-verb (euid-guarded exactly like `add`/`rm`/`grant`, direct-home, no
+command (euid-guarded exactly like `add`/`rm`/`grant`, direct-home, no
 socket) with NO cross-process lock against a concurrently-running broker
 daemon — a `migrate` racing a live `secrets put`/`exec` against the same
 secret through the running daemon is an unprotected window, a known
@@ -1820,7 +1820,7 @@ IN automation.consumers)`) -> fetch. When `requireTotp` is `false`,
 automation has nothing to relax and every caller resolves exactly as
 before this field existed; when `requireTotp` is `true` and automation is
 CLOSED (`enabled:false`) or the requesting consumer isn't LISTED, `totp`
-is checked exactly as it always has been. Admin verbs: `secrets automate
+is checked exactly as it always has been. Admin commands: `secrets automate
 <name> on|off` flips `enabled`; `secrets automate <name> grant|revoke
 <consumer>` edits `consumers` (same name validation as every other
 consumer/secret name in this crate). **Honesty note, same shape as
@@ -1919,11 +1919,11 @@ resolve/park/approve/dismiss/put audit line also carries the acting
 connection's peer uid now, alongside the pre-existing self-asserted name.
 
 **Admin mutations (task #79) — a new op family, built on Peer identity
-above.** Every admin CRUD verb (`add`/`rm`/`grant`/`revoke`/`set-totp`/
+above.** Every admin CRUD command (`add`/`rm`/`grant`/`revoke`/`set-totp`/
 `automate`/`expose`/`migrate`) is now reachable over this SAME socket, as
 the daemon's SINGLE-WRITER path — the live broker becomes the one process
 serializing every `policy.json`/backend-store mutation, closing the TOCTOU
-a concurrent `put`/`exec` and an admin verb used to have when both raced a
+a concurrent `put`/`exec` and an admin command used to have when both raced a
 direct-home write:
 ```text
 -> {"op":"admin","verb":"add","name":"<name>","backend":"<backend>","key":"<key>","requireTotp":<bool>?,"consumers":[<name>,...]?}
@@ -1950,7 +1950,7 @@ same fail-closed default `dismiss` holds.
 
 **The CLI tries this socket FIRST; a direct write is the no-daemon
 fallback, never a silent downgrade past a live one.** `aoide secrets
-<verb>` connects and sends the `{"op":"admin"}` request above; only when
+<command>` connects and sends the `{"op":"admin"}` request above; only when
 the connect itself fails with "nothing is listening" (no socket file, or a
 stale one with nothing behind it) does the CLI fall back to writing
 `policy.json` directly (the pre-#79 behavior, still euid-guarded the same
@@ -1958,7 +1958,7 @@ way). Any OTHER socket failure — including the broker's own authoritative
 `{"ok":false}` denial — is reported as the command's result outright,
 never silently downgraded into the fallback; a live-but-sick daemon can
 never be bypassed into a direct write racing underneath it. Every admin
-verb's `Outcome` names which path actually ran (`data: {"path":"broker"}`
+command's `Outcome` names which path actually ran (`data: {"path":"broker"}`
 or `{"path":"direct"}`).
 
 If a secrets file shape ever needs to be READ by something outside the
@@ -2546,9 +2546,9 @@ that command being non-empty. Fixed in `a2a.rs`:
   through the SAME `Door::A2a` log every other §6 outcome already uses — no
   second logging path.
 
-**Amendment (2026-08-20, Phase G): the READ verbs are token-gated by the same
+**Amendment (2026-08-20, Phase G): the READ commands are token-gated by the same
 switch.** The 2026-08-19 amendment gated Spawn and the Inject-delivery origin,
-but left the read verbs — `tasks/get`, `aoide/graphSummary`, and the SSE pair
+but left the read commands — `tasks/get`, `aoide/graphSummary`, and the SSE pair
 (`message/stream`, `tasks/resubscribe`) — open regardless of the token. On
 loopback that is harmless, but the moment the door faces a network,
 `aoide/graphSummary` hands any caller the operator's WHOLE resolved session
@@ -2571,7 +2571,7 @@ does the caller hold a valid token when one is required):
   `effective_origin`, so it is not re-gated in the dispatcher).
 
 **Amendment (2026-08-20): the unauthenticated AgentCard GET is stripped, not
-gated.** Phase G above closed the read verbs but left
+gated.** Phase G above closed the read commands but left
 `GET /.well-known/agent-card.json` untouched — it doesn't fit that
 predicate's `-32005` JSON-RPC shape at all: a GET is answered with a card,
 never a JSON-RPC envelope, so there is no error code to return, only a
@@ -2591,7 +2591,7 @@ choice of WHICH card. Fixed in `a2a.rs`:
   skills inventory (the full command surface), `version`, `capabilities`,
   `description`, `defaultInputModes`, and `defaultOutputModes` — everything
   that is not one of the three served fields. All of it requires a valid
-  bearer once a token is configured, same as the Phase G read verbs.
+  bearer once a token is configured, same as the Phase G read commands.
 - Off-path (no token, today's default) is byte-identical to before — the
   served card is pinned field-for-field against `agent_card_from_commands`
   directly, the same off-path pin style Phase G used.
@@ -2606,7 +2606,7 @@ choice of WHICH card. Fixed in `a2a.rs`:
 
 **Amendment (2026-08-20, #50): an unauthenticated `message/send` naming a
 context answers UNIFORMLY, not with a hard gate.** Phase G above closed the
-read verbs and Spawn, but left Inject's `contextId` lookup itself open to two
+read commands and Spawn, but left Inject's `contextId` lookup itself open to two
 problems even with a token configured: `decide_send_action` ran
 `session_ref_lookup` regardless of authentication, so an unauthenticated
 caller could tell a real `contextId` from a bogus one apart by the response
@@ -2945,7 +2945,7 @@ POST.** Two closes, one commit:
   changes no byte of any produced canonical string — the pinned vectors
   above are UNCHANGED, and no vector needed to move.
 - **`peer spawn <name> [--yes] -- <text…>`** (`aoide-client::commands::
-  handle_peer_spawn`, golden 77 → 78, §3 above): the CLI verb that
+  handle_peer_spawn`, golden 77 → 78, §3 above): the CLI command that
   actually reaches the spawn gate this section's P-P3/P-P4 amendments
   built. Builds the exact spawn-shaped body `do_spawn` consumes —
   `aoide_client::wire::build_message_send_body(text, messageId, None)`,
@@ -3009,7 +3009,7 @@ fetched AgentCard — the same handle `aoide a2a agent remove <name>` takes.
 appended); it curl-GETs the card, requires at least `name`, keeps
 `description`, and records the card's own `url`/first-interface url (else the
 fetch origin) as the endpoint. `aoide a2a agent send <name> "<message>"` is
-the **drive verb** (the outbound half of bidirectional A2A): it POSTs a
+the **drive command** (the outbound half of bidirectional A2A): it POSTs a
 JSON-RPC `message/send` to that endpoint and reports the returned
 Task/Message. These external calls are **unauthenticated** for the MVP (no
 `securityScheme` handling yet) and loopback/LAN-oriented, consistent with §6's
@@ -3216,7 +3216,7 @@ expiring outbound entry (`peer pair pending`) and an ordinary re-pair, not
 a special recovery path. `peer pair reject <id>` against an outbound entry
 aborts it at ANY stage (`awaiting-approval` or `awaiting-confirm`) — no
 wire call, no peer record — doubling as the ceremony's own missing abort
-verb.
+command.
 
 **Park cap.** `park_inbound` refuses beyond
 `AOIDE_PAIRING_PARK_CAP` concurrently parked inbound requests (default 32,
@@ -3411,7 +3411,7 @@ never be silently repointed at a different URL by a second `add`). `aoide
 peer remove <name>` deregisters; a **missing name is an error**, not
 idempotent-silent — following `rice draft drop <name>`'s precedent (§4) over
 `a2a agent remove`'s tolerate-missing stance, a deliberate choice called out
-here since the two existing verbs this one could have mirrored disagree.
+here since the two existing commands this one could have mirrored disagree.
 `aoide peer list` enumerates the registry.
 
 ### `state/peer-cache/<name>.json` — **v0**
@@ -3472,7 +3472,7 @@ new `--peer-name` flag on `a2a serve`). `instance.url` is this instance's own
 advertised URL (`http://<bind>:<port>/`, the same string the AgentCard's own
 `url` field carries). `graph` is EXACTLY what `aoide graph view --json` /
 `graph emit` resolve (`aoide_conduct::graph::resolve_graph_document`, the
-SAME function both those verbs and this method call) — no second graph
+SAME function both those commands and this method call) — no second graph
 vocabulary is invented for the wire.
 
 ### The `peer:*` node-id convention (graph fold)
@@ -3493,10 +3493,10 @@ fold: `{ id: "peer:<name>", kind: "peer", name, url, state, children? }`.
   "stale"` and NO `children` — never a crash, never a silently-dropped peer.
   `error` carries the last pull failure's reason when present.
 
-Local graph verbs (`graph focus`/`prune`/`reap`/`link`) keep ignoring
+Local graph commands (`graph focus`/`prune`/`reap`/`link`) keep ignoring
 `peer:*` ids exactly as they already ignore `a2a:*` ids today — confirmed by
 test (`conduct::graph::verbs::tests::local_only_verbs_ignore_peer_ids_exactly_like_a2a_ids_today`),
-not just assumed to generalize: none of those verbs read `peer_store` (or
+not just assumed to generalize: none of those commands read `peer_store` (or
 `a2a_store`) at all, they operate purely on `sessions.json`'s
 `SessionRecord`s, so a `peer:*`/`a2a:*` id is simply never a session id they
 could ever match.
@@ -3549,7 +3549,7 @@ the remote gate, which is the sole security authority.
 
 ### Status
 
-Real: the registry, the cache, `aoide/graphSummary`, the CLI verbs, and the
+Real: the registry, the cache, `aoide/graphSummary`, the CLI commands, and the
 graph fold all run. The pairing ceremony (P-P2) is real too: `pubkey`/
 `verified` on `Peer`, `peer pair request|pending|approve|reject`, and both
 `aoide/pairRequest`/`aoide/pairApprove` A2A methods (§6's "Pairing wire"
@@ -3587,14 +3587,14 @@ the called-out §6 amendments).
 
 The `lyra screen` family (`pkgs/aoide/crates/screen/src/`) writes a
 JSON sidecar (`<capture>.json`, same stem as the image) next to every
-`screen shot`/`screen diff` capture. `screen point` has nine verbs, six of
+`screen shot`/`screen diff` capture. `screen point` has nine commands, six of
 which synthesize real pointer input against a native Wayland backend
 (`idle`/`save` are read-only queries, `restore` warps via `hyprctl` instead
 of synthesizing). This section is the sidecar field contract, the
 image↔screen scale contract, and the
-`*-*` reason-code vocabulary every `screen` verb's structured error draws
+`*-*` reason-code vocabulary every `screen` command's structured error draws
 from. See `concepts/orchestration/Screen-Control` in the wiki for the
-verb-by-verb usage this contract backs.
+command-by-command usage this contract backs.
 
 ### The sidecar — `<capture>.json`
 
@@ -3643,7 +3643,7 @@ ever reconstructing it.
 
 ### The `*-*` reason-code vocabulary
 
-Every `screen` verb's structured error carries a backend-agnostic
+Every `screen` command's structured error carries a backend-agnostic
 `data.reason`. For most families the caller never learns which underlying
 tool (grim, tesseract, the pointer backend) did the work from the code
 alone, only from the free-text detail string if it wants to — those three
@@ -3677,7 +3677,7 @@ top level.
 ### The pointer backend
 
 `zwlr_virtual_pointer_v1` is spoken natively, in-process, by
-`screen::synth` — no shell-out. Every `screen point` verb assembles a `Seq`
+`screen::synth` — no shell-out. Every `screen point` command assembles a `Seq`
 of motion/button/wheel steps and hands it to one `synthesize()` call, which
 opens a Wayland connection, walks the `Seq`, and tears down. A press and its
 release always share a SINGLE `synthesize()` call (`drag`'s press-move-release
@@ -3699,7 +3699,7 @@ press-move-release paints a text selection; hover enter/motion reaches
 layer surfaces (bar cell repainted its hover state under the pointer);
 a post-run pointer sweep left no selection trail, so every release was
 delivered. With that proof landed, the `wlrctl` fallback package is
-retired from `modules/dendrites/vision.nix` — `screen::point`'s verbs
+retired from `modules/dendrites/vision.nix` — `screen::point`'s commands
 all cross the pointer-synthesis boundary through `screen::synth`
 in-process, and nothing else speaks for the pointer.
 
@@ -3707,7 +3707,7 @@ in-process, and nothing else speaks for the pointer.
 event logger (`wev`) as the receiving client — the events an app actually
 gets, not pixels inferred from them:
 
-| Verb | What the client received |
+| Command | What the client received |
 |---|---|
 | `move` | `enter` + a `motion` stream; surface coords matched the requested screen point exactly |
 | `click` | `button` press (state 1) then release (state 0) on the right code, same millisecond |

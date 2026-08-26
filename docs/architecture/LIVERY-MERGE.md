@@ -90,7 +90,7 @@ crates/song/src/
                              # `run_lint` becomes a thin call into livery::lint
   live.rs                    # unchanged (already the effectful hyprctl seam)
   commands/rice.rs           # `rice lint` → livery::lint (native); preview uses livery::emit
-  commands/livery.rs         # NEW: `aoide livery emit|resolve|lint` verb group
+  commands/livery.rs         # NEW: `aoide livery emit|resolve|lint` command group
 ```
 
 ### 1.2 The emitter registry (additive backend design)
@@ -209,7 +209,7 @@ the deep-pantheon crate scheme; offered as the in-voice runner-up.
 - `song/src/notes.rs` — drop the binary-locate env var/PATH lookup + `run_lint` shell-out (becomes native call).
 - `song/src/commands/rice.rs` — `rice lint` summary + delegate; `handle_rice_preview` stage-file constant; test strings/fixtures.
 - `song/src/mint.rs` — renders the option tier under its new `aoide.livery.<tier>` path; scaffolds `livery.json`; comment text.
-- `song/src/commands/livery.rs` — **new** verb group.
+- `song/src/commands/livery.rs` — **new** command group.
 - `storage/src/fs.rs` — `songbook_notes()` → `…/livery.json`; test paths (`fs.rs:105,373,379`).
 - `storage/src/design.rs:98` — `sources: vec!["stage/livery.json"]`.
 - `conductor/src/app.rs:288,295,362,382` — stage reader path → `livery.json` (dual-read, §2.3).
@@ -217,7 +217,7 @@ the deep-pantheon crate scheme; offered as the in-voice runner-up.
 - `conduct/src/graph/verbs.rs:256` — comment ("mirrors the `livery emit stage` pattern").
 - `cli/src/guide.rs:106` — house-rule #5 text (`aoide.livery`).
 - `cli/tests/conductor_integration.rs:57,89,92` + `cli/tests/fixtures/seed.sh` — stage fixture filename + assertion text.
-- `cli/src/registry.rs` — golden command-path snapshot (updates when `livery.*` verbs land).
+- `cli/src/registry.rs` — golden command-path snapshot (updates when `livery.*` commands land).
 
 **Code — Nix**
 - `modules/nucleus/options.nix` — the option namespace renamed `options.aoide.livery` (+ `mkRenamedOptionModule` alias from the old namespace, §2.3).
@@ -399,7 +399,7 @@ package remains present but aoide stops calling it.
 - Accept: `cargo test -p aoide-song emit::file` — a template round-trips a
   known set of substitutions; an unknown placeholder errors, not panics.
 
-**Step 1.5 — wire CLI: `rice lint` native + `livery` verb group.** [SERIAL]
+**Step 1.5 — wire CLI: `rice lint` native + `livery` command group.** [SERIAL]
 - Owns: `crates/song/src/notes.rs` (shrink to a thin `livery::lint` wrapper;
   drop the binary-locate env var/PATH lookup — but keep a `run_lint` shape its
   two callers expect), `crates/song/src/commands/rice.rs` (`handle_rice_lint` →

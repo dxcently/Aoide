@@ -42,7 +42,7 @@ there is no "this peer may spawn, that one may not."
    drivable from a plain terminal on both ends; the popup is sugar.
 5. **Per-peer permissions: a closed `allows` set.** Capabilities
    today: `"spawn"` (create a session via the A2A spawn arm),
-   `"read"` (graph/who summaries over A2A). Verbs:
+   `"read"` (graph/who summaries over A2A). Commands:
    `aoide peer allow <name> <cap> on|off` — idempotent, reports
    exactly what changed. Unknown capability strings are refused.
    `autogate` stays its own field (landed semantics, not churned).
@@ -72,7 +72,7 @@ there is no "this peer may spawn, that one may not."
 ## Identity
 
 - Keypair minted lazily on first need (`peer pair` or an explicit
-  `aoide identity` verb — the executor proposes the verb shape),
+  `aoide identity` command — the executor proposes the command shape),
   stored under the state dir, private key 0600, never printed, never
   in an Outcome. The public key and its fingerprint are freely
   shown.
@@ -176,17 +176,17 @@ the full count-site checklist (git show 9c2d05c).
   (workspace-level justification comment in the Cargo.toml), keypair
   mint/load/store in `storage` (or a new small crate if storage's
   charter resists — executor states the reading), `aoide identity`
-  show verb (golden +1). Tests: mint-once idempotence, 0600, pubkey
+  show command (golden +1). Tests: mint-once idempotence, 0600, pubkey
   round-trip, no private material in any Serialize type (grep gate).
 - **P-P2 — pairing wire + CLI ceremony (L).** Request/park/approve
   over the A2A door (new method, CONTRACTS §6), SAS derivation +
-  display, `peer pair request|pending|approve|reject` verbs (golden
+  display, `peer pair request|pending|approve|reject` commands (golden
   +N), peer record gains `pubkey`/`verified` (additive serde),
   legacy fields untouched. Tests: full ceremony against a test door,
   SAS stability vectors, expiry, re-pair confirmation, unapproved =
   no record change.
 - **P-P3 — allows + the spawn gate flip + audit identity (M).**
-  `allows` set + `peer allow` verbs (golden +1), spawn arm requires
+  `allows` set + `peer allow` commands (golden +1), spawn arm requires
   paired+spawn (taught error otherwise), audit/pending/session-record
   stamping (`origin: peer:<name>`, projected into the ledger).
   Tests: gate table (paired+allowed / paired+denied / unpaired /
@@ -208,7 +208,7 @@ ledger entry carrying `origin: peer:<name>`.
 
 - No hand-rolled cryptography — primitives come from the vetted dep,
   full stop (User ruling).
-- No daemon-door or A2A allowlist tables — the per-verb door policy
+- No daemon-door or A2A allowlist tables — the per-command door policy
   and the `allows` set are the only gates (AOIDED L2 discipline).
 - No transitive relay, no mesh-level object — the mesh stays the
   closure of pairwise records.
