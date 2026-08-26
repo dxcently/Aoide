@@ -185,12 +185,12 @@ pkgs.testers.runNixOSTest {
     # This is a deliberate drift tripwire: adding or removing a command must
     # consciously update this count (it caught 8 commands that had landed
     # unrecorded — graph wrap/reap/send, conduct, conductor, and the graph session
-    # write-verbs; bumped by 4 for the a2a serve / agent add|list|remove stubs
+    # write-commands; bumped by 4 for the a2a serve / agent add|list|remove stubs
     # (CONTRACTS.md §6); bumped by 1 for `usage` (CONTRACTS.md §4); bumped by 1
-    # for `a2a agent send` — the Phase D client-side drive verb;
-    # bumped by 1 for `hooks install` — the generic hook-installer verb;
+    # for `a2a agent send` — the Phase D client-side drive command;
+    # bumped by 1 for `hooks install` — the generic hook-installer command;
     # bumped by 3 for `livery emit|resolve|lint` — the native note-engine
-    # verbs (LIVERY-MERGE Phase 1); bumped by 3 for `rice mode
+    # commands (LIVERY-MERGE Phase 1); bumped by 3 for `rice mode
     # status|stage|declarative` — the staging/declarative mode toggle
     # (reached 54, but this count was never bumped for it until now);
     # bumped by −3 for deleting a since-removed `rice design status/enter/exit`
@@ -202,15 +202,15 @@ pkgs.testers.runNixOSTest {
     # it, not left as a permanent stub (landed at 54); net unchanged (−1, +1)
     # for replacing `rice draft stage` (copy-based) with `rice mode draft` —
     # symlink-routes stage/livery.json into a saved draft instead of
-    # snapshotting into/out of it, superseding the copy-based verb outright
+    # snapshotting into/out of it, superseding the copy-based command outright
     # (no-internal-aliases rule) — landed at 54; bumped by 5 for the new
     # `peer add|list|remove|pull|status` group (cross-device peer federation,
     # CONTRACTS.md §7) — reached 59; bumped by 1 for the new `shell reload`
     # command (Quickshell IPC hot-reload trigger) — reached 60; bumped by 2
     # for the new `screen info`/`screen shot` group (Phase 1 of the `screen`
-    # verb family, docs/architecture/PACKAGE-LAYOUT.md) — reached 62; bumped
+    # command family, docs/architecture/PACKAGE-LAYOUT.md) — reached 62; bumped
     # by 6 for the new `screen point move|click|scroll|idle|save|restore`
-    # group (Phase 2 of the `screen` verb family — pointer synthesis via
+    # group (Phase 2 of the `screen` command family — pointer synthesis via
     # wlrctl, ported from tools/pointer.sh) — reached 68; bumped by 1 for the
     # new `screen ocr` command (Phase 3 — tesseract text extraction) — reached
     # 69; bumped by 1 for the new `screen send` command (Phase 5 — hand a
@@ -224,7 +224,7 @@ pkgs.testers.runNixOSTest {
     # than left silently stale) — reached 71; bumped by 2 for the new
     # `screen point drag`/`screen point hover` commands (Phase B of the
     # pointer-emulation workstream, khoa 2026-08-17 — atomic
-    # press-move-release drag, and a hover verb that reports which layer
+    # press-move-release drag, and a hover command that reports which layer
     # surfaces/windows appeared/disappeared/retitled while parked) — reached
     # 73; bumped by 1 for the new `screen diff` command (Phase E of the
     # pointer-emulation workstream, same day — mechanical act-verification:
@@ -234,8 +234,8 @@ pkgs.testers.runNixOSTest {
     # pointer-emulation workstream, khoa 2026-08-17 — click a word/phrase an
     # earlier `screen ocr` pass already located, by name instead of a
     # picked-by-eye pixel) — reached 75; bumped by 1 for `herald push`, the
-    # feed verb of the herald retcon (khoa 2026-08-17 — dunst stops drawing
-    # and becomes the daemon only, handing each notification to this verb
+    # feed command of the herald retcon (khoa 2026-08-17 — dunst stops drawing
+    # and becomes the daemon only, handing each notification to this command
     # through its `script` hook; the Quickshell herald draws the card from
     # the resulting stage/herald.json) — reached 76; bumped by 7 for the
     # self-ricing take tree and the flake integrity checker (`rice back`,
@@ -267,7 +267,7 @@ pkgs.testers.runNixOSTest {
     # between backends (P-G2, task #72) — reached 68 (this assert was
     # updated to 68 with that landing, though this historical comment
     # wasn't extended to say so until now); bumped by 1 for `events tail`
-    # — the aoided event bus's own terminal-reachable follow verb (P-D3,
+    # — the aoided event bus's own terminal-reachable follow command (P-D3,
     # docs/architecture/AOIDED.md) — reached 69; bumped by 1 for `peer hub`
     # — designates at most one registered peer as the hub address
     # resolution prefers as a last-resort remote target (P-D5,
@@ -276,17 +276,17 @@ pkgs.testers.runNixOSTest {
     # session off the durable session ledger, the ledger/resume phase of
     # harness summoning (P-D8, docs/architecture/AOIDED.md's "L5") —
     # reached 71; bumped by 1 for `identity` — this instance's lazily-minted
-    # ed25519 identity show verb (P-P1, docs/architecture/PAIRING.md) —
+    # ed25519 identity show command (P-P1, docs/architecture/PAIRING.md) —
     # reached 72; bumped by 4 for `peer pair request|pending|approve|
     # reject` — the pairing ceremony's CLI half (P-P2,
     # docs/architecture/PAIRING.md) — reached 76; bumped by 1 for `peer
-    # allow` — the closed-capability-set grant/revoke verb backing the A2A
+    # allow` — the closed-capability-set grant/revoke command backing the A2A
     # spawn arm's hard gate (P-P3, docs/architecture/PAIRING.md decisions
     # 5/6) — reached 77; bumped by 1 for `peer spawn` — the signed,
     # spawn-shaped message/send that actually reaches that gate from the
     # CLI (P-P5b, docs/architecture/PAIRING.md) — reached 78.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
-    # bump BOTH in the same commit that registers a verb.
+    # bump BOTH in the same commit that registers a command.
     schema_raw = machine.succeed("aoide schema --json")
     schema_doc = json.loads(schema_raw)
     # schema --json emits a JSON Outcome envelope:

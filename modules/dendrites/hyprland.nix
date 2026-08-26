@@ -131,7 +131,7 @@ in
         # Launcher (Hyprland global shortcut → AoideLauncher.GlobalShortcut
         # toggle). The launcher registers `aoide:launcher` in-process (hyprland-
         # global-shortcuts-v1), so the keypress reaches the running surface
-        # directly — no `aoide shell launcher` CLI verb (that verb is an
+        # directly — no `aoide shell launcher` CLI command (that command is an
         # unimplemented stub) and no inbound socket. `global, <appid>:<name>` is
         # Hyprland's dispatcher for it.
         bind = SUPER, SPACE, global, aoide:launcher
@@ -140,10 +140,10 @@ in
         # GlobalShortcut toggle). Registers `aoide:wallpaper` in-process, same
         # global-shortcuts-v1 seam as the launcher — one press summons the cover
         # grid over song/covers/, a pick shells `aoide cover set <path>` which
-        # hot-swaps the live wallpaper. No CLI toggle verb, no inbound socket.
+        # hot-swaps the live wallpaper. No CLI toggle command, no inbound socket.
         bind = SUPER, W, global, aoide:wallpaper
 
-        # Lock screen (hyprlock directly — no lock verb exists in either
+        # Lock screen (hyprlock directly — no lock command exists in either
         # binary; the shellbridge powermenu's PowerAction::Lock shells the
         # same locker)
         bind = SUPER, ESCAPE, exec, hyprlock
@@ -152,7 +152,7 @@ in
         # GlobalShortcut toggle). SUPER+G opens/closes the center-left book-edge
         # dock that holds the widget sub-panels (conductor, terminals, meters,
         # power). It registers `aoide:dock` in-process (same global-shortcuts-v1
-        # seam as the launcher/wallpaper) — no CLI verb (the old `aoide shell
+        # seam as the launcher/wallpaper) — no CLI command (the old `aoide shell
         # dock` was an unimplemented stub), no inbound socket. The dock also
         # peeks out on its own as an alert when an agent needs a response.
         bind = SUPER, G, global, aoide:dock

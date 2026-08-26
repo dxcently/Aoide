@@ -75,13 +75,13 @@ lib.mkIf (config.aoide.enable && config.aoide.secrets.enable) {
     # (sudo -u aoide-secrets, never the socket), so its age/age-keygen
     # shell-outs run under sudo's secure_path — the unit-path entry above
     # covers only the broker's own resolve/put. Without this, the lane's
-    # headline verb fails on every deployed box with the taught
+    # headline command fails on every deployed box with the taught
     # missing-binary hint. Same class as the qrencode lesson at the top of
     # this list.
     pkgs.age
   ]
   # ── zenity for `secrets watch --popup` ───────────────────────────────────
-  # Same shape as qrencode above: a hand-invoked verb (`watch --popup`,
+  # Same shape as qrencode above: a hand-invoked command (`watch --popup`,
   # crates/secrets/src/watch.rs) feature-detects a PATH binary
   # (`zenity_available`) and prints a taught install hint when absent — not a
   # Cargo dependency, not on the broker unit's `path`. Gated on the

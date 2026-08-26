@@ -48,7 +48,7 @@
 #   - DUNST_CATEGORY carried `x-aoide.permission` through
 # Two things the env does NOT carry, learned the same way, both handled on the
 # aoide side rather than papered over here:
-#   - DUNST_URGENCY is UPPERCASE (LOW/NORMAL/CRITICAL); the push verb lowers it.
+#   - DUNST_URGENCY is UPPERCASE (LOW/NORMAL/CRITICAL); the push command lowers it.
 #   - there is no DUNST_ACTIONS. A third-party sender's action labels never
 #     reach us, so the herald offers no buttons for them. This costs nothing for
 #     the case that matters: an aoide permission summons is published to the
@@ -135,15 +135,15 @@
         # suppressed.
         #
         # The script is `aoide herald push`, which reads the DUNST_* environment
-        # and writes the record over $AOIDE_BRIDGE_SOCKET. It is a real verb and
+        # and writes the record over $AOIDE_BRIDGE_SOCKET. It is a real command and
         # not a shell wrapper on purpose: notification bodies are arbitrary
         # sender text, and hand-rolled shell JSON escaping is a bug farm.
         #
         # `script` takes ONE executable, not a command line — dunst appends its
         # own five positional arguments (appname summary body icon urgency), so
-        # the verb's arguments cannot be written here. Hence the wrapper. Its
+        # the command's arguments cannot be written here. Hence the wrapper. Its
         # store path is absolute on purpose: dunst resolves a bare name through
-        # PATH, and the HM user unit's PATH is not ours to rely on. The verb
+        # PATH, and the HM user unit's PATH is not ours to rely on. The command
         # reads the DUNST_* environment, so the positional arguments dunst adds
         # are ignored.
         herald-feed = {
