@@ -1368,6 +1368,33 @@ session a paired peer's A2A spawn created, projected verbatim off the live
 this line, `null` otherwise (including every legacy line written before
 this field existed, tolerated on read the same as any other field here).
 
+### `state/carry.json` — **v0** (durable-sessions plan, P-C1)
+
+The carry mark: the set of session ids marked DURABLE, so a project's whole
+carried set can be resurrected together (`aoide graph session carry on|off`,
+a later phase of the same plan — not yet wired to this store). Lives under
+`state_dir` (`aoide_storage::fs::state_dir`) alongside `usage.json`/
+`session-ledger.jsonl`, NOT `song/stage/` — a carry mark is durable
+operator state, never staged rehearsal state. Distinct from the ledger
+above: the ledger is an append-only record of every session that has ever
+left the roster, while `carry.json` is a small, freely-mutated SET — marked
+on, marked off, and its entries transferred wholesale when a carried
+session is resurrected under a new id.
+
+```json
+{ "schemaVersion": "0", "carried": [ { "sessionId": "conduct-1234-1756…", "markedAt": "2026-08-26T10:00:00Z" } ] }
+```
+
+**Additive / tolerate-missing:** a missing, corrupt, or wrong-shape file
+reads as an empty carried set, never an error — a mark on an id that never
+produced a ledger line is inert, not an error condition. Written atomically
+(`aoide_storage::fs::atomic_write`, not `atomic_write_private`: a session id
+is the same class of data `sessions.json`/`a2a-agents.json` already keep at
+default mode). A carried id is a plain string, meaningful whether the
+session is live, dead-with-a-ledger-line, or dead-without-one. Re-marking
+an already-carried id refreshes its `markedAt` rather than duplicating the
+entry.
+
 ### `state/a2a-agents.json` — **v0**
 
 The client-side registry of EXTERNAL A2A agents this aoide has registered by
