@@ -173,6 +173,33 @@ lib.mkIf config.aoide.enable {
     };
   };
 
+  # ── Discovery beacon firewall (task #98 diagnosis) ────────────────────────
+  # `discoveryAdvertise` starts a background thread inside `aoide-a2a` that
+  # sends its LAN beacon on a fixed UDP multicast group+port
+  # (`aoide_storage::beacon::GROUP`/`PORT`, 239.255.87.10:8711, CONTRACTS.md
+  # §6's "Discovery beacon" subsection). NixOS's default firewall trusts only
+  # `lo` and drops every other inbound packet that isn't part of an
+  # established connection — including a beacon this SAME host's own
+  # multicast-loopback delivers to its own listening socket on a real
+  # interface, not only a beacon actually arriving from the wire. Confirmed
+  # live on yomi-strix (2026-08-26): an independent raw UDP send/receive over
+  # `lo` succeeds, the identical send/receive over `eno1` is silently
+  # dropped, and `firewall-start`'s generated ruleset shows zero
+  # `allowedUDPPorts` for this port — a socket bug was ruled out first
+  # (`ip route get 239.255.87.10` already resolves via the right interface,
+  # and pinning `IP_MULTICAST_IF` explicitly changed nothing). `bindAddress`
+  # above stays loopback-by-default and unmanaged here on purpose (going
+  # non-loopback is a deliberate, separate operator choice); the beacon is
+  # different in kind — `discoveryAdvertise` IS the deliberate opt-in for
+  # this instance to be found on the LAN, so flipping it also opens the one
+  # port that opt-in requires, the same "one option changes two things
+  # together" shape `tokenFile`/`bearerSecret` already hold in options.nix.
+  # A box that only ever wants to RECEIVE (`peer discover`/`peer invite`
+  # with `discoveryAdvertise` left off) still needs this port opened by
+  # hand — not covered by this toggle, since there is no persistent
+  # "this box discovers" state to hang a firewall rule off of.
+  networking.firewall.allowedUDPPorts = lib.mkIf config.aoide.a2a.discoveryAdvertise [ 8711 ];
+
   # ── Usage widget poller (opt-in, off by default per house policy) ────────
   # When aoide.usage.enable is true, run `aoide usage` on a timer: it computes
   # the LOCAL token/cost rollup from this machine's own Claude Code

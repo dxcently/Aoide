@@ -14,7 +14,11 @@ module builds against what nucleus declares.
   toggles, not part of the facet whitelist).
 - `aoided.nix` — the orchestrator daemon service: the neutral event stream,
   default-deny-per-class subscriptions, the user-gated rebuild pipeline, the
-  single audit log.
+  single audit log. Also opens the LAN discovery beacon's inbound UDP port
+  (`networking.firewall.allowedUDPPorts`) whenever `aoide.a2a.
+  discoveryAdvertise` is on — the stock firewall trusts only `lo`, and a
+  beacon never reaches a listening socket on a real interface without it
+  (task #98).
 - `melete-adapter.nix` — the concrete thin-adapter exemplar on the `aoided`
   event stream.
 - `shellbridge.nix` — the bidirectional bridge service: atomic JSON state

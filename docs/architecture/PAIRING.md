@@ -240,6 +240,29 @@ ceremony; discovery only tells you who is there to invite.
   advertises) only when the operator opts in — config/env knob
   (`AOIDE_DISCOVERY_ADVERTISE`, plus the nix option), cadence ~30s,
   jittered. No resident listener exists: hearing is on-demand.
+- **Interface selection needs no pinning.** A beacon socket binds
+  unbound (`0.0.0.0`) on both ends; the kernel resolves the outgoing
+  send and the receiving join to the same physical interface via the
+  normal unicast routing table (`ip route get <group>` reaches the
+  right interface even with no explicit `224.0.0.0/4` route present —
+  the multicast destination falls through to the default route like
+  any other). `IP_MULTICAST_IF`/interface-scoped joins were tested and
+  ruled out as a fix during task #98's diagnosis; the socket layer was
+  never the defect.
+- **A host must let the beacon's UDP port through its own firewall.**
+  The join succeeding (`ip maddr show` lists the group on the right
+  interface) is not the same as delivery succeeding: a default-deny
+  firewall (NixOS's stock one trusts only `lo`) drops an inbound
+  beacon on a physical interface even when it originated as this
+  SAME host's own multicast-loopback copy of a beacon it just sent —
+  confirmed by an independent raw UDP send/receive that succeeds over
+  `lo` and fails identically over the physical interface, with no
+  Aoide code in the path at all. The nix module opens the beacon's UDP
+  port automatically whenever `aoide.a2a.discoveryAdvertise` is on,
+  since that flag is already the operator's deliberate opt-in to being
+  found on the LAN; a box that only ever wants to receive
+  (`discoveryAdvertise` left off, running `peer discover`/`peer
+  invite` against others) must open that port itself.
 - **`aoide peer discover [--secs N]`** joins the group, listens
   briefly (default a few seconds), dedupes by fingerprint, and
   prints the table: name, fingerprint, URL, first/last heard. A

@@ -3353,7 +3353,14 @@ advertising on lazily mints this instance's own P-P1 identity if it
 doesn't exist yet, the same lazy-mint discipline `aoide identity` and
 `peer pair request` already hold. **No resident listener exists anywhere**
 — hearing a beacon is always an on-demand sweep, never something `a2a
-serve` itself does.
+serve` itself does. **The receiving host's own firewall must admit
+inbound UDP on this port** — a correct multicast join on the right
+interface (verified via routing-table fallback, no `IP_MULTICAST_IF`
+pinning needed) is not the same as delivery, and a default-deny
+firewall drops the beacon before any Aoide socket ever sees it
+(`docs/architecture/PAIRING.md`'s "Discovery" section has the
+diagnosis); the nix module opens this port automatically alongside
+`discoveryAdvertise`.
 
 **Discover** — `aoide peer discover [--secs N]` joins the group, listens
 `N` seconds (default ~4), and validates every line heard
