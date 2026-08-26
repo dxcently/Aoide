@@ -124,6 +124,22 @@
           registry = sb.registryAttrs;
         };
 
+      # ── aoide.* option derivation (P-I3, onboarding lane) ───────────────────
+      # Every `aoide.*` option declared across modules/{nucleus,facets,
+      # dendrites}, narrowed to {name, description, default} for `lyra
+      # onboard`'s `aoide.nix` generator (docs/architecture/ONBOARD.md "The
+      # vars-file generator"; lib/options.nix does the evalModules walk).
+      # Deliberately NOT per-system like `packages`/`checks` below —
+      # `songbookManifest` above sets the precedent (system-independent where
+      # nothing system-specific is needed) and this repo targets
+      # `x86_64-linux` only (`systems` above), so lyra shells a single static
+      # flake ref (`nix eval --json <checkout>#aoideOptions`) with no system
+      # attrpath to get right.
+      aoideOptions = import ./lib/options.nix {
+        inherit lib inputs;
+        pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      };
+
       # ── Checks ─────────────────────────────────────────────────────────────
       # The contractual coupling discipline (lib/checks.nix). They pass
       # trivially now (no facets declare surface owners yet) and become real as

@@ -571,13 +571,15 @@ count.
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
-- `lyra schema --json` — the AoideOS-surface contract: rice/draft/mode/
-  cover/livery/quickshell/screen/shellbridge/herald, the painted surface.
-  **42 commands** (`crates/lyra/src/registry.rs`'s golden test — one more
-  than the group list alone because `mcp.serve` must itself be a
+- `lyra schema --json` — the AoideOS-surface contract: onboard/rice/draft/
+  mode/cover/livery/quickshell/screen/shellbridge/herald, the painted
+  surface. **43 commands** (`crates/lyra/src/registry.rs`'s golden test —
+  two more than the group list alone: `mcp.serve` must itself be a
   registered path for `aoide_protocol::door::parse` to ever reach lyra's
-  `special` closure on `mcp serve --stdio`). Lyra alone may shell out to
-  nix (`song/widgets.rs`).
+  `special` closure on `mcp serve --stdio`, and `onboard` (P-I3,
+  docs/architecture/ONBOARD.md) is lyra's own root-coupled command, not
+  named in any painted group). Lyra alone may shell out to nix
+  (`song/widgets.rs`, and `onboard`'s own `nix eval`/`nix-instantiate`).
 
 A consumer wanting the whole desktop's capability inventory reads both.
 This was never a version bump: `schemaVersion` stays `"0"` on both —
