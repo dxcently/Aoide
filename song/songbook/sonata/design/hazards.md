@@ -271,12 +271,12 @@ resetting to zero.
   files-not-processes rule), and side effects go through `bridge.sendCommand`
   or a Quickshell-native service call (`DesktopEntry.execute()`,
   `Hyprland` workspace `activate()`).
-- **`ShellBridge` is OUTBOUND-only, and it only understands verbs the daemon
+- **`ShellBridge` is OUTBOUND-only, and it only understands commands the daemon
   parses.** `{ cmd: "powermenu" }` went nowhere — shellbridge's parser never
-  knew that verb — so the bar's clef calls `.toggle()` on the injected
+  knew that command — so the bar's clef calls `.toggle()` on the injected
   powermenu instance directly instead. Inbound triggers are Hyprland
   `GlobalShortcut`s registered in-process (`aoide:launcher`,
-  `aoide:powermenu`, `aoide:clipboard`); no new socket, no new CLI verb.
+  `aoide:powermenu`, `aoide:clipboard`); no new socket, no new CLI command.
 - **Pipewire's `.audio` sub-object never binds unless the node is tracked.**
   `PwObjectTracker` must carry BOTH `defaultAudioSink` and
   `defaultAudioSource`.
@@ -294,7 +294,7 @@ resetting to zero.
   reload regardless, run `aoide quickshell reload`.
 - **A brand-new slot file is not discovered by a reload** — `manifest.json` is
   read once, at startup. Restart `aoide-quickshell.service`.
-- **The CLI verb is `quickshell reload`, not `shell reload`** — renamed
+- **The CLI command is `quickshell reload`, not `shell reload`** — renamed
   because `shell` collided with `--agent shell`.
 - **Quickshell's file watcher only scans the TOP LEVEL of `run/qml/`, never
   `run/qml/songs/`.** So editing a song widget can never trigger a reload on

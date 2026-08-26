@@ -325,7 +325,7 @@ Item {
     //   4 bt        · paired bluetooth devices (teal)
     // The bt register is the fifth because pairing is not sink selection: a
     // connected headset does appear under `outputs` as a bluez sink, but
-    // connecting it is a different verb, and with the pillars persisting the
+    // connecting it is a different command, and with the pillars persisting the
     // bt roster would otherwise have no way in from the expanded face.
     //
     // TWO ROW SPECIES, not one. Registers 0–1 are STREAMS: they have a level
@@ -1202,7 +1202,7 @@ Item {
                 // its size, so it gets the pressable edge a control has in this
                 // house and a tag never does (calendar.qml's `[ ἔτος ⌄ ]`
                 // argument, and the same drawn chip the plinth already wears).
-                // It carries the live channel count as well as the verb, so it is
+                // It carries the live channel count as well as the command, so it is
                 // ALSO this stele's per-app figure and the word "channels"
                 // appears exactly once on the surface — the naos captions its
                 // rows by their SOURCE (`♪ apps`), the way a notification card
@@ -1867,7 +1867,7 @@ Item {
                     id: hint
                     anchors.right: mixerTag.left; anchors.rightMargin: 10
                     anchors.bottom: parent.bottom
-                    // The verbs are the same on a shaft and on a channel row,
+                    // The commands are the same on a shaft and on a channel row,
                     // which is why the naos needed no gesture vocabulary of
                     // its own — this one line still names both.
                     text: "scroll · set   click · mute"

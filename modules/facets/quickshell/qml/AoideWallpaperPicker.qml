@@ -12,7 +12,7 @@
 // ── The write seam ──────────────────────────────────────────────────────────
 // QML has no file-write primitive and the shellbridge socket only speaks
 // `focuswindow`, so switching the wallpaper cannot write stage/cover.json from
-// here. Instead a pick shells out through the ONE CLI verb built for this —
+// here. Instead a pick shells out through the ONE CLI command built for this —
 // `lyra cover set <path>` (Quickshell.execDetached, the same exec idiom
 // ConductorGadget uses) — which atomic-writes stage/cover.json. `cover` left
 // core's registry at P-A5 of the binary-split workstream and lives only in

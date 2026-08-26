@@ -617,7 +617,7 @@ Item {
                                                  // instead of the daemon's ~12s
                                                  // timer. Guarded like
                                                  // focusSession — a no-op until
-                                                 // the bridge verb lands.
+                                                 // the bridge command lands.
                         id: condTag
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter

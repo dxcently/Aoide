@@ -140,7 +140,7 @@ PanelWindow {
 
     // ── Second trigger: Hyprland global shortcut (aoide:powermenu) ─────────
     // The launcher's in-process inbound idiom (see AoideLauncher.qml's
-    // rationale — no new socket, no aoided verb). The bar's clef stays the
+    // rationale — no new socket, no aoided command). The bar's clef stays the
     // primary key; this gives the compositor a bindable hook and makes the
     // LIVE instance summonable programmatically
     // (`hyprctl dispatch global aoide:powermenu`).

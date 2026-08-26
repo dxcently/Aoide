@@ -22,7 +22,7 @@
 // ── Why GlobalShortcut stays OUT of this file ───────────────────────────────
 // The facet's AoidePanel.qml registers its own `aoide:dock` Hyprland global
 // shortcut in-process — ShellBridge is OUTBOUND-only and there is no inbound
-// CLI verb to toggle a surface, same rationale as the old AoideLauncher's. That
+// CLI command to toggle a surface, same rationale as the old AoideLauncher's. That
 // keybind stays a FACET contract on purpose: Phase 6 keeps it in shell.qml,
 // dispatching into this slot, so a future song's dock body can't silently
 // forget to bind it. This file instead exposes the unconditional

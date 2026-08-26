@@ -19,8 +19,8 @@
 // write-temp-then-rename, so a hot-reload or a crash mid-write never reads a
 // torn file), mirroring the execute()-direct precedent launcher.qml's
 // own header already flags: DesktopEntry.execute() is called straight from
-// QML with no aoided verb in between, and this ledger follows the same
-// no-new-verb idiom for its own side effect. Parsing follows LiveryState.qml's
+// QML with no aoided command in between, and this ledger follows the same
+// no-new-command idiom for its own side effect. Parsing follows LiveryState.qml's
 // FileView idiom: a guarded try/catch degrades a missing/garbage file to an
 // empty map rather than throwing.
 //

@@ -49,7 +49,7 @@ Three consequences worth internalising:
 
 House rule 7, and the one rule in this file that is not about looks. A widget
 **paints**; it is never the place a capability *lives*. State, policy, IPC and
-system access sit behind an agnostic bridge — a CLI verb, a stage file
+system access sit behind an agnostic bridge — a CLI command, a stage file
 (`CONTRACTS.md §4`), an IPC socket — that a shell can reach with no desktop
 running. The widget picks that bridge up **by name** and draws it.
 
@@ -63,9 +63,9 @@ In practice, inside a `widgets/*.qml`:
 - **Read** from `livery`, `bridge`, and whatever `slots.md` lists for your slot.
   Arrange, animate, draw. That is the whole job.
 - **Do not** hold the only copy of a fact. If the widget computes something a
-  verb should know, the verb should compute it and the widget should read it.
-- **Do not** `Process`-out to do work a verb should do. `bridge` is the only
-  outbound path (§2), and if the thing you need has no verb, the verb is the
+  command should know, the command should compute it and the widget should read it.
+- **Do not** `Process`-out to do work a command should do. `bridge` is the only
+  outbound path (§2), and if the thing you need has no command, the command is the
   work — write it, then draw it.
 - **Do not** decide policy. Gates, permissions and admission live in `aoided`.
 - **A new API lands as a bridge FIRST and the QML picks it up second.** Never

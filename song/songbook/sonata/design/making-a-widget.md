@@ -520,7 +520,7 @@ aoide rice mode stage sonata
 #    (a no-op re-stage deliberately skips the reload).
 aoide rice stage sonata
 
-# 2. force a reload yourself when you need one anyway. The verb is
+# 2. force a reload yourself when you need one anyway. The command is
 #    `quickshell reload` (renamed from `shell reload` — `shell` collided
 #    with `--agent shell`). No systemd restart; no-ops if qs isn't running.
 aoide quickshell reload

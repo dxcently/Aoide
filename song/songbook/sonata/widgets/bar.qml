@@ -79,7 +79,7 @@
 // consequences, all decided rather than inherited:
 //   · MUTE moved to MIDDLE-CLICK on either audio cell, since left-click is
 //     now "open". Not a right-click context menu (nothing on this strip has
-//     one, and one verb does not justify inventing that system) and not
+//     one, and one command does not justify inventing that system) and not
 //     "it's inside the colonnade" alone (mute is an everyday action; making
 //     it cost a surface plus two clicks is a regression). The cue prints
 //     `mmb · mute` in its own ledger, so the gesture is on screen exactly
@@ -125,7 +125,7 @@
 //     two clicks. It no longer costs that: the cue is already on screen
 //     whenever the pointer is on the cell, it now STAYS on screen, and one
 //     click on the row does it, for all THREE channels instead of two. A second
-//     invisible path to a verb that is now drawn on screen is not a shortcut,
+//     invisible path to a command that is now drawn on screen is not a shortcut,
 //     it is a thing that rots, so `Qt.MiddleButton` is gone from both cells
 //     and `mmb · mute` is gone from the ledger with it — the line now reads
 //     `click · silence`, which describes a gesture the surface it is printed
@@ -141,7 +141,7 @@
 //     natively, and no `pactl set-default-sink` shell-out is needed. That is
 //     the whole switch. The roster itself comes off `Pipewire.nodes`, filtered
 //     by `PwNodeType.Audio` with `isStream` excluded, and the BT roster off
-//     `Bluetooth.devices` with `connect()`/`disconnect()` (the only verbs that
+//     `Bluetooth.devices` with `connect()`/`disconnect()` (the only commands that
 //     module has — see the 2026-08-15 grounding on the seam below).
 //
 // Data sources (unchanged real Quickshell services — the plumbing survives):
@@ -482,14 +482,14 @@ component WorkspaceRow: Item {
     // The Exodos powermenu (AoideExodos instance, injected by shell.qml the
     // same way the launcher receives the clipboard). The clef toggles it
     // directly — the old `{ cmd: "powermenu" }` bridge line was a dead end
-    // (shellbridge never parsed that verb).
+    // (shellbridge never parsed that command).
     required property var powermenu
     // The center-left dock (AoidePanel instance), injected by shell.qml the
     // SAME way — audit-report.md flagged the ✎N cell's `{ cmd: "dock",
     // action: "toggle" }` as a silent no-op and suggested teaching shellbridge
-    // the verb, but that goes against this file's own already-stated rule two
+    // the command, but that goes against this file's own already-stated rule two
     // lines up: ShellBridge is OUTBOUND-only by design (hazards.md §5,
-    // AoidePanel.qml's own header — "no inbound CLI verb to toggle a
+    // AoidePanel.qml's own header — "no inbound CLI command to toggle a
     // surface"), and adding one here would be a second, inconsistent path to
     // the exact toggle GlobalShortcut (SUPER+G → aoide:dock) already owns
     // cleanly. Fixed the same way powermenu was: call .toggle() on the
@@ -977,7 +977,7 @@ component WorkspaceRow: Item {
 
     // ── Agent-sessions count (Aoide-native — sessions.json via FileView) ────
     // Reuses the TerminalManagerGadget data seam (already-plumbed stage file).
-    // Click → open the gadget dock (bridge dock verb, the AoideAgentWidgets path).
+    // Click → open the gadget dock (bridge dock command, the AoideAgentWidgets path).
     property int sessionCount: 0
     property bool sessionsBlocked: false
     property bool hooksBlocked: false
@@ -1385,7 +1385,7 @@ component WorkspaceRow: Item {
             // Direct toggle on the injected AoideExodos instance — the same
             // sibling-reference idiom as launcher↔clipboard. (The old
             // `sendCommand({ cmd: "powermenu" })` went nowhere: shellbridge's
-            // parser never knew that verb.)
+            // parser never knew that command.)
             onClicked: if (root.powermenu) root.powermenu.toggle()
         }
     }
@@ -1717,7 +1717,7 @@ component WorkspaceRow: Item {
     //
     // khoa, 2026-08-16: it is no longer read-only. A copyist's cue staff also
     // carries the TACET marks — where a channel falls silent — and that is the
-    // one verb this card grows: clicking a channel row silences it (mute for
+    // one command this card grows: clicking a channel row silences it (mute for
     // out/in, adapter power for bt). Nothing else on it is clickable, and the
     // full control surface is still the colonnade one click away. It also
     // RETAINS on its own body now (see the popout-state block above); the
@@ -2242,10 +2242,10 @@ component WorkspaceRow: Item {
                         // this card actually has. "silence" and not "mute"
                         // because the bt row cuts power rather than muting, and
                         // this widget already treats the two as one state.
-                        // Two verbs as of the wheel landing, in the colonnade
+                        // Two commands as of the wheel landing, in the colonnade
                         // ledger's own `scroll · set   click · mute` form.
                         text: "scroll · set  click · silence"
-                        // 9 → 8: two verbs do not fit beside the kaomoji at 9
+                        // 9 → 8: two commands do not fit beside the kaomoji at 9
                         // in a 217-wide card (they touched — captured). A hint
                         // is an informational layer, where the 7–9 micro tier
                         // is legal; nothing you came to read lives here.

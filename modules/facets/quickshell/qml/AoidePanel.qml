@@ -12,7 +12,7 @@
 //
 // ── Why GlobalShortcut, not the bridge ──────────────────────────────────────
 // Same rationale as AoideLauncher/the old dock: ShellBridge is OUTBOUND-only and
-// there is no inbound CLI verb to toggle a surface. The dock registers a Hyprland
+// there is no inbound CLI command to toggle a surface. The dock registers a Hyprland
 // global shortcut in-process and receives the keypress directly — the compositor
 // binds `SUPER, P, global, aoide:dock`. One press pins it out, the next dismisses.
 //
@@ -550,7 +550,7 @@ PanelWindow {
                             id: usageGadget
                             width: root.gadgetW
                             livery: root.livery
-                            bridge: root.bridge     // for the ❋-spark manual refresh (refreshusage verb)
+                            bridge: root.bridge     // for the ❋-spark manual refresh (refreshusage command)
                             visible: hasData
                         }
 

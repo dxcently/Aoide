@@ -65,7 +65,7 @@ Item {
     // WidgetSlot._songProps() always passes bridge unconditionally (universal
     // widget contract, slots.md) — promoted from the facet's nullable
     // `bridge: null` to required. Still used only for the OUTBOUND-only
-    // (hazards §5) `refreshusage` verb via refreshUsage(); the manual-refresh
+    // (hazards §5) `refreshusage` command via refreshUsage(); the manual-refresh
     // click null-guards on it regardless.
     required property var bridge
 
@@ -133,13 +133,13 @@ Item {
     // ── MANUAL REFRESH — click the ❋ spark to demand a fresh `aoide usage` ────
     // The spark is already the data heartbeat (it ticks on every poller write,
     // above); clicking the heartbeat asks for a beat. requestRefresh sends the
-    // OUTBOUND-only `refreshusage` verb (bridge.refreshUsage → shellbridge →
+    // OUTBOUND-only `refreshusage` command (bridge.refreshUsage → shellbridge →
     // `aoide usage` → state/usage.json write → the FileView watch → onUsageChanged
     // → clef.tick()), so SUCCESS feedback is the SAME arrival spin a timed poll
     // draws — no second success animation. clef.acknowledge() covers only the gap
     // between click and that write with a quiet press-dip, so the click never
     // feels dead. refreshPending is a cooldown: nothing downstream dedupes the
-    // verb, so without it a mash would stack redundant ~15s `aoide usage` runs on
+    // command, so without it a mash would stack redundant ~15s `aoide usage` runs on
     // the daemon — it swallows repeat clicks until the next real write
     // (onUsageChanged) or refreshCooldownMs, whichever comes first.
     readonly property int refreshCooldownMs: 10000
@@ -149,11 +149,11 @@ Item {
     // animation: the spinner is reserved for real work (refreshPending).
     property bool hoverRefresh: false
 
-    // The real Claude Code status-verb list — extracted verbatim (strings on
+    // The real Claude Code status-word list — extracted verbatim (strings on
     // the installed claude-code binary) rather than invented, per the User: "just
     // copy the code over". One word is drawn per click and held for that
     // whole spin (see requestRefresh/spinWord below), same as the real CLI
-    // picks one verb per turn rather than cycling through several.
+    // picks one word per turn rather than cycling through several.
     readonly property var spinWords: [
         "Accomplishing", "Actioning", "Actualizing", "Architecting", "Baking",
         "Beaming", "Beboppin'", "Befuddling", "Billowing", "Blanching",
@@ -209,7 +209,7 @@ Item {
         refreshCooldown.restart()
         gadget.bridge.refreshUsage()
         // One word for the whole spin, drawn now and held (not rerolled
-        // every frame) — matches the real CLI picking one verb per turn.
+        // every frame) — matches the real CLI picking one word per turn.
         gadget.spinWord = gadget.spinWords[Math.floor(Math.random() * gadget.spinWords.length)]
         // Start the loop fresh — reset even though activeSpin should
         // already be false here (the cooldown guard above blocks re-entry
@@ -220,7 +220,7 @@ Item {
         clef.loopedOnce = false
         spinFrame.frame = -1
     }
-    // Fallback release: if NO write ever lands (daemon down, the verb unknown to
+    // Fallback release: if NO write ever lands (daemon down, the command unknown to
     // an un-rebuilt daemon, or the fetch itself failing), clear the cooldown
     // after refreshCooldownMs so the spark never stays stuck un-clickable.
     Timer {

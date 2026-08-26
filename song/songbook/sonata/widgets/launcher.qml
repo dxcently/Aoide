@@ -19,18 +19,18 @@
 //
 // ── Why GlobalShortcut, not the bridge ──────────────────────────────────────
 // ShellBridge is OUTBOUND-only (QML → shellbridge socket), and the old
-// `aoide shell launcher toggle` CLI verb the keybind used to call is an
+// `aoide shell launcher toggle` CLI command the keybind used to call is an
 // unimplemented stub (not in the aoide command schema). Rather than build a new
 // inbound CLI+socket path, the launcher registers a Hyprland global shortcut and
 // receives the keypress IN-PROCESS — the cleanest inbound trigger for a surface
-// that lives in the shell. No new aoided verb, no SocketServer.
+// that lives in the shell. No new aoided command, no SocketServer.
 //
 // ── Enumerate + launch (exec discipline) ────────────────────────────────────
 // Apps come from Quickshell's built-in DesktopEntries (parsed XDG .desktop
 // files); launching calls DesktopEntry.execute() directly — the same
 // Quickshell-native-service idiom the rest of the shell uses for side effects.
 // The Grimoire's ledger write follows the same idiom: QML writes its stage
-// file directly, no new aoided verb.
+// file directly, no new aoided command.
 //
 // ══ THE GRIMOIRE — a rectangular open book with an incantation strip ════════
 // Fourth chrome (khoa, 2026-07-31). Iteration history, all same-day: the

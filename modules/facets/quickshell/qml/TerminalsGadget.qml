@@ -492,7 +492,7 @@ Item {
                                                       // instead of the daemon's
                                                       // ~12s timer. Guarded like
                                                       // focusSession — a no-op
-                                                      // until the bridge verb lands.
+                                                      // until the bridge command lands.
                     id: ttyTag
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
@@ -1187,7 +1187,7 @@ Item {
                                 // Every row now carries a sessionId — a tracked
                                 // agent/shell, or the daemon's synthetic `win:<addr>`
                                 // for a bare tty. The bridge resolves it to a window
-                                // (the one narrow outbound socket verb).
+                                // (the one narrow outbound socket command).
                                 if (modelData.sessionId && gadget.bridge && gadget.bridge.focusSession)
                                     gadget.bridge.focusSession(modelData.sessionId);
                             }
