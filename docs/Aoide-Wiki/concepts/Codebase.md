@@ -265,7 +265,7 @@ nix build .#checks.x86_64-linux.vm-boot -L             # headless QEMU boot test
 --workspace`: `aoide-conduct`/`aoide-server` bind real sockets and a
 workspace-wide run deadlocks on this machine. Each crate carries its own
 `registry.rs` golden test pinning its exact command-path set (`aoide-cli`:
-80 paths; `aoide-lyra`: 42), plus schema validity, exit-code, and MCP
+80 paths; `aoide-lyra`: 43), plus schema validity, exit-code, and MCP
 tool-list-parity tests; the conduct crate's graph domain
 (`crates/conduct/src/graph/{model,doc,common,commands,window,session_store,
 conduct,send}.rs`) carries handlers for all 21 `graph` subcommands: cycle
@@ -284,7 +284,8 @@ two-binary split.
 
 **Real code paths:** the whole flake/walker/option/checks layer; both packages
 build; `aoide guide`, `aoide schema --json`, `mcp serve --stdio`, and the audit
-log; `rice lint` (native [[livery]] lint); the daemon skeleton (audit
+log; `aoide onboard`/`lyra onboard` (the clone-onboarding lane,
+[[Clone-and-Run]]); `rice lint` (native [[livery]] lint); the daemon skeleton (audit
 append, user gate, default-deny event bus); shellbridge (atomic writer, seeded
 stage files, and a live socket accept loop — `focuswindow`); the melete-adapter skeleton (env-driven
 subscription, metadata-only notification boundary); all four livery emitters; the
@@ -330,9 +331,9 @@ NowPlaying/Power/Calendar gadgets. Baseline dendrites default on in
 `hosts/common` via `mkDefault`; `allowUnfree` is carried mkIf-scoped by the two
 dendrites that need it (devtools, fonts).
 
-**Structured not-implemented stubs (exit 64, 10 total):** the mutating CLI
+**Structured not-implemented stubs (exit 64, 9 total):** the mutating CLI
 commands — `rice declare/transpose`, the five-command `content` pipeline, `make`,
-`update`, `onboard`. Their arg-parsing, schema, gate flag, and audit trail are
+`update`. Their arg-parsing, schema, gate flag, and audit trail are
 real; only the live-system action is deferred. (`rice stage`/`rice compose`/
 the `rice draft` group are **real** — `rice stage` stages
 `song/stage/livery.json` for Quickshell hot-reload today; only the

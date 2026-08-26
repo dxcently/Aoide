@@ -73,7 +73,8 @@ the groups it documents.
 | `guide`, `schema` | 2 | real |
 | `content register/propose/ingest/query` | 4 | stub |
 | `content approve` | 1 | stub, gated |
-| `make` ([[Widget-Maker]] entry), `onboard` | 2 | stub |
+| `make` ([[Widget-Maker]] entry) | 1 | stub |
+| `onboard` | 1 | real — the clone-onboarding lane, delegates the nix half to `lyra onboard` ([[Clone-and-Run]]) |
 | `update` | 1 | stub, gated |
 | `mcp serve`, `daemon` | 2 | real |
 | `graph` group (incl. `pending list/approve/deny`, `spawn` — below) | 21 | real |
@@ -116,6 +117,15 @@ versus already present. `--capture` installs a parallel set of entries that
 tee raw payloads to `~/Aoide/state/<agent>-hooks.jsonl` for debugging, under
 a distinct idempotency key so capture entries coexist with the plain ones
 (removed manually). See [[Agent-Hooking]].
+
+**`onboard`** (`cli/src/commands/onboard.rs`) is the clone-onboarding lane
+— CLI-only, run from a checkout. It registers the clone as a graph project,
+links `~/song` to `<checkout>/song` (never clobbering an existing file or
+symlink), and seeds `song/songbook/preferences.md` when absent; then it
+asks which agent harnesses to wire (`--harness a,b`, or `--yes` for
+non-interactive) and runs `hooks install` for each. When the `lyra` binary
+resolves it delegates the nix half to `lyra onboard`, and finally prints
+the guide. See [[Clone-and-Run]].
 
 A stub returns a structured `Outcome` with status `not-implemented` (exit
 `64`), never a crash — arg-parsing, the schema entry, the audit-log append,

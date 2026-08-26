@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-25
+updated: 2026-08-26
 tags: [aoide, agent, cli]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -50,8 +50,10 @@ concept mapping, and its security model.
 ## Guidance tiers
 
 This page holds the four-tier onboarding ladder; the repo root `AGENTS.md`
-points here, and `aoide guide` prints the same map at runtime. An agent
-orients through the tiers in order:
+points here, and `aoide guide` prints the same map at runtime. `aoide
+onboard` ([[Clone-and-Run]]) ends by printing this same guide, so a fresh
+install lands the agent at tier 0. An agent orients through the tiers in
+order:
 
 | Tier | Surface | Scope |
 |---|---|---|

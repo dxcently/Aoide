@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-25
+updated: 2026-08-26
 tags: [aoide, architecture, desktop, lyra, pipeline]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -32,7 +32,7 @@ marked on one of three rungs:
   bridge skeletons, the three facets, song replay, the launcher, the gadget
   dock.
 - **Stubbed** — the mutating CLI commands (`rice declare/transpose`,
-  `content *`, `make`, `update`, `onboard`) parse, audit, and exit 64 with a
+  `content *`, `make`, `update`) parse, audit, and exit 64 with a
   structured not-implemented payload; only the live action is deferred.
   (`rice lint`/`rice stage`/`rice compose`/the `rice draft` group are real —
   see [[Self-Ricing]]. There is no `rice gen`: cut outright, not stubbed —
@@ -74,7 +74,7 @@ of the data flow, labeled `aoide` throughout for readability. Ownership
 (`CONTRACTS.md` §3, [[Package-Layout]]): the AGENT INTERFACE/`aoided`/CONTENT
 PIPELINE/NIX EVAL boxes are `aoide`'s (80 commands: conducting/orchestration
 is aoide's identity); the RICE ENGINE, LIVERY, Quickshell, and shellbridge
-boxes below them are `lyra`'s (42 commands, its own schema and dispatch,
+boxes below them are `lyra`'s (43 commands, its own schema and dispatch,
 routed through the desktop, not through `aoided`'s CLI trunk).
 
 ```
@@ -133,7 +133,7 @@ the implemented/stubbed ladder.
 
 | Subsystem            | Inputs                                         | Outputs                                             | Status                                     |
 | -------------------- | ---------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
-| [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 72 real/8 exit 64; lyra 40 real/2 exit 64) |
+| [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 73 real/7 exit 64; lyra 41 real/2 exit 64) |
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`~/Aoide/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; stage    | mostly real (`declare`/`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all commands exit 64)                |
@@ -305,7 +305,7 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   `aoide schema --json` is its machine-readable source of truth; the stdio
   MCP façade (`aoide mcp serve --stdio`) generates its tool list from it, and
   the [[A2A-Door]]'s AgentCard is derived from the same schema — all
-  one-to-one. **80 commands** — real (72): `guide`, `schema`,
+  one-to-one. **80 commands** — real (73): `guide`, `schema`,
   `mcp serve`, `daemon`, `events tail`, `conduct`, `conductor`, `adapter
   melete`, `identity`, the
   5-command `a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`),
@@ -318,22 +318,39 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   socket-only credential broker under its own uid, [[Secrets-Broker]]),
   `usage`, `hooks install`, `soundcheck`, `who` (live presence over sessions
   and registered peers), the 3-command `inbox` group (`list`/`read`/`clear`, the
-  durable per-host message store), and the 21-command `graph` group (the
+  durable per-host message store), the 21-command `graph` group (the
   [[Session-Graph]] DAG viewer + management layer over projects and
   sessions, incl. `graph send`/`wrap`/`reap` and the `graph pending
-  list|approve|deny` held-injection queue, all real); stubs (8, exit 64):
+  list|approve|deny` held-injection queue, all real), and `onboard` — the
+  core half of installation: registers the clone as a graph project, links
+  `~/song` to the checkout's `song/` (never clobbering an existing file or
+  symlink), seeds `song/songbook/preferences.md` when absent, wires the
+  agent harnesses (an interactive pick over `hooks install`, or `--harness
+  a,b`/`--yes` non-interactive), then delegates the nix half to `lyra
+  onboard` when the lyra binary resolves and prints the guide. Interactive
+  prompts CLI-wide (picker, y/N confirms, hidden input) ride `inquire`
+  behind seams in `crates/protocol/src/pick.rs`; piped/non-tty behavior is
+  unchanged. Stubs (7, exit 64):
   the 5-command `content` group (`register`/`propose`/`ingest`/`query`/
-  `approve`), `make`, `update`, `onboard`. Core is nix-independent: cargo
+  `approve`), `make`, `update`. Core is nix-independent: cargo
   build, zero nix shell-outs.
 - **`lyra`** — the AoideOS paint binary. `lyra schema --json` holds the other
-  **42 commands**: the 18-command `rice` group (`lint`, `stage`, `compose`, the
+  **43 commands**: the 18-command `rice` group (`lint`, `stage`, `compose`, the
   3-command `rice draft` group, the 4-command `rice mode` group, the 5-command `rice
   take` rehearsal-snapshot group, `rice back`; `declare`/`transpose` are the
   2 stubs), `cover set`, the 3-command `livery` group (`lint`/`resolve`/`emit`
   — the native design-token engine), `shellbridge`, `quickshell reload` (the
   Quickshell IPC hot-reload trigger — rebuilds the whole scene from
   `shell.qml` in-process, picking up dynamically-loaded widget/facet QML the
-  file watcher can't track), `herald push`, and the 14-command `screen` group
+  file watcher can't track), `herald push`, `onboard` (the nix half of
+  installation: generates `./aoide.nix` — or `--out <path>` — listing every
+  `aoide.*` module option, 142 today, derived live from the modules via the
+  flake's `aoideOptions` output, defaults commented out with one-line
+  descriptions, plus the env-knob appendix as comments, and prints the
+  `imports = [ ./aoide.nix ];` line for the user's own flake — it never edits
+  that flake; re-running warns and backs up the old file to `<out>.bak`, and
+  a file it did not generate is refused, never overwritten), and the
+  14-command `screen` group
   (capture, OCR, and synthesized-pointer control — [[Screen-Control]]). Only
   `lyra` may shell out to nix.
 

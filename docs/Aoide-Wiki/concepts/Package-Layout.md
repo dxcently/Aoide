@@ -66,13 +66,13 @@ songbook manifest).
 | **secrets** | The credential broker: a socket-only daemon under its own uid, TOTP-gated parked resolves, `file`/`age` backends, `secrets watch`/`--popup`. See [[Secrets-Broker]]. | aoide | `secrets.*` (16) |
 | **conductor** | The session-DAG TUI (ratatui: app/ui/graphview/theme). Depends on `{protocol, conduct, storage}` via a dependency-injection seam (`App` takes a `DispatchFn`), never on `server`. | aoide | `conductor` |
 | **upkeep** | Mechanical integrity, the working-tree half: `soundcheck` polices gitignored/uncommitted state (`result`, `state/`, stray root files) that `nix flake check` structurally cannot see. Report-only, forever — never moves, deletes, formats, or repairs. | aoide | `soundcheck` |
-| **cli** | The app shell: `aoide`/`aoided` bins, arg parse, the single dispatcher, registry assembly (`commands::all()`), guide/onboarding, and the three root-coupled groups (`meta`, `stubs`, `mcp serve`) that read the fully-assembled registry. Depends on every core domain crate; nothing depends on it. | aoide | `guide`, `schema`, `mcp.serve`, `content.*` (5, stub), `make`/`update`/`onboard` (stub) |
+| **cli** | The app shell: `aoide`/`aoided` bins, arg parse, the single dispatcher, registry assembly (`commands::all()`), guide/onboarding, and the three root-coupled groups (`meta`, `stubs`, `mcp serve`) that read the fully-assembled registry. Depends on every core domain crate; nothing depends on it. | aoide | `guide`, `schema`, `mcp.serve`, `content.*` (5, stub), `make`/`update` (stub), `onboard` |
 | **song** | The ricing/design engine: the native livery engine (schema · resolve · emit), rice/draft/mode/cover/take, the Pantheon design language. Rices portably — no Stylix/NixOS-module dependency in the crate itself. | lyra | `rice.*` (3), `rice.draft.*` (3), `rice.mode.*` (4), `cover.set`, `livery.*` (3), `rice.declare`/`.transpose` (stub), `quickshell.reload`, `rice.take.*` (6) |
 | **screen** | A read-only view onto the desktop for agents plus pointer synthesis: `info`/`shot`/`ocr`/`diff`/`send`, `point` (native `zwlr_virtual_pointer_v1` synthesis, 9 subverbs). Carved out (P-A1) specifically to isolate wayland/image dependency weight off core. | lyra | `screen.*` (14) |
 | **test-support** | Shared test rig only — scratch dirs, `EnvSaver`, fixture payloads, the single `env_lock`. A dev-dependency, never a production edge. | both (dev-only) | none |
-| **lyra** | The second app shell: arg parse, dispatcher, registry assembly for the paint bundle. The one binary allowed to shell out to nix. Never registers `a2a serve`, `conductor`, or any core-only group. | lyra | `guide`, `schema`, `mcp.serve` |
+| **lyra** | The second app shell: arg parse, dispatcher, registry assembly for the paint bundle. The one binary allowed to shell out to nix. Never registers `a2a serve`, `conductor`, or any core-only group. | lyra | `guide`, `schema`, `mcp.serve`, `onboard` |
 
-Command totals: **aoide 68** (60 real, 8 stub), **lyra 42** (40 real, 2 stub)
+Command totals: **aoide 80** (73 real, 7 stub), **lyra 43** (41 real, 2 stub)
 — see [[Full-Architecture]] for the full per-group breakdown.
 
 ## Two binaries — `aoide`/`aoided` (core) and `lyra` (paint)

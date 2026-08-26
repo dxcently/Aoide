@@ -33,7 +33,7 @@ start at [[aoide-cli]] and the group pages linked below.
   `state/` via `$AOIDE_STATE_DIR`, `song/stage/` via `$AOIDE_STAGE_DIR`.
   Stage/state writes are atomic temp-then-rename.
 - **Two registries, one convention:** `aoide schema --json` holds 80
-  command paths, `lyra schema --json` holds 42 — every group page prefixes
+  command paths, `lyra schema --json` holds 43 — every group page prefixes
   each heading `aoide `/`lyra ` so the binary a command belongs to is never
   ambiguous.
 - `secrets exec`'s parking is detailed in [[Secrets-Commands]].
@@ -67,7 +67,8 @@ start at [[aoide-cli]] and the group pages linked below.
   `song/stage/herald.json`), and `hooks install` (harness settings merge,
   `--capture` tee to `state/<agent>-hooks.jsonl`).
 - [[Meta-and-Upkeep|Meta-and-Upkeep]] — `guide`, `schema`,
-  `make`/`update`/`onboard` (stubs), `usage` (→ `state/usage.json`),
+  `make`/`update` (stubs), `onboard` (the first-boot flow, core and lyra
+  halves), `usage` (→ `state/usage.json`),
   `quickshell reload`, `soundcheck` (report-only sweep).
 - [[Secrets-Commands|Secrets-Commands]] — the `aoide secrets` credential door: 16
   commands across direct-home admin, over-the-socket operator, and the daemon

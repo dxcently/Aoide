@@ -40,7 +40,7 @@ reads the socket path `shellbridge` owns).
 
 ## The command surface
 
-42 command paths, [[aoide-cli|`aoide`]]'s sibling registry, pinned by its
+43 command paths, [[aoide-cli|`aoide`]]'s sibling registry, pinned by its
 own golden-snapshot test in `crates/lyra/src/registry.rs`.
 
 | Group | Leaves | Detail |
@@ -53,6 +53,7 @@ own golden-snapshot test in `crates/lyra/src/registry.rs`.
 | `herald push` | 1 | dunst's notification-ledger hook — [[Content-and-Hooks]] |
 | `screen` | 14 | capture, OCR, and synthesized-pointer control — [[Screen-Commands]] |
 | `guide`, `schema`, `mcp serve` | 3 | the same commands as their `aoide` spellings, over lyra's own registry |
+| `onboard` | 1 | the nix half of clone onboarding — generates `./aoide.nix` with every `aoide.*` module option's default commented out, never edits the user's flake — [[Clone-and-Run]] |
 
 ## The nix boundary
 

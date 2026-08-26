@@ -480,9 +480,9 @@ lyra rice take prune [--older-than <N>d|<N>h] [--keep <N>] [--all-but-marks] [--
   Marked takes are protected unless `--force`. `--older-than` accepts only
   `<N>d`/`<N>h` (malformed → usage exit 2, `invalid-older-than`). Bare
   invocation on a real CLI tty (Door::Cli AND stdin AND stdout are terminals
-  — `pkgs/aoide/crates/protocol/src/pick.rs`) opens a multi-select picker;
-  choosing rows IS the confirm (no y/n prompt), aborting is usage exit 2
-  (`no-selection`).
+  — `pkgs/aoide/crates/protocol/src/pick.rs`) opens a multi-select picker
+  (`inquire::MultiSelect` renders the tty path); choosing rows IS the
+  confirm (no y/n prompt), aborting is usage exit 2 (`no-selection`).
 
 ### lyra rice back
 
@@ -513,9 +513,10 @@ lyra rice back [--take N | --mark <letter>] [--json]
   moves; the next snapshot parents off wherever it points (implicit
   branching, no branch command). Bare invocation on a real CLI tty opens a
   numbered picker defaulting to the head's parent (one-step undo = bare
-  Enter); off a tty (agent doors, pipes) a bare call refuses with usage
-  exit 2 (`no-selection`) — flags/`--json` bypass the picker either way.
-  Malformed flags are usage errors checked before the lock is taken.
+  Enter), rendered by `inquire` behind the `pick.rs` seam; off a tty (agent
+  doors, pipes) a bare call refuses with usage exit 2 (`no-selection`) —
+  flags/`--json` bypass the picker either way. Malformed flags are usage
+  errors checked before the lock is taken.
 
 ## Related
 

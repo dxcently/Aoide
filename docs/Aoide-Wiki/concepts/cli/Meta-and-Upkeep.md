@@ -8,11 +8,13 @@ tags: [aoide, cli, meta, upkeep]
 # Meta & Upkeep Commands — Guide, Schema, Soundcheck
 
 The meta commands (`guide`, `schema`) orient an agent. The stubs (`make`,
-`update`, `onboard`) are walking-skeleton reservations of schema surface for
-planned flows. The upkeep commands (`usage`, `quickshell reload`, `soundcheck`)
-maintain local state and sweep the working tree. Handlers live in
+`update`) are walking-skeleton reservations of schema surface for planned
+flows. The upkeep commands (`usage`, `quickshell reload`, `soundcheck`)
+maintain local state and sweep the working tree; `onboard` runs the
+first-boot install flow. Handlers live in
 `pkgs/aoide/crates/cli/src/commands/meta.rs` (`guide`/`schema`),
 `pkgs/aoide/crates/cli/src/commands/stubs.rs` (the stubs),
+`pkgs/aoide/crates/cli/src/commands/onboard.rs` (`onboard`),
 `pkgs/aoide/crates/storage/src/commands.rs` (`usage`),
 `pkgs/aoide/crates/song/src/commands/quickshell.rs` (`quickshell reload`),
 and `pkgs/aoide/crates/upkeep/src/{commands,scan}.rs` (`soundcheck`).
@@ -66,7 +68,7 @@ aoide schema [--json]
 - **Notes:** read-only; not gated. This document is the machine-readable
   backstop every tier generates from — the MCP tool list derives from it
   ([[Agent-Interface]]). `lyra schema` mirrors it for the paint side: its own
-  registry, its own golden snapshot (42 command paths, evolving independently
+  registry, its own golden snapshot (43 command paths, evolving independently
   of core's 80 — see [[lyra]]).
 
 ### aoide make
@@ -100,13 +102,67 @@ aoide update [--check-only] [--json]
 ### aoide onboard
 
 ```
-aoide onboard [--json]
+aoide onboard [--harness <a,b,...>] [--yes] [--out <path>] [--json]
 ```
 
-- **Notes:** STUB — `implemented: false`, `gated: false`
-  (`stubs.rs::register_onboard`). Same not-implemented envelope and exit 64.
-  Contract per the schema summary: the first-boot flow — register the clone,
-  seed the songbook, print the guide. See [[Clone-and-Run]].
+- **Reads:** the checkout root, found by walking up from the cwd to
+  `.claude/skills/aoide/SKILL.md` (`hooks::skill_source()`'s walk-up);
+  outside a checkout the run fails exit 1, `reason: "no-checkout"`. PATH
+  probes for each known harness (`claude`, `kimi`, `pi` via
+  `aoide_protocol::agents`) and for the lyra binary (`rice_bin()`:
+  `$AOIDE_RICE_BIN`, a sibling binary, then PATH).
+- **Writes:** registers the clone by dispatching the already-registered
+  `graph project add aoide <checkout>` handler (stage-file effects per
+  [[Graph-and-Conduct]]); links `~/song` → `<checkout>/song` when nothing is
+  there (a correct existing link is a no-op; a wrong-target symlink or a
+  non-symlink is left alone with a note, never clobbered); seeds
+  `song/songbook/preferences.md` when absent (created once, never
+  overwritten). For each chosen harness, runs the registered
+  `hooks install <agent>` handler (harness settings merge and skill symlink
+  per [[Content-and-Hooks]]).
+- **Pipes to / output:** progress lines per phase; the closing output is the
+  full `aoide guide` text rendered from the same assembled registry. Message
+  `"onboard: clone registered, N harness(es) wired -- <lyra note>"`;
+  `--json` data `{root, harnesses, hooks: [{agent, ok, message}], lyra}`.
+- **Notes:** not gated; `implemented: true`, registered in
+  `pkgs/aoide/crates/cli/src/commands/onboard.rs`. CLI door only — any other
+  door is a usage error (exit 2). Harness selection: `--harness` wires
+  exactly the comma-separated list (an unknown name is a usage error); given
+  neither flag, a tty gets the interactive multi-select preselected by the
+  PATH probe, while `--yes` or a non-tty run wires every harness found on
+  PATH. When lyra resolves, the nix half is delegated to a child `lyra
+  onboard` with inherited stdio (`--out` and `--yes` forward; `--harness`
+  does not) — a spawn failure or nonzero exit degrades to a note, not an
+  onboard failure. See [[Clone-and-Run]].
+
+### lyra onboard
+
+```
+lyra onboard [--out <path>] [--yes] [--json]
+```
+
+- **Reads:** the checkout root, found by walking up from the cwd for a
+  directory holding both `flake.nix` and `pkgs/aoide`; outside a checkout the
+  run fails exit 1, `reason: "no-checkout"`. The option set is derived live
+  with `nix eval <checkout>#aoideOptions` (142 options today), never from a
+  hand-list.
+- **Writes:** `./aoide.nix` (`--out <path>` overrides) — a nix module the
+  user imports, listing every `aoide.*` module option commented out at its
+  current default with a one-line description each, plus a commented
+  env-knob appendix (`AOIDE_CONDUCT_AUTOGATE`, `AOIDE_TERMINAL`,
+  `AOIDE_CORE_BIN`/`AOIDE_RICE_BIN`, `AOIDE_DISCOVERY_ADVERTISE`). Re-running
+  over a file it generated warns and backs the old file up to `<out>.bak`
+  (an interactive confirm unless `--yes`); a file it did not generate is
+  refused, never overwritten.
+- **Pipes to / output:** prints the teaching line `imports = [ ./aoide.nix
+  ];` — the user's flake is never edited. Message `"lyra onboard: wrote
+  <out> (N options) -- imports = [ ... ];"` (`regenerated` on a rerun);
+  `--json` data `{out, optionCount, backedUp, importsLine}`.
+- **Notes:** not gated; `implemented: true`, registered in
+  `pkgs/aoide/crates/lyra/src/commands/onboard.rs`. CLI door only, from a
+  checkout — the derivation needs the repo's `modules/` and `flake.nix`. In
+  the normal flow this runs as `aoide onboard`'s delegate child, but it
+  stands alone. See [[lyra]].
 
 ### aoide usage
 

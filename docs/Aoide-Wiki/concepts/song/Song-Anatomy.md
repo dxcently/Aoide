@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-28
-updated: 2026-08-25
+updated: 2026-08-26
 tags: [aoide, song, rice, architecture]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -16,7 +16,9 @@ committed or runtime, and who writes it. The vocabulary those roles are named
 in lives in [[Song-Vocabulary]]; this page grounds the words in the actual
 directories.
 
-`song/` lives at `~/Aoide/song` (onboard links `~/song` → `~/Aoide/song`). It is
+`song/` lives at `~/Aoide/song` (onboard links `~/song` → `~/Aoide/song`,
+never clobbering an existing file or symlink, and seeds
+`songbook/preferences.md` when absent). It is
 the **song agent's writable domain** (house rule #1, `AGENTS.md`): the agent
 commits *there* and, for score, nowhere else. Runtime dirs inside it are
 gitignored and created on demand.

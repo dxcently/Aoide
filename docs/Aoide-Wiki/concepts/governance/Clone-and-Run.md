@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-25
+updated: 2026-08-26
 tags: [aoide, onboarding, deployment]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -22,24 +22,26 @@ Aoide is a framework you clone and run. The upstream repo ships the shape-making
 
 ```
 git clone <upstream> ~/Aoide
-aoide onboard
+cd ~/Aoide && aoide onboard
 ```
 
-That is the complete install. **Status:** `aoide onboard` is declared in the schema but not yet implemented (stub, exit `64`); the flow below is the target shape, not a working install path today.
+That is the complete install. `onboard` is a CLI-door command and runs from inside the checkout: it performs the core half itself, delegates the nix half to `lyra onboard` when the `lyra` binary resolves, and finishes by printing the four-tier agent guide ([[Agent-Interface]]).
 
 ## First-Boot Onboarding Flow
 
-`aoide onboard` is designed to be idempotent, running through these steps:
+`aoide onboard` is idempotent. The core half:
 
-1. Generate `hosts/<hostname>/` from the shelved skeletons (`hosts/_desktop`, `_laptop`, or `_server`; `_mac` is the darwin skeleton, pending the `mkHost` class seam); create `song/` runtime dirs (gitignored).
-2. Install the shipped standard rice + wallpaper as the active baseline; link `~/song` → `~/Aoide/song`.
-3. Confirm the upstream remote (the clone already tracks it as `origin`); offer adding a personal remote for backup/fleet sync.
-4. Seed `songbook/` with starter files and the update playbook.
-5. Write `AGENTS.md` to its well-known path; print the four-tier agent guide.
-6. Detect `claude` CLI; offer the stdio MCP registration line and spawn-wrapper install. Other agents get shell instructions.
-7. Offer integration toggles: Mneme source registration, Obsidian (off by default).
-8. Walk an approve-gate demo: register a scratch folder, watch it flow discover → propose → approve → query.
-9. Run `lyra rice stage` on the shipped standard to verify the live loop.
+1. Register the clone as a graph project ([[Session-Graph]]).
+2. Link `~/song` → `<checkout>/song`, never clobbering an existing file or symlink.
+3. Seed `song/songbook/preferences.md` when absent ([[Song-Anatomy]]).
+4. Ask which agent harnesses to wire — interactively, or via `--harness a,b` / `--yes` non-interactively — and run `hooks install` for each chosen harness ([[Agent-Hooking]]).
+
+If the `lyra` binary resolves, `onboard` then delegates the nix half to `lyra onboard`:
+
+1. Generate `./aoide.nix` (or `--out <path>`): every `aoide.*` module option — 142 today, derived live from the modules through the flake's `aoideOptions` output, never a hand-list — with its default commented out and a one-line description, plus an appendix listing the env knobs (`AOIDE_CONDUCT_AUTOGATE`, `AOIDE_TERMINAL`, `AOIDE_CORE_BIN`/`AOIDE_RICE_BIN`, `AOIDE_DISCOVERY_ADVERTISE`) as comments.
+2. Print the `imports = [ ./aoide.nix ];` line for the user's own flake. Onboard never edits the flake; adding the import is the user's one manual step.
+
+Re-running `lyra onboard` warns and backs the old file up to `<out>.bak`; a file it did not generate is refused, never overwritten.
 
 **Done-state check**: bar shows agent session + connection state; a notification round-trips agent → center; `aoide schema --json` validates.
 

@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-25
+updated: 2026-08-26
 tags: [aoide, cli, mcp, a2a, peer, daemon]
 ---
 
@@ -9,7 +9,7 @@ tags: [aoide, cli, mcp, a2a, peer, daemon]
 
 This group covers the doors onto the one command schema and the federation
 surface: the stdio [[Agent-Interface|MCP]] façade (`mcp serve` — `lyra mcp
-serve` is the same façade over lyra's own 42-path registry), the [[aoided]]
+serve` is the same façade over lyra's own 43-path registry), the [[aoided]]
 policy skeleton (`daemon`, `events tail`, `adapter melete`), the desktop
 state bridge (`shellbridge`), the interactive session UI (`conductor`,
 detailed at [[Conductor-TUI]]), live presence (`who`), the [[A2A-Door]]
