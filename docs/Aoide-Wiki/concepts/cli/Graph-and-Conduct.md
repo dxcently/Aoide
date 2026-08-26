@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-25
+updated: 2026-08-26
 tags: [aoide, cli, session, graph, conductor]
 ---
 
@@ -14,7 +14,7 @@ project/session DAG, injection into conducted terminals
 dead-session reaper, and the `inbox` commands that read back what `graph send`
 delivered. `graph session hook` is the [[Agent-Hooking]] door agent
 harnesses (Claude Code, kimi, pi) fire into. Handlers live in
-`pkgs/aoide/crates/conduct/src/graph/{commands,session_store,send,pending,spawn,resurrect,permit,window,conduct,doc,model,common}.rs`
+`pkgs/aoide/crates/conduct/src/graph/{commands,session_store,send,pending,spawn,resurrect,carry,permit,window,conduct,doc,model,common}.rs`
 and `pkgs/aoide/crates/conduct/src/reap.rs`; registrations in
 `pkgs/aoide/crates/conduct/src/commands/graph.rs`. `inbox list|read|clear`
 is the one exception: it lives in `pkgs/aoide/crates/storage/src/{inbox,
@@ -167,6 +167,34 @@ aoide graph session end --id <id> [--json]
   (`doomed_subagent_descendants`), mirrors `phase=done` into
   `song/stage/hooks.json`, re-stages `graph.json`.
 - **Output:** `data: {sessionId, file}`; an unknown id is an ok no-op.
+
+### aoide graph session carry
+
+```
+aoide graph session carry (on|off) [--self | --id <id>] [--json]
+```
+
+- **Reads:** `state/carry.json` (the durable carry mark — durable-sessions
+  plan P-C2); `song/stage/sessions.json`, only to answer the informational
+  `live` field below, never to gate the write.
+- **Writes:** `state/carry.json` directly — atomic write, no stage lock, and
+  no `daemon_dispatch` routing, unlike every other `graph session *` command
+  above: `carry.json` is not a `song/stage/` file, so it sits outside that
+  dual-writer surface entirely. `on` adds the target id to the carried set
+  (or refreshes its `markedAt` if already present); `off` removes it.
+- **Output:** `data: {sessionId, carried, live}`; `changed` names the
+  transition (`"<id>: carried"` / `"<id>: not carried"`) and stays empty on a
+  re-mark that changed nothing.
+- **Notes:** the target resolves from `--id <id>` (any session id, including
+  one that has already left the roster — no roster lookup gates the write,
+  which is what makes the mark flippable post-mortem, off a bare ledger id),
+  or from `--self`/a bare invocation, both of which read `$AOIDE_SESSION_ID`.
+  `--self` and `--id` together is a usage error; neither an `--id` nor a
+  resolvable `$AOIDE_SESSION_ID` is likewise a usage error naming both
+  flags — never a silent no-op. `live` reports whether the id is currently in
+  `sessions.json`; it is informational only. The mark itself does nothing yet
+  on its own — it is the input a later phase's `graph resurrect` selection
+  and `graph spawn --carry` consume.
 
 ### aoide graph session hook
 

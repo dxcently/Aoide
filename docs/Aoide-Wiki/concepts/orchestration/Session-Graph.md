@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-25
+updated: 2026-08-26
 tags: [aoide, graph, session, terminal, agent, cli]
 ---
 
@@ -112,6 +112,16 @@ should follow).
   the desktop herald surface renders it with approve/deny buttons whose click
   types the verdict back through the session's socket. The hook door raises
   it automatically the moment a session goes `awaiting`.
+- **`graph session carry on|off`** — mark or unmark a session DURABLE in
+  `state/carry.json`, so a project's whole carried set can later be
+  resurrected together. A separate, freely-mutated set beside the ledger:
+  writes only `carry.json`, atomic, no stage lock, outside the `song/stage/`
+  dual-writer surface entirely. `--id <id>` targets any session id directly,
+  including one already gone from the roster — no roster lookup gates the
+  write, which is what lets a mark be flipped post-mortem, off a bare ledger
+  id. Bare and `--self` both resolve the target from `$AOIDE_SESSION_ID`.
+  The mark alone changes nothing yet; it's the input a resurrect-selection
+  and a spawn-time `--carry` flag build on.
 
 A durability rule spans the layer: the stage rewriters **round-trip unknown
 fields** (serde flatten), so graph management never clobbers fields other

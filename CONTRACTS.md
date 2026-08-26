@@ -1368,11 +1368,12 @@ session a paired peer's A2A spawn created, projected verbatim off the live
 this line, `null` otherwise (including every legacy line written before
 this field existed, tolerated on read the same as any other field here).
 
-### `state/carry.json` — **v0** (durable-sessions plan, P-C1)
+### `state/carry.json` — **v0** (durable-sessions plan)
 
 The carry mark: the set of session ids marked DURABLE, so a project's whole
-carried set can be resurrected together (`aoide graph session carry on|off`,
-a later phase of the same plan — not yet wired to this store). Lives under
+carried set can be resurrected together. `aoide graph session carry on|off`
+is the one writer, and it writes this file alone — no stage lock, no
+`daemon_dispatch` routing, since this is not a `song/stage/` file. Lives under
 `state_dir` (`aoide_storage::fs::state_dir`) alongside `usage.json`/
 `session-ledger.jsonl`, NOT `song/stage/` — a carry mark is durable
 operator state, never staged rehearsal state. Distinct from the ledger
