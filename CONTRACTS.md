@@ -25,8 +25,9 @@ folder, never an edit to an import list** (§2, §5). Each of those modules
 self-gates on its own `enable`/`aoide.song` rather than being switched on from
 outside. A widget resolves through `StagingEngine.resolveSong(song, slot)` — by
 slot *name*, falling back to sonata — so no surface ever imports a concrete
-widget (§5). Facets read `aoide.livery` and `aoide.arrangement` and nothing else:
-a closed set of named services, never another module's internals (house rule 5).
+widget (§5). Facets read only the closed namespace whitelist house rule 5
+enumerates (`AGENTS.md` owns the list): named services, never another
+module's internals.
 
 Two names for the halves, taken from **Cordis** — *A Programming Paradigm for
 Spatiotemporal Composability* (Shi, Zhang & Cui; preprint 2026-08-13,

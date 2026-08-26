@@ -144,6 +144,6 @@ Two axes move independently, and neither has a background updater — house poli
 | [`docs/Aoide-Wiki/Overview.md`](docs/Aoide-Wiki/Overview.md) | The wiki's own clickable index — every concept and entity page, start here for depth. |
 | [`docs/Aoide-Wiki/entities/aoide-cli.md`](docs/Aoide-Wiki/entities/aoide-cli.md) | The full `aoide` command tree, real vs stub, contract-level conventions. |
 | [`docs/Aoide-Wiki/concepts/desktop/Controls.md`](docs/Aoide-Wiki/concepts/desktop/Controls.md) | Every keybind and shell alias: the `ad*` rebuild family, compositor keybinds, bar interactions, shell QoL aliases. |
-| [`AGENTS.md`](AGENTS.md) | The agent-facing onboarding doc — the four-tier capability map and house rules, for any agent driving this repo. |
+| [`AGENTS.md`](AGENTS.md) | The agent-facing onboarding doc — house rules and pointers, for any agent driving this repo; `docs/agent/` is its checkout-side router. |
 | [`CONTRACTS.md`](CONTRACTS.md) | Versioned interfaces: the note schema, dendrite shape, `schema --json`, stage-file formats. |
 | [`docs/BUILD.md`](docs/BUILD.md) | Module-authoring: how to write a dendrite or facet. |
