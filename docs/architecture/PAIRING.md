@@ -165,6 +165,16 @@ peers:
   only, per decision 6). Fail-closed discipline mirrors #84
   (sentinel on resolve failure, constant-time comparisons where
   secrets are still compared).
+- **`X-Aoide-Peer` carries the caller's own self name**
+  (`aoide_storage::display::local_host_name()`), the same value the
+  pairing wire's `pairRequest.name` sends — never the caller's local
+  nickname for the counterpart. The far end resolves the caller BY
+  THAT NAME against its own registry. Known limitation, deferred to
+  #63: because resolution is by name, renaming a peer locally on the
+  far end breaks inbound signed requests from it until it re-pairs.
+  Resolving identity by public key instead (the signature already
+  proves the key) is the durable fix; it is #63's lane, not this
+  document's settled design.
 
 ## Phases
 
