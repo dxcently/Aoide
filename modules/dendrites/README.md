@@ -15,7 +15,7 @@ networkmanager, audio).
   (invisible to the walker), documents the v0 dendrite shape and the
   enable-with-one-line-in-`hosts/`convention.
 - A dendrite that draws (e.g. `dunst.nix`'s notification popups) hands off
-  to a facet-owned surface via a bridge (a CLI verb, a stage file) rather
+  to a facet-owned surface via a bridge (a CLI command, a stage file) rather
   than drawing itself — `dunst.nix` pipes through `aoide herald push` into
   `song/stage/herald.json`, which the Quickshell herald widget reads.
 

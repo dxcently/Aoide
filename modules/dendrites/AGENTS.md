@@ -13,7 +13,7 @@ what's specific to dendrites.
   declares itself, plus stock options.
 - **Draws through a bridge, never directly.** A dendrite that produces
   something visible (a notification, a status line) hands data to a
-  facet-owned surface via a CLI verb or stage file (root `AGENTS.md`
+  facet-owned surface via a CLI command or stage file (root `AGENTS.md`
   corollary: Quickshell paints, it is never the capability) — it does not
   embed its own rendering.
 - **`hosts/` knows dendrites; dendrites never know hosts.** No

@@ -62,7 +62,7 @@ lib.mkIf (config.aoide.enable && config.aoide.secrets.enable) {
 
   # ── qrencode on the operator's own PATH ──────────────────────────────────
   # `secrets enroll` (run by the operator, not the broker service — see
-  # "Admin verbs" below) renders its `otpauth://` URI as a QR code only when
+  # "Admin commands" below) renders its `otpauth://` URI as a QR code only when
   # `qrencode` is reachable on PATH (`enroll::render_qr`'s feature-detect,
   # not a Cargo dependency); without it the URI/base32 still print, just no
   # QR. The first live enrollment attempt (yomi-strix, P-V4d) found
@@ -211,7 +211,7 @@ lib.mkIf (config.aoide.enable && config.aoide.secrets.enable) {
     };
   };
 
-  # ── Admin verbs: no sudo rule shipped, invocation documented instead ─────
+  # ── Admin commands: no sudo rule shipped, invocation documented instead ─────
   # `secrets add|rm|grant|revoke|enroll` mutate policy.json/totp.secret under
   # the secrets home, so they must run AS the secrets user — this module
   # deliberately does NOT add a `security.sudo.extraRules` entry for that
