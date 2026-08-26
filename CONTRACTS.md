@@ -583,8 +583,9 @@ This was never a version bump: `schemaVersion` stays `"0"` on both —
 this section has never promised a fixed command inventory, only a
 document SHAPE, and the shape above is unchanged for either binary. The
 A2A AgentCard (§6) advertises whichever registry the serving binary
-assembled — core's card carries only core's 80, since `a2a serve` is
-core-only and lyra never registers it.
+assembled — core's card advertises only core's registry, and only its
+implemented commands (the card's `implemented` filter drops stubs, §6),
+since `a2a serve` is core-only and lyra never registers it.
 
 ### Daemon wire — the fourth door (`docs/architecture/AOIDED.md`, P-D2/P-D4)
 
