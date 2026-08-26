@@ -6,6 +6,10 @@
           {
             "type": "command",
             "command": "a=/home/khoa/Aoide/.claude/worktrees/devtools-dendrites/result-aoide/bin/aoide; [ -x \"$a\" ] || a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0"
+          },
+          {
+            "type": "command",
+            "command": "printf 'Aoide onboarding: run `aoide guide`; read AGENTS.md, then docs/agent/README.md (read order) and docs/agent/session.md (session checklist). Command ground truth: `aoide schema --json`.\\n'"
           }
         ]
       }
