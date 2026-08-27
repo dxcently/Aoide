@@ -106,21 +106,32 @@ allowed to become a resident daemon:
   record only once its `ssh` child is confirmed dead; a stubborn/hung one
   that survives the bounded `SIGTERM`+wait keeps its record on disk instead
   of losing it, so the backstop below still has a name to find.
+  `open_or_reuse` holds the same rule on the OPEN side: a stale record
+  whose old `ssh` survives the bounded kill REFUSES the reopen with a
+  taught error rather than overwriting it — a second forward is never
+  opened to the same target while the first is still alive and untracked.
 - **The backstop.** `aoide-conduct::reap::sweep_orphan_tunnels` catches a
   session that never got to run that exit — SUPER+Q, SIGKILL, anything
   [[Session-Graph]]'s liveness reaping already exists to catch — and
-  retries any tunnel the fast path's own kill couldn't finish, once that
-  session leaves the roster. It runs as
+  retries, on every sweep pass, any tunnel a kill only ATTEMPTED to clear
+  (the fast path's own, or an earlier sweep pass's), until it is finally
+  confirmed dead. A record's session leaving the roster is what makes it a
+  candidate for a genuinely dead session — but a session that ended
+  cleanly (`state: "done"`) counts as gone for THIS purpose the moment it
+  ends, even before `session prune` removes its record from the roster, so
+  a survivor `close` had to keep is retried promptly rather than waiting on
+  prune's own schedule. It runs as
   part of the same sweep pass that collects orphan sockets, but not under
   the same lock: `reap_inner` only GATHERS candidates while holding the
   stage lock (`orphan_tunnel_candidates`, a roster/settle check against
   already-loaded state, no process signaling), and `reap` runs the KILL half
   outside it (`sweep_orphan_tunnels`) — a still-answering `ssh -N` child is
-  signaled (`kill_if_still_our_ssh`) before its record is unlinked. Socket
-  cleanup stays fully inside the lock because unlinking a leftover file is
-  cheap; signaling a live child is not, and holding the stage lock across
-  that would block every other stage writer on a process that might not
-  even need killing.
+  signaled (`kill_if_still_our_ssh`), and its record is unlinked ONLY once
+  that call confirms the pid actually gone; a survivor keeps its record for
+  the next pass, same as the fast path. Socket cleanup stays fully inside
+  the lock because unlinking a leftover file is cheap; signaling a live
+  child is not, and holding the stage lock across that would block every
+  other stage writer on a process that might not even need killing.
 - **A bare shell with no conducted session** gets a tunnel keyed
   `pid-<pid>` instead of a session id — process-scoped, not persistent. It
   has no session-exit fast path to hook, so the same sweep's ordinary
