@@ -76,6 +76,8 @@ lib.mkIf config.aoide.enable {
         # aoided reads it to build the per-adapter subscription gate.)
         "AOIDE_ADAPTER_MELETE_ENABLE=1"
         "AOIDE_USER=${config.aoide.user}"
+        "AOIDE_ROOT=${config.aoide.root}"
+        "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
       ];
 
       NoNewPrivileges = true;
