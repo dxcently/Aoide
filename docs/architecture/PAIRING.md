@@ -218,9 +218,17 @@ the full count-site checklist (git show 9c2d05c).
   paired peers; unpaired callers unchanged. Tests: signature
   round-trip, replay rejection, skew taught error, canonical-string
   vectors pinned.
-- **P-P5 — popup + polish (S).** The pairing-request popup surface
-  riding the events feed (same seam as secrets asks), legacy-escape
-  documentation pass (CONTRACTS + wiki page for the ceremony).
+- **P-P5 — pairing events feed + the popup watcher (S).** `a2a serve`
+  emits `pair-parked`/`pair-revealed`/`pair-awaiting-confirm` onto
+  aoided's own events feed — the same seam secrets asks already ride
+  (`class: "gate"`, `source: "a2a-door"`, by-name payload, no SAS/
+  pubkey/nonce/commitment ever on the wire, CONTRACTS §6's "Pairing
+  events feed" subsection). `aoide peer pair watch [--popup] [--json]`
+  tails it and re-derives the actionable set from `aoide-storage::
+  pairing` directly (golden +1); `--popup` is zenity `--question` only
+  — no `lyra` fallback, a QML confirm dialog is a named deferral, not
+  built. Legacy-escape documentation pass lands as CONTRACTS §6's own
+  "Legacy escapes" subsection.
 - **P-P6 — discovery + invite (M).** The multicast beacon
   (advertise-off-by-default, emitted by `a2a serve`), `peer discover`
   + `peer invite` (golden +2, full count-site checklist), beacon

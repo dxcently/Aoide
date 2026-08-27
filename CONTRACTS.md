@@ -435,7 +435,7 @@ count.
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` command
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker).
-  **80 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **75 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -601,6 +601,14 @@ count.
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
+  The running `(+N → M)` narrative above stops at 80 (P-P6) — it is
+  historical color for how the count reached that point, not a live
+  ledger; the command-defrag lanes (task #101) and the pairing-events
+  watcher (P-P5) that followed changed the count several more times
+  without extending the narrative. `crates/cli/src/registry.rs`'s golden
+  snapshot (mirrored by `lib/vmTest.nix`'s own tripwire) is the ONE
+  authoritative count at any given moment; the headline above tracks it,
+  the prose trail does not.
 - `lyra schema --json` — the AoideOS-surface contract: onboard/rice/draft/
   mode/cover/livery/quickshell/screen/shellbridge/herald, the painted
   surface. **43 commands** (`crates/lyra/src/registry.rs`'s golden test —
@@ -1903,7 +1911,11 @@ entries on read, no background timer) and consumed exactly once via
 the callback re-parks the outbound entry instead of destroying it). Neither
 file, nor anything derived from it, ever carries a private key — only the
 two sides' public keys and nonces, the same public transcript the SAS
-above is derived from.
+above is derived from. `aoide peer pair watch` (§6's "Pairing events
+feed" subsection, P-P5) re-derives its own actionable set from exactly
+these two files via `list_inbound`/`list_outbound` — the events feed a
+watcher tails is a trigger only, never a second source of truth for
+what's parked here.
 
 ### Secrets home — NOT under `state/`, contract lives in `crates/secrets/README.md`
 
@@ -3431,10 +3443,11 @@ POST.** Two closes, one commit:
   purely LOCAL `y`/`N` confirmation (`peer pair approve`'s own idiom) —
   it has no bearing on the remote gate.
 
-**Peer authentication today, one standing paragraph** (gathering what the
-amendments above accreted across P-P3/P-P4 — no behavior change, just one
-place to read it instead of reconstructing it from three dated entries).
-Four rungs answer "who is this caller," and they are NOT interchangeable:
+### Legacy escapes
+
+Four rungs answer "who is this caller," gathering what the amendments
+above accreted across P-P3/P-P4 into one place to read rather than
+reconstructing it from three dated entries — they are NOT interchangeable:
 the **door-wide bearer** (`aoide.a2a.tokenFile`/`bearerSecret`) and a
 peer's own **`token_file`** are both **legacy escapes for an UNPAIRED
 caller** (`docs/architecture/PAIRING.md` decision 2) — they authenticate
@@ -3716,6 +3729,76 @@ all additive, `#[serde(default)]` where a legacy record could otherwise
 fail to parse. Carries no version bump to §1–§6 and needs no playbook
 migration entry.
 
+### Pairing events feed (P-P5)
+
+`aoide/pairRequest`/`aoide/pairReveal`/`aoide/pairApprove` (above) were
+audit-only until P-P5: nothing told a watcher a ceremony milestone had
+landed short of polling `peer pair pending`. `a2a serve`'s
+`emit_pairing_event` (`aoide-server::a2a`) now appends one best-effort,
+never-`?`, never-panicking record onto `aoided`'s OWN events feed — the
+SAME `$XDG_RUNTIME_DIR/aoide/events.jsonl`
+(`aoide_server::daemon::events_path`) `aoided` itself writes through, via
+`aoide_protocol::feed::FeedWriter` — from the Ok arm of each of the three
+methods, never from a mismatch or unknown-id arm:
+
+```json
+{ "v": 0, "ts": 1735000000, "class": "gate", "kind": "pair-parked",
+  "source": "a2a-door",
+  "payload": { "id": "abc12345", "name": "box-a", "originAddr": "10.0.0.5",
+               "url": "http://box-a:8710/", "direction": "inbound" } }
+```
+
+Three `kind`s: `pair-parked` (`pairRequest`'s Ok arm), `pair-revealed`
+(`pairReveal`'s Ok arm), `pair-awaiting-confirm` (`pairApprove`'s Ok
+arm) — `class: "gate"` (the existing `EventClass::Gate`, `aoide-protocol`
+§3's registry-adjacent audit module, its first emitter), `source:
+"a2a-door"`. `payload` carries fields BY NAME ONLY —
+`id`/`name`/`originAddr`/`url`/`direction` — **NEVER a SAS, pubkey,
+nonce, or commitment.** A watcher (`aoide peer pair watch`, below) re-
+derives the SAS locally from its own identity plus
+`aoide_storage::pairing::list_inbound`/`list_outbound` — the feed line is
+only ever a TRIGGER to re-check them, never itself trusted data, the
+same "tail is a trigger, the storage-backed list is the authority"
+stance `aoide-secrets`' own events feed already holds for its notify
+mirror.
+
+**Two writers, one file (an accepted, named race).** `a2a serve` and
+`aoided` are separate processes; both open their own `FeedWriter` onto
+the identical path, capped at `EVENTS_CAP_BYTES` (1 MiB) and
+truncated-in-place past that cap rather than rotated. A cap-truncate race
+at the exact boundary can lose a line from either writer — accepted,
+because this feed is ephemeral cues, never the durable record (the
+single audit log, written at all three call sites regardless, is that
+record) and because the watcher's own reconcile tick (30s, or on-demand
+before any action) re-derives the truth from `aoide_storage::pairing`
+directly rather than trusting the feed's own completeness.
+
+**`aoide peer pair watch [--popup] [--json]`** (`aoide-client::
+pair_watch`, registered newest in `peer pair`, golden count 74 → 75) is
+the foreground follow: tails this feed, narrates each recognized line
+(or emits it verbatim under `--json`), and re-derives the actionable set
+(an inbound entry once revealed, an outbound entry once
+`awaiting-confirm`) on a 30s safety tick so a missed or malformed line
+never strands a request. `--popup` swaps that narration for a **zenity
+`--question`-only** confirm dialog per actionable request (no `lyra`
+fallback — a QML confirm dialog is a named deferral, not built): exit 0
+approves (`peer pair approve`'s own `approve_inbound`/`approve_outbound`,
+`skip_confirm: true` — the dialog itself already IS the confirmation);
+the dialog's own `"Reject request"` extra button (a distinct label from
+`aoide-secrets`' own `"Dismiss ask"` — two ceremonies, two labels, one
+shared reader) rejects; a bare Cancel/Escape ignores the request for the
+rest of that session only; a spawn/infra failure backs off the retry
+cadence and is NEVER treated as a dismissal. The dialog shows no more
+than `peer pair pending` already prints — no fingerprint. `--popup` is
+refused up front when `zenity` isn't installed; `--popup`+`--json`
+together is a usage error. Deployed as the graphical-session USER unit
+`aoide-pair-watch.service` (`modules/nucleus/aoided.nix`), gated on
+`aoide.a2a.enable && aoide.facets.quickshell.enable`.
+
+This subsection is **additive**: a new events-feed record shape and a
+new CLI command, no change to the three wire methods above, no version
+bump.
+
 ### Discovery beacon (P-P6, `docs/architecture/PAIRING.md`'s "Discovery
 (advertise-but-locked)" section)
 
@@ -3908,7 +3991,12 @@ hand-set-URL escape hatch, `peer pair` for the one ceremony that verifies a
 public key on both ends. Re-pairing an EXISTING peer name replaces only
 `pubkey`/`verified`/`url` — never `autogate`/`tokenFile`/`bearerSecret`/
 `hub`/`allows` — and only after a fresh SAS confirmation (`peer pair
-approve`'s own y/N gate), never silently.
+approve`'s own y/N gate), never silently. `aoide peer pair watch` (§6's
+"Pairing events feed" subsection, P-P5) is what surfaces a ceremony
+reaching this commit point WITHOUT polling `peer pair pending` by hand —
+it never reads or writes this file directly, only
+`aoide_storage::pairing`'s own parked-request state, the same source
+`upsert_paired_peer` itself commits from.
 
 `allows` (array of strings, additive per P-P3, `docs/architecture/
 PAIRING.md` decision 5; omitted from the wire when empty) is a CLOSED

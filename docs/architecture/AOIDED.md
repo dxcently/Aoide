@@ -129,6 +129,38 @@ record (`class:"secret"`, `source:"secrets-mirror"`). Rules:
 - Secrets feed absent (broker not installed/running): the Follower's
   NotFound arm already returns no lines; the mirror simply stays quiet.
 
+### A SECOND live writer: the pairing events feed (P-P5)
+
+Unlike the secrets mirror above (aoided TAILS a foreign feed and
+re-publishes onto its own), the A2A door's `a2a serve` process appends
+DIRECTLY onto aoided's own feed — the first producer that isn't aoided
+itself. `emit_pairing_event` (`aoide-server::a2a`) opens its own
+`feed::FeedWriter` on the identical resolved path/cap/create-mode and
+appends a `class:"gate"`, `source:"a2a-door"` record from the Ok arm of
+each of the three pairing-ceremony wire methods (CONTRACTS §6's "Pairing
+wire"/"Pairing events feed" subsections) — `pair-parked`/`pair-revealed`/
+`pair-awaiting-confirm`, payload fields by name only
+(`id`/`name`/`originAddr`/`url`/`direction`), never a SAS/pubkey/nonce/
+commitment.
+
+**Two writers, one file — a named, accepted race, not an oversight.**
+`aoided` and `a2a serve` are separate processes; both can observe the
+feed at or past `EVENTS_CAP_BYTES` and both truncate-in-place rather than
+rotate. A cap-truncate race at the exact boundary can lose a line from
+either writer's append. This is accepted rather than fixed with a shared
+lock or a single-writer proxy because the feed was already documented as
+ephemeral cues, never the durable record (the single audit log, written
+at all three call sites regardless of feed success, is that record — the
+SAME "best-effort, never blocks the caller's own hot path" posture
+`emit_notify`/`append_events_feed` already hold for the secrets side),
+and because every consumer (`aoide peer pair watch`) already re-derives
+its actionable set from `aoide_storage::pairing` directly on a safety
+tick rather than trusting the feed's own completeness — the identical
+"tail is a TRIGGER, the storage-backed state is the AUTHORITY" rule the
+secrets mirror above already lives by. A future SECOND concurrent writer
+of any kind inherits this same acceptance; a caller that needs a
+lossless record reaches for the audit log, never this feed.
+
 ### The first producer: the hand-edit watcher (#69)
 
 A tick-driven stat sweep over the broker-owned file roster — the stage files
