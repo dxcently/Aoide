@@ -409,7 +409,7 @@ Append-only, never truncated, never a lookup key for live state —
 ### `graph resurrect --project <x>`
 
 Resolve `<x>` against `projects.json` and anchor every ledger entry to it
-(the same longest-path-prefix rule `graph emit` uses). Selection then
+(the same longest-path-prefix rule `graph view` uses). Selection then
 branches on the flags: `--all` widens to every anchored entry, `--id`
 narrows to one specific `sessionId`, and bare (neither flag) resumes the
 project's WHOLE carried set (`state/carry.json`, durable-sessions plan
@@ -434,8 +434,8 @@ windowed path with its resolved argv. Rules:
 
 - The revived session is a NEW `sessionId` — ids are never recycled. The
   new record carries additive `resumedFrom: Option<String>` naming the
-  ledger entry's sessionId; `graph emit` projects it as a `resumed` edge
-  beside `spawned`/`anchors` (`CONTRACTS.md §4`, graph.json — additive edge
+  ledger entry's sessionId; any graph (re)stage projects it as a `resumed`
+  edge beside `spawned`/`anchors` (`CONTRACTS.md §4`, graph.json — additive edge
   kind). If the old id was carried, the mark transfers onto the new id in
   the same step (one `save_carry` call, never left on the now-dead old id).
 - **Post-spawn restore delivery (P-C6).** Once a terminal candidate's spawn

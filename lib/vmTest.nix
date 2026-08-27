@@ -174,6 +174,7 @@ pkgs.testers.runNixOSTest {
 
   testScript = ''
     import json
+    import shlex
 
     # ── 1. multi-user.target reached ────────────────────────────────────────
     machine.wait_for_unit("multi-user.target")
@@ -297,7 +298,9 @@ pkgs.testers.runNixOSTest {
     # ungated, structurally superseded by the `peer` family) — reached 77;
     # bumped by −1 for deleting `graph wrap` outright — zero production
     # callers (superseded by `conduct`/`graph spawn`), command-defrag lane
-    # (task #101) — reached 76.
+    # (task #101) — reached 76; bumped by −1 for deleting `graph emit` —
+    # restage_graph fires at every mutation site and `graph prune` is the
+    # blessed manual resync, command-defrag lane (task #101) — reached 75.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a command.
     schema_raw = machine.succeed("aoide schema --json")
@@ -311,8 +314,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 76, (
-        f"expected 76 commands, got {cmd_count}.  "
+    assert cmd_count == 75, (
+        f"expected 75 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 
@@ -412,13 +415,32 @@ pkgs.testers.runNixOSTest {
     demo_nodes = [n for n in nodes if n.get("kind") == "project" and n.get("name") == "demo"]
     assert demo_nodes, f"demo project node not found in graph view: {view_raw[:300]}"
 
-    # `aoide graph emit --json` exits 0.
-    emit_raw = machine.succeed(khoa_graph("aoide graph emit --json"))
-    emit_doc = json.loads(emit_raw)
-    ok = emit_doc.get("ok") is True or emit_doc.get("status") == "ok"
-    assert ok, f"graph emit failed: {emit_raw[:300]}"
+    # `aoide graph prune --json` exits 0 — the blessed manual resync now that
+    # `graph emit` is gone (restage_graph already runs at every mutation
+    # site; prune's own restage is the one this test exercises). Seed a
+    # `done` session directly (no conduct session exists in this headless
+    # VM) so prune has something to actually drop rather than taking its
+    # no-op early return, then delete graph.json so its reappearance can
+    # only be explained by THIS invocation (re)staging it.
+    sessions_seed = json.dumps({
+        "schemaVersion": "0",
+        "sessions": [{"sessionId": "vmtest-prune-probe", "state": "done"}],
+    })
+    machine.succeed(f"printf '%s' {shlex.quote(sessions_seed)} > {stage_dir}/sessions.json")
+    machine.succeed(f"rm -f {stage_dir}/graph.json")
 
-    # graph.json was written and is valid JSON with a nodes key.
+    prune_raw = machine.succeed(khoa_graph("aoide graph prune --json"))
+    prune_doc = json.loads(prune_raw)
+    ok = prune_doc.get("ok") is True or prune_doc.get("status") == "ok"
+    assert ok, f"graph prune failed: {prune_raw[:300]}"
+    prune_data = prune_doc.get("data", prune_doc)
+    assert "vmtest-prune-probe" in prune_data.get("removed", []), (
+        f"graph prune did not remove the seeded session: {prune_raw[:300]}"
+    )
+
+    # graph.json reappeared — (re)staged by that same `graph prune`
+    # invocation, since nothing else could have recreated it after the rm
+    # above — and is valid JSON with a nodes key.
     graph_raw = machine.succeed(f"cat {stage_dir}/graph.json")
     graph_doc = json.loads(graph_raw)
     assert "nodes" in graph_doc, f"graph.json missing 'nodes': {graph_raw[:200]}"

@@ -958,8 +958,9 @@ daemon's own boot-time auto-resume trigger, which calls the same command
 core in-process) right after the resurrected session registers. Session
 ids are never recycled: a resurrected session always mints a FRESH
 `sessionId`, and `resumedFrom` is the only link back to the ledger entry
-it continues. `aoide graph emit` projects a populated `resumedFrom` as an
-additive `resumed` edge (see `graph.json` below) beside the ordinary
+it continues. A (re)staged `graph.json` — automatic at every project/session
+mutation, or via `aoide graph prune`'s manual resync — projects a populated
+`resumedFrom` as an additive `resumed` edge (see `graph.json` below) beside the ordinary
 `spawned`/`anchors` edges. Absent means "not a resurrection" (the ordinary
 case, and every legacy record); readers must tolerate both forms and
 round-trip fields they do not know.
@@ -1103,8 +1104,9 @@ tick.
 
 ### `song/stage/graph.json` — **v0**
 
-The **fully resolved** project/session DAG, written by `aoide graph emit`
-(atomic) for Quickshell to hot-reload — like stage notes, QML reads concrete
+The **fully resolved** project/session DAG, written (atomic) automatically by
+every project/session mutation and by `aoide graph prune`'s manual resync,
+for Quickshell to hot-reload — like stage notes, QML reads concrete
 values and computes nothing. Project nodes anchor session nodes by cwd
 (longest path-prefix wins, so nested projects anchor correctly); `spawned`
 edges come from `parentSessionId`. A session with a resolved parent carries
@@ -3720,10 +3722,10 @@ OS hostname → the literal `"aoide"`, mirroring `resolve_bind_port`/
 `resolve_spawn_agent`'s precedence discipline exactly (`a2a::resolve_peer_name`,
 new `--peer-name` flag on `a2a serve`). `instance.url` is this instance's own
 advertised URL (`http://<bind>:<port>/`, the same string the AgentCard's own
-`url` field carries). `graph` is EXACTLY what `aoide graph view --json` /
-`graph emit` resolve (`aoide_conduct::graph::resolve_graph_document`, the
-SAME function both those commands and this method call) — no second graph
-vocabulary is invented for the wire.
+`url` field carries). `graph` is EXACTLY what `aoide graph view --json`
+resolves (`aoide_conduct::graph::resolve_graph_document`, the SAME function
+that command and this method call) — no second graph vocabulary is invented
+for the wire.
 
 ### The `peer:*` node-id convention (graph fold)
 
