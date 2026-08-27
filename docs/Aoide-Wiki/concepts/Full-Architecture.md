@@ -243,8 +243,9 @@ default) — see [[Self-Ricing#Staging vs Declarative Mode]].
 
 `song/` is the agent's only writable domain.
 
-Song replay is implemented: `aoide.song` (nucleus option, default
-`"sonata"`) selects the song a host performs; `lib/mkHost.nix` walks
+Song replay is implemented: `aoide.song` (nucleus option, `nullOr str`,
+default `null` — naming no song performs no song) selects the song a host
+performs; `lib/mkHost.nix` walks
 `song/songbook/` exactly as it walks `modules/`, so a committed song
 self-registers and self-gates on `config.aoide.song == "<name>"` — the same
 discipline as a dendrite. The shipped standard is song `"sonata"` at

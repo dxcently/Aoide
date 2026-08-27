@@ -235,9 +235,11 @@ facet's own defaults, unchanged.
 
 ## The Shipped Baseline Is Guarded, Not Frozen
 
-`aoide.song` defaults to `"sonata"` — the shipped standard, guaranteed
-present under `song/songbook/sonata/`. A missing baseline is a loud nix
-eval failure, never a silent no-op. `sonata` is upstream-owned and
+`sonata` is the shipped standard, guaranteed present under
+`song/songbook/sonata/`. `aoide.song` (`nullOr str`) defaults to `null` —
+naming no song performs no song: a host opts into the desktop by naming the
+song explicitly. A missing baseline is a loud nix eval failure, never a
+silent no-op. `sonata` is upstream-owned and
 evolving: like any other upstream-owned tree (nucleus, facets), upstream
 MAY update or iterate on it.
 
@@ -268,7 +270,8 @@ The discipline is already in use: the retired `default` song's declared aestheti
 
 **Declare** (planned) commits a staged rice to `song/songbook/<song>/` as
 durable, versioned, fleet-available score. **`aoide.song`** is the per-host
-selector (str, default `"sonata"`) — one line in `hosts/<host>/default.nix`:
+selector (`nullOr str`, default `null` — naming no song performs no song) —
+one line in `hosts/<host>/default.nix`:
 
 ```nix
 aoide.song = "sonata";

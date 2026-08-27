@@ -1797,3 +1797,29 @@ last verification.
 - Registration: SCHEMA.md Notes manifest and `ingest/index.md` catalog
   entries added; `updated:` bumped on Peer-Federation, A2A-Door,
   Peer-Transport, Doors-and-Peers, aoide-cli, and the index.
+
+## [2026-08-28] upkeep | aoide.song default removed — six pages reconciled
+
+`aoide.song` is `types.nullOr types.str`, default `null`
+(`modules/nucleus/options.nix`, commits 0b65c49 + ae18b98). Naming no song
+performs no song: with the quickshell facet enabled and `aoide.song = null`
+the host gets no paint config and no shell service — not an empty surface;
+the unit carries `ConditionPathExists` on the runtime `shell.qml` so a
+runtime-composed song starts it without a rebuild. Hosts wanting paint name
+the song explicitly (`aoide.song = "sonata";`, as yomi-strix does).
+Canonical wording: CONTRACTS.md, "Naming no song performs no song".
+
+Six stale claims of the old `"sonata"` default corrected in place:
+`concepts/song/Song-Anatomy.md` (shipped-standard blockquote),
+`concepts/song/Self-Ricing.md` (Shipped-Baseline section; Declare/Select/
+Replay selector line), `concepts/Snowflake-Anatomy.md` (song
+self-registration paragraph), `concepts/Codebase.md` (option-contract
+bullet), `concepts/Full-Architecture.md` (song-replay paragraph). The
+`rice compose --from` default of `"sonata"` (Self-Ricing.md diagram +
+pipeline line, Rice-and-Livery.md Reads bullet) is a separate, unchanged
+CLI default and was left alone, as were all `aoide.song = "sonata";`
+example lines — explicit naming is the current mechanism.
+
+Lint grep pass over the five touched pages: no new violations in the edited
+lines; pre-existing candidates on untouched lines (e.g. Codebase.md:20
+"robust", Self-Ricing.md:53 "would") left for a user-reviewed lint sweep.

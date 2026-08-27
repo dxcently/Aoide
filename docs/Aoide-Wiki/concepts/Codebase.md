@@ -125,8 +125,10 @@ no behaviour, so an empty config evaluates. The surface:
 
 - `aoide.enable` (master switch), `aoide.user` (default `"khoa"`, owner of the
   `~/Aoide` clone).
-- `aoide.song` (str, default `"sonata"`) — which song this host performs.
-  Set once in `hosts/<host>/default.nix`; each song's `rice.nix` guards itself
+- `aoide.song` (`nullOr str`, default `null`) — which song this host performs.
+  Null performs no song: a paint facet reads the null and deploys nothing (no
+  QML tree, no shell service). Set once in `hosts/<host>/default.nix`; each
+  song's `rice.nix` guards itself
   with `lib.mkIf (config.aoide.song == "<name>")`. See [[Song-Vocabulary#Replay — any song, any host]].
 - `aoide.livery` — the v0 livery schema: closed `palette.{bg,fg,accent,urgent}`
   (base16, permissive hex type) + optional component tiers `bar.*` / `notif.*` /

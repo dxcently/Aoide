@@ -35,9 +35,9 @@ Only `stage/` and `auditions/` are gitignored — those two are the whole runtim
 surface; everything else under `song/` is versioned score.
 
 > **The shipped standard song lives in the songbook like any other.**
-> `aoide.song`'s default, `"sonata"`, is `song/songbook/sonata/` —
-> upstream-owned and evolving; every other song is clone-owned, and upstream
-> never touches it. See [[Self-Ricing#The Shipped Baseline Is Guarded, Not
+> The shipped standard, `song/songbook/sonata/`, is upstream-owned and
+> evolving; a host performs it by naming it (`aoide.song = "sonata";`).
+> Every other song is clone-owned, and upstream never touches it. See [[Self-Ricing#The Shipped Baseline Is Guarded, Not
 > Frozen]] for the full guarantee.
 
 ## Committed score — the versioned half
