@@ -21,11 +21,11 @@ door verifies the exact same request it always did. Spec:
 ## Why it exists
 
 A door that only ever answers `127.0.0.1` is unreachable from a second box
-on its own terms. Before this lane, reaching it meant the peer's own
-address had to be directly HTTP-routable — true on a flat LAN, false the
-moment a router filters cross-segment traffic (the gap `docs/architecture/
-PAIRING.md`'s Discovery section documents) or the door is deliberately kept
-off any routable interface. Ssh already crosses that boundary on a trusted
+on its own terms. A direct dial requires the peer's address to be
+HTTP-routable — true on a flat LAN, false the moment a router filters
+cross-segment traffic (the gap `docs/architecture/PAIRING.md`'s Discovery
+section documents) or the door is deliberately kept off any routable
+interface. Ssh already crosses that boundary on a trusted
 home network, and aoide already assumes ssh keys are set up between paired
 boxes — so instead of a raw interface, a peer reaches the door through a
 tunnel aoide opens for the duration of one session, never a standing pipe
@@ -36,7 +36,7 @@ the operator maintains by hand.
 `Peer.via` (`ssh://[user@]host[:port]`, `aoide_storage::tunnel::parse_via`)
 is the only thing that turns a dial on: absent, every outbound call to that
 peer — every signed POST and `peer add`'s own unsigned AgentCard GET —
-dials `url` directly, byte-for-byte the pre-transport behavior. Present, it
+dials `url` directly. Present, it
 names the ssh target `aoide-client`'s dial resolution forwards through.
 `set_peer_via` is the sole writer, a sibling to `upsert_paired_peer` rather
 than a parameter on it, and a caller passing no value never clears an
@@ -52,8 +52,8 @@ Three ways a peer picks one up:
   loopback-bound door always claims regardless of who hears it), recording
   it on the resulting peer at pairing-approval commit even when the
   ceremony's own two dials went direct.
-- **A plain, undecorated `peer pair`** records nothing — every peer paired
-  without `--via` dials directly, exactly as before this lane.
+- **A plain, undecorated `peer pair`** records nothing — a peer paired
+  without `--via` dials directly.
 
 ## Dial resolution
 
@@ -70,8 +70,8 @@ canonical string binds to, so the two can never drift apart. The logical url is 
 rewritten url is only ever what gets dialed. This is also why `peer add`'s
 AgentCard fetch — its one verification call, a plain GET — dials through
 the same funnel when `--via` is given: the exact scenario `--via` exists
-for is a door reachable only through the tunnel, so skipping the funnel on
-this one call would fail verification before the peer was ever registered.
+for is a door reachable only through the tunnel, so the verification GET
+must ride it too.
 Either way `peer add` records the peer under its LOGICAL `url`, never the
 rewritten one.
 
@@ -79,9 +79,8 @@ rewritten one.
 
 Every request that arrives through the forward reaches the far door's
 socket as `PeerOrigin::Loopback` — that is what a forward IS, and the door
-still extends Loopback's unconditional Inject-delivery free pass to an
-*unsigned* connection exactly as before, tunnel or not. What changes is
-narrower and older than this lane: a request carrying a verified
+extends Loopback's unconditional Inject-delivery free pass to an
+*unsigned* connection, tunnel or not. The narrower rule: a request carrying a verified
 per-request signature (`aoide-server::a2a::verify_signed_request`) is, by
 construction, never a local caller, so `origin_for_inject` strips Loopback's
 free pass from it before the delivery decision runs, regardless of which
