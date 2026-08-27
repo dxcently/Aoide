@@ -3806,19 +3806,33 @@ non-empty host). A beacon failing any one check is dropped and counted —
 never echoed, never partially rendered. Survivors are deduped by
 FINGERPRINT, keeping the freshest sighting's fields (a restarted
 advertiser's new `url` wins over a stale one); the printed table carries
-name/fingerprint/url/first-heard/last-heard/count. This command NEVER
-writes `state/peers.json`.
+name/fingerprint/url/**srcAddr**/first-heard/last-heard/count. `srcAddr` is
+the UDP packet's own source IP — captured by the listening socket itself,
+never sent by the advertiser — kept on the client's local, unpinned
+`Heard` record, never on the wire-shape `Beacon` above (that shape stays
+CONTRACTS-pinned and additive, §4/§6 untouched). `url` is what the
+advertiser CLAIMS; `srcAddr` is what was actually OBSERVED — for a
+loopback-bound advertiser (the default) `url` is display-only noise
+(`http://127.0.0.1:<port>/` no matter who hears it) and `srcAddr` is the
+field that matters. This command NEVER writes `state/peers.json`.
 
 **Invite** — `aoide peer invite <name> [--secs N] [--yes]` is sugar over
 the ceremony, nothing more: it runs its OWN discover sweep, resolves
 `<name>` against what was heard (exactly one fingerprint claiming that
 name → proceed; zero or more than one → a taught error listing every name
-actually heard), and on a single match runs the EXACT SAME
-`run_pair_request` core `peer pair request` calls — a shared function, not
-a copy — against that beacon's advertised url. `--yes` skips only the
-local proceed-confirm; the ceremony's own mutual SAS confirmation (both
-operators, both ends, decision 4) is untouched and still the sole
-authority.
+actually heard), composes its dial target from that beacon's OBSERVED
+`srcAddr` rather than its advertised `url` (swapping only the host —
+scheme, port, and path are preserved verbatim from `url`, since outbound
+requests are signed over the path and never the host), and on a single
+match runs the EXACT SAME `run_pair_request` core `peer pair request`
+calls — a shared function, not a copy — against that composed target.
+Before dialing, it refuses when the resolved target is this instance's
+OWN door: the heard fingerprint matching this instance's own identity
+fingerprint, or the composed target resolving to loopback or to one of
+this instance's own known urls, either one a taught refusal naming the
+fingerprint. `--yes` skips only the local proceed-confirm; the ceremony's
+own mutual SAS confirmation (both operators, both ends, decision 4) is
+untouched and still the sole authority.
 
 **Spoofed beacons are phishing, and the ceremony catches them** — an
 attacker advertising a victim's name with its own url can lure an invite,

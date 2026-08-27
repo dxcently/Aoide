@@ -278,18 +278,39 @@ ceremony; discovery only tells you who is there to invite.
   invite` against others) must open that port itself.
 - **`aoide peer discover [--secs N]`** joins the group, listens
   briefly (default a few seconds), dedupes by fingerprint, and
-  prints the table: name, fingerprint, URL, first/last heard. A
-  beacon is UNTRUSTED NETWORK DATA (house rule 4's discipline):
-  every field is validated (name shape, hex fingerprint, http(s)
-  URL, line-size cap) before display, a malformed beacon is dropped
-  and counted, and nothing is ever written to the peer registry by
-  discovery alone.
+  prints the table: name, fingerprint, URL, the observed source
+  address, first/last heard. A beacon is UNTRUSTED NETWORK DATA
+  (house rule 4's discipline): every field is validated (name shape,
+  hex fingerprint, http(s) URL, line-size cap) before display, a
+  malformed beacon is dropped and counted, and nothing is ever
+  written to the peer registry by discovery alone.
+- **The advertised URL is a claim; the observed source address is a
+  fact.** A loopback-bound advertiser's `url` field always reads
+  `http://127.0.0.1:<port>/`, no matter who hears it — useless as a
+  dial target for anyone but itself. The UDP packet's own source IP,
+  by contrast, is measured directly by the socket that heard it and
+  cannot be spoofed the way a self-reported field can. `peer
+  discover` shows both, side by side, precisely so the two can be
+  seen disagreeing; `peer invite` DIALS the observed address, never
+  the claimed one — it swaps only the host, preserving the
+  advertised URL's scheme, port, and path verbatim (the path matters:
+  outbound requests are signed over the path, never the host, so
+  dropping it would silently break the far end's signature check).
 - **`aoide peer invite <name>`** is sugar over the ceremony, nothing
   more: it runs its own discover sweep, resolves `<name>` to the
-  beacon's URL (ambiguous or absent name = taught error listing what
-  WAS heard), shows the fingerprint, and then runs the EXISTING
-  `peer pair request` flow against that URL. One ceremony stays the
-  only verification.
+  matching beacon (ambiguous or absent name = taught error listing
+  what WAS heard), composes a dial target from that beacon's
+  OBSERVED source address rather than its advertised URL, shows both
+  the advertised URL and the observed address plus the fingerprint,
+  and then runs the EXISTING `peer pair request` flow against the
+  composed target. One ceremony stays the only verification.
+- **`peer invite` refuses to invite yourself.** Before dialing
+  anything, it checks whether the resolved target is this instance's
+  own door: the heard beacon's fingerprint matching this instance's
+  own identity fingerprint is one way to trip it; the composed dial
+  target resolving to loopback or to one of this instance's own known
+  URLs is the other. Either one is a taught refusal naming the
+  fingerprint, never a ceremony run against yourself.
 - **Spoofed beacons are phishing, and the ceremony catches them.** An
   attacker advertising a victim's name with its own URL can lure an
   invite — but the SAS confirmation is mutual: the code on the
