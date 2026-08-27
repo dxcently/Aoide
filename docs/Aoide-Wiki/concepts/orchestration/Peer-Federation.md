@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-15
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, agent, a2a, orchestration, interop, federation]
 ---
 
@@ -65,7 +65,7 @@ an error.
 local "sender is the target's own parent" autogate rule: a peer marked
 `true` has its inbound `message/send` auto-deliver without the pending
 queue even though the connection is non-loopback — see
-[[#Security — the non-loopback pending-gate amendment]] below. An
+[[#Security — pairing is the verification path]] below. An
 unmarked/unknown sender is never autogated.
 
 `tokenFile` (`peer add --token-file <path>`, optional) names a file on THIS
@@ -163,7 +163,12 @@ session id they could match.
 ## CLI surface
 
 `aoide peer add <name> <url> [--autogate] [--token-file <path>] [--bearer-secret
-<name>]` / `remove <name>` / `pull [<name>]` / `status` — see
+<name>]` / `remove <name>` / `pull [<name>]` / `status` — plus the pairing
+ceremony's `pair request|pending|approve|reject|watch`
+([[Pairing-Ceremony]]), the per-peer capability gate `allow <name> <cap>
+on|off`, LAN discovery `discover [--secs <n>]` and `invite <name>`, and
+`spawn <name> [--yes] -- <text…>`, a signed spawn against a paired peer's
+own door — see
 [[aoide-cli#The `peer` group — aoide-to-aoide federation]] for the per-command
 behavior. `status --json` carries the full registry row per peer; `peer
 list` folded into it (command-defrag lane D).
@@ -180,42 +185,62 @@ peer gates its own delivery through its own [[A2A-Door]] security model, so
 a remote send never sits in the sender's local pending queue. `--to` and
 `--id` are mutually exclusive on `send`.
 
-## Security — the non-loopback pending-gate amendment
+## Security — pairing is the verification path
 
-The [[A2A-Door]]'s original security model assumes a **loopback** caller and
-moves all admission to rebuild time (enabling the door, setting
-`spawnAgent`) rather than gating per request. Peer federation is the first
-caller that isn't loopback, so `message/send` classifies the caller's
-address first (`a2a::classify_origin` → `PeerOrigin`: `Loopback` /
-`Remote(IpAddr)` / `Unknown`):
+The [[Pairing-Ceremony]] is the only verification between two instances:
+a completed pair commits a `verified: true` peer record carrying the
+peer's ed25519 pubkey and a closed `allows` set (default
+`["read","spawn"]`), and the door's per-request gates read that record.
+`peer_store::resolve_peer` answers "who is this caller" on a ladder of
+rungs (`CONTRACTS.md` §6 "Legacy escapes"):
 
-- **`Remote`** — falls back to the same interactive pending-approval queue
-  `send` already uses, UNLESS the sender's address matches a peer
-  registered with `autogate: true` in `state/peers.json`
-  ([[#The registry — `state/peers.json`]] above) **or** presents that
-  peer's own `tokenFile` secret as a bearer token
-  (`peer_store::is_autogated_peer_token`) — either match auto-delivers
-  exactly like a loopback call.
-- **`Unknown`** (the caller's address couldn't be read at all) — never
-  auto-delivered, failing safe the same as an unmatched `Remote`.
-- **`Loopback`** — delivers immediately, admission stays at rebuild time,
-  **only while no server-wide inbound bearer gate is configured**
-  ([[A2A-Door#Security and governance]]). The operator has two ways to set
-  that gate, wired through the `aoide-a2a` unit: `aoide.a2a.bearerSecret` (a
-  secret NAME resolved fresh on every request through the local
-  [[Secrets-Broker]], consumer `a2a-door`, failing closed on a resolve
-  failure) takes precedence over `aoide.a2a.tokenFile` (a path read once at
-  `a2a serve` launch) when both are set; either alone is sufficient to close
-  the gate. Once one is configured, a caller — loopback included — that does
-  not present the valid token is coerced to `Unknown` before this
-  classification is even consulted: behind a reverse proxy or tunnel every
-  caller's connection looks loopback to the server, so an unconditional
-  loopback trust hands a remote attacker the operator's own standing.
+- **Signature** (`PeerRung::Signature`) — a paired peer's per-request
+  ed25519 signature over a canonical string binding method, path,
+  timestamp, nonce, and the body digest
+  (`a2a.rs::verify_signed_request`), replay-guarded by a ±120s timestamp
+  window and a bounded nonce cache. The ONLY rung Spawn accepts:
+  `spawn_admitted` requires a verified peer, resolved by signature, whose
+  `allows` contains `"spawn"`.
+- **Token** — a peer's own `tokenFile` presented as a bearer. A legacy
+  escape for an unpaired caller: it authenticates the read arms
+  (`tasks/get`, the AgentCard GET, `aoide/graphSummary`) and answers
+  Inject's autogate question, and never reaches Spawn.
+- **Addr** (`PeerRung::Addr`) — a bare TCP-source-IP-vs-registered-`url`
+  match. Resolves a peer identity for ATTRIBUTION only (Inject's `from`
+  field, the autogate question): it carries no possession proof and is
+  never sufficient for Spawn.
+- **Door-wide bearer** (`aoide.a2a.tokenFile`/`aoide.a2a.bearerSecret`) —
+  the second legacy escape; it authenticates the read arms without ever
+  resolving a peer identity.
 
-This is the one interactive per-request gate the wire otherwise lacks —
-added specifically for the case the original loopback-only design didn't
-need to cover. Every inject/spawn/error, loopback or not, still writes to
-the single audit log as `Door::A2a`.
+Inject delivery still classifies the caller's address first
+(`a2a::classify_origin` → `PeerOrigin`: `Loopback` / `Remote(IpAddr)` /
+`Unknown`). A `Remote` caller falls back to the same interactive
+pending-approval queue `send` uses, auto-delivering only on an autogate
+match — the OR of the address check, the per-peer `tokenFile` check, and
+the signature-rung `autogate` flag on the resolved peer's own record
+(`autogate_match` = `ip_autogate || token_autogate || sig_autogate`). An
+`Unknown` origin never auto-delivers. A verified signature outranks
+loopback for this question: an ssh `-L` forward delivers a tunneled
+peer's packets from its own end's sshd, so `origin_for_inject` strips
+`PeerOrigin::Loopback`'s free pass from any request
+`verify_signed_request` already verified — a signed peer's delivery
+timing is decided by its `autogate` flag, never by which address it
+arrived from ([[Peer-Transport]]). `Loopback` keeps its unconditional
+trust only while no server-wide inbound bearer gate is configured
+([[A2A-Door#Security and governance]]): `aoide.a2a.bearerSecret` (a
+secret NAME resolved fresh on every request through the local
+[[Secrets-Broker]], consumer `a2a-door`, failing closed on a resolve
+failure) takes precedence over `aoide.a2a.tokenFile` (a path read once at
+`a2a serve` launch); once either is set, a caller — loopback included —
+that does not present the valid token is coerced to `Unknown` before this
+classification is even consulted, since behind a reverse proxy or tunnel
+every caller's connection looks loopback to the server.
+
+Every inject/spawn/error, loopback or not, writes to the single audit log
+as `Door::A2a`, and a resolved peer's name is stamped on audit lines,
+pending-queue entries, and a spawned session's record as
+`origin: "peer:<name>"`.
 
 ## Status
 
@@ -229,6 +254,7 @@ both are later, separately-directed work.
 ## Related
 
 - [[A2A-Door]]
+- [[Pairing-Ceremony]]
 - [[Peer-Transport]]
 - [[Session-Graph]]
 - [[Governance]]

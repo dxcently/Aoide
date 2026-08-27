@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-27
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, agent, a2a, orchestration, peer, transport, ssh]
 ---
 
@@ -172,6 +172,9 @@ allowed to become a resident daemon:
   proxy hop.
 - [[Peer-Federation]] — the peer registry `Peer.via` lives on, and the
   federation door the tunnel carries requests to.
+- [[Pairing-Ceremony]] — the ceremony that records the `via` marker on the
+  resulting peer at approve (`peer invite` derives it; `--via` sets it
+  explicitly).
 - [[Conductor-Channel]] — `send`'s remote delivery, gated the same way
   whether or not the call happened to travel through a tunnel.
 - [[Session-Graph]] — the liveness reaping a tunnel's own backstop sweep

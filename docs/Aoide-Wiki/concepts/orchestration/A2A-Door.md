@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-01
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, agent, a2a, orchestration, interop]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -189,6 +189,7 @@ to **rebuild time** instead.
 
 - [[Agent-Interface]]
 - [[Peer-Federation]] — the aoide-to-aoide door built on top of this one
+- [[Pairing-Ceremony]] — the commit-then-reveal handshake whose three wire methods ride this door
 - [[Peer-Transport]] — reaching this door through a tunnel when a paired peer isn't directly HTTP-reachable
 - [[Governance]]
 - [[Session-Graph]]

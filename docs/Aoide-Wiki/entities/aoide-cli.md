@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-08-27
+updated: 2026-08-28
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
@@ -59,10 +59,11 @@ adding, removing, or renaming a leaf shows as a deliberate diff against that
 snapshot.
 
 The command surface holds **59 leaves across the groups this page tracks**;
-`aoide schema --json | jq '.commands | length'` reports 74, since further
+`aoide schema --json | jq '.commands | length'` reports 75, since further
 commands exist that are not yet covered here: the `inbox` group, `who`,
 `events tail`, `identity`, and the `peer` group's `hub`/`allow`/`spawn`,
-`discover`/`invite`, and 4-command `pair` ceremony. `lyra schema --json`
+`discover`/`invite`, and 5-command `pair` ceremony
+(`request`/`pending`/`approve`/`reject`/`watch` — [[Pairing-Ceremony]]). `lyra schema --json`
 carries the painted surface — see above.
 The per-command dev reference — signature, files read, files written,
 where output pipes to — lives at [[CLI-Reference]]; the table below sums

@@ -104,6 +104,7 @@ concepts/orchestration/Conductor-3D-DAG.md
 concepts/orchestration/Conductor-Channel.md
 concepts/orchestration/Content-Pipeline.md
 concepts/orchestration/Loop-Protocol.md
+concepts/orchestration/Pairing-Ceremony.md
 concepts/orchestration/Peer-Federation.md
 concepts/orchestration/Peer-Transport.md
 concepts/orchestration/Screen-Control.md

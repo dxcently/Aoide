@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, cli, mcp, a2a, peer, daemon]
 ---
 
@@ -407,10 +407,60 @@ aoide peer hub <name> [--clear]
   else matches, never shadowing a real registered name. See
   [[Peer-Federation]].
 
+### aoide peer pair request / pending / approve / reject / watch
+
+```
+aoide peer pair request <url> [--name <n>] [--self-url <url>]
+                        [--via ssh://[user@]host[:port]]
+aoide peer pair pending
+aoide peer pair approve <id> [--yes]
+aoide peer pair reject <id>
+aoide peer pair watch [--popup]
+```
+
+- **Reads:** the parked pairing state `state/peer-pairing-inbound.json` /
+  `state/peer-pairing-outbound.json` (`aoide_storage::pairing`,
+  tolerate-missing, expired entries swept lazily on read) and this
+  instance's ed25519 identity (`state/identity/`, minted lazily on first
+  need — the private key never appears in any output). `request` POSTs
+  `aoide/pairRequest` then `aoide/pairReveal` — two sequential POSTs in
+  one invocation — to the target instance's A2A door; `approve` on the
+  inbound (approver) side POSTs the `aoide/pairApprove` callback BEFORE
+  writing anything local. `watch` follows the daemon events feed
+  (`$XDG_RUNTIME_DIR/aoide/events.jsonl`, same path `events tail` reads)
+  for the `pair-parked`/`pair-revealed`/`pair-awaiting-confirm` lines
+  (`class: "gate"`, `source: "a2a-door"`) and re-derives the actionable
+  set from `list_inbound`/`list_outbound` on a 30s reconcile tick — the
+  feed line is a trigger, the storage-backed list the authority.
+- **Writes:** `request` parks the outbound half; `approve` commits a
+  `pubkey`/`verified` peer record into `state/peers.json`
+  (`peer_store::upsert_paired_peer`, default `allows: ["read","spawn"]`),
+  dispatching by direction — inbound queue first, then outbound — so the
+  requester's own confirm is a SECOND `approve` against the outbound
+  queue with no further wire call; `reject` removes the parked entry
+  locally on either queue, no wire call, no record.
+- **Output:** `request` prints the derived SAS (the `%03d-%03d`
+  confirmation code, `aoide_storage::pairing::derive_sas`); `pending`
+  lists both directions, each entry with its own independently-derived
+  SAS (an unrevealed inbound entry shows `revealed: false` and no code);
+  `approve` re-derives the SAS and prompts `y`/`N` unless `--yes`.
+  `watch` blocks until Ctrl-C, narrating each recognized line; `--json`
+  emits one event object per line instead, and `--popup` raises a zenity
+  `--question` confirm per actionable request (refused up front when
+  zenity is not on PATH; `--popup`+`--json` is a usage error) whose
+  Approve/Reject drive the same approve/reject paths — on a non-CLI door
+  `watch` returns a "run it from a terminal" outcome, the `events tail`
+  posture.
+- **Notes:** not gated. The commit-then-reveal ceremony, the commit
+  asymmetry, the park cap (`AOIDE_PAIRING_PARK_CAP`, default 32) and the
+  4-hour expiry (`DEFAULT_PAIRING_TIMEOUT_SECS`): [[Pairing-Ceremony]].
+
 ## Related
 
 - [[A2A-Door]] — the inbound A2A contract (CONTRACTS.md §6)
 - [[Peer-Federation]] — same-network aoide-to-aoide federation (§7)
+- [[Pairing-Ceremony]] — the commit-then-reveal handshake the `peer pair`
+  group drives
 - [[Agent-Interface]] — the one-schema, two-doors MCP contract
 - [[aoided]] — the daemon entity and policy surface
 - [[shellbridge]] — the stage-state bridge concept

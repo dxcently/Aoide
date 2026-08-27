@@ -1763,3 +1763,37 @@ last verification.
   all cite [[Style]].
 - Self-description test: walked SCHEMA.md, SHAPE.md, Lint.md, Assertion.md
   against the new rule; protocol pages remain imperative-mood conformant.
+
+## [2026-08-28] ingest | pairing ceremony page + federation security rewrite
+
+- New page `concepts/orchestration/Pairing-Ceremony.md` (the pairing lane,
+  task #93 / P-P5 close): the commit-then-reveal ceremony over
+  `aoide/pairRequest`/`pairReveal`/`pairApprove`, the A-commits/B-reveals
+  wire asymmetry and the B-commits-first record asymmetry, the locally
+  derived SAS (`aoide_storage::pairing::derive_sas`, pinned vectors
+  740-729/847-405), the five `peer pair` commands including `watch
+  [--popup|--json]` (zenity `--question` only), the gate-classed events
+  feed (`pair-parked`/`pair-revealed`/`pair-awaiting-confirm`, payload
+  `id`/`name`/`originAddr`/`url`/`direction` only), the park cap (32) and
+  4-hour expiry, and the legacy-escape rungs.
+- [[Peer-Federation]]: the Security section rewritten as "Security —
+  pairing is the verification path" (the rung ladder, Signature-only
+  Spawn, signature-outranks-loopback, `origin: "peer:<name>"` audit
+  stamping); the previous autogate/token-only framing read as the whole
+  security story and is superseded. Its CLI-surface list gains `pair
+  request|pending|approve|reject|watch`, `allow`, `discover`, `invite`,
+  `spawn`; the in-page anchor on the registry section's `autogate`
+  paragraph repointed to the new heading.
+- Cross-links: [[A2A-Door]] and [[Peer-Transport]] gain a
+  [[Pairing-Ceremony]] Related entry (Peer-Transport's notes the `via`
+  marker is recorded by the ceremony).
+- `concepts/cli/Doors-and-Peers.md` gains a `peer pair
+  request/pending/approve/reject/watch` section in its house
+  reads/writes/output shape. `entities/aoide-cli.md`'s command-count
+  paragraph updated: 75 leaves at HEAD per `cli/src/registry.rs`'s golden
+  snapshot, the pair ceremony now enumerated as 5 commands. The installed
+  binary's `schema --json` still reports 74 (older than HEAD); the tree's
+  own golden test pins 75 including `peer.pair.watch`.
+- Registration: SCHEMA.md Notes manifest and `ingest/index.md` catalog
+  entries added; `updated:` bumped on Peer-Federation, A2A-Door,
+  Peer-Transport, Doors-and-Peers, aoide-cli, and the index.
