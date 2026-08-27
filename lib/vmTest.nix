@@ -288,10 +288,13 @@ pkgs.testers.runNixOSTest {
     # for `peer discover`/`peer invite` — the LAN discovery beacon's CLI
     # half, a read-only multicast sweep plus a sugar-over-the-ceremony
     # invite (P-P6, docs/architecture/PAIRING.md's "Discovery
-    # (advertise-but-locked)" section) — reached 80; bumped by −4 for
-    # deleting the legacy `a2a agent add|list|remove|send` family outright
-    # (pre-pairing legacy — unsigned, ungated, structurally superseded by
-    # the `peer` family) — reached 76.
+    # (advertise-but-locked)" section) — reached 80; bumped by 1 for
+    # `graph session carry` — the durable-session mark (task #96, 562c8f6;
+    # this tripwire was never bumped with that landing and sat at
+    # stale-80-vs-actual-81 until the next entry's review caught it) —
+    # reached 81; bumped by −4 for deleting the legacy `a2a agent
+    # add|list|remove|send` family outright (pre-pairing legacy — unsigned,
+    # ungated, structurally superseded by the `peer` family) — reached 77.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a command.
     schema_raw = machine.succeed("aoide schema --json")
@@ -305,8 +308,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 76, (
-        f"expected 76 commands, got {cmd_count}.  "
+    assert cmd_count == 77, (
+        f"expected 77 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

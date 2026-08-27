@@ -396,7 +396,7 @@ Item {
         for (var i = 0; i < all.length; i++) {
             var s = all[i]
             if (!s) continue
-            if (kindOf(s) !== "shell") mine.push(s)   // agents · subagents · a2a
+            if (kindOf(s) !== "shell") mine.push(s)   // agents · subagents
         }
 
         var byId = {}

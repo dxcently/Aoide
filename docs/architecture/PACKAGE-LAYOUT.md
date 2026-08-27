@@ -111,9 +111,9 @@ pkgs/aoide/
     server/                     # aoided — the daemon + door serve-loops
       src/ daemon · listener · mcp-serve · a2a-serve · sessions · snapshots
            · commands (daemon, shellbridge, a2a serve — Phase 9)
-    client/                     # outbound: drive external agents / talk to aoided
-      src/ a2a-client · adapter(melete) · transport · session-handle
-           · commands (a2a agent*, adapter melete — Phase 9)
+    client/                     # outbound: drive peer aoides / talk to aoided
+      src/ wire(A2A client half) · peer · adapter(melete) · discover
+           · commands (peer*, adapter melete — Phase 9)
     storage/                    # durable session data + memory persistence
       src/ session-store · transcript-index · stage-state · migrations · search
            · commands (usage — Phase 9)
@@ -150,7 +150,7 @@ pkgs/aoide/
 | **protocol** | The single contract: registry, schema doc, `Outcome` envelope + exit codes, `canonical_state`, `Door`, audit event classes, the `feed` primitives (`FeedWriter`/`Follower` — the append-only JSON-lines event-feed spine, same cross-cutting shape as `audit`), the A2A-JSON-RPC / MCP wire types, and the `cmd!`/`arg!`/`flag!` registration macros. Every door depends on it; it depends on nothing aoide-specific. | `registry.rs`, `output.rs`, `daemon.rs`(Door/audit), a2a/mcp wire types, `CONTRACTS.md`, `commands/meta.rs`(schema) | landed (Phase 2); macros + `audit_log_path` folded in (Phase 9) |
 | **conduct** | The session core: PTY-backed `conduct` wrap, the session DAG, hook ingestion, liveness reaping — plus its CLI commands (`graph *`, `conduct`, `hooks install`). Makes every terminal a tracked, conductable session. | `graph/` (conduct·send·model·doc·window·manage·common), `shellbridge.rs`, `reap.rs`, `commands/graph.rs`, `commands/hooks.rs` | landed (Phase 3b); commands landed (Phase 9) |
 | **server** | `aoided` and the door serve-loops: MCP-over-stdio, A2A JSON-RPC/HTTP/SSE, listeners, sessions, snapshots, the audit sink — plus its CLI commands (`daemon`, `shellbridge`, `a2a serve`). Untrusted input stops here. | `daemon.rs`, `mcp.rs`, `a2a.rs`(serve half), `commands/infra.rs`(server half), `commands/a2a.rs`(serve command) | landed (Phase 4c); commands landed (Phase 9) |
-| **client** | Outbound: the A2A client registry + send, the melete adapter (neutral-event consumer), transports — plus its CLI commands (`a2a agent *`, `adapter melete`). Drives external agents and speaks to `aoided`. | `a2a.rs`(client half), `adapter.rs`, `commands/a2a.rs`(agent commands), `commands/infra.rs`(adapter command) | landed (Phase 4b); commands landed (Phase 9) |
+| **client** | Outbound: the A2A client half (card fetch, signed `message/send` to peers), the melete adapter (neutral-event consumer), LAN discovery — plus its CLI commands (`peer *`, `adapter melete`). Drives peer aoides and speaks to `aoided`. | `wire.rs`(A2A client half), `peer.rs`, `adapter.rs`, `discover.rs`, `commands.rs`(peer commands, adapter command) | landed (Phase 4b); commands landed (Phase 9) |
 | **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, migrations, search — plus its CLI command (`usage`). The steward's `canon` and session memory persist through here. | `graph/session_store.rs`, `song/stage/*`, `state/*`, `commands/usage.rs` | landed (Phase 3a); backend is still file-first (seed → build); commands landed (Phase 9) |
 | **secrets** | The secrets broker: policy-gated resolve over a unix socket, TOTP enrollment, pluggable backends (`file` built-in), admin commands — plus its CLI commands (`secrets *`). A secret's value never crosses into a `Serialize`/`Deserialize` type; audit happens broker-side only. | `crates/secrets/` (broker·client·policy·backend·enroll·store·commands) | landed (Workstream SECRETS, P-V1–P-V4f) |
 | **test-support** | Shared test rig (scratch dirs, `EnvSaver`, fixture payloads, the single `env_lock`). **Dev-dependency only** — never a production edge. | `commands/mod.rs::test_support`, root `env_lock` | landed (Phase 9) |
