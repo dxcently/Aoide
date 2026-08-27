@@ -412,6 +412,17 @@ Contract guarantees:
   omitted from `schema --json` entirely when empty, so a command without
   examples serializes byte-identical to before the field existed; consumers
   simply see the key when present.
+- `internal` (optional bool, default omitted = `false`) — hook-plumbing a
+  harness drives, never a human typing it directly (`session start/phase/
+  end/hook`, task #101 R1 of the command-defrag lane). **Additive**, same
+  discipline as `implemented`/`examples`: omitted from `schema --json`
+  entirely when `false`, so a non-internal command serializes byte-identical
+  to before the field existed. It hides noise from the HUMAN listing only
+  (`aoide guide`'s command table skips `internal` rows) — every other door
+  (`schema --json`, the MCP tool list, the A2A AgentCard's `skills`) still
+  enumerates internal commands in full; `internal` is not a second
+  `implemented`-style capability filter, it is purely a display hint for one
+  consumer.
 
 **Per-binary schema (two binaries, P-A5 of the binary-split workstream,
 `docs/architecture/PACKAGE-LAYOUT.md`, "Two binaries").** This schema is

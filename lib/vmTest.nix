@@ -308,7 +308,15 @@ pkgs.testers.runNixOSTest {
     # blessed manual resync, command-defrag lane (task #101) — reached 75;
     # bumped by −1 for deleting `graph focus` — conductor and shellbridge
     # call focus_session directly — reached 74; bumped by −1 for folding
-    # `peer list` into `peer status --json` (full Peer row) — reached 73.
+    # `peer list` into `peer status --json` (full Peer row) — reached 73;
+    # the graph-prefix cutover (task #101, Lane R, Phase R1) then renamed 18
+    # of the 19 `graph.*` spellings IN PLACE — `graph view` -> bare `graph`
+    # (the render; `graph link` alone survives the family), `graph
+    # send`/`graph spawn`/`graph resurrect` -> bare `send`/`spawn`/
+    # `resurrect`, `graph session *`/`graph permit`/`graph pending *`/`graph
+    # reap`/`graph prune` -> `session *`, `graph project *` -> `project *` —
+    # a hard cutover, no aliases; the PATH SET changed, the COUNT did not:
+    # still 73.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a command.
     schema_raw = machine.succeed("aoide schema --json")
@@ -408,26 +416,29 @@ pkgs.testers.runNixOSTest {
     def khoa_graph(cmd):
         return f"su -s /bin/sh khoa -c '{graph_env} {cmd}'"
 
-    # `aoide graph project add demo /tmp --json` exits 0.
-    add_raw = machine.succeed(khoa_graph("aoide graph project add demo /tmp --json"))
+    # `aoide project add demo /tmp --json` exits 0 (ex-`graph project add`,
+    # task #101 R1 — `project *` promoted to its own top-level group).
+    add_raw = machine.succeed(khoa_graph("aoide project add demo /tmp --json"))
     add_doc = json.loads(add_raw)
     # Outcome envelope: ok == true or status == "ok".
     ok = add_doc.get("ok") is True or add_doc.get("status") == "ok"
-    assert ok, f"graph project add failed: {add_raw[:300]}"
+    assert ok, f"project add failed: {add_raw[:300]}"
 
-    # `aoide graph view --json` parses with the demo project node present.
-    view_raw = machine.succeed(khoa_graph("aoide graph view --json"))
+    # `aoide graph --json` parses with the demo project node present
+    # (ex-`graph view`, R1 — the render IS the bare command now).
+    view_raw = machine.succeed(khoa_graph("aoide graph --json"))
     view_doc = json.loads(view_raw)
     nodes = None
     if "nodes" in view_doc:
         nodes = view_doc["nodes"]
     elif "data" in view_doc and "nodes" in view_doc.get("data", {}):
         nodes = view_doc["data"]["nodes"]
-    assert nodes is not None, f"graph view --json missing nodes key: {view_raw[:300]}"
+    assert nodes is not None, f"graph --json missing nodes key: {view_raw[:300]}"
     demo_nodes = [n for n in nodes if n.get("kind") == "project" and n.get("name") == "demo"]
-    assert demo_nodes, f"demo project node not found in graph view: {view_raw[:300]}"
+    assert demo_nodes, f"demo project node not found in the graph render: {view_raw[:300]}"
 
-    # `aoide graph prune --json` exits 0 — the blessed manual resync now that
+    # `aoide session prune --json` exits 0 (ex-`graph prune`, R1 — session
+    # lifecycle promoted to `session *`) — the blessed manual resync now that
     # `graph emit` is gone (restage_graph already runs at every mutation
     # site; prune's own restage is the one this test exercises). Seed a
     # `done` session directly (no conduct session exists in this headless
@@ -441,16 +452,16 @@ pkgs.testers.runNixOSTest {
     machine.succeed(f"printf '%s' {shlex.quote(sessions_seed)} > {stage_dir}/sessions.json")
     machine.succeed(f"rm -f {stage_dir}/graph.json")
 
-    prune_raw = machine.succeed(khoa_graph("aoide graph prune --json"))
+    prune_raw = machine.succeed(khoa_graph("aoide session prune --json"))
     prune_doc = json.loads(prune_raw)
     ok = prune_doc.get("ok") is True or prune_doc.get("status") == "ok"
-    assert ok, f"graph prune failed: {prune_raw[:300]}"
+    assert ok, f"session prune failed: {prune_raw[:300]}"
     prune_data = prune_doc.get("data", prune_doc)
     assert "vmtest-prune-probe" in prune_data.get("removed", []), (
-        f"graph prune did not remove the seeded session: {prune_raw[:300]}"
+        f"session prune did not remove the seeded session: {prune_raw[:300]}"
     )
 
-    # graph.json reappeared — (re)staged by that same `graph prune`
+    # graph.json reappeared — (re)staged by that same `session prune`
     # invocation, since nothing else could have recreated it after the rm
     # above — and is valid JSON with a nodes key.
     graph_raw = machine.succeed(f"cat {stage_dir}/graph.json")
