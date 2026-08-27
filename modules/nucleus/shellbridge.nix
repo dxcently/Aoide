@@ -151,6 +151,12 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+        # This unit execs `lyra shellbridge --run` (below) — the ONE unit in
+        # this file whose process actually reads `AOIDE_SONG_TEMPLATES`
+        # (`aoide-song::widgets`, `lyra`-only). `aoide-graph-reap` further
+        # down execs plain `aoide`, never touches paint data, and does not
+        # carry this var — review finding, task #107: paint data belongs on
+        # the unit that paints, not every unit this file happens to declare.
         "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
       ]
       # Nix-declared baseline song — same env-baked-into-the-service
@@ -243,7 +249,6 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
-        "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
       ];
 
       NoNewPrivileges = true;

@@ -51,6 +51,21 @@ lib.mkIf config.aoide.enable {
   # consumers.
   environment.sessionVariables =
     (lib.optionalAttrs (config.aoide.terminal != "") { AOIDE_TERMINAL = config.aoide.terminal; })
+    # `AOIDE_SONG_TEMPLATES` (L-C3, task #107) is paint data (the shipped
+    # songbook), not core state like `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT` below —
+    # gated on `aoide.lyra.enable`, the option that actually controls
+    # whether the `lyra` binary is installed on this host at all (review
+    # finding: a headless-core box that never installs `lyra` has no reader
+    # for this var, so exporting it unconditionally only drags the
+    # `pkgs.lyra-songbook` closure onto every interactive shell for no
+    # reason). An operator's own `lyra rice compose` still needs it — the
+    # sibling-of-binary fallback tier (`fs::song_templates_dir`'s own doc)
+    # can't resolve across `lyra`'s separate `rice` output, so this env
+    # export is the ONLY way an interactive shell agrees with `lyra` on
+    # where the templates are.
+    // (lib.optionalAttrs config.aoide.lyra.enable {
+      AOIDE_SONG_TEMPLATES = "${pkgs.lyra-songbook}/share/lyra/songbook";
+    })
     // {
       # Non-default values only need to WORK; the defaults are chosen so
       # that unset == set-to-default already matches core's own code
@@ -60,7 +75,6 @@ lib.mkIf config.aoide.enable {
       # already holds.
       AOIDE_ROOT = config.aoide.root;
       AOIDE_FLAKE_ROOT = config.aoide.checkout;
-      AOIDE_SONG_TEMPLATES = "${pkgs.lyra-songbook}/share/lyra/songbook";
     };
 
   # ── aoided systemd user service ──────────────────────────────────────────
@@ -122,7 +136,6 @@ lib.mkIf config.aoide.enable {
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
-        "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
       ]
       ++ lib.optional (config.aoide.terminal != "") "AOIDE_TERMINAL=${config.aoide.terminal}";
       # The interactive half of the same need: `spawn --windowed` and
@@ -167,7 +180,6 @@ lib.mkIf config.aoide.enable {
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
-        "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
       ];
       NoNewPrivileges = true;
       StandardOutput = "journal";
@@ -224,7 +236,6 @@ lib.mkIf config.aoide.enable {
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
-        "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
       ];
       NoNewPrivileges = true;
       StandardOutput = "journal";
@@ -270,7 +281,6 @@ lib.mkIf config.aoide.enable {
       Environment = [
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
-        "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
         "AOIDE_USER=${config.aoide.user}"
       ];
 
@@ -329,7 +339,6 @@ lib.mkIf config.aoide.enable {
       Environment = [
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
-        "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
         "AOIDE_USER=${config.aoide.user}"
       ];
       NoNewPrivileges = true;

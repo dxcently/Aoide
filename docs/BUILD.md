@@ -50,9 +50,13 @@ none of them except your own dendrite/facet flags.
 | `aoide.auditLog`               | str (default `$AOIDE_ROOT/log`, i.e. `~/.aoide/log`) | single audit log |
 
 `AOIDE_SONG_TEMPLATES` (L-C3, task #107) is not its own `aoide.*` option — it
-is wired directly, exported alongside `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT` on the
-same units/shells (`modules/nucleus/{aoided,shellbridge,secrets,
-melete-adapter}.nix`) as `${pkgs.lyra-songbook}/share/lyra/songbook`. That
+is wired directly, as `${pkgs.lyra-songbook}/share/lyra/songbook`, but NOT
+onto the same broad unit list `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT` ride: only
+`aoide-song` reads it and only `lyra` links `aoide-song`, so it rides
+`modules/nucleus/shellbridge.nix`'s main `shellbridge` service (execs
+`lyra`) and `modules/nucleus/aoided.nix`'s `environment.sessionVariables`
+gated on `aoide.lyra.enable`, never the core-only units that exec plain
+`aoide` (a headless core carries no `pkgs.lyra-songbook` closure). That
 package (`pkgs/lyra-songbook/default.nix`) bakes the committed
 `song/songbook/` tree plus `manifest.json`/`registry.json` (via
 `lib/songbook.nix`) at build time, so a repo-less host's `rice compose --from

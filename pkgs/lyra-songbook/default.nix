@@ -20,14 +20,20 @@
 # `AOIDE_SONG_TEMPLATES` — `lyra rice compose --from <song>` and
 # `aoide-song::widgets`'s registry/manifest regeneration both fall back to it
 # on a repo-less host (no `$AOIDE_FLAKE_ROOT` checkout there to have composed
-# FROM or to shell `nix eval` against). Wired onto every unit/shell that
-# already carries `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT`
-# (`modules/nucleus/{aoided,shellbridge,secrets,melete-adapter}.nix`) as
-# `AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook` — on a
-# NixOS host this env tier always wins, so the core Rust's OWN
-# sibling-of-binary fallback tier is never actually exercised there; that
-# tier exists for a future non-nix tarball install (`bin/lyra` +
-# `share/lyra/songbook/` shipped side by side).
+# FROM or to shell `nix eval` against). ONLY `aoide-song` reads this var, and
+# only `lyra` links `aoide-song` — so it is wired onto exactly the units
+# whose PROCESS actually execs `lyra`, not every unit that happens to carry
+# `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT` (review finding, task #107: paint data on a
+# headless-core unit only drags this package's closure onto it for nothing).
+# That is `modules/nucleus/shellbridge.nix`'s main `shellbridge` service
+# (execs `lyra shellbridge --run`) plus `modules/nucleus/aoided.nix`'s
+# `environment.sessionVariables`, itself gated on `aoide.lyra.enable` — the
+# option that actually controls whether `lyra` is installed on this host —
+# for an operator's own interactive `lyra rice compose`. On a NixOS host this
+# env tier always wins, so the core Rust's OWN sibling-of-binary fallback
+# tier is never actually exercised there; that tier exists for a future
+# non-nix tarball install (`bin/lyra` + `share/lyra/songbook/` shipped side
+# by side).
 {
   lib,
   runCommand,
