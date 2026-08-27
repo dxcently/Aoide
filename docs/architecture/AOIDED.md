@@ -668,3 +668,18 @@ Exactly one:
   one live terminal. Daemon start is the one trigger that exists on
   headless and desktop alike, fires once per boot by construction, and
   needs no new event source.
+
+  The daemon-start trigger carries one hard limitation, found live at
+  the durable-sessions boot sweep (task #96, gate 6): a systemd user
+  unit's environment freezes at spawn, before any compositor runs, so
+  the daemon can never see `WAYLAND_DISPLAY` — a windowed resurrect
+  from the boot trigger has no terminal to open and degrades to the
+  taught no-terminal error while headless revives work fine. The
+  desktop-correct trigger is a graphical-session-side unit (WantedBy
+  graphical-session.target, the popup watcher's own pattern) running
+  `aoide resurrect` for the auto-resume projects once the compositor
+  env exists. That unit is deliberately NOT built: `autoResume` is
+  per-project and default off, nobody has flipped it since the sweep,
+  and the daemon trigger already covers the headless case correctly.
+  Whoever flips the flag on a desktop host builds the
+  graphical-session unit then, with this paragraph as the design.
