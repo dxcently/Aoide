@@ -276,7 +276,8 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
   #       "socket":        "string? — per-session injection socket path",
   #       "contextTokens": "int?    — context-window fill of the last request (input+cache tokens); absent until the first assistant turn",
   #       "contextCeiling": "int?   — context-window ceiling for the current model; re-derived on model change",
-  #       "needsSudo":     "bool?   — true while a conducted shell is blocked at a sudo prompt; cleared (not set false) once the prompt clears"
+  #       "needsSudo":     "bool?   — true while a conducted shell is blocked at a sudo prompt; cleared (not set false) once the prompt clears",
+  #       "restore":       "object? — a conducted shell's continuously-captured restore snapshot: { cwd, idle, argv, typed }; absent for non-shell sessions"
   #     }
   #   ]
   # }

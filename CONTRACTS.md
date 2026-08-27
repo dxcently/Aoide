@@ -976,6 +976,48 @@ spoofable same-user process state `--from`/`AOIDE_SESSION_ID` already are
 (`pending.json`'s own note below); nothing may ever gate on it without
 upgrading it to an authenticated channel first (task #63's lane).
 
+**Additive in v0 (P-C5, durable-sessions plan):** a session record MAY also
+carry an optional `restore` (object) — a conducted SHELL's continuously-
+captured restore snapshot, written change-only by `aoide-conduct`'s PTY
+tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
+
+```json
+"restore": { "cwd": "/home/khoa/Aoide", "idle": true, "argv": null, "typed": "cargo test -p aoide-conduct" }
+```
+
+- `cwd` — the shell's live working directory at the last tick (`None` when
+  unreadable).
+- `idle` — whether the pty's foreground process group was the bare shell
+  itself, the SAME predicate `state` is derived from. Kept as its own field
+  rather than read back off `state` later: the reap sweep overwrites `state`
+  to `"done"` BEFORE its ledger write (`reap.rs`'s own ordering, `graph
+  reap`), so idleness would otherwise be unrecoverable by the time the
+  ledger line is written.
+- `argv` — RAW, uncollapsed, unclipped `argv` off `/proc/<fg>/cmdline`
+  (`proc_argv`) while a foreground command runs; `None` while idle. Never
+  the DISPLAY label `activity` carries (`proc_command` basename-collapses
+  `argv[0]` and truncates at 48 chars) — re-exec'ing that string would run
+  the wrong or a truncated binary.
+- `typed` — the reconstructed unsubmitted prompt line, REFUSAL-based: `Some`
+  only for a clean, unedited keystroke run since the last submit (bytes from
+  BOTH real stdin and an injection connection count, since both land in the
+  same shell readline buffer); any readline-editing byte (an escape
+  sequence, `^R`, Tab, `^U`/`^W`) or invalid UTF-8 poisons it to `None`
+  instead of guessing. Only ever populated when `idle` is true — a shell
+  mid-command has no prompt line. A silently WRONG `typed` would put text
+  the operator never composed one keystroke from running; `None` is a fully
+  acceptable product of this capture, a guess is not.
+
+Absent for every non-shell session and every legacy record predating this
+field; readers must tolerate both forms. No `graph.json` projection — like
+`headless`/`hookAncestry`/`origin` above, it is consumed internally
+(projected verbatim into `state/session-ledger.jsonl`'s own `restore` field
+at session exit, below) rather than rendered into the live graph. Never
+computed at reap time: by the time a sweep condemns a session its process is
+already gone (that is the signal it reaped on), so a `/proc` read there
+returns nothing, every time — the snapshot is always the last one the live
+tick took, up to ~950ms stale at worst.
+
 **Windowless lineage (task #89, corrected in review round 2):** a session is
 windowless BY CONSTRUCTION — no `windowAddress`, no window-owning pid ever
 attached to it — in either of two cases: (1) it IS ITSELF a conducted
@@ -1366,7 +1408,7 @@ state — a reader wanting "is this session still running" still asks
 `sessions.json`, never this file.
 
 ```json
-{"v":0,"sessionId":"s1","agent":"claude","harnessSessionId":"claude-uuid-123","cwd":"/home/khoa/Aoide","title":"fix the thing","petname":"brave-otter","startedAt":"2026-08-20T10:00:00Z","endedAt":"2026-08-20T12:00:00Z","resumedFrom":null,"origin":null}
+{"v":0,"sessionId":"s1","agent":"claude","harnessSessionId":"claude-uuid-123","cwd":"/home/khoa/Aoide","title":"fix the thing","petname":"brave-otter","startedAt":"2026-08-20T10:00:00Z","endedAt":"2026-08-20T12:00:00Z","resumedFrom":null,"origin":null,"restore":null}
 ```
 
 Every field serializes unconditionally (no `skip_serializing_if`,
@@ -1382,6 +1424,21 @@ session a paired peer's A2A spawn created, projected verbatim off the live
 `SessionRecord.origin` at the exact moment `ledger_session_exit` appends
 this line, `null` otherwise (including every legacy line written before
 this field existed, tolerated on read the same as any other field here).
+
+`restore` (P-C5, durable-sessions plan) is `null` for every non-shell
+session and every line predating this field, and otherwise the SAME
+`{cwd, idle, argv, typed}` object `sessions.json`'s own `restore` field
+carries (see above) — projected verbatim off `SessionRecord.restore` at the
+exact instant `ledger_session_exit` appends this line, never re-derived and
+never a `/proc` read here: the reap sweep's own ordering
+(`state = "done"` BEFORE this call) means the process this line is about may
+already be gone by the time it is written, so the record's own
+continuously-captured snapshot is the only honest source. A populated
+`restore` object's OWN fields also always serialize (never
+`skip_serializing_if`, even here) — the SAME `RestoreSnapshot` type backs
+both `sessions.json`'s additive-optional field and this always-present one,
+so a caller reading a populated `restore` sees the identical complete shape
+in either file.
 
 ### `state/carry.json` — **v0** (durable-sessions plan)
 
