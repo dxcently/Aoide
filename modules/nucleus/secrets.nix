@@ -55,6 +55,7 @@
   config,
   lib,
   pkgs,
+  inputs,
   ...
 }:
 
@@ -276,7 +277,16 @@ lib.mkMerge [
       # is listed explicitly rather than assumed from the systemPackages
       # entry above (that entry serves `secrets enroll`'s own QR rendering
       # and an operator's interactive shell, never this unit).
-      path = [ pkgs.zenity ];
+      # `quickshell` rides the same rule for the lyra dialog path:
+      # `lyra secrets ask` spawns it by bare name, so the unit that spawns
+      # lyra must carry it — the live gap that let the first unit-spawned
+      # dialog fail silently (lyra resolved via AOIDE_RICE_BIN, its
+      # quickshell ENOENT'd, the ask just stayed parked). Same package the
+      # quickshell facet installs; this whole block is gated on that facet.
+      path = [
+        pkgs.zenity
+        inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default
+      ];
 
       serviceConfig = {
         Type = "simple";
