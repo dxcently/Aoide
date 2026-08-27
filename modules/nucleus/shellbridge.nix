@@ -151,6 +151,7 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+        "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
       ]
       # Nix-declared baseline song — same env-baked-into-the-service
       # precedent as quickshell's AOIDE_WALLPAPER (modules/facets/quickshell/
@@ -242,6 +243,7 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+        "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
       ];
 
       NoNewPrivileges = true;

@@ -78,6 +78,7 @@ lib.mkIf config.aoide.enable {
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+        "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
       ];
 
       NoNewPrivileges = true;

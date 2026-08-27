@@ -60,6 +60,7 @@ lib.mkIf config.aoide.enable {
       # already holds.
       AOIDE_ROOT = config.aoide.root;
       AOIDE_FLAKE_ROOT = config.aoide.checkout;
+      AOIDE_SONG_TEMPLATES = "${pkgs.lyra-songbook}/share/lyra/songbook";
     };
 
   # ── aoided systemd user service ──────────────────────────────────────────
@@ -121,6 +122,7 @@ lib.mkIf config.aoide.enable {
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+        "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
       ]
       ++ lib.optional (config.aoide.terminal != "") "AOIDE_TERMINAL=${config.aoide.terminal}";
       # The interactive half of the same need: `spawn --windowed` and
@@ -165,6 +167,7 @@ lib.mkIf config.aoide.enable {
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+        "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
       ];
       NoNewPrivileges = true;
       StandardOutput = "journal";
@@ -221,6 +224,7 @@ lib.mkIf config.aoide.enable {
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+        "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
       ];
       NoNewPrivileges = true;
       StandardOutput = "journal";
@@ -266,6 +270,7 @@ lib.mkIf config.aoide.enable {
       Environment = [
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+        "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
         "AOIDE_USER=${config.aoide.user}"
       ];
 
@@ -324,6 +329,7 @@ lib.mkIf config.aoide.enable {
       Environment = [
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+        "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
         "AOIDE_USER=${config.aoide.user}"
       ];
       NoNewPrivileges = true;

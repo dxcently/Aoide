@@ -302,6 +302,7 @@ lib.mkMerge [
           "AOIDE_SECRETS_SOCKET=/run/aoide-secrets/secrets.sock"
           "AOIDE_ROOT=${config.aoide.root}"
           "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+          "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
         ]
         # `watch::resolve_lyra_bin` resolves `lyra` via `AOIDE_RICE_BIN` (tier
         # 1, trusted unconditionally) or a sibling of `current_exe()` (tier
