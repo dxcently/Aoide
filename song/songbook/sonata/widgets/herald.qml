@@ -36,7 +36,7 @@
 //     holoBlue (the information hue), with the mono figure beside it.
 //
 // ── Data ───────────────────────────────────────────────────────────────────
-// Read-only: song/stage/herald.json via FileView (the sessions.json watch
+// Read-only: state/stage/herald.json via FileView (the sessions.json watch
 // pattern, bar.qml). Newest is LAST in the array; capped at 20 daemon-side.
 // Sender text is UNTRUSTED DATA — every Text rendering it is PlainText, so
 // a body carrying `<b>` displays literally.
@@ -93,8 +93,10 @@ PanelWindow {
     readonly property int maxCards: 5    // older unexpired cards wait in the ledger
 
     // ── The ledger file — read-only, watched (bar.qml's sessions.json idiom) ─
+    // herald.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
+    // not song/stage/.
     readonly property string heraldPath:
-        Quickshell.env("HOME") + "/Aoide/song/stage/herald.json"
+        Quickshell.env("HOME") + "/Aoide/state/stage/herald.json"
     property var records: []
     FileView {
         id: heraldFile

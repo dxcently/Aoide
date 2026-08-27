@@ -165,7 +165,9 @@ PanelWindow {
     // its `state === "awaiting"` (needsInput ⇔ awaiting). No regex derivation.
     FileView {
         id: stage
-        path: Quickshell.env("HOME") + "/Aoide/song/stage/sessions.json"
+        // sessions.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
+        // not song/stage/.
+        path: Quickshell.env("HOME") + "/Aoide/state/stage/sessions.json"
         watchChanges: true
         blockLoading: false
         printErrors: false

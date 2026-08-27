@@ -135,7 +135,9 @@ PanelWindow {
     // its `state === "awaiting"` (needsInput ⇔ awaiting). No regex derivation.
     FileView {
         id: stage
-        path: "/home/khoa/Aoide/song/stage/sessions.json"
+        // sessions.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
+        // not song/stage/.
+        path: "/home/khoa/Aoide/state/stage/sessions.json"
         watchChanges: true
         blockLoading: false
         printErrors: false

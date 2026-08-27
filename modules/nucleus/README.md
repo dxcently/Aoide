@@ -22,8 +22,9 @@ module builds against what nucleus declares.
 - `melete-adapter.nix` — the concrete thin-adapter exemplar on the `aoided`
   event stream.
 - `shellbridge.nix` — the bidirectional bridge service: atomic JSON state
-  out to `song/stage/*.json`, unix-socket commands in, Hyprland IPC
-  consumed here only.
+  out to `state/stage/*.json` (CONDUCTING files — sessions.json, hooks.json;
+  CONTRACTS.md §4), unix-socket commands in, Hyprland IPC consumed here
+  only.
 - `secrets.nix` (P-V4 of Workstream SECRETS, renamed from "vault" at P-V4b)
   — the secrets broker's deployment: its own system user `aoide-secrets` +
   groups `aoide-secrets`/`aoide-secrets-access`, and a SYSTEM

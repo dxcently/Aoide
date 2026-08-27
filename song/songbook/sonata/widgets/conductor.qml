@@ -15,8 +15,9 @@
 // THE PROGRAM — the roster reads as a CONCERT PLAYBILL: a pantheon entablature
 // over a hall of collapsible per-project FOLDERS, each folder a numbered
 // movement whose cards are main-agent plaques with their subagent plaques hung
-// beneath. Self-contained: this file owns its data read (stage/sessions.json +
-// projects.json + hooks.json + herald.json, QS_STAGE honoured), its model
+// beneath. Self-contained: this file owns its data read (state/stage/
+// sessions.json + projects.json + hooks.json + herald.json, QS_STAGE
+// honoured), its model
 // build, and its card UI. Nothing here is shared with TerminalsGadget — that temple keeps its
 // own, untouched pattern.
 //
@@ -69,7 +70,7 @@
 // radius 0 everywhere.
 //
 // ── The hooks channel (any-agent) ──────────────────────────────────────────
-// stage/hooks.json — [{ sessionId, phase, updatedAt }] — is agent-agnostic:
+// state/stage/hooks.json — [{ sessionId, phase, updatedAt }] — is agent-agnostic:
 // ANY agent session may be hooked into a phase from outside the roster's own
 // state. The hook phase WINS as the card's live state (cardLiveState): it
 // drives the lamp glyph/colour, the metronome pulse, the terracotta breath,
@@ -150,10 +151,13 @@ Item {
             onTriggered: temple.nowMs = Date.now() }
 
     // ── Stage files (QS_STAGE override — the preview-harness seam) ──────────
+    // CONDUCTING files (sessions/projects/hooks/herald) live under
+    // state/stage/, not song/stage/ (CONTRACTS.md §4, command-defrag S2) —
+    // this temple never reads a rice file.
     readonly property string stageDir: {
         var s = Quickshell.env("QS_STAGE")
         return (s && s.length > 0) ? s
-             : Quickshell.env("HOME") + "/Aoide/song/stage"
+             : Quickshell.env("HOME") + "/Aoide/state/stage"
     }
 
     property var _sessions: []
@@ -189,7 +193,7 @@ Item {
         onFileChanged: reload()
     }
     // ── The SUMMONS channel — the herald ledger, read for permission cards ──
-    // stage/herald.json is the herald's own file (`aoide herald` / `graph
+    // state/stage/herald.json is the herald's own file (`aoide herald` / `graph
     // permit` write it through the shellbridge). The roster reads ONLY its
     // `kind: "summons"` records, and only to learn which session is blocked on
     // a permission prompt the human can actually answer.

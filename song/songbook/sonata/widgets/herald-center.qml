@@ -28,7 +28,7 @@
 //   · Sender text is UNTRUSTED DATA — every Text rendering it is
 //     PlainText; `<b>` displays literally.
 //
-// Read side: song/stage/herald.json via FileView (bar.qml's sessions.json
+// Read side: state/stage/herald.json via FileView (bar.qml's sessions.json
 // watch). Newest LAST in the array, capped at 20 daemon-side. This surface
 // never expires anything — the popup owns the dismiss clock; the ledger
 // only drops a record when a human dismisses it (row click, or the
@@ -70,8 +70,10 @@ Item {
     implicitHeight: stele.height + 5     // +5 clears the cast shadow's overhang
 
     // ── The ledger file — read-only, watched ───────────────────────────────
+    // herald.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
+    // not song/stage/.
     readonly property string heraldPath:
-        Quickshell.env("HOME") + "/Aoide/song/stage/herald.json"
+        Quickshell.env("HOME") + "/Aoide/state/stage/herald.json"
     property var records: []
     FileView {
         id: heraldFile

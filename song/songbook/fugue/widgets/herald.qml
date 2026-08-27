@@ -3,7 +3,7 @@
 // owns its own layer surface -- hidden while the ledger is empty.
 //
 // Mechanism only borrowed from sonata's herald.qml (read as reference, not
-// copied): read-only song/stage/herald.json via FileView, newest last, a
+// copied): read-only state/stage/herald.json via FileView, newest last, a
 // LOCAL dismiss clock keyed by id (0 timeoutMs = never expires), and two
 // outbound commands over the bridge socket -- heralddismiss / heraldverdict
 // -- never a file write from QML (CONTRACTS.md section 4).
@@ -34,8 +34,10 @@ PanelWindow {
     readonly property int maxCards: 5
 
     // -- The ledger file -- read-only, watched -------------------------------
+    // herald.json is a CONDUCTING file (CONTRACTS.md section 4) --
+    // state/stage/, not song/stage/.
     readonly property string heraldPath:
-        Quickshell.env("HOME") + "/Aoide/song/stage/herald.json"
+        Quickshell.env("HOME") + "/Aoide/state/stage/herald.json"
     property var records: []
     FileView {
         id: heraldFile

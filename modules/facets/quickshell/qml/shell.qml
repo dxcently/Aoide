@@ -175,8 +175,8 @@ ShellRoot {
     //                              song/songbook/sonata/widgets/herald.qml
     // (No AoideNotifications anymore — dunst owns org.freedesktop.Notifications
     // as the DAEMON, but draws nothing. It feeds `aoide herald push`, the
-    // shellbridge files each notification into stage/herald.json, and the
-    // `herald` slot below draws the popup — with the images and progress bars
+    // shellbridge files each notification into state/stage/herald.json, and
+    // the `herald` slot below draws the popup — with the images and progress bars
     // inside the frame, and real hit-tested approve/deny buttons on a
     // permission summons, none of which dunst could draw itself. The dock's
     // `herald-center` slot reads the same file as a ledger.)
@@ -205,7 +205,7 @@ ShellRoot {
         extraProps: ({ clipboard: clipboard, ledger: ledger })
     }
     // herald: the notification popup (see the overlay-surfaces note above) —
-    // the slot's PanelWindow watches stage/herald.json and stays dormant
+    // the slot's PanelWindow watches state/stage/herald.json and stays dormant
     // while the ledger is empty.
     SurfaceSlot {
         id: heraldSlot

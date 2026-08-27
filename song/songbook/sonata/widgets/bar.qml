@@ -156,7 +156,7 @@
 //   - SystemTray → StatusNotifier items (the collapsible tray); rows open
 //                  their dbusmenu via QsMenuAnchor (needs the shell.qml
 //                  UseQApplication pragma — see hazards.md §4).
-//   - Sessions   → song/stage/sessions.json + hooks.json via FileView.
+//   - Sessions   → state/stage/sessions.json + hooks.json via FileView.
 
 import QtQuick
 import QtQuick.Layouts
@@ -994,10 +994,11 @@ component WorkspaceRow: Item {
         }
         return false
     }
+    // CONDUCTING files (CONTRACTS.md §4) — state/stage/, not song/stage/.
     readonly property string sessionsPath:
-        Quickshell.env("HOME") + "/Aoide/song/stage/sessions.json"
+        Quickshell.env("HOME") + "/Aoide/state/stage/sessions.json"
     readonly property string hooksPath:
-        Quickshell.env("HOME") + "/Aoide/song/stage/hooks.json"
+        Quickshell.env("HOME") + "/Aoide/state/stage/hooks.json"
     FileView {
         id: sessionsFile
         path: root.sessionsPath

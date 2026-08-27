@@ -108,7 +108,7 @@ ShellRoot {
         property string stubStagePath: {
             var e = Quickshell.env("QS_STAGE");
             return (e && e.length > 0) ? e
-                                       : (Quickshell.env("HOME") + "/Aoide/song/stage/sessions.json");
+                                       : (Quickshell.env("HOME") + "/Aoide/state/stage/sessions.json");
         }
 
         // NOT anchors.fill — an explicit Loader size forces the loaded item

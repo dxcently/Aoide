@@ -14,9 +14,9 @@
 # stacking, pause levels, and the rule engine. It does NOT draw. Every rule
 # below sets `skip_display`, and a `script` hands the notification to
 # `aoide herald push`, which packs it over the shellbridge socket into
-# song/stage/herald.json, where the Quickshell herald reads it and draws the
-# real widget (song slot `herald` for the popup, `herald-center` for the dock
-# ledger).
+# state/stage/herald.json (CONDUCTING, CONTRACTS.md §4), where the Quickshell
+# herald reads it and draws the real widget (song slot `herald` for the
+# popup, `herald-center` for the dock ledger).
 #
 # Why: the previous dunstrc carried the entire card as Pango markup in `format`
 # strings. That ceiling was structural, not cosmetic —

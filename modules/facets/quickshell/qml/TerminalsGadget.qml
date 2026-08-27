@@ -64,7 +64,9 @@ Item {
     required property var livery            // palette roles
     required property var bridge           // socket sender (bridge.focusSession)
     property var shared: null              // cross-widget state (shared.tracedSessionId)
-    property string stagePath: "/home/khoa/Aoide/song/stage/sessions.json"
+    // sessions.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
+    // not song/stage/.
+    property string stagePath: "/home/khoa/Aoide/state/stage/sessions.json"
 
     implicitWidth: 360
     implicitHeight: 520

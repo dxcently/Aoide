@@ -17,7 +17,7 @@ networkmanager, audio).
 - A dendrite that draws (e.g. `dunst.nix`'s notification popups) hands off
   to a facet-owned surface via a bridge (a CLI command, a stage file) rather
   than drawing itself — `dunst.nix` pipes through `aoide herald push` into
-  `song/stage/herald.json`, which the Quickshell herald widget reads.
+  `state/stage/herald.json`, which the Quickshell herald widget reads.
 
 ## What it consumes
 

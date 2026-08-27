@@ -14,7 +14,7 @@
 //   mode       (livery.riceMode, toggled via bridge.toggleRiceMode())
 //   net        (a readout: /proc/net/route via FileView, no backing
 //               action exists to toggle a NIC from here, so no button)
-//   sessions   (song/stage/sessions.json + hooks.json via FileView --
+//   sessions   (state/stage/sessions.json + hooks.json via FileView --
 //               click opens the injected dock, the same capability
 //               sonata's session-count cell exposes)
 //   clock      (a readout, QtQuick Date/Timer, no shell-out)
@@ -130,7 +130,9 @@ Item {
     }
     Timer { interval: 5000; repeat: true; running: true; onTriggered: routeFile.reload() }
 
-    // -- Agent sessions -- song/stage/sessions.json + hooks.json ------------
+    // -- Agent sessions -- state/stage/sessions.json + hooks.json -----------
+    // CONDUCTING files (CONTRACTS.md section 4) -- state/stage/, not
+    // song/stage/.
     property int sessionCount: 0
     property bool sessionsBlocked: false
     property bool hooksBlocked: false
@@ -145,7 +147,7 @@ Item {
     }
     FileView {
         id: sessionsFile
-        path: Quickshell.env("HOME") + "/Aoide/song/stage/sessions.json"
+        path: Quickshell.env("HOME") + "/Aoide/state/stage/sessions.json"
         watchChanges: true
         onFileChanged: sessionsFile.reload()
         onTextChanged: {
@@ -160,7 +162,7 @@ Item {
     }
     FileView {
         id: hooksFile
-        path: Quickshell.env("HOME") + "/Aoide/song/stage/hooks.json"
+        path: Quickshell.env("HOME") + "/Aoide/state/stage/hooks.json"
         watchChanges: true
         onFileChanged: hooksFile.reload()
         onTextChanged: {

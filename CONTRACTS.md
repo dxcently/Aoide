@@ -665,9 +665,10 @@ applied to the stage tree itself):
 - **`state/stage/`** — CONDUCTING state: `sessions.json`, `hooks.json`,
   `projects.json`, `graph.json`, `pending.json`, `herald.json`. Written by
   shellbridge and the `aoide`/`aoided` binaries (`aoide graph`, `aoide
-  herald`); read by the conductor TUI and, until the desktop-side cutover
-  (a later phase), by Quickshell. This is core's tree — the
-  `aoide`/`aoided` binaries alone read and write it, never `lyra`.
+  herald`); read by the conductor TUI and by Quickshell. This is core's
+  tree — the `aoide`/`aoided` binaries alone read and write it, never
+  `lyra`, and QML READS it (display only, CONTRACTS.md §0's corollary) but
+  never writes it.
 
 **Stage-dir resolution (the CLI ↔ unit seam), one function per tree.**
 `song/stage/`: precedence `$AOIDE_STAGE_DIR` when set to an **absolute** path
@@ -680,9 +681,12 @@ itself `~/Aoide/state` (`$AOIDE_STATE_DIR` when absolute, else
 override is ignored for either tree (a runtime path is never resolved
 against an arbitrary cwd). On the default layout, with no override set, the
 two trees resolve to two different directories, as intended; an
-`$AOIDE_STAGE_DIR` override (every test fixture, and the systemd unit until
-its own cutover) still names one directory for both, exactly as it did
-before the split.
+`$AOIDE_STAGE_DIR` override (every test fixture that sets one) still names
+one directory for both, exactly as it did before the split. The systemd
+unit (`modules/nucleus/shellbridge.nix`) no longer sets one at all
+(command-defrag lane S2) — `AOIDE_USER` alone is enough for both trees to
+resolve correctly on the default layout, so pinning them together would
+only undo the split for that unit.
 
 **The one-shot migration.** The first time a process resolves `state/stage/`
 under the no-override fallback, it moves each of the six conducting files

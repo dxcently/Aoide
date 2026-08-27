@@ -35,9 +35,14 @@
 # ── Stage-dir note ────────────────────────────────────────────────────────────
 #   Graph commands are invoked via `su -c` (no login shell), so no user-service
 #   environment is inherited.  The test therefore passes AOIDE_STAGE_DIR
-#   (%h/Aoide/song/stage's expansion, /home/khoa/Aoide/song/stage) explicitly
-#   on each graph command invocation, and the commands create what they need
-#   under that path themselves.
+#   explicitly on each graph command invocation, and the commands create what
+#   they need under that path themselves. The graph commands exercised here
+#   are all CONDUCTING operations, so on the real (unoverridden) layout they'd
+#   resolve under state/stage/ (CONTRACTS.md §4) — the deployed shellbridge
+#   unit no longer overrides AOIDE_STAGE_DIR at all. This test still sets it
+#   (both trees name one directory when the override is present) purely for
+#   isolation from the real ~/Aoide tree; it is not a claim about where
+#   conducting files belong in production.
 {
   pkgs,
   inputs,
@@ -384,8 +389,12 @@ pkgs.testers.runNixOSTest {
 
     # Stage dir: without shellbridge nothing pre-seeds sessions.json/hooks.json
     # here; the graph commands below create what they need under this path via
-    # AOIDE_STAGE_DIR.
-    stage_dir = "/home/khoa/Aoide/song/stage"
+    # AOIDE_STAGE_DIR. Only conducting files (sessions.json, graph.json) are
+    # ever touched under it — quickshell is disabled in this VM (see the
+    # trims note at the top of this file), so nothing rice-shaped is
+    # exercised — hence state/stage/, the tree those files resolve to on the
+    # real (unoverridden) layout.
+    stage_dir = "/home/khoa/Aoide/state/stage"
 
     # ── 5. Graph commands (run as khoa) ──────────────────────────────────────
     # AOIDE_STAGE_DIR is set explicitly because graph commands are invoked via
