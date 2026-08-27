@@ -86,11 +86,11 @@ let
   # full or not at all — never a half-applied mkdir/mktemp/jq/mv sequence.
   seedStageScript = pkgs.writeShellScript "aoide-seed-stage" ''
     set -euo pipefail
-    mkdir -p "$HOME/Aoide/song/stage"
-    tmp=$(mktemp "$HOME/Aoide/song/stage/.livery.json.XXXXXX")
+    mkdir -p "${config.aoide.root}/song/stage"
+    tmp=$(mktemp "${config.aoide.root}/song/stage/.livery.json.XXXXXX")
     ${pkgs.jq}/bin/jq -S '. + {song: $song}' --arg song "${config.aoide.song}" \
       "${activeSongLivery}" > "$tmp"
-    mv -f "$tmp" "$HOME/Aoide/song/stage/livery.json"
+    mv -f "$tmp" "${config.aoide.root}/song/stage/livery.json"
   '';
 
   # ── QML root — the full skeleton config installed into run/qml/ ────────────
@@ -199,10 +199,11 @@ let
     done
   '';
 
-  # Path used at runtime: ~/Aoide/run/qml/shell.qml is Quickshell's entry
-  # point — the rsync-deployed copy (see the home.activation entry below),
-  # not the repo's source tree.
-  shellQmlEntry = "/home/${config.aoide.user}/Aoide/run/qml/shell.qml";
+  # Path used at runtime: $AOIDE_ROOT/run/qml/shell.qml is Quickshell's
+  # entry point — the rsync-deployed copy (see the home.activation entry
+  # below), not the repo's source tree. L-C2 (task #107): the runtime root
+  # moved off `~/Aoide` onto `aoide.root` (default `~/.aoide`).
+  shellQmlEntry = "${config.aoide.root}/run/qml/shell.qml";
 
   # The Quickshell binary from the pre-declared flake input (flake.nix).
   quickshellPkg = inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
@@ -294,9 +295,9 @@ in
       { lib, ... }:
       lib.optionalAttrs (config.aoide.song != null) {
         home.activation.aoideDeployQml = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-          run mkdir -p "$HOME/Aoide/run"
+          run mkdir -p "${config.aoide.root}/run"
           run ${pkgs.rsync}/bin/rsync -a --delete --chmod=u+w \
-            "${quickshellConfig}/qml/" "$HOME/Aoide/run/qml/"
+            "${quickshellConfig}/qml/" "${config.aoide.root}/run/qml/"
         '';
 
         # ── Seed the live stage twin from the active song ──────────────────────

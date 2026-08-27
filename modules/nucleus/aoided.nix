@@ -38,10 +38,10 @@ lib.mkIf config.aoide.enable {
   # gate — matching `song/stage/`'s own mode rather than inventing a second
   # convention for the same class of data.
   systemd.user.tmpfiles.rules = [
-    "d %h/Aoide/log        0700 - - -"
-    "d %h/Aoide/song/stage 0755 - - -"
-    "d %h/Aoide/state      0700 - - -"
-    "d %h/Aoide/state/stage 0755 - - -"
+    "d ${config.aoide.root}/log        0700 - - -"
+    "d ${config.aoide.root}/song/stage 0755 - - -"
+    "d ${config.aoide.root}/state      0700 - - -"
+    "d ${config.aoide.root}/state/stage 0755 - - -"
   ];
 
   # ── The terminal, for the interactive half ───────────────────────────────
@@ -49,9 +49,18 @@ lib.mkIf config.aoide.enable {
   # `resurrect` are ordinary commands an operator runs in a shell, and a
   # shell inherits this no more than a systemd unit does. One option, two
   # consumers.
-  environment.sessionVariables = lib.mkIf (config.aoide.terminal != "") {
-    AOIDE_TERMINAL = config.aoide.terminal;
-  };
+  environment.sessionVariables =
+    (lib.optionalAttrs (config.aoide.terminal != "") { AOIDE_TERMINAL = config.aoide.terminal; })
+    // {
+      # Non-default values only need to WORK; the defaults are chosen so
+      # that unset == set-to-default already matches core's own code
+      # default (L-C2, task #107) — exported anyway so an interactive shell
+      # agrees with every unit above on where the runtime root/checkout
+      # sit, the same "one option, two consumers" shape `AOIDE_TERMINAL`
+      # already holds.
+      AOIDE_ROOT = config.aoide.root;
+      AOIDE_FLAKE_ROOT = config.aoide.checkout;
+    };
 
   # ── aoided systemd user service ──────────────────────────────────────────
   systemd.user.services.aoided = {
@@ -110,6 +119,8 @@ lib.mkIf config.aoide.enable {
       Environment = [
         "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
         "AOIDE_USER=${config.aoide.user}"
+        "AOIDE_ROOT=${config.aoide.root}"
+        "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
       ]
       ++ lib.optional (config.aoide.terminal != "") "AOIDE_TERMINAL=${config.aoide.terminal}";
       # The interactive half of the same need: `spawn --windowed` and
@@ -152,6 +163,8 @@ lib.mkIf config.aoide.enable {
       Environment = [
         "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
         "AOIDE_USER=${config.aoide.user}"
+        "AOIDE_ROOT=${config.aoide.root}"
+        "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
       ];
       NoNewPrivileges = true;
       StandardOutput = "journal";
@@ -206,6 +219,8 @@ lib.mkIf config.aoide.enable {
         "AOIDE_DISCOVERY_ADVERTISE=${if config.aoide.a2a.discoveryAdvertise then "1" else ""}"
         "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
         "AOIDE_USER=${config.aoide.user}"
+        "AOIDE_ROOT=${config.aoide.root}"
+        "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
       ];
       NoNewPrivileges = true;
       StandardOutput = "journal";
@@ -247,6 +262,12 @@ lib.mkIf config.aoide.enable {
       RestartSec = "3s";
 
       ExecStart = "${pkgs.aoide}/bin/aoide peer pair watch --popup";
+
+      Environment = [
+        "AOIDE_ROOT=${config.aoide.root}"
+        "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+        "AOIDE_USER=${config.aoide.user}"
+      ];
 
       NoNewPrivileges = true;
       StandardOutput = "journal";
@@ -301,7 +322,8 @@ lib.mkIf config.aoide.enable {
       Type = "oneshot";
       ExecStart = "${pkgs.aoide}/bin/aoide usage";
       Environment = [
-        "AOIDE_STATE_DIR=%h/Aoide/state"
+        "AOIDE_ROOT=${config.aoide.root}"
+        "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
         "AOIDE_USER=${config.aoide.user}"
       ];
       NoNewPrivileges = true;

@@ -300,6 +300,8 @@ lib.mkMerge [
           # explicit env above: matches `socket.rs`'s canonical default today,
           # keeps working if that default ever changes.
           "AOIDE_SECRETS_SOCKET=/run/aoide-secrets/secrets.sock"
+          "AOIDE_ROOT=${config.aoide.root}"
+          "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
         ]
         # `watch::resolve_lyra_bin` resolves `lyra` via `AOIDE_RICE_BIN` (tier
         # 1, trusted unconditionally) or a sibling of `current_exe()` (tier

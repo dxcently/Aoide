@@ -70,7 +70,7 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
   # song/stage/ is shared with aoided.nix's tmpfiles rules; systemd-tmpfiles
   # deduplicates identical rules so declaring it here as well is safe.
   systemd.user.tmpfiles.rules = [
-    "d %h/Aoide/song/stage 0755 - - -"
+    "d ${config.aoide.root}/song/stage 0755 - - -"
   ];
 
   # ── shellbridge systemd user service ─────────────────────────────────────
@@ -143,12 +143,14 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
         # No AOIDE_STAGE_DIR override (command-defrag lane S2): the two
         # stage trees (CONTRACTS.md §4) now live at different roots —
         # song/stage/ for rice/paint, state/stage/ for CONDUCTING state —
-        # and AOIDE_USER below is enough to resolve both correctly on the
+        # and AOIDE_ROOT below is enough to resolve both correctly on the
         # default layout. Setting AOIDE_STAGE_DIR here would pin BOTH trees
         # back onto one directory, undoing the split for this unit alone.
         # Hyprland socket (standard Hyprland env; shellbridge reads it directly).
         # HYPRLAND_INSTANCE_SIGNATURE is set by the compositor at session start.
         "AOIDE_USER=${config.aoide.user}"
+        "AOIDE_ROOT=${config.aoide.root}"
+        "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
       ]
       # Nix-declared baseline song — same env-baked-into-the-service
       # precedent as quickshell's AOIDE_WALLPAPER (modules/facets/quickshell/
@@ -236,7 +238,11 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
       # AOIDE_USER is set explicitly like every other unit — resolution
       # works off systemd's inherited HOME without it, but no unit in this
       # tree leans on that inheritance alone.
-      Environment = [ "AOIDE_USER=${config.aoide.user}" ];
+      Environment = [
+        "AOIDE_USER=${config.aoide.user}"
+        "AOIDE_ROOT=${config.aoide.root}"
+        "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+      ];
 
       NoNewPrivileges = true;
       StandardOutput = "journal";
