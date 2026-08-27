@@ -36,6 +36,15 @@ lib.mkIf config.aoide.enable {
     "d %h/Aoide/state    0700 - - -"
   ];
 
+  # ── The terminal, for the interactive half ───────────────────────────────
+  # See the unit's own `Environment` note below: `graph spawn --windowed` and
+  # `graph resurrect` are ordinary commands an operator runs in a shell, and a
+  # shell inherits this no more than a systemd unit does. One option, two
+  # consumers.
+  environment.sessionVariables = lib.mkIf (config.aoide.terminal != "") {
+    AOIDE_TERMINAL = config.aoide.terminal;
+  };
+
   # ── aoided systemd user service ──────────────────────────────────────────
   systemd.user.services.aoided = {
     description = "Aoide orchestrator daemon — neutral event stream + policy + audit";
@@ -95,6 +104,12 @@ lib.mkIf config.aoide.enable {
         "AOIDE_USER=${config.aoide.user}"
       ]
       ++ lib.optional (config.aoide.terminal != "") "AOIDE_TERMINAL=${config.aoide.terminal}";
+      # The interactive half of the same need: `graph spawn --windowed` and
+      # `graph resurrect` are ordinary commands an operator runs in a shell,
+      # and a shell has no more of this variable than the unit does. The unit
+      # entry above and this export are the two consumers of one option; a
+      # box configured for the daemon but not the shell would answer the
+      # taught no-terminal error to the operator while resuming fine at boot.
 
       # Harden: no new privileges; keep the user session's dbus accessible.
       NoNewPrivileges = true;
