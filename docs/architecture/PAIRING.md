@@ -367,11 +367,19 @@ forward is a pipe, not a party to the protocol.
   making ssh keys an acceptable substrate is the User's own premise for
   this lane, not something this code decides on his behalf.
 - **A tunnel is reused within a session, never held open forever.** Opened
-  lazily on first use, keyed by `(session id, peer name)`, reused by every
-  later action under the same conducted session, torn down at session end
-  and swept by the reaper for a session that never got to run its own exit
-  path. A bare shell with no conducted session gets a process-scoped
-  tunnel instead — per-command rather than persistent.
+  lazily on first use (`aoide_client::tunnel::open_or_reuse`), keyed by
+  `(session id, peer name)`, reused by every later action under the same
+  conducted session. A clean `session end` closes every tunnel it opened as
+  its own fast path (`aoide_client::tunnel::close_all_for_session`,
+  `aoide-conduct::graph::session_store::do_session_end`); `aoide-conduct::
+  reap::sweep_orphan_tunnels` is the SUPER+Q/SIGKILL backstop for a session
+  that never got to run that exit path — a roster-less, settled record's
+  still-answering `ssh -N` child is signaled
+  (`aoide_client::tunnel::kill_if_still_our_ssh`) before its record is
+  unlinked, the same shape the reaper already holds for a killed session's
+  control socket. Nothing about a tunnel is ever allowed to become a
+  resident daemon. A bare shell with no conducted session gets a
+  process-scoped tunnel instead — per-command rather than persistent.
 - **The door's own loopback trust narrows so a tunneled request cannot
   silently auto-deliver.** Every tunneled connection reaches the far door's
   socket as loopback — that is what a forward IS. The door treats an
