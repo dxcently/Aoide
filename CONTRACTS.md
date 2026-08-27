@@ -1572,21 +1572,21 @@ this file's `resurrect` and `projects.json`/`autoResume` entries
 above for the full selection contract and the daemon's boot-sweep
 consumer.
 
-### `.aoide/project.json` — **v0** (command-defrag lane U1, 2026-08-27)
+### `.aoide/project.json` — **v0** (command-defrag lane U1, 2026-08-27;
+consumed by `resurrect`'s bare mode at U2, same lane)
 
-A project's own SESSION SPECS, committed adjacent to (never inside)
-`state_dir` or either stage tree — this file lives INSIDE a project root
-(`<project_root>/.aoide/project.json`), not under `~/Aoide/`, and is meant
-to be committed with the project so a bare clone can still tell `resurrect`
-what sessions the project wants brought up (U2, a later phase, is this
-file's first consumer). Distinct from `state/undying.json` above in every
-way that matters: `undying.json` marks LIVE session IDS durable on ONE
-host, gitignored runtime state, outside any project; `project.json` names
-the SHAPE of sessions a project wants — never a session id, never a
-timestamp, nothing host-specific except each spec's own `host` field. A
-project can hold both at once: an `undying` mark survives a session's exit
-on the host that ran it, while a `project.json` spec survives a `git clone`
-onto a host that has never run anything.
+A project's own SESSION SPECS — never inside `state_dir` or either stage
+tree, but NOT committed either: this file lives INSIDE a project root
+(`<project_root>/.aoide/project.json`), self-ignoring (below), so
+`resurrect` can find it on the host that conducts the project without a
+`projects.json` registration first. Distinct from `state/undying.json`
+above in every way that matters except one — both are HOST-LOCAL, neither
+syncs via git. `undying.json` marks LIVE session IDS durable on ONE host,
+gitignored runtime state, outside any project; `project.json` names the
+SHAPE of sessions a project wants — never a session id, never a timestamp,
+nothing host-specific except each spec's own `host` field. A project can
+hold both at once: an `undying` mark and a `project.json` spec each name
+intent that only ever means anything on the host that wrote it.
 
 ```json
 {
@@ -1598,25 +1598,28 @@ onto a host that has never run anything.
 }
 ```
 
-`dir` is PROJECT-RELATIVE, ALWAYS — never an absolute path (an absolute
-`dir` would silently stop being correct the moment the file is read on a
-different checkout); `aoide_storage::manifest::save_manifest` refuses the
-WHOLE save before writing anything if any spec's `dir` is absolute, naming
-the offending `host` in a taught error. `command` is optional
-(`skip_serializing_if`, absent unless given) — a spec with none just names
-where an agent should be conducted, no fixed argv. No `sessionId`, no
-`markedAt`/timestamp of any kind: a manifest is a durable declaration of
-intent, not a record of any particular past run.
+`dir` is PROJECT-RELATIVE, ALWAYS — never an absolute path: this file is
+host-local, but the project directory it sits beside can still move on
+that same host (a re-clone elsewhere, a rename), and an absolute `dir`
+would silently stop being correct the moment it did.
+`aoide_storage::manifest::save_manifest` refuses the WHOLE save before
+writing anything if any spec's `dir` is absolute, naming the offending
+`host` in a taught error. `command` is optional (`skip_serializing_if`,
+absent unless given) — a spec with none just names where an agent should
+be conducted, no fixed argv. No `sessionId`, no `markedAt`/timestamp of
+any kind: a manifest is a durable declaration of intent, not a record of
+any particular past run.
 
 **Tolerant, both directions.** No `#[serde(deny_unknown_fields)]` anywhere
-in `aoide_storage::manifest` — the file is committed, so it can be read by
-an older `aoide` build than the one that wrote it; an unrecognized
-top-level or per-spec field is silently tolerated, not refused. Reading:
-`load_manifest(project_root)` returns `None` for a MISSING file (the
-ordinary case — most projects declare nothing) with no narration at all,
-and ALSO `None` — but narrated to stderr first — for a present file that is
-unreadable or fails to parse, so an operator learns something is wrong
-without the caller needing a second error type.
+in `aoide_storage::manifest` — the file persists on disk indefinitely,
+host-local, so it must stay readable across an `aoide` upgrade or
+downgrade on that same host, not only the exact build that wrote it; an
+unrecognized top-level or per-spec field is silently tolerated, not
+refused. Reading: `load_manifest(project_root)` returns `None` for a
+MISSING file (the ordinary case — most projects declare nothing) with no
+narration at all, and ALSO `None` — but narrated to stderr first — for a
+present file that is unreadable or fails to parse, so an operator learns
+something is wrong without the caller needing a second error type.
 
 **`.aoide/` self-ignores.** The first `save_manifest` into a project root
 seeds `.aoide/.gitignore` with `*\n` if one is not already there — the
@@ -1626,15 +1629,53 @@ the project's own source does. An existing `.gitignore` there (an operator
 customization, or one committed on purpose to override the default) is
 NEVER overwritten by a later save.
 
+**Containment (U2).** `aoide_storage::manifest::resolve_spec_dir(project_root,
+dir)` is the read-side twin of `save_manifest`'s write-side absolute-`dir`
+refusal: joins a spec's `dir` onto `project_root` and normalizes it
+LEXICALLY (no filesystem access, so it resolves before the directory
+necessarily exists), refusing — never silently clamping — any `..` that
+would resolve outside `project_root` after normalization, and any
+still-absolute `dir` a hand-edited or newer-build-written file might carry.
+`resurrect`'s bare-manifest mode (below) is this guard's first caller, on
+every spec before it is ever used as a `--cwd`.
+
 **Discovery.** `aoide_storage::manifest::walk_up(start)` walks from `start`
 up through every parent directory, git-style, for the NEAREST
 `.aoide/project.json` — stopping at the filesystem root, nearest-wins (a
 directory further up is never consulted even when the nearest one turns out
 unreadable). Pure with respect to everything but the filesystem itself: no
 env var, no `state_dir`/`stage_dir` indirection, just the path handed in —
-this is the seam a later phase's bare `resurrect` (task #101, Lane U, U2)
-calls to work from a bare clone with no `state/undying.json` marks of its
-own.
+this is the seam bare `resurrect` (task #101, Lane U, U2) calls to work
+from a project a given host has a manifest for, with or without any
+`state/undying.json` marks of its own. LEXICAL, not realpath: each step is
+a bare `Path::parent()`, never a `readlink`/`canonicalize` — a manifest
+reached through a symlinked directory component is still found (the
+per-level existence check follows it, ordinary `stat` semantics), but the
+walk never resumes from the symlink's own target ancestry once past it.
+
+**Bare `resurrect` (U2, command-defrag lane U).** `resurrect` with none of
+`--project`/`--all`/`--id` walks up from cwd via `walk_up`; found, it
+revives that manifest's specs directly — no `projects.json` registration
+needed at all — instead of falling through to the flag-mode selection
+above. Not found, the command still requires one of the three flags, now
+naming the manifest miss explicitly in its taught usage error. Each spec
+resolves independently (one spec's failure never aborts the rest, same
+posture flag-mode's per-candidate loop already holds): a spec whose `host`
+does not match this host's own (`aoide_storage::display::local_host_name`)
+is skipped — remote summoning is a later phase (U4), never guessed here.
+A local spec's `dir` resolves through `resolve_spec_dir` (above); the
+**enrichment rule** then decides HOW to bring it up — the NEWEST entry in
+THIS HOST's own session ledger whose `cwd`/`agent` match the resolved
+`dir`/the spec's `agent` (host is implicit: the ledger is host-local state,
+and only same-host specs reach this point at all) is revived through the
+exact SAME `resolve_candidate`/`resurrect_one` path `--id` drives — its
+harness resume args or terminal restore snapshot, exactly as if the
+operator had named that ledger entry directly. No match — a spec this host
+has never actually run, the ordinary case straight off a fresh checkout —
+clean-spawns instead: windowed (`AOIDE_TERMINAL`), the spec's own `command`
+when given, else the agent's registered `AgentProfile::launch` default; an
+agent with neither is a taught `failed[]` entry, never a guessed argv. The
+manifest DECIDES WHAT exists; the ledger only ever decides HOW.
 
 ### `state/identity/` — **v0** (P-P1, `docs/architecture/PAIRING.md`)
 
