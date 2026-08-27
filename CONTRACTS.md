@@ -715,20 +715,39 @@ invocation. Two tiers, absolute-path-wins like every override above:
 `$AOIDE_SONG_TEMPLATES` itself, else a sibling of `current_exe()`'s
 directory (`<exe_dir>/../share/lyra/songbook`, gated on that directory
 actually existing — `aoide_protocol::bin`'s sibling-binary resolver shape,
-applied to a directory). On a NixOS host the env tier always wins: every
-unit/shell that carries `$AOIDE_ROOT`/`$AOIDE_FLAKE_ROOT`
-(`modules/nucleus/{aoided,shellbridge,secrets,melete-adapter}.nix`) also
-carries `$AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook`
-— `pkgs/lyra-songbook` bakes a verbatim copy of the committed
-`song/songbook/` tree plus `manifest.json`/`registry.json` (via
-`lib/songbook.nix`, the SAME generator the checkout-host `nix eval` path
-and the quickshell facet's own build-time carry both call) at nix build
-time. The sibling-of-binary tier exists for a future non-nix tarball
-install instead. Neither tier resolving is a taught error naming both
-locations, never a panic; a song with a `_widgets/` shelf (borrowed widget
-ownership) still needs a real flake checkout even with templates present —
-resolving a shelf requires `composeSong` in the nix evaluator, which the
-templates fallback cannot run.
+applied to a directory). On a NixOS host the env tier always wins, but only
+where it can be READ: `AOIDE_SONG_TEMPLATES` is paint data (only
+`aoide-song` reads it, only `lyra` links `aoide-song`), so it is wired ONLY
+onto units whose process execs `lyra` — `modules/nucleus/shellbridge.nix`'s
+main `shellbridge` service — plus `modules/nucleus/aoided.nix`'s
+`environment.sessionVariables` (an operator's own interactive `lyra rice
+compose`), itself gated on `aoide.lyra.enable` so a host that never installs
+`lyra` never carries the var into its shells either. It does NOT ride the
+core-only units (`aoided` itself, `aoide-mcp`/`aoide-a2a`/`aoide-usage`/
+`aoide-pair-watch`, `aoide-graph-reap`, `aoide-secrets-watch`, the melete
+adapter) the way `$AOIDE_ROOT`/`$AOIDE_FLAKE_ROOT` do — those exec plain
+`aoide`, never `lyra`, so carrying `pkgs.lyra-songbook`'s closure onto them
+would drag paint data onto a headless core for nothing. `pkgs/lyra-songbook`
+bakes a verbatim copy of the committed `song/songbook/` tree plus
+`manifest.json`/`registry.json` (via `lib/songbook.nix`, the SAME generator
+the checkout-host `nix eval` path and the quickshell facet's own build-time
+carry both call) at nix build time. The sibling-of-binary tier exists for a
+future non-nix tarball install instead. Neither tier resolving is a taught
+error naming both locations, never a panic; a song with a `_widgets/` shelf
+(borrowed widget ownership) still needs a real flake checkout even with
+templates present — resolving a shelf requires `composeSong` in the nix
+evaluator, which the templates fallback cannot run.
+
+The registry/manifest regeneration is a THREE-layer merge, not a bare
+baked-baseline-plus-current-song write: the baked file is the baseline,
+then the EXISTING on-disk file's entries for every song that still has a
+directory in the host songbook are overlaid on top of it (a song whose
+directory is gone is pruned, never kept immortal), then the
+currently-staged song's own freshly-scanned entry is patched in last,
+winning over both. Without the overlay layer, composing and staging a
+second song on a repo-less host would silently drop the first song's
+entry — it lives in neither the frozen baseline (a runtime composition) nor
+the second song's own scan.
 
 **Stage-dir resolution (the CLI ↔ unit seam), one function per tree.**
 `song/stage/`: precedence `$AOIDE_STAGE_DIR` when set to an **absolute**
