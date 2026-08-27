@@ -690,33 +690,57 @@ applied to the stage tree itself):
   `lyra`, and QML READS it (display only, CONTRACTS.md §0's corollary) but
   never writes it.
 
-**Stage-dir resolution (the CLI ↔ unit seam), one function per tree.**
-`song/stage/`: precedence `$AOIDE_STAGE_DIR` when set to an **absolute** path
-→ else `~/Aoide/song/stage` derived from `$AOIDE_USER`/`$HOME`. `state/stage/`:
-same `$AOIDE_STAGE_DIR` absolute-path precedence (the one env var the systemd
-unit and every test already set continues to win for BOTH trees at once — a
-relocated stage tree relocates as a unit) → else `~/Aoide/state/stage`,
-itself `~/Aoide/state` (`$AOIDE_STATE_DIR` when absolute, else
-`$AOIDE_USER`/`$HOME`-derived) with `/stage` appended. A relative or empty
-override is ignored for either tree (a runtime path is never resolved
-against an arbitrary cwd). On the default layout, with no override set, the
-two trees resolve to two different directories, as intended; an
-`$AOIDE_STAGE_DIR` override (every test fixture that sets one) still names
-one directory for both, exactly as it did before the split. The systemd
-unit (`modules/nucleus/shellbridge.nix`) no longer sets one at all
-(command-defrag lane S2) — `AOIDE_USER` alone is enough for both trees to
-resolve correctly on the default layout, so pinning them together would
-only undo the split for that unit.
+**The runtime root (L-C2, lyra-carrier lane, task #107).** Every runtime
+tree below — `song/stage/`, `state/` (and `state/stage/`), `run/qml/`,
+the composed `songbook/` — hangs off ONE root: `$AOIDE_ROOT` when set to an
+**absolute** path, else `<home>/.aoide` derived from `$AOIDE_USER`/`$HOME`.
+Nix-free — core code carries this default with no NixOS assumption.
+`~/Aoide` is no longer a runtime root on any host; it is purely the dev git
+checkout, reached through the separate `$AOIDE_FLAKE_ROOT` seam (default
+`<home>/Aoide` — §1's `flake_root()`, unchanged by this lane) that
+`soundcheck`, `rice declare`'s commit-in step, and the songbook `nix eval`
+registry regen all read the checkout through.
 
-**The one-shot migration.** The first time a process resolves `state/stage/`
-under the no-override fallback, it moves each of the six conducting files
-found at the OLD `song/stage/` location into the new one — `rename` when
-found (same filesystem), copy-then-remove-source otherwise — skipping any
-file already present at the new path (a fresher `state/stage/` file is never
-clobbered) and never touching a rice file (`livery.json`, `mode.json`,
-`grimoire.json`, `cover.json`) even when it sits in the same old directory.
-Guarded to run at most once per process; idempotent across repeated boots
-(`aoide-storage`'s `migrate_conducting_stage`, `fs.rs`).
+**Stage-dir resolution (the CLI ↔ unit seam), one function per tree.**
+`song/stage/`: precedence `$AOIDE_STAGE_DIR` when set to an **absolute**
+path → else `$AOIDE_ROOT/song/stage`. `state/stage/`: same
+`$AOIDE_STAGE_DIR` absolute-path precedence (the one env var the systemd
+unit and every test already set continues to win for BOTH trees at once — a
+relocated stage tree relocates as a unit, and stays authoritative ABOVE
+`$AOIDE_ROOT`) → else `$AOIDE_ROOT/state/stage`, itself
+`$AOIDE_ROOT/state` (`$AOIDE_STATE_DIR` when absolute, else composed off
+`$AOIDE_ROOT`) with `/stage` appended. A relative or empty override is
+ignored for either tree, or for `$AOIDE_ROOT` itself (a runtime path is
+never resolved against an arbitrary cwd). On the default layout, with no
+override set, the two trees resolve to two different directories under the
+same root, as intended; an `$AOIDE_STAGE_DIR` override (every test fixture
+that sets one) still names one directory for both, exactly as it did before
+the split.
+
+**The one-shot migrations — two, composing.** (1) S1 (command-defrag lane):
+the first time a process resolves `state/stage/` under the no-override
+fallback, it moves each of the six conducting files found at the sibling
+`song/stage/` location (wherever that currently resolves) into the new one
+— `rename` when possible (same filesystem), copy-then-remove-source
+otherwise — skipping any file already present at the new path (a fresher
+`state/stage/` file is never clobbered) and never touching a rice file
+(`livery.json`, `mode.json`, `grimoire.json`, `cover.json`) even when it
+sits in the same old directory. Guarded to run at most once per process;
+idempotent across repeated boots (`aoide-storage`'s
+`migrate_conducting_stage`, `fs.rs`). (2) L-C2: moves a pre-L-C2 host's
+`~/Aoide/{song/stage,state,log}` trees wholesale into the new root's
+equivalents — each piece gated independently on its OWN override
+(`$AOIDE_STAGE_DIR`/`$AOIDE_STATE_DIR`/`$AOIDE_AUDIT_LOG`) being unset, so a
+host that already relocated one tree never has a sibling moved out from
+under it. Idempotent, and deliberately NOT wired into any path getter — the
+three real binaries (`aoide`, `aoided`, `lyra`) call it explicitly, once, at
+process start (`fs::migrate_root_once`; see that function's own doc for why
+a path getter is the wrong place to hang a process-wide side effect, the
+kind `with_stage_lock`'s pervasive fan-out makes unsafe there). Composes
+correctly with S1 in either order: whichever migration a given process's
+`main()` runs first, S1 always resolves its OWN old/new dirs dynamically
+via `stage_dir()`/`state_dir()`, so it finds files wherever L-C2 most
+recently left them.
 
 ### `song/stage/livery.json` — **v0**
 
@@ -1392,8 +1416,8 @@ not built.
 Account/usage runtime — lives in the gitignored root-runtime `state/` dir
 (§2), NOT inside either stage tree: this is account/global state, not
 song-scoped, rehearsal, or broker-owned registry state. **State-dir resolution** mirrors the stage-dir seam above:
-`$AOIDE_STATE_DIR` when set to an **absolute** path, else `~/Aoide/state`
-derived from `$AOIDE_USER`/`$HOME`. Written by `aoide usage` (`aoide.usage.*`,
+`$AOIDE_STATE_DIR` when set to an **absolute** path, else `$AOIDE_ROOT/state`
+(§4's runtime-root note). Written by `aoide usage` (`aoide.usage.*`,
 `modules/nucleus/options.nix`; opt-in poller service, off by default).
 
 The `local` block is a rollup computed straight off this machine's own Claude
@@ -2082,7 +2106,7 @@ consumer tailing it must treat any shrink as "reopen and read from the
 new start," the same handling `aoide-secrets`'s own `watch::Follower`
 gives it). This exists because the deployed broker unit's
 `ProtectHome=true` blocks the OTHER mirrored destination below
-(`~/Aoide/log`) from ever landing — see that crate's `README.md` for the
+(`$AOIDE_ROOT/log`) from ever landing — see that crate's `README.md` for the
 full incident and mechanism; this paragraph only states the shape for a
 consumer that never reads this repo's Rust. `aoide secrets watch` (the
 in-crate consumer) surfaces a parked ask through this feed in about a

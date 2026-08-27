@@ -68,7 +68,8 @@ and the staging/declarative/draft modes:
    reads another module. This is a documented convention backed by code
    review — no automated `checks` coupling check exists yet.
 6. **Every operation flows through `aoided`:** one policy surface, one gate,
-   one audit log (`~/Aoide/log`). Both doors inherit it.
+   one audit log (`$AOIDE_ROOT/log`, default `~/.aoide/log`). Both doors
+   inherit it.
 7. **Everything is a plugin.** A capability enters by *existing* at a
    conventional path, declares what it needs by *name*, and is removable
    without a trace — never by an edit to an import list, never by reaching into
