@@ -378,17 +378,6 @@ aoide peer add <name> <url> [--autogate] [--token-file <path>]
   failure fails that outbound call outright rather than sending it
   unauthenticated. See [[Peer-Federation]].
 
-### aoide peer list
-
-```
-aoide peer list [--json]
-```
-
-- **Reads:** `state/peers.json` (absent → empty).
-- **Output:** human lines `<name> · <url>[ · autogate]`; data `{peers,
-  count}`.
-- **Notes:** read-only.
-
 ### aoide peer remove
 
 ```

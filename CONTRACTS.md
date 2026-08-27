@@ -3667,8 +3667,9 @@ idempotent-silent — following `rice draft drop <name>`'s precedent (§4).
 `aoide peer status --json` enumerates the registry — its `data.peers`
 carries every registered peer's full row (name/url/autogate/tokenFile/
 bearerSecret/hub/pubkey/verified/allows/addedAt) layered with that peer's
-last-pull outcome (below); there is no separate `peer list` command, since
-that row was always a strict subset of this one.
+last-pull outcome (below); there is no separate `peer list` command — its
+`--json` row was always a strict subset of this one (the human-readable
+`peer status` line stays a terse count; names and URLs live in `--json`).
 
 ### `state/peer-cache/<name>.json` — **v0**
 
