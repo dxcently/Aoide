@@ -434,8 +434,9 @@ count.
 - `aoide schema --json` — the core contract (the `protocol`/`storage`/
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` command
   surface: conducting, the project/session graph, A2A, peers, presence,
-  the daemon, usage, hooks, the message inbox, the secrets broker).
-  **75 commands** (`crates/cli/src/registry.rs`'s golden test —
+  the daemon, usage, hooks, the message inbox, the secrets broker, the
+  Melete MCP client).
+  **78 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
