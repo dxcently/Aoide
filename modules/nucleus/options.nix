@@ -710,8 +710,8 @@ in
       default = "";
       example = "kitty -e {cmd}";
       description = ''
-        The terminal emulator invocation `graph spawn --windowed` and
-        `graph resurrect` open a session in, as a plain string with a
+        The terminal emulator invocation `spawn --windowed` and
+        `resurrect` open a session in, as a plain string with a
         `{cmd}` placeholder. A bare `{cmd}` splices the conducted argv in
         as separate arguments (`kitty -e {cmd}`); a quoted one is joined
         into a single shell word (`foot sh -c '{cmd}'`).

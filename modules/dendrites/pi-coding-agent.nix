@@ -81,7 +81,7 @@
       '';
 
       # The aoide session bridge: pi's twin of claude's ~/.claude/settings.json
-      # hooks. Every lifecycle event shells out to `aoide graph session hook`
+      # hooks. Every lifecycle event shells out to `aoide session hook`
       # with a canonical claude-shaped payload on stdin — the aoide side reads
       # it through the pi AgentProfile (hook_event_map, identity normalize, the
       # pi TranscriptSpec). TUI-only: pi-subagents' child pi runs (`--mode json

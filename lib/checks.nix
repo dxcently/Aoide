@@ -173,10 +173,10 @@ let
   # command surface is still taught in hand-written prose — both binaries'
   # guide texts are registry-derived, so they cannot drift and are not
   # re-checked here. Every backticked invocation spelling those docs teach
-  # (`aoide graph send …`, `lyra rice compose <name>`, …) must resolve against
+  # (`aoide send …`, `lyra rice compose <name>`, …) must resolve against
   # the matching binary's `schema --json`, built from this checked-out source:
   # the spelled words must be a registered command path, or a prefix of one
-  # (`aoide graph send` validly teaches the `graph.send` leaf; `aoide secrets`
+  # (`aoide send` validly teaches the `send` leaf; `aoide secrets`
   # alone validly names a group). A spelling that resolves to nothing fails
   # the build naming the file, line, and spelling.
   #

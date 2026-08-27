@@ -52,7 +52,7 @@
 #   - there is no DUNST_ACTIONS. A third-party sender's action labels never
 #     reach us, so the herald offers no buttons for them. This costs nothing for
 #     the case that matters: an aoide permission summons is published to the
-#     stage file by `aoide graph permit` itself, which knows its own verdicts.
+#     stage file by `aoide session permit` itself, which knows its own verdicts.
 # And one consequence worth stating plainly: a notification that is never
 # displayed is never "displayed", so it does not expire — dunst drops it
 # straight into history. TIMEOUT rides in the record and the QML herald owns

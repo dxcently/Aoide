@@ -179,13 +179,13 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
 
   # ── Liveness reaper: timer + oneshot service ─────────────────────────────
   # A terminal killed with SUPER+Q / SIGKILL is torn down uncatchably, so the
-  # `conduct`/`wrap` process can never run its own `graph session end` — the
+  # `conduct`/`wrap` process can never run its own `session end` — the
   # session record is stranded `running` in the roster forever (22 dead
   # `conduct-*` shells piled up in ~8 minutes of use). No QML surface can fix
   # this: widgets/conductor cannot spawn `hyprctl` (no process-spawning in QML).
   #
   # So the sweep lives HERE, next to the stage/graph infra it repairs: a cheap
-  # periodic `aoide graph reap` that gathers live `hyprctl clients -j` window
+  # periodic `aoide session reap` that gathers live `hyprctl clients -j` window
   # addresses (falling back to pid-only liveness off Hyprland), marks every dead
   # session `done`, and prunes it — re-staging graph.json atomically only when
   # something actually changed. One hyprctl call + a stage read/write; it never
@@ -197,6 +197,9 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
   # session so it inherits HYPRLAND_INSTANCE_SIGNATURE (the compositor imports
   # its env into the user manager), and resolves the same state/stage/ tree
   # shellbridge itself writes — neither unit overrides AOIDE_STAGE_DIR.
+  # Unit name kept as `aoide-graph-reap` (command-defrag lane R2): renaming it
+  # would churn enabled-unit state at the next switch for no functional gain.
+  # Only the ExecStart spelling follows the CLI's dissolved `graph` prefix.
   systemd.user.services.aoide-graph-reap = {
     description = "Aoide graph reaper — resolve KILLED sessions (SUPER+Q/SIGKILL) that could not self-clean";
 
@@ -216,7 +219,7 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
 
     serviceConfig = {
       Type = "oneshot";
-      ExecStart = "${pkgs.aoide}/bin/aoide graph reap";
+      ExecStart = "${pkgs.aoide}/bin/aoide session reap";
 
       # No AOIDE_STAGE_DIR override either (command-defrag lane S2, same
       # reasoning as shellbridge's own unit above): the reaper touches only

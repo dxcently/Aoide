@@ -45,8 +45,8 @@ lib.mkIf config.aoide.enable {
   ];
 
   # ── The terminal, for the interactive half ───────────────────────────────
-  # See the unit's own `Environment` note below: `graph spawn --windowed` and
-  # `graph resurrect` are ordinary commands an operator runs in a shell, and a
+  # See the unit's own `Environment` note below: `spawn --windowed` and
+  # `resurrect` are ordinary commands an operator runs in a shell, and a
   # shell inherits this no more than a systemd unit does. One option, two
   # consumers.
   environment.sessionVariables = lib.mkIf (config.aoide.terminal != "") {
@@ -112,8 +112,8 @@ lib.mkIf config.aoide.enable {
         "AOIDE_USER=${config.aoide.user}"
       ]
       ++ lib.optional (config.aoide.terminal != "") "AOIDE_TERMINAL=${config.aoide.terminal}";
-      # The interactive half of the same need: `graph spawn --windowed` and
-      # `graph resurrect` are ordinary commands an operator runs in a shell,
+      # The interactive half of the same need: `spawn --windowed` and
+      # `resurrect` are ordinary commands an operator runs in a shell,
       # and a shell has no more of this variable than the unit does. The unit
       # entry above and this export are the two consumers of one option; a
       # box configured for the daemon but not the shell would answer the

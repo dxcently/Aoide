@@ -82,7 +82,7 @@ QtObject {
     // daemon to run the liveness/rehook sweep NOW — reap dead sessions (a
     // window/process that exited), decay `stopped` → `idle`, and prune orphaned
     // hook records — instead of waiting up to a full ~12s aoide-graph-reap.timer
-    // period. No payload: the daemon re-execs `aoide graph reap` itself (see
+    // period. No payload: the daemon re-execs `aoide session reap` itself (see
     // shellbridge.rs's dispatch_recheck_sessions), whose atomic stage writes the
     // roster gadgets pick up through their own FileView watches. No hyprctl /
     // MCP / shell-exec from QML.

@@ -75,7 +75,7 @@
 // produce no rows and never inflate the ϟN tally.
 //
 // ── Reaping ────────────────────────────────────────────────────────────────
-// The liveness reaper (`aoide graph reap`, ~12s timer) sweeps dead sessions
+// The liveness reaper (`aoide session reap`, ~12s timer) sweeps dead sessions
 // out of the stage file out-of-band — the widget needs NO tombstone rows: a
 // session gone from sessions.json is gone from the roster on the next FileView
 // reload; `state: "done"` records stay visible with the done pose (𝄂 lamp,
@@ -174,13 +174,13 @@ Item {
         onFileChanged: reload()
     }
     // ── The SUMMONS channel — the herald ledger, read for permission cards ──
-    // state/stage/herald.json is the herald's own file (`aoide herald` / `graph
+    // state/stage/herald.json is the herald's own file (`aoide herald` / `session
     // permit` write it through the shellbridge). The roster reads ONLY its
     // `kind: "summons"` records, and only to learn which session is blocked on
     // a permission prompt the human can actually answer.
     //
     // Why the ledger and not `state === "awaiting"`: a summons exists only for
-    // a session `graph permit` found CONDUCTABLE — one with a control socket to
+    // a session `session permit` found CONDUCTABLE — one with a control socket to
     // type the answer into. An awaiting session with no summons has no channel,
     // and drawing it a verdict button would be a live-looking control that
     // cannot do anything (permit.rs, guard 1). The record also disappears the
