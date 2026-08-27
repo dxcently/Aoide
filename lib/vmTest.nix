@@ -316,7 +316,10 @@ pkgs.testers.runNixOSTest {
     # `resurrect`, `graph session *`/`graph permit`/`graph pending *`/`graph
     # reap`/`graph prune` -> `session *`, `graph project *` -> `project *` —
     # a hard cutover, no aliases; the PATH SET changed, the COUNT did not:
-    # still 73.
+    # still 73. Bumped by 1 for bare `session` — the undying picker over
+    # local and peer sessions (U3, command-defrag lane U, a parent command
+    # alongside `session.*` the same way bare `graph` sits alongside
+    # `graph.link`) — reached 74.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a command.
     schema_raw = machine.succeed("aoide schema --json")
@@ -330,8 +333,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 73, (
-        f"expected 73 commands, got {cmd_count}.  "
+    assert cmd_count == 74, (
+        f"expected 74 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

@@ -1504,11 +1504,18 @@ The undying mark: the set of session ids marked DURABLE, so a project's
 whole undying set can be resurrected together. Prototyped under the name
 "carry" (task #96, `state/carry.json`); shipped under this name at
 command-defrag lane U1 (2026-08-27) — same shape and discipline throughout,
-only the vocabulary changed. Three writers, none routed through a stage lock
+only the vocabulary changed. Four writers, none routed through a stage lock
 or `daemon_dispatch` (this is not a stage-tree file): `aoide session undying
 on|off` sets or clears the mark directly; `aoide spawn --undying` adds the
 newly spawned id once it registers; `aoide resurrect` transfers an undying
-old id onto the freshly spawned session that replaces it. Lives under
+old id onto the freshly spawned session that replaces it; bare `aoide
+session`'s picker (U3, command-defrag lane U) writes the SAME store for
+every LOCAL row a confirm touches — one `load_undying`, N `set_undying`
+mutations, one `save_undying`, the same discipline `session undying`'s own
+single-id write holds, widened to cover a whole confirm's diff at once. A
+PEER row the picker touches never reaches this store at all — the id lives
+on the peer, so the picker writes a `.aoide/project.json` spec instead (see
+that file's own section below). Lives under
 `state_dir` (`aoide_storage::fs::state_dir`) alongside
 `usage.json`/`session-ledger.jsonl`, NOT inside either stage tree — an
 undying mark is durable operator state, never staged rehearsal/registry
@@ -1676,6 +1683,28 @@ clean-spawns instead: windowed (`AOIDE_TERMINAL`), the spec's own `command`
 when given, else the agent's registered `AgentProfile::launch` default; an
 agent with neither is a taught `failed[]` entry, never a guessed argv. The
 manifest DECIDES WHAT exists; the ledger only ever decides HOW.
+
+**The picker's peer writer (U3, command-defrag lane U).** Bare `aoide
+session` opens a tty multi-select over local sessions AND every registered
+peer's CACHED sessions (`peer_store::load_peer_cache`, no live pull); a
+local row's mark toggles `state/undying.json` (above), but a PEER row's id
+lives on the peer, so this file is the write target instead — a confirmed
+mark appends `{host: <peer name>, dir, agent}` (never a `command`) into the
+CURRENT project's manifest, an unmark removes the matching spec if one is
+present. "Current project" is resolved the exact same way `resurrect`'s
+bare mode resolves it — `walk_up` from cwd — and NEVER auto-created: no
+manifest above cwd means every peer mark/unmark in that confirm is reported
+`skipped[]` with a taught reason, while any LOCAL rows in the SAME confirm
+still write normally. `dir` resolves via a purely lexical `Path::strip_prefix`
+against the current project's own root — the peer session's cwd relativizes
+when it literally starts with that same root string (the real case for a
+project checked out at the same path on more than one host), else the raw
+cwd is used as-is, noted as such; this is deliberately narrower than
+`resolve_spec_dir`'s own containment guard (above), which only ever reads a
+`dir` that already exists — remote summoning across genuinely different
+root paths is U4's door path, not guessed here. Dedupe on write: an
+identical `{host, dir, agent}` spec already present is a no-op, reported as
+such, never a duplicate row.
 
 ### `state/identity/` — **v0** (P-P1, `docs/architecture/PAIRING.md`)
 
