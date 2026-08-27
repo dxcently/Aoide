@@ -476,21 +476,32 @@ count.
   `graph resurrect`, appended newest, P-D8 (`docs/architecture/AOIDED.md`'s
   "L5 — harness summoning") (+1 → 71) — revives a project's resumable
   sessions off the durable session ledger (`state/session-ledger.jsonl`,
-  §4 below), spawning each via the windowed path (P-D7) with the
-  harness's own resume argv; `--project <name>` resolves against
-  `projects.json`. Selection: `--all` widens to every anchored ledger
-  entry, `--id <ledgerSessionId>` narrows to one specific entry, and bare
-  (neither flag) resumes the project's WHOLE carried set
-  (`state/carry.json`, durable-sessions plan P-C4 — see this section's
-  own `state/carry.json` subsection below) — anchored entries currently
-  marked durable, minus any id already alive (non-`done`) in
-  `sessions.json`, deduped by `sessionId` keeping the newest `endedAt`.
-  `--all`/`--id` never consult the carry mark. An empty bare-mode
-  selection is an `Outcome::ok` no-op naming the carried set as empty for
-  the project. A harness with no verified `resume_args`
-  (`aoide_protocol::agents::AgentProfile`) is skipped with a taught
-  message naming it, never a guessed invocation. Also the command core
-  the daemon's own boot-time auto-resume trigger calls in-process — see
+  §4 below); `--project <name>` resolves against `projects.json`.
+  Selection: `--all` widens to every anchored ledger entry, `--id
+  <ledgerSessionId>` narrows to one specific entry, and bare (neither flag)
+  resumes the project's WHOLE carried set (`state/carry.json`,
+  durable-sessions plan P-C4 — see this section's own `state/carry.json`
+  subsection below) — anchored entries currently marked durable, minus any
+  id already alive (non-`done`) in `sessions.json`, deduped by `sessionId`
+  keeping the newest `endedAt`. `--all`/`--id` never consult the carry
+  mark. An empty bare-mode selection is an `Outcome::ok` no-op naming the
+  carried set as empty for the project. Each surviving candidate then
+  resolves through TWO arms (durable-sessions plan P-C6): a harness with a
+  verified `resume_args` (`aoide_protocol::agents::AgentProfile`) spawns
+  windowed running `<harness> --resume <id>`; a candidate the harness arm
+  finds nothing for falls to the TERMINAL arm — a captured `restore`
+  snapshot (P-C5) marks it a conducted shell, so it spawns windowed running
+  its own login shell (`$SHELL` → passwd → `/bin/sh`, `-l`) instead. A
+  candidate neither arm resolves is skipped with a taught message naming
+  it, never a guessed invocation. Once a terminal candidate's spawn
+  registers, its `restore` snapshot drives one more step, in-process
+  through `graph send`, never a direct socket write: a foreground command
+  it was demonstrably running re-execs with `--yes --submit` (never for a
+  recorded `sudo …`, which only restores the cwd); an idle session's clean
+  unsubmitted `typed` line preloads with `--yes` and permanently no
+  `--submit`, so it sits in the new prompt until a human presses Enter;
+  idle with no `typed` delivers nothing. Also the command core the
+  daemon's own boot-time auto-resume trigger calls in-process — see
   `song/stage/projects.json`'s `autoResume` paragraph below for that
   trigger's own contract.
   `identity`, appended newest, P-P1 (`docs/architecture/PAIRING.md`) (+1 →

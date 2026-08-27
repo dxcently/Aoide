@@ -420,9 +420,17 @@ P-C4) — every anchored entry currently marked durable
 the append-only ledger). `--all` and `--id` are unchanged escapes: both
 widen or narrow past the carried set regardless of the mark. An empty
 bare-mode selection is an honest `Outcome::ok` no-op naming the carried set
-as empty for the project, never a silent success. Every surviving
-candidate is filtered to harnesses with `resume_args` and spawned via the
-windowed path with the resume argv. Rules:
+as empty for the project, never a silent success. Every surviving candidate
+then resolves through TWO arms (`resolve_candidate`, P-C6): the harness arm,
+unchanged, filters to harnesses with a verified `resume_args`; a candidate
+the harness arm finds nothing for falls to the TERMINAL arm — a `restore`
+snapshot present (P-C5) marks it a conducted shell, not a harness, so it
+resolves `[<login shell>, "-l"]` (the same `$SHELL` → passwd → `/bin/sh`
+order `modules/dendrites/kitty.nix`'s own wrapper uses to pick a shell for a
+brand-new terminal) rather than a `--resume <id>` no shell could ever honor.
+A candidate neither arm resolves is skipped with a taught message naming it,
+never a guessed invocation. Every resolved candidate spawns via the
+windowed path with its resolved argv. Rules:
 
 - The revived session is a NEW `sessionId` — ids are never recycled. The
   new record carries additive `resumedFrom: Option<String>` naming the
@@ -430,6 +438,22 @@ windowed path with the resume argv. Rules:
   beside `spawned`/`anchors` (`CONTRACTS.md §4`, graph.json — additive edge
   kind). If the old id was carried, the mark transfers onto the new id in
   the same step (one `save_carry` call, never left on the now-dead old id).
+- **Post-spawn restore delivery (P-C6).** Once a terminal candidate's spawn
+  actually registers, its `restore` snapshot decides what — if anything —
+  lands in the new pty, through `session_send` in-process, never a direct
+  socket write. Not idle, with a foreground `argv`: re-exec it (`--yes
+  --submit`) — the session was demonstrably running it when it left — EXCEPT
+  when `argv[0]`'s basename is `sudo`, which is never re-exec'd unattended
+  (only the cwd restores; a privileged command popping a password prompt in
+  a terminal nobody is watching is not a restore). Idle, with a clean
+  `typed` line: preload it (`--yes`, and permanently no `--submit`) so it
+  sits in the new prompt until a human presses Enter — nothing runs without
+  a keystroke. Idle with no `typed`: nothing is delivered, a terminal
+  reopened at its own cwd already being the complete answer. The two
+  delivery branches are never unified behind a shared boolean parameter —
+  each hardcodes its own flag map, so a later refactor cannot flip the
+  no-submit path into a submitting one by threading a stray `true` through
+  a shared helper.
 - The conductor gains a keybind invoking resurrect for the focused
   project (`conductor/src/commands.rs` — the TUI already maps keys onto
   typed commands).
