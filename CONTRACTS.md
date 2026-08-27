@@ -1737,27 +1737,42 @@ undying) — a manifest-mode revival marks unconditionally, because there is
 no ordinary-revive case to protect against here: every manifest-mode spawn
 already came from an explicit, operator-authored declaration.
 
-**The picker's peer writer (U3, command-defrag lane U).** Bare `aoide
-session` opens a tty multi-select over local sessions AND every registered
-peer's CACHED sessions (`peer_store::load_peer_cache`, no live pull); a
-local row's mark toggles `state/undying.json` (above), but a PEER row's id
-lives on the peer, so this file is the write target instead — a confirmed
-mark appends `{host: <peer name>, dir, agent}` (never a `command`) into the
-CURRENT project's manifest, an unmark removes the matching spec if one is
-present. "Current project" is resolved the exact same way `resurrect`'s
-bare mode resolves it — `walk_up` from cwd — and NEVER auto-created: no
-manifest above cwd means every peer mark/unmark in that confirm is reported
-`skipped[]` with a taught reason, while any LOCAL rows in the SAME confirm
-still write normally. `dir` resolves via a purely lexical `Path::strip_prefix`
-against the current project's own root — the peer session's cwd relativizes
-when it literally starts with that same root string (the real case for a
-project checked out at the same path on more than one host), else the raw
-cwd is used as-is, noted as such; this is deliberately narrower than
-`resolve_spec_dir`'s own containment guard (above), which only ever reads a
-`dir` that already exists — remote summoning across genuinely different
-root paths is U4's door path, not guessed here. Dedupe on write: an
-identical `{host, dir, agent}` spec already present is a no-op, reported as
-such, never a duplicate row.
+**The picker's peer writer (U3, command-defrag lane U; review round 1 fixed
+the batch-poisoning defect below, same phase).** Bare `aoide session` opens
+a tty multi-select over local sessions AND every registered peer's CACHED
+sessions (`peer_store::load_peer_cache`, no live pull); a local row's mark
+toggles `state/undying.json` (above), but a PEER row's id lives on the
+peer, so this file is the write target instead — a confirmed mark appends
+`{host: <peer name>, dir, agent}` (never a `command`) into the CURRENT
+project's manifest, an unmark removes EVERY spec matching `{host, dir,
+agent}` (`Vec::retain`, not a first-match removal — a hand-duplicated entry
+is cleaned up in one unmark, not one per copy) if any are present. "Current
+project" is resolved the exact same way `resurrect`'s bare mode resolves
+it — `walk_up` from cwd — and NEVER auto-created: no manifest above cwd
+means every peer mark/unmark in that confirm is reported `skipped[]` with a
+taught reason, while any LOCAL rows in the SAME confirm still write
+normally. `dir` resolves via a purely lexical `Path::strip_prefix` against
+the current project's own root — the peer session's cwd relativizes when it
+literally starts with that same root string (the real case for a project
+checked out at the same path on more than one host); a cwd that does NOT
+relativize has no savable spec AT ALL and is REJECTED before it ever
+reaches the manifest, `skipped[]` with a taught reason, the same as the
+no-manifest case. There is deliberately no raw-cwd fallback: `save_manifest`
+refuses the WHOLE batch on any absolute `dir`, so a fallback spec here would
+not merely be an inferior write — it would silently sink every OTHER
+legitimate peer change queued in the same confirm, reporting them all as
+`changed` when nothing was actually persisted. This is deliberately
+narrower than `resolve_spec_dir`'s own containment guard (above), which
+only ever reads a `dir` that already exists — remote summoning across
+genuinely different root paths is U4's door path, not guessed here. Dedupe
+on write: an identical `{host, dir, agent}` spec already present is a
+no-op, reported as such, never a duplicate row. The manifest write itself
+is all-or-nothing per confirm: `changed[]` only ever names a `{peer, dir}`
+pair AFTER `save_manifest` actually persisted it — a failed save (the
+validation refusal above would only ever fire on a hand-corrupted manifest
+now that the picker itself never produces an absolute `dir`; a plain I/O
+error is the realistic case) folds every pending peer change for that
+confirm into `skipped[]` instead.
 
 ### `state/identity/` — **v0** (P-P1, `docs/architecture/PAIRING.md`)
 
