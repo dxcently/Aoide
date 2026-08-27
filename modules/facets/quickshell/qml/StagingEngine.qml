@@ -49,10 +49,10 @@ QtObject {
     // The baseline-fallback floor (CONTRACTS.md §5): when the ACTIVE song
     // doesn't dress a slot, resolution falls back to this song before
     // falling back further to the anchor's own facet-side `fallback`
-    // Component. Mirrors `aoide.song`'s own default
-    // (`modules/nucleus/options.nix`) — sonata is the shipped, guaranteed-
-    // present baseline, so it's the correct floor to catch every other song's
-    // gaps.
+    // Component. Sonata is the shipped, guaranteed-present standard song —
+    // a fixed constant here, independent of `aoide.song`'s own default
+    // (`modules/nucleus/options.nix`, null) — so it's the correct floor to
+    // catch every other song's gaps.
     readonly property string baselineSong: "sonata"
 
     // { "<song>": { "<slot>": { "owner": …, "file": … } }, … } — empty until

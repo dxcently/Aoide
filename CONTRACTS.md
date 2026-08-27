@@ -2456,7 +2456,7 @@ notes.**
 
 ### Selection — `aoide.song`
 
-`aoide.song` (str, default `"default"`, declared in
+`aoide.song` (nullOr str, default `null`, declared in
 `modules/nucleus/options.nix`) names the song this host performs. A host
 replays any committed song with **one line**:
 
@@ -2465,17 +2465,22 @@ replays any committed song with **one line**:
 aoide.song = "moonlight";
 ```
 
-Naming no song performs song `"sonata"` — the shipped standard
-(`song/songbook/sonata/rice.nix`), the guaranteed-present baseline.
+Naming no song performs no song: `aoide.song` defaults to null, and every
+committed song's `rice.nix` self-gates on `config.aoide.song == "<name>"`,
+which is never true against null — so a host that names nothing gets no
+song's config, and the paint facets (which read the active song to bake and
+deploy) activate only when a song IS named: no QML tree, no shell service
+otherwise, not an empty surface. A host wanting the desktop names its song
+explicitly; `sonata` is the shipped standard (`song/songbook/sonata/rice.nix`),
+the guaranteed-present baseline every fleet member can opt into by name.
 **Renamed (2026-08-14):** the shipped standard song was `default`;
 `song/songbook/default/` is now retired outright (its Pantheon design
 grammar relocated to
 `docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`, its recorded
 aesthetic distilled into `song/songbook/learnings.md` — the rest is
 git-recoverable history, not deleted knowledge). No shape change, no version
-bump: `aoide.song`'s default and every "shipped baseline" reference in this
-section simply name `sonata` now. Full dated entry:
-`docs/Aoide-Wiki/ingest/log.md`.
+bump: every "shipped baseline" reference in this section simply names
+`sonata` now. Full dated entry: `docs/Aoide-Wiki/ingest/log.md`.
 
 ### Self-registration (dendrite discipline)
 
@@ -2591,8 +2596,9 @@ set of "flavor" surfaces — committed files, not nix options:
 **Additive (2026-08-14) — baseline-fallback resolution:**
 `StagingEngine.resolveSong(song, slot)` resolves a slot through a floor, not
 just the one song: the active song's own file if it authored the slot, else
-**sonata**'s (mirrors `aoide.song`'s own default — the shipped baseline
-every song can fall back to), else `""` (the anchor's own facet-side
+**sonata**'s (the shipped standard song — the baseline every song can fall
+back to, a fixed constant independent of `aoide.song`'s own default, which
+is null), else `""` (the anchor's own facet-side
 `fallback` Component, when it has one, or nothing). `WidgetSlot.resolvedSource`
 keys off the RESOLVED song, not a bool, so a live song-switch between two
 songs that both provide a slot re-triggers correctly instead of silently

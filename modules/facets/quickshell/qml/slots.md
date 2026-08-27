@@ -24,8 +24,9 @@ Every slot below is hosted by one of two anchors:
 
 Both anchor kinds resolve through the SAME baseline-fallback chain
 (`StagingEngine.resolveSong`, CONTRACTS.md §5): the active song's own file if
-it authored the slot, else **sonata's** (the shipped baseline every song
-falls back to — mirrors `aoide.song`'s own default), else — `WidgetSlot`
+it authored the slot, else **sonata's** (the shipped standard song — the
+baseline every song falls back to, a fixed constant independent of
+`aoide.song`'s own default, which is null), else — `WidgetSlot`
 only — the anchor's own facet-side `fallback` Component, else nothing.
 `SurfaceSlot` slots have no facet-side fallback: sonata's file IS the floor,
 since a window-owning slot moves as one whole unit with nothing left behind

@@ -48,10 +48,11 @@
 
   # The song this host performs. Replay any committed song on ANY host with one
   # line — e.g. `aoide.song = "moonlight";` swaps the whole livery fan-out with
-  # zero other edits (song/songbook/<name>/). `sonata` is already the shipped
-  # standard (aoide.song's default), so this line is redundant with that
-  # default — kept anyway: naming your song explicitly is good practice, not
-  # a sign it's some non-default pick. "sonata": the light glass key drawn
+  # zero other edits (song/songbook/<name>/). REQUIRED, not decorative:
+  # `aoide.song` defaults to null, and a host that names no song deploys no
+  # QML and runs no shell service — the paint facets only activate once a
+  # song is named. `sonata` is the shipped standard, the guaranteed-present
+  # baseline this host opts into by name. "sonata": the light glass key drawn
   # from its own cover.
   aoide.song = "sonata";
 

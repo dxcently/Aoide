@@ -31,9 +31,12 @@
   aoide.enable = true;
   aoide.user = "khoa"; # ← your user
 
-  # The song this host performs (sonata is the shipped standard default;
-  # stated explicitly as good practice). Replay any committed
-  # song/songbook/<name>/ with this one line.
+  # The song this host performs. REQUIRED, not decorative: `aoide.song`
+  # defaults to null, and a host that names no song deploys no QML and runs
+  # no shell service — the paint facets only activate once a song is named.
+  # `sonata` is the shipped standard, the guaranteed-present baseline this
+  # host opts into by name. Replay any committed song/songbook/<name>/ with
+  # this one line.
   aoide.song = "sonata";
 
   # The whole desktop, one line each (facets render; hyprland owns the
