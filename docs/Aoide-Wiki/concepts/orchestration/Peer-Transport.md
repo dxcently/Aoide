@@ -102,10 +102,15 @@ allowed to become a resident daemon:
 
 - **The fast path.** A clean `session end` closes every tunnel it opened
   (`aoide_client::tunnel::close_all_for_session`, called from `aoide-conduct
-  ::graph::session_store::do_session_end`).
+  ::graph::session_store::do_session_end`) — `close` removes a tunnel's
+  record only once its `ssh` child is confirmed dead; a stubborn/hung one
+  that survives the bounded `SIGTERM`+wait keeps its record on disk instead
+  of losing it, so the backstop below still has a name to find.
 - **The backstop.** `aoide-conduct::reap::sweep_orphan_tunnels` catches a
   session that never got to run that exit — SUPER+Q, SIGKILL, anything
-  [[Session-Graph]]'s liveness reaping already exists to catch. It runs as
+  [[Session-Graph]]'s liveness reaping already exists to catch — and
+  retries any tunnel the fast path's own kill couldn't finish, once that
+  session leaves the roster. It runs as
   part of the same sweep pass that collects orphan sockets, but not under
   the same lock: `reap_inner` only GATHERS candidates while holding the
   stage lock (`orphan_tunnel_candidates`, a roster/settle check against
