@@ -28,12 +28,20 @@
 lib.mkIf config.aoide.enable {
 
   # ── Runtime directories ──────────────────────────────────────────────────
-  # song/stage/ is the atomic JSON state tree (CONTRACTS.md §4). Created at
-  # runtime, never committed, never imported by any module (checks.no-song-read).
+  # Two atomic JSON state trees (CONTRACTS.md §4), both created at runtime,
+  # never committed, never imported by any module (checks.no-song-read):
+  # `song/stage/` is rice/paint staging (livery.json, mode.json — lyra's
+  # tree); `state/stage/` is CONDUCTING state (sessions.json/hooks.json/
+  # projects.json/graph.json/pending.json/herald.json — command-defrag S1,
+  # 2026-08-27). `state/stage/` nests under the already-0700 `state/` dir, so
+  # its own 0755 grants nothing beyond the owner the parent doesn't already
+  # gate — matching `song/stage/`'s own mode rather than inventing a second
+  # convention for the same class of data.
   systemd.user.tmpfiles.rules = [
-    "d %h/Aoide/log      0700 - - -"
+    "d %h/Aoide/log        0700 - - -"
     "d %h/Aoide/song/stage 0755 - - -"
-    "d %h/Aoide/state    0700 - - -"
+    "d %h/Aoide/state      0700 - - -"
+    "d %h/Aoide/state/stage 0755 - - -"
   ];
 
   # ── The terminal, for the interactive half ───────────────────────────────

@@ -24,7 +24,7 @@ The shape, end state:
                                    │  events.jsonl◀ (append-only, capped)   │
                                    └──────┬───────────────┬─────────────────┘
                                           │ tail          │ projection writes
-                              desktop surfaces,      song/stage/*.json
+                              desktop surfaces,      state/stage/*.json
                               `aoide events tail`    (readers untouched)
 
    remote: claude.ai ──▶ Tier-3 MCP connector (user-enabled) ──▶ any mesh
@@ -132,7 +132,7 @@ record (`class:"secret"`, `source:"secrets-mirror"`). Rules:
 ### The first producer: the hand-edit watcher (#69)
 
 A tick-driven stat sweep over the broker-owned file roster — the stage files
-(`song/stage/sessions.json`, `hooks.json`, `projects.json`, `graph.json`,
+(`state/stage/sessions.json`, `hooks.json`, `projects.json`, `graph.json`,
 `pending.json`, `herald.json`; paths from `aoide_storage::stage`,
 `storage/src/stage.rs:17-29`). The daemon records `(mtime, len)` after each
 of its own writes; a tick that finds a file changed with no daemon write in

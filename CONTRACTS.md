@@ -502,7 +502,7 @@ count.
   `--submit`, so it sits in the new prompt until a human presses Enter;
   idle with no `typed` delivers nothing. Also the command core the
   daemon's own boot-time auto-resume trigger calls in-process — see
-  `song/stage/projects.json`'s `autoResume` paragraph below for that
+  `state/stage/projects.json`'s `autoResume` paragraph below for that
   trigger's own contract.
   `identity`, appended newest, P-P1 (`docs/architecture/PAIRING.md`) (+1 →
   72) — this instance's lazily-minted ed25519 keypair (`aoide-storage`'s
@@ -652,19 +652,47 @@ first when a peer is still there to receive it.
 
 ## 4. Stage file formats — **v0**
 
-Live-side (rehearsal) state written to `song/stage/` — gitignored runtime, never
+Two live-side (rehearsal) state trees, both gitignored runtime, never
 committed, never load-bearing for the nix build (enforced by
-`checks.no-song-read`). Emitted by the notes package (Agent A), shellbridge
-(Wave 1), and the aoide CLI (`aoide graph`); read by Quickshell.
+`checks.no-song-read`), split by who owns them (command-defrag lane,
+2026-08-27 — root `AGENTS.md`'s "Aoide (core) vs AoideOS/Lyra" boundary
+applied to the stage tree itself):
 
-**Stage-dir resolution (the CLI ↔ unit seam).** Every stage reader/writer
-resolves the stage directory through one function; nothing computes it
-independently. Precedence: `$AOIDE_STAGE_DIR` when set to an **absolute** path
-(the systemd unit sets `AOIDE_STAGE_DIR=%h/Aoide/song/stage`,
-`modules/nucleus/shellbridge.nix`) → else `~/Aoide/song/stage` derived from
-`$AOIDE_USER`/`$HOME`. A relative or empty value is ignored (a runtime path is
-never resolved against an arbitrary cwd). On the default layout both agree; the
-override is what lets the unit — or a test/smoke run — relocate the stage tree.
+- **`song/stage/`** — rice/paint staging. `livery.json`, `mode.json`, the
+  draft-routing symlink target, `grimoire.json`. Emitted by the notes
+  package, `lyra rice`/`cover`/`draft`, and QML itself (`grimoire.json`);
+  read by Quickshell. This is lyra's tree.
+- **`state/stage/`** — CONDUCTING state: `sessions.json`, `hooks.json`,
+  `projects.json`, `graph.json`, `pending.json`, `herald.json`. Written by
+  shellbridge and the `aoide`/`aoided` binaries (`aoide graph`, `aoide
+  herald`); read by the conductor TUI and, until the desktop-side cutover
+  (a later phase), by Quickshell. This is core's tree — the
+  `aoide`/`aoided` binaries alone read and write it, never `lyra`.
+
+**Stage-dir resolution (the CLI ↔ unit seam), one function per tree.**
+`song/stage/`: precedence `$AOIDE_STAGE_DIR` when set to an **absolute** path
+→ else `~/Aoide/song/stage` derived from `$AOIDE_USER`/`$HOME`. `state/stage/`:
+same `$AOIDE_STAGE_DIR` absolute-path precedence (the one env var the systemd
+unit and every test already set continues to win for BOTH trees at once — a
+relocated stage tree relocates as a unit) → else `~/Aoide/state/stage`,
+itself `~/Aoide/state` (`$AOIDE_STATE_DIR` when absolute, else
+`$AOIDE_USER`/`$HOME`-derived) with `/stage` appended. A relative or empty
+override is ignored for either tree (a runtime path is never resolved
+against an arbitrary cwd). On the default layout, with no override set, the
+two trees resolve to two different directories, as intended; an
+`$AOIDE_STAGE_DIR` override (every test fixture, and the systemd unit until
+its own cutover) still names one directory for both, exactly as it did
+before the split.
+
+**The one-shot migration.** The first time a process resolves `state/stage/`
+under the no-override fallback, it moves each of the six conducting files
+found at the OLD `song/stage/` location into the new one — `rename` when
+found (same filesystem), copy-then-remove-source otherwise — skipping any
+file already present at the new path (a fresher `state/stage/` file is never
+clobbered) and never touching a rice file (`livery.json`, `mode.json`,
+`grimoire.json`, `cover.json`) even when it sits in the same old directory.
+Guarded to run at most once per process; idempotent across repeated boots
+(`aoide-storage`'s `migrate_conducting_stage`, `fs.rs`).
 
 ### `song/stage/livery.json` — **v0**
 
@@ -818,7 +846,7 @@ draft is refused (`draft-is-live`) rather than silently also tearing down
 the routing and falling back to `staging` — switch modes first
 (`rice mode stage`/`rice mode declarative`), then drop it.
 
-### `song/stage/sessions.json` / `hooks.json` — **v0**
+### `state/stage/sessions.json` / `hooks.json` — **v0**
 
 The shellbridge roster + live hook phases (full field tables in
 `modules/nucleus/shellbridge.nix`). Session records: `{ sessionId, agent,
@@ -1067,7 +1095,7 @@ upstream ever lets one acquire a window anyway, the dedup pass still will
 not retire its own lineage — only a genuine no-lineage same-window twin
 collapses.
 
-### `song/stage/projects.json` — **v0**
+### `state/stage/projects.json` — **v0**
 
 Registered project anchor roots for the graph. Written by
 `aoide graph project add/remove` (atomic, idempotent); read by
@@ -1102,7 +1130,7 @@ whole carried set is already live simply resolves to an empty-set
 with no `$AOIDE_TERMINAL`) degrades gracefully — logged, never a crashed
 tick.
 
-### `song/stage/graph.json` — **v0**
+### `state/stage/graph.json` — **v0**
 
 The **fully resolved** project/session DAG, written (atomic) automatically by
 every project/session mutation and by `aoide graph prune`'s manual resync,
@@ -1140,7 +1168,7 @@ ledger is exactly the memory that survives that prune; a `resumed` edge's
 A session node MAY carry the sessions.json `petname` field above, present
 under the same rule.
 
-### `song/stage/herald.json` — **v0**
+### `state/stage/herald.json` — **v0**
 
 The notification ledger the Quickshell herald draws from. dunst owns
 `org.freedesktop.Notifications` but draws NOTHING (`skip_display` on every
@@ -1175,7 +1203,7 @@ parsed as markup or as a command.
 }
 ```
 
-### `song/stage/pending.json` — **v0**
+### `state/stage/pending.json` — **v0**
 
 The held-injection queue: entries `aoide graph send` writes when its gate
 doesn't clear immediate delivery (no `--yes`, no autogate match), and the
@@ -1283,8 +1311,9 @@ An OUTBOUND `--to peer/<x>` send (`deliver_remote`) never files here: the
 message lands in the REMOTE peer's own inbox, via whichever of that peer's
 own two writers actually delivers it.
 
-Lives in the gitignored root-runtime `state/` dir (§2), NOT `song/stage/` —
-same tier as `usage.json`/`peers.json`, never reset by a stage reseed.
+Lives in the gitignored root-runtime `state/` dir (§2), NOT inside either
+stage tree (`state/stage/` or `song/stage/`) — same tier as
+`usage.json`/`peers.json`, never reset by a stage reseed.
 Read/resolved by `aoide inbox list/read/clear`: `list` shows unread entries
 by default (`--all` includes read ones); `read <n>` marks one entry read by
 its array position (`n`, same as `pending list`'s id scheme) — but unlike a
@@ -1337,8 +1366,8 @@ not built.
 ### `state/usage.json` — **v0**
 
 Account/usage runtime — lives in the gitignored root-runtime `state/` dir
-(§2), NOT `song/stage/`: this is account/global state, not song-scoped or
-rehearsal state. **State-dir resolution** mirrors the stage-dir seam above:
+(§2), NOT inside either stage tree: this is account/global state, not
+song-scoped, rehearsal, or broker-owned registry state. **State-dir resolution** mirrors the stage-dir seam above:
 `$AOIDE_STATE_DIR` when set to an **absolute** path, else `~/Aoide/state`
 derived from `$AOIDE_USER`/`$HOME`. Written by `aoide usage` (`aoide.usage.*`,
 `modules/nucleus/options.nix`; opt-in poller service, off by default).
@@ -1457,13 +1486,14 @@ in either file.
 
 The carry mark: the set of session ids marked DURABLE, so a project's whole
 carried set can be resurrected together. Three writers, none routed through
-a stage lock or `daemon_dispatch` (this is not a `song/stage/` file): `aoide
+a stage lock or `daemon_dispatch` (this is not a stage-tree file): `aoide
 graph session carry on|off` sets or clears the mark directly; `aoide graph
 spawn --carry` adds the newly spawned id once it registers; `aoide graph
 resurrect` transfers a carried old id onto the freshly spawned session that
 replaces it. Lives under `state_dir` (`aoide_storage::fs::state_dir`)
-alongside `usage.json`/`session-ledger.jsonl`, NOT `song/stage/` — a carry
-mark is durable operator state, never staged rehearsal state. Distinct from
+alongside `usage.json`/`session-ledger.jsonl`, NOT inside either stage tree
+— a carry mark is durable operator state, never staged rehearsal/registry
+state. Distinct from
 the ledger above: the ledger is an append-only record of every session that
 has ever left the roster, while `carry.json` is a small, freely-mutated SET
 — marked on, marked off, and its entries transferred wholesale when a
@@ -1552,7 +1582,7 @@ separate files for the two directions a box can be in mid-ceremony,
 gitignored root-runtime `state/` (same tier as `state/identity/` above),
 each additive/tolerate-missing (an absent file is simply "nothing
 pending", never an error). Ids are STABLE 8-hex-char values
-(`gen_request_id`), never array-position — unlike `song/stage/pending.json`
+(`gen_request_id`), never array-position — unlike `state/stage/pending.json`
 (§4 above), a pairing correlation must survive both processes exiting and
 an asynchronous `aoide/pairApprove` callback arriving arbitrarily later.
 
@@ -3265,7 +3295,7 @@ A's own nonce itself is chosen locally and does NOT ride this message.
 B parks the request (`aoide_storage::pairing::park_inbound`, disk-persisted
 under `state/peer-pairing-inbound.json`, STABLE non-array-position ids —
 correlation must survive both processes exiting and an async callback
-arriving arbitrarily later, unlike `song/stage/pending.json`'s idiom, and
+arriving arbitrarily later, unlike `state/stage/pending.json`'s idiom, and
 capped — see below) and answers SYNCHRONOUSLY with its own public identity
 and a fresh nonce of its own:
 
