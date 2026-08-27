@@ -1778,11 +1778,18 @@ until it times out (a corollary of the ask outliving that one socket).
 
 **`resolve`** — read a secret's value:
 ```text
--> {"op":"resolve","secret":"<name>","consumer":"<consumer>","totp":"<code>"?,"argv0":"<cmd>"?}
+-> {"op":"resolve","secret":"<name>","consumer":"<consumer>","totp":"<code>"?,"argv0":"<cmd>"?,"reason":"<text>"?}
 <- {"ok":true,"value":"<value>"}
 <- {"ok":false,"error":"<message>"}
 ```
-`totp`/`argv0` are optional. Error strings (never containing the secret's
+`totp`/`argv0`/`reason` are optional. `reason` (P3) is free-text,
+self-asserted, DISPLAY-ONLY context for why this ask exists — it only ever
+matters when the resolve PARKS (below): it rides onto the parked-ask
+registry row, the `pending` reply, and the `parked` events-feed line, for a
+popup/prompt surface to show. It never gates anything; `secrets exec`
+derives it automatically from the wrapped command when `--reason` isn't
+given (`crates/secrets/README.md`'s "Secrets wire" section has the full
+derivation). Error strings (never containing the secret's
 value): `"secret not found"`; `"consumer not authorized for this secret"`;
 `"requireTotp is set but no TOTP enrollment exists on this host yet"`;
 `"requireTotp is set but no totp code was provided"`; `"malformed totp
@@ -1871,14 +1878,19 @@ would).
 **`pending`** — list every parked ask (never a value):
 ```text
 -> {"op":"pending"}
-<- {"ok":true,"pending":[{"id":"<id>","secret":"<name>","consumer":"<consumer>","requestedAt":<unix-seconds>,"peerUid":<uid-or-null>},...]}
+<- {"ok":true,"pending":[{"id":"<id>","secret":"<name>","consumer":"<consumer>","requestedAt":<unix-seconds>,"peerUid":<uid-or-null>,"reason":<string-or-null>,"origin":{"username":<string-or-null>,"pid":<int-or-null>,"comm":<string-or-null>,"hostname":<string-or-null>}},...]}
 ```
 Never errors (an empty queue is `{"ok":true,"pending":[]}`); not audited —
 a read of in-memory state only, same precedent `graph pending list` already
 sets. `peerUid` (task #73) is ADDITIVE over the pre-#73 shape — the
 kernel-truth `SO_PEERCRED` uid of the connection that parked this ask
 (`null` when it could not be read), alongside the pre-existing
-self-asserted `consumer` name; see "Peer identity" below.
+self-asserted `consumer` name; see "Peer identity" below. `reason`/`origin`
+(P3) are additive again — `reason` mirrors whatever the parking `resolve`
+sent (above); `origin` is best-effort "who/where," captured ONCE at park
+time from the SAME `SO_PEERCRED` stamp `peerUid` reads (username/pid/comm)
+plus the broker's own hostname — every field UNTRUSTED DISPLAY DATA,
+`null` per field when unknown, never an error.
 
 **`approve`** — complete a parked ask with a code, releasing the value down
 the ORIGINAL parked connection (never this reply):
