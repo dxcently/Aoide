@@ -3993,16 +3993,26 @@ THIS peer must present TO us; `bearerSecret` is what we present TO it.
 `peer add --via`/`peer invite [--via]`/`peer pair request [--via]`/`peer
 spawn --via`) is an `ssh://[user@]host[:port]` transport marker
 (`aoide_storage::tunnel::parse_via`'s shape). Absent by default (today's
-every peer): every outbound call to this peer dials `url` directly,
-byte-for-byte the pre-P-S4 behavior. When present, `aoide-client`'s dial
-resolution opens (or reuses) an internal ssh forward to `via`'s host and
-dials `http://127.0.0.1:<local port>` through it instead, rewriting only
-the URL's authority — the PATH is preserved verbatim
-(`aoide_storage::tunnel::dial_url`), so the P-P4 signature (which signs
-over the path, never the host) still verifies on the far end unchanged.
+every peer): every outbound call to this peer — every signed POST AND
+`peer add`'s own unsigned AgentCard GET, its one verification call —
+dials `url` directly, byte-for-byte the pre-P-S4 behavior. When present,
+`aoide-client`'s dial resolution opens (or reuses) an internal ssh forward
+to `via`'s host and dials `http://127.0.0.1:<local port>` through it
+instead, rewriting only the URL's authority — the PATH is preserved
+verbatim (`aoide_storage::tunnel::dial_url`), so the P-P4 signature (which
+signs over the path, never the host) still verifies on the far end
+unchanged; the AgentCard GET carries no signature to preserve, but dials
+through the identical rewritten target, since it is otherwise the exact
+scenario `--via` exists for (a loopback-bound door reachable only through
+the tunnel) — `peer add` would fail verification before ever registering
+such a peer if this one call bypassed the funnel. Either way `peer add`
+registers the peer under its LOGICAL `url`, never the rewritten one.
 `set_peer_via` is the only writer, a sibling to `upsert_paired_peer` rather
-than a parameter on it. A `--via` flag on the command itself always beats
-a peer's own recorded `via`. `peer invite` additionally derives a default
+than a parameter on it — and a caller passing `None` means "nothing to
+record," never "clear a previously-set marker": a plain `peer pair
+request` re-pair with no `--via` leaves an existing `via` (e.g. one `peer
+invite` recorded) untouched. A `--via` flag on the command itself always
+beats a peer's own recorded `via`. `peer invite` additionally derives a default
 `via` from the discovery beacon's OBSERVED source address (never its
 advertised `url`, which a loopback-bound door always claims regardless of
 who hears it) and records it on the resulting peer at pairing-approval
