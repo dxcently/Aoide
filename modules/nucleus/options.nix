@@ -358,14 +358,19 @@ in
     # the SONG carries only the livery (palette + component tiers). A song must
     # never set host options or enable facets/dendrites.
     song = mkOption {
-      type = types.str;
-      default = "sonata";
-      example = "moonlight";
+      type = types.nullOr types.str;
+      default = null;
+      example = "sonata";
       description = ''
-        The song (rice) this host performs. Defaults to "sonata" — the shipped
-        standard baseline, guaranteed present. Set to a committed song name
+        The song (rice) this host performs. Set to a committed song name
         (a folder under song/songbook/<name>/) to replay it on this host;
-        the livery fan-out swaps with zero other edits.
+        the livery fan-out swaps with zero other edits. Null (the default)
+        means no song is named: "no song, no service" — a paint facet reads
+        this null and deploys nothing (no QML tree, no shell service) rather
+        than an empty surface, and every song's own rice.nix stays inert
+        (its self-gate `config.aoide.song == "<name>"` is never true against
+        null). A host wanting the desktop names its song explicitly, e.g.
+        `aoide.song = "sonata";` for the shipped standard.
       '';
     };
 

@@ -37,7 +37,7 @@ none of them except your own dendrite/facet flags.
 | Option                         | Type                         | Notes |
 | ------------------------------ | ---------------------------- | ----- |
 | `aoide.enable`                 | bool                         | framework master switch |
-| `aoide.song`                   | str (default `"sonata"`)     | the song this host performs; names a `song/songbook/<name>/` (or the shipped standard) |
+| `aoide.song`                   | nullOr str (default `null`)  | the song this host performs; names a `song/songbook/<name>/`. Null — no song named — means a paint facet deploys nothing: no song, no service |
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` clone |
 | `aoide.livery.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
 | `aoide.livery.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
@@ -129,8 +129,13 @@ self-gates on `aoide.song`:
 ```
 
 Replay it on any host with **one line** in `hosts/<host>/default.nix`:
-`aoide.song = "moonlight";`. Naming no song performs song `"sonata"` — the
-shipped standard (`song/songbook/sonata/rice.nix`).
+`aoide.song = "moonlight";`. `aoide.song` defaults to null — naming no song
+performs no song: a host with the quickshell facet enabled but no song named
+gets no deployed QML and no shell service, not an empty surface (options.nix).
+Every committed song's `rice.nix` self-gates on an equality check against
+`aoide.song`, so a null host leaves every song's `config` inert. Name a song
+explicitly to get a desktop — `aoide.song = "sonata";` for the shipped
+standard (`song/songbook/sonata/rice.nix`).
 
 **Host-agnostic rules (CONTRACTS.md §5):** a song sets ONLY `aoide.livery` (and,
 later, cover/chime refs inside `song/`). It NEVER sets host options (monitors,

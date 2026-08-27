@@ -279,89 +279,108 @@ in
     # attrset — so `lib` here is home-manager's EXTENDED lib (carrying `lib.hm.dag`),
     # not the outer NixOS-module lib (which lacks `hm`). `config`/`pkgs`/`quickshellConfig`
     # still resolve lexically to the outer module scope, unshadowed by the pattern.
-    home-manager.users.${config.aoide.user} = { lib, ... }: {
-      home.activation.aoideDeployQml = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-        run mkdir -p "$HOME/Aoide/run"
-        run ${pkgs.rsync}/bin/rsync -a --delete --chmod=u+w \
-          "${quickshellConfig}/qml/" "$HOME/Aoide/run/qml/"
-      '';
+    # ── No song, no service ──────────────────────────────────────────────────
+    # Every entry below reaches for the ACTIVE song (activeSongLivery,
+    # seedStageScript's jq --arg, or a shell entry deployed FROM the song's
+    # QML) — with `aoide.song` null there is no active song to bake, so this
+    # whole block is `lib.optionalAttrs`-gated on `config.aoide.song != null`
+    # rather than `lib.mkIf`: optionalAttrs never forces its `attrs` argument
+    # when the condition is false (plain nix laziness, no module-system
+    # merging involved at this attrset-literal level), so a null-song host's
+    # eval never touches `${config.aoide.song}` here — no deployed QML, no
+    # seeded stage, no `aoide-quickshell` unit; not an empty surface, simply
+    # absent. A host that names a song gets exactly today's behaviour.
+    home-manager.users.${config.aoide.user} =
+      { lib, ... }:
+      lib.optionalAttrs (config.aoide.song != null) {
+        home.activation.aoideDeployQml = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          run mkdir -p "$HOME/Aoide/run"
+          run ${pkgs.rsync}/bin/rsync -a --delete --chmod=u+w \
+            "${quickshellConfig}/qml/" "$HOME/Aoide/run/qml/"
+        '';
 
-      # ── Seed the live stage twin from the active song ──────────────────────
-      # `song/stage/livery.json` is what LiveryState.qml hot-reloads
-      # (CONTRACTS.md §4); until now nothing seeded it from the BAKED default,
-      # so a host that never ran `aoide rice preview <name>` had a stale/absent
-      # stage twin even though the compositor/Stylix/QML tree were all built
-      # from the active song. This reasserts the active song's committed livery
-      # into the stage file on every activation — `seedStageScript` (above)
-      # does the actual write. Same "switch = truth resets the sketch"
-      # discipline as `aoideDeployQml`'s rsync above: this OVERWRITES whatever
-      # a live `rice preview`/`cover set` staged, which is intended — the next
-      # `rice preview` can re-sketch over it again live.
-      home.activation.aoideSeedStage = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-        run ${seedStageScript}
-      '';
+        # ── Seed the live stage twin from the active song ──────────────────────
+        # `song/stage/livery.json` is what LiveryState.qml hot-reloads
+        # (CONTRACTS.md §4); until now nothing seeded it from the BAKED default,
+        # so a host that never ran `aoide rice preview <name>` had a stale/absent
+        # stage twin even though the compositor/Stylix/QML tree were all built
+        # from the active song. This reasserts the active song's committed livery
+        # into the stage file on every activation — `seedStageScript` (above)
+        # does the actual write. Same "switch = truth resets the sketch"
+        # discipline as `aoideDeployQml`'s rsync above: this OVERWRITES whatever
+        # a live `rice preview`/`cover set` staged, which is intended — the next
+        # `rice preview` can re-sketch over it again live.
+        home.activation.aoideSeedStage = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          run ${seedStageScript}
+        '';
 
-      # ── Quickshell autostart via systemd user service ─────────────────────
-      # The shell surface (bar/dock/wallpaper/notifications/OSD) is started by
-      # a systemd user service rather than a Hyprland exec-once. A service is
-      # the stronger session-assembly seam:
-      #   - Restart=on-failure — a QML crash respawns the whole shell instead
-      #     of leaving the desktop bare until the next login.
-      #   - journald — `journalctl --user -u aoide-quickshell` gives real logs
-      #     (an exec-once child's stderr is lost).
-      #   - graphical-session.target ordering — it starts only once the
-      #     compositor facet's env handoff (hyprland-session.target →
-      #     graphical-session.target, WAYLAND_DISPLAY/HYPRLAND_INSTANCE_SIGNATURE
-      #     imported) has fired, so Quickshell inherits a valid Wayland env.
-      # ConditionPathExists guards the shell entry so the unit fails cleanly
-      # (not crash-loops) if the QML tree hasn't landed in the clone yet. That
-      # guard only checks *existence*, though — a shell.qml that exists but
-      # fails to load (a QML parse/load error, or an ExecStart pointed elsewhere
-      # by a stray drop-in) still exits 255 and, under Restart=on-failure, would
-      # respawn every RestartSec forever. StartLimit* is the backstop: after 5
-      # failures inside 60s systemd stops trying and parks the unit `failed`
-      # instead of thrashing the desktop (and journald) indefinitely. Five tries
-      # still absorbs a genuinely transient failure (e.g. Wayland not ready yet).
-      systemd.user.services.aoide-quickshell = {
-        Unit = {
-          Description = "Aoide Quickshell — shell surface (bar/dock/wallpaper/notifications)";
-          PartOf = [ "graphical-session.target" ];
-          After = [ "graphical-session.target" ];
-          ConditionEnvironment = "WAYLAND_DISPLAY";
-          ConditionPathExists = shellQmlEntry;
-          StartLimitIntervalSec = 60;
-          StartLimitBurst = 5;
+        # ── Quickshell autostart via systemd user service ─────────────────────
+        # The shell surface (bar/dock/wallpaper/notifications/OSD) is started by
+        # a systemd user service rather than a Hyprland exec-once. A service is
+        # the stronger session-assembly seam:
+        #   - Restart=on-failure — a QML crash respawns the whole shell instead
+        #     of leaving the desktop bare until the next login.
+        #   - journald — `journalctl --user -u aoide-quickshell` gives real logs
+        #     (an exec-once child's stderr is lost).
+        #   - graphical-session.target ordering — it starts only once the
+        #     compositor facet's env handoff (hyprland-session.target →
+        #     graphical-session.target, WAYLAND_DISPLAY/HYPRLAND_INSTANCE_SIGNATURE
+        #     imported) has fired, so Quickshell inherits a valid Wayland env.
+        # ConditionPathExists guards the shell entry so the unit fails cleanly
+        # (not crash-loops) if the QML tree hasn't landed in the clone yet. That
+        # guard only checks *existence*, though — a shell.qml that exists but
+        # fails to load (a QML parse/load error, or an ExecStart pointed elsewhere
+        # by a stray drop-in) still exits 255 and, under Restart=on-failure, would
+        # respawn every RestartSec forever. StartLimit* is the backstop: after 5
+        # failures inside 60s systemd stops trying and parks the unit `failed`
+        # instead of thrashing the desktop (and journald) indefinitely. Five tries
+        # still absorbs a genuinely transient failure (e.g. Wayland not ready yet).
+        # The same condition doubles as the runtime-compose seam: a later lane
+        # phase that materializes `run/qml/shell.qml` straight from a staged
+        # rice (no rebuild) only has to write that file and start this unit —
+        # ConditionPathExists is already the gate that lets it, and with a
+        # declared song the rebuild path already satisfies it, so nothing
+        # about this unit needs to change to grow that second producer.
+        systemd.user.services.aoide-quickshell = {
+          Unit = {
+            Description = "Aoide Quickshell — shell surface (bar/dock/wallpaper/notifications)";
+            PartOf = [ "graphical-session.target" ];
+            After = [ "graphical-session.target" ];
+            ConditionEnvironment = "WAYLAND_DISPLAY";
+            ConditionPathExists = shellQmlEntry;
+            StartLimitIntervalSec = 60;
+            StartLimitBurst = 5;
+          };
+          Service = {
+            # `-p <path>` loads a config by PATH; `-c <name>` (used previously)
+            # treats the argument as a config NAME and fails on a path in
+            # quickshell 0.3.0.
+            ExecStart = "${quickshellPkg}/bin/quickshell -p ${shellQmlEntry}";
+            # Qt6's qtbase ships only jpeg/png/gif/ico imageformats plugins (plus
+            # qtsvg); webp/tiff/etc. live in a SEPARATE qtimageformats plugin the
+            # quickshell wrapper does not carry. A song cover may be any of those
+            # formats (sonata's is .webp), and AoideWallpaper renders it through a
+            # Qt Image — with no webp plugin the Image can't decode and the layer
+            # falls back to the solid palette colour (the "wallpaper didn't run
+            # after rebuild" symptom). The wrapper sets QT_PLUGIN_PATH via
+            # makeWrapper --prefix, which PRESERVES an inherited value, so this
+            # plugin dir is scanned alongside the wrapper's own. quickshell follows
+            # this flake's nixpkgs, so this qtimageformats is the exact Qt ABI.
+            Environment = [
+              "QT_PLUGIN_PATH=${pkgs.qt6.qtimageformats}/lib/qt-6/plugins"
+            ]
+            # Export the song's baked wallpaper (immutable store path) so
+            # AoideWallpaper always has the right cover on boot/rebuild — the live
+            # stage/cover.json overrides it, but nothing re-seeded it from the
+            # song before, so a rebuild lost the background. Null → no env.
+            ++ lib.optionals (config.aoide.livery.wallpaper != null) [
+              "AOIDE_WALLPAPER=${config.aoide.livery.wallpaper}"
+            ];
+            Restart = "on-failure";
+            RestartSec = 3;
+          };
+          Install.WantedBy = [ "graphical-session.target" ];
         };
-        Service = {
-          # `-p <path>` loads a config by PATH; `-c <name>` (used previously)
-          # treats the argument as a config NAME and fails on a path in
-          # quickshell 0.3.0.
-          ExecStart = "${quickshellPkg}/bin/quickshell -p ${shellQmlEntry}";
-          # Qt6's qtbase ships only jpeg/png/gif/ico imageformats plugins (plus
-          # qtsvg); webp/tiff/etc. live in a SEPARATE qtimageformats plugin the
-          # quickshell wrapper does not carry. A song cover may be any of those
-          # formats (sonata's is .webp), and AoideWallpaper renders it through a
-          # Qt Image — with no webp plugin the Image can't decode and the layer
-          # falls back to the solid palette colour (the "wallpaper didn't run
-          # after rebuild" symptom). The wrapper sets QT_PLUGIN_PATH via
-          # makeWrapper --prefix, which PRESERVES an inherited value, so this
-          # plugin dir is scanned alongside the wrapper's own. quickshell follows
-          # this flake's nixpkgs, so this qtimageformats is the exact Qt ABI.
-          Environment = [
-            "QT_PLUGIN_PATH=${pkgs.qt6.qtimageformats}/lib/qt-6/plugins"
-          ]
-          # Export the song's baked wallpaper (immutable store path) so
-          # AoideWallpaper always has the right cover on boot/rebuild — the live
-          # stage/cover.json overrides it, but nothing re-seeded it from the
-          # song before, so a rebuild lost the background. Null → no env.
-          ++ lib.optionals (config.aoide.livery.wallpaper != null) [
-            "AOIDE_WALLPAPER=${config.aoide.livery.wallpaper}"
-          ];
-          Restart = "on-failure";
-          RestartSec = 3;
-        };
-        Install.WantedBy = [ "graphical-session.target" ];
       };
-    };
   };
 }

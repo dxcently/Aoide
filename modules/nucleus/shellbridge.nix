@@ -149,13 +149,21 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
         # Hyprland socket (standard Hyprland env; shellbridge reads it directly).
         # HYPRLAND_INSTANCE_SIGNATURE is set by the compositor at session start.
         "AOIDE_USER=${config.aoide.user}"
-        # Nix-declared baseline song — same env-baked-into-the-service
-        # precedent as quickshell's AOIDE_WALLPAPER (modules/facets/quickshell/
-        # default.nix). Read by dispatch_rice_mode_toggle's declarative-
-        # direction re-exec (shellbridge.rs) so the bar's rice-mode toggle
-        # re-pins to the shipped baseline instead of whatever song happens to
-        # be staged.
+      ]
+      # Nix-declared baseline song — same env-baked-into-the-service
+      # precedent as quickshell's AOIDE_WALLPAPER (modules/facets/quickshell/
+      # default.nix). Read by dispatch_rice_mode_toggle's declarative-
+      # direction re-exec (shellbridge.rs) so the bar's rice-mode toggle
+      # re-pins to the shipped baseline instead of whatever song happens to
+      # be staged. Null when no song is named ("no song, no service" —
+      # options.nix) — omit the var entirely rather than interpolate null;
+      # shellbridge.rs already reads it as an Option (std::env::var(..).ok()),
+      # so an absent var and a re-pin with nothing to re-pin to are the same
+      # thing to the reader.
+      ++ lib.optionals (config.aoide.song != null) [
         "AOIDE_DEFAULT_SONG=${config.aoide.song}"
+      ]
+      ++ [
         # The process running this unit IS lyra now, so shellbridge's core_bin()
         # re-exec sites (protocol::bin's sibling resolver — the usage/recheck
         # calls, shellbridge.rs) need this set explicitly (P-A7 of the
