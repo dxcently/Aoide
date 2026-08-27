@@ -372,17 +372,19 @@ forward is a pipe, not a party to the protocol.
   and swept by the reaper for a session that never got to run its own exit
   path. A bare shell with no conducted session gets a process-scoped
   tunnel instead — per-command rather than persistent.
-- **Narrowing the door's own loopback trust so a tunneled request cannot
-  silently auto-deliver is a REQUIRED, not optional, companion change.**
-  Every tunneled connection reaches the far door's socket as loopback —
-  that is what a forward IS. Today's door treats any loopback connection
-  as implicitly trusted for Inject delivery (a sound stance behind a bind
-  that only a genuinely local caller could ever reach); a tunnel is a NEW
-  way to reach that same socket from somewhere else, so the trust a bare
-  loopback classification confers must narrow to require a verified
-  signature before this transport is safe to actually use against a real
-  peer. Until that narrowing lands, treat `via`/`--via` as functional
-  plumbing, not a safe-to-use feature.
+- **The door's own loopback trust narrows so a tunneled request cannot
+  silently auto-deliver.** Every tunneled connection reaches the far door's
+  socket as loopback — that is what a forward IS. The door treats an
+  UNSIGNED loopback connection as implicitly trusted for Inject delivery (a
+  sound stance behind a bind that only a genuinely local caller could ever
+  reach); a tunnel is a way to reach that same socket from somewhere else,
+  so a request carrying a verified per-request signature never rides that
+  trust — it is a remote peer by construction, and `a2a.rs::origin_for_
+  inject` strips loopback's free pass from it before the delivery decision
+  runs (CONTRACTS.md §6). A signature-rung `autogate` flag restores
+  auto-delivery for a peer the operator already marked that way, exactly
+  the like-for-like an operator's existing grant expects. `via`/`--via` are
+  safe to use against a real peer.
 
 ## Kill-list
 

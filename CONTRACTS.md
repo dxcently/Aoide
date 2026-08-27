@@ -4020,9 +4020,10 @@ commit time, even when the ceremony's own dial went direct. Reaching a
 peer's own A2A door remains loopback-bound either way — the tunnel is a
 TRANSPORT hop, never a relay; the signed `X-Aoide-Peer` identity still
 crosses it end to end. See `docs/architecture/PAIRING.md`'s Transport
-section for the full design and its still-open P-S6 dependency (a verified
-signature must outrank a tunneled connection's loopback origin for Inject
-delivery before this transport is safe to use against a real peer).
+section for the full design; a verified signature outranks a tunneled
+connection's loopback origin for Inject delivery (`a2a.rs::origin_for_
+inject`, this section's "Peer authentication today" paragraph above), so
+this transport is safe to use against a real peer.
 
 `aoide peer add <name> <url> [--autogate]` verifies the peer FIRST — fetches
 its `/.well-known/agent-card.json` and only registers on success; a peer
