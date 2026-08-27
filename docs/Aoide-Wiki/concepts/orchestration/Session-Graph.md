@@ -309,3 +309,4 @@ an `aoide shell lock` command absent from the schema (open thread, see
 - [[Widget-Bridge-Contract]]
 - [[Conductor-Channel]]
 - [[Conductor-TUI]]
+- [[Peer-Transport]] — the reaper backstop that collects a tunnel a killed session never closed

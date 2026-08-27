@@ -34,7 +34,13 @@ strictly loopback (`127.0.0.1:<port>`), same-subnet HTTP reachability
 standing in for "two boxes on the same network." **WAN /
 NAT-traversal / relay reachability for a peer that is NOT on the same
 network is explicitly out of scope for this v0** — a later, separate
-contract amendment, not designed or assumed here.
+contract amendment, not designed or assumed here. A **paired** peer has a
+narrower escape hatch past plain HTTP reachability: an explicit `via`
+marker reaches the door through a session-scoped ssh tunnel instead of
+dialing directly ([[Peer-Transport]]) — still not NAT traversal or a
+relay, since it requires the same ssh access a trusted network already
+assumes, but it does cross a segment boundary a router filters for plain
+HTTP.
 
 ## The registry — `state/peers.json`
 
@@ -223,6 +229,7 @@ both are later, separately-directed work.
 ## Related
 
 - [[A2A-Door]]
+- [[Peer-Transport]]
 - [[Session-Graph]]
 - [[Governance]]
 - [[aoide-cli]]

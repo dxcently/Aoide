@@ -189,6 +189,7 @@ to **rebuild time** instead.
 
 - [[Agent-Interface]]
 - [[Peer-Federation]] — the aoide-to-aoide door built on top of this one
+- [[Peer-Transport]] — reaching this door through a tunnel when a paired peer isn't directly HTTP-reachable
 - [[Governance]]
 - [[Session-Graph]]
 - [[Conductor-Channel]]

@@ -104,6 +104,7 @@ concepts/orchestration/Conductor-Channel.md
 concepts/orchestration/Content-Pipeline.md
 concepts/orchestration/Loop-Protocol.md
 concepts/orchestration/Peer-Federation.md
+concepts/orchestration/Peer-Transport.md
 concepts/orchestration/Screen-Control.md
 concepts/orchestration/Secrets-Broker.md
 concepts/orchestration/Session-Graph.md
