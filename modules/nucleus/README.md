@@ -18,7 +18,11 @@ module builds against what nucleus declares.
   (`networking.firewall.allowedUDPPorts`) whenever `aoide.a2a.
   discoveryAdvertise` is on — the stock firewall trusts only `lo`, and a
   beacon never reaches a listening socket on a real interface without it
-  (task #98).
+  (task #98). Declares a graphical-session USER unit,
+  `aoide-pair-watch.service` (P-P5), running `aoide peer pair watch
+  --popup` — gated on `aoide.a2a.enable && aoide.facets.quickshell.enable`,
+  zenity-only (F6, no `lyra` fallback for this ceremony), the same unit
+  shape `secrets.nix`'s own `aoide-secrets-watch.service` below holds.
 - `melete-adapter.nix` — the concrete thin-adapter exemplar on the `aoided`
   event stream.
 - `shellbridge.nix` — the bidirectional bridge service: atomic JSON state

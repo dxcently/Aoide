@@ -213,6 +213,47 @@ lib.mkIf config.aoide.enable {
     };
   };
 
+  # ── Pairing events watcher (P-P5) ─────────────────────────────────────────
+  # Surfaces the pairing ceremony's own events feed (`peer pair watch
+  # --popup`, CONTRACTS.md §6's "Pairing events feed" subsection) as a
+  # zenity confirm dialog per actionable request — the same unit shape
+  # `secrets.nix`'s own `aoide-secrets-watch` holds (graphical-session.target,
+  # `Type = simple` + `Restart = on-failure`, an explicit zenity `path` entry,
+  # journal both streams, NoNewPrivileges) — zenity-only (F6: no
+  # `AOIDE_RICE_BIN`, no `lyra` fallback for this ceremony; a QML confirm
+  # dialog is a named deferral, not built). No ordering against `aoide-a2a`
+  # (the process that actually emits onto this feed) — `pair_watch::
+  # wait_for_follower` already retries until the events feed appears rather
+  # than exiting 1, so this unit starting before `a2a serve` has bound its
+  # socket, or before `aoided` itself has created the feed file, is a
+  # normal, harmless race, the same reasoning `aoide-secrets-watch` already
+  # holds against the SYSTEM-unit `aoide-secrets-serve` above.
+  systemd.user.services.aoide-pair-watch = lib.mkIf (config.aoide.a2a.enable && config.aoide.facets.quickshell.enable) {
+    description = "Aoide pairing-ceremony popup watcher — surfaces actionable pairing requests as a dialog";
+
+    wantedBy = [ "graphical-session.target" ];
+    after = [ "graphical-session.target" ];
+    partOf = [ "graphical-session.target" ];
+
+    # `zenity` must resolve off a bare-name `PATH` lookup
+    # (`pair_watch::zenity_available`/`spawn_pair_confirm`, both take the
+    # binary NAME, never a hardcoded path) — the same PATH gap
+    # `aoide-secrets-watch` documents in `secrets.nix`.
+    path = [ pkgs.zenity ];
+
+    serviceConfig = {
+      Type = "simple";
+      Restart = "on-failure";
+      RestartSec = "3s";
+
+      ExecStart = "${pkgs.aoide}/bin/aoide peer pair watch --popup";
+
+      NoNewPrivileges = true;
+      StandardOutput = "journal";
+      StandardError = "journal";
+    };
+  };
+
   # ── Discovery beacon firewall (task #98 diagnosis) ────────────────────────
   # `discoveryAdvertise` starts a background thread inside `aoide-a2a` that
   # sends its LAN beacon on a fixed UDP multicast group+port
