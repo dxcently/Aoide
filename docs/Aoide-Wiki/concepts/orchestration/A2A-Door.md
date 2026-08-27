@@ -54,16 +54,21 @@ The server serves:
 
 ## Client — aoide driving external agents
 
-`aoide a2a agent add|list|remove|send` is the outbound half. `agent add <url>`
-fetches an external agent's AgentCard (a bare origin has the well-known path
-appended), requires at least a `name`, and registers it into
-`state/a2a-agents.json`. Each registered agent folds into the [[Session-Graph]]
-as a root node of `kind: "a2a"`, so a remote agent appears in the DAG beside
-aoide's own sessions. `agent send <name> <message>` is the **drive command**: it
-POSTs a JSON-RPC `message/send` to the agent's endpoint and reports the returned
-Task or Message. The external endpoints carry no local credential, so the fetch
-is a plain user-initiated request; the message text is untrusted data, never
-executed.
+The outbound half lives in the `peer` family ([[Peer-Federation]]), not on the
+A2A door itself. `peer add <name> <url>` verifies a remote aoide instance by
+fetching its AgentCard (a bare origin has the well-known path appended) before
+registering it into `state/peers.json`. `peer pull` refreshes its cached
+graph over `aoide/graphSummary`. `peer spawn <name> -- <text>` starts a new
+session on a PAIRED peer's own configured agent: it POSTs a signed,
+spawn-shaped `message/send` to the peer's A2A door, and the peer's own
+paired+signature+allows gate is the sole authority. `graph send --to
+peer/<name>` (or `--to <name>/<session>`) drives an EXISTING remote session:
+it resolves the target against the peer's cached graph and delivers over the
+same `message/send` RPC — mutually exclusive with `--id`, and a remote send
+always attempts delivery since the receiving peer gates its own inject. Each
+registered peer folds into the [[Session-Graph]] as a root node, so a remote
+instance appears in the DAG beside aoide's own sessions. The message text is
+untrusted data, never executed.
 
 ## The mapping — A2A concepts to aoide's own vocabulary
 

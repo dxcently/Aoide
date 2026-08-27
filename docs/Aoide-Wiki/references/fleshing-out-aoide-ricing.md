@@ -51,7 +51,7 @@ And the discipline added last (the User, closing note of the session):
 │    aoide cue · the business-triggered stderr line            │
 ├──────────────────────────────────────────────────────────────┤
 │  CONDUCTOR CITIZENSHIP  (general — any agent, any purpose)   │
-│    register: hook door │ graph wrap │ conduct │ A2A(remote)  │
+│    register: hook door │ conduct │ graph spawn │ A2A(remote) │
 │    observe:  hook edges + graph tail (transcript ∨ PTY tee)  │
 │    steer:    graph send (gated) │ A2A message/send (remote)  │
 │    escalate: the sudo door — declared ops, polkit auth (§8)  │
@@ -74,13 +74,13 @@ for agents aoide can only reach as a *peer* (usually remote):
 | agent on this box | door onto the conductor | cost |
 |---|---|---|
 | claude, kimi (hook systems) | hook door — `aoide graph session hook` | free |
-| codex, gemini, aider, any CLI | `graph wrap` / `conduct` (PTY) | free |
+| codex, gemini, aider, any CLI | `conduct` (PTY) / `graph spawn` (detached) | free |
 | anything scriptable | explicit commands — `graph session start/phase/end` | free |
-| an A2A-speaking agent (remote, usually) | A2A door — `a2a agent add` / `message/send` | model turns |
+| an A2A-speaking peer (remote, usually) | peer door — `peer add` / `peer spawn` / `graph send --to` | model turns |
 
-All four converge on the same `sessions/hooks/graph.json` records; an
-A2A-registered agent folds in as a `kind: "a2a"` root node beside the hooked
-and wrapped ones. The wiki sentence, once locked: *the conductor hooks every
+All four converge on the same `sessions/hooks/graph.json` records; a
+registered peer folds in as a `kind: "peer"` root node beside the hooked
+and conducted ones. The wiki sentence, once locked: *the conductor hooks every
 local agent mechanically (hooks, PTY, commands — zero tokens) and speaks A2A
 outward to whatever it can't touch.* Agent-agnosticism lives in the
 `AgentProfile` seam (EXISTS) — a new harness is one profile entry.
@@ -194,8 +194,8 @@ v1 is raw ring log + ANSI-stripped last-N lines ("ugly but true"); a
 hand-rolled vt screen model is a later phase only if TUI capture ever
 matters (the TUI-heavy harnesses have transcripts). Output logs live under
 `state/`, not `stage/` — durable observation artifacts, same reasoning as
-captures. The tee lives in `conduct`, not `graph wrap` (wrap stays
-inherit-stdio pure; capture-without-steering is one flag later if wanted).
+captures. The tee lives in `conduct`, not `graph spawn` (spawn stays a bare
+detached launch; capture-without-steering is one flag later if wanted).
 Kimi's `wire.jsonl` flush cadence needs a live check before `--follow`
 claims "live" rather than "recent".
 

@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-15
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, agent, a2a, orchestration, interop, federation]
 ---
 
@@ -12,8 +12,8 @@ registers ANOTHER aoide instance as a **peer** by URL and pulls its resolved
 session graph into its own, folded in as a subtree. It is not a new
 transport — it is built entirely on top of the existing [[A2A-Door]] (§6):
 one new JSON-RPC method (`aoide/graphSummary`), a client-side peer registry
-plus a per-peer pull cache, and an additive fold in the same `build_graph`
-function the A2A door's `kind:"a2a"` fold already uses. Spec: `CONTRACTS.md`
+plus a per-peer pull cache, and an additive fold in `build_graph` (the same
+function that produces `graph view`'s document). Spec: `CONTRACTS.md`
 §7 (v0, 2026-08-14).
 
 **Melete-optional** — federation works standalone; nothing in it references
@@ -41,10 +41,9 @@ contract amendment, not designed or assumed here.
 The set of other aoide instances this one has registered, written atomically
 via `aoide_storage::peer_store`. Lives in the gitignored root-runtime
 `state/` dir — **not** `song/stage/`: a peer roster is account/global
-external-registry state, exactly like the sibling `state/a2a-agents.json`
-the [[A2A-Door|A2A client]] already keeps there, not song-scoped rehearsal
-state. Additive/tolerate-missing: an absent file just means "no peers
-registered," never an error.
+external-registry state, not song-scoped rehearsal state. Additive/
+tolerate-missing: an absent file just means "no peers registered," never
+an error.
 
 ```json
 {
@@ -129,15 +128,15 @@ caller still gets the standard `-32601`.
 same precedence-chain discipline the rest of the server's config resolution
 follows. `instance.url` is this instance's own advertised URL — the same
 string the AgentCard's own `url` field carries. `graph` is EXACTLY what
-`aoide graph view --json` / `graph emit` resolve — the SAME
-`resolve_graph_document` function both those commands and this method call, so
-no second graph vocabulary is invented for the wire.
+`aoide graph view --json` resolves — the SAME `resolve_graph_document`
+function both that command and this method call, so no second graph
+vocabulary is invented for the wire. Every stage mutation restages
+`song/stage/graph.json` for Quickshell automatically, so there is no
+separate emit step to keep in sync.
 
 ## The `peer:*` node convention (graph fold)
 
-`build_graph` — the same function that already folds registered A2A agents
-in as opaque `kind:"a2a"` root nodes — ADDITIVELY folds each registered peer
-in as a root node, one level richer than the A2A fold:
+`build_graph` ADDITIVELY folds each registered peer in as a root node:
 `{ id: "peer:<name>", kind: "peer", name, url, state, children? }`.
 
 - A **fresh** cache contributes `state: "fresh"` plus `children: { nodes,
@@ -149,19 +148,18 @@ in as a root node, one level richer than the A2A fold:
   "stale"` and no `children`; never a crash, never a silently-dropped peer.
   `error` carries the last pull failure's reason when present.
 
-Local graph commands (`graph focus`/`prune`/`reap`/`link`) keep ignoring
-`peer:*` ids exactly as they already ignore `a2a:*` ids — none of those
-commands read `peer_store` (or `a2a_store`) at all, they operate purely on
-`sessions.json`'s `SessionRecord`s, so a `peer:*`/`a2a:*` id is simply never
-a session id they could match.
+Local graph commands (`graph prune`/`reap`/`link`) keep ignoring `peer:*`
+ids — none of those commands read `peer_store` at all, they operate purely
+on `sessions.json`'s `SessionRecord`s, so a `peer:*` id is simply never a
+session id they could match.
 
 ## CLI surface
 
 `aoide peer add <name> <url> [--autogate] [--token-file <path>] [--bearer-secret
-<name>]` / `list` / `remove <name>` / `pull [<name>]` / `status` — see
+<name>]` / `remove <name>` / `pull [<name>]` / `status` — see
 [[aoide-cli#The `peer` group — aoide-to-aoide federation]] for the per-command
-behavior. Registered as its own group, directly after `a2a agent
-add/list/remove/send` in `schema --json`'s order.
+behavior. `status --json` carries the full registry row per peer; `peer
+list` folded into it (command-defrag lane D).
 
 ## Sending across the fold — `graph send --to peer/<query>`
 

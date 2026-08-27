@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-27
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, agent, session, conductor, orchestration, graph]
 ---
 
@@ -71,10 +71,11 @@ Canonical state vocabulary and how the desktop renders it:
 ### 3. The wrapper — hookless agents (codex, gemini, aider, anything)
 
 ```sh
-aoide graph wrap [--agent codex] [--parent "$PARENT_ID"] -- codex --whatever-flags
+aoide conduct [--agent codex] [--parent "$PARENT_ID"] -- codex --whatever-flags
 ```
 
-- Spawns with **inherited stdio** — a wrapped TUI runs undisturbed.
+- Spawns on a controlling tty plus a per-session control socket, so an
+  orchestrator can steer the child afterward.
 - Registers `idle` on spawn, resolves `done` on exit — crash included; nothing haunts the roster.
 - Exit mirrors the child (0 ok / 1 otherwise; real code in `data.exitCode`).
 - Exports **`AOIDE_SESSION_ID`** into the child, so anything hookable *inside* the wrapped agent can self-report richer phases:
@@ -83,27 +84,16 @@ aoide graph wrap [--agent codex] [--parent "$PARENT_ID"] -- codex --whatever-fla
 aoide graph session phase --id "$AOIDE_SESSION_ID" --phase blocked
 ```
 
-Everything after `--` passes to the child verbatim (the CLI stops flag-parsing there).
-
-### 4. Conducting — the steerable variant of the wrapper
-
-```sh
-aoide conduct [--agent codex] [--parent "$PARENT_ID"] -- codex --whatever-flags
-```
-
-Same spawn/register/wait/end lifecycle as `graph wrap`, but on a controlling
-tty plus a per-session control socket, so an orchestrator can steer the child
-afterward:
+Everything after `--` passes to the child verbatim (the CLI stops
+flag-parsing there). Steer it afterward through the one gated injection
+door:
 
 ```sh
 aoide graph send --id "$AOIDE_SESSION_ID" [--submit] [--yes] -- some text to type
 ```
 
-`graph send` is the one gated injection door — held pending approval by
-default, `--yes` (or an autogate policy) delivers it, and every outcome is
-audited. Use `graph wrap` for pure observe-only registration; use `conduct`
-when something (a human via the `conductor` TUI, or another agent) needs to type
-into the session later.
+`graph send` is held pending approval by default, `--yes` (or an autogate
+policy) delivers it, and every outcome is audited.
 
 **Headless — no terminal required.** `aoide conduct --headless` runs the
 identical steerable session with no controlling terminal at all: the pty's
@@ -235,7 +225,7 @@ Operator notes: kimi's TUI submits on `\r`, not `\n` — `graph send --submit` r
 ### Any plain CLI agent (no hook system)
 
 ```sh
-aoide graph wrap --agent aider -- aider --model sonnet
+aoide conduct --agent aider -- aider --model sonnet
 ```
 
 Running→done for free; the graph shows who is out working even when the agent can't speak.

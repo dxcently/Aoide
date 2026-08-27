@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, architecture, nix, flake, rust, node]
 ---
 
@@ -97,7 +97,7 @@ home-manager/stylix modules, the pkgs overlay, and mirrored `specialArgs`
 (`host = "vm-test"`, inputs, username, system; `node.pkgsReadOnly = false`
 so the overlay applies) — so the test boots the real assembly, not a
 replica. It asserts: `multi-user.target` reached; `aoide` on
-PATH with `schema --json` reporting exactly 80 commands (a hardcoded
+PATH with `schema --json` reporting exactly 73 commands (a hardcoded
 drift-tripwire figure, [[AOIDE-DEV]] §7) and `guide` exiting
 0; greetd enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
 linger active with the `aoided` and `shellbridge` user units finishing
@@ -220,8 +220,8 @@ Live-side state, all gitignored, none load-bearing for the build:
   [[shellbridge]]; records may carry an additive optional `parentSessionId`),
   `hooks.json` (live Claude Code hook phases), `projects.json` (the project
   registry, kept by `aoide graph project`), `graph.json` (the resolved
-  project/session DAG, written by `aoide graph emit` for Quickshell — see
-  [[Session-Graph]]), `cover.json` (the wallpaper note, written by `cover
+  project/session DAG, restaged automatically by every graph mutation for
+  Quickshell — see [[Session-Graph]]), `cover.json` (the wallpaper note, written by `cover
   set`), `herald.json` (the notification ledger the Quickshell herald draws
   from — the shellbridge daemon is the single writer), and `pending.json`
   (the held-injection queue `graph send`/the A2A door write when their gate

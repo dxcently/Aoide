@@ -62,7 +62,7 @@ full reason-code vocabulary this page's examples draw from).
 | `screen point hover <x> <y>` | Move to target, hold `--settle-ms`, report what layer surfaces/windows appeared, disappeared, or got retitled while parked there. Its inventory delta sees toplevels and layer surfaces ONLY — pair it with `screen diff` to catch a hover that repaints in place (see below). |
 | `screen point text <text>` | Click a word/phrase an earlier `screen ocr` already located, by NAME — no picked-by-eye pixel. `--dry-run` resolves the match with no motion at all. |
 | `screen diff <before-capture>` | Re-shoot the identical rect after an optional settle delay, pixel-diff the two images, report a changed bounding box plus an inventory delta. |
-| `screen send <capture>` | Hand a capture (path + comment + OCR text) to a conducted session or a registered A2A agent. |
+| `screen send <capture>` | Hand a capture (path + comment + OCR text) to a conducted session. |
 
 ## Mapping from the Anthropic computer-use vocabulary
 

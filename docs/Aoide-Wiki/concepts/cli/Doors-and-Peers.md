@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-26
+updated: 2026-08-27
 tags: [aoide, cli, mcp, a2a, peer, daemon]
 ---
 
@@ -13,8 +13,9 @@ serve` is the same façade over lyra's own 43-path registry), the [[aoided]]
 policy skeleton (`daemon`, `events tail`, `adapter melete`), the desktop
 state bridge (`shellbridge`), the interactive session UI (`conductor`,
 detailed at [[Conductor-TUI]]), live presence (`who`), the [[A2A-Door]]
-server (`a2a serve`) and its outbound client commands (`a2a agent *`), and
-[[Peer-Federation]] (`peer *`). Handlers are spread across
+server (`a2a serve`), and [[Peer-Federation]] (`peer *`) — the peer family is
+also the outbound A2A client, driving remote instances over the same wire.
+Handlers are spread across
 `pkgs/aoide/crates/server/src/{commands,mcp,daemon,a2a}.rs` (the server
 domain), `pkgs/aoide/crates/client/src/{commands,adapter,peer,wire}.rs`
 (the outbound half), `pkgs/aoide/crates/conductor/src/` (the TUI), and
@@ -38,8 +39,9 @@ Every command takes `--json`. Without it the CLI prints the human `message`
 line; with it, an envelope `{status, command, message, gated, changed?, data?}`
 (`pkgs/aoide/crates/protocol/src/output.rs`). Exit codes: 0 ok, 1 error,
 2 usage, 64 not-implemented (no command on this page is a stub). Outbound HTTP
-in the `a2a agent`/`peer` commands is `curl -sS --max-time 15` shelled out with
-the URL/body in argv or on stdin (no local credential is involved).
+in the `peer` commands is `curl -sS --max-time 15` shelled out with the
+URL/body in argv or on stdin (no local credential beyond an optional peer
+bearer secret is involved).
 
 ### aoide mcp serve
 
@@ -269,8 +271,10 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     `-32004`; session not conductable → `-32004`; unknown contextId →
     `-32001`. A held-pending send returns a `submitted` Task immediately.
   - `aoide/graphSummary` — `{schemaVersion: "0", instance: {name, url,
-    emittedAt}, graph}` wrapping the same resolved graph document
-    `graph view`/`graph emit` build (CONTRACTS.md §7).
+    emittedAt}, graph}` wrapping the same resolved graph document `graph
+    view` renders (CONTRACTS.md §7) — every stage mutation restages
+    `song/stage/graph.json` automatically, so there is nothing separate to
+    build here.
   - `message/stream` / `tasks/resubscribe` — the socket stays open as SSE
     (`text/event-stream`, one `data: <json>` frame per status change, final
     frame a `TaskStatusUpdateEvent` with `final: true`); stream lifetime
@@ -283,68 +287,6 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
   A client never supplies a command — the spawn path only ever launches the
   operator-configured executable. Localhost, user-only, off by default. See
   [[A2A-Door]].
-
-### aoide a2a agent add
-
-```
-aoide a2a agent add <url> [--json]
-```
-
-- **Reads:** `state/a2a-agents.json` (tolerate-missing → empty); fetches the
-  remote AgentCard over HTTP via curl — a bare origin has
-  `/.well-known/agent-card.json` appended (`client/src/wire.rs::resolve_card_url`).
-- **Writes:** upserts the parsed card into `state/a2a-agents.json` (v0,
-  atomic write; keyed by the card `name`, re-add replaces in place). The
-  stored `url` is the resolved `message/send` endpoint, not the card URL.
-  `changed: ["state/a2a-agents.json"]`.
-- **Output:** ok → `"registered|updated A2A agent \`<name>\` → <url> (<n>
-  total)"`, data `{agent, count, replaced}`. Failures: `reason:
-  fetch-failed | fetch-http-error | card-unparseable | card-invalid |
-  registry-write-failed`, exit 1. Missing arg → usage, exit 2.
-- **Notes:** registered agents fold into the session DAG as `kind:"a2a"`
-  nodes (`graph/doc.rs::build_graph`).
-
-### aoide a2a agent list
-
-```
-aoide a2a agent list [--json]
-```
-
-- **Reads:** `state/a2a-agents.json` (absent → empty, never an error).
-- **Output:** human lines `<name> · <url>[ · <description>]`; data
-  `{agents, count}`.
-- **Notes:** read-only.
-
-### aoide a2a agent remove
-
-```
-aoide a2a agent remove <name> [--json]
-```
-
-- **Reads:** `state/a2a-agents.json`.
-- **Writes:** the registry, atomic, only when the name existed (`changed:
-  ["state/a2a-agents.json"]`).
-- **Output:** data `{removed, name, count}`. A missing name is ok with
-  `removed: false` — idempotent, not an error (contrast `peer remove`).
-- **Notes:** not gated.
-
-### aoide a2a agent send
-
-```
-aoide a2a agent send <name> <message> [--json]
-```
-
-- **Reads:** `state/a2a-agents.json` (unknown name → exit 1, `reason:
-  unknown-agent`).
-- **Writes:** none locally.
-- **Output:** POSTs a JSON-RPC `message/send` (fresh `messageId`
-  `aoide-<pid>-<nanos>`) to the agent's stored endpoint via curl. Ok →
-  `"sent to \`<name>\` … — task <id> [<state>]"`, data `{name, url,
-  messageId, response}`. Non-200 → `send-http-error`; a JSON-RPC error body on
-  HTTP 200 → `agent-error`; unreachable/timeout → `send-failed` (exit 1
-  throughout).
-- **Notes:** `lyra screen send --agent` calls this handler in-process with a
-  synthesized invocation — same driver, never a second transport.
 
 ### aoide peer add
 
@@ -360,8 +302,8 @@ aoide peer add <name> <url> [--autogate] [--token-file <path>]
   the shape check is the path-traversal guard) — else exit 1, `reason:
   invalid-name`.
 - **Writes:** inserts into `state/peers.json` (v0, atomic write). A duplicate
-  name is rejected cleanly (`reason: duplicate-name`, exit 1) — unlike
-  `a2a agent add`'s replace-on-re-add, a nickname is never silently repointed.
+  name is rejected cleanly (`reason: duplicate-name`, exit 1) — a nickname is
+  never silently repointed.
 - **Output:** `"registered peer \`<name>\` → <url>[ (autogate)] (<n> total)"`,
   data `{peer: {name, url, autogate, tokenFile?, bearerSecret?, addedAt}, count}`.
 - **Notes:** `--autogate` marks the peer trusted: its inbound `message/send`
@@ -389,8 +331,7 @@ aoide peer remove <name> [--json]
   `state/peer-cache/<name>.json` if present (best-effort), so a peer re-added
   under the same name never starts from a stale leftover.
 - **Output:** data `{removed: true, name, count}`. A missing name is an
-  error (`reason: unknown-peer`, exit 1) — deliberately not
-  idempotent-silent, the documented divergence from `a2a agent remove`
+  error (`reason: unknown-peer`, exit 1) — deliberately not idempotent-silent
   (CONTRACTS.md §7).
 - **Notes:** not gated.
 
@@ -425,11 +366,14 @@ aoide peer status [--json]
 ```
 
 - **Reads:** `state/peers.json` plus each peer's `state/peer-cache/<name>.json`.
-- **Output:** `"<n> peer(s) registered"`, data `{peers: [{name, url,
-  autogate, state, fetchedAt, error}]}` where `state` is `fresh` (pulled
-  within the 300 s TTL and not marked stale), `stale`, or `never-pulled` — the
-  same three-way classification the graph fold uses, so this and the DAG never
-  disagree.
+- **Output:** the human line stays a terse `"<n> peer(s) registered"`; `--json`
+  carries the full row per peer — `{peers: [{name, url, autogate, tokenFile?,
+  bearerSecret?, hub, pubkey?, verified, allows, addedAt, state, fetchedAt,
+  error}]}`. `state` is `fresh` (pulled within the 300 s TTL and not marked
+  stale), `stale`, or `never-pulled` — the same three-way classification the
+  graph fold uses, so this and the DAG never disagree. `peer list` folded
+  into this command (command-defrag lane D): the full registry row that used
+  to be `peer list`'s only output rides here now, under `--json`.
 - **Notes:** read-only. TTL constant: `PEER_CACHE_TTL_SECS` in
   `pkgs/aoide/crates/storage/src/peer_store.rs`.
 

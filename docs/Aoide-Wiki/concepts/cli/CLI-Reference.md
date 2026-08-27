@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, cli, reference, schema]
 ---
 
@@ -32,7 +32,7 @@ start at [[aoide-cli]] and the group pages linked below.
 - **Runtime roots:** repo-relative paths below resolve under `~/Aoide/` —
   `state/` via `$AOIDE_STATE_DIR`, `song/stage/` via `$AOIDE_STAGE_DIR`.
   Stage/state writes are atomic temp-then-rename.
-- **Two registries, one convention:** `aoide schema --json` holds 80
+- **Two registries, one convention:** `aoide schema --json` holds 73
   command paths, `lyra schema --json` holds 43 — every group page prefixes
   each heading `aoide `/`lyra ` so the binary a command belongs to is never
   ambiguous.
@@ -45,8 +45,8 @@ start at [[aoide-cli]] and the group pages linked below.
   `rice take` groups, `rice back`, `cover set`, and the `livery` engine commands.
   Stage files: `song/stage/{livery,cover,mode}.json`; songbook and drafts trees.
 - [[Graph-and-Conduct|Graph-and-Conduct]] — the session DAG:
-  `graph view/project/link/session/wrap/spawn/resurrect/send/permit/focus/
-  prune/reap/emit`, `conduct`, and `inbox list/read/clear` (the receive
+  `graph view/project/link/session/spawn/resurrect/send/permit/
+  prune/reap`, `conduct`, and `inbox list/read/clear` (the receive
   half of `graph send`).
   Stage files: `song/stage/{sessions,hooks,projects,graph,pending,
   herald}.json`, `state/inbox.json`; control sockets at
@@ -56,9 +56,9 @@ start at [[aoide-cli]] and the group pages linked below.
   in `state/captures/`; pointer position in `state/pointer-pos.json`.
 - [[Doors-and-Peers|Doors-and-Peers]] — the other doors:
   `mcp serve`, `daemon`, `events tail`, `shellbridge`, `adapter melete`,
-  `conductor` (signature + pointer to [[Conductor-TUI]]), `who`, the `a2a`
-  server + client group, and the `peer` federation group. Registries:
-  `state/{a2a-agents,peers}.json`, `state/peer-cache/<name>.json`.
+  `conductor` (signature + pointer to [[Conductor-TUI]]), `who`, `a2a serve`,
+  and the `peer` federation group (the outbound A2A client). Registries:
+  `state/peers.json`, `state/peer-cache/<name>.json`.
 - [[Conductor-TUI|Conductor-TUI]] — the `aoide conductor` interactive
   terminal frontend: seven panels, keys, what each dispatches. State:
   `song/stage/{projects,sessions,hooks,livery}.json`, the audit log.

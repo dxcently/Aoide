@@ -1,6 +1,7 @@
 ---
 type: concept
 created: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, cli, conductor, tui]
 ---
 
@@ -65,8 +66,10 @@ earlier panel's key ever shifts.
 - **DAG (`1`)** — the visual graph: nodes and edges laid out and drawn by
   `graphview`. Selection walks the same preorder node list the layout
   draws. `Enter` on a node with a session cues it (see "Enter's
-  destination" below); `p`/`e` dispatch `graph prune`/`graph emit`, the two
-  graph-wide commands.
+  destination" below); `p` dispatches `graph prune`, the one graph-wide
+  command left on this key (`e`/`graph emit` is deleted — every stage
+  mutation restages `graph.json` automatically, so there is nothing left
+  for the keybinding to trigger).
 - **SESSIONS (`2`)** — the collapsible terminal roster: project group
   headers interleaved with their session subtrees, one flattened selection
   index over the lot (`App::dag_rows`). `Enter` on a session cues it; on a
@@ -74,8 +77,8 @@ earlier panel's key ever shifts.
   cursor, `l`/`+` unfolds it. `a` opens the inline project-add prompt; `d`
   on a group header removes that project (`graph project remove` — the
   unanchored pseudo-group has nothing to remove). `L` on a session opens a
-  prompt collecting a parent session id and dispatches `graph link`. `p`/`e`
-  dispatch `graph prune`/`graph emit` here too.
+  prompt collecting a parent session id and dispatches `graph link`. `p`
+  dispatches `graph prune` here too.
 - **PROJECTS (`3`)** — the flat project registry, sorted by name. `a` opens
   the same project-add prompt SESSIONS uses; `d` removes the selected
   project (`graph project remove`).
@@ -116,8 +119,8 @@ Per-panel keys (LOG and STATUS take none — read-only):
 
 | Panel | Keys |
 |---|---|
-| DAG | `j`/`k` (`↓`/`↑`) move; `g`/`Home` jump to the first node, `G`/`End` to the last; `Enter` cue the selected session; `p` `graph prune`; `e` `graph emit` |
-| SESSIONS | `j`/`k` move; `Enter` cue a session / toggle a group's fold; `h`/`-` fold, `l`/`+` unfold; `a` add a project; `d` on a group header remove that project; `L` on a session link it under a typed parent id; `p`/`e` prune/emit |
+| DAG | `j`/`k` (`↓`/`↑`) move; `g`/`Home` jump to the first node, `G`/`End` to the last; `Enter` cue the selected session; `p` `graph prune` |
+| SESSIONS | `j`/`k` move; `Enter` cue a session / toggle a group's fold; `h`/`-` fold, `l`/`+` unfold; `a` add a project; `d` on a group header remove that project; `L` on a session link it under a typed parent id; `p` prune |
 | PROJECTS | `j`/`k` move; `a` add a project; `d` remove the selected project |
 | ROSTER | `j`/`k` move; `r` force a fetch; `s` compose a send to the selected session |
 | PENDING | `j`/`k` move; `a` approve; `d` deny |
@@ -126,12 +129,14 @@ Per-panel keys (LOG and STATUS take none — read-only):
 
 Every mutating keypress builds an `Invocation` and passes it to the injected
 `DispatchFn`, so it is audited exactly like a typed command: `graph prune`,
-`graph emit`, `graph focus` (via cue-session on a live window), `graph
-project add`, `graph project remove`, `graph link`, `graph send --to
+`graph project add`, `graph project remove`, `graph link`, `graph send --to
 <target> --yes` (ROSTER compose), `graph pending approve`, `graph pending
 deny`. Reads (`who`, `graph pending list`, the stage-file loads) never
 dispatch — they call the pure graph functions and stage-file loaders
-directly.
+directly. Cue-session on a live window is the one exception on the write
+side too: it calls `focus_session` directly rather than dispatching `graph
+focus` (deleted — there is no CLI subcommand left to dispatch), writing its
+own audit line by hand so the one-audit-log invariant still holds.
 
 ## Two behaviours a reader will hit
 
@@ -149,7 +154,7 @@ directly.
 `Enter` on a session (`cue_session`) opens the log-tail overlay when the
 record carries a `log_path` — set only by `conduct --headless` — reading the
 file immediately so content paints on the keypress itself, not the next
-tick. Any other session dispatches `graph focus` instead.
+tick. Any other session calls `focus_session` directly instead.
 
 ## Terminal restoration
 

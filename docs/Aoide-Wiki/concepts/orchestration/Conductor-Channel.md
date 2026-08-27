@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-28
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, agent, orchestration, conductor, pty, ipc]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -32,9 +32,10 @@ channel's shape: one PTY, one control socket, one gated door per session.
 
 ## Why this layer is new (substrate facts)
 
-- `graph wrap`'s `session_wrap` spawns with **inherited stdio** and only
-  `wait()`s — it holds the `Child` but captures no stdin, so there is no
-  channel to type into the agent (`graph.rs`).
+- A bare spawn with **inherited stdio** only `wait()`s on the child — it
+  holds the `Child` but captures no stdin, so there is no channel to type
+  into the agent. That gap is why registration alone (the observe-only
+  doors) was never enough to steer anything.
 - **shellbridge's socket is a separate, narrower channel**
   (`lyra shellbridge --run`): a `{cmd:"focuswindow",address}` line drives
   `hyprctl dispatch focuswindow`, so the dock/roster row-click jumps end to
@@ -79,12 +80,13 @@ threads `AOIDE_SESSION_ID`, already blocks on `wait()`.
 ## The commands
 
 - **`aoide conduct [--agent A] [--parent P] [--id I] [--headless] -- <command
-  …>`** — the PTY-backed wrap. Same registration semantics as `graph wrap`
-  (spawn-first, running→done, exit mirror, `AOIDE_SESSION_ID` exported) plus
-  the PTY + control socket + `conductable` flag. `graph wrap` stays the
-  lightweight observe-only wrapper; `conduct` is the controllable one.
+  …>`** — the PTY-backed wrap: spawn-first, running→done, exit mirror,
+  `AOIDE_SESSION_ID` exported, plus the PTY + control socket +
+  `conductable` flag. `conduct` is the one wrapper — `graph wrap`, a
+  lightweight observe-only variant with no PTY, is deleted (zero callers).
   `--headless` (below) drops the requirement that the caller have a terminal
-  at all.
+  at all; `graph spawn` is the detached launcher that re-execs `conduct
+  --headless` and returns immediately.
 - **`aoide graph send --id <id> [--submit] [--yes] [--from <sender>] --
   <text>`** — the one door both callers use. Connects to the session's
   control socket and injects `<text>`. `--submit` appends the target

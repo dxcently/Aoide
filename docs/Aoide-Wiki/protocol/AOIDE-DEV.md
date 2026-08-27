@@ -1,7 +1,7 @@
 ---
 type: reference
 created: 2026-07-28
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, handoff, development, agent, operating-manual]
 ---
 
@@ -338,10 +338,12 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   group (§7 below), then again for the new `shell reload` command
   (Quickshell IPC hot-reload trigger) — asserts `cmd_count == 60` now,
   matching `aoide schema --json`. See [[Codebase]].
-- **[bug] `lib/vmTest.nix` command-count assertion has drifted again** — it
-  asserts `cmd_count == 83` while `aoide schema --json` reports **87**
-  commands (source-tree registrations and the installed CLI agree). Bump the
-  assertion; same bug class as the struck entry above.
+- ~~**[bug] `lib/vmTest.nix` command-count assertion has drifted again**~~
+  **closed**: bumped again across the command-defrag lane D pass (the `a2a
+  agent` family deleted, `graph wrap`/`graph emit`/`graph focus` deleted,
+  `peer list` folded into `peer status`) — asserts `cmd_count == 73` now,
+  matching `aoide schema --json`. Same bug class as the struck entry above;
+  watch for a next drift the same way.
 - **[bug] Rice keybinds invoke retired commands.** `modules/dendrites/hyprland.nix`
   binds `SUPER SHIFT, P` → `lyra rice preview` and `SUPER SHIFT, A` → `aoide
   rice adopt` — both spellings were retired in the renames (`preview` →

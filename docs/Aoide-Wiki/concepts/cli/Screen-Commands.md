@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, cli, screen, computer-use]
 ---
 
@@ -338,7 +338,7 @@ lyra screen diff <before-capture> [--settle-ms 0-60000] [--threshold 0-255] [--o
 ### lyra screen send
 
 ```
-lyra screen send <capture> (--session <id> | --agent <name>) [--comment "text"] [--yes] [--json]
+lyra screen send <capture> --session <id> [--comment "text"] [--yes] [--json]
 ```
 
 - **Reads:** the capture (must exist; canonicalized to an absolute path so a
@@ -346,37 +346,36 @@ lyra screen send <capture> (--session <id> | --agent <name>) [--comment "text"] 
   sidecar `<capture>.json` — a missing/corrupt sidecar never fails the send,
   it just tags `data.sidecarStatus: "missing"|"corrupt"` and drops the
   enrichment. The stored `comment` and OCR `text` enrich the message;
-  `--comment` overrides the stored one (blank counts as absent). For
-  `--agent`, the registry at `state/a2a-agents.json` (`~/Aoide/state/
-  a2a-agents.json` at runtime) resolves the name.
+  `--comment` overrides the stored one (blank counts as absent).
 - **Output:** the composed message is
   `screenshot: <abs-path>` + optional `comment: …` + optional `ocr text:\n…`.
-  Envelope data `{target: {kind: "session"|"agent", id}, message, state,
+  Envelope data `{target: {kind: "session", id}, message, state,
   sidecarStatus, path, inner}` — `state` is `"held" | "delivered" |
-  "sent-to-agent" | "error"`, and `inner` nests the underlying door's whole
-  `data` (a failed send's real reason lives at `data.inner.reason`, e.g.
-  `"unknown-agent"`). The inner `status`/`message`/`changed` ride through
-  unchanged — a failed delivery is never reported as ok.
-- **Pipes to:** `--session` routes through the exact `graph send --id <id>
-  --submit [--yes] -- <message>` handler (`--submit` is fixed on): held
-  pending by default, delivered on `--yes`, on `AOIDE_CONDUCT_AUTOGATE`
-  ∈ {1,true,yes,all}, or when the sender is the target's parent session —
-  delivery writes into the target session's control socket
-  `$XDG_RUNTIME_DIR/aoide/session-<id>.sock`, injecting the text into the
-  conducted PTY's stdin. `--agent` routes through the `a2a agent send`
-  driver (`aoide_client::commands::handle_agent_send`): a `curl` shell-out
-  POSTing the JSON-RPC `message/send` body to the registered agent's URL —
-  delivers immediately, no hold; non-200, curl failure, or a JSON-RPC
-  `error` in a 200 response all surface as errors at `data.inner.reason`
-  (`send-failed`/`send-http-error`/`agent-error`). Exactly one of
-  `--session`/`--agent` is required; both or neither is a usage error. The
-  global `--audit-log` flag is honoured and forwarded to the session gate.
+  "error"`, and `inner` nests the underlying door's whole `data`. The inner
+  `status`/`message`/`changed` ride through unchanged — a failed delivery is
+  never reported as ok.
+- **Pipes to:** routes through the exact `graph send --id <id> --submit
+  [--yes] -- <message>` handler (`--submit` is fixed on, a synthesized
+  `Invocation` calling `aoide_conduct::graph::session_send` directly —
+  never a subprocess shell-out): held pending by default, delivered on
+  `--yes`, on `AOIDE_CONDUCT_AUTOGATE` ∈ {1,true,yes,all}, or when the
+  sender is the target's parent session — delivery writes into the target
+  session's control socket `$XDG_RUNTIME_DIR/aoide/session-<id>.sock`,
+  injecting the text into the conducted PTY's stdin. `--session` is
+  required; there is no other target — a remote peer's session is reached
+  through `graph send --to peer/<query>` instead ([[Peer-Federation]]), not
+  through `screen send`. The global `--audit-log` flag is honoured and
+  forwarded to the session gate.
 - **Notes:** `gated: false` in the schema — the gating lives inside the
   `graph send` door it reuses, not on this command. Writes nothing itself.
+  `--agent` (send straight to a registered A2A agent) is deleted along with
+  the `a2a agent` family it drove (command-defrag lane D) — `--session` is
+  the only target kind now.
 
 ## Related
 
 - [[Screen-Control]] — the concept page this contract backs
 - [[Session-Graph]] — `graph send`, the session gate `screen send --session` reuses
+- [[Peer-Federation]] — reaching a remote peer's session (`graph send --to peer/<query>`)
 - [[Terminal-Commander]] — conducted sessions and their control sockets
 - [[aoide-cli]] — the CLI envelope, exit codes, and `--json` convention

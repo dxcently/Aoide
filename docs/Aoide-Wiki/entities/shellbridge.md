@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, bridge, ipc, desktop]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -36,9 +36,14 @@ atomic writer (write-temp-then-rename) seeds both files with their v0
 shapes and keeps them current as sessions come and go.
 
 The socket accept loop binds the contract socket and accepts newline-JSON
-commands: a `{cmd:"focuswindow", address}` line drives `hyprctl dispatch
-focuswindow address:…`, the same session-jump primitive `graph focus` uses
-from the CLI door. This is the command the [[Gadget-Dock]]'s terminal-manager
+commands: a `{cmd:"focuswindow", address}` line calls `focus_window`
+(`hyprctl dispatch focuswindow address:…` directly), and `{cmd:"focussession",
+sessionId}` calls `focus_session` — resolving the session to its window
+first, the SAME library function (`aoide-conduct::graph::window`) the
+conductor TUI calls to jump on `Enter`. Neither goes through a CLI
+subcommand; `graph focus` is deleted, and this socket verb is the only
+shell-reachable path to a session jump left. This is the command the
+[[Gadget-Dock]]'s terminal-manager
 gadget and the [[Terminal-Commander]] roster call on a row click — QML
 issues the socket command, never shells out. The command set is narrow (jump
 only; prune remains an open thread, see below).
@@ -53,9 +58,10 @@ so a unit-level `path = [ pkgs.hyprland ]` on both the `shellbridge` and
 `serviceConfig`, not a `serviceConfig` key — nesting it there emits an inert
 raw `path=` line and PATH stays broken. Without it, every widget click
 fails with `hyprctl unavailable: No such file or directory` (audited as
-`focus-failed`, not logged to the journal): the CLI `graph focus` inherits
-the caller's richer PATH and keeps working while the daemon's minimal PATH
-breaks silently.
+`focus-failed`, not logged to the journal): `focus_session`/`focus_window`
+called from `aoide conductor`, run by hand in an interactive terminal,
+inherit that shell's richer PATH and keep working while the systemd unit's
+minimal PATH breaks silently.
 
 Reads and jumps go through the socket; the write door for session state
 remains the CLI. The `aoide graph session` command family upserts those same
@@ -76,8 +82,8 @@ round-tripping the conductor reader — no chrono in the offline lock).
 The stage also carries two more files: `song/stage/projects.json` (the
 project registry, v0 `{schemaVersion, projects: [{name, path}]}`) and
 `song/stage/graph.json` (the resolved DAG, v0 `{schemaVersion, nodes, edges:
-[{from, to, kind}]}`, emitted by `aoide graph emit` with the same atomic
-write). A `sessions.json` record may additionally carry the optional
+[{from, to, kind}]}`, restaged atomically by `restage_graph` on every
+mutation — no separate emit step). A `sessions.json` record may additionally carry the optional
 `parentSessionId` (additive, still v0), the spawned-by edge. `aoide graph
 link` and `aoide graph session start --parent` both write that field;
 shellbridge stamping it at spawn time over the socket is still an open

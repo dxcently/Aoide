@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-28
-updated: 2026-08-26
+updated: 2026-08-27
 tags: [aoide, song, rice, architecture]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -106,7 +106,7 @@ sees a torn file (`CONTRACTS.md §4`). The files:
 | `sessions.json` | the agent-session roster (`sessionId, agent, windowAddress, workspace, cwd, state, startedAt`, optional `parentSessionId`) | [[shellbridge]] + `aoide graph session` |
 | `hooks.json` | live Claude Code hook phases | shellbridge + `aoide graph session` |
 | `projects.json` | the project-anchor registry | `aoide graph project` |
-| `graph.json` | the resolved project/session DAG | `aoide graph emit` |
+| `graph.json` | the resolved project/session DAG | restaged automatically on every `aoide graph` mutation |
 | `cover.json` | the live wallpaper seed (seeded from the song's baked `wallpaper`) | Quickshell wallpaper layer |
 
 Which files are present is runtime-dependent (e.g. `cover.json` appears once a

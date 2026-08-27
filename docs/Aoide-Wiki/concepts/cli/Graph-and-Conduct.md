@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-26
+updated: 2026-08-27
 tags: [aoide, cli, session, graph, conductor]
 ---
 
@@ -47,17 +47,16 @@ aoide graph view [--focus <node>] [--json]
 ```
 
 - **Reads:** `song/stage/{projects,sessions,hooks}.json` (missing files read as
-  empty); also folds in `state/a2a-agents.json` (`a2a:*` root nodes) and
-  `state/peers.json` + `state/peer-cache/<name>.json` (`peer:*` root nodes,
-  `children` nested verbatim when the cache is fresh) via `build_graph`
-  (`doc.rs`).
+  empty); also folds in `state/peers.json` + `state/peer-cache/<name>.json`
+  (`peer:*` root nodes, `children` nested verbatim when the cache is fresh)
+  via `build_graph` (`doc.rs`).
 - **Output:** text — `"<n> node(s), <e> edge(s)\n"` followed by a Unicode
   box-drawing tree: `◆` project roots, `●` sessions (spawned children nest
   under their parent, project-less sessions under a synthetic `(unanchored)`
   root), `▶ ` marks the `--focus` node (matches `session:<id>`,
   `project:<name>`, or the bare id). `--json`: `data` is the full `graph.json`
-  document `{schemaVersion, nodes, edges}` — identical to what `graph emit`
-  stages.
+  document `{schemaVersion, nodes, edges}` — identical to what every stage
+  mutation restages to `song/stage/graph.json` automatically.
 - **Notes:** read-only. Session states shown are hook-merged and folded to the
   canonical five (`working | awaiting | stopped | idle | done`) by
   `merged_sessions`.
@@ -230,25 +229,6 @@ aoide graph session hook [--agent <claude|kimi|pi>] [--json]   # reads ONE hook 
   untrusted display data. A session whose record was ended/pruned mid-process
   self-heals by re-registering on its next event (`hook_ensure_session`).
 
-### aoide graph wrap
-
-```
-aoide graph wrap [--agent <name>] [--parent <sessionId>] [--id <id>] -- <command …>
-```
-
-- **Reads:** nothing on disk; spawns `<command>` with INHERITED stdio and
-  `AOIDE_SESSION_ID=<id>` in its env (defaults: `--id wrap-<pid>-<unixts>`,
-  `--agent` = the command's basename).
-- **Writes:** `song/stage/sessions.json` — register running (AFTER a
-  successful spawn, so a failed exec leaves no ghost; `pid` is the wrap
-  process's own pid, the lifecycle owner the reaper watches), then
-  `do_session_end` whatever happened; re-stages `graph.json` both times.
-- **Output:** the child's stdio passes through untouched. Exit mirrors the
-  child: 0 on success, 1 otherwise (a signal kill reports code −1), real code
-  in `data.exitCode`; envelope `data: {sessionId, agent, exitCode}`.
-- **Notes:** the universal door for hookless agents — anything hookable inside
-  can self-report via `graph session phase --id "$AOIDE_SESSION_ID"`.
-
 ### aoide graph spawn
 
 ```
@@ -277,7 +257,7 @@ aoide graph spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt 
   approve` uses to replay a held entry — never a direct socket write;
   `data.prompt` reads `none` / `delivered` / `skipped-unregistered` /
   `failed: <reason>`.
-- **Notes:** the detached counterpart to `conduct`/`wrap` — this call returns
+- **Notes:** the detached counterpart to `conduct` — this call returns
   immediately while the spawned agent keeps running headless. See "Headless
   conduct" under [[Conductor-Channel]] for the pty/log mechanism the re-exec'd
   child uses.
@@ -291,7 +271,7 @@ aoide graph resurrect --project <name> [--all | --id <ledgerSessionId>] [--json]
 - **Reads:** `state/session-ledger.jsonl` (the durable, append-only record
   written exactly once at roster exit, P-D8) — resolves `--project` against
   `projects.json` by exact name, then filters ledger entries anchored to it
-  via the SAME longest-cwd-prefix rule `graph emit`'s `anchor_for` uses.
+  via the SAME longest-cwd-prefix rule `build_graph`'s `anchor_for` uses.
   Candidates: `--all` widens to every anchored entry, `--id` narrows to one
   specific ledger `sessionId` (mutually exclusive with `--all`; `--id` wins
   if both are given), and bare (neither flag) resumes the project's WHOLE
@@ -468,25 +448,6 @@ aoide graph permit --id <id> [--tool <name>] [--what <text>] [--json]
   types the bare digit (no newline) through `session_send` in-process with
   `--yes` — audited by the send door.
 
-### aoide graph focus
-
-```
-aoide graph focus <node> [--json]
-```
-
-- **Reads:** `song/stage/sessions.json` (`<node>` accepts `session:<id>` or the
-  bare id); shells out to `hyprctl clients -j` to VERIFY the stored
-  `windowAddress` is still live (`hyprctl dispatch focuswindow` exits 0 even on
-  a gone window, so verification comes first).
-- **Pipes to / output:** `hyprctl dispatch focuswindow address:<addr>` on
-  success. Text `focused session '<id>'`; `data: {node, windowAddress,
-  dispatcher: "hyprctl"}`.
-- **Notes:** errors (exit 1) with `reason` ∈ `session-not-found`,
-  `no-window-address`, `hyprctl-unavailable`, `hyprctl-failed`,
-  `window-not-found`. The same `focus_window` seam backs the shellbridge's
-  click-to-jump (`focussession`, with a workspace-switch fallback the CLI command
-  does not use).
-
 ### aoide graph prune
 
 ```
@@ -538,21 +499,6 @@ aoide graph reap [--announce] [--json]
 - **Notes:** the ~12 s systemd timer runs this command unannounced; the dock's
   reap control runs it `--announce` via the shellbridge. A false reap of a
   merely-quiet live session self-heals at its next hook event.
-
-### aoide graph emit
-
-```
-aoide graph emit [--json]
-```
-
-- **Reads:** `song/stage/{projects,sessions,hooks}.json` (+ the a2a/peer folds
-  `graph view` has).
-- **Writes:** the resolved DAG to `song/stage/graph.json` (atomic) — the file
-  Quickshell hot-reloads.
-- **Output:** `data: {path, nodes, edges}`; `changed` lists the path.
-- **Notes:** redundant in steady state (every mutation already re-stages), kept
-  as the explicit staging step; byte-identical to what `graph view --json`
-  computes.
 
 ### aoide inbox list
 

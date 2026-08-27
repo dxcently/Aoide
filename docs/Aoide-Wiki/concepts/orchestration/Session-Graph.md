@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-26
+updated: 2026-08-27
 tags: [aoide, graph, session, terminal, agent, cli]
 ---
 
@@ -10,8 +10,8 @@ tags: [aoide, graph, session, terminal, agent, cli]
 [[Terminal-Commander]]'s roster of agent sessions is a **DAG of projects and
 sessions**: who spawned whom, and which project each session belongs to. One
 CLI group, `aoide graph`, is the DAG's terminal viewer and management layer —
-every subcommand is implemented (`view`/`project`/`link`/`session`/`wrap`/
-`spawn`/`send`/`pending`/`permit`/`focus`/`prune`/`reap`/`emit`, per `aoide
+every subcommand is implemented (`view`/`project`/`link`/`session`/
+`spawn`/`send`/`pending`/`permit`/`prune`/`reap`, per `aoide
 schema --json`). Like every command it registers into the single `commands/`
 registry (`commands/graph.rs`, thin registrations over the `graph/` domain
 functions — see [[aoide-cli]]), so the CLI door and the MCP door share the
@@ -20,7 +20,7 @@ group ([[Agent-Interface]]).
 ## The graph model
 
 **Nodes** are projects (`project:<name>`) and sessions (`session:<sessionId>`).
-Commands that take a node (`graph focus`, `view --focus`) accept either the
+Commands that take a node (`view --focus`) accept either the
 full node id or the bare id.
 
 **Edges** come in two kinds:
@@ -45,7 +45,7 @@ project group under a synthetic `(unanchored)` root. Each session's live
 state is the latest hook phase from `hooks.json` merged over its raw roster
 state ([[shellbridge]] writes both files).
 
-## The viewer — `graph view` and `graph emit`
+## The viewer — `graph view`
 
 `graph view` renders the DAG as a Unicode box-drawing tree in the terminal;
 `--focus <id>` marks a node with `▶`, and `--json` emits the structured graph
@@ -59,9 +59,11 @@ document instead. A sample render:
 └─ ● zzz789  melete-run  done  /opt/elsewhere
 ```
 
-`graph emit` writes the same resolved document atomically to
+Every stage mutation restages the same resolved document atomically to
 `song/stage/graph.json` — the identical write-temp-then-rename pattern as the
-livery emitter — so [[Quickshell]] can hot-reload it.
+livery emitter — via `restage_graph`, so [[Quickshell]] hot-reloads it without
+a separate emit step. `graph prune` is the manual resync when a hand-edit to
+one of the stage files needs to be reconciled back into `graph.json`.
 
 The desktop has no standalone DAG-diagram surface today: `graph view`/
 `--json` in the terminal and the `aoide conductor` ratatui TUI (DAG/sessions/
@@ -85,16 +87,19 @@ should follow).
 - **`graph link <child> <parent>`** — record a spawned-by edge by setting
   `parentSessionId` on the child's session record. Self-links and cycles are
   rejected (the handler walks the parent chain), exit 1.
-- **`graph focus <session>`** — jump to the session's window via `hyprctl
-  dispatch focuswindow address:…` — the existing [[Terminal-Commander]]
-  session-jump flow, reachable from the CLI. It first **verifies the window is
-  alive** through `hyprctl clients -j` before dispatching, because
-  `focuswindow` exits 0 even for a vanished window: a gone terminal yields a
-  structured `window-not-found` exit 1 with no dispatch. Address matching is
-  case- and `0x`-prefix-tolerant (pure, unit-tested helpers `normalize_addr` /
-  `window_present`). The full failure vocabulary: `session-not-found`,
-  `no-window-address`, `hyprctl-unavailable`, `hyprctl-failed`,
-  `window-not-found`.
+- **`focus_session`** — jump to a session's window via `hyprctl dispatch
+  focuswindow address:…`, the [[Terminal-Commander]] session-jump primitive.
+  Not a CLI subcommand (`graph focus` is deleted): the [[Conductor-TUI]] and
+  [[shellbridge]]'s `focussession` socket verb both call this library
+  function directly (`aoide-conduct::graph::window`), so the shellbridge
+  socket is the only shell-reachable path left to a session jump. It first
+  **verifies the window is alive** through `hyprctl clients -j` before
+  dispatching, because `focuswindow` exits 0 even for a vanished window: a
+  gone terminal yields a structured `window-not-found` error with no
+  dispatch. Address matching is case- and `0x`-prefix-tolerant (pure,
+  unit-tested helpers `normalize_addr` / `window_present`). The full failure
+  vocabulary: `session-not-found`, `no-window-address`,
+  `hyprctl-unavailable`, `hyprctl-failed`, `window-not-found`.
 - **`graph prune`** — drop sessions whose **raw** roster state is `done` (not
   the merged hook phase) along with their hook records; any `kind:"subagent"`
   descendant of a dropped session cascades away with it (see "Sub-agent
@@ -134,8 +139,8 @@ writers add to the same records.
 
 `graph prune` only drops sessions whose raw state is already `done` — an
 *orderly* exit. Conduct-by-default makes a *disorderly* exit common: a
-terminal closed with `SUPER+Q` or killed outright tears down the `conduct`/
-`wrap` process uncatchably, so it can never run its own `graph session end`.
+terminal closed with `SUPER+Q` or killed outright tears down the `conduct`
+process uncatchably, so it can never run its own `graph session end`.
 Left alone, the record strands `running` in the roster forever (observed:
 22 dead `conduct-*` sessions piled up in ~8 minutes of normal use).
 
@@ -276,3 +281,4 @@ thread, see [[aoide-cli]]).
 - [[Codebase]]
 - [[Widget-Bridge-Contract]]
 - [[Conductor-Channel]]
+- [[Conductor-TUI]]

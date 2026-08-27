@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-26
+updated: 2026-08-27
 tags: [aoide, architecture, desktop, lyra, pipeline]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -72,7 +72,7 @@ trail but exit 64 today.
 **Binary note.** The map below draws both binaries as one continuous picture
 of the data flow, labeled `aoide` throughout for readability. Ownership
 (`CONTRACTS.md` §3, [[Package-Layout]]): the AGENT INTERFACE/`aoided`/CONTENT
-PIPELINE/NIX EVAL boxes are `aoide`'s (80 commands: conducting/orchestration
+PIPELINE/NIX EVAL boxes are `aoide`'s (73 commands: conducting/orchestration
 is aoide's identity); the RICE ENGINE, LIVERY, Quickshell, and shellbridge
 boxes below them are `lyra`'s (43 commands, its own schema and dispatch,
 routed through the desktop, not through `aoided`'s CLI trunk).
@@ -85,7 +85,7 @@ routed through the desktop, not through `aoided`'s CLI trunk).
                                         ▼            │
    ┌─────────────────────────────────────────────────────────────┐
    │  AGENT INTERFACE            aoide <cmd>   ·   aoide mcp serve │   [[Agent-Interface]]
-   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   80 commands · exit 0/1/2/64
+   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   73 commands · exit 0/1/2/64
    └───────────────────────────────┬─────────────────────────────┘
                                     ▼
    ┌─────────────────────────────────────────────────────────────┐
@@ -305,23 +305,29 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   `aoide schema --json` is its machine-readable source of truth; the stdio
   MCP façade (`aoide mcp serve --stdio`) generates its tool list from it, and
   the [[A2A-Door]]'s AgentCard is derived from the same schema — all
-  one-to-one. **80 commands** — real (73): `guide`, `schema`,
+  one-to-one. **73 commands** — real (66): `guide`, `schema`,
   `mcp serve`, `daemon`, `events tail`, `conduct`, `conductor`, `adapter
   melete`, `identity`, the
-  5-command `a2a` door group (`a2a serve` + `a2a agent add/list/remove/send`),
-  the 14-command `peer` group (`peer add/list/remove/pull/status/hub`,
+  1-command `a2a` door group (`a2a serve` — the outbound client is the `peer`
+  group below, not a separate `a2a agent` family),
+  the 13-command `peer` group (`peer add/remove/pull/status/hub`,
   `peer allow`/`spawn`, the LAN `peer discover`/`invite` beacon pair, and the
   4-command `peer pair` ceremony (`request`/`pending`/`approve`/`reject`) —
-  cross-device peer federation, [[Peer-Federation]]), the 16-command `secrets` group
+  cross-device peer federation, [[Peer-Federation]]; `status --json` carries
+  the full peer row, folding in what `peer list` used to be the only place
+  to say), the 16-command `secrets` group
   (`serve`/`exec`/`add`/`rm`/`grant`/`revoke`/`enroll`/`put`/`set-totp`/
   `automate`/`expose`/`migrate`/`pending`/`approve`/`dismiss`/`watch` — the
   socket-only credential broker under its own uid, [[Secrets-Broker]]),
   `usage`, `hooks install`, `soundcheck`, `who` (live presence over sessions
   and registered peers), the 3-command `inbox` group (`list`/`read`/`clear`, the
-  durable per-host message store), the 21-command `graph` group (the
+  durable per-host message store), the 19-command `graph` group (the
   [[Session-Graph]] DAG viewer + management layer over projects and
-  sessions, incl. `graph send`/`wrap`/`reap` and the `graph pending
-  list|approve|deny` held-injection queue, all real), and `onboard` — the
+  sessions, incl. `graph send`/`reap` and the `graph pending
+  list|approve|deny` held-injection queue, all real — registering a new
+  conducted session is `conduct` or `graph spawn`, and jumping to a
+  session's window is a library call the conductor and `shellbridge` reach
+  directly, not a CLI subcommand), and `onboard` — the
   core half of installation: registers the clone as a graph project, links
   `~/song` to the checkout's `song/` (never clobbering an existing file or
   symlink), seeds `song/songbook/preferences.md` when absent, wires the

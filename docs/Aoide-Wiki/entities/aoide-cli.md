@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-08-25
+updated: 2026-08-27
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
@@ -77,12 +77,12 @@ the groups it documents.
 | `onboard` | 1 | real — the clone-onboarding lane, delegates the nix half to `lyra onboard` ([[Clone-and-Run]]) |
 | `update` | 1 | stub, gated |
 | `mcp serve`, `daemon` | 2 | real |
-| `graph` group (incl. `pending list/approve/deny`, `spawn` — below) | 21 | real |
+| `graph` group (incl. `pending list/approve/deny`, `spawn` — below) | 19 | real |
 | `conduct` | 1 | real |
 | `adapter melete` | 1 | real |
 | `conductor` | 1 | real |
-| `a2a serve`, `a2a agent add/list/remove/send` | 5 | real |
-| `peer add/list/remove/pull/status` | 5 | real (same-network federation — `CONTRACTS.md` §7) |
+| `a2a serve` | 1 | real |
+| `peer add/remove/pull/status` | 4 | real (same-network federation — `CONTRACTS.md` §7) |
 | `secrets serve/exec/add/rm/grant/revoke/enroll/put/set-totp/automate/expose/migrate/pending/approve/dismiss/watch` | 16 | real ([[Secrets-Broker]] — TOTP-gated resolves, socket-only, own uid) |
 | `usage` | 1 | real |
 | `hooks install` | 1 | real |
@@ -93,9 +93,10 @@ serve` raises the A2A JSON-RPC/HTTP server (AgentCard, `message/send`,
 `tasks/get`, SSE streaming; off by default, loopback-bound). Its
 `--bearer-secret <name>` names a secret this door requires as the inbound
 `Authorization: Bearer` token, resolved fresh per request through
-[[Secrets-Broker]] and failing closed on a resolve error. The four `a2a
-agent` commands register and drive external A2A agents through
-`state/a2a-agents.json`.
+[[Secrets-Broker]] and failing closed on a resolve error. Driving an
+external aoide instance over this wire is the **`peer`** group's job (below)
+— `peer add`/`peer spawn`/`graph send --to` — not a separate `a2a` client
+command.
 
 **`usage`** computes the local token/cost rollup behind the opt-in claude.ai
 usage gadget ([[Gadget-Dock]]).
@@ -147,16 +148,13 @@ reference, and [[Self-Ricing]] for the self-ricing loop's walkthrough.
 `view`, `project add`/`remove`/`list`, `link`, `session start`/`phase`/
 `end`/`hook` (takes `--agent <name>`, default `claude`; the payload maps
 through that harness's agent profile, [[Agent-Hooking]]), `permit`,
-`focus`, `prune`, `emit` are the [[Session-Graph]] viewer and manager
-feeding the [[Terminal-Commander]] roster (see [[Agent-Hooking]] for the
+`prune` are the [[Session-Graph]] viewer and manager feeding the
+[[Terminal-Commander]] roster (see [[Agent-Hooking]] for the
 session-registration doors). `graph permit --id <id>` answers a harness
 permission prompt inside a conducted session by typing the profile's
-verified permission key (claude's `1`/`3`). Three commands turn the graph
+verified permission key (claude's `1`/`3`). Two commands turn the graph
 into a live conductor mesh:
 
-- **`graph wrap`** — spawn any agent command as a registered session
-  (inherited stdio, `running`→`done` for free, `AOIDE_SESSION_ID` exported to
-  the child). See [[Agent-Hooking]].
 - **`graph reap`** — the liveness sweeper: marks a session `done` when its
   window is gone (`hyprctl clients -j`) or its pid's `/proc` entry is gone,
   run on a systemd user timer (~12s) as the companion to `graph prune`
@@ -166,17 +164,21 @@ into a live conductor mesh:
   `--yes` (or an autogate policy) delivers and renames the node to a
   one-line form of the text. Every outcome is audited.
 
-`graph focus` distrusts `focuswindow`'s always-zero exit: it confirms the
-window in `hyprctl clients -j` first (case- and `0x`-tolerant address
-matching) and fails structured (`window-not-found`, exit 1) for a vanished
-terminal; its five failure reasons are `session-not-found` /
-`no-window-address` / `hyprctl-unavailable` / `hyprctl-failed` /
-`window-not-found`.
+Registering a NEW conducted session is `conduct` (below), the PTY-backed
+wrapper, or `graph spawn` for a DETACHED session that outlives the caller.
+`graph wrap` (inherited-stdio spawn, no PTY) is deleted — zero callers once
+`conduct` covered the need. `graph emit` is deleted too: every stage
+mutation restages `song/stage/graph.json` for Quickshell automatically now
+(`restage_graph`), so `graph prune` is the only manual resync left, for
+reconciling a hand-edit. `graph focus` is deleted as a CLI command; jumping
+to a session's window is a library call (`focus_session`,
+[[Session-Graph]]) the conductor and `shellbridge`'s `focussession` socket
+verb reach directly, not something shelled out to.
 
 ### The `peer` group — aoide-to-aoide federation
 
 `add <name> <url> [--autogate] [--token-file <path>] [--bearer-secret
-<name>]` / `list` / `remove <name>` / `pull [<name>]` / `status` register
+<name>]` / `remove <name>` / `pull [<name>]` / `status` register
 OTHER aoide instances as **peers** and fold their resolved session graphs
 into this instance's own — built entirely on top of the existing
 [[A2A-Door]] rather than a new transport (`aoide/graphSummary`, one new
@@ -186,33 +188,34 @@ mechanism. Same-network only today — real, integration-tested
 `a2a::serve()` instances talking peer-to-peer end to end); WAN/NAT-traversal
 reachability is out of scope for this v0.
 
-- **`peer add`** — verifies the peer FIRST (fetches its AgentCard, mirroring
-  `a2a agent add`) and only registers on success; a duplicate `name` is
-  rejected rather than repointed, unlike `a2a agent add`'s upsert-on-readd.
-  `--token-file` records a per-peer bearer secret this instance expects that
-  peer to present, identifying WHICH peer is calling once address alone
-  can't (a proxy or tunnel makes every caller's address look loopback).
-  `--bearer-secret` is the outbound counterpart: it names a secret,
-  resolved fresh through [[Secrets-Broker]], this instance presents as its
-  own `Authorization: Bearer` header when calling that peer.
+- **`peer add`** — verifies the peer FIRST (fetches its AgentCard) and only
+  registers on success; a duplicate `name` is rejected rather than
+  repointed. `--token-file` records a per-peer bearer secret this instance
+  expects that peer to present, identifying WHICH peer is calling once
+  address alone can't (a proxy or tunnel makes every caller's address look
+  loopback). `--bearer-secret` is the outbound counterpart: it names a
+  secret, resolved fresh through [[Secrets-Broker]], this instance presents
+  as its own `Authorization: Bearer` header when calling that peer.
 - **`peer remove`** — a missing name is an error, not idempotent-silent
   (`rice draft drop`'s precedent); also drops that peer's cache file.
 - **`peer pull`** — with no name, pulls EVERY registered peer; one peer
   being unreachable never aborts the others, and a failed pull marks the
   cache `stale` with a reason rather than deleting it.
-- **`peer status`** — each peer's `fresh`/`stale`/`never-pulled`
-  classification (the same one the graph fold itself uses) plus
-  `fetchedAt`/`lastError`.
-
-Registered directly after `a2a agent add/list/remove/send` in `schema
---json`'s order.
+- **`peer status`** — the human line stays a terse count; `--json` carries
+  the full registry row per peer (name/url/autogate/tokenFile/bearerSecret/
+  hub/pubkey/verified/allows/addedAt) plus its `fresh`/`stale`/`never-pulled`
+  classification (the same one the graph fold itself uses) and
+  `fetchedAt`/`lastError`. `peer list` folded into this command
+  (command-defrag lane D) — the full row is the only thing `peer list` used
+  to say that `peer status --json` didn't already.
 
 ### `conduct` and `conductor`
 
 The two are deliberately distinct parts of speech. **`conduct`** is the
-command — `graph wrap`'s PTY-backed sibling, same register/wait/end lifecycle,
-but on a controlling tty plus a per-session control socket, so `graph send`
-can type into the running agent while its own TUI runs undisturbed.
+command — spawn/register/wait/end lifecycle (exit mirrored,
+`AOIDE_SESSION_ID` exported) on a controlling tty plus a per-session control
+socket, so `graph send` can type into the running agent while its own TUI
+runs undisturbed.
 **`conductor`** is the noun — the interactive terminal frontend over the
 whole trunk: a ratatui TUI (DAG / sessions / projects / log / status
 panels, ~500ms poll, no watcher/async runtime) that dispatches every action

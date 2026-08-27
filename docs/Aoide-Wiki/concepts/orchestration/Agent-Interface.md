@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-26
+updated: 2026-08-27
 tags: [aoide, agent, cli]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -42,8 +42,9 @@ third door — the standard wire by which aoide interoperates with *other*
 agents over JSON-RPC-2.0/HTTP. It is **bidirectional**: aoide is both a
 discoverable A2A *agent* (`aoide a2a serve`, off by default, loopback-bound)
 whose AgentCard is generated from the same registry as the MCP tool list, and
-an A2A *client* (`aoide a2a agent add|send`) that registers and drives external
-A2A agents, folding each into the [[Session-Graph]]. Its capability is admitted
+an A2A *client* — the `peer` group (`peer add`/`peer spawn`/`graph send
+--to`) — that registers and drives external aoide instances, folding each
+into the [[Session-Graph]]. Its capability is admitted
 at rebuild time rather than per request; see [[A2A-Door]] for the door, the
 concept mapping, and its security model.
 
