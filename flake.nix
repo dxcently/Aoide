@@ -77,6 +77,7 @@
       # lib/mkHost.nix first). yomi-strix remains the living reference host.
       nixosConfigurations = {
         yomi-strix = mkHost "yomi-strix";
+        chiyo = mkHost "chiyo";
       };
 
       # ── Packages ───────────────────────────────────────────────────────────
