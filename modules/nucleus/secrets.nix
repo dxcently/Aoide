@@ -58,7 +58,8 @@
   ...
 }:
 
-lib.mkIf (config.aoide.enable && config.aoide.secrets.enable) {
+lib.mkMerge [
+  (lib.mkIf (config.aoide.enable && config.aoide.secrets.enable) {
 
   # ── qrencode on the operator's own PATH ──────────────────────────────────
   # `secrets enroll` (run by the operator, not the broker service — see
@@ -227,4 +228,86 @@ lib.mkIf (config.aoide.enable && config.aoide.secrets.enable) {
   # the CALLER's env by default), so the CODE default
   # (`/var/lib/aoide-secrets`, `home.rs`) already matching this unit's explicit
   # env above is what makes the bare form work with no extra flags.
-}
+  })
+
+  # ── The popup watcher: a graphical-session USER unit ──────────────────────
+  # Nothing autostarted `aoide secrets watch --popup` before this — a parked
+  # TOTP ask surfaced only if an operator happened to have a `secrets watch`
+  # already running in some terminal. This unit closes that gap the same way
+  # shellbridge.nix's own units do: a per-session, per-operator process
+  # anchored to `graphical-session.target`, never a system service (the popup
+  # is a desktop surface belonging to the logged-in operator, not the
+  # secrets-uid broker).
+  #
+  # Gated on `config.aoide.facets.quickshell.enable` — the SAME condition
+  # `environment.systemPackages`'s `pkgs.zenity` entry above already uses: a
+  # headless box (sakaki) enables `aoide.secrets` for its A2A door's own
+  # bearer-token resolve but has no display for a dialog, and ungated zenity
+  # would drag GTK into that box's closure for nothing this unit could ever
+  # show. `secrets watch --popup` itself feature-detects BOTH dialog binaries
+  # at runtime (`watch::resolve_lyra_bin`/`watch::zenity_available`,
+  # `crates/secrets/src/watch.rs`) and refuses to start only when neither
+  # resolves — this gate exists purely to keep the unit off a box with no
+  # graphical session at all, not to pick which binary it uses.
+  #
+  # Like the broker service above (module doc's "headless service-anchoring
+  # lesson"), `aoide secrets watch --popup` blocks forever on its own tail
+  # loop — `Type = simple` + `Restart = on-failure` is correct from day one,
+  # no oneshot detour. No explicit ordering against `aoide-secrets-serve`
+  # (a SYSTEM unit — crossing manager boundaries for ordering is unusual and
+  # unnecessary here): `watch::wait_for_follower` already waits out a
+  # not-yet-created events feed rather than exiting 1, so this unit coming up
+  # before the broker has bound its socket is a normal, harmless race, not a
+  # failure to guard against.
+  (lib.mkIf (config.aoide.enable && config.aoide.secrets.enable && config.aoide.facets.quickshell.enable) {
+    systemd.user.services.aoide-secrets-watch = {
+      description = "Aoide secrets popup watcher — surfaces parked TOTP asks as a dialog";
+
+      wantedBy = [ "graphical-session.target" ];
+      after = [ "graphical-session.target" ];
+      partOf = [ "graphical-session.target" ];
+
+      # `zenity` must resolve off a bare-name `PATH` lookup
+      # (`watch::zenity_available`/`watch::spawn_zenity_entry`, both take the
+      # binary NAME, never a hardcoded path) — a systemd user unit's default
+      # `PATH` does not include `/run/current-system/sw/bin`'s
+      # `environment.systemPackages` entries any more reliably than
+      # shellbridge.nix's own `hyprctl`/`curl` lesson already found, so this
+      # is listed explicitly rather than assumed from the systemPackages
+      # entry above (that entry serves `secrets enroll`'s own QR rendering
+      # and an operator's interactive shell, never this unit).
+      path = [ pkgs.zenity ];
+
+      serviceConfig = {
+        Type = "simple";
+        Restart = "on-failure";
+        RestartSec = "3s";
+
+        ExecStart = "${pkgs.aoide}/bin/aoide secrets watch --popup";
+
+        Environment = [
+          # Belt-and-suspenders, same reasoning as the broker service's own
+          # explicit env above: matches `socket.rs`'s canonical default today,
+          # keeps working if that default ever changes.
+          "AOIDE_SECRETS_SOCKET=/run/aoide-secrets/secrets.sock"
+        ]
+        # `watch::resolve_lyra_bin` resolves `lyra` via `AOIDE_RICE_BIN` (tier
+        # 1, trusted unconditionally) or a sibling of `current_exe()` (tier
+        # 2) — but `lyra` ships from `pkgs.aoide.rice`, a SEPARATE output
+        # from the `aoide` binary this unit execs (P-A8 of the binary-split
+        # workstream, the exact sibling-resolution break shellbridge.nix's
+        # own `AOIDE_CORE_BIN` comment already documents in the other
+        # direction), so sibling resolution would silently fail here without
+        # this. Only set when `aoide.lyra.enable` is actually on — mirrors
+        # shellbridge.nix's own guard, since a host with the facet on but
+        # lyra explicitly disabled has no `pkgs.aoide.rice` output to point
+        # at.
+        ++ lib.optional config.aoide.lyra.enable "AOIDE_RICE_BIN=${pkgs.aoide.rice}/bin/lyra";
+
+        NoNewPrivileges = true;
+        StandardOutput = "journal";
+        StandardError = "journal";
+      };
+    };
+  })
+]

@@ -32,7 +32,12 @@ module builds against what nucleus declares.
   (default `false`); `aoide.secrets.members` names who joins
   `aoide-secrets-access`. The broker binary itself stays nix-independent —
   see `pkgs/aoide/crates/secrets/README.md`'s "Deployment" section for the
-  non-nix install path this module mirrors.
+  non-nix install path this module mirrors. Also declares a graphical-session
+  USER unit, `aoide-secrets-watch.service`, running `aoide secrets watch
+  --popup` — gated additionally on `aoide.facets.quickshell.enable` (the same
+  condition the broker's own `zenity` package pull already uses), since the
+  popup is a desktop surface belonging to the logged-in operator, never the
+  secrets-uid broker.
 - `nix.nix` — flake-native nix settings (Aoide IS a flake; every rebuild/
   check/`aoide update` runs through the flake CLI).
 - `packages.nix` — puts the `aoide`/`aoided`/`lyra` binaries on the system
