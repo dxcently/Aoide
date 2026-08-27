@@ -1507,15 +1507,22 @@ command-defrag lane U1 (2026-08-27) — same shape and discipline throughout,
 only the vocabulary changed. Four writers, none routed through a stage lock
 or `daemon_dispatch` (this is not a stage-tree file): `aoide session undying
 on|off` sets or clears the mark directly; `aoide spawn --undying` adds the
-newly spawned id once it registers; `aoide resurrect` transfers an undying
-old id onto the freshly spawned session that replaces it; bare `aoide
-session`'s picker (U3, command-defrag lane U) writes the SAME store for
-every LOCAL row a confirm touches — one `load_undying`, N `set_undying`
-mutations, one `save_undying`, the same discipline `session undying`'s own
-single-id write holds, widened to cover a whole confirm's diff at once. A
-PEER row the picker touches never reaches this store at all — the id lives
-on the peer, so the picker writes a `.aoide/project.json` spec instead (see
-that file's own section below). Lives under
+newly spawned id once it registers — including from TWO further internal
+call sites, still the SAME writer, not a fifth (U2's own design ruling,
+below): `resurrect`'s bare-manifest mode passes the identical `--undying`
+flag on both its own internal spawn invocations (the ledger-enrichment
+path's spawn and the clean-spawn path's), so a manifest-revived session
+gets marked through the exact code `spawn --undying` itself runs, gated
+the exact same way (registered, not merely launched); `aoide resurrect`
+(flag mode, the ORIGINAL revival path) transfers an undying old id onto
+the freshly spawned session that replaces it; bare `aoide session`'s picker
+(U3, command-defrag lane U) writes the SAME store for every LOCAL row a
+confirm touches — one `load_undying`, N `set_undying` mutations, one
+`save_undying`, the same discipline `session undying`'s own single-id write
+holds, widened to cover a whole confirm's diff at once. A PEER row the
+picker touches never reaches this store at all — the id lives on the peer,
+so the picker writes a `.aoide/project.json` spec instead (see that file's
+own section below). Lives under
 `state_dir` (`aoide_storage::fs::state_dir`) alongside
 `usage.json`/`session-ledger.jsonl`, NOT inside either stage tree — an
 undying mark is durable operator state, never staged rehearsal/registry
@@ -1613,9 +1620,14 @@ would silently stop being correct the moment it did.
 writing anything if any spec's `dir` is absolute, naming the offending
 `host` in a taught error. `command` is optional (`skip_serializing_if`,
 absent unless given) — a spec with none just names where an agent should
-be conducted, no fixed argv. No `sessionId`, no `markedAt`/timestamp of
-any kind: a manifest is a durable declaration of intent, not a record of
-any particular past run.
+be conducted, no fixed argv. When given, a clean-spawning `resurrect`
+(below) splits it on WHITESPACE ONLY — no shell-quote awareness, no `sh -c`
+involved — the same naive tokenizing `spawn.rs`'s own `$AOIDE_TERMINAL`
+parser already uses; an argument that itself needs an embedded space
+CANNOT be expressed in `command` today. A hand-editor should know this
+before reaching for quotes that will not do what they look like they do.
+No `sessionId`, no `markedAt`/timestamp of any kind: a manifest is a
+durable declaration of intent, not a record of any particular past run.
 
 **Tolerant, both directions.** No `#[serde(deny_unknown_fields)]` anywhere
 in `aoide_storage::manifest` — the file persists on disk indefinitely,
@@ -1644,7 +1656,15 @@ necessarily exists), refusing — never silently clamping — any `..` that
 would resolve outside `project_root` after normalization, and any
 still-absolute `dir` a hand-edited or newer-build-written file might carry.
 `resurrect`'s bare-manifest mode (below) is this guard's first caller, on
-every spec before it is ever used as a `--cwd`.
+every spec before it is ever used as a `--cwd`. **The guard is lexical, so
+it is a STRING check on `dir`, not a filesystem-real check on where that
+string ends up** — a `dir` with no `..` at all can still name a path that,
+at USE time, is (or passes through) a symlink pointing outside the project
+root; `resolve_spec_dir` has no opinion about that, and nothing downstream
+re-checks it. Accepted, not a gap to close: the manifest's whole trust
+model is host-local and operator-authored — the operator who writes a
+`.aoide/project.json` spec already controls what's on their own disk,
+including any symlinks inside their own project.
 
 **Discovery.** `aoide_storage::manifest::walk_up(start)` walks from `start`
 up through every parent directory, git-style, for the NEAREST
@@ -1664,13 +1684,21 @@ walk never resumes from the symlink's own target ancestry once past it.
 `--project`/`--all`/`--id` walks up from cwd via `walk_up`; found, it
 revives that manifest's specs directly — no `projects.json` registration
 needed at all — instead of falling through to the flag-mode selection
-above. Not found, the command still requires one of the three flags, now
-naming the manifest miss explicitly in its taught usage error. Each spec
-resolves independently (one spec's failure never aborts the rest, same
-posture flag-mode's per-candidate loop already holds): a spec whose `host`
-does not match this host's own (`aoide_storage::display::local_host_name`)
-is skipped — remote summoning is a later phase (U4), never guessed here.
-A local spec's `dir` resolves through `resolve_spec_dir` (above); the
+above. Not found, the command falls through to the ordinary
+`--project`-required check; ITS OWN usage error then names the manifest
+miss too (`no .aoide/project.json above <cwd> and no --project/--all/--id
+given`) since neither path had anything to go on. Naming BOTH misses is
+conditioned on having genuinely tried the walk — an invocation that DID
+give one of the three flags (`--id` alone, say, with no `--project`) never
+attempts a manifest walk at all and gets the ORIGINAL, accurate
+`--project`-missing usage error instead; a review fix (U2 review round 1)
+closed an earlier bug where that case wrongly got the manifest-miss
+wording despite never having looked for one. Each spec resolves
+independently (one spec's failure never aborts the rest, same posture
+flag-mode's per-candidate loop already holds): a spec whose `host` does
+not match this host's own (`aoide_storage::display::local_host_name`) is
+skipped — remote summoning is a later phase (U4), never guessed here. A
+local spec's `dir` resolves through `resolve_spec_dir` (above); the
 **enrichment rule** then decides HOW to bring it up — the NEWEST entry in
 THIS HOST's own session ledger whose `cwd`/`agent` match the resolved
 `dir`/the spec's `agent` (host is implicit: the ledger is host-local state,
@@ -1682,7 +1710,32 @@ has never actually run, the ordinary case straight off a fresh checkout —
 clean-spawns instead: windowed (`AOIDE_TERMINAL`), the spec's own `command`
 when given, else the agent's registered `AgentProfile::launch` default; an
 agent with neither is a taught `failed[]` entry, never a guessed argv. The
-manifest DECIDES WHAT exists; the ledger only ever decides HOW.
+manifest DECIDES WHAT exists; the ledger only ever decides HOW. Every row
+in the outcome — `revived-from-ledger`, `clean-spawned`, `skipped-remote`,
+a bare `skipped` (an unresolved harness with no `restore` snapshot either),
+or `failed` — carries a `disposition` key naming which of these it is, so
+a consumer filtering the outcome by disposition never silently drops a row
+that fell through `resolve_candidate`/`resurrect_one`'s own flag-mode
+shapes.
+
+**Manifest-revived sessions are marked undying (orchestrator design
+ruling, U2 review round 1).** Both the enrichment path and the clean-spawn
+path pass the same `--undying` flag `resurrect_one`/`clean_spawn_from_spec`
+hand to their own internal `spawn` invocation — the identical
+mark-after-registration mechanic `aoide spawn --undying` runs (above), not
+a re-implementation, and gated the same way (marked only once the new
+session actually registers). Rationale: the manifest spec IS the durable
+declaration of what should exist — marking its revived session undying
+means a LATER bare `resurrect --project <name>` (or the daemon's boot
+sweep) finds it in the undying set without needing to re-walk or
+re-consult the manifest at all, so flag-mode and manifest-mode revival
+converge on the SAME durable set instead of tracking two independent
+notions of "what this project wants running." This is deliberately
+DIFFERENT from flag-mode's own transfer rule immediately above (which only
+ever marks a NEW id when the OLD ledger id it replaces was already
+undying) — a manifest-mode revival marks unconditionally, because there is
+no ordinary-revive case to protect against here: every manifest-mode spawn
+already came from an explicit, operator-authored declaration.
 
 **The picker's peer writer (U3, command-defrag lane U).** Bare `aoide
 session` opens a tty multi-select over local sessions AND every registered
