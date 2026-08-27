@@ -294,7 +294,10 @@ pkgs.testers.runNixOSTest {
     # stale-80-vs-actual-81 until the next entry's review caught it) —
     # reached 81; bumped by −4 for deleting the legacy `a2a agent
     # add|list|remove|send` family outright (pre-pairing legacy — unsigned,
-    # ungated, structurally superseded by the `peer` family) — reached 77.
+    # ungated, structurally superseded by the `peer` family) — reached 77;
+    # bumped by −1 for deleting `graph wrap` outright — zero production
+    # callers (superseded by `conduct`/`graph spawn`), command-defrag lane
+    # (task #101) — reached 76.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a command.
     schema_raw = machine.succeed("aoide schema --json")
@@ -308,8 +311,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 77, (
-        f"expected 77 commands, got {cmd_count}.  "
+    assert cmd_count == 76, (
+        f"expected 76 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

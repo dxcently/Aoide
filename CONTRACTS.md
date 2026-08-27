@@ -870,8 +870,8 @@ tool call, readers tolerate both forms and round-trip fields they do not know.
 (string) — the absolute path to the pty-master transcript of a HEADLESS
 `aoide conduct` session (`state/sessions/<sessionId>.log`, below). Stamped
 once, right after the session registers, by `aoide conduct --headless`; every
-INTERACTIVE session (conduct with a real controlling tty, `graph wrap`, a
-hook-only agent) never sets it. Absent means "no headless log" (the common
+INTERACTIVE session (conduct with a real controlling tty, a hook-only agent)
+never sets it. Absent means "no headless log" (the common
 case); readers must tolerate both forms and round-trip fields they do not
 know.
 
@@ -1052,8 +1052,8 @@ backfill call sites:
   its descendants, not by a second parallel mechanism.
 
 A session with no parent, or whose chain anchors in a windowed conducted
-session directly (an interactive `graph wrap`/`conduct` with a real
-`windowAddress`), keeps the ordinary backfill. The same-window eviction
+session directly (an interactive `conduct` with a real `windowAddress`),
+keeps the ordinary backfill. The same-window eviction
 (immediately above `graph.json`'s render, below) is lineage-safe on top of
 this: it never retires a member of the newly registering session's own
 lineage (every ancestor AND descendant, walking `parentSessionId`), only a
