@@ -117,7 +117,7 @@ routed through the desktop, not through `aoided`'s CLI trunk).
    Quickshell — LiveryState.qml watches the stage file (hot-reload)
    [[Quickshell]]
       │  ▲
-      │  └── reads song/stage/{sessions,hooks,graph}.json (roster + DAG surfaces)
+      │  └── reads state/stage/{sessions,hooks,graph}.json (roster + DAG surfaces)
       └──► widget click → shellbridge socket → hyprctl dispatch focuswindow
                               │
                     ┌─────────┴──────┐
@@ -138,8 +138,8 @@ the implemented/stubbed ladder.
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; stage    | mostly real (`declare`/`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all commands exit 64)                |
 | [[livery]]         | `aoide.livery` (palette + component tiers)   | `song/stage/livery.json`; baked facets + Stylix   | implemented (v0)                           |
-| [[shellbridge]]      | unix-socket commands; Hyprland IPC             | atomic JSON in `song/stage/`; `hyprctl` dispatch    | implemented (accept loop live: `focuswindow`) |
-| [[Quickshell]]       | `song/stage/*.json` (incl. livery)           | widget socket commands; rendered surfaces            | implemented (9 real surfaces)              |
+| [[shellbridge]]      | unix-socket commands; Hyprland IPC             | atomic JSON in `state/stage/` (conducting) + `song/stage/` (rice); `hyprctl` dispatch    | implemented (accept loop live: `focuswindow`) |
+| [[Quickshell]]       | `state/stage/*.json` (sessions/hooks/graph/herald) + `song/stage/*.json` (livery/mode)  | widget socket commands; rendered surfaces            | implemented (9 real surfaces)              |
 | [[Hyprland]]         | baked config + `hyprctl` keywords              | IPC event/state socket                              | implemented (greetd stubbed)               |
 | [[Stylix]]           | base16 synthesized from the v0 palette         | themed config for every nix app                     | implemented (stands down on owned surfaces) |
 
@@ -190,7 +190,7 @@ The baked side is carried by the three facets, all real:
   fully on hot-edge hover or
   `SUPER+G`, all livery-themed; osd, lockscreen, greeter, and wallpaper
   round out the set. `sessionGraph` remains declared but has no QML body —
-  the DAG is rendered via `aoide graph view`/`aoide conductor`, not a desktop
+  the DAG is rendered via bare `aoide graph`/`aoide conductor`, not a desktop
   overlay ([[Session-Graph]]).
 - **compositor** — [[Hyprland]]; the system layer holds session/portal wiring,
   the home-manager layer owns `hyprland.conf` with livery baked at build and
@@ -321,11 +321,13 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   socket-only credential broker under its own uid, [[Secrets-Broker]]),
   `usage`, `hooks install`, `soundcheck`, `who` (live presence over sessions
   and registered peers), the 3-command `inbox` group (`list`/`read`/`clear`, the
-  durable per-host message store), the 19-command `graph` group (the
-  [[Session-Graph]] DAG viewer + management layer over projects and
-  sessions, incl. `graph send`/`reap` and the `graph pending
-  list|approve|deny` held-injection queue, all real — registering a new
-  conducted session is `conduct` or `graph spawn`, and jumping to a
+  durable per-host message store), the 19-command graph/session/project
+  surface (the [[Session-Graph]] DAG viewer + management layer over projects
+  and sessions — bare `graph`/`graph link` the read/analysis lens,
+  `project add/remove/list`, the `session` family
+  (`start/phase/end/hook/carry/permit/pending list|approve|deny/prune/reap`),
+  and bare `send`/`spawn`/`resurrect`, all real — registering a new
+  conducted session is `conduct` or `spawn`, and jumping to a
   session's window is a library call the conductor and `shellbridge` reach
   directly, not a CLI subcommand), and `onboard` — the
   core half of installation: registers the clone as a graph project, links
@@ -376,9 +378,10 @@ and `aoide-usage` (gated on `aoide.usage.enable`) units, and the
 `aoide-secrets-serve`, gated on `aoide.secrets.enable`, own uid
 `aoide-secrets` — anchored to `multi-user.target` rather than a graphical
 session.
-Live state lands in `song/stage/*.json` (livery, mode, sessions, hooks,
-projects, graph, cover, herald, pending, and the [[Session-Graph]] DAG
-layer's own files). `lib/mkHost.nix`
+Live state lands in two stage trees split by owner: `song/stage/*.json`
+(livery, mode, cover — rice/paint staging) and `state/stage/*.json`
+(sessions, hooks, projects, graph, herald, pending — the [[Session-Graph]]
+DAG layer's own conducting files). `lib/mkHost.nix`
 injects `pkgs.aoide` by overlay from the **same**
 `callPackage` paths as the flake's `packages` output, so the units and the
 flake always build the same binaries, never a drifted copy.

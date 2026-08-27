@@ -42,7 +42,7 @@ third door — the standard wire by which aoide interoperates with *other*
 agents over JSON-RPC-2.0/HTTP. It is **bidirectional**: aoide is both a
 discoverable A2A *agent* (`aoide a2a serve`, off by default, loopback-bound)
 whose AgentCard is generated from the same registry as the MCP tool list, and
-an A2A *client* — the `peer` group (`peer add`/`peer spawn`/`graph send
+an A2A *client* — the `peer` group (`peer add`/`peer spawn`/`send
 --to`) — that registers and drives external aoide instances, folding each
 into the [[Session-Graph]]. Its capability is admitted
 at rebuild time rather than per request; see [[A2A-Door]] for the door, the
@@ -97,7 +97,7 @@ through per-harness profiles (`aoide_protocol::agents`, see
 spawn wrapper registers the agent session and window address with
 [[shellbridge]]; the harness's hooks post state after each operation — claude
 via `Notification` / `Stop` / `Pre-PostToolUse`, kimi via the same core events
-plus its dedicated `PermissionRequest`. `aoide graph session hook --agent
+plus its dedicated `PermissionRequest`. `aoide session hook --agent
 <name>` selects the profile (default `claude`; unknown names get a structured
 `unknown-agent` error listing the registered ones), and **`aoide hooks install
 <agent> [--capture]`** wires the harness's settings file to pipe its hook

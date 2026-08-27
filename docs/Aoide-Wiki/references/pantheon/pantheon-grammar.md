@@ -197,10 +197,10 @@ The Pantheon effect at full strength:
   notes are solid ink (`paletteFg`); the **active** workspace's note
   **swells** (15px → 19px) and **fills with the song's accent colour**,
   resting on a soft accent glow; urgent workspaces pulse `glitchPink`.
-- **Real data only**: the session write door (`aoide graph session
+- **Real data only**: the session write door (`aoide session
   start/phase/end/hook`) exists; widgets read the LIVE stage; demo fixture
   files are retired permanently. Forced-state screenshots register
-  short-lived real sessions and `graph prune` after.
+  short-lived real sessions and `session prune` after.
 
 ---
 

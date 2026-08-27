@@ -1,6 +1,6 @@
 ---
 type: index
-updated: 2026-08-26
+updated: 2026-08-27
 ---
 
 # Aoide — Index
@@ -32,11 +32,11 @@ updated: 2026-08-26
 - [[Rebuild-Gate]] — propose-then-human-`switch` by default; the opt-in passwordless-narrow `aoide.rebuild` polkit capability and why it beats a sudo password
 - [[Wiki-Protocol]] — the Mneme/Melete-owned protocol giving each project a standalone wiki in one shared shape; mint and convert
 - [[Ricing-Protocol|Ricing Protocol]] — the creation/application split (deriving base16 vs Stylix fan-out), the light/dark vision-check, per-song design memory
-- [[Conductor-Channel|Conductor Channel]] — commanding a wrapped agent session: PTY control socket, the gated `graph send` injection door, parent-autogate
+- [[Conductor-Channel|Conductor Channel]] — commanding a wrapped agent session: PTY control socket, the gated `send` injection door, parent-autogate
 - [[Loop-Protocol|Loop Protocol]] — harness-agnostic multi-role agent loops: per-role fresh contexts, the R1/R2 degradation ladder, review integrity
 - [[Conductor-3D-DAG|Conductor 3D DAG]] — the ratatui 3D-wireframe DAG view for `aoide conductor`. Status: specified, not implemented
 - [[Package-Layout]] — the landed pi-style single-charter crate split of `pkgs/aoide`, the per-crate charters, and the two-binary split (`aoide`/`aoided` vs `lyra`)
-- [[Agent-Hooking]] — how any harness registers on the conductor: hook payloads through the `AgentProfile` seam, the `graph session` commands, the conduct wrapper
+- [[Agent-Hooking]] — how any harness registers on the conductor: hook payloads through the `AgentProfile` seam, the `session` commands, the conduct wrapper
 - [[Conductor-TUI]] — the `aoide conductor` interactive terminal frontend: seven panels, keys, what each dispatches
 - [[Secrets-Commands]] — the `aoide secrets` credential door's 16 commands: direct-home admin, over-the-socket operator, and the daemon itself
 - [[Controls]] — the day-to-day surface: rebuild aliases, compositor keybinds, the bar's click/scroll/hover interactions, shell aliases

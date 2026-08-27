@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, cli, meta, upkeep]
 ---
 
@@ -112,7 +112,7 @@ aoide onboard [--harness <a,b,...>] [--yes] [--out <path>] [--json]
   `aoide_protocol::agents`) and for the lyra binary (`rice_bin()`:
   `$AOIDE_RICE_BIN`, a sibling binary, then PATH).
 - **Writes:** registers the clone by dispatching the already-registered
-  `graph project add aoide <checkout>` handler (stage-file effects per
+  `project add aoide <checkout>` handler (stage-file effects per
   [[Graph-and-Conduct]]); links `~/song` → `<checkout>/song` when nothing is
   there (a correct existing link is a no-op; a wrong-target symlink or a
   non-symlink is left alone with a note, never clobbered); seeds

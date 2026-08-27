@@ -24,13 +24,15 @@ start at [[aoide-cli]] and the group pages linked below.
   record to `~/Aoide/log` (`$AOIDE_AUDIT_LOG` / `--audit-log` override).
 - **Gating:** exactly three commands carry `gated: true` (`rice declare`,
   `content approve`, `update`) — the user rebuild gate ([[Rebuild-Gate]]).
-  `graph send` and `screen send` hold pending approval internally instead;
+  `send` and `screen send` hold pending approval internally instead;
   `secrets exec` holds the same way when a TOTP code is required and
   absent — the connection PARKS until a separate `secrets approve`/
   `dismiss` call or a timeout, rather than carrying `gated: true`
   ([[Secrets-Broker]]).
 - **Runtime roots:** repo-relative paths below resolve under `~/Aoide/` —
-  `state/` via `$AOIDE_STATE_DIR`, `song/stage/` via `$AOIDE_STAGE_DIR`.
+  `state/` via `$AOIDE_STATE_DIR`; two stage trees share `$AOIDE_STAGE_DIR`
+  for an absolute override and otherwise fall back separately —
+  `state/stage/` (conducting state) and `song/stage/` (rice staging).
   Stage/state writes are atomic temp-then-rename.
 - **Two registries, one convention:** `aoide schema --json` holds 73
   command paths, `lyra schema --json` holds 43 — every group page prefixes
@@ -44,11 +46,12 @@ start at [[aoide-cli]] and the group pages linked below.
   `rice lint/stage/compose/declare/transpose`, the `rice draft` / `rice mode` /
   `rice take` groups, `rice back`, `cover set`, and the `livery` engine commands.
   Stage files: `song/stage/{livery,cover,mode}.json`; songbook and drafts trees.
-- [[Graph-and-Conduct|Graph-and-Conduct]] — the session DAG:
-  `graph view/project/link/session/spawn/resurrect/send/permit/
-  prune/reap`, `conduct`, and `inbox list/read/clear` (the receive
-  half of `graph send`).
-  Stage files: `song/stage/{sessions,hooks,projects,graph,pending,
+- [[Graph-and-Conduct|Graph-and-Conduct]] — the session DAG: bare
+  `graph`/`graph link` (the read/analysis lens), `project add/list/remove`,
+  `session start/phase/end/hook/carry/permit/pending list/approve/deny/
+  prune/reap`, bare `send`/`spawn`/`resurrect`, `conduct`, and `inbox
+  list/read/clear` (the receive half of `send`).
+  Stage files: `state/stage/{sessions,hooks,projects,graph,pending,
   herald}.json`, `state/inbox.json`; control sockets at
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock`.
 - [[Screen-Commands|Screen-Commands]] — computer use: `screen info/
@@ -61,10 +64,11 @@ start at [[aoide-cli]] and the group pages linked below.
   `state/peers.json`, `state/peer-cache/<name>.json`.
 - [[Conductor-TUI|Conductor-TUI]] — the `aoide conductor` interactive
   terminal frontend: seven panels, keys, what each dispatches. State:
-  `song/stage/{projects,sessions,hooks,livery}.json`, the audit log.
+  `state/stage/{projects,sessions,hooks}.json`, `song/stage/livery.json`,
+  the audit log.
 - [[Content-and-Hooks|Content-and-Hooks]] — the content
   pipeline commands (all stubs today), `herald push` (shellbridge socket →
-  `song/stage/herald.json`), and `hooks install` (harness settings merge,
+  `state/stage/herald.json`), and `hooks install` (harness settings merge,
   `--capture` tee to `state/<agent>-hooks.jsonl`).
 - [[Meta-and-Upkeep|Meta-and-Upkeep]] — `guide`, `schema`,
   `make`/`update` (stubs), `onboard` (the first-boot flow, core and lyra

@@ -1,7 +1,7 @@
 ---
 type: overview
 created: 2026-07-25
-updated: 2026-08-26
+updated: 2026-08-27
 ---
 
 # Aoide — Overview
@@ -22,7 +22,7 @@ AoideOS is also a specialized widget maker: it integrates and launches the indep
 - [[Widget-Maker]] — Aoide as an extensible, declarative widget maker; the coding agent writes new integrations instead of selecting plugins
 - [[Feature-Set]] — what ships in the box (Melete + Mneme) and the exemplar features: messaging bridge, fleet management, scheduled-job widget
 - [[Terminal-Commander]] — the conductor-class agent-session widget: watch terminals running agents, jump to any by click or keybind
-- [[Session-Graph]] — the project/session DAG and its `aoide graph` CLI; rendered via `graph view`/`--json` and the `aoide conductor` TUI
+- [[Session-Graph]] — the project/session DAG and its `aoide graph` CLI; rendered via bare `graph`/`--json` and the `aoide conductor` TUI
 - [[Gadget-Dock]] — `AoidePanel.qml`, a left-edge panel holding four core gadgets (Conductor, Terminals, Meters, Power) plus an opt-in Usage stele; opens on hot-edge hover or SUPER+G
 - [[Controls]] — the day-to-day reference: `ad*` rebuild aliases, compositor keybinds, bar cell interactions, shell QoL aliases
 - [[Lexicon]] — the whole vocabulary in one place: the three Muses, the frozen/performed split, why each word family was chosen

@@ -7,7 +7,7 @@ tags: [aoide, agent, session, conductor, orchestration, graph]
 
 # Agent Hooking — putting ANY agent on the conductor
 
-*The stage files `song/stage/{sessions,hooks,graph}.json` are the single truth; the `aoide conductor` TUI, the [[Gadget-Dock]]'s Conductor/Terminals gadgets, and the orchestration daemons all render from them. Anything that writes these files through the doors below becomes a full citizen of the graph.*
+*The stage files `state/stage/{sessions,hooks,graph}.json` are the single truth; the `aoide conductor` TUI, the [[Gadget-Dock]]'s Conductor/Terminals gadgets, and the orchestration daemons all render from them. Anything that writes these files through the doors below becomes a full citizen of the graph.*
 
 ## The three doors
 
@@ -18,7 +18,7 @@ Pick by what the agent harness can do. All three converge on the same records; a
 Pipe ONE hook payload as JSON on stdin, naming the harness when it isn't the default:
 
 ```sh
-echo '{"session_id":"…","hook_event_name":"…","cwd":"…","message":"…"}' | aoide graph session hook --agent claude
+echo '{"session_id":"…","hook_event_name":"…","cwd":"…","message":"…"}' | aoide session hook --agent claude
 ```
 
 `--agent` defaults to `claude`; an unknown name is a structured `unknown-agent` error listing the registered profiles. The door resolves the harness's **agent profile** (the seam below) and maps the payload through it: one contract, per-harness tables behind it.
@@ -52,10 +52,15 @@ focus-jumpable from the roster, same as a conducted one.
 
 ### 2. The explicit commands — anything scriptable
 
+`session start`/`phase`/`end`/`hook` carry `internal: true` in the schema —
+hook plumbing a harness's own lifecycle is meant to drive, hidden from
+`aoide guide`'s human listing (though still enumerated by `schema`/MCP/A2A
+and fully runnable, exactly as below).
+
 ```sh
-aoide graph session start --id "$ID" --agent gemini --cwd "$PWD" [--parent "$PARENT_ID"]
-aoide graph session phase --id "$ID" --phase awaiting
-aoide graph session end   --id "$ID"
+aoide session start --id "$ID" --agent gemini --cwd "$PWD" [--parent "$PARENT_ID"]
+aoide session phase --id "$ID" --phase awaiting
+aoide session end   --id "$ID"
 ```
 
 Canonical state vocabulary and how the desktop renders it:
@@ -66,7 +71,7 @@ Canonical state vocabulary and how the desktop renders it:
 | `awaiting` | 𝄐 | needs the human (permission prompt or the idle-input ping); the bar's `✎N` cell flips paletteHot→glitchPink and pulses while ANY session is `awaiting` |
 | `stopped` | 𝄁 | the TURN ended and the agent sits at its prompt, within the last hour — alive and warm; a section barline, not the final one |
 | `idle` | 𝄽 | at rest and cold — stopped for more than an hour, or freshly created / resumed and not yet active |
-| `done` | 𝄂 | final barline, dimmed; `graph prune` sweeps them |
+| `done` | 𝄂 | final barline, dimmed; `session prune` sweeps them |
 
 ### 3. The wrapper — hookless agents (codex, gemini, aider, anything)
 
@@ -81,7 +86,7 @@ aoide conduct [--agent codex] [--parent "$PARENT_ID"] -- codex --whatever-flags
 - Exports **`AOIDE_SESSION_ID`** into the child, so anything hookable *inside* the wrapped agent can self-report richer phases:
 
 ```sh
-aoide graph session phase --id "$AOIDE_SESSION_ID" --phase blocked
+aoide session phase --id "$AOIDE_SESSION_ID" --phase blocked
 ```
 
 Everything after `--` passes to the child verbatim (the CLI stops
@@ -89,16 +94,16 @@ flag-parsing there). Steer it afterward through the one gated injection
 door:
 
 ```sh
-aoide graph send --id "$AOIDE_SESSION_ID" [--submit] [--yes] -- some text to type
+aoide send --id "$AOIDE_SESSION_ID" [--submit] [--yes] -- some text to type
 ```
 
-`graph send` is held pending approval by default, `--yes` (or an autogate
+`send` is held pending approval by default, `--yes` (or an autogate
 policy) delivers it, and every outcome is audited.
 
 **Headless — no terminal required.** `aoide conduct --headless` runs the
 identical steerable session with no controlling terminal at all: the pty's
 output mirrors to an append-only `state/sessions/<sessionId>.log` instead of a
-real screen, and `aoide graph spawn` is the detached command that launches one
+real screen, and `aoide spawn` is the detached command that launches one
 and returns immediately (full mechanism in [[Conductor-Channel]]). Both are
 harness-agnostic: the hook door above doesn't care whether its own stdin is a
 real tty, so a headless-launched agent hooks itself onto the graph exactly
@@ -151,7 +156,7 @@ the transcript refresh (`crates/conduct/src/graph/session_store.rs`), the
 window listener's sub-agent tool check (`crates/conduct/src/graph/window.rs`),
 the reaper's transcript probe and same-window dedup (`profile_for` in
 `crates/conduct/src/reap.rs` — a record whose agent has no registered profile falls
-back to the claude layout), and `graph session start`'s default agent
+back to the claude layout), and `session start`'s default agent
 (`crates/storage/src/session.rs`). A new harness lands as one more entry in the
 profile table, not a scatter of conditionals.
 
@@ -167,7 +172,7 @@ stdin; the door does the mapping:
 ```json
 {
   "hooks": {
-    "SessionStart": [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" graph session hook >/dev/null 2>&1; exit 0" } ] } ]
+    "SessionStart": [ { "hooks": [ { "type": "command", "command": "a=$(command -v aoide) || exit 0; \"$a\" session hook >/dev/null 2>&1; exit 0" } ] } ]
   }
 }
 ```
@@ -189,7 +194,7 @@ started outside a project that carries its own `.claude/settings.json` — a
 Claude Code session opened in, say, `~/dxflake` never touches this repo's
 project-local hooks, so it registers on the graph only if
 `~/.claude/settings.json` also carries the same nine hooks. Without them,
-that session is invisible to `aoide graph session hook` entirely:
+that session is invisible to `aoide session hook` entirely:
 Hyprland's window listener still picks up the enclosing terminal as a bare
 `shell`-kind row (window address, pid, cwd), but the Claude process itself
 never becomes an `agent`-kind row with turn state, phase, or a spawned-by
@@ -214,13 +219,13 @@ Wiring: `aoide hooks install kimi` (see [[Agent-Interface]]) merges ten `[[hooks
 ```toml
 [[hooks]]
 event = "SessionStart"
-command = "aoide graph session hook --agent kimi"
+command = "aoide session hook --agent kimi"
 timeout = 5
 ```
 
 An entry carries ONLY `event`/`command`/`timeout` — extra fields (a claude-style `matcher`) make kimi's config fail to load.
 
-Operator notes: kimi's TUI submits on `\r`, not `\n` — `graph send --submit` resolves this automatically from the target's own agent profile (see [[Conductor-Channel]]), so no manual workaround is needed. And kimi's model aliases are provider-prefixed on the CLI too (`-m kimi-code/kimi-for-coding`; a bare alias errors `config.invalid`).
+Operator notes: kimi's TUI submits on `\r`, not `\n` — `send --submit` resolves this automatically from the target's own agent profile (see [[Conductor-Channel]]), so no manual workaround is needed. And kimi's model aliases are provider-prefixed on the CLI too (`-m kimi-code/kimi-for-coding`; a bare alias errors `config.invalid`).
 
 ### Any plain CLI agent (no hook system)
 
@@ -235,15 +240,15 @@ Running→done for free; the graph shows who is out working even when the agent 
 Map its lifecycle onto the explicit commands. Example shape (pseudo-config for any harness that can run a shell command on events):
 
 ```
-on_start:    aoide graph session start --id "$MY_ID" --agent myagent --cwd "$PWD"
-on_tool:     aoide graph session phase --id "$MY_ID" --phase working
-on_ask:      aoide graph session phase --id "$MY_ID" --phase awaiting
-on_turn_end: aoide graph session phase --id "$MY_ID" --phase stopped
-on_exit:     aoide graph session end   --id "$MY_ID"
+on_start:    aoide session start --id "$MY_ID" --agent myagent --cwd "$PWD"
+on_tool:     aoide session phase --id "$MY_ID" --phase working
+on_ask:      aoide session phase --id "$MY_ID" --phase awaiting
+on_turn_end: aoide session phase --id "$MY_ID" --phase stopped
+on_exit:     aoide session end   --id "$MY_ID"
 ```
 
 `--phase stop` and `--phase stopped` both mean the TURN ended and both fold to
-`stopped`; process exit is `graph session end` (or the `exit`/`finished`/`complete`
+`stopped`; process exit is `session end` (or the `exit`/`finished`/`complete`
 vocabulary). A harness that has no turn-end event at all can leave the session
 `working` and let its `on_exit` close it.
 

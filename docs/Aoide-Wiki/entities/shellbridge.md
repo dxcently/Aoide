@@ -28,10 +28,13 @@ shellbridge --run`, a sub-command of the [[aoide-cli]] binary. Its socket
 path is a hard contract, never computed independently:
 `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` (the unit's `RuntimeDirectory=aoide`
 creates the directory). It publishes two atomically-written stage files
-besides `livery.json`: `song/stage/sessions.json` (the agent session
+besides `livery.json` (which stays under `song/stage/`, rice staging):
+`state/stage/sessions.json` (the agent session
 roster — `{ sessionId, agent, windowAddress, cwd, state, startedAt }`,
-backing the [[Terminal-Commander]] session-jump) and `song/stage/hooks.json`
-(live Claude Code hook phases — `{ sessionId, phase, updatedAt }`). The
+backing the [[Terminal-Commander]] session-jump) and `state/stage/hooks.json`
+(live Claude Code hook phases — `{ sessionId, phase, updatedAt }`) — both
+CONDUCTING state (`CONTRACTS.md §4`), written into the conducting tree even
+though the `shellbridge` command itself ships in `lyra`. The
 atomic writer (write-temp-then-rename) seeds both files with their v0
 shapes and keeps them current as sessions come and go.
 
@@ -64,7 +67,7 @@ inherit that shell's richer PATH and keep working while the systemd unit's
 minimal PATH breaks silently.
 
 Reads and jumps go through the socket; the write door for session state
-remains the CLI. The `aoide graph session` command family upserts those same
+remains the CLI. The `aoide session` command family upserts those same
 stage files atomically (each mutation re-stages `graph.json`, so the read
 path lights up immediately). `session start --id <id> [--agent --cwd
 --window --parent]` upserts a running `sessions.json` record, idempotent —
@@ -76,25 +79,34 @@ the session (and its hook phase) `done`, an ok no-op on an unknown id.
 Claude-Code hook JSON (`session_id`, `cwd`, `hook_event_name`) and maps
 SessionStart→start, UserPromptSubmit/PreToolUse→phase running, Stop→phase
 waiting, SessionEnd→end, never exiting non-zero so it is safe to wire into
-interactive-session hooks. `startedAt` is stamped ISO-8601 UTC (hand-rolled,
+interactive-session hooks. `start`/`phase`/`end`/`hook` all carry
+`internal: true` in the schema — hook plumbing, hidden from `aoide guide`'s
+human listing though fully runnable exactly as documented here.
+`startedAt` is stamped ISO-8601 UTC (hand-rolled,
 round-tripping the conductor reader — no chrono in the offline lock).
 
-The stage also carries two more files: `song/stage/projects.json` (the
+The conducting stage also carries two more files: `state/stage/projects.json` (the
 project registry, v0 `{schemaVersion, projects: [{name, path}]}`) and
-`song/stage/graph.json` (the resolved DAG, v0 `{schemaVersion, nodes, edges:
+`state/stage/graph.json` (the resolved DAG, v0 `{schemaVersion, nodes, edges:
 [{from, to, kind}]}`, restaged atomically by `restage_graph` on every
 mutation — no separate emit step). A `sessions.json` record may additionally carry the optional
 `parentSessionId` (additive, still v0), the spawned-by edge. `aoide graph
-link` and `aoide graph session start --parent` both write that field;
+link` and `aoide session start --parent` both write that field;
 shellbridge stamping it at spawn time over the socket is still an open
 thread. The graph stage rewriters round-trip unknown fields, so they never
 clobber what shellbridge (or any other writer) adds to a record.
 
 The env-var seam is a documented contract ("Stage-dir resolution",
-`CONTRACTS.md §4`): the Rust `stage_dir()` honours `$AOIDE_STAGE_DIR` when
-set to an absolute path (the unit sets `%h/Aoide/song/stage`; empty or
-relative values are ignored so runtime paths never resolve against an
-arbitrary cwd), else it falls back to the `aoide_home()` derivation. A
+`CONTRACTS.md §4`): the conducting tree resolves through
+`conducting_stage_dir()`, honouring `$AOIDE_STAGE_DIR` when set to an
+absolute path (empty or relative values are ignored so runtime paths never
+resolve against an arbitrary cwd), else falling back to
+`~/Aoide/state/stage`; the rice tree resolves the same way through the
+separate `stage_dir()`, falling back to `~/Aoide/song/stage` instead — the
+same override relocates both trees at once, a relocated tree with no
+override does not. Neither shellbridge unit sets `$AOIDE_STAGE_DIR`
+(command-defrag lane S2): `$AOIDE_USER` alone is enough for both trees'
+no-override defaults to resolve correctly. A
 serialized test pins the precedence; the companion `AOIDE_AUDIT_LOG` seam
 follows the same contract. The env-var test mutex in `shellbridge.rs` is
 module-local — fine while only this module's tests touch env vars, a
@@ -123,8 +135,8 @@ fallback), runs concurrently with the accept loop without blocking it, and
 degrades to a logged no-op with no `HYPRLAND_INSTANCE_SIGNATURE`
 (headless/non-Hypr aoide is unaffected).
 
-A terminal killed uncatchably (SIGKILL, SUPER+Q) cannot run its own `graph
-session end`. The **liveness reaper** (`aoide graph reap`, on a systemd user
+A terminal killed uncatchably (SIGKILL, SUPER+Q) cannot run its own `session
+end`. The **liveness reaper** (`aoide session reap`, on a systemd user
 timer every ~12s after an initial 15s delay) sweeps the roster shellbridge
 publishes and marks such a session dead when its window is gone (per `hyprctl
 clients -j`) OR its pid's `/proc` entry is gone — never both required, never

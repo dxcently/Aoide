@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-30
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, bridge, desktop, widget, quickshell, session, ipc]
 ---
 
@@ -16,22 +16,23 @@ IPC. This page is the contract both sides are built to.
 
 ## The bridges (who writes the truth)
 
-- **[[shellbridge]]** — the daemon. Atomic JSON stage files out (`song/stage/`),
-  a unix socket in, and the Hyprland `socket2` window listener that keeps each
-  session's `windowAddress`/`workspace` authoritative.
-- **The hook door** (`aoide graph session hook`) — a short-lived process per
+- **[[shellbridge]]** — the daemon. Atomic JSON stage files out (`state/stage/`
+  for conducting state, `song/stage/` for rice staging), a unix socket in, and
+  the Hyprland `socket2` window listener that keeps each session's
+  `windowAddress`/`workspace` authoritative.
+- **The hook door** (`aoide session hook`) — a short-lived process per
   agent hook event ([[Agent-Hooking]]) that maps the event to a canonical
   session state through the harness's agent profile (`--agent`, default
   claude). This is the agent↔desktop bridge.
 - **`conduct`** ([[Conductor-Channel]]) — owns every terminal's PTY, so it is the
   producer of a shell's live `cwd`, current command, and idle/working state, and
-  the injection channel for `graph send`.
+  the injection channel for `send`.
 - **`ShellBridge.qml`** — QML's ONLY outbound channel: newline-JSON socket
   commands. No MCP, no HTTP, no shell-exec from QML.
 
 ## What the bridge publishes — `sessions.json` is the widget contract
 
-`song/stage/sessions.json` is the ONE file the roster widgets watch. Each record:
+`state/stage/sessions.json` is the ONE file the roster widgets watch. Each record:
 
 | field | meaning |
 |---|---|
@@ -41,7 +42,7 @@ IPC. This page is the contract both sides are built to.
 | `activity` | the current PROCESS: a shell's foreground command / file being edited (`nvim notes.md`, `cargo test`), or its bare shell process when idle (`bash`); an agent's current tool. Absent only when truly nothing runs. |
 | `say` | the agent's latest WORDS — the last line of prose it wrote, tail-read from its own transcript through its agent profile (claude: the session JSONL; kimi: `wire.jsonl` — see [[Agent-Hooking]]). Distinct from `activity` (the process); absent for shells and for an agent that hasn't spoken. |
 | `model` | the session's currently-active model (e.g. `claude-sonnet-5`, `kimi-code/k3-256k`), read from the transcript tail alongside `say`. A sub-agent's `model` is its OWN — a background Task can run a different model than its parent. |
-| `title` | the human session NAME. Set-once — whichever source lands FIRST wins: the first user prompt (clipped one-liner), Claude Code's own session title (`custom-title` in the transcript, e.g. "Aoide Dev"), or a `graph send` steer. |
+| `title` | the human session NAME. Set-once — whichever source lands FIRST wins: the first user prompt (clipped one-liner), Claude Code's own session title (`custom-title` in the transcript, e.g. "Aoide Dev"), or a `send` steer. |
 | `cwd` | live working directory (a conducted shell's follows `cd`). |
 | `parentSessionId` | the tree edge — a sub-agent's owner, or a nested claude's launcher. |
 | `agent`, `windowAddress`, `workspace`, `pid`, `conductable`, `socket` | identity + jump/lifecycle. |
@@ -65,7 +66,7 @@ switches on the string, it does NOT regex-guess:
 
 **The `stopped` → `idle` decay.** No hook event fires for a session that is simply
 left alone, so the only way out of `stopped` is AGE. The reaper's ~12 s pass
-(`aoide graph reap`) ages every `stopped` session an hour after the `Stop` that set
+(`aoide session reap`) ages every `stopped` session an hour after the `Stop` that set
 it; the stop instant is the session's rolling `hooks.json` `updatedAt`, so no new
 field and no migration are involved. The decay writes `sessions.json` and
 `hooks.json` together — the merge overlays the hook phase onto the roster state, so
@@ -159,7 +160,7 @@ window-merge. The bridge collapses same-window agent records to one:
   shared by two simultaneously-open windows, so the pair is always a stale re-id).
   The eviction spares the new record's own `parentSessionId`: a hooked session
   starting inside its conducted wrapper must not evict the wrapper it lives in.
-- **In the reaper** (`aoide graph reap`, the safety net for a window that resolves
+- **In the reaper** (`aoide session reap`, the safety net for a window that resolves
   later) — among same-window agents past a short grace, keep the one with a real
   on-disk transcript (→ has `say` → classified `agent` → newest), retire the rest.
 
@@ -209,7 +210,7 @@ for Quickshell: render surfaces only]]) applied to the roster widgets:
 3. **One canonical file.** Watch `sessions.json`; treat `hooks.json`/`graph.json`
    as audit/derived.
 4. **Outbound is a narrow socket.** `focussession`/`focuswindow` jumps and
-   `graph send` injection — nothing else leaves QML.
+   `send` injection — nothing else leaves QML.
 5. **Colour only from [[livery]]**; hard corners; the music-glyph state contract
    (♪ working · 𝄐 awaiting · 𝄁 stopped · 𝄽 idle · 𝄂 done) is a hard contract.
 6. **Degrade.** An empty/missing stage file is an empty roster; off-Hyprland the

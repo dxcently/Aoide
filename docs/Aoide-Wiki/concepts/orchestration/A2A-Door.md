@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-01
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, agent, a2a, orchestration, interop]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -61,7 +61,7 @@ registering it into `state/peers.json`. `peer pull` refreshes its cached
 graph over `aoide/graphSummary`. `peer spawn <name> -- <text>` starts a new
 session on a PAIRED peer's own configured agent: it POSTs a signed,
 spawn-shaped `message/send` to the peer's A2A door, and the peer's own
-paired+signature+allows gate is the sole authority. `graph send --to
+paired+signature+allows gate is the sole authority. `send --to
 peer/<name>` (or `--to <name>/<session>`) drives an EXISTING remote session:
 it resolves the target against the peer's cached graph and delivers over the
 same `message/send` RPC — mutually exclusive with `--id`, and a remote send
@@ -78,7 +78,7 @@ translation, not a new model:
 | A2A concept | aoide equivalent |
 |---|---|
 | AgentCard @ `/.well-known/agent-card.json` | discovery derived from the command registry (`schema --json`) — one schema, same as the MCP tool list |
-| Task (one unit of work) | a **turn** — what `graph send` injects into a session |
+| Task (one unit of work) | a **turn** — what `send` injects into a session |
 | `contextId` | a **session** ([[Session-Graph|SessionRecord]]) |
 | TaskState `WORKING` | canonical state `working` |
 | TaskState `INPUT_REQUIRED` | canonical state `awaiting` |
@@ -100,7 +100,7 @@ precedence). The dock renders this same signal as the Conductor gadget's
 The A2A door fits the [[Governance]] model — the user admits, agents propose,
 git records — with one adaptation forced by the wire: **a request/response
 cannot block on a human admission**, so there is no interactive per-request
-gate like `graph send`'s pending/approve dance. The admission is moved entirely
+gate like `send`'s pending/approve dance. The admission is moved entirely
 to **rebuild time** instead.
 
 - **Admitted at rebuild time.** Enabling the door (`aoide.a2a.enable`) and
@@ -111,14 +111,14 @@ to **rebuild time** instead.
   `spawnAgent` executable — the client names the prompt, never the command. If
   `spawnAgent` is empty (the default), spawning is unavailable and the door
   returns a structured error rather than launching anything. An inject steers a
-  session already running under aoide's conductor, the same door `graph send`
+  session already running under aoide's conductor, the same door `send`
   uses. A forwarded A2A message is **data**, routed through the dispatcher, never
   executed — the A2A door adds no new trust tier.
 - **Non-loopback callers are gated at request time.** `message/send`
   classifies the caller's address first (`a2a::classify_origin` →
   `PeerOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`). A `Remote`
   caller falls back to the same interactive pending-approval queue
-  `graph send` uses — auto-delivering only when the sender's address matches
+  `send` uses — auto-delivering only when the sender's address matches
   a peer registered with `autogate: true` in `state/peers.json`
   ([[Peer-Federation]]); an `Unknown` origin (the address couldn't be read
   at all) is never auto-delivered, failing safe like an unmatched `Remote`.

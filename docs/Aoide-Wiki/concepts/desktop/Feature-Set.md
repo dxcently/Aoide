@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, features, integration, melete, mneme]
 ---
 
@@ -131,12 +131,12 @@ agent — with **jump by click or keybind**. Full page: [[Terminal-Commander]].
 - Watches: new agent terminals via a watcher dendrite on [[aoided]]'s event
   stream; sessions register their window address with [[shellbridge]] at spawn.
 - Shows: one row per session (agent · repo/cwd · state · elapsed), live from
-  `song/stage/*.json`; an `awaiting-input` row can chime or hit the messaging
+  `state/stage/*.json`; an `awaiting-input` row can chime or hit the messaging
   bridge.
 - Jump: click → `hyprctl dispatch focuswindow address:…` (one hop); or a
   [[Hyprland]] keybind to cycle agent terminals / pop the roster.
-- Surfaced as the terminal-commander widget + the real `aoide graph
-  session …` command group.
+- Surfaced as the terminal-commander widget + the real `aoide session
+  …` command family.
 
 ## How every feature hooks into the system
 
@@ -151,8 +151,9 @@ One spine, so a new integration is always the same shape:
 
 - In: external events enter as *data* through an adapter; [[aoided]] applies
   default-deny-per-class before anything reaches an agent.
-- Out: state is written atomically to `song/stage/` by [[shellbridge]];
-  widgets read it; nothing in QML speaks an agent protocol.
+- Out: state is written atomically to `state/stage/` (conducting) or
+  `song/stage/` (rice) by [[shellbridge]]; widgets read it; nothing in QML
+  speaks an agent protocol.
 - Control: every capability is one `aoide <cmd>` (+ generated MCP façade);
   every mutation and exposure passes the [[Governance|gate]] and lands in the
   single audit log.
@@ -176,7 +177,7 @@ more]] on demand. Rows marked *(planned)* have no command yet in `aoide schema
 | Vault knowledge | Mneme | pipeline · `aoide …` | via approve gate | approve gate |
 | Autonomous code tasks | Melete | messaging stream · PR | — | rebuild gate |
 | Self-ricing | livery + facets | `lyra rice` (`lint`/`stage`/`compose`/`draft`/`mode`/`take`/`back` real; `declare`/`transpose` exit-64 stubs) | on | rebuild gate |
-| Agent-session terminal commander | shellbridge + aoided watcher | widget · `aoide graph session` · click/keybind jump | on | — |
+| Agent-session terminal commander | shellbridge + aoided watcher | widget · `aoide session` · click/keybind jump | on | — |
 
 ## Related
 

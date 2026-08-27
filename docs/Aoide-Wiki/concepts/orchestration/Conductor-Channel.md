@@ -25,7 +25,7 @@ Every terminal runs conducted by default, so it is a tracked, conductable
 session out of the box — no opt-in. The parent-autogate rule lets an
 orchestrator freely command the children it spawned; sibling sessions
 (sharing a live parent) autogate each other too. Headless conduct
-(`--headless`, no controlling terminal at all), `graph spawn` (the detached
+(`--headless`, no controlling terminal at all), `spawn` (the detached
 launch command), and sender provenance (a delivered payload carries a `from
 <sender>: ` prefix) round out the no-terminal case without changing the core
 channel's shape: one PTY, one control socket, one gated door per session.
@@ -85,9 +85,9 @@ threads `AOIDE_SESSION_ID`, already blocks on `wait()`.
   `conductable` flag. `conduct` is the one wrapper — `graph wrap`, a
   lightweight observe-only variant with no PTY, is deleted (zero callers).
   `--headless` (below) drops the requirement that the caller have a terminal
-  at all; `graph spawn` is the detached launcher that re-execs `conduct
+  at all; `spawn` is the detached launcher that re-execs `conduct
   --headless` and returns immediately.
-- **`aoide graph send --id <id> [--submit] [--yes] [--from <sender>] --
+- **`aoide send --id <id> [--submit] [--yes] [--from <sender>] --
   <text>`** — the one door both callers use. Connects to the session's
   control socket and injects `<text>`. `--submit` appends the target
   harness's own submit keystroke, resolved at delivery time from the
@@ -104,7 +104,7 @@ threads `AOIDE_SESSION_ID`, already blocks on `wait()`.
   live chat title claude already writes to its terminal window, so
   un-conducted sessions still label correctly.
 
-## Headless conduct & `graph spawn` — no terminal required
+## Headless conduct & `spawn` — no terminal required
 
 Conduct's PTY is the injection surface. Nothing about it requires a real
 controlling tty, raw-moded and resized by SIGWINCH: a caller need not be
@@ -112,7 +112,7 @@ sitting at a terminal — or be a terminal at all — to launch `conduct`.
 
 - **`aoide conduct --headless [--agent A] [--parent P] [--id I] --
   <command …>`** — the identical PTY-backed session (same registration,
-  same control socket, same `graph send` steering) with NO controlling
+  same control socket, same `send` steering) with NO controlling
   terminal. The multiplexer never reads stdin — nothing to read it from —
   and the pty-master's output mirrors to an append-only, unrotated
   per-session log file: `state/sessions/<sessionId>.log`
@@ -126,7 +126,7 @@ sitting at a terminal — or be a terminal at all — to launch `conduct`.
   refuse outright), so a headless pty falls back to a conventional 80×24
   instead. Everything else — injection socket, exit mirroring,
   `AOIDE_SESSION_ID` export — is byte-identical to the interactive path.
-- **`aoide graph spawn [--agent A] [--parent P] [--id I] [--prompt T] --
+- **`aoide spawn [--agent A] [--parent P] [--id I] [--prompt T] --
   <command …>`** — the DETACHED command over headless conduct. Where
   `conduct`/`wrap` block the calling process until the wrapped agent exits,
   `spawn` re-execs the running `aoide` binary as `conduct --headless … --
@@ -140,8 +140,8 @@ sitting at a terminal — or be a terminal at all — to launch `conduct`.
   session (spawn-first, same as `wrap`/`conduct`): the socket simply never
   appears and `spawn` reports `registered: false` honestly. An optional
   `--prompt` is injected only AFTER registration succeeds, through the one
-  gated injection door (`graph send --yes --submit`, in-process) — never a
-  direct socket write — the same re-drive shape `graph pending approve`
+  gated injection door (`send --yes --submit`, in-process) — never a
+  direct socket write — the same re-drive shape `session pending approve`
   uses to replay a held entry.
 
 Proven across all three registered agent profiles ([[Agent-Hooking]]): a
@@ -195,18 +195,18 @@ terminal dendrite — no daemon, no background process.
 
 ## The gate (house rule: one gate, one audit log)
 
-Injecting keystrokes into an agent is privileged, so `graph send` is gated
+Injecting keystrokes into an agent is privileged, so `send` is gated
 through [[aoided]] — the same one policy surface every operation flows
 through.
 
 - **Confirm by default.** A send with no standing authorization is recorded
-  as a pending injection (atomic stage write to `song/stage/pending.json`)
+  as a pending injection (atomic stage write to `state/stage/pending.json`)
   and is NOT delivered until approved. The CLI approves inline with `--yes`.
-  `aoide graph pending list | approve | deny` is the standing read/resolve
+  `aoide session pending list | approve | deny` is the standing read/resolve
   surface over the held queue: `list` enumerates held entries (id = array
   position; malformed entries surface as `state: malformed` rather than
   failing the whole read), `approve <id>` re-drives the entry through this
-  exact `graph send` door (`--yes`, in-process) and removes it, `deny <id>`
+  exact `send` door (`--yes`, in-process) and removes it, `deny <id>`
   removes it without injecting. This is CLI-only today — the conductor
   TUI's own one-key approve/deny (below) is still Phase ③.
 - **Autogate policy.** Three rules ship today, all still audited, in
@@ -239,7 +239,7 @@ through.
   `AOIDE_SESSION_ID`. This is attribution, not security: either source is a
   same-user CLI flag or env var any process can set to whatever it likes.
   It exists so a receiving agent and the audit log can see who CLAIMS to
-  send a message; it does not gate delivery. A `graph permit` verdict
+  send a message; it does not gate delivery. A `session permit` verdict
   keystroke (a bare digit answering a permission prompt) is explicitly
   excluded from the prefix — the same "does this text carry a letter" check
   used for the title-rename skip — because prefixing `1` with `from
@@ -253,13 +253,13 @@ through.
 ## The conductor becomes the console
 
 **Status:** planned, Phase ③ — not yet in `app.rs`; no `InputKind::Send`
-today. The pending queue already has a resolve surface (`aoide graph pending
+today. The pending queue already has a resolve surface (`aoide session pending
 list|approve|deny`, above); what's missing is the TUI's one-key approve/deny
 over it, not the underlying read/write door.
 
 - New `InputKind::Send { session_id }` (mirrors the working `Link`
   template): select a node → key (`c` = conduct) → inline prompt → Enter
-  dispatches `graph send`.
+  dispatches `send`.
 - Nodes label by `title`, not id — the DAG reads as who-is-doing-what.
 - Conductable nodes render distinctly from observe-only hooked sessions, and
   pending sends show as a badge awaiting approval — tie the colors to the
@@ -279,7 +279,7 @@ surprising a bare `claude`.
 ## Phases
 
 1. **Core channel** — additive `conductable`/`socket`/`title` fields;
-   `graph send` + `conduct` registered in `commands/graph.rs` and dispatched
+   `send` + `conduct` registered in `commands/graph.rs` and dispatched
    through `dispatch.rs`'s registry lookup (two-doors-one-schema); the PTY
    multiplexer + per-session socket + injection; the aoided gate
    (pending/autogate/audit).

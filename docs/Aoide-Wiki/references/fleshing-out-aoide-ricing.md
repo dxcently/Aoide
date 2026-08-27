@@ -51,9 +51,9 @@ And the discipline added last (the User, closing note of the session):
 │    aoide cue · the business-triggered stderr line            │
 ├──────────────────────────────────────────────────────────────┤
 │  CONDUCTOR CITIZENSHIP  (general — any agent, any purpose)   │
-│    register: hook door │ conduct │ graph spawn │ A2A(remote) │
+│    register: hook door │ conduct │ spawn │ A2A(remote) │
 │    observe:  hook edges + graph tail (transcript ∨ PTY tee)  │
-│    steer:    graph send (gated) │ A2A message/send (remote)  │
+│    steer:    send (gated) │ A2A message/send (remote)  │
 │    escalate: the sudo door — declared ops, polkit auth (§8)  │
 ├──────────────────────────────────────────────────────────────┤
 │  ENGAGEMENTS  (scoped protocols riding citizenship)          │
@@ -73,10 +73,10 @@ for agents aoide can only reach as a *peer* (usually remote):
 
 | agent on this box | door onto the conductor | cost |
 |---|---|---|
-| claude, kimi (hook systems) | hook door — `aoide graph session hook` | free |
-| codex, gemini, aider, any CLI | `conduct` (PTY) / `graph spawn` (detached) | free |
-| anything scriptable | explicit commands — `graph session start/phase/end` | free |
-| an A2A-speaking peer (remote, usually) | peer door — `peer add` / `peer spawn` / `graph send --to` | model turns |
+| claude, kimi (hook systems) | hook door — `aoide session hook` | free |
+| codex, gemini, aider, any CLI | `conduct` (PTY) / `spawn` (detached) | free |
+| anything scriptable | explicit commands — `session start/phase/end` | free |
+| an A2A-speaking peer (remote, usually) | peer door — `peer add` / `peer spawn` / `send --to` | model turns |
 
 All four converge on the same `sessions/hooks/graph.json` records; a
 registered peer folds in as a `kind: "peer"` root node beside the hooked
@@ -115,7 +115,7 @@ One read, three answers, pointers not payload (the terse-index discipline):
   door's window discovery already runs), or the exact hook-on command.
 - **capability** — pointers to guide/schema; the cue never duplicates them.
 - **assignment** — the active engagement's state for THIS session, or
-  pending graph business (an undelivered `graph send`, an unanswered
+  pending graph business (an undelivered `send`, an unanswered
   `awaiting`), or honest `null`.
 
 Bare `aoide` prints the human rendering of the same resolution before the
@@ -132,7 +132,7 @@ aoide <cmd> runs
      ├─ command's domain has live business for THIS caller?
      │    · engagement active in the domain just touched
      │      (a rice command while a rehearsal is running)
-     │    · a pending graph send addressed to it
+     │    · a pending send addressed to it
      │    · it's marked awaiting and something answered
      │        │
      │       yes ──► "♪ cue: rehearsal neon-night @ check — `lyra rice score`"
@@ -194,7 +194,7 @@ v1 is raw ring log + ANSI-stripped last-N lines ("ugly but true"); a
 hand-rolled vt screen model is a later phase only if TUI capture ever
 matters (the TUI-heavy harnesses have transcripts). Output logs live under
 `state/`, not `stage/` — durable observation artifacts, same reasoning as
-captures. The tee lives in `conduct`, not `graph spawn` (spawn stays a bare
+captures. The tee lives in `conduct`, not `spawn` (spawn stays a bare
 detached launch; capture-without-steering is one flag later if wanted).
 Kimi's `wire.jsonl` flush cadence needs a live check before `--follow`
 claims "live" rather than "recent".
@@ -365,7 +365,7 @@ write-back stops depending on agent virtue.
 ### 5.4 Reviews and planning — gates, not scripts
 
 Orchestration itself stays out of scope: agents already spawn each other
-via `conduct` / `graph send` / A2A with `--parent` edges. The rehearsal
+via `conduct` / `send` / A2A with `--parent` edges. The rehearsal
 adds enforcement:
 
 - `rice review record --verdict pass|fail --notes …` — `score advance`
@@ -501,14 +501,14 @@ as a big retrofit pass.
 **Decision: just nix.** Aoide invents no store, no generation format, no
 snapshot layer. Pruning commands are wrappers whose whole contribution is
 *selection, correlation, and rails* — nix already does the deleting, and
-`graph prune` (EXISTS — drops finished session records) already sets the
+`session prune` (EXISTS — drops finished session records) already sets the
 house meaning of the word.
 
 | command | wraps | protected by default |
 |---|---|---|
 | `rice take prune [--older-than 14d] [--keep 20] [--all-but-marks]` (LANDED, A9) | aoide's own `takes/` dir — its only native storage | **marked** takes (reviewed-good states); `--force` to take one out |
 | `aoide nix prune [--generations 42,43] [--older-than 30d] [--keep 5]` | `nix-env -p /nix/var/nix/profiles/system --delete-generations …`, then optionally `nix store gc` | current + booted generation (nix refuses these anyway — a free rail); any generation the journal flags `keep` |
-| `aoide graph prune` | EXISTS — done session records | — |
+| `aoide session prune` | EXISTS — done session records | — |
 
 Both prune commands are dry-run-shaped: they print what would go and what it
 frees, and the bare-tty mode is a **multi-select** picker (space toggles,
@@ -609,11 +609,11 @@ comment already carries for why it is *not* used on a pure append.
 **The commands (design — none built yet):**
 
 ```
-aoide graph project edits [--project <name>] [--session <id>]
+aoide project edits [--project <name>] [--session <id>]
                           [--path <rel>] [--since <Nd|Nh>] [--json]
 
-aoide graph project back --session <id> [--project <name>] [--force] [--json]
-aoide graph project back                    bare on a tty → the picker
+aoide project back --session <id> [--project <name>] [--force] [--json]
+aoide project back                    bare on a tty → the picker
 ```
 
 `edits` is a pure fold over the journal — no git, no repo required, works on
@@ -680,13 +680,13 @@ is captured before it is overwritten, so **a revert can itself be reverted.**
   fails the hash check at revert time and surfaces as the second refusal
   shape, "changed outside aoide's view" — detected, never silently
   overwritten, but never captured either.
-- **A non-git project registers and works — up to a point.** `graph project
+- **A non-git project registers and works — up to a point.** `project
   add` still only validates an absolute, existing directory; whether it is a
   git repo is reported (`git: false`), never fixed for the User. `edits`
   (provenance) needs no repo and works identically either way. `back`
   refuses with `not-a-git-repo`, naming `git init`, and never runs it —
   aoide does not create a repository inside a directory the User named
-  without being asked to. (`graph project add|list|remove` are the LANDED
+  without being asked to. (`project add|list|remove` are the LANDED
   registration commands; `edits` and `back` are not built.)
 - **`NotebookEdit` carries `notebook_path`, not `file_path`.** Capture reads
   either key, so a notebook edit is captured like any other rather than
@@ -966,14 +966,14 @@ R4 #4, R6 #5):
   --capture`) confirms the shape of a claude `PostToolUse` payload on this
   box** — the `pre` arm is already grounded in existing code, the `post`
   arm is not, and R3 is not written against an assumption.
-- **R4** (pending, tracker #4) — `aoide graph project edits`, the
+- **R4** (pending, tracker #4) — `aoide project edits`, the
   provenance query, both renders.
-- **R5** — `aoide graph project back --session`, flags/`--json` entrance —
+- **R5** — `aoide project back --session`, flags/`--json` entrance —
   the step that lands the ask.
 - **R6** (pending, tracker #5) — the bare-on-a-tty picker lane. Its A8
   prerequisite (`aoide_protocol::pick`) is landed; nothing else in R
   depends on it, so R7 may land first.
-- **R7** — `graph project edits prune`: retention for the journal and the
+- **R7** — `project edits prune`: retention for the journal and the
   `refs/aoide/preimage/*` refs no surviving line names.
 
 ## 11. Decisions made (unmake at will) and open items
@@ -1066,7 +1066,7 @@ Decided in-session, one line each:
   calls them `pre`/`post` lines, prose says *pre-image*. `part` stays the
   reserved musical candidate if the User ever wants one, matching the
   take-tree's own no-noun-until-asked discipline.
-- No `graph project new` — registration is the only project-level
+- No `project new` — registration is the only project-level
   provenance the ask describes; a scaffolding command is a different feature.
 - `git merge-file` (a three-way merge on conflict) is rejected as the
   conflict policy — it would land literal conflict markers in the User's

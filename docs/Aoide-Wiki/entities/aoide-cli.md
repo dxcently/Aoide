@@ -59,7 +59,7 @@ adding, removing, or renaming a leaf shows as a deliberate diff against that
 snapshot.
 
 The command surface holds **65 leaves across the groups this page tracks**;
-`aoide schema --json | jq '.commands | length'` reports 80, since further
+`aoide schema --json | jq '.commands | length'` reports 73, since further
 commands exist that are not yet covered here: the `inbox` group, `who`,
 `events tail`, `identity`, and the `peer` group's `hub`/`allow`/`spawn`,
 `discover`/`invite`, and 4-command `pair` ceremony. `lyra schema --json`
@@ -77,7 +77,10 @@ the groups it documents.
 | `onboard` | 1 | real — the clone-onboarding lane, delegates the nix half to `lyra onboard` ([[Clone-and-Run]]) |
 | `update` | 1 | stub, gated |
 | `mcp serve`, `daemon` | 2 | real |
-| `graph` group (incl. `pending list/approve/deny`, `spawn` — below) | 19 | real |
+| `graph`, `graph link` | 2 | real — the read/analysis lens the `graph` prefix kept |
+| `project add/remove/list` | 3 | real |
+| `session start/phase/end/hook/carry/permit/pending list/approve/deny/prune/reap` | 11 | real — `start`/`phase`/`end`/`hook` are `internal` (hook plumbing, hidden from `aoide guide`) |
+| `send`, `spawn`, `resurrect` | 3 | real |
 | `conduct` | 1 | real |
 | `adapter melete` | 1 | real |
 | `conductor` | 1 | real |
@@ -95,7 +98,7 @@ serve` raises the A2A JSON-RPC/HTTP server (AgentCard, `message/send`,
 `Authorization: Bearer` token, resolved fresh per request through
 [[Secrets-Broker]] and failing closed on a resolve error. Driving an
 external aoide instance over this wire is the **`peer`** group's job (below)
-— `peer add`/`peer spawn`/`graph send --to` — not a separate `a2a` client
+— `peer add`/`peer spawn`/`send --to` — not a separate `a2a` client
 command.
 
 **`usage`** computes the local token/cost rollup behind the opt-in claude.ai
@@ -143,33 +146,40 @@ transpose`/`rice take`/`rice back` and the `livery`/`screen`/`herald`/
 [[Screen-Commands|Screen-Commands]] for their per-command
 reference, and [[Self-Ricing]] for the self-ricing loop's walkthrough.
 
-### The `graph` group — session/project DAG + the conductor mesh
+### The graph/session/project families — session/project DAG + the conductor mesh
 
-`view`, `project add`/`remove`/`list`, `link`, `session start`/`phase`/
-`end`/`hook` (takes `--agent <name>`, default `claude`; the payload maps
-through that harness's agent profile, [[Agent-Hooking]]), `permit`,
-`prune` are the [[Session-Graph]] viewer and manager feeding the
-[[Terminal-Commander]] roster (see [[Agent-Hooking]] for the
-session-registration doors). `graph permit --id <id>` answers a harness
-permission prompt inside a conducted session by typing the profile's
-verified permission key (claude's `1`/`3`). Two commands turn the graph
-into a live conductor mesh:
+The `graph` prefix owns only the read/analysis lens now — bare `graph` (the
+render) and `graph link` — since command-defrag task #101 (Lane R) promoted
+everything that acts or manages lifecycle to its own top-level family:
+`project add`/`remove`/`list`, `session start`/`phase`/`end`/`hook` (takes
+`--agent <name>`, default `claude`; the payload maps through that harness's
+agent profile, [[Agent-Hooking]]), `session carry`, `session permit`,
+`session pending list`/`approve`/`deny`, `session prune`, and bare
+`send`/`spawn`/`resurrect`. `session start`/`phase`/`end`/`hook` carry
+`internal: true` in the schema — hook plumbing a harness's own lifecycle
+drives, hidden from `aoide guide`'s human listing though still enumerated by
+`schema`/MCP/A2A; `session carry` is not internal. Together these are the
+[[Session-Graph]] viewer and manager feeding the [[Terminal-Commander]]
+roster (see [[Agent-Hooking]] for the session-registration doors). `session
+permit --id <id>` answers a harness permission prompt inside a conducted
+session by typing the profile's verified permission key (claude's `1`/`3`).
+Two commands turn the graph into a live conductor mesh:
 
-- **`graph reap`** — the liveness sweeper: marks a session `done` when its
+- **`session reap`** — the liveness sweeper: marks a session `done` when its
   window is gone (`hyprctl clients -j`) or its pid's `/proc` entry is gone,
-  run on a systemd user timer (~12s) as the companion to `graph prune`
+  run on a systemd user timer (~12s) as the companion to `session prune`
   (which only drops sessions already `done`).
-- **`graph send`** — the one gated injection door: types text into a
+- **`send`** — the one gated injection door: types text into a
   *conducted* session's control socket. Held pending approval by default;
   `--yes` (or an autogate policy) delivers and renames the node to a
   one-line form of the text. Every outcome is audited.
 
 Registering a NEW conducted session is `conduct` (below), the PTY-backed
-wrapper, or `graph spawn` for a DETACHED session that outlives the caller.
+wrapper, or `spawn` for a DETACHED session that outlives the caller.
 `graph wrap` (inherited-stdio spawn, no PTY) is deleted — zero callers once
 `conduct` covered the need. `graph emit` is deleted too: every stage
-mutation restages `song/stage/graph.json` for Quickshell automatically now
-(`restage_graph`), so `graph prune` is the only manual resync left, for
+mutation restages `state/stage/graph.json` for Quickshell automatically now
+(`restage_graph`), so `session prune` is the only manual resync left, for
 reconciling a hand-edit. `graph focus` is deleted as a CLI command; jumping
 to a session's window is a library call (`focus_session`,
 [[Session-Graph]]) the conductor and `shellbridge`'s `focussession` socket
@@ -214,10 +224,10 @@ reachability is out of scope for this v0.
 The two are deliberately distinct parts of speech. **`conduct`** is the
 command — spawn/register/wait/end lifecycle (exit mirrored,
 `AOIDE_SESSION_ID` exported) on a controlling tty plus a per-session control
-socket, so `graph send` can type into the running agent while its own TUI
+socket, so `send` can type into the running agent while its own TUI
 runs undisturbed.
 **`conductor`** is the noun — the interactive terminal frontend over the
-whole trunk: a ratatui TUI (DAG / sessions / projects / log / status
+whole trunk: a ratatui TUI (DAG / session / projects / log / status
 panels, ~500ms poll, no watcher/async runtime) that dispatches every action
 through the same `dispatch()` the CLI and MCP doors use.
 
@@ -248,7 +258,7 @@ shortcut the panel itself registers (`aoide:dock`), not a CLI command (see
   outcome envelope, so external tooling and the MCP tool list parse it
   directly. The MCP door (`mcp serve --stdio`) is a minimal
   dependency-free JSON-RPC 2.0 server over newline-delimited stdio: each
-  command becomes one tool named by its dotted path (`graph.view`),
+  command becomes one tool named by its dotted path (`session.hook`),
   args/flags become the `inputSchema`, and `tools/call` dispatches back
   into the same handlers the CLI uses. `lyra mcp serve --stdio` is the same
   façade over lyra's own registry.

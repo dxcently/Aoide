@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, shell, ui, qml, quickshell]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -168,7 +168,7 @@ Four are registry-only, with no QML anywhere in the repo:
   session is unbuilt.
 - **`sessionGraph`** — declared but has no QML body: the standalone DAG
   overlay this surface once named is no longer part of the QML tree.
-  `aoide graph view`/`--json` and the `aoide conductor` TUI are the DAG's
+  bare `aoide graph`/`--json` and the `aoide conductor` TUI are the DAG's
   renderers today ([[Session-Graph]]).
 
 ## Launcher

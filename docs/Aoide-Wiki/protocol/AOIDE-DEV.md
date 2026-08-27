@@ -82,7 +82,7 @@ CLI-specific tiering only.
 ### 2.2 Session control and parallelism
 
 - Drive sessions with `aoide conduct -- <cmd>` and command them with
-  `aoide graph send --id <id> [--submit] [--yes] -- <text>`. Parent-autogate
+  `aoide send --id <id> [--submit] [--yes] -- <text>`. Parent-autogate
   applies to children spawned by the orchestrator; other sessions need `--yes`.
 - Batch independent agents so they run concurrently; keep conclusions, not
   file dumps. Resume a failed agent by id (`SendMessage`) rather than spawning
@@ -229,8 +229,8 @@ Small, coherent, verified changes land directly.
   leave files another agent is mid-editing alone.
 - **No AI co-author trailer** on Aoide commits — push as khoa, plain.
 - **Never commit** `.claude/settings.json` (user commits by hand),
-  `node_modules`, or `song/stage/*` (live desktop state, not a commit
-  target).
+  `node_modules`, or `song/stage/*`/`state/stage/*` (live desktop state, not a
+  commit target).
 - **Gates before landing:** `nix build .#<pkg>` for touched packages,
   `nixfmt --check` on changed nix, a toplevel eval, the relevant
   `aoide … --json` smoke check. Stage new files before a flake eval — it
@@ -376,8 +376,8 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
   (`EDITOR_BASENAMES`/`friendly_editor_command`,
   `crates/conduct/src/graph/conduct.rs`) — snapshot `git
   status --porcelain` around that window, diff to newly-changed paths, write
-  `song/stage/edits.json` (atomic write-temp-rename, same contract as other
-  stage files); `aoide graph edits [list|ack]` CLI. Undecided: how the
+  `state/stage/edits.json` (atomic write-temp-rename, same contract as other
+  conducting stage files); `aoide graph edits [list|ack]` CLI. Undecided: how the
   orchestrator learns without polling — PTY injection (collision risk with a
   human mid-keystroke) vs. a visual badge on the session row (no collision,
   relies on being noticed). Scope git-repos-only, no mtime fallback. See
@@ -516,7 +516,7 @@ flag by resolving it AND deleting its line; add one the moment you raise it.
 | Stage a song live | `lyra rice stage <song>` |
 | Check QML loads | `qs -p …/shell.qml` |
 | Show the user | `grim` → read the PNG back → judge → send |
-| Command a session | `aoide graph send --id <id> [--submit] [--yes] -- <text>` |
+| Command a session | `aoide send --id <id> [--submit] [--yes] -- <text>` |
 | Machine-readable API | `aoide schema --json` |
 
 ## Related

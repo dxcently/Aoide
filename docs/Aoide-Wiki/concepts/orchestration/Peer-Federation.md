@@ -13,7 +13,7 @@ session graph into its own, folded in as a subtree. It is not a new
 transport — it is built entirely on top of the existing [[A2A-Door]] (§6):
 one new JSON-RPC method (`aoide/graphSummary`), a client-side peer registry
 plus a per-peer pull cache, and an additive fold in `build_graph` (the same
-function that produces `graph view`'s document). Spec: `CONTRACTS.md`
+function that produces bare `graph`'s document). Spec: `CONTRACTS.md`
 §7 (v0, 2026-08-14).
 
 **Melete-optional** — federation works standalone; nothing in it references
@@ -40,8 +40,9 @@ contract amendment, not designed or assumed here.
 
 The set of other aoide instances this one has registered, written atomically
 via `aoide_storage::peer_store`. Lives in the gitignored root-runtime
-`state/` dir — **not** `song/stage/`: a peer roster is account/global
-external-registry state, not song-scoped rehearsal state. Additive/
+`state/` dir — **not** either stage tree (`state/stage/` conducting state or
+`song/stage/` rice staging): a peer roster is account/global
+external-registry state, not stage-scoped rehearsal state. Additive/
 tolerate-missing: an absent file just means "no peers registered," never
 an error.
 
@@ -54,7 +55,7 @@ an error.
 }
 ```
 
-`autogate` (default `false`) is the cross-device analogue of `graph send`'s
+`autogate` (default `false`) is the cross-device analogue of `send`'s
 local "sender is the target's own parent" autogate rule: a peer marked
 `true` has its inbound `message/send` auto-deliver without the pending
 queue even though the connection is non-loopback — see
@@ -128,10 +129,10 @@ caller still gets the standard `-32601`.
 same precedence-chain discipline the rest of the server's config resolution
 follows. `instance.url` is this instance's own advertised URL — the same
 string the AgentCard's own `url` field carries. `graph` is EXACTLY what
-`aoide graph view --json` resolves — the SAME `resolve_graph_document`
+`aoide graph --json` resolves — the SAME `resolve_graph_document`
 function both that command and this method call, so no second graph
 vocabulary is invented for the wire. Every stage mutation restages
-`song/stage/graph.json` for Quickshell automatically, so there is no
+`state/stage/graph.json` for Quickshell automatically, so there is no
 separate emit step to keep in sync.
 
 ## The `peer:*` node convention (graph fold)
@@ -148,7 +149,7 @@ separate emit step to keep in sync.
   "stale"` and no `children`; never a crash, never a silently-dropped peer.
   `error` carries the last pull failure's reason when present.
 
-Local graph commands (`graph prune`/`reap`/`link`) keep ignoring `peer:*`
+Local graph commands (`session prune`/`session reap`/`graph link`) keep ignoring `peer:*`
 ids — none of those commands read `peer_store` at all, they operate purely
 on `sessions.json`'s `SessionRecord`s, so a `peer:*` id is simply never a
 session id they could match.
@@ -161,9 +162,9 @@ session id they could match.
 behavior. `status --json` carries the full registry row per peer; `peer
 list` folded into it (command-defrag lane D).
 
-## Sending across the fold — `graph send --to peer/<query>`
+## Sending across the fold — `send --to peer/<query>`
 
-[[Conductor-Channel|`graph send`]]'s `--to` flag resolves a target name
+[[Conductor-Channel|`send`]]'s `--to` flag resolves a target name
 through the same tiered address grammar `aoide who` uses; a `peer/<query>`
 form is its remote tier. It resolves `<query>` against a registered peer's
 CACHED graph (the same `state/peer-cache/<name>.json` the fold above reads)
@@ -171,7 +172,7 @@ and, on a match, delivers the message over A2A `message/send` instead of
 queuing a local pending send. The call is always attempted: the receiving
 peer gates its own delivery through its own [[A2A-Door]] security model, so
 a remote send never sits in the sender's local pending queue. `--to` and
-`--id` are mutually exclusive on `graph send`.
+`--id` are mutually exclusive on `send`.
 
 ## Security — the non-loopback pending-gate amendment
 
@@ -183,7 +184,7 @@ address first (`a2a::classify_origin` → `PeerOrigin`: `Loopback` /
 `Remote(IpAddr)` / `Unknown`):
 
 - **`Remote`** — falls back to the same interactive pending-approval queue
-  `graph send` already uses, UNLESS the sender's address matches a peer
+  `send` already uses, UNLESS the sender's address matches a peer
   registered with `autogate: true` in `state/peers.json`
   ([[#The registry — `state/peers.json`]] above) **or** presents that
   peer's own `tokenFile` secret as a bearer token

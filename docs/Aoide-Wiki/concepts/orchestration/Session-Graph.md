@@ -8,19 +8,22 @@ tags: [aoide, graph, session, terminal, agent, cli]
 # Session Graph — the Project/Session DAG
 
 [[Terminal-Commander]]'s roster of agent sessions is a **DAG of projects and
-sessions**: who spawned whom, and which project each session belongs to. One
-CLI group, `aoide graph`, is the DAG's terminal viewer and management layer —
-every subcommand is implemented (`view`/`project`/`link`/`session`/
-`spawn`/`send`/`pending`/`permit`/`prune`/`reap`, per `aoide
-schema --json`). Like every command it registers into the single `commands/`
-registry (`commands/graph.rs`, thin registrations over the `graph/` domain
-functions — see [[aoide-cli]]), so the CLI door and the MCP door share the
-group ([[Agent-Interface]]).
+sessions**: who spawned whom, and which project each session belongs to. The
+DAG's terminal viewer and management layer spans several top-level command
+families — bare `graph` (the render) and `graph link` are the read/analysis
+lens; `project add|remove|list`, `session start|phase|end|hook|carry|
+permit|pending list|approve|deny|reap|prune`, and bare `send`/`spawn`/
+`resurrect` are the acting/lifecycle surface (command-defrag task #101, Lane
+R). Every subcommand is
+implemented, per `aoide schema --json`. Like every command it registers into
+the single `commands/` registry (`commands/graph.rs`, thin registrations
+over the `graph/` domain functions — see [[aoide-cli]]), so the CLI door and
+the MCP door share the group ([[Agent-Interface]]).
 
 ## The graph model
 
 **Nodes** are projects (`project:<name>`) and sessions (`session:<sessionId>`).
-Commands that take a node (`view --focus`) accept either the
+Commands that take a node (`graph --focus`) accept either the
 full node id or the bare id.
 
 **Edges** come in two kinds:
@@ -45,9 +48,9 @@ project group under a synthetic `(unanchored)` root. Each session's live
 state is the latest hook phase from `hooks.json` merged over its raw roster
 state ([[shellbridge]] writes both files).
 
-## The viewer — `graph view`
+## The viewer — bare `graph`
 
-`graph view` renders the DAG as a Unicode box-drawing tree in the terminal;
+Bare `graph` renders the DAG as a Unicode box-drawing tree in the terminal;
 `--focus <id>` marks a node with `▶`, and `--json` emits the structured graph
 document instead. A sample render:
 
@@ -60,13 +63,15 @@ document instead. A sample render:
 ```
 
 Every stage mutation restages the same resolved document atomically to
-`song/stage/graph.json` — the identical write-temp-then-rename pattern as the
-livery emitter — via `restage_graph`, so [[Quickshell]] hot-reloads it without
-a separate emit step. `graph prune` is the manual resync when a hand-edit to
-one of the stage files needs to be reconciled back into `graph.json`.
+`state/stage/graph.json` — the identical write-temp-then-rename pattern as the
+livery emitter (which stages to `song/stage/` instead — the two trees are
+split by owner, core vs. lyra) — via `restage_graph`, so [[Quickshell]]
+hot-reloads it without a separate emit step. `session prune` is the manual
+resync when a hand-edit to one of the stage files needs to be reconciled
+back into `graph.json`.
 
-The desktop has no standalone DAG-diagram surface today: `graph view`/
-`--json` in the terminal and the `aoide conductor` ratatui TUI (DAG/sessions/
+The desktop has no standalone DAG-diagram surface today: bare `graph`/
+`--json` in the terminal and the `aoide conductor` ratatui TUI (DAG/session/
 projects/log/status panels) are the DAG's renderers. On the desktop, the
 [[Gadget-Dock]]'s **Conductor gadget** gives the at-a-glance agent view
 instead — a beamed tree of agent/sub-agent sessions, not a literal node/edge
@@ -81,9 +86,9 @@ should follow).
 
 ## The management layer
 
-- **`graph project add|remove|list`** — keep the project registry
-  `song/stage/projects.json`. Idempotent: `add` re-registers an existing name,
-  `remove` of an absent project succeeds.
+- **`project add|remove|list`** — keep the project registry
+  `state/stage/projects.json`. Idempotent: `add` re-registers an existing
+  name, `remove` of an absent project succeeds.
 - **`graph link <child> <parent>`** — record a spawned-by edge by setting
   `parentSessionId` on the child's session record. Self-links and cycles are
   rejected (the handler walks the parent chain), exit 1.
@@ -100,32 +105,32 @@ should follow).
   unit-tested helpers `normalize_addr` / `window_present`). The full failure
   vocabulary: `session-not-found`, `no-window-address`,
   `hyprctl-unavailable`, `hyprctl-failed`, `window-not-found`.
-- **`graph prune`** — drop sessions whose **raw** roster state is `done` (not
+- **`session prune`** — drop sessions whose **raw** roster state is `done` (not
   the merged hook phase) along with their hook records; any `kind:"subagent"`
   descendant of a dropped session cascades away with it (see "Sub-agent
   cascade" below), and children that survive get `parentSessionId` cleared
   (un-orphaned rather than dangling). Everything removed or cleared is
   reported.
-- **`graph spawn`** and **`graph send`** — the detached headless-launch command
+- **`spawn`** and **`send`** — the detached headless-launch command
   and the gated cross-session injection door. Full mechanism in
   [[Conductor-Channel]].
-- **`graph pending list|approve|deny`** — the resolve surface over sends held
-  without standing authorization (`song/stage/pending.json`); `approve`
-  re-drives a held entry through `graph send` with `--yes`.
-- **`graph permit`** — publish a permission SUMMONS card to
-  `song/stage/herald.json` for a session blocked on a tool/permission prompt;
+- **`session pending list|approve|deny`** — the resolve surface over sends held
+  without standing authorization (`state/stage/pending.json`); `approve`
+  re-drives a held entry through `send` with `--yes`.
+- **`session permit`** — publish a permission SUMMONS card to
+  `state/stage/herald.json` for a session blocked on a tool/permission prompt;
   the desktop herald surface renders it with approve/deny buttons whose click
   types the verdict back through the session's socket. The hook door raises
   it automatically the moment a session goes `awaiting`.
-- **`graph session carry on|off`** — mark or unmark a session DURABLE in
+- **`session carry on|off`** — mark or unmark a session DURABLE in
   `state/carry.json`, so a project's whole carried set can later be
   resurrected together. A separate, freely-mutated set beside the ledger:
-  writes only `carry.json`, atomic, no stage lock, outside the `song/stage/`
+  writes only `carry.json`, atomic, no stage lock, outside the `state/stage/`
   dual-writer surface entirely. `--id <id>` targets any session id directly,
   including one already gone from the roster — no roster lookup gates the
   write, which is what lets a mark be flipped post-mortem, off a bare ledger
   id. Bare and `--self` both resolve the target from `$AOIDE_SESSION_ID`.
-  `graph spawn --carry` marks a session at birth; a bare `graph resurrect
+  `spawn --carry` marks a session at birth; a bare `resurrect
   --project <x>` (no `--all`/`--id`) resumes a project's whole carried set
   and transfers the mark from an old id onto the fresh one that replaces
   it — see [[Graph-and-Conduct]] for the resurrect-selection mechanism and
@@ -137,14 +142,14 @@ writers add to the same records.
 
 ## Liveness reaping — the SIGKILL problem
 
-`graph prune` only drops sessions whose raw state is already `done` — an
+`session prune` only drops sessions whose raw state is already `done` — an
 *orderly* exit. Conduct-by-default makes a *disorderly* exit common: a
 terminal closed with `SUPER+Q` or killed outright tears down the `conduct`
-process uncatchably, so it can never run its own `graph session end`.
+process uncatchably, so it can never run its own `session end`.
 Left alone, the record strands `running` in the roster forever (observed:
 22 dead `conduct-*` sessions piled up in ~8 minutes of normal use).
 
-**`aoide graph reap`** is the out-of-band sweep that resolves these. It marks
+**`aoide session reap`** is the out-of-band sweep that resolves these. It marks
 a session **dead** when *any* of three independent signals fires:
 
 - **window gone** — the record has a non-empty `windowAddress` that is no
@@ -172,7 +177,7 @@ still eligible for the staleness signal, never for the other two.
 
 Dead sessions are marked `done` (session + hook record) and then run through
 the same `prune_done` path — dropped, `graph.json` re-staged atomically.
-`graph reap` never errors on "nothing to reap" and never errors on an
+`session reap` never errors on "nothing to reap" and never errors on an
 unreachable compositor.
 
 ## Sub-agent cascade
@@ -181,16 +186,16 @@ A `Task`/`Agent`-tool spawn (see [[Agent-Hooking]]'s `subagent_tools`)
 registers its child as a `kind:"subagent"` node. That node carries no `pid`
 and no `windowAddress` — it lives and dies inside its parent process, so the
 window/pid signals structurally can never fire for one. Its **only** cleanup
-path is cascading out when its owning top-level session does: a clean `graph
-session end` walks `parentSessionId` transitively and drops the whole
+path is cascading out when its owning top-level session does: a clean
+`session end` walks `parentSessionId` transitively and drops the whole
 sub-agent subtree, and `prune_done` does the same for anything it is about to
-remove — so every `prune_done` caller inherits the cascade: `graph prune`'s
-done-sweep, `graph reap`'s liveness sweep (above), and the same-window
+remove — so every `prune_done` caller inherits the cascade: `session prune`'s
+done-sweep, `session reap`'s liveness sweep (above), and the same-window
 duplicate-eviction retirement (below). One shared walk
 (`doomed_subagent_descendants`, fixed-point over `parentSessionId`, handles
 subagent-of-subagent nesting) backs both paths, so a session that dies
 **abnormally** — killed terminal, crashed process, caught by the reap sweep
-rather than exiting through `graph session end` — loses its sub-agent
+rather than exiting through `session end` — loses its sub-agent
 children exactly as cleanly as an orderly exit does.
 
 The same pass also retires **same-window agent duplicates**: a compact/resume
@@ -256,19 +261,26 @@ seeing a stale "haunting" session.
 
 ## Open seams
 
-The `stage_dir()` / `AOIDE_STAGE_DIR` mismatch is fixed and documented as a
-contract seam ("Stage-dir resolution", `CONTRACTS.md §4` — see
-[[shellbridge]]). The `focuswindow` exit-0 ambiguity is resolved by the
-liveness check above. Spawn-time parenting is now two-layered: the kitty
-wrapper stamps `parentSessionId` directly for the common nested-terminal case
+`state/stage/` (the conducting tree this page's commands read and write) and
+`song/stage/` (rice/paint staging) resolve through two separate functions —
+`conducting_stage_dir()` and `stage_dir()` — that share the same
+`$AOIDE_STAGE_DIR` absolute-path override so a relocated stage tree relocates
+as a unit, and otherwise fall back to two different default directories
+("Stage-dir resolution", `CONTRACTS.md §4` — see [[shellbridge]]). The
+`focuswindow` exit-0 ambiguity is resolved by the liveness check above.
+Spawn-time parenting is now two-layered: the kitty wrapper stamps
+`parentSessionId` directly for the common nested-terminal case
 ([[Conductor-Channel]]), and a hook-registered session with no explicit
 `--parent` resolves one automatically via the `hookAncestry` walk — so `graph
 link` is the manual override path for edges outside both, not the only
-source. The dock's `SUPER+G` toggle and the launcher's `SUPER+SPACE` both
-resolve in-process (Hyprland global shortcuts the QML registers itself)
-rather than through an `aoide shell` CLI command; only `SUPER+ESCAPE` (lock)
-still execs an `aoide shell lock` command absent from the schema (open
-thread, see [[aoide-cli]]).
+source (`graph link` is the one other command the `graph` prefix still owns
+after the Lane R cutover, alongside the bare render).
+
+The dock's `SUPER+G` toggle and the launcher's `SUPER+SPACE` both resolve
+in-process (Hyprland global shortcuts the QML registers itself) rather than
+through an `aoide shell` CLI command; only `SUPER+ESCAPE` (lock) still execs
+an `aoide shell lock` command absent from the schema (open thread, see
+[[aoide-cli]]).
 
 ## Related
 

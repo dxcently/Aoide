@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, cli, content, hooks, notification]
 ---
 
@@ -101,13 +101,13 @@ To *send* a notification use `notify-send`.
   `$XDG_RUNTIME_DIR/aoide/shellbridge.sock`
   (`pkgs/aoide/crates/conduct/src/shellbridge.rs::send_line`). The bridge
   daemon — the single writer, serialising concurrent pushes through its accept
-  loop — folds the record into the ledger `song/stage/herald.json` (resolves
-  `~/Aoide/song/stage/herald.json`; `$AOIDE_STAGE_DIR` absolute override),
+  loop — folds the record into the ledger `state/stage/herald.json` (resolves
+  `~/Aoide/state/stage/herald.json`; `$AOIDE_STAGE_DIR` absolute override),
   written atomically by the daemon (`edit_ledger`). Ledger rules
   (`pkgs/aoide/crates/conduct/src/herald.rs::apply_push`): a non-empty
   `stackTag` replaces the entry holding the same tag, a repeated `id` replaces
   too, everything else appends newest-last, oldest fall off the front at
-  `LEDGER_CAP = 20`. The QML herald reads `herald.json`; `graph permit`
+  `LEDGER_CAP = 20`. The QML herald reads `herald.json`; `session permit`
   publishes permission summonses (`kind: "summons"`) into the same ledger.
 - **Output:** pushed → `"pushed `<id>`"`, data `{pushed: true, id, urgency,
   progress}`. Empty record (no summary and no body) → ok
@@ -123,7 +123,7 @@ aoide hooks install <agent> [--capture] [--json]
 ```
 
 Idempotent merge of aoide's hook wiring into an agent harness's settings file
-so its hook stream pipes into `aoide graph session hook`. `<agent>` is one of
+so its hook stream pipes into `aoide session hook`. `<agent>` is one of
 `claude | kimi | pi`; the per-harness path/format lives in
 `pkgs/aoide/crates/protocol/src/agents.rs` (`SettingsSpec`).
 
@@ -155,19 +155,19 @@ so its hook stream pipes into `aoide graph session hook`. `<agent>` is one of
   `SubagentStart`, `SubagentStop`, `SessionEnd`, `Notification`), plus kimi's
   dedicated `PermissionRequest` (10 for kimi, 9 for claude). Hook commands
   installed:
-  - claude (plain): `a=$(command -v aoide) || exit 0; "$a" graph session hook
+  - claude (plain): `a=$(command -v aoide) || exit 0; "$a" session hook
     >/dev/null 2>&1; exit 0` — a missing aoide is a silent no-op.
-  - kimi (plain): `aoide graph session hook --agent kimi`, as a `[[hooks]]`
+  - kimi (plain): `aoide session hook --agent kimi`, as a `[[hooks]]`
     block carrying only `event`/`command`/`timeout = 5` (extra fields break
     kimi's config load).
   - `--capture` (either harness): `sh -c 'tee -a
-    "$HOME/Aoide/state/<agent>-hooks.jsonl" | aoide graph session hook --agent
+    "$HOME/Aoide/state/<agent>-hooks.jsonl" | aoide session hook --agent
     <agent>'`. Temporary debugging only; the `-hooks.jsonl` marker is a
     distinct idempotency key, so capture entries coexist with plain ones
     (installing without `--capture` replaces nothing) and are removed
     manually. `~/Aoide/log` is the audit log file, not this capture path.
   - Idempotency: an event counts as installed when an existing entry's command
-    contains `graph session hook` and matches the current mode's capture
+    contains `session hook` and matches the current mode's capture
     marker; re-running either mode adds nothing.
 
 ## Related

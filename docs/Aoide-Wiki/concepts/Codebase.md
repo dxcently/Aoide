@@ -102,8 +102,9 @@ drift-tripwire figure, [[AOIDE-DEV]] §7) and `guide` exiting
 0; greetd enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
 linger active with the `aoided` and `shellbridge` user units finishing
 `Result=success` (the skeleton binaries seed state and exit 0); stage files
-seeded at `schemaVersion` 0; and a `graph project add → view → emit` round-trip
-landing `graph.json`. The test node trims the stylix and quickshell facets
+seeded at `schemaVersion` 0; and a `project add → graph` round-trip landing
+`graph.json` (every stage mutation restages it automatically, so there is no
+separate emit step to round-trip through). The test node trims the stylix and quickshell facets
 (headless closure cost; the compositor stays for greetd). The script runs in
 about 16 s of wall clock: `nix build .#checks.x86_64-linux.vm-boot -L`. It
 also confirmed in-VM that the unit's `AOIDE_STAGE_DIR` and the binary's
@@ -183,9 +184,10 @@ All nucleus services are user services gated on `aoide.enable`, keyed into
 | `aoide-secrets-serve` | `nucleus/secrets.nix` | **gated on `aoide.secrets.enable`**; SYSTEM (not user) service, own uid `aoide-secrets`, anchored to `multi-user.target` — see [[Secrets-Broker]] |
 | `aoide-obsidian-register` | `dendrites/obsidian.nix` | oneshot; registers a window class with shellbridge |
 
-`systemd.user.tmpfiles.rules` create `~/Aoide/log` (0700) and
-`~/Aoide/song/stage` (0755) at runtime; systemd-tmpfiles deduplicates the shared
-rule declared in both aoided and shellbridge.
+`systemd.user.tmpfiles.rules` create `~/Aoide/log` (0700), `~/Aoide/state/stage`
+(0755, conducting state), and `~/Aoide/song/stage` (0755, rice staging) at
+runtime; systemd-tmpfiles deduplicates the shared rules declared in both
+aoided and shellbridge.
 
 Two **non-service nucleus modules** close baseline gaps, both gated on
 `aoide.enable`:
@@ -205,8 +207,9 @@ Live-side state, all gitignored, none load-bearing for the build:
 - **Socket:** `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` — the one outbound
   channel from QML; adapters and widgets bind exactly this path, never compute
   it.
-- **Stage files** under `song/stage/`: `livery.json` (resolved livery colours,
-  written by [[livery]]'s `rice stage`/`cover set`/other emitters at
+- **Stage files** split by owner into two trees (command-defrag lane S1):
+  `song/stage/` holds rice/paint staging — `livery.json` (resolved livery
+  colours, written by [[livery]]'s `rice stage`/`cover set`/other emitters at
   rehearsal — both refuse under `rice mode declarative`, see
   [[Self-Ricing#Staging vs Declarative Mode]] — and reseeded from the active
   song's committed
@@ -215,25 +218,33 @@ Live-side state, all gitignored, none load-bearing for the build:
   — a write-temp-then-rename script that injects the same `"song"` field
   `rice stage` writes, so a host that boots without ever staging still
   carries a correct live stage twin from the baked default), `mode.json`
-  (the staging/declarative mode marker — absent reads as `declarative`),
-  `sessions.json` (agent session roster, written by
+  (the staging/declarative mode marker — absent reads as `declarative`), and
+  `grimoire.json` (QML-only writer). `state/stage/` holds CONDUCTING
+  state — `sessions.json` (agent session roster, written by
   [[shellbridge]]; records may carry an additive optional `parentSessionId`),
   `hooks.json` (live Claude Code hook phases), `projects.json` (the project
-  registry, kept by `aoide graph project`), `graph.json` (the resolved
-  project/session DAG, restaged automatically by every graph mutation for
-  Quickshell — see [[Session-Graph]]), `cover.json` (the wallpaper note, written by `cover
-  set`), `herald.json` (the notification ledger the Quickshell herald draws
-  from — the shellbridge daemon is the single writer), and `pending.json`
-  (the held-injection queue `graph send`/the A2A door write when their gate
-  doesn't clear immediate delivery, resolved by `graph pending
-  list/approve/deny`). Each has a v0 shape in `CONTRACTS.md §4`; writes are
+  registry, kept by `aoide project add/remove/list`), `graph.json` (the
+  resolved project/session DAG, restaged automatically by every graph
+  mutation for Quickshell — see [[Session-Graph]]), `herald.json` (the
+  notification ledger the Quickshell herald draws from — the shellbridge
+  daemon is the single writer), and `pending.json` (the held-injection queue
+  `send`/the A2A door write when their gate doesn't clear immediate
+  delivery, resolved by `session pending list/approve/deny`). `cover.json`
+  (the wallpaper note, written by `cover set`) is rice staging and stays
+  under `song/stage/`. Each has a v0 shape in `CONTRACTS.md §4`; writes are
   atomic (write-temp-then-rename), and the graph rewriters round-trip unknown
   fields so concurrent writers never lose data.
-- **Stage-dir resolution** (`CONTRACTS.md §4`): every stage
-  reader/writer resolves the stage directory as `$AOIDE_STAGE_DIR` when set
-  to an absolute path (the unit sets it; empty/relative ignored), else the
-  `aoide_home()` fallback — the documented CLI ↔ unit seam, pinned by a
-  serialized precedence test.
+- **Stage-dir resolution** (`CONTRACTS.md §4`): two functions, one per tree —
+  `stage_dir()` for `song/stage/` and `conducting_stage_dir()` for
+  `state/stage/`. Both resolve `$AOIDE_STAGE_DIR` when set to an absolute
+  path (the unit sets it; empty/relative ignored) first, so an override
+  relocates both trees as a unit; with no override each falls back to its
+  own default location under `~/Aoide/` — the documented CLI ↔ unit seam,
+  pinned by a serialized precedence test. The first no-override resolution
+  of `conducting_stage_dir()` runs a one-shot migration moving any of the
+  six conducting files still sitting at the old `song/stage/` location into
+  `state/stage/`, never clobbering a fresher file already there and never
+  touching a rice file.
 
 ## Repo-file roles
 
@@ -265,13 +276,15 @@ nix build .#checks.x86_64-linux.vm-boot -L             # headless QEMU boot test
 --workspace`: `aoide-conduct`/`aoide-server` bind real sockets and a
 workspace-wide run deadlocks on this machine. Each crate carries its own
 `registry.rs` golden test pinning its exact command-path set (`aoide-cli`:
-80 paths; `aoide-lyra`: 43), plus schema validity, exit-code, and MCP
+73 paths; `aoide-lyra`: 43), plus schema validity, exit-code, and MCP
 tool-list-parity tests; the conduct crate's graph domain
 (`crates/conduct/src/graph/{model,doc,common,commands,window,session_store,
-conduct,send}.rs`) carries handlers for all 21 `graph` subcommands: cycle
-rejection, anchoring, a deterministic render snapshot, edge shape, prune
-orphan-clearing, unknown-field round-trip, a serialized stage-dir precedence
-test, and the pure focus-liveness helpers `normalize_addr`/`window_present`.
+conduct,send}.rs`) carries handlers for all 19 commands the bare `graph`
+render, `graph link`, the `project`/`session` families, and bare
+`send`/`spawn`/`resurrect` register into: cycle rejection, anchoring, a
+deterministic render snapshot, edge shape, prune orphan-clearing,
+unknown-field round-trip, a serialized stage-dir precedence test, and the
+pure focus-liveness helpers `normalize_addr`/`window_present`.
 One noted hazard: the env-var test mutex in `shellbridge.rs` is module-local
 — fine while each domain crate coordinates its own env-touching tests via
 `aoide-test-support::env_lock()`.
@@ -290,9 +303,9 @@ append, user gate, default-deny event bus); shellbridge (atomic writer, seeded
 stage files, and a live socket accept loop — `focuswindow`); the melete-adapter skeleton (env-driven
 subscription, metadata-only notification boundary); all four livery emitters; the
 QML shell skeleton; the baked Stylix and compositor fan-outs; and the whole
-`aoide graph` group — 21 subcommands (`view`, `project add/remove/list`,
-`link`, `session start/phase/end/hook`, `wrap`, `spawn`, `resurrect`, `send`,
-`focus`, `prune`, `reap`, `emit`, `permit`, `pending list/approve/deny`),
+graph/session/project surface — 19 commands (bare `graph`, `graph link`,
+`project add/remove/list`, `session start/phase/end/hook/carry/permit/
+pending list/approve/deny/prune/reap`, bare `send`/`spawn`/`resurrect`),
 none a stub (see
 [[Session-Graph]]) — plus the separate
 `aoide conductor` command (also real; the liveness-reap predicate now lives in
@@ -306,7 +319,7 @@ song's `widgets/notifications.qml`) —
 across the facet's nine `owner = "quickshell"` surfaces (bar, notifications,
 launcher, osd, lockscreen, greeter, wallpaper, agentWidgets, sessionGraph; see
 [[Full-Architecture]]). `sessionGraph` is declared but has no QML body today
-— the DAG renders via `aoide graph view`/`aoide conductor`, not a desktop
+— the DAG renders via bare `aoide graph`/`aoide conductor`, not a desktop
 overlay ([[Session-Graph]]). The bootable yomi-strix profile and the
 vm-boot check (above) are likewise real.
 

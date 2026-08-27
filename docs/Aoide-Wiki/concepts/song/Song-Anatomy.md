@@ -98,24 +98,29 @@ folder in the repo, not the wiki.
 
 The live preview/runtime state, hot-reloaded by [[Quickshell]] and never
 committed. Written only by **atomic write-temp-then-rename**, so a reader never
-sees a torn file (`CONTRACTS.md §4`). The files:
+sees a torn file (`CONTRACTS.md §4`). Split by owner into two trees
+(command-defrag lane S1): `song/stage/` holds rice/paint staging,
+`state/stage/` holds CONDUCTING state. The files:
 
-| File | Holds | Written by |
-|---|---|---|
-| `livery.json` | the fully-resolved livery values (colours concrete, no `null`) | [[livery]] `emit stage` / `lyra rice stage` |
-| `sessions.json` | the agent-session roster (`sessionId, agent, windowAddress, workspace, cwd, state, startedAt`, optional `parentSessionId`) | [[shellbridge]] + `aoide graph session` |
-| `hooks.json` | live Claude Code hook phases | shellbridge + `aoide graph session` |
-| `projects.json` | the project-anchor registry | `aoide graph project` |
-| `graph.json` | the resolved project/session DAG | restaged automatically on every `aoide graph` mutation |
-| `cover.json` | the live wallpaper seed (seeded from the song's baked `wallpaper`) | Quickshell wallpaper layer |
+| File | Holds | Written by | Tree |
+|---|---|---|---|
+| `livery.json` | the fully-resolved livery values (colours concrete, no `null`) | [[livery]] `emit stage` / `lyra rice stage` | `song/stage/` |
+| `cover.json` | the live wallpaper seed (seeded from the song's baked `wallpaper`) | Quickshell wallpaper layer | `song/stage/` |
+| `sessions.json` | the agent-session roster (`sessionId, agent, windowAddress, workspace, cwd, state, startedAt`, optional `parentSessionId`) | [[shellbridge]] + `aoide session` | `state/stage/` |
+| `hooks.json` | live Claude Code hook phases | shellbridge + `aoide session` | `state/stage/` |
+| `projects.json` | the project-anchor registry | `aoide project` | `state/stage/` |
+| `graph.json` | the resolved project/session DAG | restaged automatically on every `aoide graph` mutation | `state/stage/` |
 
 Which files are present is runtime-dependent (e.g. `cover.json` appears once a
 wallpaper is staged; `AOIDE_WALLPAPER` on the Quickshell unit re-seeds it across
 rebuilds — the facet bakes the song's `wallpaper` note into the unit env, see
-[[Quickshell]]). The stage dir is resolved
-via the `AOIDE_STAGE_DIR` contract seam ([[shellbridge]]); the flake's
-`no-song-read` check forbids any nix module reading `stage/` at build time, so
-runtime state can never become load-bearing for the build.
+[[Quickshell]]). Both stage dirs resolve via the same `AOIDE_STAGE_DIR`
+absolute-path override, so relocating it relocates both trees at once; with
+no override each falls back to its own default location under `~/Aoide/`
+(`stage_dir()` for `song/stage/`, `conducting_stage_dir()` for
+`state/stage/` — [[shellbridge]]). The flake's `no-song-read` check forbids
+any nix module reading `song/stage/` at build time, so runtime state can
+never become load-bearing for the build.
 
 ### `auditions/`
 

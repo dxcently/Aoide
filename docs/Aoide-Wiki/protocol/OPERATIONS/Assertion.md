@@ -51,7 +51,7 @@ A **specified design** is not an open question, and this clause does not evict i
 Present-tense exclusion is a specification, not a negation of history. A constraint on the system as it stands is correct and required content:
 
 - `A facet reads aoide.livery and nothing else.`
-- `graph reap never errors on "nothing to reap".`
+- `session reap never errors on "nothing to reap".`
 - `The agent never holds the password.`
 
 These pass clause 1 — they describe HEAD — and clause 2 — they name a property, not a road not taken.

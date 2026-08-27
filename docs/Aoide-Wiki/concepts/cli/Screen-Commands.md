@@ -45,8 +45,9 @@ Path resolution (`pkgs/aoide/crates/storage/src/fs.rs`): the state dir is
 `$AOIDE_STATE_DIR` when set to an **absolute** path, else `~/Aoide/state/`.
 Captures land in `~/Aoide/state/captures/`, the saved pointer position in
 `~/Aoide/state/pointer-pos.json`. The session store `screen shot --session`
-reads is `<stage>/sessions.json` where the stage dir is `$AOIDE_STAGE_DIR`
-(absolute) else `~/Aoide/song/stage/`. Every JSON write in this group routes
+reads is `<stage>/sessions.json` where the stage dir is the conducting stage
+dir — `$AOIDE_STAGE_DIR` (absolute) else `~/Aoide/state/stage/`. Every JSON
+write in this group routes
 through `aoide_storage::fs::atomic_write` — temp file `<stem>.tmp.<pid>`,
 fsync, then rename (symlink-transparent; stale temps swept).
 
@@ -88,7 +89,7 @@ lyra screen shot [--output <name> | --region "X,Y WxH" | --pick | --window <addr
 - **Reads:** `hyprctl -j monitors` (layout bounds; out-of-bounds regions are
   clamped to it and the outcome says so via `clamped`). `--output` matches a
   monitor name off the same list. `--window` resolves an address off `hyprctl
-  -j clients`; `--session` reads `song/stage/sessions.json` (missing file →
+  -j clients`; `--session` reads `state/stage/sessions.json` (missing file →
   empty registry) and resolves the session's `windowAddress`, falling back to
   its pid, against `hyprctl -j clients`. A full desktop snapshot (cursor +
   clients + layers via `hyprctl -j cursorpos|clients|layers`) is gathered at
@@ -354,7 +355,7 @@ lyra screen send <capture> --session <id> [--comment "text"] [--yes] [--json]
   "error"`, and `inner` nests the underlying door's whole `data`. The inner
   `status`/`message`/`changed` ride through unchanged — a failed delivery is
   never reported as ok.
-- **Pipes to:** routes through the exact `graph send --id <id> --submit
+- **Pipes to:** routes through the exact `send --id <id> --submit
   [--yes] -- <message>` handler (`--submit` is fixed on, a synthesized
   `Invocation` calling `aoide_conduct::graph::session_send` directly —
   never a subprocess shell-out): held pending by default, delivered on
@@ -363,11 +364,11 @@ lyra screen send <capture> --session <id> [--comment "text"] [--yes] [--json]
   session's control socket `$XDG_RUNTIME_DIR/aoide/session-<id>.sock`,
   injecting the text into the conducted PTY's stdin. `--session` is
   required; there is no other target — a remote peer's session is reached
-  through `graph send --to peer/<query>` instead ([[Peer-Federation]]), not
+  through `send --to peer/<query>` instead ([[Peer-Federation]]), not
   through `screen send`. The global `--audit-log` flag is honoured and
   forwarded to the session gate.
 - **Notes:** `gated: false` in the schema — the gating lives inside the
-  `graph send` door it reuses, not on this command. Writes nothing itself.
+  `send` door it reuses, not on this command. Writes nothing itself.
   `--agent` (send straight to a registered A2A agent) is deleted along with
   the `a2a agent` family it drove (command-defrag lane D) — `--session` is
   the only target kind now.
@@ -375,7 +376,7 @@ lyra screen send <capture> --session <id> [--comment "text"] [--yes] [--json]
 ## Related
 
 - [[Screen-Control]] — the concept page this contract backs
-- [[Session-Graph]] — `graph send`, the session gate `screen send --session` reuses
-- [[Peer-Federation]] — reaching a remote peer's session (`graph send --to peer/<query>`)
+- [[Session-Graph]] — `send`, the session gate `screen send --session` reuses
+- [[Peer-Federation]] — reaching a remote peer's session (`send --to peer/<query>`)
 - [[Terminal-Commander]] — conducted sessions and their control sockets
 - [[aoide-cli]] — the CLI envelope, exit codes, and `--json` convention

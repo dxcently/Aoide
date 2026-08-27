@@ -24,8 +24,8 @@ re-documented: the PTY control socket and the injection door's mechanics
 ([[Conductor-Channel]]), the graph model and liveness reaping
 ([[Session-Graph]]), the 3D-wireframe view ([[Conductor-3D-DAG]], specified
 not implemented), the Quickshell terminal widget ([[Terminal-Commander]]),
-and the full per-command I/O of `graph prune`/`emit`/`focus`/`send`/`pending *`
-([[Graph-and-Conduct]]).
+and the full per-command I/O of `session prune`/`send`/`pending *` and
+`focus_session` ([[Graph-and-Conduct]]).
 
 ### aoide conductor
 
@@ -33,9 +33,10 @@ and the full per-command I/O of `graph prune`/`emit`/`focus`/`send`/`pending *`
 aoide conductor [--json]
 ```
 
-- **Reads:** `song/stage/{projects,sessions,hooks}.json`, mtime-polled every
+- **Reads:** `state/stage/{projects,sessions,hooks}.json`, mtime-polled every
   ~500 ms (the crossterm poll timeout doubling as the tick); `song/stage/
-  livery.json` (palette → ANSI-256 theme); the audit log (the LOG panel
+  livery.json` (palette → ANSI-256 theme — rice staging, so it reads the
+  other tree); the audit log (the LOG panel
   tails it). `$AOIDE_STAGE_DIR` / `$AOIDE_AUDIT_LOG` are both honoured, so a
   tempdir plus the seed fixture is a full offline rig:
 
@@ -58,32 +59,35 @@ aoide conductor [--json]
 
 ## The seven panels
 
-`Panel::ALL` (`app.rs`): DAG, SESSIONS, PROJECTS, LOG, STATUS, ROSTER,
+`Panel::ALL` (`app.rs`): DAG, SESSION, PROJECTS, LOG, STATUS, ROSTER,
 PENDING, in that order — the order the `1`–`7` keys and `Tab`/`BackTab`
 cycle through. ROSTER and PENDING are later additions, appended last so no
-earlier panel's key ever shifts.
+earlier panel's key ever shifts. The panel titles itself SESSION, singular —
+the underlying `sessions.json` file and data-shape names stay plural; only
+the panel/family name normalizes.
 
 - **DAG (`1`)** — the visual graph: nodes and edges laid out and drawn by
   `graphview`. Selection walks the same preorder node list the layout
   draws. `Enter` on a node with a session cues it (see "Enter's
-  destination" below); `p` dispatches `graph prune`, the one graph-wide
+  destination" below); `p` dispatches `session prune`, the one graph-wide
   command left on this key (`e`/`graph emit` is deleted — every stage
   mutation restages `graph.json` automatically, so there is nothing left
   for the keybinding to trigger).
-- **SESSIONS (`2`)** — the collapsible terminal roster: project group
+- **SESSION (`2`)** — the collapsible terminal roster: project group
   headers interleaved with their session subtrees, one flattened selection
   index over the lot (`App::dag_rows`). `Enter` on a session cues it; on a
   group header it toggles the fold. `h`/`-` folds the group under the
   cursor, `l`/`+` unfolds it. `a` opens the inline project-add prompt; `d`
-  on a group header removes that project (`graph project remove` — the
+  on a group header removes that project (`project remove` — the
   unanchored pseudo-group has nothing to remove). `L` on a session opens a
   prompt collecting a parent session id and dispatches `graph link`. `p`
-  dispatches `graph prune` here too.
+  dispatches `session prune` here too.
 - **PROJECTS (`3`)** — the flat project registry, sorted by name. `a` opens
-  the same project-add prompt SESSIONS uses; `d` removes the selected
-  project (`graph project remove`).
+  the same project-add prompt SESSION uses; `d` removes the selected
+  project (`project remove`).
 - **LOG (`4`)** — read-only: tails the audit log.
-- **STATUS (`5`)** — read-only: stage status.
+- **STATUS (`5`)** — read-only: stage status, both trees (`App::stage` for
+  `state/stage/`, `App::rice_stage` for `song/stage/`).
 - **ROSTER (`6`)** — presence over this box's own sessions plus every
   registered peer. Rows are `who --json`'s `Outcome.data`, dispatched
   through the same injected `DispatchFn` and parsed into a flattened row
@@ -98,13 +102,13 @@ earlier panel's key ever shifts.
   mutates anything and its live probes would otherwise freeze the tick
   loop. `s` on a selected session row opens the compose prompt, pre-labeled
   with that row's own display-grammar label, and on submit dispatches
-  `graph send --to <target> --yes -- <text>`.
-- **PENDING (`7`)** — held `graph send`/A2A entries, approve/deny. Rows are
-  `graph pending list --json`'s `Outcome.data`. Unlike ROSTER, this is a
+  `send --to <target> --yes -- <text>`.
+- **PENDING (`7`)** — held `send`/A2A entries, approve/deny. Rows are
+  `session pending list --json`'s `Outcome.data`. Unlike ROSTER, this is a
   local file read (no network), so it refreshes synchronously on the tick
   while the pane is visible, and again after every dispatch
-  (`reload_all` → `refresh_pending`). `a`/`d` dispatch `graph pending
-  approve`/`graph pending deny` on the selected row.
+  (`reload_all` → `refresh_pending`). `a`/`d` dispatch `session pending
+  approve`/`session pending deny` on the selected row.
 
 ## Keys
 
@@ -119,8 +123,8 @@ Per-panel keys (LOG and STATUS take none — read-only):
 
 | Panel | Keys |
 |---|---|
-| DAG | `j`/`k` (`↓`/`↑`) move; `g`/`Home` jump to the first node, `G`/`End` to the last; `Enter` cue the selected session; `p` `graph prune` |
-| SESSIONS | `j`/`k` move; `Enter` cue a session / toggle a group's fold; `h`/`-` fold, `l`/`+` unfold; `a` add a project; `d` on a group header remove that project; `L` on a session link it under a typed parent id; `p` prune |
+| DAG | `j`/`k` (`↓`/`↑`) move; `g`/`Home` jump to the first node, `G`/`End` to the last; `Enter` cue the selected session; `p` `session prune` |
+| SESSION | `j`/`k` move; `Enter` cue a session / toggle a group's fold; `h`/`-` fold, `l`/`+` unfold; `a` add a project; `d` on a group header remove that project; `L` on a session link it under a typed parent id; `p` prune |
 | PROJECTS | `j`/`k` move; `a` add a project; `d` remove the selected project |
 | ROSTER | `j`/`k` move; `r` force a fetch; `s` compose a send to the selected session |
 | PENDING | `j`/`k` move; `a` approve; `d` deny |
@@ -128,10 +132,10 @@ Per-panel keys (LOG and STATUS take none — read-only):
 ## What it dispatches
 
 Every mutating keypress builds an `Invocation` and passes it to the injected
-`DispatchFn`, so it is audited exactly like a typed command: `graph prune`,
-`graph project add`, `graph project remove`, `graph link`, `graph send --to
-<target> --yes` (ROSTER compose), `graph pending approve`, `graph pending
-deny`. Reads (`who`, `graph pending list`, the stage-file loads) never
+`DispatchFn`, so it is audited exactly like a typed command: `session prune`,
+`project add`, `project remove`, `graph link`, `send --to
+<target> --yes` (ROSTER compose), `session pending approve`, `session pending
+deny`. Reads (`who`, `session pending list`, the stage-file loads) never
 dispatch — they call the pure graph functions and stage-file loaders
 directly. Cue-session on a live window is the one exception on the write
 side too: it calls `focus_session` directly rather than dispatching `graph
@@ -143,7 +147,7 @@ own audit line by hand so the one-audit-log invariant still holds.
 - **ROSTER's `who` throttles.** A stale cache fetches immediately on
   switching into the pane; otherwise a fetch fires at most every ~15 s
   while the pane is visible. `r` overrides the window unconditionally.
-- **`graph pending list`'s `id` is an array position, not a stable id** —
+- **`session pending list`'s `id` is an array position, not a stable id** —
   resolving one entry shifts every id after it. `App::dispatch` re-lists
   synchronously (`reload_all` → `refresh_pending`) before the next paint,
   so a second `a`/`d` in the same visit always resolves the row actually on

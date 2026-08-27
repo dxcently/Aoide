@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-01
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, architecture, rust, cli, crate, blueprint]
 ---
 
@@ -93,7 +93,7 @@ desktop needs.
 - **Charter exceptions, named as the smudges they are.** `shellbridge.rs`
   and `herald.rs` stay as files in `conduct` — only their registry lines (the
   CLI commands) move to `lyra` — because both are entangled with core:
-  `graph permit` publishes summons through `herald`, and the conductor TUI
+  `session permit` publishes summons through `herald`, and the conductor TUI
   reads the socket path `shellbridge` owns. `storage::takes` and
   `storage::mode` stay in `storage` for the same reason: zero dependency
   weight, and `mode` is read by `shellbridge`, itself core-crate-resident.

@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, widget, qml, desktop, gadget]
 ---
 
@@ -79,7 +79,7 @@ fifth (Usage) that draws only when its stage file exists:
 
 Clicking a Conductor/Terminals row jumps to its terminal via the
 [[shellbridge]] socket. The full session DAG has no standalone desktop
-surface today — `aoide graph view`/`--json` and the `aoide conductor` TUI are its
+surface today — bare `aoide graph`/`--json` and the `aoide conductor` TUI are its
 renderers; the dock's Conductor gadget gives the desktop its at-a-glance
 agent-tree view instead of a literal graph diagram ([[Session-Graph]]).
 

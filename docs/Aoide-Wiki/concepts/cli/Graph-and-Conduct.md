@@ -7,47 +7,60 @@ tags: [aoide, cli, session, graph, conductor]
 
 # Graph & Conduct Commands — the Session-Graph Command Surface
 
-The `graph` command group plus the top-level `conduct` command are the
-[[Session-Graph]]'s command surface: session registration and the
-project/session DAG, injection into conducted terminals
+The bare `graph` render, `graph link`, the `session`/`project` families, the
+top-level `send`/`spawn`/`resurrect` verbs, and the top-level `conduct`
+command are the [[Session-Graph]]'s command surface: session registration and
+the project/session DAG, injection into conducted terminals
 ([[Conductor-Channel]]), window jumps ([[Terminal-Commander]]), the
-dead-session reaper, and the `inbox` commands that read back what `graph send`
-delivered. `graph session hook` is the [[Agent-Hooking]] door agent
-harnesses (Claude Code, kimi, pi) fire into. Handlers live in
+dead-session reaper, and the `inbox` commands that read back what `send`
+delivered. The `graph` prefix itself owns only the read/analysis lens now —
+the bare render and `graph link`; everything that acts (`send`/`spawn`/
+`resurrect`) or manages session/project lifecycle (`session *`/`project *`)
+is its own top-level family (command-defrag task #101, Lane R). `session
+hook` is the [[Agent-Hooking]] door agent harnesses (Claude Code, kimi, pi)
+fire into, and — like `session start`/`phase`/`end` — is marked `internal`
+in the schema: hook plumbing a harness's own lifecycle drives, hidden from
+`aoide guide`'s human listing though still enumerated by `schema`/MCP/A2A.
+Handlers live in
 `pkgs/aoide/crates/conduct/src/graph/{commands,session_store,send,pending,spawn,resurrect,carry,permit,window,conduct,doc,model,common}.rs`
 and `pkgs/aoide/crates/conduct/src/reap.rs`; registrations in
-`pkgs/aoide/crates/conduct/src/commands/graph.rs`. `inbox list|read|clear`
-is the one exception: it lives in `pkgs/aoide/crates/storage/src/{inbox,
-commands}.rs` — inbox is state, and storage already owns the store.
+`pkgs/aoide/crates/conduct/src/commands/graph.rs` (the registered `path:`
+renamed in place — handler names and file layout are unchanged). `inbox
+list|read|clear` is the one exception: it lives in
+`pkgs/aoide/crates/storage/src/{inbox, commands}.rs` — inbox is state, and
+storage already owns the store.
 
-Path resolution (`pkgs/aoide/crates/storage/src/fs.rs`): the stage dir is
-`$AOIDE_STAGE_DIR` when absolute, else `~/Aoide/song/stage/` — so
-`song/stage/{projects,sessions,hooks,graph,pending,herald}.json` all ride that
-one override. The state dir is `$AOIDE_STATE_DIR` else `~/Aoide/state/`. Every
-stage write goes through `aoide_storage::fs::atomic_write` (temp
-`<stem>.tmp.<pid>`, `fsync`, rename, symlink-transparent) and multi-file
-load-modify-writes serialise through `with_stage_lock` (a non-reentrant
-`.stage.lock` flock in the stage dir). Every mutation re-stages
-`song/stage/graph.json` via `restage_graph` so the hot-reloaded document never
-drifts from the registries. The audit log defaults to `~/Aoide/log`
-(`$AOIDE_AUDIT_LOG`, or the `--audit-log` flag, override).
+Path resolution (`pkgs/aoide/crates/storage/src/fs.rs`): the conducting stage
+dir is `$AOIDE_STAGE_DIR` when absolute, else `~/Aoide/state/stage/` — so
+`state/stage/{projects,sessions,hooks,graph,pending,herald}.json` all ride
+that one override (`aoide_storage::fs::conducting_stage_dir`, distinct from
+the rice `stage_dir` under `song/stage/`). The state dir is
+`$AOIDE_STATE_DIR` else `~/Aoide/state/`. Every stage write goes through
+`aoide_storage::fs::atomic_write` (temp `<stem>.tmp.<pid>`, `fsync`, rename,
+symlink-transparent) and multi-file load-modify-writes serialise through
+`with_stage_lock` (a non-reentrant `.stage.lock` flock, still fixed to the
+rice `stage_dir()` so conducting writes stay serialised against rice writers
+sharing the same lock file). Every mutation re-stages `state/stage/graph.json`
+via `restage_graph` so the hot-reloaded document never drifts from the
+registries. The audit log defaults to `~/Aoide/log` (`$AOIDE_AUDIT_LOG`, or
+the `--audit-log` flag, override).
 
 Every command takes `--json`: without it the CLI prints the human `message`
 line (plus a `changed:` trailer); with it, an envelope `{status, command,
 message, gated, changed, data?}` (`pkgs/aoide/crates/protocol/src/output.rs`).
 Exit codes: 0 ok, 1 error, 2 usage, 64 not-implemented (none in this group).
-No command in this group is `gated: true` in the schema; `graph send`'s
+No command in this group is `gated: true` in the schema; `send`'s
 pending-approval hold is an internal policy, separate from the user rebuild
 gate the flag denotes.
 
-### aoide graph view
+### aoide graph
 
 ```
-aoide graph view [--focus <node>] [--json]
+aoide graph [--focus <node>] [--json]
 ```
 
-- **Reads:** `song/stage/{projects,sessions,hooks}.json` (missing files read as
-  empty); also folds in `state/peers.json` + `state/peer-cache/<name>.json`
+- **Reads:** `state/stage/{projects,sessions,hooks}.json` (missing files read
+  as empty); also folds in `state/peers.json` + `state/peer-cache/<name>.json`
   (`peer:*` root nodes, `children` nested verbatim when the cache is fresh)
   via `build_graph` (`doc.rs`).
 - **Output:** text — `"<n> node(s), <e> edge(s)\n"` followed by a Unicode
@@ -56,23 +69,23 @@ aoide graph view [--focus <node>] [--json]
   root), `▶ ` marks the `--focus` node (matches `session:<id>`,
   `project:<name>`, or the bare id). `--json`: `data` is the full `graph.json`
   document `{schemaVersion, nodes, edges}` — identical to what every stage
-  mutation restages to `song/stage/graph.json` automatically.
+  mutation restages to `state/stage/graph.json` automatically.
 - **Notes:** read-only. Session states shown are hook-merged and folded to the
   canonical five (`working | awaiting | stopped | idle | done`) by
   `merged_sessions`.
 
-### aoide graph project add
+### aoide project add
 
 ```
-aoide graph project add <name> [<path>] [--json]
+aoide project add <name> [<path>] [--json]
 ```
 
-- **Reads:** `song/stage/projects.json`. `<path>` defaults to the current
+- **Reads:** `state/stage/projects.json`. `<path>` defaults to the current
   working directory; a relative or nonexistent path is refused as usage (exit
   2, `data.reason: "invalid-path"`) because anchoring is absolute-path prefix
   matching.
-- **Writes:** `song/stage/projects.json` (atomic; sorted by name,
-  `schemaVersion` stamped) then re-stages `song/stage/graph.json` — only when
+- **Writes:** `state/stage/projects.json` (atomic; sorted by name,
+  `schemaVersion` stamped) then re-stages `state/stage/graph.json` — only when
   something changed.
 - **Output:** `data: {name, path, file}`. Idempotent: re-adding the same
   name+path is an ok no-change ("already registered"); a new path for an
@@ -80,25 +93,25 @@ aoide graph project add <name> [<path>] [--json]
 - **Notes:** a session anchors under the longest-prefix matching project root
   (`model.rs::anchor_for`).
 
-### aoide graph project remove
+### aoide project remove
 
 ```
-aoide graph project remove <name> [--json]
+aoide project remove <name> [--json]
 ```
 
-- **Reads:** `song/stage/projects.json`.
-- **Writes:** `song/stage/projects.json` + re-staged `graph.json`, only on an
+- **Reads:** `state/stage/projects.json`.
+- **Writes:** `state/stage/projects.json` + re-staged `graph.json`, only on an
   actual removal.
 - **Output:** `data: {name, file}`; an absent name is an ok no-op (`{name}`
   only, no `changed`).
 
-### aoide graph project list
+### aoide project list
 
 ```
-aoide graph project list [--json]
+aoide project list [--json]
 ```
 
-- **Reads:** `song/stage/projects.json`.
+- **Reads:** `state/stage/projects.json`.
 - **Output:** text — `"N project(s) registered"` plus one `◆ <name>  <path>`
   line each (name-sorted); `data: {projects: [...]}`.
 - **Notes:** read-only.
@@ -109,7 +122,7 @@ aoide graph project list [--json]
 aoide graph link <child> <parent> [--json]
 ```
 
-- **Reads:** `song/stage/sessions.json`.
+- **Reads:** `state/stage/sessions.json`.
 - **Writes:** sets `parentSessionId` on the child record (atomic), re-stages
   `graph.json`. No write when already linked.
 - **Output:** `data: {child, parent}`; an unregistered parent still records the
@@ -119,17 +132,21 @@ aoide graph link <child> <parent> [--json]
   `"cycle"` (the walk in `doc.rs::would_cycle`). Ignores `peer:*`/`a2a:*` ids
   like any unknown local id.
 
-### aoide graph session start
+### aoide session start
+
+`internal` in the schema — hook plumbing a harness's own lifecycle drives,
+hidden from `aoide guide`'s human listing, never typed by an operator
+directly.
 
 ```
-aoide graph session start --id <id> [--agent <name>] [--cwd <dir>] [--window <addr>] [--parent <sessionId>] [--json]
+aoide session start --id <id> [--agent <name>] [--cwd <dir>] [--window <addr>] [--parent <sessionId>] [--json]
 ```
 
-- **Writes:** UPSERT into `song/stage/sessions.json` under the stage lock, then
-  re-stage `graph.json`. A fresh record starts `idle` with `agent` defaulting
-  to `claude`; a re-start updates only the provided fields and preserves
-  `startedAt` and the live state (`upsert_session`). A `--parent` that would
-  cycle is refused (exit 1, `reason: "cycle"`).
+- **Writes:** UPSERT into `state/stage/sessions.json` under the stage lock,
+  then re-stage `graph.json`. A fresh record starts `idle` with `agent`
+  defaulting to `claude`; a re-start updates only the provided fields and
+  preserves `startedAt` and the live state (`upsert_session`). A `--parent`
+  that would cycle is refused (exit 1, `reason: "cycle"`).
 - **Output:** `data: {sessionId, agent, startedAt, inserted, file}`.
 - **Notes:** registration-time same-window agent eviction: if the NEW record is
   an agent with a `windowAddress` shared by another live agent record, the
@@ -137,15 +154,17 @@ aoide graph session start --id <id> [--agent <name>] [--cwd <dir>] [--window <ad
   foreground agent; conducted PTY hosts and the record's own parent are
   excluded).
 
-### aoide graph session phase
+### aoide session phase
+
+`internal` in the schema, same standing as `session start` above.
 
 ```
-aoide graph session phase --id <id> --phase <phase> [--json]
+aoide session phase --id <id> --phase <phase> [--json]
 ```
 
-- **Writes:** UPSERTs the hook record in `song/stage/hooks.json` (fresh
+- **Writes:** UPSERTs the hook record in `state/stage/hooks.json` (fresh
   `updatedAt` every call — the per-hook heartbeat) AND lands the canonical
-  state on `song/stage/sessions.json` (change-only; legacy vocab like
+  state on `state/stage/sessions.json` (change-only; legacy vocab like
   `running`/`blocked` migrates in passing; a non-`working` state clears
   `activity`); then re-stages `graph.json`. All under one stage lock.
 - **Output:** `data: {sessionId, phase, updatedAt, file}`.
@@ -155,30 +174,34 @@ aoide graph session phase --id <id> --phase <phase> [--json]
   wins on merge. No-op for state purposes on an unregistered id (the hook
   record is still written).
 
-### aoide graph session end
+### aoide session end
+
+`internal` in the schema, same standing as `session start` above.
 
 ```
-aoide graph session end --id <id> [--json]
+aoide session end --id <id> [--json]
 ```
 
-- **Writes:** `state=done` in `song/stage/sessions.json` (the record stays for
-  the widgets' done pose), cascades-drop its whole `sub:*` sub-agent subtree
-  (`doomed_subagent_descendants`), mirrors `phase=done` into
-  `song/stage/hooks.json`, re-stages `graph.json`.
+- **Writes:** `state=done` in `state/stage/sessions.json` (the record stays
+  for the widgets' done pose), cascades-drop its whole `sub:*` sub-agent
+  subtree (`doomed_subagent_descendants`), mirrors `phase=done` into
+  `state/stage/hooks.json`, re-stages `graph.json`.
 - **Output:** `data: {sessionId, file}`; an unknown id is an ok no-op.
 
-### aoide graph session carry
+### aoide session carry
+
+Not internal — an operator command, unlike `start`/`phase`/`end`/`hook` above.
 
 ```
-aoide graph session carry (on|off) [--self | --id <id>] [--json]
+aoide session carry (on|off) [--self | --id <id>] [--json]
 ```
 
 - **Reads:** `state/carry.json` (the durable carry mark — durable-sessions
-  plan P-C2); `song/stage/sessions.json`, only to answer the informational
+  plan P-C2); `state/stage/sessions.json`, only to answer the informational
   `live` field below, never to gate the write.
 - **Writes:** `state/carry.json` directly — atomic write, no stage lock, and
-  no `daemon_dispatch` routing, unlike every other `graph session *` command
-  above: `carry.json` is not a `song/stage/` file, so it sits outside that
+  no `daemon_dispatch` routing, unlike every other `session *` command
+  above: `carry.json` is not a `state/stage/` file, so it sits outside that
   dual-writer surface entirely. `on` adds the target id to the carried set
   (or refreshes its `markedAt` if already present); `off` removes it.
 - **Output:** `data: {sessionId, carried, live}`; `changed` names the
@@ -192,17 +215,20 @@ aoide graph session carry (on|off) [--self | --id <id>] [--json]
   resolvable `$AOIDE_SESSION_ID` is likewise a usage error naming both
   flags — never a silent no-op. `live` reports whether the id is currently in
   `sessions.json`; it is informational only. The mark itself is the input
-  bare `graph resurrect`'s selection reads (below) and `graph spawn --carry`
-  writes at birth.
+  bare `resurrect`'s selection reads (below) and `spawn --carry` writes at
+  birth.
 
-### aoide graph session hook
+### aoide session hook
+
+`internal` in the schema, same standing as `session start` above — this is
+the [[Agent-Hooking]] door.
 
 ```
-aoide graph session hook [--agent <claude|kimi|pi>] [--json]   # reads ONE hook JSON object from stdin
+aoide session hook [--agent <claude|kimi|pi>] [--json]   # reads ONE hook JSON object from stdin
 ```
 
 - **Reads:** stdin (one harness hook payload); the agent profile's event map
-  (`aoide_protocol::agents`); `song/stage/{sessions,hooks}.json`; env
+  (`aoide_protocol::agents`); `state/stage/{sessions,hooks}.json`; env
   `AOIDE_SESSION_ID` (threads a launching conductor as the parent),
   `HYPRLAND_INSTANCE_SIGNATURE` + `hyprctl clients -j` + `/proc/<pid>/stat`
   ancestry walk (best-effort window/pid backfill); harness transcripts for the
@@ -223,16 +249,16 @@ aoide graph session hook [--agent <claude|kimi|pi>] [--json]   # reads ONE hook 
   re-key on async `isAsync`, and close `sub:` nodes), Stop→`stopped`,
   Notification→`awaiting` (permission prompt, unconditional) or conditional
   `awaiting`-only-if-still-`working` (idle ping), SessionEnd→end. On an
-  unconditional `awaiting` it spawns `aoide graph permit --id <id>
+  unconditional `awaiting` it spawns `aoide session permit --id <id>
   [--what <notification message>]` DETACHED (opt-out:
   `AOIDE_HERALD_PERMIT` in {0,false,no,off}); the harness's message rides as
   untrusted display data. A session whose record was ended/pruned mid-process
   self-heals by re-registering on its next event (`hook_ensure_session`).
 
-### aoide graph spawn
+### aoide spawn
 
 ```
-aoide graph spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt <text>] -- <command …>
+aoide spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt <text>] -- <command …>
 ```
 
 - **Reads:** re-execs `current_exe()` (the running `aoide` binary itself) as
@@ -252,20 +278,19 @@ aoide graph spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt 
   never appears and `spawn` returns `registered: false` honestly.
 - **Pipes to / output:** `data: {sessionId, agent, socket, logPath,
   registered, prompt}`. `--prompt`, when given, is injected only AFTER
-  registration succeeds, through the one gated injection door — `graph send
-  --yes --submit`, in-process, the exact re-drive shape `graph pending
-  approve` uses to replay a held entry — never a direct socket write;
-  `data.prompt` reads `none` / `delivered` / `skipped-unregistered` /
-  `failed: <reason>`.
+  registration succeeds, through the one gated injection door — `send --yes
+  --submit`, in-process, the exact re-drive shape `session pending approve`
+  uses to replay a held entry — never a direct socket write; `data.prompt`
+  reads `none` / `delivered` / `skipped-unregistered` / `failed: <reason>`.
 - **Notes:** the detached counterpart to `conduct` — this call returns
   immediately while the spawned agent keeps running headless. See "Headless
   conduct" under [[Conductor-Channel]] for the pty/log mechanism the re-exec'd
   child uses.
 
-### aoide graph resurrect
+### aoide resurrect
 
 ```
-aoide graph resurrect --project <name> [--all | --id <ledgerSessionId>] [--json]
+aoide resurrect --project <name> [--all | --id <ledgerSessionId>] [--json]
 ```
 
 - **Reads:** `state/session-ledger.jsonl` (the durable, append-only record
@@ -276,7 +301,7 @@ aoide graph resurrect --project <name> [--all | --id <ledgerSessionId>] [--json]
   specific ledger `sessionId` (mutually exclusive with `--all`; `--id` wins
   if both are given), and bare (neither flag) resumes the project's WHOLE
   carried set (`state/carry.json`, durable-sessions plan P-C4) — anchored
-  entries currently marked durable via `graph session carry on`, minus any
+  entries currently marked durable via `session carry on`, minus any
   id already alive (non-`done`) in `sessions.json`, deduped by `sessionId`
   keeping the entry with the newest `endedAt` (a carried id resurrected and
   exited again can appear twice in the append-only ledger). `--all`/`--id`
@@ -287,7 +312,7 @@ aoide graph resurrect --project <name> [--all | --id <ledgerSessionId>] [--json]
   (unregistered, or never confirmed against the real binary) is skipped,
   not guessed at.
 - **Writes:** spawns each surviving candidate via the windowed path (the
-  same mechanism `graph spawn --windowed` uses — a fresh terminal from
+  same mechanism `spawn --windowed` uses — a fresh terminal from
   `$AOIDE_TERMINAL` running `<harness> --resume <id>` in the ledger entry's
   own `cwd`). A resurrected session always mints a NEW `sessionId` — ledger
   ids are never recycled — and is stamped `resumedFrom` naming the ledger
@@ -303,26 +328,26 @@ aoide graph resurrect --project <name> [--all | --id <ledgerSessionId>] [--json]
   an unknown project name, an `--id` naming no anchored ledger entry) are
   `Outcome::usage`/`error`.
 - **Notes:** the same command core also backs the daemon's own boot-time
-  auto-resume trigger — a project's `autoResume` flag (`graph project add
-  --auto-resume`, only ever set true by the CLI) fires `graph resurrect
+  auto-resume trigger — a project's `autoResume` flag (`project add
+  --auto-resume`, only ever set true by the CLI) fires `resurrect
   --project <name>` once per boot on `aoided` start (P-D8, `docs/
   architecture/AOIDED.md`'s "L5 — harness summoning"), unconditionally for
   every `autoResume` project — the daemon carries no liveness check of its
   own; a project whose whole carried set is already alive simply resolves
   to the empty-set no-op above, so one live terminal never suppresses
   reviving the rest of a multi-session carried set. This is the revival
-  half of the liveness story `graph reap` sweeps the other side of: a
+  half of the liveness story `session reap` sweeps the other side of: a
   session a killed terminal could never mark `done` gets reaped off the
-  live roster, and its ledger entry is what `graph resurrect` can later
+  live roster, and its ledger entry is what `resurrect` can later
   bring back in a fresh terminal.
 
-### aoide graph send
+### aoide send
 
 ```
-aoide graph send (--id <id> | --to <name>) [--submit] [--yes] [--from <sender>] -- <text …>
+aoide send (--id <id> | --to <name>) [--submit] [--yes] [--from <sender>] -- <text …>
 ```
 
-- **Reads:** `song/stage/sessions.json` (resolves the target's `socket` and
+- **Reads:** `state/stage/sessions.json` (resolves the target's `socket` and
   `parentSessionId`, and — for the sibling rule — the SENDER's own record from
   the same already-loaded file); env `AOIDE_SESSION_ID` (the sender's own id,
   for the parent- and sibling-autogate rules and as the provenance fallback)
@@ -330,7 +355,7 @@ aoide graph send (--id <id> | --to <name>) [--submit] [--yes] [--from <sender>] 
   orchestration-mode switch) and `AOIDE_CONDUCT_SIBLING_AUTOGATE` in
   {0,false,no} (the sibling-rule opt-out).
 - **Writes:** pending path — appends `{sessionId, text, submit, queuedAt,
-  from?}` to `song/stage/pending.json` (atomic, under the stage lock; `from`
+  from?}` to `state/stage/pending.json` (atomic, under the stage lock; `from`
   carries the resolved sender attribution when one resolves, omitted
   otherwise). Delivered path — opens the target's control socket
   (`$XDG_RUNTIME_DIR/aoide/session-<id>.sock`) and writes `<text>` (+ the
@@ -341,9 +366,9 @@ aoide graph send (--id <id> | --to <name>) [--submit] [--yes] [--from <sender>] 
   (`title` in `sessions.json` + re-stage) to a one-line ≤60-char form of the
   UNPREFIXED text — UNLESS the text carries no letter at all (a bare keystroke
   answer like `1`), which leaves the title alone AND skips the provenance
-  prefix (a `graph permit` verdict digit must land byte-exact, not `from
+  prefix (a `session permit` verdict digit must land byte-exact, not `from
   orch-1: 1`). EVERY outcome appends one audit record (`class: "audit"`,
-  `command: "graph.send"`, status `pending|delivered|error`, the unprefixed
+  `command: "send"`, status `pending|delivered|error`, the unprefixed
   text as `untrusted_data` — never the message — and the resolved sender, if
   any, folded into the message) to `~/Aoide/log`.
 - **Output:** pending → exit 0, `data: {id, state: "pending", delivered:
@@ -362,69 +387,69 @@ aoide graph send (--id <id> | --to <name>) [--submit] [--yes] [--from <sender>] 
   explicitly (sanitized of embedded `\n`/`\r`); omitted, it falls back to
   `AOIDE_SESSION_ID`; `--from ""` is explicit anonymity and skips that
   fallback — attribution only, never authentication, since either source is a
-  same-user value any caller can set to whatever it likes. `aoide graph
+  same-user value any caller can set to whatever it likes. `aoide session
   pending list|approve|deny` is the read/resolve surface over the held queue
   (below) — `approve` re-drives a held entry through this exact door with
-  `--yes` and the entry's own `from`, in-process. `graph permit`'s verdict and
-  the A2A door both re-enter this same function in-process rather than
+  `--yes` and the entry's own `from`, in-process. `session permit`'s verdict
+  and the A2A door both re-enter this same function in-process rather than
   reimplementing it. `--to` resolves a name (local id, tail4, or petname;
   `peer/<query>` targets a remote session over A2A) in place of a raw `--id`,
   and the two are mutually exclusive. A remote send is always attempted and
   never queues locally; the receiving peer gates its own delivery.
 
-### aoide graph pending list
+### aoide session pending list
 
 ```
-aoide graph pending list [--json]
+aoide session pending list [--json]
 ```
 
-- **Reads:** `song/stage/pending.json`, raw-JSON — a malformed entry (a bare
+- **Reads:** `state/stage/pending.json`, raw-JSON — a malformed entry (a bare
   string, or an object missing `sessionId`) is listed with `state: malformed`
   rather than failing the whole read.
 - **Output:** text — one line per entry; `data: {pending: [...]}` with each
   entry's `id` (its array POSITION — the schema carries no id of its own, so
   positions shift the moment any entry resolves; re-list between multiple
   resolutions in one breath).
-- **Notes:** read-only. The queue `graph send` parks a held injection in (no
+- **Notes:** read-only. The queue `send` parks a held injection in (no
   `--yes`, no autogate match) and where the A2A door parks its own held
   injects.
 
-### aoide graph pending approve
+### aoide session pending approve
 
 ```
-aoide graph pending approve <id> [--json]
+aoide session pending approve <id> [--json]
 ```
 
-- **Reads:** `song/stage/pending.json`; `<id>` is the entry's list position.
-- **Writes:** re-synthesizes and runs the exact `graph send --id <sessionId>
+- **Reads:** `state/stage/pending.json`; `<id>` is the entry's list position.
+- **Writes:** re-synthesizes and runs the exact `send --id <sessionId>
   --yes -- <text>` (with `--submit`/`--from` carried through) the held entry
-  represents, in-process through `session_send` — the SAME door `graph
+  represents, in-process through `session_send` — the SAME door `session
   permit`'s verdict-typing already goes through — then removes the entry from
   `pending.json` under the stage lock. Resolution is the audit line, not a
   persisted archive.
-- **Output:** the inner `graph send` outcome. A malformed or out-of-range id
+- **Output:** the inner `send` outcome. A malformed or out-of-range id
   fails cleanly (exit 1), leaving the entry untouched — never destroyed on
   failure.
 
-### aoide graph pending deny
+### aoide session pending deny
 
 ```
-aoide graph pending deny <id> [--json]
+aoide session pending deny <id> [--json]
 ```
 
-- **Reads:** `song/stage/pending.json`; `<id>` is the entry's list position.
+- **Reads:** `state/stage/pending.json`; `<id>` is the entry's list position.
 - **Writes:** removes the entry from `pending.json` under the stage lock —
   injects nothing.
 - **Output:** `data: {id, sessionId}`. A malformed or out-of-range id fails
   cleanly, leaving the entry untouched.
 
-### aoide graph permit
+### aoide session permit
 
 ```
-aoide graph permit --id <id> [--tool <name>] [--what <text>] [--json]
+aoide session permit --id <id> [--tool <name>] [--what <text>] [--json]
 ```
 
-- **Reads:** `song/stage/sessions.json` (record, `conductable`/`socket`,
+- **Reads:** `state/stage/sessions.json` (record, `conductable`/`socket`,
   `title`, `agent` → profile); the harness's verified permission-prompt keys
   (`aoide_protocol::agents::PermissionKeys` — claude and kimi both carry
   verified keys: approve `1` (once-only; the digit alone chooses AND
@@ -433,7 +458,7 @@ aoide graph permit --id <id> [--tool <name>] [--what <text>] [--json]
 - **Writes:** none directly. Publishes the summons card by sending one
   newline-delimited JSON line `{"cmd": "heraldpush", "notification": {…}}` to
   the shellbridge socket `$XDG_RUNTIME_DIR/aoide/shellbridge.sock`; the daemon
-  (single writer) folds it into `song/stage/herald.json`. Card: id
+  (single writer) folds it into `state/stage/herald.json`. Card: id
   `permit-<sessionId>`, `kind: "summons"`, category `x-aoide.permission`,
   `stackTag: aoide-permit-<sessionId>` (a second prompt in the same session
   REPLACES the standing card), `timeoutMs: 0` (never expires on its own).
@@ -448,13 +473,13 @@ aoide graph permit --id <id> [--tool <name>] [--what <text>] [--json]
   types the bare digit (no newline) through `session_send` in-process with
   `--yes` — audited by the send door.
 
-### aoide graph prune
+### aoide session prune
 
 ```
-aoide graph prune [--json]
+aoide session prune [--json]
 ```
 
-- **Reads:** `song/stage/{sessions,hooks}.json`.
+- **Reads:** `state/stage/{sessions,hooks}.json`.
 - **Writes:** drops every `done` session (cascading to its `subagent`
   descendants) and its hook records, and clears `parentSessionId` links left
   dangling; both files + re-staged `graph.json` only when something changed.
@@ -463,13 +488,13 @@ aoide graph prune [--json]
 - **Notes:** idempotent. The `done` record itself is written by
   `session end`/the reaper; prune is the sweeper on its own schedule.
 
-### aoide graph reap
+### aoide session reap
 
 ```
-aoide graph reap [--announce] [--json]
+aoide session reap [--announce] [--json]
 ```
 
-- **Reads:** `song/stage/{sessions,hooks}.json`; `hyprctl clients -j` (window
+- **Reads:** `state/stage/{sessions,hooks}.json`; `hyprctl clients -j` (window
   liveness + window-owner map — skipped without `HYPRLAND_INSTANCE_SIGNATURE`,
   falling back to pid-only); `/proc/<pid>` existence, `/proc/stat` `btime`
   (boot instant), harness transcript mtimes + tails (profile-dispatched);
@@ -510,7 +535,7 @@ aoide inbox list [--all] [--json]
   durable, per-host, NOT song-scoped record of every message that actually
   landed in a local session (`pkgs/aoide/crates/storage/src/inbox.rs`,
   registered in that same crate's `commands.rs`, not `conduct`). Filed at
-  exactly two sites: `graph send`'s local-delivery success path (covers a
+  exactly two sites: `send`'s local-delivery success path (covers a
   direct `--id`, a `--to <local target>`, and `pending approve`'s re-drive)
   and the A2A door's spawn-first-turn path — the receive half of a message
   that landed, however it got there.
@@ -542,7 +567,7 @@ aoide inbox clear [--json]
 
 - **Writes:** empties `state/inbox.json`; reports how many entries were
   dropped (`0` on an already-empty inbox — a clean no-op, not an error).
-- **Notes:** not gated, unconditional — no `--yes`, matching `graph prune`'s
+- **Notes:** not gated, unconditional — no `--yes`, matching `session prune`'s
   precedent: the command name is the whole blast radius, nothing selective to
   confirm.
 
@@ -561,7 +586,7 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
   output stream).
 - **Writes:** binds the per-session control socket
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock` (unlinked on exit and on start if
-  stale); registers the session in `song/stage/sessions.json` with
+  stale); registers the session in `state/stage/sessions.json` with
   `conductable: true`, `socket`, the discovered `windowAddress`, and
   `pid` = the conduct process itself; shell ticks push live
   `cwd`/`activity`/`state`/`needsSudo` (change-only, re-staging `graph.json`);
@@ -573,26 +598,26 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
   interactive-only and skipped entirely under `--headless` (below).
 - **Pipes to / output:** a `poll()` multiplexer shuttles real stdin → PTY
   master → real stdout (the wrapped TUI runs undisturbed), and each accepted
-  control-socket connection's bytes → PTY master (that is what `graph send`
+  control-socket connection's bytes → PTY master (that is what `send`
   types into). Exit mirrors the child: 0 ok, 1 otherwise, real code in
   `data.exitCode`; envelope `data: {sessionId, agent, exitCode, conductable,
   socket}`.
 - **`--headless`:** a pty session with NO controlling terminal — for a caller
-  (a script, `graph spawn`, an orchestrating agent) that has none to give it.
+  (a script, `spawn`, an orchestrating agent) that has none to give it.
   The multiplexer never pushes a stdin pollfd (there is nothing to read from)
   and the pty-master's output mirrors to an append-only, unrotated per-session
   log file — `state/sessions/<sessionId>.log` (`$AOIDE_STATE_DIR` else
   `~/Aoide/state/`) — instead of real stdout; the log's path is recorded on
   the session record as the additive `logPath` field the moment the file
-  opens. Everything else — registration, the injection socket, `graph send`
+  opens. Everything else — registration, the injection socket, `send`
   steering, exit mirroring — is identical to the interactive path. With no
   controlling tty to query, `openpty` would otherwise get a NULL winsize and
   leave the pty at 0×0 (full-screen TUIs misrender against or refuse that
   outright), so a headless pty falls back to a conventional 80×24 instead; the
   interactive no-tty case (rare, e.g. redirected stdin in a test) keeps `None`. A log file that can't be opened (an unwritable
   state dir) degrades to stdout rather than killing the session, the same
-  best-effort posture as the socket bind. See "Headless conduct & `graph
-  spawn`" under [[Conductor-Channel]].
+  best-effort posture as the socket bind. See "Headless conduct & `spawn`"
+  under [[Conductor-Channel]].
 - **Notes:** defaults: `--id conduct-<pid>-<unixts>`, `--agent` = the command's
   basename (`shell` is special: only a shell agent gets the live-tick state
   driving — agents' states come from hooks). A bind failure leaves the session

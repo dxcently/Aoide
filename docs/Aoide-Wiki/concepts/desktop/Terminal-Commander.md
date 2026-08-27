@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, widget, terminal, agent, session]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -81,7 +81,7 @@ The plumbing already exists ([[Desktop-Architecture]], [[shellbridge]]):
 
 ## The list
 
-[[shellbridge]] writes the roster atomically to `song/stage/*.json`; the
+[[shellbridge]] writes the roster atomically to `state/stage/*.json`; the
 [[Quickshell]] widget reads it (no agent protocol in QML, ever). One row per
 session:
 
@@ -102,13 +102,14 @@ and the same signal the [[A2A-Door]] reports as the `auth-required` task state.
 Conduct-by-default means every closed or killed terminal is also a roster row
 to clean up — a `SUPER+Q` or SIGKILL tears the wrap process down uncatchably,
 so it can never mark itself `done`. The [[Session-Graph]]'s **liveness
-reaper** (`aoide graph reap`, a ~12s systemd timer) sweeps these out-of-band
+reaper** (`aoide session reap`, a ~12s systemd timer) sweeps these out-of-band
 by window-gone-or-pid-gone, so the roster never accumulates dead rows.
 
 The flat roster has a **graph layer** on top: the [[Session-Graph]] — a
 DAG of projects and sessions (which project anchors each session, which
-session spawned which), viewed and managed through the `aoide graph` command
-group. The roster is the rows; the graph is the tree they hang from.
+session spawned which), viewed through bare `aoide graph` and managed
+through the `project`/`session` command families. The roster is the rows;
+the graph is the tree they hang from.
 
 The roster also has its **desktop gadget**: `TerminalsGadget` in the
 [[Gadget-Dock]] renders the PROCESS view live — a pure view of `sessions.json`

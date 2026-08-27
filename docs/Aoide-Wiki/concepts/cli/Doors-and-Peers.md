@@ -25,8 +25,11 @@ launches (`mcp serve --stdio`, `a2a serve`, `conductor`) are special-cased in
 `pkgs/aoide/crates/cli/src/lib.rs::run_cli`.
 
 Shared state paths (`pkgs/aoide/crates/storage/src/fs.rs`): `state/` is
-`$AOIDE_STATE_DIR` when set to an absolute path, else `~/Aoide/state/`;
-`song/stage/` is `$AOIDE_STAGE_DIR` when absolute, else `~/Aoide/song/stage/`.
+`$AOIDE_STATE_DIR` when set to an absolute path, else `~/Aoide/state/`; the
+conducting stage tree `state/stage/` is `$AOIDE_STAGE_DIR` when absolute,
+else `~/Aoide/state/stage/` (`conducting_stage_dir`) — distinct from the
+rice stage tree `song/stage/`, which shares the same `$AOIDE_STAGE_DIR`
+override but otherwise falls back to `~/Aoide/song/stage/` (`stage_dir`).
 The audit log (`pkgs/aoide/crates/protocol/src/audit.rs::default_audit_log`)
 is `$AOIDE_AUDIT_LOG`, else `/home/$AOIDE_USER/Aoide/log`, else
 `$HOME/Aoide/log`. Every one-shot command appends one NDJSON audit record
@@ -104,16 +107,21 @@ lyra shellbridge [--run] [--json]
 - **Reads:** env `$XDG_RUNTIME_DIR` (socket parent; falls back to
   `/run/user/1000`), `$AOIDE_DEFAULT_SONG` (the rice-mode toggle's
   declarative-direction song, baked in by `modules/nucleus/shellbridge.nix`);
-  `song/stage/mode.json` (the toggle's current mode). Newline-delimited JSON
-  commands on its socket (below).
-- **Writes:** seeds `song/stage/sessions.json` and `song/stage/hooks.json`
+  `song/stage/mode.json` (the toggle's current mode — rice staging, so it
+  stays under `song/stage/`). Newline-delimited JSON commands on its socket
+  (below).
+- **Writes:** seeds `state/stage/sessions.json` and `state/stage/hooks.json`
   with their empty v0 registry shapes, atomic and only when absent or corrupt
   (`seed_if_absent` — a populated roster survives a restart); binds
   `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` (a stale socket file is removed
-  first); maintains `song/stage/herald.json` (notification ledger, v0,
+  first); maintains `state/stage/herald.json` (notification ledger, v0,
   capped at 20 cards, atomic read-modify-write on the accept loop);
   appends audit records (door `daemon`) to the default audit log for every
-  dispatched command.
+  dispatched command. All six of these are the CONDUCTING stage files
+  (`CONTRACTS.md §4`) — shellbridge writes them into `state/stage/` even
+  though the `shellbridge` command itself ships in `lyra`; rice staging
+  (`mode.json`, `livery.json`, `grimoire.json`, `cover.json`) stays under
+  `song/stage/`, untouched by this split.
 - **Output:** blocks forever serving the socket (systemd unit is
   `Type=simple`); returns an error document only on bind failure
   (`state: "error"`, data `{socket, stageDir, wrote}`). Socket commands
@@ -125,16 +133,16 @@ lyra shellbridge [--run] [--json]
   `rice mode <stage|declarative> [song] --json`, waits, then fires a detached
   `notify-send "Aoide" <message>`), `refreshusage` (detached re-exec
   `usage --json`; the gadget picks up the `state/usage.json` write itself),
-  `rechecksessions` (detached re-exec `graph reap --announce --json`),
+  `rechecksessions` (detached re-exec `session reap --announce --json`),
   `heraldpush` / `heraldverdict` / `heralddismiss` (the ledger; a verdict
-  types the answer into the waiting session through `graph send`). Also
+  types the answer into the waiting session through `send`). Also
   spawns the Hyprland window→session listener thread at startup
   (`graph::run_hypr_window_listener`). Malformed/unknown lines are logged to
   stderr and skipped — nothing kills the accept loop.
 - **Notes:** not gated. The `--run` flag is registered in the schema but the
   handler (`conduct/src/commands/shellbridge.rs::handle_shellbridge`) never
   consults it — bare `lyra shellbridge` runs the blocking loop either way. Client half:
-  `shellbridge::send_line` is how `lyra herald push` and `graph permit` reach
+  `shellbridge::send_line` is how `lyra herald push` and `session permit` reach
   the daemon, which stays the single ledger writer. See [[shellbridge]].
 
 ### aoide adapter melete
@@ -236,7 +244,7 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
   precedence over `tokenFile` when both are set, and a broker resolve
   failure — unreachable, denied, or a bounded ~2 s timeout — fails that
   connection's bearer check closed rather than falling back to the file or
-  the pre-token-open behavior). Per request: `song/stage/sessions.json`
+  the pre-token-open behavior). Per request: `state/stage/sessions.json`
   (task/session state), `state/peers.json` (autogate match — by caller
   address, or by an autogate-marked peer's own `tokenFile`, read fresh off
   disk per request). The `aoide-a2a` systemd unit
@@ -245,7 +253,7 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
   `AOIDE_A2A_PEER_NAME`/`AOIDE_A2A_BEARER_SECRET` are flag/env-only.
 - **Writes:** an audit record (door `a2a`) for every handled request, spawn,
   and SSE open/close in the audit log; the `message/send` inject path reuses
-  `graph send`'s `session_send`, so a held send writes the session's
+  `send`'s `session_send`, so a held send writes the session's
   `pending.json` and a delivered one writes the session's control socket.
 - **Output:** blocks in a thread-per-connection `TcpListener` accept loop
   (`pkgs/aoide/crates/server/src/a2a.rs`); announces
@@ -271,9 +279,9 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     `-32004`; session not conductable → `-32004`; unknown contextId →
     `-32001`. A held-pending send returns a `submitted` Task immediately.
   - `aoide/graphSummary` — `{schemaVersion: "0", instance: {name, url,
-    emittedAt}, graph}` wrapping the same resolved graph document `graph
-    view` renders (CONTRACTS.md §7) — every stage mutation restages
-    `song/stage/graph.json` automatically, so there is nothing separate to
+    emittedAt}, graph}` wrapping the same resolved graph document bare
+    `graph` renders (CONTRACTS.md §7) — every stage mutation restages
+    `state/stage/graph.json` automatically, so there is nothing separate to
     build here.
   - `message/stream` / `tasks/resubscribe` — the socket stays open as SSE
     (`text/event-stream`, one `data: <json>` frame per status change, final
@@ -315,7 +323,7 @@ aoide peer add <name> <url> [--autogate] [--token-file <path>]
   the [[Secrets-Broker|secrets broker]] (consumer `a2a-client`, fresh on
   every request, never cached) and presents as `Authorization: Bearer
   <value>` on every outbound call to that peer's own A2A door (`peer pull`,
-  `graph send --to`, `who`'s live probe). Absent by default — an unmarked
+  `send --to`, `who`'s live probe). Absent by default — an unmarked
   peer's outbound calls carry no bearer header, unchanged. A resolve
   failure fails that outbound call outright rather than sending it
   unauthenticated. See [[Peer-Federation]].
