@@ -3743,8 +3743,9 @@ state, children? }`.
   "stale"` and NO `children` — never a crash, never a silently-dropped peer.
   `error` carries the last pull failure's reason when present.
 
-Local graph commands (`graph focus`/`prune`/`reap`/`link`) keep ignoring
-`peer:*` ids — confirmed by test
+Local graph commands (`prune`/`reap`/`link`) and the focus jump
+(`focus_session`/`focus_window`, conductor- and shellbridge-driven, no CLI
+command) keep ignoring `peer:*` ids — confirmed by test
 (`conduct::graph::manage::tests::local_only_commands_ignore_peer_ids`), not
 just assumed to generalize: none of those commands read `peer_store` at
 all, they operate purely on `sessions.json`'s `SessionRecord`s, so a

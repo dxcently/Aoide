@@ -221,7 +221,6 @@ atomic writes only); missing stage files read as empty registries.
 | `aoide graph project remove <name>`| unregister (ok + no-op if absent) |
 | `aoide graph project list`         | list the registered anchor roots |
 | `aoide graph link <child> <parent>`| set the spawned-by edge on the child session (rejects self-links and cycles; a not-yet-registered parent is recorded with a warning) |
-| `aoide graph focus <node>`         | jump to the session's window via `hyprctl dispatch focuswindow` (Terminal-Commander session jump); first verifies the window is live via `hyprctl clients -j` (`focuswindow` exits 0 even for a vanished window) — a gone terminal → structured `window-not-found` (exit 1), no dispatch |
 | `aoide graph prune`                | drop `done` sessions + their hook records (orphaned children keep running with their `parentSessionId` cleared); the blessed manual resync — restages `song/stage/graph.json` for Quickshell hot-reload the same as every other mutating graph command |
 
 Session live state is the latest hook phase from `hooks.json` when present
