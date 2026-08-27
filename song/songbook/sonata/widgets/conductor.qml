@@ -1411,10 +1411,10 @@ Item {
                 }
                 Text {                           // kind tag — WITH the name
                     id: kindTag
-                    visible: card.sKind === "subagent" || card.sKind === "a2a"
+                    visible: card.sKind === "subagent"
                     anchors.left: nameT.right; anchors.leftMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
-                    text: card.sKind === "subagent" ? "⟐ sub" : "⇄ a2a"
+                    text: "⟐ sub"
                     font.family: temple.faceMono; font.pixelSize: 9
                     color: temple.livery.violet
                 }

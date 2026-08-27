@@ -288,7 +288,10 @@ pkgs.testers.runNixOSTest {
     # for `peer discover`/`peer invite` — the LAN discovery beacon's CLI
     # half, a read-only multicast sweep plus a sugar-over-the-ceremony
     # invite (P-P6, docs/architecture/PAIRING.md's "Discovery
-    # (advertise-but-locked)" section) — reached 80.
+    # (advertise-but-locked)" section) — reached 80; bumped by −4 for
+    # deleting the legacy `a2a agent add|list|remove|send` family outright
+    # (pre-pairing legacy — unsigned, ungated, structurally superseded by
+    # the `peer` family) — reached 76.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a command.
     schema_raw = machine.succeed("aoide schema --json")
@@ -302,8 +305,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 80, (
-        f"expected 80 commands, got {cmd_count}.  "
+    assert cmd_count == 76, (
+        f"expected 76 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

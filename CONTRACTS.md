@@ -750,7 +750,7 @@ staging writes; never an error.
 ```
 
 `song`/`draft`/`stagingSong`/`since` are optional (omitted, not `null`, when
-absent — the `SessionRecord`/`A2aAgent` Option convention). `song` names the
+absent — the `SessionRecord`/`Peer` Option convention). `song` names the
 song a `staging`- or `draft`-mode session is pointed at. `draft` is
 `Some(name)` **if and only if** `mode == "draft"` — every other mode always
 carries `draft` absent; nothing in the codebase ever sets one without the
@@ -1282,7 +1282,7 @@ message lands in the REMOTE peer's own inbox, via whichever of that peer's
 own two writers actually delivers it.
 
 Lives in the gitignored root-runtime `state/` dir (§2), NOT `song/stage/` —
-same tier as `usage.json`/`a2a-agents.json`, never reset by a stage reseed.
+same tier as `usage.json`/`peers.json`, never reset by a stage reseed.
 Read/resolved by `aoide inbox list/read/clear`: `list` shows unread entries
 by default (`--all` includes read ones); `read <n>` marks one entry read by
 its array position (`n`, same as `pending list`'s id scheme) — but unlike a
@@ -1475,7 +1475,7 @@ carried session is resurrected under a new id.
 reads as an empty carried set, never an error — a mark on an id that never
 produced a ledger line is inert, not an error condition. Written atomically
 (`aoide_storage::fs::atomic_write`, not `atomic_write_private`: a session id
-is the same class of data `sessions.json`/`a2a-agents.json` already keep at
+is the same class of data `sessions.json`/`peers.json` already keep at
 default mode). A carried id is a plain string, meaningful whether the
 session is live, dead-with-a-ledger-line, or dead-without-one. Re-marking
 an already-carried id refreshes its `markedAt` rather than duplicating the
@@ -1503,30 +1503,6 @@ ledger entry currently in the set, minus any id already alive in
 this file's `graph resurrect` and `projects.json`/`autoResume` entries
 above for the full selection contract and the daemon's boot-sweep
 consumer.
-
-### `state/a2a-agents.json` — **v0**
-
-The client-side registry of EXTERNAL A2A agents this aoide has registered by
-AgentCard URL (`aoide a2a agent add`; §6, client side). Lives in the same
-gitignored root-runtime `state/` dir as `usage.json` (state-dir resolution as
-above), NOT `song/stage/`. Written atomically by `aoide a2a agent add/remove`;
-read by `aoide a2a agent list/send` and folded into the session DAG
-(`graph.json`) as `kind:"a2a"` nodes. Keyed by the `name` from the fetched
-card — re-adding the same name replaces in place (dedupe). Each entry's `url`
-is the RESOLVED `message/send` endpoint (the card's own `url`/first-interface
-url, else the origin of the fetched card URL), i.e. what `agent send` POSTs to,
-not the card URL. **Additive / tolerate-missing:** an absent file is simply "no
-agents registered" (never an error), and readers round-trip fields they do not
-know.
-
-```json
-{
-  "schemaVersion": "0",
-  "agents": [
-    { "name": "peer", "url": "http://10.0.0.5:8710/", "description": "…", "registeredAt": "2026-08-01T12:00:00Z" }
-  ]
-}
-```
 
 ### `state/identity/` — **v0** (P-P1, `docs/architecture/PAIRING.md`)
 
@@ -2753,14 +2729,13 @@ choice of WHICH card. Fixed in `a2a.rs`:
 - Off-path (no token, today's default) is byte-identical to before — the
   served card is pinned field-for-field against `agent_card_from_commands`
   directly, the same off-path pin style Phase G used.
-- Known accepted consequence: `aoide a2a agent add` against a
-  token-protected remote records an **empty `description`** today, since
-  `parse_agent_card` only requires `name` (and derives the endpoint from
-  `url` or the fetch origin) — the client presents no `Authorization` bearer
-  when fetching a peer's card (outbound clients send none at all, per the
-  2026-08-19 amendment's grounding), so it only ever sees the stripped
-  shape on a protected peer. Enrollment still succeeds; closing that gap is
-  #47 Phase H, not this amendment.
+- Known accepted consequence: `aoide peer add` against a token-protected
+  remote only ever verifies the fetched card is well-formed JSON (it never
+  parses individual fields), so a stripped card still satisfies the
+  verification-before-registering check — the client presents no
+  `Authorization` bearer when fetching a peer's card (outbound clients send
+  none at all, per the 2026-08-19 amendment's grounding), so it only ever
+  sees the stripped shape on a protected peer. Registration still succeeds.
 
 **Amendment (2026-08-20, #50): an unauthenticated `message/send` naming a
 context answers UNIFORMLY, not with a hard gate.** Phase G above closed the
@@ -3161,40 +3136,19 @@ autogate, never by which address it happened to arrive from. §7's
 "`state/peers.json`" subsection below has the full mechanical detail
 (which field backs which rung, `resolve_peer`'s ladder, tie-break order).
 
-### Session-DAG integration (client side)
-
-An external A2A agent, once registered (`aoide a2a agent add <url>`), folds
-into the session DAG as a node of `kind: "a2a"` (mirroring
-`graph/model.rs`'s `SessionRecord.kind` tag) — `build_graph` reads
-`state/a2a-agents.json` (§4) and emits, per agent, a ROOT node
-`{ id: "a2a:<name>", kind: "a2a", name, url, state: "idle" }` (plus
-`description` when non-empty). No edges (an a2a agent anchors to nothing), so
-the existing `spawned`/`anchors` machinery is untouched; a missing/empty
-registry folds nothing (additive). The node is keyed by the `name` from its
-fetched AgentCard — the same handle `aoide a2a agent remove <name>` takes.
-
-`aoide a2a agent add <url>` accepts either a full
-`…/.well-known/agent-card.json` URL or a bare origin (the well-known path is
-appended); it curl-GETs the card, requires at least `name`, keeps
-`description`, and records the card's own `url`/first-interface url (else the
-fetch origin) as the endpoint. `aoide a2a agent send <name> "<message>"` is
-the **drive command** (the outbound half of bidirectional A2A): it POSTs a
-JSON-RPC `message/send` to that endpoint and reports the returned
-Task/Message. These external calls are **unauthenticated** for the MVP (no
-`securityScheme` handling yet) and loopback/LAN-oriented, consistent with §6's
-security posture; the message text is untrusted data, never executed.
-
 ### Status
 
 The option surface (`aoide.a2a.enable`/`bindAddress`/`port`/`spawnAgent`/
-`tokenFile`), the `kind:"a2a"` DAG fold, and the `a2a serve` command are
-**real**: the
-AgentCard, `tasks/get`, and `message/send` (Phase B2: inject-or-spawn
-execution, above) all run. The CLIENT side is now **real** too (Phase D):
-`a2a agent add|list|remove` maintain the `state/a2a-agents.json` registry
-(§4) and `a2a agent send` drives a registered agent. This section is
-**additive**: it introduces a new contract, carries no version bump to §1–§5,
-and needs no playbook migration entry (nothing existing changed shape).
+`tokenFile`) and the `a2a serve` command are **real**: the AgentCard,
+`tasks/get`, and `message/send` (Phase B2: inject-or-spawn execution, above)
+all run. The CLIENT side of this door is the `peer` family (§7): a registered
+peer folds into the session DAG as a `kind:"peer"` node, and `peer spawn`/
+`graph send --to <peer>/<query>` drive `message/send` against it. (An
+earlier, pre-pairing client half — `a2a agent add|list|remove|send`,
+unsigned and ungated — was deleted outright once `peer` superseded it.)
+This section is **additive**: it introduces a new contract, carries no
+version bump to §1–§5, and needs no playbook migration entry (nothing
+existing changed shape).
 
 ### Remote reach (P-D5, `docs/architecture/AOIDED.md`'s L3)
 
@@ -3558,8 +3512,8 @@ Aoide-to-aoide federation: one aoide instance can register ANOTHER aoide
 instance as a **peer** by URL and pull its resolved session graph into its
 own, folded in as a subtree. Built on §6's existing A2A door — ONE new
 JSON-RPC method (`aoide/graphSummary`), a client-side peer registry +
-per-peer pull cache, and an additive fold in the same `build_graph`
-function §6's `kind:"a2a"` fold already uses.
+per-peer pull cache, and an additive fold in `build_graph`
+(`graph/doc.rs`).
 
 **Melete-optional**: this federation works standalone; nothing in it
 references or requires Melete. A Melete-side consumer (a Rune polling skill,
@@ -3578,12 +3532,11 @@ contract amendment, not designed or assumed here.
 
 The peer registry: OTHER aoide instances this one has registered by URL
 (`aoide peer add <name> <url>`). Lives in the gitignored root-runtime
-`state/` dir (§2, state-dir resolution as in §4's `state/a2a-agents.json`
+`state/` dir (§2, state-dir resolution as in §4's `state/usage.json`
 entry) — **not** `song/stage/`, a deliberate divergence from an earlier
 draft of this contract that sketched `song/stage/peers.json`: a peer roster
-is account/global external-registry state, exactly like the sibling
-`state/a2a-agents.json` (§4) it mirrors byte-for-byte in shape/discipline,
-not song-scoped rehearsal state. Written atomically
+is account/global external-registry state, not song-scoped rehearsal state.
+Written atomically
 (`aoide_storage::peer_store`); **additive/tolerate-missing** — an absent
 file is simply "no peers registered", never an error; readers round-trip
 fields they do not know.
@@ -3691,16 +3644,12 @@ different questions and are independent of each other — `tokenFile` is what
 THIS peer must present TO us; `bearerSecret` is what we present TO it.
 
 `aoide peer add <name> <url> [--autogate]` verifies the peer FIRST — fetches
-its `/.well-known/agent-card.json` (mirroring `a2a agent add`'s
-verification-before-registering pattern exactly) — and only registers on
-success; a peer that fails the fetch is never added. Unlike `a2a agent
-add`'s upsert-replace-on-readd, **a duplicate `name` is rejected cleanly**
-(CONTRACTS.md's own judgment-call divergence: a peer's local nickname should
+its `/.well-known/agent-card.json` and only registers on success; a peer
+that fails the fetch is never added. **A duplicate `name` is rejected
+cleanly** (never an upsert-replace-on-readd: a peer's local nickname should
 never be silently repointed at a different URL by a second `add`). `aoide
 peer remove <name>` deregisters; a **missing name is an error**, not
-idempotent-silent — following `rice draft drop <name>`'s precedent (§4) over
-`a2a agent remove`'s tolerate-missing stance, a deliberate choice called out
-here since the two existing commands this one could have mirrored disagree.
+idempotent-silent — following `rice draft drop <name>`'s precedent (§4).
 `aoide peer list` enumerates the registry.
 
 ### `state/peer-cache/<name>.json` — **v0**
@@ -3766,38 +3715,34 @@ vocabulary is invented for the wire.
 
 ### The `peer:*` node-id convention (graph fold)
 
-`build_graph` (`aoide-conduct::graph::doc`, the same function that already
-folds registered §6 `kind:"a2a"` agents in as opaque root nodes) ADDITIVELY
-folds each registered peer in as a root node, one level richer than the a2a
-fold: `{ id: "peer:<name>", kind: "peer", name, url, state, children? }`.
+`build_graph` (`aoide-conduct::graph::doc`) ADDITIVELY folds each registered
+peer in as a root node: `{ id: "peer:<name>", kind: "peer", name, url,
+state, children? }`.
 
 - A **fresh** cache (see the TTL rule above) contributes `state: "fresh"`
   plus `children: { nodes, graph's edges }` — the peer's OWN
   already-resolved subtree, nested VERBATIM, never flattened into this
-  document's own top-level `nodes`/`edges` (unlike the a2a fold's one opaque
-  node, this folds in a peer's whole graph one level richer — so a peer's
-  ids can never collide with a local id or another peer's).
+  document's own top-level `nodes`/`edges` — so a peer's ids can never
+  collide with a local id or another peer's.
 - A **stale or never-pulled** peer still surfaces immediately (visible the
   moment `peer add` runs, before any pull ever succeeds) with `state:
   "stale"` and NO `children` — never a crash, never a silently-dropped peer.
   `error` carries the last pull failure's reason when present.
 
 Local graph commands (`graph focus`/`prune`/`reap`/`link`) keep ignoring
-`peer:*` ids exactly as they already ignore `a2a:*` ids today — confirmed by
-test (`conduct::graph::manage::tests::local_only_commands_ignore_peer_ids_exactly_like_a2a_ids_today`),
-not just assumed to generalize: none of those commands read `peer_store` (or
-`a2a_store`) at all, they operate purely on `sessions.json`'s
-`SessionRecord`s, so a `peer:*`/`a2a:*` id is simply never a session id they
-could ever match.
+`peer:*` ids — confirmed by test
+(`conduct::graph::manage::tests::local_only_commands_ignore_peer_ids`), not
+just assumed to generalize: none of those commands read `peer_store` at
+all, they operate purely on `sessions.json`'s `SessionRecord`s, so a
+`peer:*` id is simply never a session id they could ever match.
 
 ### CLI surface
 
 `aoide peer add <name> <url> [--autogate] [--token-file <path>]
 [--bearer-secret <name>]` / `list` / `remove <name>` / `pull [<name>]` /
-`status` — registered as their own command group, directly after `a2a agent
-add/list/remove/send` in `schema --json`'s order (nothing existing
-reorders). `peer pull` with no name pulls EVERY registered peer; with a
-name, just that one.
+`status` — registered as their own command group, directly after `a2a
+serve` in `schema --json`'s order (nothing existing reorders). `peer pull`
+with no name pulls EVERY registered peer; with a name, just that one.
 
 `aoide peer pair request <url> [--name <n>] [--self-url <url>]` /
 `pending` / `approve <id> [--yes]` / `reject <id>` (P-P2, appended newest
