@@ -558,7 +558,24 @@ in
           executable always comes from this option, set by the operator at
           rebuild time (the admission). Empty (the default) disables
           spawning entirely: `message/send` returns a structured error
-          instead of launching anything.
+          instead of launching anything. A bare-word command must also
+          appear on the unit's PATH via `spawnPath` below — a systemd user
+          unit's default PATH carries none of the system profile.
+        '';
+      };
+
+      spawnPath = mkOption {
+        type = types.listOf types.package;
+        default = [ ];
+        description = ''
+          Packages placed on the aoide-a2a unit's PATH so `spawnAgent`
+          (and the conducted child it launches) can resolve by bare name.
+          A systemd user unit's default PATH is minimal (coreutils and
+          friends) and does not include /run/current-system/sw/bin — found
+          live when a door-summoned spawn on a headless host failed with
+          "failed to conduct `claude`: No such file or directory" while an
+          interactive shell resolved it fine. Same explicit-package rule
+          shellbridge and the secrets popup watcher already follow.
         '';
       };
 

@@ -187,6 +187,12 @@ lib.mkIf config.aoide.enable {
     after = [ "aoided.service" ];
     bindsTo = [ "aoided.service" ];
 
+    # The spawn agent (and everything the conducted child execs) resolves
+    # off THIS unit's PATH, not the operator's shell — `aoide.a2a.spawnPath`
+    # names the packages explicitly (see the option's own live-incident
+    # note; empty when spawning is disabled).
+    path = config.aoide.a2a.spawnPath;
+
     serviceConfig = {
       ExecStart = "${pkgs.aoide}/bin/aoide a2a serve";
       Restart = "on-failure";
