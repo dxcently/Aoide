@@ -412,14 +412,14 @@ Resolve `<x>` against `projects.json` and anchor every ledger entry to it
 (the same longest-path-prefix rule bare `graph` uses). Selection then
 branches on the flags: `--all` widens to every anchored entry, `--id`
 narrows to one specific `sessionId`, and bare (neither flag) resumes the
-project's WHOLE carried set (`state/carry.json`, durable-sessions plan
+project's WHOLE undying set (`state/undying.json`, durable-sessions plan
 P-C4) — every anchored entry currently marked durable
-(`session carry on|off`), minus any id already alive (non-`done`) in
+(`session undying on|off`), minus any id already alive (non-`done`) in
 `sessions.json`, deduped by `sessionId` keeping the entry with the newest
 `endedAt` (an id that was resurrected and exited again can appear twice in
 the append-only ledger). `--all` and `--id` are unchanged escapes: both
-widen or narrow past the carried set regardless of the mark. An empty
-bare-mode selection is an honest `Outcome::ok` no-op naming the carried set
+widen or narrow past the undying set regardless of the mark. An empty
+bare-mode selection is an honest `Outcome::ok` no-op naming the undying set
 as empty for the project, never a silent success. Every surviving candidate
 then resolves through TWO arms (`resolve_candidate`, P-C6): the harness arm,
 unchanged, filters to harnesses with a verified `resume_args`; a candidate
@@ -436,8 +436,8 @@ windowed path with its resolved argv. Rules:
   new record carries additive `resumedFrom: Option<String>` naming the
   ledger entry's sessionId; any graph (re)stage projects it as a `resumed`
   edge beside `spawned`/`anchors` (`CONTRACTS.md §4`, graph.json — additive edge
-  kind). If the old id was carried, the mark transfers onto the new id in
-  the same step (one `save_carry` call, never left on the now-dead old id).
+  kind). If the old id was undying, the mark transfers onto the new id in
+  the same step (one `save_undying` call, never left on the now-dead old id).
 - **Post-spawn restore delivery (P-C6).** Once a terminal candidate's spawn
   actually registers, its `restore` snapshot decides what — if anything —
   lands in the new pty, through `session_send` in-process, never a direct
@@ -463,7 +463,7 @@ windowed path with its resolved argv. Rules:
   (`run_boot_auto_resume`) calls this command core unconditionally for
   every `autoResume` project — no liveness check of its own; liveness is
   the bare-mode selection's per-candidate exclusion above, so one live
-  terminal in a project never suppresses reviving the rest of its carried
+  terminal in a project never suppresses reviving the rest of its undying
   set.
 
 ---
@@ -661,10 +661,10 @@ Exactly one:
   project unconditionally — no liveness check at this layer. Liveness is
   handled one level down, per candidate, inside `resurrect`'s own
   bare-mode selection (durable-sessions plan P-C4): an already-alive
-  carried id is dropped before anything is spawned, so a project whose
-  whole carried set is already live resolves to an empty-set no-op rather
+  undying id is dropped before anything is spawned, so a project whose
+  whole undying set is already live resolves to an empty-set no-op rather
   than being skipped wholesale — a project-wide skip here would suppress
-  reviving a multi-session carried set's other, actually-dead members over
+  reviving a multi-session undying set's other, actually-dead members over
   one live terminal. Daemon start is the one trigger that exists on
   headless and desktop alike, fires once per boot by construction, and
   needs no new event source.

@@ -491,13 +491,13 @@ count.
   §4 below); `--project <name>` resolves against `projects.json`.
   Selection: `--all` widens to every anchored ledger entry, `--id
   <ledgerSessionId>` narrows to one specific entry, and bare (neither flag)
-  resumes the project's WHOLE carried set (`state/carry.json`,
-  durable-sessions plan P-C4 — see this section's own `state/carry.json`
+  resumes the project's WHOLE undying set (`state/undying.json`,
+  durable-sessions plan P-C4 — see this section's own `state/undying.json`
   subsection below) — anchored entries currently marked durable, minus any
   id already alive (non-`done`) in `sessions.json`, deduped by `sessionId`
-  keeping the newest `endedAt`. `--all`/`--id` never consult the carry
+  keeping the newest `endedAt`. `--all`/`--id` never consult the undying
   mark. An empty bare-mode selection is an `Outcome::ok` no-op naming the
-  carried set as empty for the project. Each surviving candidate then
+  undying set as empty for the project. Each surviving candidate then
   resolves through TWO arms (durable-sessions plan P-C6): a harness with a
   verified `resume_args` (`aoide_protocol::agents::AgentProfile`) spawns
   windowed running `<harness> --resume <id>`; a candidate the harness arm
@@ -1139,9 +1139,9 @@ this layer (durable-sessions plan P-C4): that used to gate on the whole
 project (any non-`done` session anchored to it skipped the call entirely),
 which was wrong once a project could carry MULTIPLE durable sessions — one
 live terminal would have suppressed reviving the rest. Liveness now lives
-inside `resurrect`'s own bare-mode selection, per carried candidate
+inside `resurrect`'s own bare-mode selection, per undying candidate
 (see this section's own `resurrect` entry above), so a project whose
-whole carried set is already live simply resolves to an empty-set
+whole undying set is already live simply resolves to an empty-set
 `Outcome::ok` no-op. A per-candidate spawn failure (e.g. a headless host
 with no `$AOIDE_TERMINAL`) degrades gracefully — logged, never a crashed
 tick.
@@ -1498,59 +1498,143 @@ both `sessions.json`'s additive-optional field and this always-present one,
 so a caller reading a populated `restore` sees the identical complete shape
 in either file.
 
-### `state/carry.json` — **v0** (durable-sessions plan)
+### `state/undying.json` — **v0** (durable-sessions plan)
 
-The carry mark: the set of session ids marked DURABLE, so a project's whole
-carried set can be resurrected together. Three writers, none routed through
-a stage lock or `daemon_dispatch` (this is not a stage-tree file): `aoide
-session carry on|off` sets or clears the mark directly; `aoide
-spawn --carry` adds the newly spawned id once it registers; `aoide
-resurrect` transfers a carried old id onto the freshly spawned session that
-replaces it. Lives under `state_dir` (`aoide_storage::fs::state_dir`)
-alongside `usage.json`/`session-ledger.jsonl`, NOT inside either stage tree
-— a carry mark is durable operator state, never staged rehearsal/registry
-state. Distinct from
-the ledger above: the ledger is an append-only record of every session that
-has ever left the roster, while `carry.json` is a small, freely-mutated SET
-— marked on, marked off, and its entries transferred wholesale when a
-carried session is resurrected under a new id.
+The undying mark: the set of session ids marked DURABLE, so a project's
+whole undying set can be resurrected together. Prototyped under the name
+"carry" (task #96, `state/carry.json`); shipped under this name at
+command-defrag lane U1 (2026-08-27) — same shape and discipline throughout,
+only the vocabulary changed. Three writers, none routed through a stage lock
+or `daemon_dispatch` (this is not a stage-tree file): `aoide session undying
+on|off` sets or clears the mark directly; `aoide spawn --undying` adds the
+newly spawned id once it registers; `aoide resurrect` transfers an undying
+old id onto the freshly spawned session that replaces it. Lives under
+`state_dir` (`aoide_storage::fs::state_dir`) alongside
+`usage.json`/`session-ledger.jsonl`, NOT inside either stage tree — an
+undying mark is durable operator state, never staged rehearsal/registry
+state. Distinct from the ledger above: the ledger is an append-only record
+of every session that has ever left the roster, while `undying.json` is a
+small, freely-mutated SET — marked on, marked off, and its entries
+transferred wholesale when an undying session is resurrected under a new
+id.
 
 ```json
-{ "schemaVersion": "0", "carried": [ { "sessionId": "conduct-1234-1756…", "markedAt": "2026-08-26T10:00:00Z" } ] }
+{ "schemaVersion": "0", "undying": [ { "sessionId": "conduct-1234-1756…", "markedAt": "2026-08-26T10:00:00Z" } ] }
 ```
 
 **Additive / tolerate-missing:** a missing, corrupt, or wrong-shape file
-reads as an empty carried set, never an error — a mark on an id that never
+reads as an empty undying set, never an error — a mark on an id that never
 produced a ledger line is inert, not an error condition. Written atomically
 (`aoide_storage::fs::atomic_write`, not `atomic_write_private`: a session id
 is the same class of data `sessions.json`/`peers.json` already keep at
-default mode). A carried id is a plain string, meaningful whether the
+default mode). An undying id is a plain string, meaningful whether the
 session is live, dead-with-a-ledger-line, or dead-without-one. Re-marking
-an already-carried id refreshes its `markedAt` rather than duplicating the
+an already-undying id refreshes its `markedAt` rather than duplicating the
 entry.
 
+**The one-shot migration.** The first time a process resolves
+`load_undying`, it renames a pre-existing `state/carry.json` onto
+`state/undying.json` when the new path is absent — the same atomic,
+narrated-on-failure, never-clobbers discipline this file's own "one-shot
+migration" note (above, `song/stage/`/`state/stage/`) established for the S1
+split, applied to a single small file: a plain `rename` (both paths share
+`state_dir`, so this is always same-filesystem), skipped when a fresher
+`undying.json` already exists (a process that already migrated is never
+overwritten), and narrated rather than panicking on a failed rename. A
+process that never had a `carry.json` (a fresh install, or one that already
+migrated) pays one cheap `exists()` check and nothing else — no process-wide
+guard is needed the way the six-file S1 migration warranted one. A file the
+migration just renamed but that has not yet been re-saved through
+`save_undying` still holds its pre-rename content (keyed `"carried"`, not
+`"undying"`); the read side tolerates that legacy key until the next
+`save_undying` normalizes it.
+
 **The resurrect transfer.** When `resurrect` spawns a replacement for
-a ledger entry whose old `sessionId` is currently carried, it moves the mark
-onto the new id in ONE `save_carry` call — add the new id, then drop the
+a ledger entry whose old `sessionId` is currently undying, it moves the mark
+onto the new id in ONE `save_undying` call — add the new id, then drop the
 old, never two separate writes. The old id must not survive the transfer or
 an ancestor chain would double-resurrect on the next sweep; conversely, an
-old id that was never carried gets no mark on its successor — the transfer
-only fires for a pair that started carried, it never grows the carried set
+old id that was never undying gets no mark on its successor — the transfer
+only fires for a pair that started undying, it never grows the undying set
 on an ordinary `--all`/`--id` revive. Within the single in-memory vector the
 new id is added BEFORE the old one is dropped, so a crash between that edit
-and the write leaves the OLD id carried — retryable on the next sweep —
-rather than leaving neither carried, which would be silent loss. A spawn
+and the write leaves the OLD id undying — retryable on the next sweep —
+rather than leaving neither undying, which would be silent loss. A spawn
 that fails outright transfers nothing, for the same reason: the old id
-stays carried so the next sweep retries it.
+stays undying so the next sweep retries it.
 
-**Driving selection (P-C4).** `carry.json` is also the fourth reader: bare
+**Driving selection (P-C4).** `undying.json` is also the fourth reader: bare
 `resurrect --project <x>` (no `--all`/`--id`) reads it to resume a
-project's WHOLE carried set rather than a single entry — every anchored
+project's WHOLE undying set rather than a single entry — every anchored
 ledger entry currently in the set, minus any id already alive in
 `sessions.json`, deduped by `sessionId` keeping the newest `endedAt`. See
 this file's `resurrect` and `projects.json`/`autoResume` entries
 above for the full selection contract and the daemon's boot-sweep
 consumer.
+
+### `.aoide/project.json` — **v0** (command-defrag lane U1, 2026-08-27)
+
+A project's own SESSION SPECS, committed adjacent to (never inside)
+`state_dir` or either stage tree — this file lives INSIDE a project root
+(`<project_root>/.aoide/project.json`), not under `~/Aoide/`, and is meant
+to be committed with the project so a bare clone can still tell `resurrect`
+what sessions the project wants brought up (U2, a later phase, is this
+file's first consumer). Distinct from `state/undying.json` above in every
+way that matters: `undying.json` marks LIVE session IDS durable on ONE
+host, gitignored runtime state, outside any project; `project.json` names
+the SHAPE of sessions a project wants — never a session id, never a
+timestamp, nothing host-specific except each spec's own `host` field. A
+project can hold both at once: an `undying` mark survives a session's exit
+on the host that ran it, while a `project.json` spec survives a `git clone`
+onto a host that has never run anything.
+
+```json
+{
+  "version": 0,
+  "sessions": [
+    { "host": "yomi", "dir": ".", "agent": "claude" },
+    { "host": "yomi", "dir": "crates/aoide", "command": "cargo watch -x check" }
+  ]
+}
+```
+
+`dir` is PROJECT-RELATIVE, ALWAYS — never an absolute path (an absolute
+`dir` would silently stop being correct the moment the file is read on a
+different checkout); `aoide_storage::manifest::save_manifest` refuses the
+WHOLE save before writing anything if any spec's `dir` is absolute, naming
+the offending `host` in a taught error. `command` is optional
+(`skip_serializing_if`, absent unless given) — a spec with none just names
+where an agent should be conducted, no fixed argv. No `sessionId`, no
+`markedAt`/timestamp of any kind: a manifest is a durable declaration of
+intent, not a record of any particular past run.
+
+**Tolerant, both directions.** No `#[serde(deny_unknown_fields)]` anywhere
+in `aoide_storage::manifest` — the file is committed, so it can be read by
+an older `aoide` build than the one that wrote it; an unrecognized
+top-level or per-spec field is silently tolerated, not refused. Reading:
+`load_manifest(project_root)` returns `None` for a MISSING file (the
+ordinary case — most projects declare nothing) with no narration at all,
+and ALSO `None` — but narrated to stderr first — for a present file that is
+unreadable or fails to parse, so an operator learns something is wrong
+without the caller needing a second error type.
+
+**`.aoide/` self-ignores.** The first `save_manifest` into a project root
+seeds `.aoide/.gitignore` with `*\n` if one is not already there — the
+manifest is a deliberately HOST-LOCAL decision (one focused host owns the
+shape it wants for a project), not something meant to sync via git the way
+the project's own source does. An existing `.gitignore` there (an operator
+customization, or one committed on purpose to override the default) is
+NEVER overwritten by a later save.
+
+**Discovery.** `aoide_storage::manifest::walk_up(start)` walks from `start`
+up through every parent directory, git-style, for the NEAREST
+`.aoide/project.json` — stopping at the filesystem root, nearest-wins (a
+directory further up is never consulted even when the nearest one turns out
+unreadable). Pure with respect to everything but the filesystem itself: no
+env var, no `state_dir`/`stage_dir` indirection, just the path handed in —
+this is the seam a later phase's bare `resurrect` (task #101, Lane U, U2)
+calls to work from a bare clone with no `state/undying.json` marks of its
+own.
 
 ### `state/identity/` — **v0** (P-P1, `docs/architecture/PAIRING.md`)
 
