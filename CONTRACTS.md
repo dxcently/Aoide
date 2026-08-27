@@ -2977,6 +2977,22 @@ façade — `aoide.a2a.enable` defaults to `false`. When enabled it binds
 exposing it to the network is a deliberate, explicit per-host choice, never
 the default.
 
+**Security invariant: never expose this door via `ssh -R` (or any other
+tunnel/proxy) terminating on loopback.** `classify_origin` (below) resolves
+solely from the TCP connection's own `peer_addr()` — it has no way to see
+past a loopback-terminated forward to whoever is really calling on the far
+end, so every such caller is misclassified as `PeerOrigin::Loopback` and
+inherits that origin's unconditional auto-delivery, silently bypassing the
+non-loopback pending gate this whole amendment exists to enforce. A same-box
+caller that is genuinely non-local (another process, another agent's
+harness reaching in over the network rather than through this box's own
+loopback) is bound correctly only by giving the door a real LAN or tailnet
+IP (`aoide.a2a.bindAddress`) — never by tunneling a remote caller back onto
+`127.0.0.1`. (A caller that dials THROUGH an ssh forward this instance
+itself opens outbound — `peer.via`/`--via`, §7 below — is the opposite
+direction and unaffected: the far END of that tunnel is this instance's own
+peer client, not an inbound caller trying to look local.)
+
 A forwarded A2A message — whether inbound (someone else's agent calling
 aoide's door) or outbound (aoide relaying to a registered external agent) —
 is **untrusted data** crossing aoided's boundary, exactly like an MCP call:
@@ -4193,7 +4209,13 @@ this transport is safe to use against a real peer.
 
 `aoide peer add <name> <url> [--autogate]` verifies the peer FIRST — fetches
 its `/.well-known/agent-card.json` and only registers on success; a peer
-that fails the fetch is never added. **A duplicate `name` is rejected
+that fails the fetch is never added. `--no-verify` skips this fetch
+entirely — for a peer that serves no AgentCard at all (a plain A2A client
+endpoint, e.g. an inbound-only harness): the peer is recorded exactly as
+the verified path records it, `verified: false` either way (a card fetch
+was always reachability, never identity — that only ever comes from `peer
+pair`), so skipping it changes nothing about what gets written, only
+whether the GET runs first. **A duplicate `name` is rejected
 cleanly** (never an upsert-replace-on-readd: a peer's local nickname should
 never be silently repointed at a different URL by a second `add`). `aoide
 peer remove <name>` deregisters; a **missing name is an error**, not
@@ -4292,7 +4314,7 @@ all, they operate purely on `sessions.json`'s `SessionRecord`s, so a
 
 ### CLI surface
 
-`aoide peer add <name> <url> [--autogate] [--token-file <path>]
+`aoide peer add <name> <url> [--autogate] [--no-verify] [--token-file <path>]
 [--bearer-secret <name>]` / `remove <name>` / `pull [<name>]` /
 `status` — registered as their own command group, directly after `a2a
 serve` in `schema --json`'s order (nothing existing reorders). `peer pull`
