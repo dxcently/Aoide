@@ -302,7 +302,8 @@ pkgs.testers.runNixOSTest {
     # restage_graph fires at every mutation site and `graph prune` is the
     # blessed manual resync, command-defrag lane (task #101) — reached 75;
     # bumped by −1 for deleting `graph focus` — conductor and shellbridge
-    # call focus_session directly — reached 74.
+    # call focus_session directly — reached 74; bumped by −1 for folding
+    # `peer list` into `peer status --json` (full Peer row) — reached 73.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a command.
     schema_raw = machine.succeed("aoide schema --json")
@@ -316,8 +317,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 74, (
-        f"expected 74 commands, got {cmd_count}.  "
+    assert cmd_count == 73, (
+        f"expected 73 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

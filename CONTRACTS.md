@@ -3664,7 +3664,11 @@ cleanly** (never an upsert-replace-on-readd: a peer's local nickname should
 never be silently repointed at a different URL by a second `add`). `aoide
 peer remove <name>` deregisters; a **missing name is an error**, not
 idempotent-silent — following `rice draft drop <name>`'s precedent (§4).
-`aoide peer list` enumerates the registry.
+`aoide peer status --json` enumerates the registry — its `data.peers`
+carries every registered peer's full row (name/url/autogate/tokenFile/
+bearerSecret/hub/pubkey/verified/allows/addedAt) layered with that peer's
+last-pull outcome (below); there is no separate `peer list` command, since
+that row was always a strict subset of this one.
 
 ### `state/peer-cache/<name>.json` — **v0**
 
@@ -3754,10 +3758,15 @@ all, they operate purely on `sessions.json`'s `SessionRecord`s, so a
 ### CLI surface
 
 `aoide peer add <name> <url> [--autogate] [--token-file <path>]
-[--bearer-secret <name>]` / `list` / `remove <name>` / `pull [<name>]` /
+[--bearer-secret <name>]` / `remove <name>` / `pull [<name>]` /
 `status` — registered as their own command group, directly after `a2a
 serve` in `schema --json`'s order (nothing existing reorders). `peer pull`
 with no name pulls EVERY registered peer; with a name, just that one.
+`peer status --json` is also this group's list-the-registry command — its
+`data.peers` carries every registered peer's full row (name/url/autogate/
+tokenFile/bearerSecret/hub/pubkey/verified/allows/addedAt) alongside that
+peer's last-pull outcome, so a separate `peer list` command has nothing
+left to say it doesn't already (command-defrag lane, task #101).
 
 `aoide peer pair request <url> [--name <n>] [--self-url <url>]` /
 `pending` / `approve <id> [--yes]` / `reject <id>` (P-P2, appended newest
