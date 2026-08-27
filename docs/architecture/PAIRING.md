@@ -321,6 +321,69 @@ ceremony; discovery only tells you who is there to invite.
   already knows a peer's fingerprint can spot the fake before ever
   inviting.
 
+## Transport
+
+Every A2A door stays loopback-bound, always — that invariant does not move.
+What moves is HOW a request reaches it from another box: an internal ssh
+forward, opened lazily by `aoide-client` and dialed through instead of the
+peer's own host directly. The tunnel is a TRANSPORT hop, not a protocol
+relay — the signed `X-Aoide-Peer` identity (Wire authentication, above)
+still crosses it end to end, and the far door verifies the exact same
+request it always did. Nothing about §"Settled decisions"'s "strictly
+pairwise, no relay, every hop carries the true origin" changes; an ssh `-L`
+forward is a pipe, not a party to the protocol.
+
+- **A peer dials directly unless a `via` marker says otherwise.** `Peer.via`
+  (`ssh://[user@]host[:port]`, CONTRACTS.md §7) is absent by default — every
+  peer registered today, and every peer this ceremony creates without an
+  explicit `--via`, dials `url` exactly as before. Explicit beats implicit:
+  a `--via` flag on the command itself always outranks a peer's own
+  recorded `via`.
+- **The dial's authority changes; its path never does.** When a `via` IS in
+  play, the client rewrites the dial url's `scheme://host:port` to
+  `http://127.0.0.1:<local port>` — the internal forward's own local end —
+  but copies the PATH verbatim from the logical url. Wire authentication's
+  signature is computed over the path, never the host, so this rewrite
+  changes no byte of what gets signed or what the far end verifies.
+  `aoide_storage::tunnel::dial_url` is the one place this cut happens,
+  deliberately sharing `peer_store::url_path` with the signer rather than
+  re-deriving it, so the two can never drift apart.
+- **`peer invite` records a `via` automatically; the ceremony itself does
+  not require one.** Discovery's own observed source address (this
+  document's Discovery section, above) is a real, reachable LAN target —
+  the ceremony's own two POSTs still dial it directly by default, exactly
+  as before this lane. What `peer invite` DOES do automatically is derive a
+  `via` from that same observed address and record it on the resulting
+  peer once pairing is approved, so that peer's FUTURE calls (pull, spawn,
+  send) have a working transport marker without a second manual step. An
+  explicit `--via` on either `peer invite` or `peer pair request`
+  overrides this for both the ceremony's own dial and the recorded marker.
+- **Ssh keys are the substrate; aoide never manages them.** The client
+  spawns `ssh -N -T -o BatchMode=yes …` — no password or host-key prompt
+  can ever appear, so a box missing the far side's key in its
+  `authorized_keys` fails fast with a taught error naming the one-time
+  manual step, never hangs waiting on a prompt nothing here could answer.
+  Aoide never writes to anyone's `authorized_keys`; a trusted home network
+  making ssh keys an acceptable substrate is the User's own premise for
+  this lane, not something this code decides on his behalf.
+- **A tunnel is reused within a session, never held open forever.** Opened
+  lazily on first use, keyed by `(session id, peer name)`, reused by every
+  later action under the same conducted session, torn down at session end
+  and swept by the reaper for a session that never got to run its own exit
+  path. A bare shell with no conducted session gets a process-scoped
+  tunnel instead — per-command rather than persistent.
+- **Narrowing the door's own loopback trust so a tunneled request cannot
+  silently auto-deliver is a REQUIRED, not optional, companion change.**
+  Every tunneled connection reaches the far door's socket as loopback —
+  that is what a forward IS. Today's door treats any loopback connection
+  as implicitly trusted for Inject delivery (a sound stance behind a bind
+  that only a genuinely local caller could ever reach); a tunnel is a NEW
+  way to reach that same socket from somewhere else, so the trust a bare
+  loopback classification confers must narrow to require a verified
+  signature before this transport is safe to actually use against a real
+  peer. Until that narrowing lands, treat `via`/`--via` as functional
+  plumbing, not a safe-to-use feature.
+
 ## Kill-list
 
 - No hand-rolled cryptography — primitives come from the vetted dep,

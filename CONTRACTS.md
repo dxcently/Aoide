@@ -3989,6 +3989,31 @@ behavior, unchanged): an unmarked peer's outbound requests carry no
 different questions and are independent of each other — `tokenFile` is what
 THIS peer must present TO us; `bearerSecret` is what we present TO it.
 
+`via` (string, optional, additive per P-S4, ssh-transport lane; set via
+`peer add --via`/`peer invite [--via]`/`peer pair request [--via]`/`peer
+spawn --via`) is an `ssh://[user@]host[:port]` transport marker
+(`aoide_storage::tunnel::parse_via`'s shape). Absent by default (today's
+every peer): every outbound call to this peer dials `url` directly,
+byte-for-byte the pre-P-S4 behavior. When present, `aoide-client`'s dial
+resolution opens (or reuses) an internal ssh forward to `via`'s host and
+dials `http://127.0.0.1:<local port>` through it instead, rewriting only
+the URL's authority — the PATH is preserved verbatim
+(`aoide_storage::tunnel::dial_url`), so the P-P4 signature (which signs
+over the path, never the host) still verifies on the far end unchanged.
+`set_peer_via` is the only writer, a sibling to `upsert_paired_peer` rather
+than a parameter on it. A `--via` flag on the command itself always beats
+a peer's own recorded `via`. `peer invite` additionally derives a default
+`via` from the discovery beacon's OBSERVED source address (never its
+advertised `url`, which a loopback-bound door always claims regardless of
+who hears it) and records it on the resulting peer at pairing-approval
+commit time, even when the ceremony's own dial went direct. Reaching a
+peer's own A2A door remains loopback-bound either way — the tunnel is a
+TRANSPORT hop, never a relay; the signed `X-Aoide-Peer` identity still
+crosses it end to end. See `docs/architecture/PAIRING.md`'s Transport
+section for the full design and its still-open P-S6 dependency (a verified
+signature must outrank a tunneled connection's loopback origin for Inject
+delivery before this transport is safe to use against a real peer).
+
 `aoide peer add <name> <url> [--autogate]` verifies the peer FIRST — fetches
 its `/.well-known/agent-card.json` and only registers on success; a peer
 that fails the fetch is never added. **A duplicate `name` is rejected
