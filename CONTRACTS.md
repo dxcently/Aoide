@@ -1697,7 +1697,7 @@ wording despite never having looked for one. Each spec resolves
 independently (one spec's failure never aborts the rest, same posture
 flag-mode's per-candidate loop already holds): a spec whose `host` does
 not match this host's own (`aoide_storage::display::local_host_name`) is
-skipped — remote summoning is a later phase (U4), never guessed here. A
+SUMMONED through the peer door (U4, below), never skipped. A
 local spec's `dir` resolves through `resolve_spec_dir` (above); the
 **enrichment rule** then decides HOW to bring it up — the NEWEST entry in
 THIS HOST's own session ledger whose `cwd`/`agent` match the resolved
@@ -1711,15 +1711,65 @@ clean-spawns instead: windowed (`AOIDE_TERMINAL`), the spec's own `command`
 when given, else the agent's registered `AgentProfile::launch` default; an
 agent with neither is a taught `failed[]` entry, never a guessed argv. The
 manifest DECIDES WHAT exists; the ledger only ever decides HOW. Every row
-in the outcome — `revived-from-ledger`, `clean-spawned`, `skipped-remote`,
+in the outcome — `revived-from-ledger`, `clean-spawned`, `summoned-remote`,
 a bare `skipped` (an unresolved harness with no `restore` snapshot either),
 or `failed` — carries a `disposition` key naming which of these it is, so
 a consumer filtering the outcome by disposition never silently drops a row
 that fell through `resolve_candidate`/`resurrect_one`'s own flag-mode
 shapes.
 
+**Remote summon (U4, command-defrag lane U).** A spec whose `host` names a
+DIFFERENT box than this one is summoned through the existing peer door,
+not skipped: `spec.host` resolves against `state/peers.json`
+(`aoide_storage::peer_store::load_peers`) the exact same way U3's picker
+WRITES it — a peer NICKNAME, not a literal DNS/OS hostname. Three local
+refusals, checked in order, all landing in `failed[]` (never `skipped[]` —
+the spec was tried and refused, not given up on) before the wire is ever
+touched: no peer registered under that name (taught, names `peer add`); a
+registered but UNVERIFIED peer (the same local-only refusal
+`aoide-client::commands::handle_peer_spawn` already holds toward its CLI
+callers — an unsigned request can never satisfy the remote door's
+`Signature`-rung spawn gate, PAIRING.md decision 6); or neither a `command`
+nor a registered default launch to summon WITH. Past those three,
+`aoide-conduct::graph::resurrect::summon_remote` calls
+`aoide_client::commands::spawn_on_peer` — the identical signed
+spawn-shaped `message/send` (`context_id: None`) `aoide peer spawn` drives,
+never a re-implementation of the wire and never a shell-out to the `aoide`
+CLI (the `conduct` → `client` dependency edge, documented in `conduct`'s
+own `Cargo.toml`, existed already for `who`'s live peer probe and gained
+this second tenant). No confirm prompt: the manifest spec IS the
+operator's own standing declaration, the same posture the local clean-spawn
+already takes toward a spec's `command`. Text summoned is the spec's own
+`command` verbatim when given, else the agent's registered default launch
+joined back into one line; **which AGENT actually runs is the PEER's own
+configured `aoide.a2a.spawnAgent`, never chosen here** — the summoned text
+only ever becomes that agent's first typed turn
+(`aoide-server::a2a::do_spawn`'s `spawn_inject_prompt`), so `spec.agent` is
+informational on the remote leg, unlike the local leg where it picks the
+actual harness. Every remaining refusal — an unreachable peer, the remote
+door's own gate/autogate/allow-set refusal — surfaces VERBATIM into
+`failed[]` as `spawn_on_peer`'s own error text; per-spec isolation holds
+exactly as every other row in this loop does. A summoned session is never
+marked undying on THIS host: the resurrected id lives on the peer, and
+`state/undying.json` only ever names ids that live here (the same
+reasoning U3's picker already holds toward a peer row's own mark).
+
+**The cwd limitation.** The peer-spawn wire carries NO working-directory
+field at all — `decide_send_action`/`do_spawn` (`aoide-server::a2a`) take
+only a prompt and the pre-configured `spawn_agent` executable, nothing
+else — so a spec's `dir` cannot be pushed onto the peer through this call;
+it is not silently dropped so much as never representable on this wire
+version. A spec wanting a specific directory on the peer must say so
+inside its own `command` (`git -C <absolute path on the peer> …`), an
+honest limitation rather than a guessed `--cwd` the wire has nowhere to
+carry. Adding a wire field is a later phase's job — the fleet's doors run
+older binaries this phase must stay compatible with, so the wire itself is
+never touched here.
+
 **Manifest-revived sessions are marked undying (orchestrator design
-ruling, U2 review round 1).** Both the enrichment path and the clean-spawn
+ruling, U2 review round 1) — LOCAL revivals only.** A remote summon (U4,
+above) never reaches this: the resurrected id lives on the peer, not here.
+Both the LOCAL enrichment path and the LOCAL clean-spawn
 path pass the same `--undying` flag `resurrect_one`/`clean_spawn_from_spec`
 hand to their own internal `spawn` invocation — the identical
 mark-after-registration mechanic `aoide spawn --undying` runs (above), not
