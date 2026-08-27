@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, cli, rice, livery, song]
 ---
 
@@ -13,14 +13,26 @@ scaffold a song ([[Song-Anatomy]]), hot-load it live, iterate inside a routed
 draft with take history, and validate/resolve/emit its notes through the
 native [[livery]] engine. Handlers live in
 `pkgs/aoide/crates/song/src/commands/{rice,draft,mode,cover,livery,take}.rs`;
-the stub registrations for `rice declare`/`rice transpose` live in
+`rice declare`'s handler and the `rice transpose` stub registration live in
 `pkgs/aoide/crates/lyra/src/commands/stubs.rs`.
 
-Path resolution (all in `pkgs/aoide/crates/storage/src/fs.rs`): the stage dir
-is `$AOIDE_STAGE_DIR` when set to an absolute path, else `~/Aoide/song/stage/`;
-`song/` derives as the stage dir's parent, so `song/songbook/<name>/`,
-`song/covers/`, and `song/stage/` all ride the one override. `run/qml/`
-resolves one level further up (`~/Aoide/run/qml/` at runtime). All file
+Path resolution (all in `pkgs/aoide/crates/storage/src/fs.rs`): one runtime
+root carries every runtime tree — `$AOIDE_ROOT` when set to an absolute
+path (relative/empty ignored), default `~/.aoide` — with `song/stage/`,
+`song/songbook/<name>/` (and `song/songbook/<song>/drafts/`),
+`song/covers/`, `state/`, and `run/qml/` all hanging off it. `~/Aoide` is
+purely the dev git checkout, reached through the separate `$AOIDE_FLAKE_ROOT`
+seam (absolute, default `~/Aoide`); the nix options `aoide.root`/
+`aoide.checkout` export the two envs. `$AOIDE_STAGE_DIR` (absolute) wins
+above `$AOIDE_ROOT` for the stage dir; `song/` derives as the stage dir's
+parent, so the whole song tree rides that one override, and `run/qml/`
+resolves one level further up (the stage dir's parent's parent —
+`$AOIDE_ROOT/run/qml/` on the default layout, relocated by an
+`$AOIDE_STAGE_DIR` override too). `$AOIDE_STATE_DIR` (absolute) likewise
+overrides `state/`. All three binaries call `fs::migrate_root_once()` at
+process start: on first run it moves a pre-existing
+`~/Aoide/{song/stage,state,log}` tree into the current root, each piece
+gated on its own override being unset. All file
 writes in this group route through `aoide_storage::fs::atomic_write`
 (temp `<stem>.tmp.<pid>` then rename, symlink-transparent — a write to a
 symlinked `stage/livery.json` lands in the link target). Shared stage
@@ -100,9 +112,21 @@ lyra rice stage [<name>] [--json]
 lyra rice compose <name> [--from <song>] [--force] [--json]
 ```
 
-- **Reads:** `song/songbook/<from>/livery.json` (`--from` default `"sonata"`;
-  must exist and parse as JSON).
-- **Writes:** exactly four files under `song/songbook/<name>/` (atomic):
+- **Reads:** `--from`'s notes (`--from` default `"sonata"`; must exist and
+  parse as JSON), resolved two tiers by `resolve_from_notes_path`
+  (`pkgs/aoide/crates/song/src/commands/rice.rs`): the host songbook's
+  `song/songbook/<from>/livery.json` under the runtime root FIRST, else
+  `<templates>/<from>/livery.json` in the shipped score templates —
+  `pkgs/lyra-songbook`, a verbatim copy of the committed `song/songbook/`
+  tree plus prebaked `manifest.json`/`registry.json` baked by
+  `lib/songbook.nix` (the same generator the checkout-host `nix eval` path
+  calls) into `share/lyra/songbook`. The templates dir itself resolves two
+  tiers, absolute-path-wins: `$AOIDE_SONG_TEMPLATES`, else a sibling of the
+  binary's own directory (`<exe_dir>/../share/lyra/songbook`), gated on that
+  directory existing.
+- **Writes:** exactly four files under the runtime root's
+  `song/songbook/<name>/` (never the templates dir — compose TO always
+  lands in the host songbook), all atomic:
   `rice.nix` (self-gating skeleton copying `--from`'s palette/window/geometry
   into `aoide.livery.*` under `config.aoide.song == "<name>"`),
   `livery.json` (verbatim mirror of `--from`'s), `design/intent.md`
@@ -111,8 +135,23 @@ lyra rice compose <name> [--from <song>] [--force] [--json]
 - **Notes:** errors (exit 1) on invalid name (`invalid-name`), invalid
   `--from` (`invalid-from`), `--from == <name>` (`from-equals-name`), target
   exists without `--force` (`already-exists`), missing `--from` song
-  (`from-song-not-found`). Writes stay inside `song/songbook/<name>/` (house
-  rule 1). Nothing live is touched; go live with `rice mode stage <name>`.
+  (`from-song-not-found` — not found in the host songbook NOR the templates
+  dir; the message names both locations it checked, and says so when no
+  templates dir resolved at all). Writes stay inside `song/songbook/<name>/`
+  (house rule 1). Nothing live is touched; go live with `rice mode stage
+  <name>`. The manifest/registry regen that `rice stage`'s widget sync runs
+  (`aoide-song::widgets::eval_songbook`) never shells to `nix` on a
+  repo-less host (no `flake.nix` at `$AOIDE_FLAKE_ROOT`): it merges the
+  baked templates baseline, overlays the existing on-disk file's entries for
+  songs still present in the host songbook (gone dirs pruned), and patches
+  the currently-staged song's own freshly-scanned entry in last — a scan
+  that only ever produces the compose shape, no `_widgets/` shelf. A song
+  with a `_widgets/` shelf still needs a real checkout: resolving a shelf
+  takes `composeSong` in the nix evaluator, which the templates fallback
+  cannot run. `$AOIDE_SONG_TEMPLATES` is wired only onto lyra-execing units
+  (`modules/nucleus/shellbridge.nix`'s shellbridge service) plus
+  `modules/nucleus/aoided.nix`'s `environment.sessionVariables` (gated on
+  `aoide.lyra.enable`) — core-only units don't carry it.
 
 ### lyra rice draft save
 
@@ -245,8 +284,10 @@ lyra rice mode draft <name> [--json]
   the stage file — `rice stage`, a hand-edit — lands directly in the draft
   via `atomic_write`'s symlink transparency; no save step. Only
   `livery.json` is routed — `cover set`/`stage/cover.json` are not. Drafts
-  are gitignored and banned from nix-eval reads (`lib/checks.nix`
-  `noSongRead`).
+  sit under the runtime root, outside the git checkout entirely; a
+  `rice declare` copy lands them in the checkout, where `.gitignore`
+  (`song/songbook/*/drafts/`) keeps them untracked and `lib/checks.nix`
+  `noSongRead` bans nix-eval reads of them.
 
 ### lyra cover set
 
@@ -347,14 +388,28 @@ lyra livery lint [<name>|<path>] [--json]
 lyra rice declare <name> [--json]
 ```
 
-- **Notes:** STUB — `implemented: false`, `gated: true`
-  (`pkgs/aoide/crates/lyra/src/commands/stubs.rs`). Dispatch short-circuits
-  before any handler: returns `status: "not-implemented"`, exit 64, message
-  "`lyra rice declare` is a walking-skeleton stub: arg-parsing and schema
-  are real, the live-system action is not yet implemented.", data `{path,
-  args, flags}`. Contract per the schema summary: commit a staged rice into
-  declarative state and propose the gated rebuild — the User gates this step
-  ([[Rebuild-Gate]]); the agent proposes, never admits.
+- **Reads:** the composed song `$AOIDE_ROOT/song/songbook/<name>/`
+  (`fs::songbook_dir`), recursively, byte by byte; and the checkout at
+  `aoide_storage::fs::flake_root()` (`$AOIDE_FLAKE_ROOT` absolute override,
+  default `~/Aoide`), which must exist as a directory.
+- **Writes:** copies the song tree into the checkout's
+  `song/songbook/<name>/` (`pkgs/aoide/crates/lyra/src/commands/stubs.rs`
+  `handle_rice_declare` — `implemented: true`, `gated: true`). Byte-diff
+  copy: a destination file whose bytes already match the source is left
+  untouched, so a repeat declare with nothing new is a no-op. Nothing beyond
+  the copy — no `git add`, no rebuild proposal, no `nix eval`; committing
+  and gating the rebuild stay the User's own steps ([[Rebuild-Gate]]): the
+  agent proposes, never admits.
+- **Output:** `"copied N file(s) into <dst>"`, or `"`<name>` already
+  matches <dst> — nothing to copy"` on a byte-identical re-declare; data
+  `{name, checkout}`, plus the changed-file list on the envelope's
+  `changed` field.
+- **Notes:** `<name>` is validated against `^[a-z0-9][a-z0-9-]*$` BEFORE
+  either path is built — a traversal-shaped name is refused by construction.
+  Errors: usage exit 2 on missing `<name>` (`missing-name`); exit 1 on
+  `invalid-name`, `no-composed-song` (nothing at the source — the message
+  says to run `lyra rice compose <name>` first), `no-checkout` (no checkout
+  at `$AOIDE_FLAKE_ROOT`), `copy-failed`.
 
 ### lyra rice transpose
 
@@ -362,8 +417,9 @@ lyra rice declare <name> [--json]
 lyra rice transpose <rice> <palette> [--json]
 ```
 
-- **Notes:** STUB — `implemented: false` (not gated), same not-implemented
-  envelope and exit 64 as `rice declare`. Contract per the schema summary:
+- **Notes:** STUB — `implemented: false` (not gated): `dispatch()`
+  short-circuits before any handler, returning the not-implemented envelope
+  and exit 64 — lyra's only remaining stub. Contract per the schema summary:
   replay song `<rice>` in another key (palette) from the song's
   `song/songbook/<rice>/palette/` directory. That palette directory layout is
   asserted only by the schema summary — unverified elsewhere in source.

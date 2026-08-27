@@ -9,36 +9,49 @@ source: "[[references/AOIDE-HANDOFF]]"
 # Song Anatomy — the Performed Half's Tree
 
 The sibling of [[Snowflake-Anatomy]] (which maps the frozen `modules/` tree).
-This page maps the **`song/` tree** — the performed half's home on disk: the
-committed *score* (the songbook) and the gitignored *live state* (the stage the
-desktop reads). It is a **role map**: what each subfolder is for, whether it is
+This page maps the **song surface** — the performed half's home on disk, in
+two roots: the committed *score* (the songbook, in the dev git checkout) and
+the *live state* (the stage the desktop reads, off the runtime root). It is a
+**role map**: what each subfolder is for, whether it is
 committed or runtime, and who writes it. The vocabulary those roles are named
 in lives in [[Song-Vocabulary]]; this page grounds the words in the actual
 directories.
 
-`song/` lives at `~/Aoide/song` (onboard links `~/song` → `~/Aoide/song`,
-never clobbering an existing file or symlink, and seeds
-`songbook/preferences.md` when absent). It is
-the **song agent's writable domain** (house rule #1, `AGENTS.md`): the agent
-commits *there* and, for score, nowhere else. Runtime dirs inside it are
-gitignored and created on demand.
+The committed score lives in the dev git checkout at `$AOIDE_FLAKE_ROOT/song/`
+(default `~/Aoide/song`; `aoide onboard` links `~/song` → the checkout's
+`song/` dir, never clobbering an existing file or symlink, and seeds the
+checkout's `song/songbook/preferences.md` when absent). The checkout's
+`song/songbook/` is the **song agent's writable committed domain** (house rule
+#1, `AGENTS.md`): the agent commits *there* and, for score, nowhere else. The
+runtime half hangs off `$AOIDE_ROOT` (absolute-path-wins, default `~/.aoide`):
+the stage the desktop reads (`$AOIDE_ROOT/song/stage/`), the composed host
+songbook `lyra rice compose` writes (`$AOIDE_ROOT/song/songbook/<name>/`),
+saved drafts (`$AOIDE_ROOT/song/songbook/<song>/drafts/`), plus `run/qml/`,
+`state/`, and `log`. `lyra rice declare <name>` is the seam between the two
+roots: it copies a composed song from the runtime songbook into the checkout's
+`song/songbook/<name>/` — no `git add`, no rebuild; the user gates those.
 
 ## The subfolders
 
-| Subfolder | Role | Committed? | Written by |
+| Subfolder | Role | Tree | Written by |
 |---|---|---|---|
-| `songbook/` | per-song homes + cross-cutting design memory | **committed** | song agent |
-| `stage/` | live preview/runtime state — the seam the desktop reads | gitignored runtime | [[livery]] · [[shellbridge]] · `aoide graph` |
-| `auditions/` | the propose gate | gitignored runtime | runtime |
+| `songbook/` (checkout) | per-song homes + cross-cutting design memory | committed score | song agent |
+| `song/stage/` | live preview state — the seam the desktop reads | runtime (`$AOIDE_ROOT`) | [[livery]] · `lyra rice` · QML |
+| `song/songbook/<name>/` | the composed host songbook | runtime (`$AOIDE_ROOT`) | `lyra rice compose` |
+| `song/songbook/<song>/drafts/` | saved drafts | runtime (`$AOIDE_ROOT`) | `lyra rice draft save` |
 
-Only `stage/` and `auditions/` are gitignored — those two are the whole runtime
-surface; everything else under `song/` is versioned score.
+Everything in the checkout's `song/` is versioned score; the runtime surface
+sits outside it under `$AOIDE_ROOT`, created on demand.
 
 > **The shipped standard song lives in the songbook like any other.**
 > The shipped standard, `song/songbook/sonata/`, is upstream-owned and
 > evolving; a host performs it by naming it (`aoide.song = "sonata";`).
 > Every other song is clone-owned, and upstream never touches it. See [[Self-Ricing#The Shipped Baseline Is Guarded, Not
 > Frozen]] for the full guarantee.
+> `pkgs/lyra-songbook` bakes the committed `song/songbook/` tree into
+> `share/lyra/songbook` as read-only templates (with prebaked
+> `manifest.json`/`registry.json`), so a repo-less host — no checkout on disk
+> at all — can still `lyra rice compose --from <song>` a shipped song.
 
 ## Committed score — the versioned half
 
@@ -98,9 +111,10 @@ folder in the repo, not the wiki.
 
 The live preview/runtime state, hot-reloaded by [[Quickshell]] and never
 committed. Written only by **atomic write-temp-then-rename**, so a reader never
-sees a torn file (`CONTRACTS.md §4`). Split by owner into two trees
-(command-defrag lane S1): `song/stage/` holds rice/paint staging,
-`state/stage/` holds CONDUCTING state. The files:
+sees a torn file (`CONTRACTS.md §4`). Split by owner into two trees, both off
+the runtime root (`$AOIDE_ROOT`, default `~/.aoide`):
+`$AOIDE_ROOT/song/stage/` holds rice/paint staging,
+`$AOIDE_ROOT/state/stage/` holds CONDUCTING state. The files:
 
 | File | Holds | Written by | Tree |
 |---|---|---|---|
@@ -116,33 +130,38 @@ wallpaper is staged; `AOIDE_WALLPAPER` on the Quickshell unit re-seeds it across
 rebuilds — the facet bakes the song's `wallpaper` note into the unit env, see
 [[Quickshell]]). Both stage dirs resolve via the same `AOIDE_STAGE_DIR`
 absolute-path override, so relocating it relocates both trees at once; with
-no override each falls back to its own default location under `~/Aoide/`
-(`stage_dir()` for `song/stage/`, `conducting_stage_dir()` for
-`state/stage/` — [[shellbridge]]). The flake's `no-song-read` check forbids
+no override each falls back to its own default under `$AOIDE_ROOT`
+(`stage_dir()` → `$AOIDE_ROOT/song/stage`, `conducting_stage_dir()` →
+`$AOIDE_ROOT/state/stage`, itself `$AOIDE_STATE_DIR` when absolute else
+`$AOIDE_ROOT/state` — [[shellbridge]]). On first run the binaries migrate any
+pre-existing `~/Aoide/{song/stage,state,log}` trees into `$AOIDE_ROOT`
+(`fs::migrate_root_once`). The flake's `no-song-read` check forbids
 any nix module reading `song/stage/` at build time, so runtime state can
 never become load-bearing for the build.
 
-### `auditions/`
-
-The propose gate for generated-but-unadopted rices — gitignored, created on
-demand.
-
-## Repo Layout (the `song/` surface)
+## Repo Layout (the song surface)
 
 ```
-~/Aoide/song/
+$AOIDE_FLAKE_ROOT/song/  (dev git checkout — committed score, default ~/Aoide/song)
 ├── songbook/            committed songs + cross-cutting design memory
 │   ├── sonata/          the shipped standard — upstream-owned, evolving; the LIGHT dusk key, keyed from song/covers/yuki-sonata.png (selected)
 │   │   ├── rice.nix · livery.json
 │   │   ├── palette/ · sounds/ · icons/ · widgets/ · design/
 │   ├── learnings.md · preferences.md · update-playbook.md   ← sparse today
-├── covers/              shared wallpaper library — yuki-sonata.png · sonata.webp · Alma-Tadema_Unconscious_Rivals.jpg
-├── stage/               live runtime state (gitignored)
-└── auditions/           propose gate (gitignored)
+├── covers/              shared wallpaper library — yuki-sonata.png
+└── song.md              repo-local map of this tree
+
+$AOIDE_ROOT/             (runtime root, default ~/.aoide — created on demand)
+├── song/
+│   ├── stage/           live preview state — livery.json · cover.json · mode.json · grimoire.json
+│   └── songbook/        composed host songbook (rice compose) · <song>/drafts/ (rice draft save)
+├── state/               conducting state — state/stage/ holds sessions/hooks/projects/graph
+├── run/qml/             live-deployed QML tree the desktop shell reads
+└── log                  the audit log
 ```
 
-**The root is closed** ([[Snowflake-Anatomy]]): new content lands at its
-designated place inside this tree — every per-song asset, key, sound, icon, and
+**The root is closed** ([[Snowflake-Anatomy]]): new committed content lands at its
+designated place inside the checkout tree — every per-song asset, key, sound, icon, and
 widget body lands inside that song's `songbook/<name>/` — never a new
 top-level `song/` dir. The lookup is the Song Map
 ([[Song-Vocabulary#The Song Map]]).

@@ -102,7 +102,8 @@ To *send* a notification use `notify-send`.
   (`pkgs/aoide/crates/conduct/src/shellbridge.rs::send_line`). The bridge
   daemon — the single writer, serialising concurrent pushes through its accept
   loop — folds the record into the ledger `state/stage/herald.json` (resolves
-  `~/Aoide/state/stage/herald.json`; `$AOIDE_STAGE_DIR` absolute override),
+  to `$AOIDE_ROOT/state/stage/herald.json`, default
+  `~/.aoide/state/stage/herald.json`; `$AOIDE_STAGE_DIR` absolute override),
   written atomically by the daemon (`edit_ledger`). Ledger rules
   (`pkgs/aoide/crates/conduct/src/herald.rs::apply_push`): a non-empty
   `stackTag` replaces the entry holding the same tag, a repeated `id` replaces
@@ -165,7 +166,8 @@ so its hook stream pipes into `aoide session hook`. `<agent>` is one of
     <agent>'`. Temporary debugging only; the `-hooks.jsonl` marker is a
     distinct idempotency key, so capture entries coexist with plain ones
     (installing without `--capture` replaces nothing) and are removed
-    manually. `~/Aoide/log` is the audit log file, not this capture path.
+    manually. The audit log file (`$AOIDE_ROOT/log`, default `~/.aoide/log`)
+    is separate from this capture path.
   - Idempotency: an event counts as installed when an existing entry's command
     contains `session hook` and matches the current mode's capture
     marker; re-running either mode adds nothing.

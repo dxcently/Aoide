@@ -21,7 +21,10 @@ start at [[aoide-cli]] and the group pages linked below.
 - **`--json` everywhere:** every command takes and emits a structured JSON
   envelope; without it, a human line goes to stdout.
 - **Audit:** every dispatch — CLI, MCP, or A2A door — appends a JSON-lines
-  record to `~/Aoide/log` (`$AOIDE_AUDIT_LOG` / `--audit-log` override).
+  record to the audit log: `--audit-log` flag, else `$AOIDE_AUDIT_LOG`
+  (non-empty), else `$AOIDE_ROOT/log`, default `~/.aoide/log`
+  (`default_audit_log`/`audit_log_path`,
+  `pkgs/aoide/crates/protocol/src/audit.rs`).
 - **Gating:** exactly three commands carry `gated: true` (`rice declare`,
   `content approve`, `update`) — the user rebuild gate ([[Rebuild-Gate]]).
   `send` and `screen send` hold pending approval internally instead;
@@ -29,10 +32,13 @@ start at [[aoide-cli]] and the group pages linked below.
   absent — the connection PARKS until a separate `secrets approve`/
   `dismiss` call or a timeout, rather than carrying `gated: true`
   ([[Secrets-Broker]]).
-- **Runtime roots:** repo-relative paths below resolve under `~/Aoide/` —
-  `state/` via `$AOIDE_STATE_DIR`; two stage trees share `$AOIDE_STAGE_DIR`
-  for an absolute override and otherwise fall back separately —
-  `state/stage/` (conducting state) and `song/stage/` (rice staging).
+- **Runtime root:** the `state/`, `song/stage/`, and `run/qml/` paths below
+  hang off one root — `$AOIDE_ROOT` when set to an absolute path, default
+  `<home>/.aoide` (`aoide_storage::fs::root`). Per-tree absolute overrides:
+  `state/` via `$AOIDE_STATE_DIR`; the two stage trees share
+  `$AOIDE_STAGE_DIR` and otherwise fall back separately — `state/stage/`
+  (conducting state) and `song/stage/` (rice staging). `~/Aoide` is the dev
+  git checkout, reached via `$AOIDE_FLAKE_ROOT`, not a runtime path.
   Stage/state writes are atomic temp-then-rename.
 - **Two registries, one convention:** `aoide schema --json` holds 74
   command paths, `lyra schema --json` holds 43 — every group page prefixes

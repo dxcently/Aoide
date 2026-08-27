@@ -101,10 +101,12 @@ The env-var seam is a documented contract ("Stage-dir resolution",
 `conducting_stage_dir()`, honouring `$AOIDE_STAGE_DIR` when set to an
 absolute path (empty or relative values are ignored so runtime paths never
 resolve against an arbitrary cwd), else falling back to
-`~/Aoide/state/stage`; the rice tree resolves the same way through the
-separate `stage_dir()`, falling back to `~/Aoide/song/stage` instead — the
-same override relocates both trees at once, a relocated tree with no
-override does not. Neither shellbridge unit sets `$AOIDE_STAGE_DIR`
+`$AOIDE_ROOT/state/stage`; the rice tree resolves the same way through the
+separate `stage_dir()`, falling back to `$AOIDE_ROOT/song/stage` instead —
+the same override relocates both trees at once, a relocated tree with no
+override does not. `$AOIDE_ROOT` itself defaults to `~/.aoide`
+(absolute-path-wins, empty or relative ignored), so on the default layout
+both trees hang off `~/.aoide/`. Neither shellbridge unit sets `$AOIDE_STAGE_DIR`
 (command-defrag lane S2): `$AOIDE_USER` alone is enough for both trees'
 no-override defaults to resolve correctly. A
 serialized test pins the precedence; the companion `AOIDE_AUDIT_LOG` seam

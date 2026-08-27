@@ -23,8 +23,9 @@ Every command takes `--json`. Without it the CLI prints the human `message`
 line; with it, an envelope `{status, command, message, gated, changed?, data?}`
 (`pkgs/aoide/crates/protocol/src/output.rs`). Exit codes: 0 ok, 1 error,
 2 usage, 64 not-implemented. Every dispatch — stubs included — appends one
-line to the audit log at `~/Aoide/log` (`$AOIDE_AUDIT_LOG` or a `--audit-log`
-flag overrides; `pkgs/aoide/crates/protocol/src/audit.rs`).
+line to the audit log (`default_audit_log`: `$AOIDE_AUDIT_LOG` non-empty,
+else `$AOIDE_ROOT/log`, default `~/.aoide/log`; a `--audit-log` flag
+overrides; `pkgs/aoide/crates/protocol/src/audit.rs`).
 
 ### aoide guide
 
@@ -179,8 +180,9 @@ aoide usage [--json]
   sanitized of quotes/backslashes/control chars), `$AOIDE_STATE_DIR`, `$HOME`.
   Spawns `claude --version` (to build the `claude-code/<ver>` User-Agent;
   fallback `claude-code/2.1.0`).
-- **Writes:** `state/usage.json` (resolves to `~/Aoide/state/usage.json`;
-  atomic temp-then-rename, symlink-transparent —
+- **Writes:** `state/usage.json` under the state dir (`$AOIDE_STATE_DIR`
+  absolute override, else `$AOIDE_ROOT/state/` — default
+  `~/.aoide/state/usage.json`; atomic temp-then-rename, symlink-transparent —
   `aoide_storage::fs::atomic_write`). Body: `{schemaVersion: "0", fetchedAt,
   live, local}` where `local` is `{note, today: {tokens, costUsd}, week:
   {tokens, costUsd}}` and `live` is `{ok, error?, fiveHour?, sevenDay?,
@@ -212,8 +214,8 @@ lyra quickshell reload [--json]
 - **Reads:** liveness probe via `systemctl --user show
   aoide-quickshell.service --property=MainPID --value`
   (`pkgs/aoide/crates/song/src/reap.rs`); the `shell.qml` path under
-  `run/qml/` (resolves to `~/Aoide/run/qml/shell.qml`;
-  `$AOIDE_STAGE_DIR`-relocatable).
+  `run/qml/` (`run_qml_dir()`: `$AOIDE_ROOT/run/qml/shell.qml`, default
+  `~/.aoide/run/qml/shell.qml`; `$AOIDE_STAGE_DIR`-relocatable).
 - **Pipes to / output:** when the service is up, spawns `quickshell -p
   <run_qml_dir>/shell.qml ipc call shell reload` — the `-p` is required
   because `ipc call` does not auto-discover an instance launched with a
@@ -240,8 +242,9 @@ lyra quickshell reload [--json]
 aoide soundcheck [--json]
 ```
 
-- **Reads:** the repo root (`~/Aoide`; derived as `song_dir()`'s parent, so
-  `$AOIDE_STAGE_DIR` relocates it). Shells out to git: `git status
+- **Reads:** the flake checkout root (`flake_root()`: `$AOIDE_FLAKE_ROOT`
+  absolute override, else `<home>/Aoide` — the dev git checkout, not the
+  runtime root). Shells out to git: `git status
   --porcelain` (C1), `git ls-files --cached --ignored --exclude-standard`
   (C2), `git check-ignore -v --no-index <path>` (C2's `assertedAt`
   resolution), plus `read_dir`/`readlink` on the root (C3). All in

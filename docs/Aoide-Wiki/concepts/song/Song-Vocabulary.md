@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-16
+updated: 2026-08-27
 tags: [aoide, naming, rice]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -14,7 +14,10 @@ Song vocabulary names the performed half. Snowflake vocabulary names the frozen 
 
 ## The Song Map
 
-Every term maps to a literal path inside `song/` (which lives at `~/Aoide/song`; onboard links `~/song` → `~/Aoide/song`).
+Every term maps to a literal path — committed score under the dev checkout's
+`$AOIDE_FLAKE_ROOT/song/` (default `~/Aoide/song`; onboard links `~/song` →
+the checkout's `song/`), runtime state under `$AOIDE_ROOT/song/` (default
+`~/.aoide/song`).
 
 | Music term | Meaning | `song/` path |
 |---|---|---|
@@ -27,15 +30,16 @@ Every term maps to a literal path inside `song/` (which lives at `~/Aoide/song`;
 | songbook | per-song homes + cross-cutting memory | `songbook/` |
 | cover | wallpaper | `song/covers/` |
 | chimes | notification + system sounds | `songbook/<song>/sounds/` |
-| stage | live preview state (gitignored) | `stage/` |
-| auditions | propose gate (gitignored) | `auditions/` |
+| stage | live preview state (runtime) | `$AOIDE_ROOT/song/stage/` |
 | the standard | shipped standard song | `songbook/sonata/` |
 | rehearsal | preview (`stage/livery.json`, hot-reload) | — |
 | recording | adopt — durable, committed, rebuilt | — |
 | venue | host — its own specifics and enabled instruments | `hosts/<host>/` |
 | replay | perform an existing song at a new venue | `aoide.song = "<name>";` in host config |
 
-Gitignored runtime dirs (`stage/`, `auditions/`, `catalog/`, `index/`, `log/`) hold ephemera only. Everything else is versioned.
+The runtime tree off `$AOIDE_ROOT` (`song/stage/`, the composed `song/songbook/`
+with its per-song `drafts/`, `state/`, `run/qml/`, `log`) holds ephemera only.
+Everything in the checkout's `song/` is versioned score.
 
 ## Full-Orchestration Coverage
 
@@ -66,7 +70,7 @@ Songs self-register like dendrites: `lib/mkHost.nix` walks `song/songbook/` alon
 
 **The separation of concerns (the point of replay):** the song carries only livery — palette, component tiers, and its own covers and chimes. It never sets host options, hardware configuration, or which facets and dendrites are enabled. Those remain host responsibilities. A host lacking an instrument simply does not sound that part; coverage degrades gracefully through the [[Self-Ricing]] coverage tiers. Host-agnosticism is a documented song-shape convention in `CONTRACTS.md`.
 
-The `noSongRead` check guards only the runtime dirs (`stage/`, `auditions/`). Committed `song/songbook/**` is versioned score — it is legitimately read at eval and safe for hosts to reference.
+The `noSongRead` check bans any module source under a `song/` runtime infix (`/song/stage/` · `/song/auditions/` · `/song/catalog/` · `/song/index/`) or a nested `songbook/<song>/drafts/` path at eval. Committed `song/songbook/**` is versioned score — it is legitimately read at eval and safe for hosts to reference.
 
 **Transpose vs replay:** transposing a song replays it in a different key (new palette, same venue). Replaying at a new venue uses the same key but lets a different host's instruments sound it.
 

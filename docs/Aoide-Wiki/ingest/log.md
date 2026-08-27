@@ -1823,3 +1823,61 @@ example lines — explicit naming is the current mechanism.
 Lint grep pass over the five touched pages: no new violations in the edited
 lines; pre-existing candidates on untouched lines (e.g. Codebase.md:20
 "robust", Self-Ricing.md:53 "would") left for a user-reviewed lint sweep.
+
+## [2026-08-28] lint | runtime root ~/.aoide + shipped templates — lane #107 sweep
+
+Verified and finished the L-C5 sweep (lyra-carrier lane, task #107),
+resuming a run that died mid-sweep with 23 pages edited and no log entry.
+Every runtime tree — `song/stage/`, `state/` (+ `state/stage/`), `run/qml/`,
+the composed `song/songbook/<name>/`, the audit log — hangs off ONE root,
+`$AOIDE_ROOT` (absolute-path-wins, default `~/.aoide`), nix-free; `~/Aoide`
+is purely the dev git checkout, reached through `$AOIDE_FLAKE_ROOT` (default
+`~/Aoide`). `pkgs/lyra-songbook` bakes the committed `song/songbook/` tree
+plus prebaked `manifest.json`/`registry.json` into `share/lyra/songbook`, so
+a repo-less host still `rice compose --from`s a shipped song and
+regenerates the widget registry/manifest nix-free (three-layer merge: baked
+baseline, surviving host-songbook entries overlaid, the staged song's own
+scan patched in last). `rice declare` is real: a gated, byte-diff copy of
+the composed song from the runtime songbook into the checkout's
+`song/songbook/<name>/` — no `git add`, no rebuild. `entities/dxflake.md`
+documents chiyo as the AoideOS carrier (dxflake's full paint stack, rev-
+pinned via `git+file:///home/khoa/Aoide?rev=…`; Aoide's own tree carries no
+`hosts/chiyo`).
+
+All 23 pages the prior run touched verified against HEAD (`d510235`,
+`CONTRACTS.md` §4, `aoide_storage::fs`, `aoide_protocol::audit`,
+`aoide-song`'s README/AGENTS, `crates/lyra/src/commands/stubs.rs`,
+`dxflake/hosts/chiyo/default.nix`) — all held up factually and against
+Style/Assertion; no half-finished edits found. Two more pages the sweep had
+missed, caught by the `~/Aoide`/`Aoide/state`/`Aoide/log` grep and fixed in
+place: `concepts/cli/Doors-and-Peers.md` (shared state/stage/audit-log
+path resolution) and `concepts/cli/Secrets-Commands.md` (the mirrored
+audit-log path in the TOTP-park paragraph). `Overview.md` and
+`entities/livery.md` — both on the brief's expected-edit list — carry no
+`~/Aoide`-as-runtime-root claim and needed nothing. The `~/Aoide/state/
+<agent>-hooks.jsonl` mentions left standing in `concepts/cli/
+Content-and-Hooks.md`, `entities/aoide-cli.md`, and `concepts/orchestration/
+Agent-Interface.md` are correct as written: `hooks install --capture`'s tee
+wrap (`conduct::commands::hooks::door_command`) still hardcodes that literal
+path, untouched by the L-C2 migration.
+
+`updated:` bumped to 2026-08-27 on every page actually edited this pass
+(the 23 plus the two caught above); `entities/aoide-cli.md` was already
+`2026-08-28` at HEAD, ahead of this pass, and left as is. Lint grep run
+over every changed page's added lines only (`git diff` `+`-line scan): one
+candidate (`Secrets-Broker.md`'s "would silently be blocked") is inherited,
+unchanged-in-kind phrasing describing `ProtectHome=true`'s real behavior,
+not new debt from this pass — left as rationale, not routed.
+
+Pages touched this pass: concepts/Codebase.md, concepts/Full-Architecture.md,
+concepts/Snowflake-Anatomy.md, concepts/cli/CLI-Reference.md,
+concepts/cli/Content-and-Hooks.md, concepts/cli/Graph-and-Conduct.md,
+concepts/cli/Meta-and-Upkeep.md, concepts/cli/Rice-and-Livery.md,
+concepts/cli/Screen-Commands.md, concepts/cli/Doors-and-Peers.md,
+concepts/cli/Secrets-Commands.md, concepts/governance/Clone-and-Run.md,
+concepts/governance/Governance.md, concepts/governance/Rebuild-Gate.md,
+concepts/orchestration/Conductor-Channel.md,
+concepts/orchestration/Secrets-Broker.md, concepts/song/Self-Ricing.md,
+concepts/song/Song-Anatomy.md, concepts/song/Song-Vocabulary.md,
+entities/Quickshell.md, entities/aoide-cli.md, entities/aoided.md,
+entities/dxflake.md, entities/lyra.md, entities/shellbridge.md.

@@ -42,11 +42,12 @@ Boundaries:
   → RGBA8), not an external binary.
 
 Path resolution (`pkgs/aoide/crates/storage/src/fs.rs`): the state dir is
-`$AOIDE_STATE_DIR` when set to an **absolute** path, else `~/Aoide/state/`.
-Captures land in `~/Aoide/state/captures/`, the saved pointer position in
-`~/Aoide/state/pointer-pos.json`. The session store `screen shot --session`
+`$AOIDE_STATE_DIR` when set to an **absolute** path, else `$AOIDE_ROOT/state/`
+(default `~/.aoide/state/`). Captures land in `state/captures/`, the saved
+pointer position in `state/pointer-pos.json`. The session store `screen shot
+--session`
 reads is `<stage>/sessions.json` where the stage dir is the conducting stage
-dir — `$AOIDE_STAGE_DIR` (absolute) else `~/Aoide/state/stage/`. Every JSON
+dir — `$AOIDE_STAGE_DIR` (absolute) else `$AOIDE_ROOT/state/stage/`. Every JSON
 write in this group routes
 through `aoide_storage::fs::atomic_write` — temp file `<stem>.tmp.<pid>`,
 fsync, then rename (symlink-transparent; stale temps swept).
@@ -96,8 +97,9 @@ lyra screen shot [--output <name> | --region "X,Y WxH" | --pick | --window <addr
   capture time into the sidecar's `desktop` field; a failed snapshot degrades
   the field, never the capture.
 - **Writes:** the capture image via `grim` — auto-named
-  `state/captures/screenshot-<unix_ts>-<pid>-<seq>.<ext>` (`~/Aoide/state/
-  captures/` at runtime) unless `--out` is given — plus a JSON sidecar at
+  `state/captures/screenshot-<unix_ts>-<pid>-<seq>.<ext>`
+  (`$AOIDE_ROOT/state/captures/` at runtime) unless `--out` is given — plus a
+  JSON sidecar at
   `<dest>.json` (same stem), written atomically (temp-then-rename). Sidecar
   shape per CONTRACTS.md §8: `schemaVersion: "0"`, `capturedAt`, `origin`,
   `size` (device px), `scale`, `region` (logical px, verbatim), `format`,
@@ -231,9 +233,9 @@ lyra screen point save [--json]
 ```
 
 - **Reads:** `hyprctl cursorpos`.
-- **Writes:** `state/pointer-pos.json` (`~/Aoide/state/pointer-pos.json` at
-  runtime), body `{"x": …, "y": …}`, atomic temp-then-rename. One flat file,
-  no history — each save overwrites.
+- **Writes:** `state/pointer-pos.json` (`$AOIDE_ROOT/state/pointer-pos.json`
+  at runtime), body `{"x": …, "y": …}`, atomic temp-then-rename. One flat
+  file, no history — each save overwrites.
 - **Output:** ok → `"saved <x>,<y> to <path>"`; data `{x, y, path}`;
   `changed` lists the file. Write failure → exit 1, `pointer-save-failed`.
 

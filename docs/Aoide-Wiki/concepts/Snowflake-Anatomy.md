@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, architecture, nix]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -55,7 +55,7 @@ The composition engine is an in-house dendritic walker: every file placed under 
 └── song/           the performed half (see [[Song-Vocabulary]])
 ```
 
-The repo surface is only the subsystem (`modules/`) plus standard flake furniture (`hosts/`, `pkgs/`, `lib/`, `docs/`) and the `song/` content tree — no scaffolding sprayed across the root. Runtime dirs (`song/{stage,auditions}`, root `log/`, `index/`, `catalog/`) are gitignored and created at runtime, never committed. `hosts/` knows dendrites; dendrites never know hosts — the same separation [[dxflake]] enforces. Subfolders inside `modules/dendrites/` are grouping only; the walker registers every file regardless.
+The repo surface is only the subsystem (`modules/`) plus standard flake furniture (`hosts/`, `pkgs/`, `lib/`, `docs/`) and the `song/` content tree — no scaffolding sprayed across the root. Runtime trees (`song/stage/`, `state/`, `run/qml/`, the composed `songbook/`, the audit `log/`) hang off one runtime root — `$AOIDE_ROOT`, the `aoide.root` option, default `~/.aoide` — created at runtime, never committed; the checkout carries no runtime state. `hosts/` knows dendrites; dendrites never know hosts — the same separation [[dxflake]] enforces. Subfolders inside `modules/dendrites/` are grouping only; the walker registers every file regardless.
 
 **The root is closed.** The directory list above is the whole surface — never invent a new top-level dir. New content lands inside the existing tree at its designated place: every per-song key, sound, icon, and widget body → `song/songbook/<song>/`; covers → the shared `song/covers/` library; module assets next to their module. The lookup for content paths is the Song Map ([[Song-Vocabulary#The Song Map]]); creating a new root directory is a contract change (`CONTRACTS.md` §2), not a convenience.
 

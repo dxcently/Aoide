@@ -116,7 +116,7 @@ sitting at a terminal — or be a terminal at all — to launch `conduct`.
   terminal. The multiplexer never reads stdin — nothing to read it from —
   and the pty-master's output mirrors to an append-only, unrotated
   per-session log file: `state/sessions/<sessionId>.log`
-  (`$AOIDE_STATE_DIR`, else `~/Aoide/state/`). The log's path is recorded on
+  (`$AOIDE_STATE_DIR` when set to an absolute path, else `$AOIDE_ROOT/state/`). The log's path is recorded on
   the session record as the additive `logPath` field (see [[Session-Graph]])
   the instant the file opens, so a caller can tail it to watch the headless
   session think — the conductor is one such reader: Enter on a headless

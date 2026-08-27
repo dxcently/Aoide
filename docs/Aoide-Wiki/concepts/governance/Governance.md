@@ -3,7 +3,7 @@ type: concept
 created: 2026-07-25
 tags: [aoide, governance, policy]
 source: "[[references/AOIDE-HANDOFF]]"
-updated: 2026-08-25
+updated: 2026-08-27
 ---
 
 # Governance — Gates, Contracts, Audit
@@ -16,7 +16,8 @@ Every NixOS rebuild is **user-gated**. The pattern follows sakaki's agent-sudo d
 
 Policy, lint, and audit all live in [[aoided]] core. All three doors — the CLI,
 the MCP façade, and the [[A2A-Door]] — inherit the same gate and write to the
-same audit log at `~/Aoide/log`, each dispatch tagged with the door it came
+same audit log at `$AOIDE_ROOT/log` (default `~/.aoide/log`, the
+`aoide.auditLog` option), each dispatch tagged with the door it came
 through (`Door::Cli` / `Door::Mcp` / `Door::A2a`). One audit path for every
 interface: divergence between the doors is structurally impossible.
 

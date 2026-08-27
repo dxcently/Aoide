@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-26
+updated: 2026-08-27
 tags: [aoide, onboarding, deployment]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -13,7 +13,7 @@ Aoide is a framework you clone and run. The upstream repo ships the shape-making
 ## Why Shared History
 
 - **Shared history with upstream**: `aoide update` is a real `git merge`, not a package upgrade. Improvements flow in; your personal commits never conflict with upstream additions because growth is additive.
-- **Reproducibility**: every default and generated rice is committed and versioned. A rebuild from the clone reproduces the entire riced system on any box. Gitignored runtime dirs (`stage/`, `auditions/`) hold ephemera only.
+- **Reproducibility**: every default and generated rice is committed and versioned. A rebuild from the clone reproduces the entire riced system on any box. Runtime state (`song/stage/`, `state/`, `run/qml/`, the audit log) lives under `$AOIDE_ROOT` (default `~/.aoide`), separate from the clone, and holds ephemera only.
 - **Your dendrites and songs are ordinary local commits**: `modules/dendrites/` growth is additive by construction, and `song/songbook/` is your writable domain. Committed songs are versioned score — every host that pulls the clone can perform any of them. One line in `hosts/<host>/default.nix` (`aoide.song = "<name>";`) selects which song a host performs. See [[Song-Vocabulary#Replay — any song, any host]].
 - **A remote fork is optional**: add your own remote only to back up your instance, sync songs across your machines, or open contributions upstream. The instance itself needs nothing but the clone.
 - **Module import stays possible** but secondary; the clone is the primary deployment model.

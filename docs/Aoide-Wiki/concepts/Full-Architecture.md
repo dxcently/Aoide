@@ -89,7 +89,7 @@ routed through the desktop, not through `aoided`'s CLI trunk).
    └───────────────────────────────┬─────────────────────────────┘
                                     ▼
    ┌─────────────────────────────────────────────────────────────┐
-   │  aoided  —  policy · single audit log (~/Aoide/log)          │   [[aoided]] · [[Governance]]
+   │  aoided  —  policy · single audit log ($AOIDE_ROOT/log)      │   [[aoided]] · [[Governance]]
    │            default-deny event bus (per event class)           │
    │            REBUILD GATE  ◄───────────────  User admits        │
    └───┬───────────────────────┬────────────────────────┬────────┘
@@ -134,7 +134,7 @@ the implemented/stubbed ladder.
 | Subsystem            | Inputs                                         | Outputs                                             | Status                                     |
 | -------------------- | ---------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
 | [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 74 real/7 exit 64; lyra 41 real/2 exit 64) |
-| [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`~/Aoide/log`); default-deny event bus   | implemented (skeleton)                     |
+| [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`$AOIDE_ROOT/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; stage    | mostly real (`declare`/`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all commands exit 64)                |
 | [[livery]]         | `aoide.livery` (palette + component tiers)   | `song/stage/livery.json`; baked facets + Stylix   | implemented (v0)                           |
@@ -156,7 +156,7 @@ format; [[livery]] (native Rust in `crates/song/src/livery/`; commands `lint` /
                      aoide.livery  (palette → component, v0)
                            │  single source of truth
              ┌─────────────┴──────────────┐
-             ▼ REHEARSAL (live, gitignored) ▼ RECORDING (adopted, committed)
+             ▼ REHEARSAL (live, uncommitted) ▼ RECORDING (adopted, committed)
    livery emit                    rice.nix ──► facets + Stylix
    ├─ stage: song/stage/livery.json          │   (values baked at nix build)
    │         (atomic write; fully resolved)  ▼
@@ -175,8 +175,9 @@ The baked side is carried by the three facets, all real:
 
 - **quickshell** — declares nine surfaces with `owner = "quickshell"` (bar,
   notifications, launcher, osd, lockscreen, greeter, wallpaper, agentWidgets,
-  sessionGraph); QML rsyncs from the store into the gitignored
-  `~/Aoide/run/qml/` via home-manager activation (source stays
+  sessionGraph); QML rsyncs from the store into
+  `$AOIDE_ROOT/run/qml/` (default `~/.aoide/run/qml/`) via home-manager
+  activation (source stays
   `modules/facets/quickshell/qml/`; no `qml/` at the repo root);
   `LiveryState.qml` watches the stage file for the live fan-out. Eight of
   the nine carry a live QML body: `AoideBar.qml` is the bar (its own popouts
@@ -294,7 +295,7 @@ temporal composability|same thesis]] as the walker and the widget slots. See
 
 ```
    agent ──► CLI trunk ─────┐
-   agent ──► MCP façade ─────┼──►  aoided  ──►  policy · GATE · audit(~/Aoide/log)
+   agent ──► MCP façade ─────┼──►  aoided  ──►  policy · GATE · audit($AOIDE_ROOT/log)
    agent ──► A2A door ───────┘         (all generated from the same schema)
 ```
 
@@ -381,7 +382,8 @@ and `aoide-usage` (gated on `aoide.usage.enable`) units, and the
 `aoide-secrets-serve`, gated on `aoide.secrets.enable`, own uid
 `aoide-secrets` — anchored to `multi-user.target` rather than a graphical
 session.
-Live state lands in two stage trees split by owner: `song/stage/*.json`
+Live state lands in two stage trees under the runtime root (`$AOIDE_ROOT`,
+default `~/.aoide`), split by owner: `song/stage/*.json`
 (livery, mode, cover — rice/paint staging) and `state/stage/*.json`
 (sessions, hooks, projects, graph, herald, pending — the [[Session-Graph]]
 DAG layer's own conducting files). `lib/mkHost.nix`
@@ -400,7 +402,8 @@ flake always build the same binaries, never a drifted copy.
   git records. `aoided` is propose-only; no background self-updaters — house
   policy, concrete in the unit definitions.
 - One audit surface: every door (CLI, MCP, A2A) appends to the single audit log
-  file (`~/Aoide/log`, the `aoide.auditLog` option) — there is no per-door log.
+  file (`$AOIDE_ROOT/log` — default `~/.aoide/log` — the `aoide.auditLog`
+  option) — there is no per-door log.
 - Trust boundary: forwarded notification text is untrusted data. The melete
   adapter forwards metadata only; an app title must never reach the agent as a
   command — a hard architectural constraint.
@@ -433,18 +436,23 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 │                    aoide/aoided core + lyra paint, see [[Package-Layout]])
 ├── song/            songbook/sonata/ (shipped standard) — rice.nix · livery.json ·
 │                    palette/ · sounds/ · icons/ · widgets/ · design/ (per song);
-│                    covers/ — shared wallpaper library, referenced by rice.nix;
-│                    stage/ + auditions/ runtime (gitignored)
+│                    covers/ — shared wallpaper library, referenced by rice.nix
 ├── docs/BUILD.md    module-authoring conventions
 ├── CONTRACTS.md     §0 design philosophy + the versioned contracts §1–8 (note
 │                    schema · dendrite shape · schema output · stage files ·
 │                    song shape · A2A door · peer federation · screen capture)
-├── AGENTS.md        tier-0 agent guide (aoide guide prints the same map)
-└── log              single audit log — runtime, gitignored
+└── AGENTS.md        tier-0 agent guide (aoide guide prints the same map)
 ```
 
-Runtime dirs (`song/{stage,auditions}`, root `log`, `index/`,
-`catalog/`) are gitignored and created at runtime; `song/songbook/**` is
+The map above is the dev git checkout (`~/Aoide`, reached via
+`$AOIDE_FLAKE_ROOT`). Every runtime tree hangs off one root instead —
+`$AOIDE_ROOT` when set to an absolute path, else `~/.aoide` (the `aoide.root`
+option): `song/stage/`, `state/` (+ `state/stage/`), `run/qml/`, the composed
+host `song/songbook/`, and the audit `log/`, created at runtime by
+systemd-tmpfiles, the quickshell facet's home-manager activation, and the
+binaries themselves; on first run the binaries migrate pre-existing
+`~/Aoide/{song/stage,state,log}` into the root, each piece gated on its own
+override being unset. `song/songbook/**` in the checkout is
 versioned score, legitimately walked at eval.
 
 `hosts/` knows dendrites; dendrites never know hosts. Facets read only

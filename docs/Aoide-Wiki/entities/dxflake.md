@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-07-28
+updated: 2026-08-27
 tags: [aoide, nix, flake, dxflake, auto-discovery]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -17,6 +17,8 @@ A dendritic auto-discovery NixOS flake at github.com/dxcently/dxflake. It serves
 **Host configuration.** A host's `default.nix` imports only its `./hardware.nix` and then flips `dx.*` flags. It never imports module files directly. The separation is strict: hosts know dendrites; dendrites never know hosts.
 
 `yomi-strix` — Aoide's own host — derives from dxflake's own `yomi-strix`, trimmed to essentials (`hosts/yomi-strix/`); it builds under Aoide's *own* flake (`flake.nix`'s `mkHost`), not dxflake's. Aoide's `lib/mkHost.nix` reuses the same walker pattern; see [[Snowflake-Anatomy]] for how Aoide names the equivalent layers (nucleus, dendrites, facets).
+
+**chiyo, the AoideOS carrier.** dxflake's host `chiyo` runs Aoide's full paint stack on top of dxflake; Aoide's own tree carries no `hosts/chiyo`. dxflake consumes Aoide as a flake input (`git+file:///home/khoa/Aoide`, rev-pinned to a committed HEAD) and walks the input's `modules/` and `song/songbook/` into every host's module list, so chiyo flips the `aoide.*` options directly: `aoide.song = "sonata"`, the three paint facets (`aoide.facets.{quickshell,compositor,stylix}.enable`), `aoide.lyra.enable`, and the dendrites `aoide.{hyprland,clipboard,screenshot,dunst}.enable`. The Aoide core (binaries, aoided, A2A) enters through dxflake's own `dx.aoide.enable` dendrite. dxflake keeps what does not collide — `./hardware.nix`, `ly` login and pipewire via `dx.aggregations.desktop` (with `services.greetd.enable = lib.mkForce false` against the quickshell facet's stub) — and turns off `dx.aggregations.hyprland` and `dx.stylix.enable` so only one stack writes the leaf options the two stacks share.
 
 ## Related
 

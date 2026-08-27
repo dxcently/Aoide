@@ -35,19 +35,20 @@ list|read|clear` is the one exception: it lives in
 storage already owns the store.
 
 Path resolution (`pkgs/aoide/crates/storage/src/fs.rs`): the conducting stage
-dir is `$AOIDE_STAGE_DIR` when absolute, else `~/Aoide/state/stage/` — so
+dir is `$AOIDE_STAGE_DIR` when absolute, else `$AOIDE_ROOT/state/stage/` — so
 `state/stage/{projects,sessions,hooks,graph,pending,herald}.json` all ride
 that one override (`aoide_storage::fs::conducting_stage_dir`, distinct from
 the rice `stage_dir` under `song/stage/`). The state dir is
-`$AOIDE_STATE_DIR` else `~/Aoide/state/`. Every stage write goes through
+`$AOIDE_STATE_DIR` else `$AOIDE_ROOT/state/` (default `~/.aoide/state/`).
+Every stage write goes through
 `aoide_storage::fs::atomic_write` (temp `<stem>.tmp.<pid>`, `fsync`, rename,
 symlink-transparent) and multi-file load-modify-writes serialise through
 `with_stage_lock` (a non-reentrant `.stage.lock` flock, still fixed to the
 rice `stage_dir()` so conducting writes stay serialised against rice writers
 sharing the same lock file). Every mutation re-stages `state/stage/graph.json`
 via `restage_graph` so the hot-reloaded document never drifts from the
-registries. The audit log defaults to `~/Aoide/log` (`$AOIDE_AUDIT_LOG`, or
-the `--audit-log` flag, override).
+registries. The audit log resolves to `$AOIDE_ROOT/log` (default
+`~/.aoide/log`; `$AOIDE_AUDIT_LOG`, or the `--audit-log` flag, override).
 
 Every command takes `--json`: without it the CLI prints the human `message`
 line (plus a `changed:` trailer); with it, an envelope `{status, command,
@@ -492,7 +493,8 @@ aoide send (--id <id> | --to <name>) [--submit] [--yes] [--from <sender>] -- <te
   orch-1: 1`). EVERY outcome appends one audit record (`class: "audit"`,
   `command: "send"`, status `pending|delivered|error`, the unprefixed
   text as `untrusted_data` — never the message — and the resolved sender, if
-  any, folded into the message) to `~/Aoide/log`.
+  any, folded into the message) to the audit log (`$AOIDE_ROOT/log` by
+  default).
 - **Output:** pending → exit 0, `data: {id, state: "pending", delivered:
   false, submit, gate}`; delivered → exit 0, `data: {id, state: "delivered",
   delivered: true, submit, title, gate}` with `gate` ∈ `yes | autogate |
@@ -728,8 +730,9 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
   (a script, `spawn`, an orchestrating agent) that has none to give it.
   The multiplexer never pushes a stdin pollfd (there is nothing to read from)
   and the pty-master's output mirrors to an append-only, unrotated per-session
-  log file — `state/sessions/<sessionId>.log` (`$AOIDE_STATE_DIR` else
-  `~/Aoide/state/`) — instead of real stdout; the log's path is recorded on
+  log file — `state/sessions/<sessionId>.log` (`$AOIDE_STATE_DIR` when
+  absolute, else `$AOIDE_ROOT/state/`) — instead of real stdout; the log's
+  path is recorded on
   the session record as the additive `logPath` field the moment the file
   opens. Everything else — registration, the injection socket, `send`
   steering, exit mirroring — is identical to the interactive path. With no

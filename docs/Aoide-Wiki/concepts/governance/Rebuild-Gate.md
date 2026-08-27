@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, governance, policy, rebuild, security]
 ---
 
@@ -36,7 +36,7 @@ The design grants the agent a passwordless but narrowly-scoped path to the gated
 - A dedicated no-login agent user with no general `sudo` rights.
 - The rebuild running as a fixed systemd oneshot unit (`aoide-rebuild-{test,switch}.service`) whose flake path, host, and command are baked into the unit — the agent chooses *which unit to start*, never the command line.
 - A polkit rule letting that user `systemctl start` those units and nothing else, no password — the same polkit pipeline [[Governance]] records as sakaki's agent-sudo design.
-- Every invocation streaming through journald into the single [[aoided]] audit log (`~/Aoide/log`).
+- Every invocation streaming through journald into the single [[aoided]] audit log (`$AOIDE_ROOT/log`, default `~/.aoide/log`).
 
 The capability changes only authentication; it does not create background rebuilds. The approval gate persists as policy: the design auto-admits `test` (reboot-recoverable); `switch` still routes through the admit door, keeping the *no background rebuilds, no self-updaters* house rule intact ([[Governance]]). Until built, all rebuilds use the default behaviour above.
 

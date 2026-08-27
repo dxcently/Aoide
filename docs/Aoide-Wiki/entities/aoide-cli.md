@@ -137,9 +137,13 @@ A stub returns a structured `Outcome` with status `not-implemented` (exit
 `64`), never a crash — arg-parsing, the schema entry, the audit-log append,
 and the gate flag are all real code paths; only the live-system action is
 deferred. Exactly two commands carry `gated: true` in `aoide` (`content
-approve`, `update`); a third, `rice declare`, is `lyra`'s own gated stub —
-both doors surface the user rebuild gate uniformly, and nothing here admits
-a rebuild ([[Rebuild-Gate]], [[Governance]]).
+approve`, `update`); `lyra rice declare <name>` runs gated too but is real
+code — it byte-diff-copies the composed song from
+`$AOIDE_ROOT/song/songbook/<name>/` into the checkout's
+`song/songbook/<name>/` (no `git add`, no rebuild), leaving `rice
+transpose` as lyra's one remaining stub. Both doors surface the user
+rebuild gate uniformly, and nothing here admits a rebuild
+([[Rebuild-Gate]], [[Governance]]).
 
 `cover set`/`rice compose`/`rice mode`/`rice draft`/`rice declare`/`rice
 transpose`/`rice take`/`rice back` and the `livery`/`screen`/`herald`/

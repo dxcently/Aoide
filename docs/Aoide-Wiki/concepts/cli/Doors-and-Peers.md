@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-28
+updated: 2026-08-27
 tags: [aoide, cli, mcp, a2a, peer, daemon]
 ---
 
@@ -24,15 +24,18 @@ stays in `pkgs/aoide/crates/cli/src/commands/infra.rs`. The long-running
 launches (`mcp serve --stdio`, `a2a serve`, `conductor`) are special-cased in
 `pkgs/aoide/crates/cli/src/lib.rs::run_cli`.
 
-Shared state paths (`pkgs/aoide/crates/storage/src/fs.rs`): `state/` is
-`$AOIDE_STATE_DIR` when set to an absolute path, else `~/Aoide/state/`; the
-conducting stage tree `state/stage/` is `$AOIDE_STAGE_DIR` when absolute,
-else `~/Aoide/state/stage/` (`conducting_stage_dir`) — distinct from the
-rice stage tree `song/stage/`, which shares the same `$AOIDE_STAGE_DIR`
-override but otherwise falls back to `~/Aoide/song/stage/` (`stage_dir`).
-The audit log (`pkgs/aoide/crates/protocol/src/audit.rs::default_audit_log`)
-is `$AOIDE_AUDIT_LOG`, else `/home/$AOIDE_USER/Aoide/log`, else
-`$HOME/Aoide/log`. Every one-shot command appends one NDJSON audit record
+Shared state paths (`pkgs/aoide/crates/storage/src/fs.rs`): every tree hangs
+off the runtime root `$AOIDE_ROOT` (absolute-path-wins, default `~/.aoide`).
+`state/` is `$AOIDE_STATE_DIR` when set to an absolute path, else
+`$AOIDE_ROOT/state/`; the conducting stage tree `state/stage/` is
+`$AOIDE_STAGE_DIR` when absolute, else `$AOIDE_ROOT/state/stage/`
+(`conducting_stage_dir`) — distinct from the rice stage tree `song/stage/`,
+which shares the same `$AOIDE_STAGE_DIR` override but otherwise falls back
+to `$AOIDE_ROOT/song/stage/` (`stage_dir`). `~/Aoide` is the dev git
+checkout, reached via `$AOIDE_FLAKE_ROOT`, not a runtime path. The audit log
+(`pkgs/aoide/crates/protocol/src/audit.rs::default_audit_log`) is
+`$AOIDE_AUDIT_LOG`, else `$AOIDE_ROOT/log` (when `$AOIDE_ROOT` is absolute),
+else `<home>/.aoide/log`. Every one-shot command appends one NDJSON audit record
 through the single dispatcher (`cli/src/dispatch.rs`); the doors add their own
 records on top. All registry writes in this group are atomic temp-then-rename
 (`aoide_storage::fs::atomic_write`). Registry reads tolerate a missing or
@@ -80,8 +83,8 @@ aoide daemon [--audit-log <path>] [--json]
 ```
 
 - **Reads:** nothing beyond the flag; the audit path resolves as
-  `--audit-log` → `$AOIDE_AUDIT_LOG` → `/home/$AOIDE_USER/Aoide/log` →
-  `$HOME/Aoide/log`.
+  `--audit-log` → `$AOIDE_AUDIT_LOG` → `$AOIDE_ROOT/log` (absolute) →
+  `<home>/.aoide/log`.
 - **Writes:** appends NDJSON `AuditRecord` lines to the audit log: a
   `daemon started` record (door `daemon`, class `audit`) and a gate self-check
   proposal (class `gate`, status `proposed`, `admitted: false` — the rebuild

@@ -1,6 +1,7 @@
 ---
 type: entity
 created: 2026-08-25
+updated: 2026-08-27
 aliases: [lyra binary, lyra command]
 tags: [aoide, cli, lyra, quickshell, rice, paint]
 ---
@@ -45,7 +46,7 @@ own golden-snapshot test in `crates/lyra/src/registry.rs`.
 
 | Group | Leaves | Detail |
 |---|---|---|
-| `rice` | 18 | `lint`/`stage`/`compose`/`back`/`declare`(stub)/`transpose`(stub); the 3-command `draft` group; the 4-command `mode` group; the 5-command `take` rehearsal-snapshot group — [[Rice-and-Livery]] |
+| `rice` | 18 | `lint`/`stage`/`compose`/`back`/`declare`/`transpose`(stub); the 3-command `draft` group; the 4-command `mode` group; the 5-command `take` rehearsal-snapshot group — [[Rice-and-Livery]] |
 | `cover set` | 1 | wallpaper staging — [[Rice-and-Livery]] |
 | `livery` | 3 | `lint`/`resolve`/`emit`, the native design-token engine — [[livery]] |
 | `shellbridge` | 1 | the desktop state bridge daemon — [[Doors-and-Peers]] |

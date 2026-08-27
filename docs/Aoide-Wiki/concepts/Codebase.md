@@ -7,7 +7,9 @@ tags: [aoide, architecture, nix, flake, rust, node]
 
 # Codebase — How the Built Repo Works
 
-The implementation of Aoide at `~/Aoide`, the walking-skeleton milestone: the
+The implementation of Aoide at `~/Aoide` (the dev git checkout, reached via
+`$AOIDE_FLAKE_ROOT`; runtime state hangs off `$AOIDE_ROOT`, default
+`~/.aoide`), the walking-skeleton milestone: the
 flake, the walker, the option contract, the systemd/service map, the runtime
 contracts, and what is real versus stubbed. It is the map from the design
 concepts ([[Snowflake-Anatomy]], [[Full-Architecture]]) to the files on disk.
@@ -68,7 +70,11 @@ selects which one a host performs (see [[Song-Vocabulary#Replay — any song, an
 generator two callers share: the quickshell facet's build-time `manifest.json`/
 `registry.json` derivation, and the `songbookManifest` flake output
 [[Self-Ricing|`rice stage`]] shells out to via `nix eval --json` for its
-hot-sync half). **`lib/livery.nix`** resolves `aoide.livery.override.*`, the
+hot-sync half). The same generator also feeds `pkgs/lyra-songbook`, which
+bakes the committed `song/songbook/` tree plus a prebaked
+`manifest.json`/`registry.json` into `share/lyra/songbook` — the shipped
+templates a repo-less host's registry/manifest regen reads nix-free
+(`CONTRACTS.md` §4). **`lib/livery.nix`** resolves `aoide.livery.override.*`, the
 host-set venue-recolour tier (`CONTRACTS.md` §1). **`lib/song.nix`** builds
 each song's widget records from its `_widgets/<slot>.nix` functions — the nix
 analogue of `WidgetSlot.qml`.
@@ -125,6 +131,12 @@ no behaviour, so an empty config evaluates. The surface:
 
 - `aoide.enable` (master switch), `aoide.user` (default `"khoa"`, owner of the
   `~/Aoide` clone).
+- `aoide.root` (default `~/.aoide`, exported as `AOIDE_ROOT`) — the runtime
+  root: `song/stage/`, `state/` (+ `state/stage/`), `run/qml/`, the composed
+  host `song/songbook/`, the audit log. `aoide.checkout` (default `~/Aoide`,
+  exported as `AOIDE_FLAKE_ROOT`) — the dev git checkout: `soundcheck`'s scan
+  root, `rice declare`'s commit-in target, the songbook `nix eval` registry
+  regen.
 - `aoide.song` (`nullOr str`, default `null`) — which song this host performs.
   Null performs no song: a paint facet reads the null and deploys nothing (no
   QML tree, no shell service). Set once in `hosts/<host>/default.nix`; each
@@ -140,7 +152,7 @@ no behaviour, so an empty config evaluates. The surface:
 - `aoide.surfaces.<name>.owner` — the surface-ownership registry.
 - `aoide.mcp.enable`, `aoide.a2a.enable`, `aoide.usage.enable`,
   `aoide.secrets.enable` — each off by default (house policy); `aoide.auditLog`
-  (default `/home/<user>/Aoide/log`).
+  (default `$AOIDE_ROOT/log`, i.e. `~/.aoide/log`).
 
 ## The host profile — yomi-strix is real
 
@@ -186,9 +198,12 @@ All nucleus services are user services gated on `aoide.enable`, keyed into
 | `aoide-secrets-serve` | `nucleus/secrets.nix` | **gated on `aoide.secrets.enable`**; SYSTEM (not user) service, own uid `aoide-secrets`, anchored to `multi-user.target` — see [[Secrets-Broker]] |
 | `aoide-obsidian-register` | `dendrites/obsidian.nix` | oneshot; registers a window class with shellbridge |
 
-`systemd.user.tmpfiles.rules` create `~/Aoide/log` (0700), `~/Aoide/state/stage`
-(0755, conducting state), and `~/Aoide/song/stage` (0755, rice staging) at
-runtime; systemd-tmpfiles deduplicates the shared rules declared in both
+`systemd.user.tmpfiles.rules` create `${config.aoide.root}/log` (0700),
+`${config.aoide.root}/song/stage` (0755, rice staging),
+`${config.aoide.root}/state` (0700), and `${config.aoide.root}/state/stage`
+(0755, conducting state) at runtime — with the default root, `~/.aoide/log`,
+`~/.aoide/song/stage`, `~/.aoide/state`, `~/.aoide/state/stage`;
+systemd-tmpfiles deduplicates the shared rules declared in both
 aoided and shellbridge.
 
 Two **non-service nucleus modules** close baseline gaps, both gated on
@@ -204,7 +219,8 @@ Two **non-service nucleus modules** close baseline gaps, both gated on
 
 ## Runtime contracts (socket + stage files)
 
-Live-side state, all gitignored, none load-bearing for the build:
+Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
+`~/.aoide`), none committed, none load-bearing for the build:
 
 - **Socket:** `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` — the one outbound
   channel from QML; adapters and widgets bind exactly this path, never compute
@@ -241,8 +257,13 @@ Live-side state, all gitignored, none load-bearing for the build:
   `state/stage/`. Both resolve `$AOIDE_STAGE_DIR` when set to an absolute
   path (the unit sets it; empty/relative ignored) first, so an override
   relocates both trees as a unit; with no override each falls back to its
-  own default location under `~/Aoide/` — the documented CLI ↔ unit seam,
-  pinned by a serialized precedence test. The first no-override resolution
+  own tree under the runtime root (`$AOIDE_ROOT` absolute-path-wins, else
+  `~/.aoide`; `$AOIDE_STATE_DIR` relocates `state/` alone with the same
+  precedence) — the documented CLI ↔ unit seam,
+  pinned by a serialized precedence test. On first run the binaries run a
+  one-shot root migration (`fs::migrate_root_once()`) moving pre-existing
+  `~/Aoide/{song/stage,state,log}` into the root, each piece gated on its
+  own override being unset. The first no-override resolution
   of `conducting_stage_dir()` runs a one-shot migration moving any of the
   six conducting files still sitting at the old `song/stage/` location into
   `state/stage/`, never clobbering a fresher file already there and never

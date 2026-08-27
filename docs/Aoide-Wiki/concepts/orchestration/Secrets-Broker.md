@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-23
-updated: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, agent, cli, secrets, totp, security, broker]
 ---
 
@@ -225,9 +225,11 @@ The deployed service runs with `ProtectHome=true` — the broker has no
 business reading any operator's home directory — which is why the events
 feed `secrets watch` reads lives beside the broker's own socket under
 `/run` rather than under the operator's home: a write there is unaffected
-by `ProtectHome`, where a write into `~/Aoide/log` would silently be
-blocked. The mirrored `~/Aoide/log` write still happens, for the audit
-trail; only the events feed `watch` tails moved off it.
+by `ProtectHome`, where a write into `$AOIDE_ROOT/log` (default
+`~/.aoide/log`, still under home) would silently be blocked. The mirrored
+audit-log write still happens — the unit exports `AOIDE_ROOT`, so the
+append resolves to `$AOIDE_ROOT/log` — for the audit trail; only the
+events feed `watch` tails moved off it.
 
 ## Related
 

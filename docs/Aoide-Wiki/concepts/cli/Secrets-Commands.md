@@ -1,6 +1,7 @@
 ---
 type: concept
 created: 2026-08-25
+updated: 2026-08-27
 tags: [aoide, cli, secrets, totp, security]
 ---
 
@@ -54,7 +55,8 @@ the broker's in-memory registry and waits (default 300 s,
 `AOIDE_SECRETS_PARK_TIMEOUT`) until a separate connection completes or
 dismisses the ask, or the timeout elapses. Audit is broker-side only —
 `broker::audit_resolve`/`audit_put`/`audit_admin` write both the broker's
-own `audit.log` and the mirrored `~/Aoide/log`, before a value is ever
+own `audit.log` and the mirrored `$AOIDE_ROOT/log` (default `~/.aoide/log`),
+before a value is ever
 released; a secret's value never appears on a `Serialize` type in the
 crate, so it can never reach an `Outcome`, a JSON field, argv, or a log
 line.

@@ -56,10 +56,11 @@ switcher.
 The repo root carries no `qml/` directory — widget source lives in
 `modules/facets/quickshell/qml/` and each active song's `widgets/`, and the
 facet's `home.activation.aoideDeployQml` rsyncs the built config tree
-(`rsync -a --delete --chmod=u+w`) into the gitignored `~/Aoide/run/qml/`,
-which Quickshell reads as its entry point (`quickshell -p
-~/Aoide/run/qml/shell.qml`). The deployed tree is self-healing: hot-editing
-QML directly under `~/Aoide/run/qml/` previews live without a rebuild, and
+(`rsync -a --delete --chmod=u+w`) into `$AOIDE_ROOT/run/qml/` (default
+`~/.aoide/run/qml/` — the runtime root, outside the git checkout), which
+Quickshell reads as its entry point (`quickshell -p
+$AOIDE_ROOT/run/qml/shell.qml`). The deployed tree is self-healing: hot-editing
+QML directly under `$AOIDE_ROOT/run/qml/` previews live without a rebuild, and
 every activation's rsync reasserts the store's build over any such edit —
 the same "switch is the truth, hot edits are the sketch" discipline as
 every other stage/preview seam. `hyprland.conf` is owned by
@@ -200,7 +201,7 @@ Two design decisions worth carrying forward:
 The compositor facet also adds `aoide-launcher` to the blur / `ignore_alpha` /
 hyprglass namespaces so the pane frosts like the bar and dock. Both the keybind
 and the blur rules are baked into `hyprland.conf`, so the launcher needs a gated
-`switch` to land live (the QML rsyncs into `~/Aoide/run/qml/` the same way).
+`switch` to land live (the QML rsyncs into `$AOIDE_ROOT/run/qml/` the same way).
 
 ## Session service & resilience
 
