@@ -1114,8 +1114,8 @@ collapses.
 ### `state/stage/projects.json` — **v0**
 
 Registered project anchor roots for the graph. Written by
-`aoide project add/remove` (atomic, idempotent); read by
-`aoide graph`/`emit`.
+`aoide project add/remove` (atomic, idempotent); read by bare
+`aoide graph` and by `restage_graph` at every mutation site.
 
 ```json
 { "schemaVersion": "0", "projects": [ { "name": "aoide", "path": "/home/khoa/Aoide" } ] }
