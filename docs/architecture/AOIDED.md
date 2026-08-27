@@ -17,7 +17,7 @@ The shape, end state:
    /run/aoide-secrets/events.jsonl │                                        │
         │  tail (Follower)         │  tick loop ──┬─ secrets-feed mirror    │
         └─────────────────────────▶│              ├─ hand-edit watcher (#69)│
-                                   │              ├─ graph reap             │
+                                   │              ├─ session reap           │
    session commands / hook door ──▶│  socket ─────┴─ registry dispatch      │
    (unix socket, fallback: files)  │   $XDG_RUNTIME_DIR/aoide/aoided.sock   │
                                    │              │                         │
@@ -255,7 +255,7 @@ Remote reach composes what already exists:
   mesh; each peer's capability card is its A2A AgentCard, derived from that
   binary's own `schema --json` with `implemented`-only skills
   (`CONTRACTS.md §6`, "AgentCard"). No second inventory.
-- **Route**: `graph send --to peer/<query>` already delivers over A2A
+- **Route**: `send --to peer/<query>` already delivers over A2A
   `message/send` (`conduct/src/graph/send.rs:8-16`, `deliver_remote`), and
   the receiving peer's own gate governs (`a2a.rs:566` `decide_send_action`,
   `:724` `do_inject`, `:790` `spawn_inject_prompt`). Bearer auth is the
@@ -288,12 +288,12 @@ standing orchestrator:
 
 Sessions register and tick over the daemon socket; the stage files become
 projections of daemon state, written by the daemon so every existing reader
-(graph view, the conductor, QML via `graph.json`) is untouched.
+(bare `graph`, the conductor, QML via `graph.json`) is untouched.
 
 ### Routing
 
-The session-write family — `graph session start/phase/end`,
-`graph session hook`, and `graph reap` — routes through a thin client.
+The session-write family — `session start/phase/end`,
+`session hook`, and `session reap` — routes through a thin client.
 Two members named by the original design deliberately do NOT route:
 `session wrap` spawns a long-lived child with inherited stdio and blocks
 on it, which a stateless request/reply socket cannot carry (its direct
@@ -335,7 +335,7 @@ keeps "runs anywhere with a shell" true: no daemon, no difference.
 The reaper model is untouched: `is_session_dead`'s never-guess predicate,
 the staleness bands, socket-probe liveness, pre-boot ghosts, orphan-socket
 sweep (`conduct/src/reap.rs:151`, `:732`). What changes is only WHERE it
-runs: the ~12s systemd timer keeps firing `aoide graph reap`, which now
+runs: the ~12s systemd timer keeps firing `aoide session reap`, which now
 routes through `daemon_dispatch` like every other session command — daemon up,
 the sweep runs in the daemon against its roster; daemon down, the direct
 path runs as today. Additionally the daemon tick runs the same reap
@@ -347,9 +347,9 @@ rather than the mechanism. No second liveness mechanism is introduced
 
 ## L5 — harness summoning
 
-### `graph spawn --windowed`
+### `spawn --windowed`
 
-A core command flag on the existing `graph spawn`
+A core command flag on the existing `spawn`
 (`conduct/src/graph/spawn.rs`): instead of detaching a headless
 `conduct --headless` child, exec a terminal that runs the same conducted
 command.
@@ -361,7 +361,7 @@ command.
   (`kitty -e` and `foot sh -c '{cmd}'` both work).
 - No template set → taught error naming the env var and one example. No
   display (`$WAYLAND_DISPLAY`/`$DISPLAY` both absent) → taught error
-  ("headless host — use `graph spawn` without `--windowed`"). No nix
+  ("headless host — use `spawn` without `--windowed`"). No nix
   anywhere; `lyra` never enters this path — a terminal emulator is a shell
   concern, not paint.
 - The child is `aoide conduct -- <agent cmd>` exactly as the headless path
@@ -384,7 +384,7 @@ pub resume_args: Option<fn(harness_session_id: &str) -> Vec<String>>,
 ### Capturing the harness's own session id
 
 `SessionRecord` (`storage/src/records.rs:29`) gains additive
-`harnessSessionId: Option<String>`. The hook door (`graph session hook`,
+`harnessSessionId: Option<String>`. The hook door (`session hook`,
 `conduct/src/graph/send.rs`) stamps it from the raw hook payload's own
 `session_id` on every event that carries one — so it lands for wrapped
 sessions AND for hook-only sessions aoide never birthed. For claude the
@@ -406,15 +406,15 @@ and reap both write it, which after L4 is one code path):
 Append-only, never truncated, never a lookup key for live state —
 `sessions.json` stays the roster; the ledger is history.
 
-### `graph resurrect --project <x>`
+### `resurrect --project <x>`
 
 Resolve `<x>` against `projects.json` and anchor every ledger entry to it
-(the same longest-path-prefix rule `graph view` uses). Selection then
+(the same longest-path-prefix rule bare `graph` uses). Selection then
 branches on the flags: `--all` widens to every anchored entry, `--id`
 narrows to one specific `sessionId`, and bare (neither flag) resumes the
 project's WHOLE carried set (`state/carry.json`, durable-sessions plan
 P-C4) — every anchored entry currently marked durable
-(`graph session carry on|off`), minus any id already alive (non-`done`) in
+(`session carry on|off`), minus any id already alive (non-`done`) in
 `sessions.json`, deduped by `sessionId` keeping the entry with the newest
 `endedAt` (an id that was resurrected and exited again can appear twice in
 the append-only ledger). `--all` and `--id` are unchanged escapes: both
@@ -458,8 +458,8 @@ windowed path with its resolved argv. Rules:
   project (`conductor/src/commands.rs` — the TUI already maps keys onto
   typed commands).
 - Per-project auto-resume: additive `autoResume: bool` (default false) on
-  the `projects.json` entry, set by `graph project add --auto-resume` /
-  a `graph project set` flag. Trigger point: the daemon's boot sweep
+  the `projects.json` entry, set by `project add --auto-resume` /
+  a `project set` flag. Trigger point: the daemon's boot sweep
   (`run_boot_auto_resume`) calls this command core unconditionally for
   every `autoResume` project — no liveness check of its own; liveness is
   the bare-mode selection's per-candidate exclusion above, so one live
@@ -537,7 +537,7 @@ default off).
 
 **P-D6 — graph residency.**
 `aoide_client::daemon_dispatch` (connect-or-None), routing in the
-session-write family + `graph reap`, daemon-side roster with
+session-write family + `graph reap` (today `session reap`), daemon-side roster with
 startup-load/tick-reconcile/projection-write, reap in the daemon tick.
 Tests: routed command round-trips through a test daemon and the projection
 matches the direct-path bytes; fallback path on a dead socket is
@@ -549,7 +549,7 @@ Widest phase — serialize hard against other cargo lanes. Gate: LIVE
 terminal and watch the reap, kill the daemon and watch fallback).
 
 **P-D7 — windowed spawn + resume knowledge.**
-`graph spawn --windowed` (template parse pure + unit-tested; taught errors
+`graph spawn --windowed` (today `spawn --windowed`; template parse pure + unit-tested; taught errors
 for no-template/headless), `AgentProfile.launch`/`resume_args` for
 claude/kimi/pi (pi: `resume_args: None` unless verified), hook-door
 `harnessSessionId` stamp.
@@ -561,7 +561,7 @@ verified).
 
 **P-D8 — ledger + resurrect + auto-resume flag.**
 The session ledger write at roster-exit, `graph resurrect --project`
-(golden +1), `resumedFrom` record field + `resumed` graph edge, conductor
+(today `resurrect --project`; golden +1), `resumedFrom` record field + `resumed` graph edge, conductor
 keybind, `projects.json` `autoResume` (default off) wired to the decided
 trigger.
 Tests: ledger appends exactly once per exit (clean end and reap); resurrect
@@ -659,7 +659,7 @@ Exactly one:
   already performed this boot", using the boot-epoch read the reaper
   already has, `reap.rs:472`), the daemon resurrects every `autoResume`
   project unconditionally — no liveness check at this layer. Liveness is
-  handled one level down, per candidate, inside `graph resurrect`'s own
+  handled one level down, per candidate, inside `resurrect`'s own
   bare-mode selection (durable-sessions plan P-C4): an already-alive
   carried id is dropped before anything is spawned, so a project whose
   whole carried set is already live resolves to an empty-set no-op rather

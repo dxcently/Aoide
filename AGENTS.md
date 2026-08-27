@@ -30,7 +30,7 @@ prints it at runtime, and `aoide schema --json` / `lyra schema --json` is the
 machine-readable backstop at any tier.
 
 **Conducting — commanding other sessions (aoide's headline).** Every terminal
-is a conductable, tracked session; command another with `aoide graph send
+is a conductable, tracked session; command another with `aoide send
 --id <id> [--submit] [--yes] -- <text>`. The channel, its gate/autogate
 rules, and the liveness reaper:
 `docs/Aoide-Wiki/concepts/orchestration/Conductor-Channel.md` and

@@ -484,8 +484,9 @@ count.
   `--clear` removes the designation; both directions are idempotent and
   report exactly what changed (set/moved/cleared/no-op) — see §6's "Remote
   reach" subsection for how the hub composes with the rest of the mesh;
-  `graph resurrect`, appended newest, P-D8 (`docs/architecture/AOIDED.md`'s
-  "L5 — harness summoning") (+1 → 71) — revives a project's resumable
+  `resurrect` (`graph resurrect` at the time), appended newest, P-D8
+  (`docs/architecture/AOIDED.md`'s "L5 — harness summoning") (+1 → 71) —
+  revives a project's resumable
   sessions off the durable session ledger (`state/session-ledger.jsonl`,
   §4 below); `--project <name>` resolves against `projects.json`.
   Selection: `--all` widens to every anchored ledger entry, `--id
@@ -506,7 +507,7 @@ count.
   candidate neither arm resolves is skipped with a taught message naming
   it, never a guessed invocation. Once a terminal candidate's spawn
   registers, its `restore` snapshot drives one more step, in-process
-  through `graph send`, never a direct socket write: a foreground command
+  through `send`, never a direct socket write: a foreground command
   it was demonstrably running re-execs with `--yes --submit` (never for a
   recorded `sudo …`, which only restores the cwd); an idle session's clean
   unsubmitted `typed` line preloads with `--yes` and permanently no
@@ -870,7 +871,7 @@ updatedAt }`.
 
 **Additive in v0:** a session record MAY carry an optional `parentSessionId`
 (string) naming the session that spawned it — the graph's spawned-by edge. Set
-by `aoide graph link` (cycle-checked), cleared by `aoide graph prune` when the
+by `aoide graph link` (cycle-checked), cleared by `aoide session prune` when the
 parent is removed. Absent means "no spawned-by edge"; readers must tolerate
 both forms, and rewriters must round-trip fields they do not know.
 
@@ -902,7 +903,7 @@ legacy record without it falls back to a conservative 200k client-side.
 — the agent's latest TOOL CALL as a one-line label (`"Bash: cargo test"`): the
 tool's name plus the first argument naming its subject, read off the same
 transcript tail as `say` at the same refresh points (hook boundaries, and every
-`aoide graph reap` sweep). Distinct from `activity`, which stays what it was:
+`aoide session reap` sweep). Distinct from `activity`, which stays what it was:
 the tool running RIGHT NOW, hook-set and cleared when the turn settles. `tool`
 survives that settle, so a resting session still shows what it last reached
 for; a reader wanting "is something running" reads `activity`/`state`, not
@@ -946,8 +947,8 @@ published `kind`.
 **Additive in v0 (task #89):** a session record MAY also carry an optional
 `hookAncestry` (array of integer pids, at most 8, self-first) — the
 hook-firing process's own `/proc` `ppid` walk, stamped ONCE at a hook
-session's own SessionStart/self-heal registration (`aoide graph session
-hook`) and never re-stamped afterward (a birth fact, not a live signal). A
+session's own SessionStart/self-heal registration (`aoide session hook`)
+and never re-stamped afterward (a birth fact, not a live signal). A
 later `conduct`/`spawn` registration with no explicit `--parent` walks
 ITS OWN `/proc` ancestry and looks for a live, not-`done`, agent-kind session
 whose `hookAncestry` intersects it — the closest (deepest) matching ancestor
@@ -979,14 +980,14 @@ not know.
 **Additive in v0 (P-D7, `docs/architecture/AOIDED.md`'s "L5"):** a session
 record MAY also carry an optional `harnessSessionId` (string) — the
 harness's OWN session id, straight off the raw hook payload's own
-`session_id` field. Stamped by `aoide graph session hook` on EVERY event
+`session_id` field. Stamped by `aoide session hook` on EVERY event
 that carries one — not only at registration, and not gated on whether the
 event maps to a graph action at all (an event the door has no other use for
 still stamps it, as long as a record with that id already exists) — and
 regardless of whether it equals this record's own `sessionId` (for a
 hook-registered record the two values are the same today, since the record's
 own id is minted FROM this field; the field is still stamped unconditionally
-so a later consumer, e.g. `aoide graph resurrect`'s ledger reader, never has
+so a later consumer, e.g. `aoide resurrect`'s ledger reader, never has
 to know which registration path produced a given record to find the id a
 harness's own resume flag needs). Absent means "no hook has touched this
 record yet" (a legacy record, or a wrap with no hook-driven agent inside
@@ -996,13 +997,13 @@ know.
 **Additive in v0 (P-D8, `docs/architecture/AOIDED.md`'s "L5"):** a session
 record MAY also carry an optional `resumedFrom` (string) — the durable
 session ledger's `sessionId` (see `state/session-ledger.jsonl` below) this
-record was revived from, stamped once by `aoide graph resurrect` (or the
+record was revived from, stamped once by `aoide resurrect` (or the
 daemon's own boot-time auto-resume trigger, which calls the same command
 core in-process) right after the resurrected session registers. Session
 ids are never recycled: a resurrected session always mints a FRESH
 `sessionId`, and `resumedFrom` is the only link back to the ledger entry
 it continues. A (re)staged `graph.json` — automatic at every project/session
-mutation, or via `aoide graph prune`'s manual resync — projects a populated
+mutation, or via `aoide session prune`'s manual resync — projects a populated
 `resumedFrom` as an additive `resumed` edge (see `graph.json` below) beside the ordinary
 `spawned`/`anchors` edges. Absent means "not a resurrection" (the ordinary
 case, and every legacy record); readers must tolerate both forms and
@@ -1019,7 +1020,7 @@ registration, the same change-once discipline `headless` already holds.
 crate has no direct dependency on `aoide-server`, so the env var is the
 seam, mirroring how `AOIDE_AUDIT_LOG` already threads a per-child fact the
 same way. Absent means "not a peer-initiated spawn" (a locally-launched
-`conduct`/`graph spawn`, the ordinary case, and every legacy
+`conduct`/`spawn`, the ordinary case, and every legacy
 record); readers must tolerate both forms. Unlike `resumedFrom`, `origin`
 gets NO `graph.json` projection — like `headless`/`hookAncestry`, it is
 consumed internally (projected verbatim into `state/session-ledger.jsonl`'s
@@ -1045,7 +1046,7 @@ tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
 - `idle` — whether the pty's foreground process group was the bare shell
   itself, the SAME predicate `state` is derived from. Kept as its own field
   rather than read back off `state` later: the reap sweep overwrites `state`
-  to `"done"` BEFORE its ledger write (`reap.rs`'s own ordering, `graph
+  to `"done"` BEFORE its ledger write (`reap.rs`'s own ordering, `session
   reap`), so idleness would otherwise be unrecoverable by the time the
   ledger line is written.
 - `argv` — RAW, uncollapsed, unclipped `argv` off `/proc/<fg>/cmdline`
@@ -1088,7 +1089,7 @@ backfill call sites:
   filtered out downstream;
 - the listener self-check: the shellbridge window-event listener
   (`resolve_pending_session_windows`) and every hook-time backfill site
-  (`aoide graph session hook`, `graph/send.rs`'s two `discover_window()`
+  (`aoide session hook`, `graph/send.rs`'s two `discover_window()`
   call sites, `graph/window.rs::ensure_session_window`) all route through
   `windowless_by_lineage`, which now checks the session's OWN record first
   (case 1 above) before ever walking its parent chain (case 2) — so a
@@ -1103,7 +1104,7 @@ this: it never retires a member of the newly registering session's own
 lineage (every ancestor AND descendant, walking `parentSessionId`), only a
 same-window record with NO lineage relation to it — the legitimate
 compact/resume-twin case. The reaper's own same-window dedup pass
-(`aoide graph reap`'s `superseded_agent_duplicates`) carries the identical
+(`aoide session reap`'s `superseded_agent_duplicates`) carries the identical
 lineage carve-out as defense in depth: a windowless-by-construction session
 never enters a same-window dedup group in the first place, but if a bug
 upstream ever lets one acquire a window anyway, the dedup pass still will
@@ -1113,8 +1114,8 @@ collapses.
 ### `state/stage/projects.json` — **v0**
 
 Registered project anchor roots for the graph. Written by
-`aoide graph project add/remove` (atomic, idempotent); read by
-`aoide graph view/emit`.
+`aoide project add/remove` (atomic, idempotent); read by
+`aoide graph`/`emit`.
 
 ```json
 { "schemaVersion": "0", "projects": [ { "name": "aoide", "path": "/home/khoa/Aoide" } ] }
@@ -1124,22 +1125,22 @@ Registered project anchor roots for the graph. Written by
 knobs"):** a project entry MAY also carry an optional `autoResume` (bool,
 default/absent means `false`, `skip_serializing_if` keeps a `false` value
 off the wire — the same additive-bool discipline `SessionRecord.headless`
-set the precedent for). Set via `graph project add --auto-resume`
-(idempotent-upsert; no `graph project set`/`edit` command exists yet to flip
+set the precedent for). Set via `project add --auto-resume`
+(idempotent-upsert; no `project set`/`edit` command exists yet to flip
 it back off — hand-edit `projects.json` in the meantime). Consumed by the
 daemon's own boot-time auto-resume trigger (`aoide-server`'s `daemon.rs`,
 the decided answer to this design's one open knob): once per BOOT — never
 on a same-boot `Restart=on-failure` restart, guarded by a marker recording
 the boot epoch (`btime` out of `/proc/stat`) the trigger last ran under —
 for EVERY `autoResume` project, unconditionally, the daemon calls `aoide
-graph resurrect --project <name>` in-process (`Door::Daemon`), the
+resurrect --project <name>` in-process (`Door::Daemon`), the
 identical command core the CLI command runs. There is no liveness check at
 this layer (durable-sessions plan P-C4): that used to gate on the whole
 project (any non-`done` session anchored to it skipped the call entirely),
 which was wrong once a project could carry MULTIPLE durable sessions — one
 live terminal would have suppressed reviving the rest. Liveness now lives
-inside `graph resurrect`'s own bare-mode selection, per carried candidate
-(see this section's own `graph resurrect` entry above), so a project whose
+inside `resurrect`'s own bare-mode selection, per carried candidate
+(see this section's own `resurrect` entry above), so a project whose
 whole carried set is already live simply resolves to an empty-set
 `Outcome::ok` no-op. A per-candidate spawn failure (e.g. a headless host
 with no `$AOIDE_TERMINAL`) degrades gracefully — logged, never a crashed
@@ -1148,7 +1149,7 @@ tick.
 ### `state/stage/graph.json` — **v0**
 
 The **fully resolved** project/session DAG, written (atomic) automatically by
-every project/session mutation and by `aoide graph prune`'s manual resync,
+every project/session mutation and by `aoide session prune`'s manual resync,
 for Quickshell to hot-reload — like stage notes, QML reads concrete
 values and computes nothing. Project nodes anchor session nodes by cwd
 (longest path-prefix wins, so nested projects anchor correctly); `spawned`
@@ -1201,9 +1202,9 @@ rather than appending, and the ledger is capped at 20 (matching the dunstrc's
 notification dunst never displays is never expired by dunst either.
 
 `kind` is `toast` or `summons`. A summons is an agent blocked on a permission
-prompt, published by `aoide graph permit` rather than by dunst; it carries the
+prompt, published by `aoide session permit` rather than by dunst; it carries the
 waiting `sessionId` and is drawn with real approve/deny buttons whose verdict
-routes back through the shellbridge to `graph send`, the one gated injection
+routes back through the shellbridge to `send`, the one gated injection
 door. Sender text is DATA on both sides of the seam: carried verbatim, never
 parsed as markup or as a command.
 
@@ -1220,17 +1221,17 @@ parsed as markup or as a command.
 
 ### `state/stage/pending.json` — **v0**
 
-The held-injection queue: entries `aoide graph send` writes when its gate
+The held-injection queue: entries `aoide send` writes when its gate
 doesn't clear immediate delivery (no `--yes`, no autogate match), and the
 A2A door's own `message/send` Inject path reuses VERBATIM when its admission
 check doesn't clear a caller either (`crates/server/src/a2a.rs::do_inject`) —
 one queue, two writers, no second pending-queue implementation. Read and
-resolved by `aoide graph pending list/approve/deny`: `list` enumerates every
+resolved by `aoide session pending list/approve/deny`: `list` enumerates every
 entry (a malformed one — a stale hand-edited line — surfaces as
 `"state": "malformed"` rather than failing the read); `approve` re-drives the
 entry through the SAME gated injection door with `--yes`, in-process; `deny`
 drops it. Either resolution REMOVES the entry from this file — the record of
-what happened is the audit log (`graph.pending.approve` / `.deny`), not a
+what happened is the audit log (`session.pending.approve` / `.deny`), not a
 persisted "resolved" archive. An entry carries no id of its own; `list`'s
 `id` is its array position, which shifts on the next resolve. The optional
 `from` field is the sender attribution (`--from`, else `AOIDE_SESSION_ID`)
@@ -1255,7 +1256,7 @@ canonical ids, verbatim, always.
 }
 ```
 
-`graph send`'s delivered payload carries the same attribution: when a sender
+`send`'s delivered payload carries the same attribution: when a sender
 resolves and the text names the node (see `names_the_node` — a bare keystroke
 answer like a permission-verdict digit never does), the payload is prefixed
 `from <sender>: ` on its first line only, so the receiving agent can see who
@@ -1301,10 +1302,10 @@ LOCAL session, filed by exactly TWO writers — no third site anywhere in the
 tree:
 
 1. `aoide_conduct::graph::send::deliver_local`'s success path — covers a
-   direct `graph send --id`, a `--to` resolving local (re-drives
-   `deliver_local` unchanged), a `graph pending approve` re-drive, AND the
+   direct `send --id`, a `--to` resolving local (re-drives
+   `deliver_local` unchanged), a `session pending approve` re-drive, AND the
    A2A door's own `message/send` Inject arm
-   (`crates/server/src/a2a.rs::do_inject`), which builds a `graph send --id`
+   (`crates/server/src/a2a.rs::do_inject`), which builds a `send --id`
    invocation and calls `session_send` too — the SAME "one queue, two
    writers, no second implementation" shape `pending.json` (above) already
    set, except this branch alone collapses to one writer, because the a2a
@@ -1338,7 +1339,7 @@ position is the 200-entry cap's oldest-drop when a NEW message arrives
 between your `list` and your `read` (same "re-list if you're racing a
 writer" discipline `pending.json` documents, triggered by the cap instead of
 every resolution); `clear` empties the file unconditionally — no `--yes`, no
-gate, matching `graph.prune`'s precedent (the command name is the whole blast
+gate, matching `session.prune`'s precedent (the command name is the whole blast
 radius, nothing selective to confirm, unlike `rice draft drop`/`rice take
 prune` which destroy a NAMED or AMBIGUOUS subset). Capped at 200 entries,
 oldest-drop (`herald::LEDGER_CAP`'s fold-and-cap precedent, CONTRACTS.md §4
@@ -1450,13 +1451,13 @@ file's absolute path as `logPath` the moment it's open.
 The durable session HISTORY that survives `sessions.json` pruning —
 `sessions.json` is the live roster (reaping and `session end` both remove a
 record from it); this ledger is append-only memory of every session that
-has ever LEFT the roster, which `aoide graph resurrect` reads to find
+has ever LEFT the roster, which `aoide resurrect` reads to find
 something to revive. Lives under `state_dir` (`aoide_storage::fs::
 state_dir`) alongside `usage.json`/`sessions/<sessionId>.log` — real disk,
 never tmpfs, since it must survive a reboot the way those don't need to.
 
 One line per session, appended at the exact moment it leaves the roster —
-a clean `aoide graph session end` and a `graph reap` sweep are the only two
+a clean `aoide session end` and a `session reap` sweep are the only two
 producers, both routed through the SAME shared write (never two
 independently-written call sites), so a given session contributes exactly
 one line, never zero, never two, regardless of which path retired it.
@@ -1502,8 +1503,8 @@ in either file.
 The carry mark: the set of session ids marked DURABLE, so a project's whole
 carried set can be resurrected together. Three writers, none routed through
 a stage lock or `daemon_dispatch` (this is not a stage-tree file): `aoide
-graph session carry on|off` sets or clears the mark directly; `aoide graph
-spawn --carry` adds the newly spawned id once it registers; `aoide graph
+session carry on|off` sets or clears the mark directly; `aoide
+spawn --carry` adds the newly spawned id once it registers; `aoide
 resurrect` transfers a carried old id onto the freshly spawned session that
 replaces it. Lives under `state_dir` (`aoide_storage::fs::state_dir`)
 alongside `usage.json`/`session-ledger.jsonl`, NOT inside either stage tree
@@ -1528,7 +1529,7 @@ session is live, dead-with-a-ledger-line, or dead-without-one. Re-marking
 an already-carried id refreshes its `markedAt` rather than duplicating the
 entry.
 
-**The resurrect transfer.** When `graph resurrect` spawns a replacement for
+**The resurrect transfer.** When `resurrect` spawns a replacement for
 a ledger entry whose old `sessionId` is currently carried, it moves the mark
 onto the new id in ONE `save_carry` call — add the new id, then drop the
 old, never two separate writes. The old id must not survive the transfer or
@@ -1543,11 +1544,11 @@ that fails outright transfers nothing, for the same reason: the old id
 stays carried so the next sweep retries it.
 
 **Driving selection (P-C4).** `carry.json` is also the fourth reader: bare
-`graph resurrect --project <x>` (no `--all`/`--id`) reads it to resume a
+`resurrect --project <x>` (no `--all`/`--id`) reads it to resume a
 project's WHOLE carried set rather than a single entry — every anchored
 ledger entry currently in the set, minus any id already alive in
 `sessions.json`, deduped by `sessionId` keeping the newest `endedAt`. See
-this file's `graph resurrect` and `projects.json`/`autoResume` entries
+this file's `resurrect` and `projects.json`/`autoResume` entries
 above for the full selection contract and the daemon's boot-sweep
 consumer.
 
@@ -1928,7 +1929,7 @@ would).
 <- {"ok":true,"pending":[{"id":"<id>","secret":"<name>","consumer":"<consumer>","requestedAt":<unix-seconds>,"peerUid":<uid-or-null>,"reason":<string-or-null>,"origin":{"username":<string-or-null>,"pid":<int-or-null>,"comm":<string-or-null>,"hostname":<string-or-null>}},...]}
 ```
 Never errors (an empty queue is `{"ok":true,"pending":[]}`); not audited —
-a read of in-memory state only, same precedent `graph pending list` already
+a read of in-memory state only, same precedent `session pending list` already
 sets. `peerUid` (task #73) is ADDITIVE over the pre-#73 shape — the
 kernel-truth `SO_PEERCRED` uid of the connection that parked this ask
 (`null` when it could not be read), alongside the pre-existing
@@ -2477,7 +2478,7 @@ of) the 0.3.x form without a contract break here.
 | A2A concept | aoide equivalent |
 | --- | --- |
 | AgentCard @ `/.well-known/agent-card.json` | discovery derived from the command registry (`aoide schema --json`) — one schema, same as the MCP tool list |
-| Task (one unit of work) | a *turn* — what `graph send` injects into a session |
+| Task (one unit of work) | a *turn* — what `send` injects into a session |
 | `contextId` (conversation) | a `SessionRecord` (the long-lived session) |
 | TaskState `WORKING` | canonical_state `working` |
 | TaskState `COMPLETED` | canonical_state `stopped` (the *turn* ended; the session/context lives on) — **also** produced by canonical_state `done` (MVP simplification: both collapse onto `completed` today, even though `done` conceptually ends the whole context, not just a turn — see below) |
@@ -2565,7 +2566,7 @@ request (`a2a.rs::decide_send_action`, unit-tested for every branch):
 - **Inject** into an existing session when the request's `contextId` names a
   KNOWN, conductable(+socketed) session (`SessionRecord.conductable` +
   `.socket`) — and the client did not explicitly ask to spawn. Delivery
-  reuses [`crate::graph::session_send`] (the same gated door `graph send`
+  reuses [`crate::graph::session_send`] (the same gated door `send`
   uses), not a reimplementation of the socket write.
 - **Spawn** a NEW conducted agent when there is no `contextId`, OR the
   client explicitly asks to spawn via `metadata["aoide/spawn"] == true`
@@ -2592,7 +2593,7 @@ configured"}` rather than silently doing nothing.
 per-request: setting `aoide.a2a.spawnAgent` to a non-empty command is the
 user's admission (house policy — "the rebuild is user-gated"), same as any
 other nix option. There is deliberately **no interactive per-request gate**
-like `graph send`'s pending/`--yes`/autogate dance — a JSON-RPC request
+like `send`'s pending/`--yes`/autogate dance — a JSON-RPC request
 cannot block mid-flight on a human clicking "approve". In its place: the
 spawn target is fixed at rebuild time (never client-chosen), the door is
 loopback/user-scoped by default (same as the rest of §6's security posture),
@@ -2638,9 +2639,9 @@ conductable session with zero approval. Fixed in `a2a.rs::do_inject` /
   non-loopback path).
 - A **remote** origin auto-delivers ONLY when it matches a peer explicitly
   marked `"autogate": true` in `state/peers.json` (§7 below) — the
-  cross-device analogue of `graph send`'s local "sender is the target's own
+  cross-device analogue of `send`'s local "sender is the target's own
   parent" autogate rule. An unmarked/unknown remote sender is held
-  **pending**, reusing `graph send`'s EXISTING `pending.json` queue
+  **pending**, reusing `send`'s EXISTING `pending.json` queue
   machinery verbatim (`conduct::graph::send::session_send`'s own gate — no
   second pending-queue implementation). The synchronous JSON-RPC response
   reports the Task as `submitted` (A2A can't block a request on a human's
@@ -2924,7 +2925,7 @@ message_send`:
   Inject instead gains attribution: a held-pending send from a
   `resolve_peer`-resolved (either rung, non-autogated, non-deliver-now)
   sender carries `"from": "peer:<name>"` in its `pending.json` entry,
-  reusing `graph send --from`'s existing attribution field verbatim rather
+  reusing `send --from`'s existing attribution field verbatim rather
   than inventing a new one — scoped to the QUEUED path only
   (`!deliver_now`), never applied to an auto-delivered message, so no
   delivered payload's bytes change (`autogated_peer_delivers_despite_
@@ -3202,7 +3203,7 @@ The option surface (`aoide.a2a.enable`/`bindAddress`/`port`/`spawnAgent`/
 `tasks/get`, and `message/send` (Phase B2: inject-or-spawn execution, above)
 all run. The CLIENT side of this door is the `peer` family (§7): a registered
 peer folds into the session DAG as a `kind:"peer"` node, and `peer spawn`/
-`graph send --to <peer>/<query>` drive `message/send` against it. (An
+`send --to <peer>/<query>` drive `message/send` against it. (An
 earlier, pre-pairing client half — `a2a agent add|list|remove|send`,
 unsigned and ungated — was deleted outright once `peer` superseded it.)
 This section is **additive**: it introduces a new contract, carries no
@@ -3233,7 +3234,7 @@ some mesh host's aoided-adjacent session
   │  aoide who / peer registry (peer_store::PeerRegistry) enumerates
   │  the mesh — no second inventory (§7)
   ▼
-graph send --to peer/<query>  (aoide_storage::addr::resolve)
+send --to peer/<query>  (aoide_storage::addr::resolve)
   ▼
 message/send over THIS door (§6 above), bearer-authenticated
   (token_authorized / Peer.tokenFile / Peer.bearerSecret) — tunneled to
@@ -3248,11 +3249,11 @@ substitutes a designated hub peer only on that function's own `NotFound` —
 every earlier precedence tier (exact id, tail4, petname, host/role compound,
 `peer/<rest>`) is untouched (`addr.rs`'s own grammar doc). As of this phase
 `resolve_with_hub` is a tested library function in `aoide-storage`, not yet
-threaded through `graph send`'s live `--to` call site (`aoide-conduct::graph
+threaded through `send`'s live `--to` call site (`aoide-conduct::graph
 ::send`, which still calls plain `resolve`) — the same "land the pure
 function first, wire a real caller in later" order `addr.rs`'s own tier-5
 `peer/<rest>` grammar went through (P-C1 landed it library-only; C3 wired
-`graph send` to it). It never adds a network hop, never opens a port, and is
+`send` to it). It never adds a network hop, never opens a port, and is
 pure preference: a mesh with no hub set resolves exactly as before this
 field existed.
 
@@ -3687,7 +3688,7 @@ existed.
 secret THIS instance resolves through the local secrets broker's unix-socket
 wire (this document's "Secrets wire" subsection, self-asserted consumer
 `a2a-client`) and presents as `Authorization: Bearer <value>` on every
-OUTBOUND call to this peer's own A2A door (`peer pull`, `graph send --to`,
+OUTBOUND call to this peer's own A2A door (`peer pull`, `send --to`,
 and `who`'s live presence probe — `aoide-client::commands::
 resolve_peer_bearer`/`post_json`). Resolved fresh on every request, never
 cached; a resolve failure (broker unreachable, denied, or a bounded ~2s
@@ -3772,7 +3773,7 @@ OS hostname → the literal `"aoide"`, mirroring `resolve_bind_port`/
 `resolve_spawn_agent`'s precedence discipline exactly (`a2a::resolve_peer_name`,
 new `--peer-name` flag on `a2a serve`). `instance.url` is this instance's own
 advertised URL (`http://<bind>:<port>/`, the same string the AgentCard's own
-`url` field carries). `graph` is EXACTLY what `aoide graph view --json`
+`url` field carries). `graph` is EXACTLY what `aoide graph --json`
 resolves (`aoide_conduct::graph::resolve_graph_document`, the SAME function
 that command and this method call) — no second graph vocabulary is invented
 for the wire.
@@ -3793,7 +3794,7 @@ state, children? }`.
   "stale"` and NO `children` — never a crash, never a silently-dropped peer.
   `error` carries the last pull failure's reason when present.
 
-Local graph commands (`prune`/`reap`/`link`) and the focus jump
+Local graph commands (`session prune`/`session reap`/`graph link`) and the focus jump
 (`focus_session`/`focus_window`, conductor- and shellbridge-driven, no CLI
 command) keep ignoring `peer:*` ids — confirmed by test
 (`conduct::graph::manage::tests::local_only_commands_ignore_peer_ids`), not

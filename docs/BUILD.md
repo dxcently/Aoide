@@ -204,7 +204,7 @@ Provide:
 
 ---
 
-## The graph group (`aoide graph`) — projects + sessions as a DAG
+## Bare `graph`, `project`, and `session` — projects + sessions as a DAG
 
 The Terminal-Commander roster, upgraded from a flat list to a DAG: registered
 **projects** are anchor nodes, agent **sessions** hang under them (anchored by
@@ -216,12 +216,12 @@ atomic writes only); missing stage files read as empty registries.
 
 | Command                            | Does |
 | ---------------------------------- | ---- |
-| `aoide graph view [--focus <id>]`  | Unicode tree render (`◆` projects, `●` sessions, `▶` marks the focused node); `--json` emits the graph document |
-| `aoide graph project add <name> [<path>]` | register/update an anchor root in `song/stage/projects.json` (idempotent); `path` defaults to the cwd, so a session started there anchors to it |
-| `aoide graph project remove <name>`| unregister (ok + no-op if absent) |
-| `aoide graph project list`         | list the registered anchor roots |
+| `aoide graph [--focus <id>]`       | Unicode tree render (`◆` projects, `●` sessions, `▶` marks the focused node); `--json` emits the graph document |
+| `aoide project add <name> [<path>]` | register/update an anchor root in `song/stage/projects.json` (idempotent); `path` defaults to the cwd, so a session started there anchors to it |
+| `aoide project remove <name>`      | unregister (ok + no-op if absent) |
+| `aoide project list`               | list the registered anchor roots |
 | `aoide graph link <child> <parent>`| set the spawned-by edge on the child session (rejects self-links and cycles; a not-yet-registered parent is recorded with a warning) |
-| `aoide graph prune`                | drop `done` sessions + their hook records (orphaned children keep running with their `parentSessionId` cleared); the blessed manual resync — restages `song/stage/graph.json` for Quickshell hot-reload the same as every other mutating graph command |
+| `aoide session prune`              | drop `done` sessions + their hook records (orphaned children keep running with their `parentSessionId` cleared); the blessed manual resync — restages `song/stage/graph.json` for Quickshell hot-reload the same as every other mutating graph command |
 
 Session live state is the latest hook phase from `hooks.json` when present
 (falling back to the roster `state`). Like every command, the group takes and

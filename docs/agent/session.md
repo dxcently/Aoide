@@ -7,7 +7,7 @@ and the layered `AGENTS.md` files; this list only sequences them.
 1. **Be a tracked session.** Every terminal here already runs conducted —
    registered in the session graph, conductable. Work launched outside a
    terminal wraps itself the same way: `aoide conduct -- <command>` (or
-   `aoide graph spawn` for a detached launch). Never work as an untracked
+   `aoide spawn` for a detached launch). Never work as an untracked
    process.
 2. **Write inside the domain.** Rice and theming work commits to
    `song/songbook/<song>/` and nothing else (house rule 1). Code work stays

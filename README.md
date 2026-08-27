@@ -65,7 +65,7 @@ The headline feature. An agent generates, lints, stages (hot-loads live, nothing
 
 ### Conducting — every terminal is a tracked session
 
-Every terminal runs its login shell under `aoide conduct` by default, so it registers in a live session DAG **and** holds a control socket a central conductor can type into. `aoide graph send` injects text into another session's stdin, gated pending-by-default (delivers on `--yes`, an autogate switch, or when the sender is the target's own parent). `aoide conductor` is the interactive terminal UI over the same trunk — session roster, projects, audit log, stage health. → [Conductor Channel](docs/Aoide-Wiki/concepts/orchestration/Conductor-Channel.md), [Session Graph](docs/Aoide-Wiki/concepts/orchestration/Session-Graph.md), [Terminal Commander](docs/Aoide-Wiki/concepts/orchestration/Terminal-Commander.md).
+Every terminal runs its login shell under `aoide conduct` by default, so it registers in a live session DAG **and** holds a control socket a central conductor can type into. `aoide send` injects text into another session's stdin, gated pending-by-default (delivers on `--yes`, an autogate switch, or when the sender is the target's own parent). `aoide conductor` is the interactive terminal UI over the same trunk — session roster, projects, audit log, stage health. → [Conductor Channel](docs/Aoide-Wiki/concepts/orchestration/Conductor-Channel.md), [Session Graph](docs/Aoide-Wiki/concepts/orchestration/Session-Graph.md), [Terminal Commander](docs/Aoide-Wiki/concepts/orchestration/Terminal-Commander.md).
 
 ### Widget-maker
 
