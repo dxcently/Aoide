@@ -1798,7 +1798,7 @@ last verification.
   entries added; `updated:` bumped on Peer-Federation, A2A-Door,
   Peer-Transport, Doors-and-Peers, aoide-cli, and the index.
 
-## [2026-08-28] upkeep | aoide.song default removed — six pages reconciled
+## [2026-08-28] lint | aoide.song default removed — six pages reconciled
 
 `aoide.song` is `types.nullOr types.str`, default `null`
 (`modules/nucleus/options.nix`, commits 0b65c49 + ae18b98). Naming no song
