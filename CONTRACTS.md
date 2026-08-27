@@ -905,7 +905,7 @@ published `kind`.
 hook-firing process's own `/proc` `ppid` walk, stamped ONCE at a hook
 session's own SessionStart/self-heal registration (`aoide graph session
 hook`) and never re-stamped afterward (a birth fact, not a live signal). A
-later `wrap`/`conduct`/`spawn` registration with no explicit `--parent` walks
+later `conduct`/`spawn` registration with no explicit `--parent` walks
 ITS OWN `/proc` ancestry and looks for a live, not-`done`, agent-kind session
 whose `hookAncestry` intersects it — the closest (deepest) matching ancestor
 wins as parent, so a nested headless `conduct`/`spawn` launched from inside
@@ -975,7 +975,7 @@ registration, the same change-once discipline `headless` already holds.
 crate has no direct dependency on `aoide-server`, so the env var is the
 seam, mirroring how `AOIDE_AUDIT_LOG` already threads a per-child fact the
 same way. Absent means "not a peer-initiated spawn" (a locally-launched
-`conduct`/`wrap`/`graph spawn`, the ordinary case, and every legacy
+`conduct`/`graph spawn`, the ordinary case, and every legacy
 record); readers must tolerate both forms. Unlike `resumedFrom`, `origin`
 gets NO `graph.json` projection — like `headless`/`hookAncestry`, it is
 consumed internally (projected verbatim into `state/session-ledger.jsonl`'s
