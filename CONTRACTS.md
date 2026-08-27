@@ -701,6 +701,35 @@ checkout, reached through the separate `$AOIDE_FLAKE_ROOT` seam (default
 `soundcheck`, `rice declare`'s commit-in step, and the songbook `nix eval`
 registry regen all read the checkout through.
 
+**The shipped score templates (L-C3, same lane).** A repo-less host — no
+`$AOIDE_FLAKE_ROOT` checkout on disk at all — has nothing to compose FROM
+and no `flake.nix` for the songbook `nix eval` regen above to evaluate
+against. `$AOIDE_SONG_TEMPLATES` names a THIRD dir for exactly that case:
+`<templates>/<song>/livery.json` is what `rice compose --from <song>`
+(`aoide-song`'s `commands::rice`) falls back to reading once
+`songbook_dir(from)` comes up empty; `<templates>/manifest.json` and
+`<templates>/registry.json` are what `aoide-song::widgets`'s registry/
+manifest regeneration falls back to reading once `flake_root()` has no
+`flake.nix` to shell `nix eval` against — both nix-free, never a `nix`
+invocation. Two tiers, absolute-path-wins like every override above:
+`$AOIDE_SONG_TEMPLATES` itself, else a sibling of `current_exe()`'s
+directory (`<exe_dir>/../share/lyra/songbook`, gated on that directory
+actually existing — `aoide_protocol::bin`'s sibling-binary resolver shape,
+applied to a directory). On a NixOS host the env tier always wins: every
+unit/shell that carries `$AOIDE_ROOT`/`$AOIDE_FLAKE_ROOT`
+(`modules/nucleus/{aoided,shellbridge,secrets,melete-adapter}.nix`) also
+carries `$AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook`
+— `pkgs/lyra-songbook` bakes a verbatim copy of the committed
+`song/songbook/` tree plus `manifest.json`/`registry.json` (via
+`lib/songbook.nix`, the SAME generator the checkout-host `nix eval` path
+and the quickshell facet's own build-time carry both call) at nix build
+time. The sibling-of-binary tier exists for a future non-nix tarball
+install instead. Neither tier resolving is a taught error naming both
+locations, never a panic; a song with a `_widgets/` shelf (borrowed widget
+ownership) still needs a real flake checkout even with templates present —
+resolving a shelf requires `composeSong` in the nix evaluator, which the
+templates fallback cannot run.
+
 **Stage-dir resolution (the CLI ↔ unit seam), one function per tree.**
 `song/stage/`: precedence `$AOIDE_STAGE_DIR` when set to an **absolute**
 path → else `$AOIDE_ROOT/song/stage`. `state/stage/`: same
