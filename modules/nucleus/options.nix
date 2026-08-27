@@ -705,6 +705,29 @@ in
       '';
     };
 
+    terminal = mkOption {
+      type = types.str;
+      default = "";
+      example = "kitty -e {cmd}";
+      description = ''
+        The terminal emulator invocation `graph spawn --windowed` and
+        `graph resurrect` open a session in, as a plain string with a
+        `{cmd}` placeholder. A bare `{cmd}` splices the conducted argv in
+        as separate arguments (`kitty -e {cmd}`); a quoted one is joined
+        into a single shell word (`foot sh -c '{cmd}'`).
+
+        Empty means no terminal is configured, and both commands answer
+        with a taught error naming this option rather than guessing an
+        emulator. A terminal dendrite sets this with `mkDefault`, so
+        enabling one is normally the whole configuration; naming it here
+        overrides that pick.
+
+        The daemon needs this because a systemd user unit inherits no
+        shell environment: without it the boot-time auto-resume sweep runs
+        and silently resumes nothing.
+      '';
+    };
+
     user = mkOption {
       type = types.str;
       default = "khoa";

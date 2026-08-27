@@ -80,10 +80,21 @@ lib.mkIf config.aoide.enable {
       # unit already has `XDG_RUNTIME_DIR` set); `AOIDE_DAEMON_SOCKET`/
       # `AOIDE_DAEMON_EVENTS` are the override seam for a host that needs
       # something else, not something this unit has to set.
+      #
+      # `AOIDE_TERMINAL` rides here for the same reason the audit log does,
+      # and is load-bearing rather than convenience: the boot auto-resume
+      # sweep opens REAL terminals, and a systemd user unit inherits no
+      # shell environment, so without this entry the sweep runs, selects its
+      # carried sessions, and fails every windowed spawn with the taught
+      # no-terminal error — resuming nothing while looking healthy. Omitted
+      # entirely when `aoide.terminal` is empty, since the resolver reads
+      # "set but blank" as a configured template and would answer with a
+      # confusing parse instead of that taught error.
       Environment = [
         "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
         "AOIDE_USER=${config.aoide.user}"
-      ];
+      ]
+      ++ lib.optional (config.aoide.terminal != "") "AOIDE_TERMINAL=${config.aoide.terminal}";
 
       # Harden: no new privileges; keep the user session's dbus accessible.
       NoNewPrivileges = true;

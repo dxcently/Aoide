@@ -29,6 +29,14 @@
   options.aoide.kitty.enable = lib.mkEnableOption "the Kitty terminal (colours/fonts deferred to the Stylix facet)";
 
   config = lib.mkIf config.aoide.kitty.enable {
+    # The venue's terminal, offered to whoever needs to open one: `graph
+    # spawn --windowed` and `graph resurrect` read it as `$AOIDE_TERMINAL`.
+    # `-e` execs the conducted argv directly, so `{cmd}` is the bare
+    # splicing form. mkDefault, so naming `aoide.terminal` in a host file
+    # still wins, and so a second terminal dendrite is a conflict the
+    # operator resolves rather than a silent last-one-wins.
+    aoide.terminal = lib.mkDefault "kitty -e {cmd}";
+
     home-manager.users.${config.aoide.user} =
       { pkgs, lib, ... }:
       let
