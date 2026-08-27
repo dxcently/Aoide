@@ -27,5 +27,6 @@ A wiki lives **in its project's own repo**, wherever a wiki is needed — defaul
 - The keeping rules live in `OPERATIONS/`; the mint/convert procedures in `PROTOCOL.md`; the stamped skeleton in `_template/`.
 - Frontmatter, naming, and links follow [[Frontmatter]], [[Naming]], [[Wikilinks]].
 - Content pages state the system as it is, in the present indicative — [[Assertion]]. History goes to `ingest/log.md`, speculation to its `## Open Threads`.
+- Prose holds the dense technical register of [[Style]] — every sentence carries a fact; the filler constructions it bans never enter a page, whichever agent writes it.
 
 This bundle (`SHAPE.md`, `PROTOCOL.md`, `OPERATIONS/`, `_template/`) is the **wiki protocol** — shipped and managed by Mneme/Melete, staged here until it relocates to them. See [[Wiki-Protocol]].

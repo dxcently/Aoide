@@ -33,7 +33,7 @@ Aoide-Wiki/
 
 ## The wiki protocol
 
-This shape comes from the **wiki protocol**, a shipped shape + rule set that Mneme/Melete use to mint and keep project wikis. Aoide's own wiki is the self-managed exception: it lives in the Aoide repo. Mneme/Melete own the protocol; it is staged under `protocol/` and the relocation to them is an Open Thread in `ingest/log.md`. See [[Wiki-Protocol]] for the concept and `protocol/PROTOCOL.md` for the mint/convert procedure. The rules this wiki is kept by live in `protocol/OPERATIONS/`: [[Ingest]], [[Indexing]], [[Lint]], [[Self-Update]], [[Frontmatter]], [[Naming]], [[Wikilinks]], [[Assertion]].
+This shape comes from the **wiki protocol**, a shipped shape + rule set that Mneme/Melete use to mint and keep project wikis. Aoide's own wiki is the self-managed exception: it lives in the Aoide repo. Mneme/Melete own the protocol; it is staged under `protocol/` and the relocation to them is an Open Thread in `ingest/log.md`. See [[Wiki-Protocol]] for the concept and `protocol/PROTOCOL.md` for the mint/convert procedure. The rules this wiki is kept by live in `protocol/OPERATIONS/`: [[Ingest]], [[Indexing]], [[Lint]], [[Self-Update]], [[Frontmatter]], [[Naming]], [[Wikilinks]], [[Assertion]], [[Style]].
 
 ## Two ways you act
 
@@ -49,6 +49,7 @@ This shape comes from the **wiki protocol**, a shipped shape + rule set that Mne
 - Mint a stub page just to clear a red wikilink — a red link is a breadcrumb, not an error.
 - Let the Notes manifest below drift from the files on disk.
 - Write history, a rejected alternative, or a what-if into a content page. Pages state the system at HEAD in the present indicative; history goes to `ingest/log.md`, open questions to its `## Open Threads`, actionable work to the dev handoff ledger. See [[Assertion]].
+- Write filler: throat-clearing, contrast rhetoric, symmetric slogan lists, empty intensifiers, restating summaries. Every sentence carries a fact an agent needs. See [[Style]].
 - Invent a new top-level directory — in this wiki OR in the Aoide repo. Both roots are closed. New content lands inside the existing tree at its designated place; look the place up (repo content paths in [[Song-Vocabulary#The Song Map]], repo shape in `CONTRACTS.md` §2). A new root directory is a contract change, not a convenience.
 
 ## You maintain yourself
@@ -133,6 +134,7 @@ protocol/OPERATIONS/Ingest.md
 protocol/OPERATIONS/Lint.md
 protocol/OPERATIONS/Naming.md
 protocol/OPERATIONS/Self-Update.md
+protocol/OPERATIONS/Style.md
 protocol/OPERATIONS/Wikilinks.md
 protocol/PROTOCOL.md
 protocol/SHAPE.md

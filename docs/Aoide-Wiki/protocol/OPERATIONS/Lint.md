@@ -28,6 +28,14 @@ Run checks in this order. List findings under the headings below.
 
 **9. Assertion violations** — content pages carrying history, definition-by-contrast, or speculation, per [[Assertion]]. Report the offending line and which clause it breaks. Two sub-cases are reported, never auto-fixed: prose that must be *routed* (a what-if with no Open Thread covering it) and a specified-but-unbuilt section with no status label.
 
+**10. Style violations** — prose in the filler register, per [[Style]]: banned constructions (throat-clearing, contrast rhetoric, symmetric lists, empty intensifiers, marketing vocabulary, restating summaries) and sentences carrying no fact. Report the offending line and the construction it matches. A grep-able first pass:
+
+```
+grep -rniE '\b(it.s worth noting|not just|more than a|leverage|delve|seamless|robust|comprehensive|streamline|empower|in summary|essentially|arguably)\b' concepts/ entities/ Overview.md
+```
+
+Matches are candidates, not findings — [[Style]] "What stays" exempts load-bearing depth and terms of art. Confirm each before listing it.
+
 The first-pass sweep is grep-able:
 
 ```
@@ -66,6 +74,9 @@ Matches are candidates, not findings — `never` and other exclusions are invari
 - …
 
 ### Assertion violations (N)
+- …
+
+### Style violations (N)
 - …
 ```
 
