@@ -34,7 +34,7 @@ start at [[aoide-cli]] and the group pages linked below.
   for an absolute override and otherwise fall back separately —
   `state/stage/` (conducting state) and `song/stage/` (rice staging).
   Stage/state writes are atomic temp-then-rename.
-- **Two registries, one convention:** `aoide schema --json` holds 73
+- **Two registries, one convention:** `aoide schema --json` holds 74
   command paths, `lyra schema --json` holds 43 — every group page prefixes
   each heading `aoide `/`lyra ` so the binary a command belongs to is never
   ambiguous.
@@ -48,9 +48,11 @@ start at [[aoide-cli]] and the group pages linked below.
   Stage files: `song/stage/{livery,cover,mode}.json`; songbook and drafts trees.
 - [[Graph-and-Conduct|Graph-and-Conduct]] — the session DAG: bare
   `graph`/`graph link` (the read/analysis lens), `project add/list/remove`,
-  `session start/phase/end/hook/carry/permit/pending list/approve/deny/
-  prune/reap`, bare `send`/`spawn`/`resurrect`, `conduct`, and `inbox
-  list/read/clear` (the receive half of `send`).
+  `session start/phase/end/hook/undying/permit/pending list/approve/deny/
+  prune/reap`, bare `session` (the undying picker), bare `send`/`spawn`/
+  `resurrect` (bare `resurrect` also walks up to a `.aoide/project.json`
+  manifest), `conduct`, and `inbox list/read/clear` (the receive half of
+  `send`).
   Stage files: `state/stage/{sessions,hooks,projects,graph,pending,
   herald}.json`, `state/inbox.json`; control sockets at
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock`.

@@ -293,8 +293,10 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
 - **Notes:** not gated at the CLI level; the security model is bind-address +
   the rebuild-gated `aoide.a2a.spawnAgent` option + the optional bearer token.
   A client never supplies a command — the spawn path only ever launches the
-  operator-configured executable. Localhost, user-only, off by default. See
-  [[A2A-Door]].
+  operator-configured executable, which must also appear on the unit's PATH
+  via `aoide.a2a.spawnPath` (a bare-word `spawnAgent` can't resolve
+  otherwise — a systemd user unit's default PATH carries none of the system
+  profile). Localhost, user-only, off by default. See [[A2A-Door]].
 
 ### aoide peer add
 

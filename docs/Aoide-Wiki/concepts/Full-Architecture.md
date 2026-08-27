@@ -72,7 +72,7 @@ trail but exit 64 today.
 **Binary note.** The map below draws both binaries as one continuous picture
 of the data flow, labeled `aoide` throughout for readability. Ownership
 (`CONTRACTS.md` §3, [[Package-Layout]]): the AGENT INTERFACE/`aoided`/CONTENT
-PIPELINE/NIX EVAL boxes are `aoide`'s (73 commands: conducting/orchestration
+PIPELINE/NIX EVAL boxes are `aoide`'s (74 commands: conducting/orchestration
 is aoide's identity); the RICE ENGINE, LIVERY, Quickshell, and shellbridge
 boxes below them are `lyra`'s (43 commands, its own schema and dispatch,
 routed through the desktop, not through `aoided`'s CLI trunk).
@@ -85,7 +85,7 @@ routed through the desktop, not through `aoided`'s CLI trunk).
                                         ▼            │
    ┌─────────────────────────────────────────────────────────────┐
    │  AGENT INTERFACE            aoide <cmd>   ·   aoide mcp serve │   [[Agent-Interface]]
-   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   73 commands · exit 0/1/2/64
+   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   74 commands · exit 0/1/2/64
    └───────────────────────────────┬─────────────────────────────┘
                                     ▼
    ┌─────────────────────────────────────────────────────────────┐
@@ -133,7 +133,7 @@ the implemented/stubbed ladder.
 
 | Subsystem            | Inputs                                         | Outputs                                             | Status                                     |
 | -------------------- | ---------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
-| [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 73 real/7 exit 64; lyra 41 real/2 exit 64) |
+| [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 74 real/7 exit 64; lyra 41 real/2 exit 64) |
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`~/Aoide/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; stage    | mostly real (`declare`/`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all commands exit 64)                |
@@ -305,7 +305,7 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   `aoide schema --json` is its machine-readable source of truth; the stdio
   MCP façade (`aoide mcp serve --stdio`) generates its tool list from it, and
   the [[A2A-Door]]'s AgentCard is derived from the same schema — all
-  one-to-one. **73 commands** — real (66): `guide`, `schema`,
+  one-to-one. **74 commands** — real (67): `guide`, `schema`,
   `mcp serve`, `daemon`, `events tail`, `conduct`, `conductor`, `adapter
   melete`, `identity`, the
   1-command `a2a` door group (`a2a serve` — the outbound client is the `peer`
@@ -321,12 +321,14 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   socket-only credential broker under its own uid, [[Secrets-Broker]]),
   `usage`, `hooks install`, `soundcheck`, `who` (live presence over sessions
   and registered peers), the 3-command `inbox` group (`list`/`read`/`clear`, the
-  durable per-host message store), the 19-command graph/session/project
+  durable per-host message store), the 20-command graph/session/project
   surface (the [[Session-Graph]] DAG viewer + management layer over projects
   and sessions — bare `graph`/`graph link` the read/analysis lens,
   `project add/remove/list`, the `session` family
-  (`start/phase/end/hook/carry/permit/pending list|approve|deny/prune/reap`),
-  and bare `send`/`spawn`/`resurrect`, all real — registering a new
+  (`start/phase/end/hook/undying/permit/pending list|approve|deny/prune/reap`)
+  plus bare `session` (the undying picker), and bare `send`/`spawn`/
+  `resurrect` (bare `resurrect` also walks up to a `.aoide/project.json`
+  manifest — [[Session-Graph]]), all real — registering a new
   conducted session is `conduct` or `spawn`, and jumping to a
   session's window is a library call the conductor and `shellbridge` reach
   directly, not a CLI subcommand), and `onboard` — the

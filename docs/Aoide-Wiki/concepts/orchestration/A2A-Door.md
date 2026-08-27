@@ -107,6 +107,16 @@ to **rebuild time** instead.
   setting the spawn target (`aoide.a2a.spawnAgent`) are nix options, so both go
   through the normal [[Rebuild-Gate|rebuild gate]] — turning them on is the
   user's admission, made once at rebuild, not per request.
+- **The spawn agent needs its own PATH.** A systemd user unit's default PATH
+  is minimal and carries none of the system profile, so a bare-word
+  `spawnAgent` (e.g. `claude`) can fail to resolve even though an
+  interactive shell finds it fine — found live when a door-summoned spawn on
+  a headless peer failed with `failed to conduct \`claude\`: No such file or
+  directory`. `aoide.a2a.spawnPath` (list of packages, default empty) rides
+  the `aoide-a2a` unit's PATH so `spawnAgent` resolves; a host enabling spawn
+  names the agent AND the package(s) that provide it, the same
+  explicit-package convention `shellbridge` and the secrets popup watcher
+  already follow.
 - **Bounded per request.** A `message/send` spawn runs **only** the configured
   `spawnAgent` executable — the client names the prompt, never the command. If
   `spawnAgent` is empty (the default), spawning is unavailable and the door

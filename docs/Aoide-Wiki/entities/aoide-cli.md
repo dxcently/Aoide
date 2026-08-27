@@ -58,8 +58,8 @@ unit test in `registry.rs` pins the sorted set of every command path, so
 adding, removing, or renaming a leaf shows as a deliberate diff against that
 snapshot.
 
-The command surface holds **65 leaves across the groups this page tracks**;
-`aoide schema --json | jq '.commands | length'` reports 73, since further
+The command surface holds **59 leaves across the groups this page tracks**;
+`aoide schema --json | jq '.commands | length'` reports 74, since further
 commands exist that are not yet covered here: the `inbox` group, `who`,
 `events tail`, `identity`, and the `peer` group's `hub`/`allow`/`spawn`,
 `discover`/`invite`, and 4-command `pair` ceremony. `lyra schema --json`
@@ -79,7 +79,8 @@ the groups it documents.
 | `mcp serve`, `daemon` | 2 | real |
 | `graph`, `graph link` | 2 | real — the read/analysis lens the `graph` prefix kept |
 | `project add/remove/list` | 3 | real |
-| `session start/phase/end/hook/carry/permit/pending list/approve/deny/prune/reap` | 11 | real — `start`/`phase`/`end`/`hook` are `internal` (hook plumbing, hidden from `aoide guide`) |
+| `session start/phase/end/hook/undying/permit/pending list/approve/deny/prune/reap` | 11 | real — `start`/`phase`/`end`/`hook` are `internal` (hook plumbing, hidden from `aoide guide`) |
+| `session` (bare — the undying picker) | 1 | real — cli+tty only; non-interactive reach steers to `session undying` |
 | `send`, `spawn`, `resurrect` | 3 | real |
 | `conduct` | 1 | real |
 | `adapter melete` | 1 | real |
@@ -153,12 +154,15 @@ render) and `graph link` — since command-defrag task #101 (Lane R) promoted
 everything that acts or manages lifecycle to its own top-level family:
 `project add`/`remove`/`list`, `session start`/`phase`/`end`/`hook` (takes
 `--agent <name>`, default `claude`; the payload maps through that harness's
-agent profile, [[Agent-Hooking]]), `session carry`, `session permit`,
+agent profile, [[Agent-Hooking]]), `session undying` (Lane U; renamed from
+its prototype name "carry"), bare `session` (Lane U, the undying picker —
+inquire multi-select over local and peer-cached sessions), `session permit`,
 `session pending list`/`approve`/`deny`, `session prune`, and bare
 `send`/`spawn`/`resurrect`. `session start`/`phase`/`end`/`hook` carry
 `internal: true` in the schema — hook plumbing a harness's own lifecycle
 drives, hidden from `aoide guide`'s human listing though still enumerated by
-`schema`/MCP/A2A; `session carry` is not internal. Together these are the
+`schema`/MCP/A2A; `session undying` and bare `session` are not internal.
+Together these are the
 [[Session-Graph]] viewer and manager feeding the [[Terminal-Commander]]
 roster (see [[Agent-Hooking]] for the session-registration doors). `session
 permit --id <id>` answers a harness permission prompt inside a conducted

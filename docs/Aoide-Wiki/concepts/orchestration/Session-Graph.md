@@ -11,8 +11,9 @@ tags: [aoide, graph, session, terminal, agent, cli]
 sessions**: who spawned whom, and which project each session belongs to. The
 DAG's terminal viewer and management layer spans several top-level command
 families — bare `graph` (the render) and `graph link` are the read/analysis
-lens; `project add|remove|list`, `session start|phase|end|hook|carry|
-permit|pending list|approve|deny|reap|prune`, and bare `send`/`spawn`/
+lens; `project add|remove|list`, `session start|phase|end|hook|undying|
+permit|pending list|approve|deny|reap|prune`, bare `session` (the undying
+picker, command-defrag task #101, Lane U), and bare `send`/`spawn`/
 `resurrect` are the acting/lifecycle surface (command-defrag task #101, Lane
 R). Every subcommand is
 implemented, per `aoide schema --json`. Like every command it registers into
@@ -122,19 +123,33 @@ should follow).
   the desktop herald surface renders it with approve/deny buttons whose click
   types the verdict back through the session's socket. The hook door raises
   it automatically the moment a session goes `awaiting`.
-- **`session carry on|off`** — mark or unmark a session DURABLE in
-  `state/carry.json`, so a project's whole carried set can later be
+- **`session undying on|off`** — mark or unmark a session DURABLE in
+  `state/undying.json`, so a project's whole undying set can later be
   resurrected together. A separate, freely-mutated set beside the ledger:
-  writes only `carry.json`, atomic, no stage lock, outside the `state/stage/`
+  writes only `undying.json`, atomic, no stage lock, outside the `state/stage/`
   dual-writer surface entirely. `--id <id>` targets any session id directly,
   including one already gone from the roster — no roster lookup gates the
   write, which is what lets a mark be flipped post-mortem, off a bare ledger
   id. Bare and `--self` both resolve the target from `$AOIDE_SESSION_ID`.
-  `spawn --carry` marks a session at birth; a bare `resurrect
-  --project <x>` (no `--all`/`--id`) resumes a project's whole carried set
+  `spawn --undying` marks a session at birth; a bare `resurrect
+  --project <x>` (no `--all`/`--id`) resumes a project's whole undying set
   and transfers the mark from an old id onto the fresh one that replaces
   it — see [[Graph-and-Conduct]] for the resurrect-selection mechanism and
-  the daemon's boot-time auto-resume sweep.
+  the daemon's boot-time auto-resume sweep. The mark was prototyped under
+  the name "carry"; the shipped name is undying, and `state/carry.json`
+  migrates to `state/undying.json` on first load.
+- **`session` (bare)** — the undying picker: a `tty`+`inquire` multi-select
+  over this host's own sessions plus every registered peer's CACHED
+  sessions, each row pre-checked by its current undying state, confirmed in
+  one Enter. A local row's toggle writes `state/undying.json` directly; a
+  peer row's toggle can't touch that store (the id lives on the peer), so it
+  writes a `{host, dir, agent}` spec into the CURRENT project's
+  `.aoide/project.json` manifest instead (walked up from cwd; never
+  auto-created, and a peer cwd that doesn't relativize under the local
+  project root is rejected with a taught reason). Cli+tty only — a non-CLI
+  door, no tty, or `--json` always steers to the scripted spelling, `session
+  undying on|off --id <id>`. See [[Graph-and-Conduct]] for the manifest
+  shape and the bare-`resurrect` walk-up it feeds.
 
 A durability rule spans the layer: the stage rewriters **round-trip unknown
 fields** (serde flatten), so graph management never clobbers fields other

@@ -21,8 +21,12 @@ hook` is the [[Agent-Hooking]] door agent harnesses (Claude Code, kimi, pi)
 fire into, and — like `session start`/`phase`/`end` — is marked `internal`
 in the schema: hook plumbing a harness's own lifecycle drives, hidden from
 `aoide guide`'s human listing though still enumerated by `schema`/MCP/A2A.
-Handlers live in
-`pkgs/aoide/crates/conduct/src/graph/{commands,session_store,send,pending,spawn,resurrect,carry,permit,window,conduct,doc,model,common}.rs`
+The durable-sessions surface (command-defrag task #101, Lane U) adds
+`session undying on|off` (the mark, renamed from its prototype name
+"carry"), bare `session` (the undying picker), and a project manifest
+(`.aoide/project.json`) that `resurrect` reads bare — see `session undying`,
+bare `session`, and `resurrect` below. Handlers live in
+`pkgs/aoide/crates/conduct/src/graph/{commands,session_store,send,pending,spawn,resurrect,undying,session_pick,permit,window,conduct,doc,model,common}.rs`
 and `pkgs/aoide/crates/conduct/src/reap.rs`; registrations in
 `pkgs/aoide/crates/conduct/src/commands/graph.rs` (the registered `path:`
 renamed in place — handler names and file layout are unchanged). `inbox
@@ -188,24 +192,26 @@ aoide session end --id <id> [--json]
   `state/stage/hooks.json`, re-stages `graph.json`.
 - **Output:** `data: {sessionId, file}`; an unknown id is an ok no-op.
 
-### aoide session carry
+### aoide session undying
 
 Not internal — an operator command, unlike `start`/`phase`/`end`/`hook` above.
+The mark was prototyped under the name "carry" (task #96); this is its
+shipped name.
 
 ```
-aoide session carry (on|off) [--self | --id <id>] [--json]
+aoide session undying (on|off) [--self | --id <id>] [--json]
 ```
 
-- **Reads:** `state/carry.json` (the durable carry mark — durable-sessions
-  plan P-C2); `state/stage/sessions.json`, only to answer the informational
+- **Reads:** `state/undying.json` (the durable mark — durable-sessions plan
+  P-C4); `state/stage/sessions.json`, only to answer the informational
   `live` field below, never to gate the write.
-- **Writes:** `state/carry.json` directly — atomic write, no stage lock, and
+- **Writes:** `state/undying.json` directly — atomic write, no stage lock, and
   no `daemon_dispatch` routing, unlike every other `session *` command
-  above: `carry.json` is not a `state/stage/` file, so it sits outside that
-  dual-writer surface entirely. `on` adds the target id to the carried set
+  above: `undying.json` is not a `state/stage/` file, so it sits outside that
+  dual-writer surface entirely. `on` adds the target id to the undying set
   (or refreshes its `markedAt` if already present); `off` removes it.
-- **Output:** `data: {sessionId, carried, live}`; `changed` names the
-  transition (`"<id>: carried"` / `"<id>: not carried"`) and stays empty on a
+- **Output:** `data: {sessionId, undying, live}`; `changed` names the
+  transition (`"<id>: undying"` / `"<id>: not undying"`) and stays empty on a
   re-mark that changed nothing.
 - **Notes:** the target resolves from `--id <id>` (any session id, including
   one that has already left the roster — no roster lookup gates the write,
@@ -215,8 +221,47 @@ aoide session carry (on|off) [--self | --id <id>] [--json]
   resolvable `$AOIDE_SESSION_ID` is likewise a usage error naming both
   flags — never a silent no-op. `live` reports whether the id is currently in
   `sessions.json`; it is informational only. The mark itself is the input
-  bare `resurrect`'s selection reads (below) and `spawn --carry` writes at
-  birth.
+  bare `resurrect`'s selection reads (below) and `spawn --undying` writes at
+  birth. On first load, `load_undying` renames a pre-existing
+  `state/carry.json` onto `state/undying.json` — a one-shot, narrated,
+  never-clobbering migration; the read side tolerates the legacy `"carried"`
+  key until the next save normalizes it.
+
+### aoide session (bare)
+
+Cli+tty only — the undying picker. A non-CLI door, no tty, or `--json`
+always steers to `session undying on|off --id <id>`, the one scripted
+spelling; this command is never duplicated as a machine-reachable form.
+
+```
+aoide session [--json]
+```
+
+- **Reads:** `state/undying.json` and this host's own `state/stage/
+  sessions.json` for the local roster; every registered peer's CACHED
+  `state/peer-cache/<name>.json` (no live pulls) for peer rows, via `who.rs`'s
+  `sessions_from_graph` (widened `pub(super)` for this second consumer).
+- **Writes:** a `tty`+`inquire` multi-select (`aoide_protocol::pick::
+  choose_many`) opens over the combined local+peer roster, each row
+  pre-checked by its current undying state. Confirming toggles land in one
+  batch: a local row's mark goes through one `load_undying`, N
+  `set_undying` mutations, one `save_undying` — the same discipline
+  `session undying`'s own single-id write already holds. A peer row's mark
+  can't touch `undying.json` (the id lives on the peer) — it writes a
+  `{host, dir, agent}` spec into the CURRENT project's `.aoide/project.json`
+  manifest instead, resolved via the same `walk_up` bare `resurrect` uses
+  below; no manifest above cwd reports every peer mark/unmark as `skipped`
+  with a taught reason while local marks in the same confirm still land. A
+  peer cwd that cannot relativize under the local project root is rejected
+  the same way, never saved with a raw absolute `dir` (`save_manifest`
+  refuses the whole batch on an absolute `dir`, so a single bad peer spec
+  never poisons the local+valid-peer rows landing beside it).
+- **Output:** `data: {changed: [...], skipped: [...]}` naming each row's
+  disposition; a clean cancel out of the picker changes nothing.
+- **Notes:** registered as a parent command alongside `session.*`, the same
+  pattern bare `graph` sits beside `graph link`. See the manifest section
+  under `aoide resurrect` below for `.aoide/project.json`'s shape and
+  discovery rule.
 
 ### aoide session hook
 
@@ -258,7 +303,7 @@ aoide session hook [--agent <claude|kimi|pi>] [--json]   # reads ONE hook JSON o
 ### aoide spawn
 
 ```
-aoide spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt <text>] -- <command …>
+aoide spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt <text>] [--windowed] [--cwd <dir>] [--undying] -- <command …>
 ```
 
 - **Reads:** re-execs `current_exe()` (the running `aoide` binary itself) as
@@ -283,15 +328,39 @@ aoide spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt <text>
   uses to replay a held entry — never a direct socket write; `data.prompt`
   reads `none` / `delivered` / `skipped-unregistered` / `failed: <reason>`.
 - **Notes:** the detached counterpart to `conduct` — this call returns
-  immediately while the spawned agent keeps running headless. See "Headless
-  conduct" under [[Conductor-Channel]] for the pty/log mechanism the re-exec'd
-  child uses.
+  immediately while the spawned agent keeps running headless. `--windowed`
+  opens a real terminal from `$AOIDE_TERMINAL` (a whitespace-split argv with
+  a `{cmd}` placeholder) instead of a detached headless child — the same
+  path bare `resurrect` uses to revive a candidate. `--undying` marks the
+  spawned session durable in `state/undying.json` once it registers (a
+  no-op if it never does) — the same mark `session undying on` sets, so this
+  project's whole undying set can later be resurrected together. See
+  "Headless conduct" under [[Conductor-Channel]] for the pty/log mechanism
+  the re-exec'd child uses.
 
 ### aoide resurrect
 
 ```
-aoide resurrect --project <name> [--all | --id <ledgerSessionId>] [--json]
+aoide resurrect [--project <name> [--all | --id <ledgerSessionId>]] [--json]
 ```
+
+**Bare (no flags) — the manifest walk (command-defrag task #101, Lane U).**
+With none of `--project`/`--all`/`--id`, `resurrect` walks up from cwd
+(`aoide_storage::manifest::walk_up`, lexical `Path::parent()` steps, LEXICAL
+not realpath — a symlink inside the project pointing outside it escapes the
+guard at use time, accepted under the manifest's host-local trust model) for
+the nearest `.aoide/project.json` and revives that manifest's specs
+directly — no `projects.json` registration needed at all. Not found, the
+command falls through to the flag-mode selection below, and its usage error
+then names both misses (`no .aoide/project.json above <cwd> and no
+--project/--all/--id given`) only when a walk was genuinely tried; a call
+that gave one of the three flags without `--project` (e.g. `--id X` alone)
+never attempts a walk and gets the original `--project`-missing usage error
+instead. See "The project manifest" below for the file's shape and the
+per-spec revival rule; every invocation — including the empty-selection
+no-op — writes exactly one audit line.
+
+**Flag mode (`--project`/`--all`/`--id`) — unchanged.**
 
 - **Reads:** `state/session-ledger.jsonl` (the durable, append-only record
   written exactly once at roster exit, P-D8) — resolves `--project` against
@@ -299,15 +368,15 @@ aoide resurrect --project <name> [--all | --id <ledgerSessionId>] [--json]
   via the SAME longest-cwd-prefix rule `build_graph`'s `anchor_for` uses.
   Candidates: `--all` widens to every anchored entry, `--id` narrows to one
   specific ledger `sessionId` (mutually exclusive with `--all`; `--id` wins
-  if both are given), and bare (neither flag) resumes the project's WHOLE
-  carried set (`state/carry.json`, durable-sessions plan P-C4) — anchored
-  entries currently marked durable via `session carry on`, minus any
-  id already alive (non-`done`) in `sessions.json`, deduped by `sessionId`
-  keeping the entry with the newest `endedAt` (a carried id resurrected and
-  exited again can appear twice in the append-only ledger). `--all`/`--id`
-  never consult the carry mark. An empty bare-mode selection is an
-  `Outcome::ok` no-op naming the carried set as empty, never a silent
-  success. Each candidate is filtered through its harness's
+  if both are given), and bare-with-`--project` (neither `--all` nor `--id`)
+  resumes the project's WHOLE undying set (`state/undying.json`,
+  durable-sessions plan P-C4) — anchored entries currently marked durable
+  via `session undying on`, minus any id already alive (non-`done`) in
+  `sessions.json`, deduped by `sessionId` keeping the entry with the newest
+  `endedAt` (an undying id resurrected and exited again can appear twice in
+  the append-only ledger). `--all`/`--id` never consult the undying mark. An
+  empty selection is an `Outcome::ok` no-op naming the undying set as empty,
+  never a silent success. Each candidate is filtered through its harness's
   `AgentProfile.resume_args` — a harness with no verified resume argv
   (unregistered, or never confirmed against the real binary) is skipped,
   not guessed at.
@@ -317,8 +386,8 @@ aoide resurrect --project <name> [--all | --id <ledgerSessionId>] [--json]
   own `cwd`). A resurrected session always mints a NEW `sessionId` — ledger
   ids are never recycled — and is stamped `resumedFrom` naming the ledger
   entry's own id; `build_graph` projects that as a `resumed` edge beside
-  `spawned`/`anchors` (CONTRACTS.md §4). If the old id was carried, the mark
-  transfers onto the new id in the same step (one `save_carry` call, never
+  `spawned`/`anchors` (CONTRACTS.md §4). If the old id was undying, the mark
+  transfers onto the new id in the same step (one `save_undying` call, never
   left on the now-dead old id).
 - **Pipes to / output:** `data: {project, resurrected: [...], skipped:
   [...], failed: [...]}`. Never a hard error over a per-candidate spawn
@@ -327,19 +396,72 @@ aoide resurrect --project <name> [--all | --id <ledgerSessionId>] [--json]
   past one bad candidate. Only genuine usage problems (`--project` missing,
   an unknown project name, an `--id` naming no anchored ledger entry) are
   `Outcome::usage`/`error`.
-- **Notes:** the same command core also backs the daemon's own boot-time
-  auto-resume trigger — a project's `autoResume` flag (`project add
-  --auto-resume`, only ever set true by the CLI) fires `resurrect
-  --project <name>` once per boot on `aoided` start (P-D8, `docs/
-  architecture/AOIDED.md`'s "L5 — harness summoning"), unconditionally for
-  every `autoResume` project — the daemon carries no liveness check of its
-  own; a project whose whole carried set is already alive simply resolves
-  to the empty-set no-op above, so one live terminal never suppresses
-  reviving the rest of a multi-session carried set. This is the revival
-  half of the liveness story `session reap` sweeps the other side of: a
-  session a killed terminal could never mark `done` gets reaped off the
-  live roster, and its ledger entry is what `resurrect` can later
-  bring back in a fresh terminal.
+
+**The project manifest — `.aoide/project.json` (Lane U).** Bare `resurrect`
+reads a v0 manifest, `aoide_storage::manifest`: `{version, sessions: [{host,
+dir, agent, command?}]}`. `dir` is project-relative (a lexical-join +
+normalize containment guard, `resolve_spec_dir`, refuses any escape past the
+project root); `command`, when given, is split on whitespace with NO shell
+quoting awareness. The file lives at `<project_root>/.aoide/project.json`
+and is HOST-LOCAL and SELF-IGNORING — the first `save_manifest` into a
+project root writes a `.aoide/.gitignore` containing `*`, so the manifest
+never gets committed: one focused host owns the shape, hand-edited or picker-
+written, never synced via git. Each spec resolves independently (one spec's
+failure never aborts the rest): a spec whose `host` matches this host
+enriches from the ledger — the newest `state/session-ledger.jsonl` entry
+whose `cwd`/`agent` match the resolved `dir`/spec's `agent` revives through
+the exact `resolve_candidate`/`resurrect_one` path `--id` drives; no match
+clean-spawns instead, windowed, the spec's own `command` when given else the
+agent's registered default launch (an agent with neither is a taught
+`failed[]` entry, never a guessed argv) — the manifest DECIDES WHAT exists,
+the ledger only ever decides HOW. Every outcome row carries a `disposition`:
+`revived-from-ledger`, `clean-spawned`, `summoned-remote` (below), a bare
+`skipped`, or `failed`. Both local revival paths mark the fresh session
+undying at successful spawn (`mark_manifest_revival_undying`) — the manifest
+spec is itself the durable declaration, so a later resurrect finds it
+without re-walking the manifest.
+
+**Remote summon (Lane U4).** A spec whose `host` names a DIFFERENT box is
+SUMMONED through the existing peer door, never skipped: `spec.host` resolves
+against `state/peers.json` as a peer NICKNAME, the same way the undying
+picker writes it. Three local refusals land in `failed[]` (tried and
+refused, not given up on) before the wire is touched: no peer registered
+under that name, a registered but UNVERIFIED peer, or neither a `command`
+nor a registered default launch to summon with. Past those,
+`graph::resurrect::summon_remote` calls the identical signed spawn-shaped
+`message/send` `aoide peer spawn` drives (`client::commands::spawn_on_peer`,
+extracted from `handle_peer_spawn` so both consumers share one
+implementation) — no re-implementation of the wire, no shell-out to the
+`aoide` CLI, no confirm prompt (a manifest spec is the operator's own
+standing declaration). Which agent runs is the PEER's own configured
+`aoide.a2a.spawnAgent`, never chosen here — the spec's `command` (or the
+agent's default launch) only ever becomes that agent's first typed turn. The
+wire carries no working-directory field at all, so a spec's `dir` is never
+pushed across; a spec wanting a specific remote directory says so inside its
+own `command` (`git -C <path> ...`). A summoned row is never marked undying
+on this host — the resurrected id lives on the peer.
+
+**Boot auto-resume.** The same command core also backs the daemon's own
+boot-time auto-resume trigger — a project's `autoResume` flag (`project add
+--auto-resume`, default OFF, only ever set true by the CLI) fires `resurrect
+--project <name>` once per boot on `aoided` start (P-D8, `docs/
+architecture/AOIDED.md`'s "L5 — harness summoning" and "Open knobs"),
+unconditionally for every `autoResume` project — the daemon carries no
+liveness check of its own; a project whose whole undying set is already
+alive simply resolves to the empty-set no-op above, so one live terminal
+never suppresses reviving the rest of a multi-session undying set. This is
+the revival half of the liveness story `session reap` sweeps the other side
+of: a session a killed terminal could never mark `done` gets reaped off the
+live roster, and its ledger entry is what `resurrect` can later bring back
+in a fresh terminal. The trigger fires headless fine, but a windowed revive
+from boot has one hard limitation: a systemd user unit's environment
+freezes at spawn, before any compositor runs, so the daemon can never see
+`WAYLAND_DISPLAY` — a boot-triggered windowed resurrect has no terminal to
+open and degrades to the taught no-terminal error. The desktop-correct
+fix — a graphical-session-side unit running `resurrect` once the compositor
+env exists — is designed in `AOIDED.md`'s Open knobs and deliberately
+unbuilt: `autoResume` stays default off, and the daemon trigger already
+covers the headless case correctly.
 
 ### aoide send
 
