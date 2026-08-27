@@ -222,7 +222,10 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
       # reasoning as shellbridge's own unit above): the reaper touches only
       # CONDUCTING files (graph.json/sessions.json), which resolve under
       # state/stage/ on the default layout with no override needed.
-      Environment = [ ];
+      # AOIDE_USER is set explicitly like every other unit — resolution
+      # works off systemd's inherited HOME without it, but no unit in this
+      # tree leans on that inheritance alone.
+      Environment = [ "AOIDE_USER=${config.aoide.user}" ];
 
       NoNewPrivileges = true;
       StandardOutput = "journal";
