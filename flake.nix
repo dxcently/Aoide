@@ -1,5 +1,5 @@
 {
-  description = "Aoide — a dendritic auto-discovery NixOS framework: an agent-wearable desktop you clone and run.";
+  description = "Aoide tracks and conducts terminal and agent sessions — collaborating across agents and hosts, human in the loop.";
 
   # ── Inputs ─────────────────────────────────────────────────────────────────
   # Pre-declared for all waves. Later waves ADD files in their own dirs and
