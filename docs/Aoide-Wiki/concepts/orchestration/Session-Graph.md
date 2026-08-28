@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, graph, session, terminal, agent, cli]
 ---
 
@@ -260,6 +260,76 @@ then every ~12s thereafter — cheap enough (one `hyprctl` call + a stage read,
 a write only when something changed) to run continuously without agents ever
 seeing a stale "haunting" session.
 
+## Session identity — origin and the sealed credential
+
+Two additive record fields carry a session's provenance (LANE IDENTITY,
+task #63); both are consumed internally and get no `graph.json` projection:
+
+- **`origin`** (string, write-once) — `"peer:<name>"` for a session the A2A
+  door spawned on behalf of an identified, paired peer, a local-class value
+  otherwise. `stamp_origin` is the sole stamp function, with two legitimate
+  callers: the door's spawn handler (the only place a `peer:*` value may
+  originate) and `session_conduct`, stamping a local-class value off its
+  own inherited `AOIDE_SESSION_ORIGIN` env and refusing a `peer:*` shape
+  read there — inherited env is exactly what a same-uid process can set on
+  itself. `aoide resurrect` carries a local-class `origin` forward off the
+  session's own ledger entry and refuses a `peer:*` shape found there the
+  same way — the ledger is an unsealed append-only file, so a forged
+  `peer:*` line earns nothing. The raw field is **attribution, never a
+  gate**: `sessions.json` and `state/session-ledger.jsonl` stay plain
+  same-uid-writable files, so no security decision keys on `origin` as read
+  off disk. The authenticated form is the seal.
+- **`seal` + `sealedIssuedAt`** — the sealed session credential, sharing
+  one lifecycle (always both or neither). `aoided` mints an ed25519 keypair
+  once per process and holds it in memory only, never on disk — a separate
+  key from `state/identity/`'s on-disk peer-wire key, which any same-uid
+  reader could sign with. The signature covers a canonical NUL-separated
+  string of five fields: `sessionId`, `pid`, `pidStarttime`, `originClass`,
+  `issuedAt` — `sessionId`/`originClass` verbatim, no trim or case-folding,
+  so a seal minted for one exact identity cannot verify against a
+  differently-cased one. Two stamp sites cover the two registration paths:
+  the daemon's `dispatch` handler mints right after a `session start`, and
+  a tick-driven sweep seals any live pid-carrying record still missing one
+  within ~1s, however it registered.
+
+Verification is live, never cached. The verifier re-reads
+`/proc/<pid>/stat` field 22 fresh for the record's pid (the pid-reuse
+defense: a stale value for a recycled pid fails the live read; a stored
+`0` — the mint-time degrade when `/proc` was already unreadable — is
+unverifiable, never "verified") and fetches the daemon's CURRENT public key
+over its `ping` reply's `sealPubkeyHex` field. `aoide_storage::attest` is
+the one implementation of the walk + verify, shared by the send gate
+([[Conductor-Channel]]) and the secrets broker's origin gate
+([[Secrets-Broker]]). A pubkey file sitting beside the seal on the same
+same-uid-writable `sessions.json` is cryptographically void — a forger of
+the seal forges the "trusted" key with it — so the live round trip is the
+only channel asked. The trust root is Yama `ptrace_scope>=1` plus process
+liveness (the lane's answered threat-model fork, OQ1-A): with Yama off the
+seal degrades to liveness-only. An unreachable or impostor daemon leaves
+every seal unverifiable — never a fallback to trust.
+
+**The lane's accounting — enforced vs open.** Enforced end to end:
+`origin` is write-once and door-stamped (P-ID0); every live, pid-carrying
+session carries the seal (P-ID1); the send gate and the per-session
+socket's accept key on kernel facts plus a verified seal, never env
+(P-ID2); shellbridge's verdict socket and `aoided`'s dispatch socket hold a
+cross-uid `SO_PEERCRED` floor (P-ID3, [[shellbridge]], [[aoided]]); the
+secrets broker's `allowRemoteOrigin` gate is the credential's first policy
+consumer (P-ID4); the peer wire resolves identity by verifying key, never
+claimed name (P-ID5, [[Peer-Federation]]). Open, each named rather than
+implied closed: (1) **consumer-name authentication** — the seal
+authenticates the session and its class, never a self-asserted consumer
+string; (2) **OQ1-B, the own-uid daemon** — not taken; a same-uid attacker
+can race or evict the daemon's listener (`bind_socket` unlink-then-binds,
+no flock guard) and serve a forged `sealPubkeyHex`, and a same-uid process
+can append an unsealed roster row claiming `origin: local` that the reseal
+sweep then signs into a positive attestation (the sweep-relaunder
+residual); (3) **a cross-uid attestation channel** — the packaged
+`aoide-secrets` broker cannot reach the operator's daemon socket or roster,
+so the origin gate is dormant in that deployment; (4) **an authenticated
+registration path** — the closer for the sweep-relaunder shape; (5)
+**per-surface dispatch-door gates** riding the attested-caller lookup.
+
 ## Contracts (CONTRACTS.md §4, still v0)
 
 - `projects.json` v0: `{schemaVersion, projects: [{name, path}]}`.
@@ -267,9 +337,11 @@ seeing a stale "haunting" session.
   fully resolved, so Quickshell never recomputes anchoring.
 - `sessions.json` records carry several **additive** optional fields (no
   version bump): `parentSessionId` (spawned edge), `logPath` (a
-  headless-conducted session's pty-master log — [[Conductor-Channel]]), and
+  headless-conducted session's pty-master log — [[Conductor-Channel]]),
   `hookAncestry` (up to 8 self-first `/proc` pids, stamped once, the
-  auto-parenting seam above). The full field list — `kind`/`conductable`,
+  auto-parenting seam above), and the identity pair `origin` and
+  `seal`/`sealedIssuedAt` (the lane's provenance and credential, above).
+  The full field list — `kind`/`conductable`,
   `contextTokens`/`contextCeiling`/`tool`/`petname` and more — is CONTRACTS.md
   §4; each is round-tripped by every rewriter regardless of whether it
   understands the field.
@@ -309,4 +381,6 @@ an `aoide shell lock` command absent from the schema (open thread, see
 - [[Widget-Bridge-Contract]]
 - [[Conductor-Channel]]
 - [[Conductor-TUI]]
+- [[Peer-Federation]] — the wire half of key-verified identity (P-ID5)
+- [[Secrets-Broker]] — the origin gate, the credential's first policy consumer (P-ID4)
 - [[Peer-Transport]] — the reaper backstop that collects a tunnel a killed session never closed
