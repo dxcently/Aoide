@@ -3412,6 +3412,21 @@ loopback/user-scoped by default (same as the rest of §6's security posture),
 and every inject/spawn/error is audited through `Door::A2a`, the same single
 audit log every other door writes.
 
+**Spawn acks only once the wrapper proves it's alive (task #103).**
+`do_spawn` launches the configured agent via a detached `aoide conduct`
+wrapper process; a successful `cmd.spawn()` there only proves that WRAPPER
+started — it says nothing about whether the wrapper's own exec of the
+configured agent succeeded, since a missing `spawnAgent` binary fails
+inside that separate process (synchronously, from `aoide-conduct`'s own
+"spawn FIRST" ordering — no session ever registers for that failure), not
+visibly to this door. Before acking, `do_spawn` gives the wrapper a short
+bounded window (400ms, `Child::try_wait()` polled) to prove it's still
+running; a wrapper that exits inside that window gets a taught JSON-RPC
+error (`-32603`, naming the configured program, never the full command
+line or any env) instead of a `submitted` Task naming a session that will
+never appear in `sessions.json`. Every legitimate spawn pays this as fixed
+RPC latency and never notices it.
+
 **MVP simplification, carried over from Phase B:** taskId == contextId ==
 sessionId for both inject and spawn (a fresh spawn's Task/contextId/sessionId
 are all the newly-minted `a2a-<pid>-<ts>` id). Splitting a Task from its
