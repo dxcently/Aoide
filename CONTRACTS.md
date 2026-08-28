@@ -1129,9 +1129,9 @@ closes the STAMP path a live `aoide resurrect`/`conduct` invocation takes.
 Sealing the files themselves so a forged on-disk value can be told apart
 from a genuine one is P-ID1 (the daemon-signed credential, below) — minted
 and stored, verified on the per-session control socket's own accept and
-consumed by the send gate as of P-ID2 (below). Two doors remain unfloored
-by peercred (shellbridge's verdict socket, `aoided`'s own dispatch
-socket) — that closure is P-ID3, still open. Absent means "not a
+consumed by the send gate as of P-ID2, and both remaining sockets
+(shellbridge's verdict socket, `aoided`'s own dispatch socket) get a
+peercred floor of their own as of P-ID3 (below). Absent means "not a
 peer-initiated spawn" (a locally-launched `conduct`/`spawn`, the ordinary
 case, and every legacy record); readers must tolerate both forms. Unlike
 `resumedFrom`, `origin` gets NO `graph.json` projection — like `headless`/
@@ -1211,10 +1211,14 @@ only as trustworthy as the daemon socket's same-uid exclusivity, and under
 OQ1-A that is NOT attacker-proof**: `bind_socket` unlink-then-binds with
 no `flock`/pidfile guard, so a same-uid attacker can already race or evict
 the real listener and bind its own in its place, serving a forged
-`sealPubkeyHex` from an impostor `ping` reply — closing THAT is P-ID3's
-same-uid dispatch-socket floor, not this phase's. This buys the attacker
+`sealPubkeyHex` from an impostor `ping` reply. **P-ID3's dispatch-socket
+peercred floor does NOT close this** — it is a CROSS-uid floor (see
+below); a same-uid attacker racing or evicting the real listener is by
+definition the SAME uid the floor admits, so this residual is
+OQ1-A-inherent and stays open (a `flock`/pidfile guard on `bind_socket`
+would be the actual fix, not attempted here). This buys the attacker
 nothing beyond the door already open (the raw per-session socket a
-same-uid process can already connect to directly, P-ID3-inherent): the
+same-uid process can already connect to directly, OQ1-A-inherent): the
 seal's value is against a caller that follows its OWN tooling honestly
 (`aoide send`, a script, an agent that never forges argv/env but also
 never opens a raw socket) — it does not, and was never claimed to, resist
@@ -1274,13 +1278,78 @@ entirely) still injects with no gate at all — the per-session socket's
 accept refuses only the ONE narrow self-injection shape above, since the
 socket carries raw bytes with no envelope and so cannot tell an
 explicitly-`--yes`'d send apart from an ordinary one at the receiving end
-without a wire protocol this phase does not add; shellbridge's verdict
-socket and `aoided`'s own dispatch socket remain wholly unfloored — P-ID3.
+without a wire protocol this phase does not add.
 Absent `seal`/`sealedIssuedAt` means "no daemon has sealed this record yet"
 (a session that predates a daemon's current life, or one from an
 old build); readers must tolerate both forms. No `graph.json`
 projection — like `origin`/`headless`/`hookAncestry`, it is consumed
 internally, never rendered into the live graph.
+
+**The remaining two sockets get a peercred floor (LANE IDENTITY P-ID3).**
+Phase 0 mapped every legitimate connector to each: shellbridge's socket
+serves the QML herald/bar widgets clicking a summons verdict or a
+focus/power/rice-mode/usage-refresh/recheck action, `aoide herald push`
+(dunst's own script hook), and `session permit` raising its own summons —
+every one of them the OPERATOR's own uid, none of them the daemon's;
+`aoided`'s dispatch socket serves the CLI's own `daemon_dispatch` proxy (a
+session-write handler trying the resident daemon before its direct
+stage-write fallback) and any other same-uid caller of `aoide` itself.
+`aoide_conduct::shellbridge::serve` and `aoide_server::daemon::accept_loop`
+both now read `SO_PEERCRED` on accept (`aoide_conduct::graph::
+identity::peer_cred`, widened `pub(crate)` from `pub(in crate::graph)` so
+`shellbridge.rs` — a sibling of `graph`, not a descendant — reuses it
+rather than a second reimplementation; `aoide-server` reuses
+`aoide_secrets::peercred` instead, already `pub`, already a dependency, so
+no widening needed there) and refuse a connection outright — never
+forwarded — whose peer uid does not match the process's own euid,
+fail-closed exactly like the secrets broker's `admin_gate` on an
+unidentified peer (`cross_uid_gate`, restated identically in both files,
+pure and unit-tested without a real different-uid connection). **This is a
+CROSS-uid floor, not a same-uid guarantee** — under OQ1-A every legitimate
+connector named above already runs as the SAME uid a prompt-injected agent
+would, so a same-uid process forging `{"cmd":"heraldverdict",...}` on
+shellbridge's socket, or a raw `{"op":"dispatch","path":["send"],...}` on
+`aoided`'s, is refused by neither floor. This is the identical OQ1-A
+residual the per-session control socket already carries (P-ID2's own "what
+P-ID2 does NOT close" paragraph above) restated at these two sockets, not a
+new gap this phase opened — stated honestly rather than papered over with a
+floor shaped to look like more than a cross-uid check.
+
+Two ATTRIBUTION leaks close alongside the floor, both the SAME shape a
+`send`/`session_send` handler running INSIDE a long-lived door process
+(rather than inside `aoide send`'s own short-lived CLI invocation) can fall
+into: `resolve_sender` (`graph/send.rs`) falls back to reading
+`AOIDE_SESSION_ID` off the CALLING process's own env whenever a request
+carries no `--from` — attribution only, never the gate (`sender_is_parent`/
+`siblings_share_live_parent` above never consult it). For a `send` reaching
+`deliver_local` from INSIDE `aoided`'s own process (a raw
+`{"op":"dispatch","path":["send"],...}` request, or the CLI's own
+`daemon_dispatch` proxy for OTHER session-write commands riding the same
+wire), "the calling process's own env" is `aoided`'s — not the connecting
+client's, which never crosses this socket at all. `aoide_server::daemon::
+invocation_from_dispatch_request` now stamps an absent `from` flag
+EXPLICIT-EMPTY (`--from ""`, `resolve_sender`'s own documented "no
+attribution" form, the same mechanism `session pending approve`'s re-drive
+already relies on) rather than leaving it absent to fall through to
+`aoided`'s ambient env (G8). `aoide_server::a2a::do_inject` — which calls
+`session_send` the same direct, in-process way for an inbound A2A message —
+does the identical stamp when its own resolved `from` is `None`, so a
+remote inject can never pick up whatever `AOIDE_SESSION_ID` the `aoide a2a
+serve` process happened to inherit at launch either (G9). **Neither
+attribution fix touches the GATE.** `real_attested_sender`'s
+`std::process::id()` walks whichever process is actually executing
+`deliver_local` — for a request proxied through `aoided`'s dispatch socket
+or injected through `a2a serve`, that is the DOOR's own process, not the
+original caller's. In production that process's real `/proc` ancestry
+(`init -> systemd -> aoided`, or `init -> ... -> aoide a2a serve`) never
+resolves a live sealed session, so a proxied `send` with no `--yes`/
+autogate already fails closed to `pending` by construction today — not
+because either fix re-derives the connecting caller's real identity (it
+doesn't), but because the door process's own ancestry is architecturally
+incapable of impersonating one. Threading the connecting peer's real pid
+into the gate itself — so a proxied `send` resolves the ACTUAL caller
+rather than merely failing closed — would touch `graph/send.rs`'s gate,
+out of this phase's scope fence; deferred, not forgotten.
 
 **Additive in v0 (P-C5, durable-sessions plan):** a session record MAY also
 carry an optional `restore` (object) — a conducted SHELL's continuously-

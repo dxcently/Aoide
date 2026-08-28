@@ -237,9 +237,11 @@ reply line. One `write_json_line`-shaped formatter, one
   round trip instead. That round trip is NOT attacker-proof under OQ1-A:
   `bind_socket` unlink-then-binds with no flock/pidfile, so a same-uid
   attacker can already race or evict the real listener and answer with a
-  forged key — the same-uid dispatch-socket floor that would close it is
-  P-ID3's, not this field's; it buys no more than the raw per-session
-  socket already leaves open.
+  forged key — LANE IDENTITY P-ID3 added a CROSS-uid peercred floor to
+  this socket's accept, which does not close this (a same-uid attacker
+  racing the bind is the same uid the floor admits); a `flock`/pidfile
+  guard on `bind_socket` would be the actual fix, not attempted there. It
+  buys no more than the raw per-session socket already leaves open.
 - `subscribe` → the connection becomes a stream: each matching bus event is
   written as an interim line as it happens; the final reply only comes on
   shutdown. Classes are explicit — an empty/absent `classes` delivers
