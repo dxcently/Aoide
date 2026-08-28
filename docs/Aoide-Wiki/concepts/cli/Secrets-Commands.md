@@ -1,13 +1,13 @@
 ---
 type: concept
 created: 2026-08-25
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, cli, secrets, totp, security]
 ---
 
 # Secrets Commands — the `aoide secrets` Command Surface
 
-The dev-facing reference for the 16 `secrets` commands: signature, what each
+The dev-facing reference for the 17 `secrets` commands: signature, what each
 reads and writes, and where output goes. This page is the command surface;
 [[Secrets-Broker]] is the design — the identity/release-to-client flow, the
 policy model's rationale, the parked-ask design, the age lane, deployment.
@@ -29,12 +29,12 @@ else a sibling of the socket, `/run/aoide-secrets/events.jsonl`, capped at
 **Three routing classes**, the page's organizing idea:
 
 - **Direct-home admin** — `add`, `rm`, `grant`, `revoke`, `set-totp`,
-  `automate`, `expose`, `migrate`. Each refuses outright when the calling
+  `automate`, `expose`, `allow-remote-origin`, `migrate`. Each refuses outright when the calling
   process's effective uid doesn't own the secrets home, before ever
   touching `policy.json`/`totp.secret` — root included; plain `sudo`
   (euid 0) is refused the same as any other wrong uid, only `sudo -u
   aoide-secrets` passes. When a broker is listening, every one of these
-  eight commands routes over the socket FIRST (`{"op":"admin","command":…}`),
+  nine commands routes over the socket FIRST (`{"op":"admin","command":…}`),
   executed inside the same `put_lock` critical section a `put`/`exec`
   already runs under — so an admin command racing a live resolve can no
   longer interleave. Direct-write-to-`policy.json` survives only as the
@@ -48,7 +48,7 @@ else a sibling of the socket, `/run/aoide-secrets/events.jsonl`, capped at
   particular touches only in-memory broker state, no `policy.json` write).
 - **The daemon itself** — `serve`.
 
-None of the 16 carries `gated: true` in the schema. `secrets exec` on a
+None of the 17 carries `gated: true` in the schema. `secrets exec` on a
 `requireTotp` secret with no code PARKS instead of refusing outright: the
 requesting connection registers `{id, secret, consumer, requestedAt}` in
 the broker's in-memory registry and waits (default 300 s,
@@ -238,6 +238,23 @@ aoide secrets expose <name> on|off [--json]
   operator can pre-declare which secrets are meant to ever leave the host,
   ahead of one landing.
 
+## aoide secrets allow-remote-origin
+
+```
+aoide secrets allow-remote-origin <name> on|off [--json]
+```
+
+- **Reads/Writes:** the named policy's `allowRemoteOrigin` bit (default
+  `false`).
+- **Output:** idempotent, same discipline as `set-totp`.
+- **Notes:** direct-home admin command. The bit is the third policy axis —
+  caller provenance, distinct from `remote` (transport) and `automation`
+  (the code). With it off, a caller whose sealed session carries a `peer:*`
+  origin class is refused before the TOTP/park branch; with it on, that
+  caller resolves exactly as a local one. The class is resolved from kernel
+  facts plus a seal verified against the daemon's live key — never from
+  anything the request asserts ([[Secrets-Broker]]'s Caller origin).
+
 ## aoide secrets pending
 
 ```
@@ -262,7 +279,9 @@ aoide secrets approve <id> [--totp <code>] [--json]
 - **Writes:** releases the value down the ORIGINAL requesting connection,
   never into this command's own reply. Re-runs the full authorization gate
   (exists + consumer authorized) against the ask's stored consumer before
-  fetching, so a revoke issued mid-park still takes effect.
+  fetching, so a revoke issued mid-park still takes effect. The remote-origin
+  check needs no re-run here: a `peer:*`-origin resolve against a secret
+  whose `allowRemoteOrigin` is off is refused before it can ever park.
 - **Output:** ok → `{"ok":true}` to the approver; the value itself never
   rides this reply. An invalid or expired code leaves the ask parked and
   the replay ledger unburned.
