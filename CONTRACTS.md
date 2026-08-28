@@ -1145,15 +1145,25 @@ themselves are tamper-evident, which they are not yet.
 **Additive in v0 (LANE IDENTITY P-ID1) — the sealed session credential.** A
 session record MAY also carry an optional `seal` (string, hex) — an ed25519
 signature (`aoide_storage::sealed_id::mint_seal`) over a canonical
-`\x00`-separated string built from five fields:
-`sessionId`, `pid`, `pidStarttime`, `originClass`, `issuedAt` (trimmed,
-lowercased, each followed by the separator — the same field-hashing shape
-`wire_auth::canonical_string` already established, restated here since the
-field SET differs). `pidStarttime` is `/proc/<pid>/stat`'s field 22
-(1-indexed), read by `aoide_conduct::graph::pid_starttime` — paired with
-`pid` so a pid REUSE (the OS recycling a pid number after the original
-process exits) can never be mistaken for the same process a seal was minted
-over.
+`\x00`-separated string built from five fields, each followed by the
+separator: `sessionId`, `pid`, `pidStarttime`, `originClass`, `issuedAt`.
+**`sessionId`/`originClass` ride VERBATIM — no trim, no case-folding**
+(review fix: the original shape copied `wire_auth::canonical_string`'s
+trim+lowercase wholesale, but `sessionId` is the session store's own
+case-sensitive primary key and `originClass` is about to become P-ID4's
+origin-gate lookup key — folding either would let a seal minted for one
+exact identity verify against a differently-cased one). `pid`/
+`pidStarttime`/`issuedAt` are their plain canonical decimal digit strings.
+`pidStarttime` is `/proc/<pid>/stat`'s field 22 (1-indexed), read by
+`aoide_conduct::graph::pid_starttime` — paired with `pid` so a pid REUSE
+(the OS recycling a pid number after the original process exits) can never
+be mistaken for the same process a seal was minted over. **A `pidStarttime`
+of `0` (the documented degrade when `/proc/<pid>/stat` is unreadable at
+mint time — a pid that has already vanished) is UNVERIFIABLE, never
+"verified": no live process ever reports starttime `0`, so a verifier
+reconstructing this shape from a fresh `/proc` read can never produce a
+matching `0` — treat a stored `0` as "cannot be revalidated," not as a
+weaker-but-valid seal.**
 
 **The signing key is NOT `state/identity/`'s on-disk peer-wire key.** Under
 OQ1-A (the User-answered threat-model question, LANE IDENTITY's design pass)
