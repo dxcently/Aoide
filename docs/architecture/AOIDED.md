@@ -228,8 +228,13 @@ reply line. One `write_json_line`-shaped formatter, one
 {"v":0,"op":"dispatch","path":["graph","view"],"args":[],"flags":{"json":"true"}}
 ```
 
-- `ping` → `{"ok":true,"daemon":"aoided","pid":…,"version":"…"}`. The
-  liveness probe L4's clients use.
+- `ping` → `{"ok":true,"daemon":"aoided","pid":…,"version":"…",
+  "sealPubkeyHex":"…"}`. The liveness probe L4's clients use;
+  `sealPubkeyHex` (LANE IDENTITY P-ID2, `CONTRACTS.md` §4's `seal`
+  paragraph) is this process's current seal-signing public key — never
+  secret, but only trustworthy fetched fresh from the LIVE daemon (never a
+  file, which a same-uid attacker could substitute alongside a forged
+  seal).
 - `subscribe` → the connection becomes a stream: each matching bus event is
   written as an interim line as it happens; the final reply only comes on
   shutdown. Classes are explicit — an empty/absent `classes` delivers

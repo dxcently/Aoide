@@ -643,8 +643,14 @@ one final reply line. Three ops, a closed set:
 {"v":0,"op":"dispatch","path":["graph","view"],"args":[],"flags":{"json":"true"}}
 ```
 
-- `ping` → `{"ok":true,"daemon":"aoided","pid":…,"version":"…"}` — the
-  liveness probe.
+- `ping` → `{"ok":true,"daemon":"aoided","pid":…,"version":"…",
+  "sealPubkeyHex":"…"}` — the liveness probe. `sealPubkeyHex` (LANE
+  IDENTITY P-ID2) is this daemon PROCESS's current seal-signing public
+  key (§4's `seal` paragraph) — never secret, but the only channel any
+  caller can trust for it: a same-uid-writable FILE sitting next to the
+  seals it verifies would let whoever can forge a seal also forge the
+  "trusted" key that vouches for it, so it is exposed here instead, on a
+  LIVE reply only the real running daemon can write.
 - `subscribe` → the connection becomes a one-way stream: each event on the
   daemon's own events feed (§1's event-bus record shape, name-only) whose
   `class` is in the request's `classes` array is written as an interim
@@ -1122,8 +1128,10 @@ file directly (a future consumer, a dashboard, a careless `jq`); P-ID0 only
 closes the STAMP path a live `aoide resurrect`/`conduct` invocation takes.
 Sealing the files themselves so a forged on-disk value can be told apart
 from a genuine one is P-ID1 (the daemon-signed credential, below) — minted
-and stored, but nothing verifies it against an incoming connection yet;
-that's P-ID2 (the peercred floor), still open. Absent means "not a
+and stored, verified on the per-session control socket's own accept and
+consumed by the send gate as of P-ID2 (below). Two doors remain unfloored
+by peercred (shellbridge's verdict socket, `aoided`'s own dispatch
+socket) — that closure is P-ID3, still open. Absent means "not a
 peer-initiated spawn" (a locally-launched `conduct`/`spawn`, the ordinary
 case, and every legacy record); readers must tolerate both forms. Unlike
 `resumedFrom`, `origin` gets NO `graph.json` projection — like `headless`/
@@ -1142,28 +1150,38 @@ peer-spawned session, whether via env or via an unsealed ledger line) is now
 refused at every record-STAMP path this codebase drives — not that the files
 themselves are tamper-evident, which they are not yet.
 
-**Additive in v0 (LANE IDENTITY P-ID1) — the sealed session credential.** A
-session record MAY also carry an optional `seal` (string, hex) — an ed25519
-signature (`aoide_storage::sealed_id::mint_seal`) over a canonical
-`\x00`-separated string built from five fields, each followed by the
-separator: `sessionId`, `pid`, `pidStarttime`, `originClass`, `issuedAt`.
+**Additive in v0 (LANE IDENTITY P-ID1/P-ID2) — the sealed session
+credential.** A session record MAY also carry an optional `seal` (string,
+hex) — an ed25519 signature (`aoide_storage::sealed_id::mint_seal`) over a
+canonical `\x00`-separated string built from five fields, each followed by
+the separator: `sessionId`, `pid`, `pidStarttime`, `originClass`,
+`issuedAt` — and an optional `sealedIssuedAt` (number, unix seconds),
+stamped alongside `seal` in the SAME call. `sealedIssuedAt` exists because
+`issuedAt` has no live fact a verifier can re-derive it from (unlike
+`pidStarttime`, below): without storing it, checking a signature would mean
+brute-forcing every plausible mint instant, which P-ID1's own original test
+suite did as a test-only expedient before this field existed. Both fields
+share ONE lifecycle — always `Some` together, always `None` together.
 **`sessionId`/`originClass` ride VERBATIM — no trim, no case-folding**
 (review fix: the original shape copied `wire_auth::canonical_string`'s
 trim+lowercase wholesale, but `sessionId` is the session store's own
-case-sensitive primary key and `originClass` is about to become P-ID4's
-origin-gate lookup key — folding either would let a seal minted for one
-exact identity verify against a differently-cased one). `pid`/
-`pidStarttime`/`issuedAt` are their plain canonical decimal digit strings.
-`pidStarttime` is `/proc/<pid>/stat`'s field 22 (1-indexed), read by
-`aoide_conduct::graph::pid_starttime` — paired with `pid` so a pid REUSE
-(the OS recycling a pid number after the original process exits) can never
-be mistaken for the same process a seal was minted over. **A `pidStarttime`
-of `0` (the documented degrade when `/proc/<pid>/stat` is unreadable at
-mint time — a pid that has already vanished) is UNVERIFIABLE, never
-"verified": no live process ever reports starttime `0`, so a verifier
-reconstructing this shape from a fresh `/proc` read can never produce a
-matching `0` — treat a stored `0` as "cannot be revalidated," not as a
-weaker-but-valid seal.**
+case-sensitive primary key and `originClass` is P-ID4's own origin-gate
+lookup key — folding either would let a seal minted for one exact identity
+verify against a differently-cased one). `pid`/`pidStarttime`/`issuedAt`
+are their plain canonical decimal digit strings. `pidStarttime` is
+`/proc/<pid>/stat`'s field 22 (1-indexed) — at MINT time read by
+`aoide_conduct::graph::pid_starttime` over whatever pid the record carries;
+at VERIFY time (P-ID2, below) a verifier does NOT trust a stored
+`pidStarttime` at all — it re-reads `/proc/<pid>/stat` FRESH for the SAME
+`pid` and reconstructs the identity from that live value, never from
+anything persisted. This is the pid-reuse defense: a stale mint-time value
+for a pid the OS has since recycled to a different process simply fails to
+match the live read. **A `pidStarttime` of `0` at mint time (the documented
+degrade when `/proc/<pid>/stat` is unreadable then — a pid that had already
+vanished) is UNVERIFIABLE, never "verified": no live process ever reports
+starttime `0`, so a verifier's fresh `/proc` read can never produce a
+matching `0` — a stored `0` cannot be revalidated, not a weaker-but-valid
+seal.**
 
 **The signing key is NOT `state/identity/`'s on-disk peer-wire key.** Under
 OQ1-A (the User-answered threat-model question, LANE IDENTITY's design pass)
@@ -1181,33 +1199,61 @@ the target host. **Yama is the trust root; if it is off, this degrades
 honestly to liveness-only** (still requires a live `aoided` process to have
 signed it, but no longer resists a same-uid `ptrace` attach) — stated here
 rather than hidden, the same honesty discipline `origin`'s own paragraph
-above holds for its own boundary.
+above holds for its own boundary. **Verifying a seal needs the daemon's
+CURRENT public key, fetched fresh over its existing `ping` reply's
+`sealPubkeyHex` field** — never cached, never read from a file: a pubkey
+sitting next to the seal it vouches for on the SAME same-uid-writable
+`sessions.json` would let whoever can already forge a seal also forge the
+"trusted" key that verifies it, which is cryptographically void. Only a
+LIVE round trip to the actual running daemon process is a channel a
+same-uid attacker cannot also write to (`aoide_client::daemon::
+daemon_seal_pubkey_hex`). An unreachable daemon means every seal is
+UNVERIFIABLE, not a fallback to trust — the credential's whole security
+property rests on a live daemon existing to ask.
 
 `aoide_conduct::graph::session_store::stamp_seal` is the sole STAMP
 function (change-once, the same shape `stamp_origin` set the precedent
-for), with exactly ONE legitimate caller: `aoide-server`'s daemon
-`dispatch` handler, which mints the seal right after a successful
-`session start` dispatch and stamps it onto the record it just registered.
-**What P-ID1 mints the seal OVER, today, is scaffolding, not the final
-authority:** it signs over whatever `pid` the record already carries
-(`session.rs`'s own `pid` field) — the bare `session start` wire path
-carries no pid at all today (only `session_conduct`'s own direct,
-non-dispatched registration stamps one), so a seal lands only when a pid is
-already present; that is an honest, stated boundary, not a bug. P-ID2
-replaces this pid with the control socket's own peercred-authenticated
-CONNECTING pid.
+for), with TWO legitimate callers as of P-ID2: `aoide-server`'s daemon
+`dispatch` handler (P-ID1's original caller — mints right after a
+successful `session start` dispatch whose record already carries a pid),
+and the daemon's own tick-driven `seal_unsealed_live_sessions` sweep,
+which closes the gap P-ID1 shipped as scaffolding: the common real-world
+registration — `aoide conduct -- <agent>` — writes its record DIRECTLY,
+never through `dispatch` at all, so under P-ID1 alone it was never sealed.
+The sweep seals ANY live, pid-carrying session missing one within one tick
+(~1s) of registering, regardless of which path registered it.
 
-**No gate reads this field yet.** `seal` is inert data, exactly as inert as
-`origin` was before P-ID0 — this phase proves the mint → store → verify
-mechanism (round-tripped by `aoide-storage`'s own `sealed_id` test suite:
-verify TRUE on a genuine seal, FALSE on any single tampered field, FALSE
-under a different keypair) and nothing more. P-ID2 is the first phase to
-add a verify-on-accept caller (the control socket's peercred check); P-ID4
-is the first to gate a real decision (origin-class-scoped secrets policy)
-on it. Absent means "no daemon has sealed this record yet" (the common
-case today, and every legacy record); readers must tolerate both forms. No
-`graph.json` projection — like `origin`/`headless`/`hookAncestry`, it is
-consumed internally, never rendered into the live graph.
+**The per-session control socket's accept reads `SO_PEERCRED` and the send
+gate consumes the seal, as of P-ID2.** `aoide_conduct::graph::conduct`'s
+per-session injection socket (`$XDG_RUNTIME_DIR/aoide/session-<id>.sock`,
+above) reads the CONNECTING process's kernel-truth uid/pid off every
+accepted connection and refuses one outright — never forwarded to the
+pty — when that pid's real `/proc` ancestry roots back to the socket's OWN
+session. This is the un-bypassable replacement for the OLD client-side
+`is_self_send` guard `graph/send.rs` used to carry: that guard only ever
+protected a well-behaved caller of `aoide send`; a raw connection to a
+session's own socket bypassed it entirely, and still can for any OTHER
+identity claim (see the still-open door named below). The SEND GATE itself
+(`sender_is_parent`/`siblings_share_live_parent` in `graph/send.rs`) keys
+on a KERNEL-ATTESTED sender session instead of the OLD, forgeable
+`AOIDE_SESSION_ID` env read: `aoide send` walks ITS OWN real `/proc`
+ancestry (as unforgeable a kernel fact, for the SAME real process, as a
+peercred read of it would be) to find a session whose seal verifies.
+`AOIDE_SESSION_ID` remains ONLY as attribution (audit lines, the
+provenance prefix `resolve_sender` builds) — removed from every GATE
+predicate. **What P-ID2 does NOT close**: a genuinely unrelated same-uid
+process connecting directly to a session's socket (bypassing `aoide send`
+entirely) still injects with no gate at all — the per-session socket's
+accept refuses only the ONE narrow self-injection shape above, since the
+socket carries raw bytes with no envelope and so cannot tell an
+explicitly-`--yes`'d send apart from an ordinary one at the receiving end
+without a wire protocol this phase does not add; shellbridge's verdict
+socket and `aoided`'s own dispatch socket remain wholly unfloored — P-ID3.
+Absent `seal`/`sealedIssuedAt` means "no daemon has sealed this record yet"
+(a session that predates a daemon's current life, or one from an
+old build); readers must tolerate both forms. No `graph.json`
+projection — like `origin`/`headless`/`hookAncestry`, it is consumed
+internally, never rendered into the live graph.
 
 **Additive in v0 (P-C5, durable-sessions plan):** a session record MAY also
 carry an optional `restore` (object) — a conducted SHELL's continuously-
