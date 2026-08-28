@@ -331,7 +331,11 @@ pkgs.testers.runNixOSTest {
     # P2, registered from `aoide-conduct` because it folds `who`'s probe
     # core) — reached 80. Bumped by 1 for bare `pair` — the interactive
     # pairing picker over one sweep, driving the same ceremony core `peer
-    # invite` uses (task #120 P3) — reached 81.
+    # invite` uses (task #120 P3) — reached 81. Bumped by 1 for `secrets
+    # allow-remote-origin` — the per-secret remote-origin admission bit the
+    # broker's origin gate enforces, deny by default (LANE IDENTITY P-ID4,
+    # the first real consumer of the sealed session credential) — reached
+    # 82.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a command.
     schema_raw = machine.succeed("aoide schema --json")
@@ -345,8 +349,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 81, (
-        f"expected 81 commands, got {cmd_count}.  "
+    assert cmd_count == 82, (
+        f"expected 82 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

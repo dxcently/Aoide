@@ -436,7 +436,7 @@ count.
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker, the
   Melete MCP client).
-  **81 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **82 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -1213,7 +1213,12 @@ sitting next to the seal it vouches for on the SAME same-uid-writable
 `sessions.json` would let whoever can already forge a seal also forge the
 "trusted" key that verifies it, which is cryptographically void, so a live
 round trip to the actual running daemon process is the only channel worth
-asking (`aoide_client::daemon::daemon_seal_pubkey_hex`). **This channel is
+asking (`aoide_storage::attest::daemon_seal_pubkey_hex` — the ONE
+implementation as of P-ID4, with `aoide_client::daemon::
+daemon_seal_pubkey_hex` delegating; the walk + fresh-starttime verify live
+beside it in the same module, shared by the send gate and the secrets
+broker's origin gate — the credential's consumers, see the "Secrets home"
+section's origin-gate paragraph for the second one). **This channel is
 only as trustworthy as the daemon socket's same-uid exclusivity, and under
 OQ1-A that is NOT attacker-proof**: `bind_socket` unlink-then-binds with
 no `flock`/pidfile guard, so a same-uid attacker can already race or evict
@@ -2640,7 +2645,8 @@ policy's `automation` field (`{"enabled":<bool>,"consumers":[<name>,...]}`,
 absent on an old `policy.json` means `{enabled:false,consumers:[]}`) can
 only ever RELAX the TOTP requirement for the consumers it names — it can
 never impose one, and it never touches the `consumers`-authorization gate
-above it. Gate order is: exists -> consumer authorized -> TOTP required
+above it. Gate order is: exists -> consumer authorized -> remote-origin
+(P-ID4, below) -> TOTP required
 (`requireTotp AND NOT (automation.enabled AND the requesting consumer is
 IN automation.consumers)`) -> fetch. When `requireTotp` is `false`,
 automation has nothing to relax and every caller resolves exactly as
@@ -2665,6 +2671,42 @@ invariant (`crates/secrets/AGENTS.md`): every non-local entry point added
 later (mesh replication, a network door) MUST refuse a secret whose
 `remote` is `false` before ever touching its backend. `secrets expose
 <name> on|off` flips it.
+
+**The origin gate (LANE IDENTITY P-ID4) — `allowRemoteOrigin`, the third
+policy axis, and the first real consumer of the sealed session
+credential.** `policy.json` gained an `allowRemoteOrigin` boolean (default
+`false`, absent on an old file means `false`; `secrets allow-remote-origin
+<name> on|off` flips it, same admin family as `expose`). The three axes
+are distinct and never conflated: `remote` = may this secret be SERVED
+through a non-local entry point (transport); `automation` = may a listed
+consumer skip TOTP (code); `allowRemoteOrigin` = may a session that a
+REMOTE PEER created resolve this secret LOCALLY (caller provenance). The
+broker resolves each connection's caller from kernel facts alone —
+`SO_PEERCRED` pid -> real `/proc` ancestry -> sealed session record ->
+seal verified against the daemon's LIVE `ping`-fetched public key
+(`aoide_storage::attest::attested_caller`, the SAME walk/verify the send
+gate uses, fresh-starttime pid-reuse defense included; nothing the wire
+asserts ever enters this) — and a caller whose sealed `originClass` is
+`peer:*` is refused, before the TOTP/park branch, unless the secret's
+`allowRemoteOrigin` is on; the refusal names the flag, the session, and
+its origin, and audits name-only. **The boundary, exactly:** this gate
+NARROWS positively-attested remote-origin sessions; it does not
+authenticate local ones. An UNIDENTIFIED caller (no sealed session in its
+ancestry, an unreachable daemon, an unreadable roster) is NOT refused by
+this gate — same-uid honesty (OQ1-A) means local unidentified callers
+were always admitted, and this gate keys ONLY on positive attestation.
+In the packaged cross-uid deployment (`modules/nucleus/secrets.nix` runs
+the broker as the `aoide-secrets` system user) the operator's daemon
+socket (`0600` inside their `0700` `$XDG_RUNTIME_DIR`) and their
+`state/stage/sessions.json` are both unreachable from the broker, so
+every caller there resolves UNIDENTIFIED today — the gate bites wherever
+the broker runs as the operator's own uid (the cargo-only/dev deployment
+`crates/secrets/src/home.rs` documents); a cross-uid attestation channel
+is a named, deliberately-unbuilt remainder, not an improvised file drop
+(a pubkey file next to a same-uid-writable roster is exactly the channel
+the identity section above rules out). Consumer-name authentication
+remains a separate, unbuilt axis — the seal authenticates the SESSION and
+its CLASS, never the self-asserted `consumer` string.
 
 **`put`** — write a secret's value (P-V4c; `overwrite`/`exists`/`replaced`
 added P-67, "warn before overwrite"):
