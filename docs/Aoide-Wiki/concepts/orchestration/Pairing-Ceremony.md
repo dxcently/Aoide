@@ -53,8 +53,12 @@ aoide peer pair request <url> [--name b]
                                                  outright (-32002)
 both sides derive the SAME SAS locally, from values each already holds
 operator B: peer pair pending → peer pair approve <id>
-  B's own peer record commits HERE — purely local,          (nothing
-  and the parked entry is marked approved, left PARKED       dials A)
+  B's operator TYPES the code as read off A's screen (out-of-band;
+  --code NNN-NNN scripted), compared against B's OWN derived SAS,
+  never echoed in the prompt; a wrong code counts a persisted try,
+  the 3rd cumulative mismatch auto-denies (nothing committed)
+  On a match, B's own peer record commits HERE — purely     (nothing
+  local, and the parked entry is marked approved, left PARKED  dials A)
 operator A: a SECOND peer pair approve <id> (against the outbound queue)
   → aoide/pairPoll {id, timestampIso, nonceHex, ──────────► verified against
     signatureHex} — over the SAME forward dial                 the parked entry's
@@ -78,14 +82,23 @@ entry `awaiting-confirm`.
 
 ## The commit asymmetry — both humans confirm
 
-The two ends commit their peer records asymmetrically. B's record for A
-exists the moment B's operator approves — `peer pair approve` on an
-inbound id is purely local (`aoide-client::commands::approve_inbound`):
-it commits the record and marks the parked entry approved, dialing
-nobody. A's record for B exists only once A's own operator runs `peer
-pair approve <id>` a second time, against the OUTBOUND queue — that
+The two ends commit their peer records asymmetrically, and the two
+confirmations differ by side. B's record for A exists the moment B's
+operator approves — `peer pair approve` on an inbound id is purely local
+(`aoide-client::commands::approve_inbound`): it commits the record and
+marks the parked entry approved, dialing nobody. B's gate is the TYPED
+code: the operator types the SAS as read off A's screen, out of band, and
+it is compared against B's own locally derived SAS — the prompt never
+echoes the expected value. A wrong code counts one try, persisted on the
+parked entry across invocations; the third cumulative mismatch
+auto-denies (the same clean removal `reject` performs, audited
+`auto-deny-on-code-mismatch`), and an entry already at the try limit is
+denied on sight. A's record for B exists only once A's own operator runs
+`peer pair approve <id>` a second time, against the OUTBOUND queue — that
 invocation polls `aoide/pairPoll` first, then re-derives the SAS from
-values already held locally and asks for the y/N confirm. A code shown
+values already held locally and asks for the y/N confirm (A's own screen
+printed the code at request time, so the typed-code gate is B's side
+only; `--yes` scripts A's confirm but never bypasses B's). A code shown
 once and accepted once is not a mutual confirmation; a never-confirmed A
 leaves B holding a `verified: true` peer that answers nothing — visible
 on B's own `peer status`, resolved by an ordinary expiring re-pair.
@@ -107,9 +120,9 @@ the requester/approver roles on the same four values yields `"847-405"`.
 ## The five commands
 
 `aoide peer pair request <url> [--name <n>] [--self-url <url>] [--via
-ssh://[user@]host[:port]]` / `pending` / `approve <id> [--yes]` /
-`reject <id>` / `watch [--popup] [--json]`, registered together in
-`register_peer_pair`:
+ssh://[user@]host[:port]]` / `pending` / `approve <id> [--yes] [--code
+NNN-NNN]` / `reject <id>` / `watch [--popup] [--json]`, registered
+together in `register_peer_pair`:
 
 - **`request`** sends the commitment and the reveal as two sequential
   POSTs inside one invocation, parks the outbound half
@@ -120,9 +133,11 @@ ssh://[user@]host[:port]]` / `pending` / `approve <id> [--yes]` /
   transcript needs A's nonce) and outbound ones, tagged with their state
   (`awaiting-approval` / `awaiting-confirm`).
 - **`approve <id>`** dispatches by direction — the inbound queue first,
-  then the outbound — re-derives the SAS from this instance's own
-  identity either way, and requires an explicit `y`/`yes` (`--yes` for
-  scripted use) before anything commits.
+  then the outbound — and re-derives the SAS from this instance's own
+  identity either way. The gates differ by side (the commit asymmetry
+  above): inbound asks the operator to TYPE the code (`--code NNN-NNN`
+  scripted; `--yes` never bypasses), outbound polls and then asks `y`/`N`
+  (`--yes` scripted). Nothing commits before the side's own gate passes.
 - **`reject <id>`** is a clean local refusal on either queue — no wire
   call, no peer record; on an outbound entry it doubles as the ceremony's
   abort command, usable at any stage.
@@ -138,7 +153,9 @@ ssh://[user@]host[:port]]` / `pending` / `approve <id> [--yes]` /
   operator's own invocation.
   `--popup` swaps the narration for a zenity `--question` confirm dialog
   per actionable request (refused up front when zenity is not on PATH;
-  `--popup`+`--json` is a usage error). The dialog's exit-0 Approve and
+  `--popup`+`--json` is a usage error). The dialog is the one approver
+  surface that does NOT take the typed code: clicking Approve on the
+  rendered code is that arm's whole confirmation. Its exit-0 Approve and
   its `"Reject request"` extra button drive the SAME
   `approve_inbound`/`approve_outbound` paths the CLI runs (`skip_confirm:
   true` — the dialog itself IS the confirmation): the CLI is always
@@ -146,6 +163,17 @@ ssh://[user@]host[:port]]` / `pending` / `approve <id> [--yes]` /
   graphical session runs it as the `aoide-pair-watch.service` user unit
   (`modules/nucleus/aoided.nix`), gated on `aoide.a2a.enable &&
   aoide.facets.quickshell.enable`.
+
+Bare **`aoide pair`** is the interactive entry onto the same rails, CLI
+door + real tty only (a non-tty, non-CLI, or `--json` invocation gets a
+taught pointer at the scripted spellings): one bounded ~2 s advertisement
+sweep, this box's own advertisement filtered out, then a select menu over
+the candidates — each row the validated name with the claimed ssh hop and
+the OBSERVED source address side by side. Picking a row IS the
+proceed-confirmation and runs the same shared tail `peer invite` drives
+(`pair_with_heard` → `run_pair_request`), so the SAS prints with the
+approve step for both ends. Hearing nothing teaches `peer advertise on`
+(the other box) and the manual `peer pair request <url> [--via …]` path.
 
 ## The events surface
 
@@ -217,9 +245,11 @@ request` is the replacement for the hand-wired shared secrets. Spec:
 
 Real: the three wire methods (`aoide/pairRequest`/`aoide/pairReveal`/
 `aoide/pairPoll`), both parked-state files, the five CLI
-commands, the SAS derivation with its pinned vectors, the events feed,
-and the zenity popup all run. `--popup` is zenity `--question` only; a
-QML confirm dialog is a named deferral, not built.
+commands, the interactive bare `aoide pair` entry, the SAS derivation
+with its pinned vectors, the typed-code gate with its persisted tries and
+auto-deny, the events feed, and the zenity popup all run. `--popup` is
+zenity `--question` only; a QML confirm dialog is a named deferral, not
+built.
 
 ## Related
 

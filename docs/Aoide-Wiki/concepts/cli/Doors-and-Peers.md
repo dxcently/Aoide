@@ -421,7 +421,7 @@ aoide peer hub <name> [--clear]
 aoide peer pair request <url> [--name <n>] [--self-url <url>]
                         [--via ssh://[user@]host[:port]] [--json]
 aoide peer pair pending
-aoide peer pair approve <id> [--yes]
+aoide peer pair approve <id> [--yes] [--code NNN-NNN]
 aoide peer pair reject <id>
 aoide peer pair watch [--popup] [--json]
 ```
@@ -456,18 +456,30 @@ aoide peer pair watch [--popup] [--json]
   confirmation code, `aoide_storage::pairing::derive_sas`); `pending`
   lists both directions, each entry with its own independently-derived
   SAS (an unrevealed inbound entry shows `revealed: false` and no code);
-  `approve` re-derives the SAS and prompts `y`/`N` unless `--yes`.
+  `approve` re-derives the SAS and the gate differs by side — an INBOUND
+  id asks the operator to TYPE the code as read off the requester's
+  screen (the prompt never echoes the expected value; `--code NNN-NNN`
+  scripted; a wrong code counts a persisted try, the third cumulative
+  mismatch auto-denies, an entry at the try limit is denied on sight, and
+  `--yes` never bypasses any of this), an OUTBOUND id polls and then
+  prompts `y`/`N` (`--yes` scripted — this side's own screen printed the
+  code at request time).
   `watch` blocks until Ctrl-C, narrating each recognized line; `--json`
   emits one event object per line instead, and `--popup` raises a zenity
   `--question` confirm per actionable request (refused up front when
   zenity is not on PATH; `--popup`+`--json` is a usage error) whose
-  Approve/Reject drive the same approve/reject paths — on a non-CLI door
+  Approve/Reject drive the same approve/reject paths — the dialog renders
+  the code and IS that arm's whole confirmation, the one approver surface
+  with no typed-code gate. On a non-CLI door
   `watch` returns a "run it from a terminal" outcome, the `events tail`
   posture.
 - **Notes:** not gated. The commit-then-reveal ceremony, the poll, the
   commit asymmetry, the park cap (`AOIDE_PAIRING_PARK_CAP`, default 32)
   and the 4-hour expiry (`DEFAULT_PAIRING_TIMEOUT_SECS`):
-  [[Pairing-Ceremony]].
+  [[Pairing-Ceremony]]. Bare `aoide pair` (CLI door + real tty only) is
+  the interactive entry: one ~2 s advertisement sweep, a select menu over
+  the candidates heard, and the picked row runs the same ceremony tail
+  `peer invite` drives.
 
 ### aoide peer allow
 
