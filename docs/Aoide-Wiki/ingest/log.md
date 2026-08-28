@@ -1881,3 +1881,58 @@ concepts/orchestration/Secrets-Broker.md, concepts/song/Self-Ricing.md,
 concepts/song/Song-Anatomy.md, concepts/song/Song-Vocabulary.md,
 entities/Quickshell.md, entities/aoide-cli.md, entities/aoided.md,
 entities/dxflake.md, entities/lyra.md, entities/shellbridge.md.
+
+
+## [2026-08-28] refactor | identity lane #63 sweep — sealed credentials, kernel-attested senders, origin gate, key-resolved peers
+
+Brings every page touching session identity, origin/provenance, the
+secrets broker's gates, peer federation trust, and command counts current
+with LANE IDENTITY (#63, P-ID0–P-ID5, landed through `cab9b12`). Ground
+truth: `CONTRACTS.md`'s identity sections, `docs/architecture/PAIRING.md`,
+and the HEAD registry golden — 82 commands, `secrets allow-remote-origin`
+landed; pages saying 81 were stale.
+
+Session-Graph gains the lane's home section ("Session identity — origin and
+the sealed credential"): write-once door-stamped `origin` (attribution,
+never a gate), the ephemeral in-memory seal keypair and its
+`ping`/`sealPubkeyHex` verification channel, the fresh-starttime pid-reuse
+defense, the Yama-plus-liveness trust root (OQ1-A), and the lane's
+accounting — six enforced phases and the five named open items
+(consumer-name authentication; OQ1-B with its daemon-impersonation and
+sweep-relaunder residuals; the cross-uid attestation channel; an
+authenticated registration path; per-surface dispatch-door gates).
+Conductor-Channel and Graph-and-Conduct restate the send gate on a
+kernel-attested sender (`/proc` ancestry to a seal-verified session;
+`AOIDE_SESSION_ID` demoted to attribution) plus the control socket's
+`SO_PEERCRED` self-injection refusal. Secrets-Broker gains the third policy
+axis (`allowRemoteOrigin`, caller provenance — distinct from `remote`
+transport and `automation` code), the kernel-facts attestation chain, and
+the exact boundary (unidentified callers never refused; dormant in the
+packaged cross-uid deployment); Secrets-Commands gains the new admin verb
+section (16 → 17). Peer-Federation's Signature rung now states
+key-not-name resolution, the claimed-vs-resolved attribution-drift rule,
+the collision tiebreak and union-of-grants consequence, and the
+`-32007`/`-32008`/`-32009` vocabulary; A2A-Door and Doors-and-Peers flip
+Spawn to the pairing gate (`-32006` taught refusals, the bearer demoted to
+the read arms); Pairing-Ceremony records the `state/identity/` layout and
+the ephemeral seal-key split; Peer-Transport's framing is corrected to
+signature-is-identity. The shellbridge/aoided entities gain the cross-uid
+peercred floors and the daemon's sealing role; Widget-Bridge-Contract's
+field table gains the `origin`/`seal` rows. Count bumps 81 → 82 (74 → 75
+real) in Full-Architecture, Package-Layout, Codebase, CLI-Reference,
+Meta-and-Upkeep ("core's 80" → 82), aoide-cli (59 → 60 tracked leaves),
+and the index's secrets/A2A glosses.
+
+Pages touched: concepts/orchestration/Conductor-Channel.md,
+concepts/orchestration/Session-Graph.md,
+concepts/orchestration/Peer-Federation.md,
+concepts/orchestration/A2A-Door.md,
+concepts/orchestration/Pairing-Ceremony.md,
+concepts/orchestration/Peer-Transport.md,
+concepts/orchestration/Secrets-Broker.md,
+concepts/cli/Graph-and-Conduct.md, concepts/cli/Secrets-Commands.md,
+concepts/cli/Doors-and-Peers.md, concepts/cli/CLI-Reference.md,
+concepts/cli/Meta-and-Upkeep.md, concepts/Full-Architecture.md,
+concepts/Package-Layout.md, concepts/Codebase.md,
+concepts/desktop/Widget-Bridge-Contract.md, entities/shellbridge.md,
+entities/aoided.md, entities/aoide-cli.md, ingest/index.md.
