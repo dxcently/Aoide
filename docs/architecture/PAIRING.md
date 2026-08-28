@@ -256,14 +256,15 @@ the full count-site checklist (git show 9c2d05c).
   — no `lyra` fallback, a QML confirm dialog is a named deferral, not
   built. Legacy-escape documentation pass lands as CONTRACTS §6's own
   "Legacy escapes" subsection.
-- **P-P6 — discovery + invite (M).** The multicast beacon
+- **P-P6 — discovery + invite (M).** The LAN advertisement
   (advertise-off-by-default, emitted by `a2a serve`), `peer discover`
-  + `peer invite` (golden +2, full count-site checklist), beacon
-  validation as untrusted input, CONTRACTS §6 beacon format +
-  constants. Tests: beacon round-trip on loopback multicast, malformed
-  beacon dropped, dedupe by fingerprint, invite resolves a heard
-  beacon and refuses an unheard/ambiguous name, advertise knob
-  default-off, discovery writes nothing to the registry.
+  + `peer invite` (golden +2, full count-site checklist),
+  advertisement validation as untrusted input, CONTRACTS §6
+  advertisement format + constants. Tests: advertisement round-trip
+  over a real loopback socket, malformed advertisement dropped,
+  bounded dedupe, invite resolves a heard advertisement and refuses
+  an unheard/ambiguous name, advertise switch default-off, discovery
+  writes nothing to the registry.
 
 Live gates at the end of the lane: a real pair between yomi and
 sakaki via the ceremony (codes compared on real terminals), a spawn
@@ -276,85 +277,87 @@ User-decided 2026-08-25: on a large network Aoide finds other Aoide —
 but discovery grants NOTHING. Connecting still requires the pairing
 ceremony; discovery only tells you who is there to invite.
 
-- **Transport: Aoide's own UDP multicast beacon** (User-chosen over
-  mDNS — zero new dependencies, cargo-only, nix-independent). One
-  JSON line per beacon on a fixed multicast group+port (the executor
-  pins the constants and documents them in CONTRACTS §6):
-  `{v, name, fpr, url}` — protocol version, instance name, the P-P1
-  identity's public-key fingerprint, and the A2A door URL. Never a
-  credential, never a pubkey in full, never anything that grants.
-- **Advertising is OFF by default.** The beacon is emitted by the
-  `a2a serve` process (the one that actually owns the door URL it
-  advertises) only when the operator opts in — config/env knob
-  (`AOIDE_DISCOVERY_ADVERTISE`, plus the nix option), cadence ~30s,
-  jittered. No resident listener exists: hearing is on-demand.
-- **Interface selection needs no pinning.** A beacon socket binds
-  unbound (`0.0.0.0`) on both ends; the kernel resolves the outgoing
-  send and the receiving join to the same physical interface via the
-  normal unicast routing table (`ip route get <group>` reaches the
-  right interface even with no explicit `224.0.0.0/4` route present —
-  the multicast destination falls through to the default route like
-  any other). `IP_MULTICAST_IF`/interface-scoped joins were tested and
-  ruled out as a fix during task #98's diagnosis; the socket layer was
-  never the defect.
-- **A host must let the beacon's UDP port through its own firewall.**
-  The join succeeding (`ip maddr show` lists the group on the right
-  interface) is not the same as delivery succeeding: a default-deny
-  firewall (NixOS's stock one trusts only `lo`) drops an inbound
-  beacon on a physical interface even when it originated as this
-  SAME host's own multicast-loopback copy of a beacon it just sent —
-  confirmed by an independent raw UDP send/receive that succeeds over
-  `lo` and fails identically over the physical interface, with no
-  Aoide code in the path at all. The nix module opens the beacon's UDP
-  port automatically whenever `aoide.a2a.discoveryAdvertise` is on,
-  since that flag is already the operator's deliberate opt-in to being
-  found on the LAN; a box that only ever wants to receive
-  (`discoveryAdvertise` left off, running `peer discover`/`peer
-  invite` against others) must open that port itself.
-- **`aoide peer discover [--secs N]`** joins the group, listens
-  briefly (default a few seconds), dedupes by fingerprint, and
-  prints the table: name, fingerprint, URL, the observed source
-  address, first/last heard. A beacon is UNTRUSTED NETWORK DATA
-  (house rule 4's discipline): every field is validated (name shape,
-  hex fingerprint, http(s) URL, line-size cap) before display, a
-  malformed beacon is dropped and counted, and nothing is ever
-  written to the peer registry by discovery alone.
-- **The advertised URL is a claim; the observed source address is a
-  fact.** A loopback-bound advertiser's `url` field always reads
-  `http://127.0.0.1:<port>/`, no matter who hears it — useless as a
-  dial target for anyone but itself. The UDP packet's own source IP,
-  by contrast, is measured directly by the socket that heard it and
-  cannot be spoofed the way a self-reported field can. `peer
-  discover` shows both, side by side, precisely so the two can be
-  seen disagreeing; `peer invite` DIALS the observed address, never
-  the claimed one — it swaps only the host, preserving the
-  advertised URL's scheme, port, and path verbatim (the path matters:
-  outbound requests are signed over the path, never the host, so
-  dropping it would silently break the far end's signature check).
+- **Transport: Aoide's own UDP broadcast advertisement** (User-chosen
+  over mDNS — zero new dependencies, cargo-only, nix-independent).
+  One JSON line per advertisement to the limited-broadcast address on
+  a fixed port (constants pinned and documented in CONTRACTS §6):
+  `{v, name, host, user}` — protocol version, instance name, and the
+  advertiser's ssh hop claim (the makings of `--via ssh://user@host`).
+  Never a credential, never a key or fingerprint (rendezvous, not
+  authentication — pairing's SAS stays the trust gate), never a door
+  URL (doors are loopback-bound; ssh is the only cross-box
+  transport). Broadcast replaced the original multicast group (task
+  #120, the #106 fix): cross-box multicast was eaten by the User's
+  router — verified live 2026-08-27, each box heard only itself — and
+  a LAN this size needs none of multicast's efficiency. A broadcast
+  needs no group membership on either end: the listener is a plain
+  `0.0.0.0` bind on the fixed port, no interface pinning, no
+  capability probing.
+- **Advertising is OFF by default.** The advertisement is emitted by
+  the `a2a serve` process, and a box advertises only when told to:
+  `aoide peer advertise on|off` flips `state/advertise.json`
+  (idempotent, reports what changed), which the advertise thread
+  reads every tick — a toggle lands within one ~30s jittered cadence,
+  no restart; `AOIDE_DISCOVERY_ADVERTISE`/`aoide.a2a.
+  discoveryAdvertise`/`--discovery-advertise` force it on for a
+  process's lifetime (the nix-declarative path), OR'd with the
+  switch. No resident listener exists: hearing is on-demand.
+- **A host must let the advertisement's UDP port through its own
+  firewall.** A default-deny firewall (NixOS's stock one trusts only
+  `lo`) drops an inbound datagram on a physical interface before any
+  Aoide socket ever sees it — task #98's diagnosis, confirmed by an
+  independent raw UDP send/receive that succeeds over `lo` and fails
+  identically over the physical interface, with no Aoide code in the
+  path at all. The nix module opens the port automatically whenever
+  `aoide.a2a.discoveryAdvertise` is on, since that flag is already
+  the operator's deliberate opt-in to being found on the LAN; a box
+  that only ever wants to receive (advertising off, running `peer
+  discover`/`peer invite` against others) must open that port itself.
+- **`aoide peer discover [--secs N]`** listens briefly (default a few
+  seconds), dedupes by (name, source address) into a BOUNDED
+  in-memory fold (a hostile flood of fabricated names is counted
+  dropped past the cap, never grown), and prints the table: name, the
+  claimed ssh hop `user`@`host`, the observed source address,
+  first/last heard. That heard-set is what a later phase's `peer
+  list` consumes. An advertisement is UNTRUSTED NETWORK DATA (house
+  rule 4's discipline): every field is validated (name shape, bounded
+  metacharacter-free host, POSIX login shape, line-size cap) before
+  display, a malformed advertisement is dropped and counted, and
+  nothing is ever written to the peer registry by discovery alone.
+- **The claimed hop is a claim; the observed source address is a
+  fact.** `host`/`user` are whatever the advertiser typed onto the
+  wire. The UDP packet's own source IP, by contrast, is measured
+  directly by the socket that heard it and cannot be spoofed the way
+  a self-reported field can. `peer discover` shows both, side by
+  side, precisely so the two can be seen disagreeing; anything that
+  dials uses the OBSERVED address, never the claimed one.
 - **`aoide peer invite <name>`** is sugar over the ceremony, nothing
   more: it runs its own discover sweep, resolves `<name>` to the
-  matching beacon (ambiguous or absent name = taught error listing
-  what WAS heard), composes a dial target from that beacon's
-  OBSERVED source address rather than its advertised URL, shows both
-  the advertised URL and the observed address plus the fingerprint,
-  and then runs the EXISTING `peer pair request` flow against the
-  composed target. One ceremony stays the only verification.
-- **`peer invite` refuses to invite yourself.** Before dialing
-  anything, it checks whether the resolved target is this instance's
-  own door: the heard beacon's fingerprint matching this instance's
-  own identity fingerprint is one way to trip it; the composed dial
-  target resolving to loopback or to one of this instance's own known
-  URLs is the other. Either one is a taught refusal naming the
-  fingerprint, never a ceremony run against yourself.
-- **Spoofed beacons are phishing, and the ceremony catches them.** An
-  attacker advertising a victim's name with its own URL can lure an
-  invite — but the SAS confirmation is mutual: the code on the
-  inviter's terminal must match the code on the REAL counterpart's
-  terminal, and the counterpart's operator must approve. A beacon
-  can misdirect a request; it cannot survive the code comparison.
-  The discover table always shows the fingerprint so an operator who
-  already knows a peer's fingerprint can spot the fake before ever
-  inviting.
+  matching advertisement (ambiguous or absent name = taught error
+  listing what WAS heard), composes a dial target from that
+  advertisement's OBSERVED source address on the house door port
+  (`AOIDE_A2A_PORT` or 8710 — the wire carries no port to read; a far
+  end on a non-default port takes the explicit `peer pair request
+  <url>` path), shows the claimed hop and the observed address, and
+  then runs the EXISTING `peer pair request` flow against the
+  composed target — recording a `via` derived from the observed
+  address plus the claimed login for the resulting peer's future
+  calls. One ceremony stays the only verification.
+- **`peer invite` refuses to invite yourself.** A broadcast always
+  loops back to its own sender, so a box that advertises hears
+  itself every sweep. Before dialing anything, invite checks whether
+  the resolved target is this instance's own advertisement: the heard
+  name matching this instance's own, or the datagram having come from
+  loopback. Either one is a taught refusal, never a ceremony run
+  against yourself.
+- **Spoofed advertisements are phishing, and the ceremony catches
+  them.** An attacker advertising a victim's name can lure an invite
+  — but the SAS confirmation is mutual: the code on the inviter's
+  terminal must match the code on the REAL counterpart's terminal,
+  and the counterpart's operator must approve. An advertisement can
+  misdirect a request; it cannot survive the code comparison. Two
+  sources claiming one name in the same sweep is refused as
+  ambiguous before either is dialed.
 
 ## Transport
 
@@ -388,8 +391,9 @@ forward is a pipe, not a party to the protocol.
   document's Discovery section, above) is a real, reachable LAN target —
   the ceremony's own two POSTs still dial it directly by default, exactly
   as before this lane. What `peer invite` DOES do automatically is derive a
-  `via` from that same observed address and record it on the resulting
-  peer once pairing is approved, so that peer's FUTURE calls (pull, spawn,
+  `via` from that same observed address plus the advertisement's claimed
+  ssh login and record it on the resulting peer once pairing is approved,
+  so that peer's FUTURE calls (pull, spawn,
   send) have a working transport marker without a second manual step. An
   explicit `--via` on either `peer invite` or `peer pair request`
   overrides this for both the ceremony's own dial and the recorded marker.

@@ -584,22 +584,24 @@ count.
   live gate this closes.
   `peer discover [--secs N]`/`peer invite <name> [--secs N] [--yes]`,
   appended newest, P-P6 (`docs/architecture/PAIRING.md`'s "Discovery
-  (advertise-but-locked)" section) (+2 → 80) — the LAN discovery beacon's
-  CLI half. `discover` joins a fixed UDP multicast group+port, listens a
-  few seconds (default ~4), and prints every DISTINCT fingerprint heard
-  (name, fingerprint, url, first/last heard, a heard count) — read-only,
-  it never writes `state/peers.json`. `invite` runs its own discover
-  sweep, resolves `<name>` against what was heard, and on EXACTLY one
-  match runs the SAME `peer pair request` core through a shared function
-  (never a copy) against that beacon's advertised url; zero or multiple
+  (advertise-but-locked)" section) (+2 → 80) — the LAN discovery
+  advertisement's CLI half. `discover` listens on a fixed UDP port a few
+  seconds (default ~4) and prints every DISTINCT (name, source) heard
+  (name, claimed ssh hop `user`@`host`, observed source address,
+  first/last heard, a heard count) — read-only, it never writes
+  `state/peers.json`. `invite` runs its own discover sweep, resolves
+  `<name>` against what was heard, and on EXACTLY one match runs the SAME
+  `peer pair request` core through a shared function (never a copy)
+  against that advertisement's OBSERVED source address; zero or multiple
   matches refuse with a taught error listing every name that was heard.
   `--yes` skips only the local proceed-confirm — the ceremony's own SAS
   confirmation (both operators, both ends) is untouched either way.
-  Advertising (the OTHER half — `a2a serve` emitting its OWN beacon) is a
-  separate, off-by-default opt-in (`AOIDE_DISCOVERY_ADVERTISE`/
-  `aoide.a2a.discoveryAdvertise`), not a new command — see §6's "Discovery
-  beacon" subsection below for the wire format, the pinned constants, and
-  the "discovery grants nothing" statement.
+  Advertising (the OTHER half — `a2a serve` emitting its OWN
+  advertisement) is off by default, switched at runtime by `peer
+  advertise on|off` (task #120) or forced for a process's lifetime by
+  `AOIDE_DISCOVERY_ADVERTISE`/`aoide.a2a.discoveryAdvertise` — see §6's
+  "Discovery advertisement" subsection below for the wire format, the
+  pinned constants, and the "discovery grants nothing" statement.
   Core is nix-independent (cargo build, no nix shell-outs) — see the
   HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
   to the same constraint (plain unix socket + shell-outs, no nix eval).
@@ -4225,139 +4227,156 @@ together is a usage error. Deployed as the graphical-session USER unit
 This subsection is **additive**: a new events-feed record shape and a
 new CLI command, no change to the wire methods above, no version bump.
 
-### Discovery beacon (P-P6, `docs/architecture/PAIRING.md`'s "Discovery
-(advertise-but-locked)" section)
+### Discovery advertisement (P-P6 + task #120,
+`docs/architecture/PAIRING.md`'s "Discovery (advertise-but-locked)"
+section)
 
-**No new transport, no new door.** A UDP multicast beacon — Aoide's own,
-never mDNS — a fixed IPv4 group and port both ends of the feature agree on
-without any handshake, since there is nothing to negotiate: one JSON line
-per beacon, broadcast, never a connection.
+**No new transport, no new door.** A UDP broadcast advertisement —
+Aoide's own, never mDNS — the IPv4 limited-broadcast address and a fixed
+port both ends of the feature agree on without any handshake, since there
+is nothing to negotiate: one JSON line per advertisement, fire-and-forget,
+never a connection. Broadcast, not multicast (task #120's #106 fix): the
+original multicast group never crossed the User's router — verified live
+2026-08-27, each box heard only itself — and broadcast needs no group
+membership, no interface pinning, and no capability probing; the listener
+is a plain `0.0.0.0` bind on the fixed port, which hears broadcast and
+unicast datagrams alike.
 
-**Discovery grants NOTHING.** A heard beacon feeds `peer discover`'s
-printed table and `peer invite`'s URL resolution ONLY — the pairing
-ceremony above (`aoide/pairRequest`/`aoide/pairReveal`/`aoide/pairPoll`)
-is the ONLY thing that ever writes `state/peers.json`; nothing on this
-subsection's own wire ever does. A beacon carries no credential and no
-full public key, only a display fingerprint — hearing one proves nothing
-by itself, exactly the way an AgentCard GET (§6 above) proves nothing
-until a caller is actually paired.
+**Discovery grants NOTHING.** A heard advertisement feeds `peer
+discover`'s printed table and `peer invite`'s target resolution ONLY —
+the pairing ceremony above
+(`aoide/pairRequest`/`aoide/pairReveal`/`aoide/pairPoll`) is the ONLY
+thing that ever writes `state/peers.json`; nothing on this subsection's
+own wire ever does. **Discovery is rendezvous, not authentication**: the
+wire carries a name and an ssh hop claim and nothing else — no
+credential, no public key, no fingerprint (a key on a discovery wire
+invites treating discovery as trust; pairing's mutual SAS confirmation
+stays the one trust gate), and never a door URL (doors are
+loopback-bound; ssh is the only cross-box transport). Hearing an
+advertisement proves nothing by itself, exactly the way an AgentCard GET
+(§6 above) proves nothing until a caller is actually paired.
 
-**Pinned constants** (`aoide_storage::beacon`, the one crate both the
+**Pinned constants** (`aoide_storage::advertise`, the one crate both the
 advertiser and the listener depend on — see that module's own doc for the
 full reasoning):
 
 ```
-group = 239.255.87.10   (RFC 2365 administratively/site-local scope,
-                          239.255.0.0/16 — never crosses a router
-                          boundary its operator didn't configure for it)
-port  = 8711             (UDP; one past a2a serve's own TCP 8710 — a
-                          mnemonic pairing, not a forced availability;
-                          grepped clean against every other bound port
-                          in pkgs/aoide — nothing else in this tree binds
-                          a UDP port or TCP 8711 at all)
-version (v) = 1
+dest = 255.255.255.255    (IPv4 limited broadcast — link-local by
+                           definition, never crosses a router)
+port = 8711               (UDP; one past a2a serve's own TCP 8710 — a
+                           mnemonic pairing, not a forced availability;
+                           grepped clean against every other bound port
+                           in pkgs/aoide — nothing else in this tree binds
+                           a UDP port or TCP 8711 at all)
+version (v) = 2           (v1 was the multicast-era {v, name, fpr, url}
+                           shape — a v1 line is dropped as wrong-version,
+                           never half-parsed)
 max line = 512 bytes      (checked on the RAW bytes, before any JSON
-                           parse, on BOTH ends — aoide_storage::beacon::
-                           MAX_LINE_BYTES)
+                           parse, on BOTH ends — aoide_storage::
+                           advertise::MAX_LINE_BYTES)
 ```
 
 **Wire shape** — one JSON line, no envelope, no framing beyond UDP's own
 datagram boundary:
 
 ```json
-{ "v": 1, "name": "yomi-strix", "fpr": "aa:bb:cc:dd:ee:ff:00:11",
-  "url": "http://yomi-strix:8710/" }
+{ "v": 2, "name": "yomi-strix", "host": "yomi-strix", "user": "khoa" }
 ```
 
 `name` is the advertiser's own instance name (`aoide-server::a2a::
 resolve_peer_name`'s same value — the identical name `aoide/graphSummary`'s
-`instance.name` already carries, §7 below). `fpr` is the P-P1 identity's
-DISPLAY fingerprint (`aoide_storage::identity::IdentityInfo::fingerprint`,
-the colon-separated 8-byte form `aoide identity` already prints) — never
-the full 64-hex public key. `url` is the door URL that SAME `a2a serve`
-process is actually answering on, derived from its own `bind`/`port`
-exactly the way the AgentCard's own `url` field is (`aoide-server::a2a::
-self_url`, the one formula both call sites share).
+`instance.name` already carries, §7 below). `host`/`user` are its ssh hop
+claim — the makings of a `--via ssh://user@host` transport marker: `host`
+the advertiser's own hostname (`aoide_storage::display::local_host_name`),
+`user` the login its `a2a serve` process runs as (`$USER` → `$LOGNAME`).
+Both are CLAIMS kept for display and for the operator who wants a name
+instead of a DHCP lease; the address a consumer actually uses is the
+packet's OBSERVED source (below).
 
-**Advertise (off by default).** `a2a serve` — the process that actually
-owns the door URL it advertises, never a separate daemon — starts a
-background thread ONLY when `aoide.a2a.discoveryAdvertise`/
-`AOIDE_DISCOVERY_ADVERTISE` (env, truthy `1`/`true`/`yes`/`all` — the same
-vocabulary `AOIDE_CONDUCT_AUTOGATE` already established) or the
-`--discovery-advertise` flag turns it on (`aoide-server::a2a::
-resolve_discovery_advertise`, mirroring `resolve_bind_port`/
-`resolve_spawn_agent`'s own flag-then-env-then-default precedence). Every
-tick (~30s, jittered up to +10s so a LAN full of advertisers doesn't key
-up in lockstep) binds a fresh ephemeral UDP socket, sends exactly one
-beacon line to the fixed group+port, and drops the socket —
-fire-and-forget, no connection state held between ticks. Turning
-advertising on lazily mints this instance's own P-P1 identity if it
-doesn't exist yet, the same lazy-mint discipline `aoide identity` and
-`peer pair request` already hold. **No resident listener exists anywhere**
-— hearing a beacon is always an on-demand sweep, never something `a2a
-serve` itself does. **The receiving host's own firewall must admit
-inbound UDP on this port** — a correct multicast join on the right
-interface (verified via routing-table fallback, no `IP_MULTICAST_IF`
-pinning needed) is not the same as delivery, and a default-deny
-firewall drops the beacon before any Aoide socket ever sees it
-(`docs/architecture/PAIRING.md`'s "Discovery" section has the
-diagnosis); the nix module opens this port automatically alongside
+**Advertise (off by default).** `a2a serve` — the process that owns the
+door, never a separate daemon — always starts the advertise thread, but a
+tick only SENDS when the switch is on: `aoide peer advertise on|off`
+(task #120) flips `state/advertise.json`
+(`aoide_storage::advertise::enabled`/`set_enabled` — idempotent, reports
+what changed, absent file = OFF), read fresh by the thread every tick so
+a toggle lands within one cadence with no restart; `aoide.a2a.
+discoveryAdvertise`/`AOIDE_DISCOVERY_ADVERTISE` (env, truthy
+`1`/`true`/`yes`/`all` — the same vocabulary `AOIDE_CONDUCT_AUTOGATE`
+already established) or the `--discovery-advertise` flag
+(`aoide-server::a2a::resolve_discovery_advertise`, mirroring
+`resolve_bind_port`/`resolve_spawn_agent`'s own
+flag-then-env-then-default precedence) FORCE it on for that process's
+lifetime, OR'd with the switch — the nix-declarative path. A sending tick
+(~30s, jittered up to +10s so a LAN full of advertisers doesn't key up in
+lockstep) binds a fresh ephemeral UDP socket with `SO_BROADCAST`, sends
+exactly one advertisement line to the fixed destination, and drops the
+socket — fire-and-forget, no connection state held between ticks. No
+identity file is touched to advertise — the wire carries no fingerprint.
+**No resident listener exists anywhere** — hearing an advertisement is
+always an on-demand sweep, never something `a2a serve` itself does. **The
+receiving host's own firewall must admit inbound UDP on this port** — a
+default-deny firewall drops the advertisement before any Aoide socket
+ever sees it (`docs/architecture/PAIRING.md`'s "Discovery" section has
+the diagnosis); the nix module opens this port automatically alongside
 `discoveryAdvertise`.
 
-**Discover** — `aoide peer discover [--secs N]` joins the group, listens
-`N` seconds (default ~4), and validates every line heard
-(`aoide_storage::beacon::parse_and_validate`) BEFORE it is ever displayed
-(house rule 4 — a beacon is untrusted network data): the size cap first
-(on the raw bytes), then the JSON parse, then `v == 1`, `name`
-(`aoide_storage::peer_store::valid_peer_name`), `fpr` (the exact
-colon-separated 8-byte-hex shape), and `url` (`http://`/`https://` only,
-non-empty host). A beacon failing any one check is dropped and counted —
-never echoed, never partially rendered. Survivors are deduped by
-FINGERPRINT, keeping the freshest sighting's fields (a restarted
-advertiser's new `url` wins over a stale one); the printed table carries
-name/fingerprint/url/**srcAddr**/first-heard/last-heard/count. `srcAddr` is
-the UDP packet's own source IP — captured by the listening socket itself,
-never sent by the advertiser — kept on the client's local, unpinned
-`Heard` record, never on the wire-shape `Beacon` above (that shape stays
-CONTRACTS-pinned and additive, §4/§6 untouched). `url` is what the
-advertiser CLAIMS; `srcAddr` is what was actually OBSERVED — for a
-loopback-bound advertiser (the default) `url` is display-only noise
-(`http://127.0.0.1:<port>/` no matter who hears it) and `srcAddr` is the
-field that matters. This command NEVER writes `state/peers.json`.
+**Discover** — `aoide peer discover [--secs N]` binds the fixed port,
+listens `N` seconds (default ~4), and validates every line heard
+(`aoide_storage::advertise::parse_and_validate`) BEFORE it is ever
+displayed (house rule 4 — an advertisement is untrusted network data):
+the size cap first (on the raw bytes), then the JSON parse, then
+`v == 2`, `name` (`aoide_storage::peer_store::valid_peer_name`), `host`
+(bounded hostname/dotted-quad shape, no metacharacters), and `user`
+(bounded POSIX login shape). An advertisement failing any one check is
+dropped and counted — never echoed, never partially rendered. Survivors
+are deduped by (`name`, source address), keeping the freshest sighting's
+fields (a restarted advertiser's new claim wins over a stale one) in a
+BOUNDED in-memory fold (`aoide-client::discover::MAX_HEARD`, 64 distinct
+entries — a hostile flood past the cap is counted dropped, never grown);
+the printed table carries
+name/host/user/**srcAddr**/first-heard/last-heard/count, the heard-set a
+later phase's `peer list` consumes. `srcAddr` is the UDP packet's own
+source IP — captured by the listening socket itself, never sent by the
+advertiser — kept on the client's local, unpinned `Heard` record, never
+on the wire-shape `Advertisement` above. `host`/`user` are what the
+advertiser CLAIMS; `srcAddr` is what was actually OBSERVED, and the
+address anything downstream dials. This command NEVER writes
+`state/peers.json`.
 
 **Invite** — `aoide peer invite <name> [--secs N] [--yes]` is sugar over
 the ceremony, nothing more: it runs its OWN discover sweep, resolves
-`<name>` against what was heard (exactly one fingerprint claiming that
-name → proceed; zero or more than one → a taught error listing every name
-actually heard), composes its dial target from that beacon's OBSERVED
-`srcAddr` rather than its advertised `url` (swapping only the host —
-scheme, port, and path are preserved verbatim from `url`, since outbound
-requests are signed over the path and never the host), and on a single
-match runs the EXACT SAME `run_pair_request` core `peer pair request`
-calls — a shared function, not a copy — against that composed target.
-Before dialing, it refuses when the resolved target is this instance's
-OWN door: the heard fingerprint matching this instance's own identity
-fingerprint, or the composed target resolving to loopback or to one of
-this instance's own known urls, either one a taught refusal naming the
-fingerprint. `--yes` skips only the local proceed-confirm; the ceremony's
-own mutual SAS confirmation (both operators, both ends, decision 4) is
+`<name>` against what was heard (exactly one source claiming that name →
+proceed; zero or more than one → a taught error listing every name
+actually heard), composes its dial target from that advertisement's
+OBSERVED `srcAddr` on the house door port (`AOIDE_A2A_PORT` or `8710` —
+the wire deliberately carries no door URL to read a port off; a far end
+on a non-default port takes the explicit `peer pair request <url>` path),
+and on a single match runs the EXACT SAME `run_pair_request` core `peer
+pair request` calls — a shared function, not a copy — against that
+composed target, recording a `via` derived from `srcAddr` plus the
+claimed `user` for the resulting peer's future calls. Before dialing, it
+refuses when the resolved target is this instance's OWN advertisement:
+the heard name matching this instance's own, or the datagram having come
+from loopback — either one a taught refusal (a broadcast always loops
+back to its own sender, so a box that advertises hears itself every
+sweep). `--yes` skips only the local proceed-confirm; the ceremony's own
+mutual SAS confirmation (both operators, both ends, decision 4) is
 untouched and still the sole authority.
 
-**Spoofed beacons are phishing, and the ceremony catches them** — an
-attacker advertising a victim's name with its own url can lure an invite,
-but the SAS confirmation is mutual: the code on the inviter's terminal
-must match the code on the REAL counterpart's terminal, and that
-counterpart's own operator must approve. A beacon can misdirect a request;
-it cannot survive the code comparison, and the discover table always shows
-the fingerprint so an operator who already knows a peer's fingerprint can
-spot the fake before ever inviting.
+**Spoofed advertisements are phishing, and the ceremony catches them** —
+an attacker advertising a victim's name can lure an invite, but the SAS
+confirmation is mutual: the code on the inviter's terminal must match the
+code on the REAL counterpart's terminal, and that counterpart's own
+operator must approve. An advertisement can misdirect a request; it
+cannot survive the code comparison. (With two sources claiming one name
+in the same sweep, `invite` refuses as ambiguous before dialing either.)
 
-This subsection is **additive**: it introduces no new door, no new state
-file, and no new field on any existing wire shape (§4's peer-pairing files
-are untouched by this feature) — a beacon is transient, UDP,
-never-persisted network traffic, gone the instant a sweep's deadline
-passes. Carries no version bump to §1–§6 and needs no playbook migration
-entry.
+This subsection introduces no new door and no new field on any existing
+wire shape (§4's peer-pairing files are untouched by this feature) — an
+advertisement is transient, UDP, never-persisted network traffic, gone
+the instant a sweep's deadline passes; its one piece of state is the
+advertise switch file above, additive and tolerate-missing. Carries no
+version bump to §1–§6 and needs no playbook migration entry.
 
 ---
 
@@ -4526,11 +4545,11 @@ than a parameter on it — and a caller passing `None` means "nothing to
 record," never "clear a previously-set marker": a plain `peer pair
 request` re-pair with no `--via` leaves an existing `via` (e.g. one `peer
 invite` recorded) untouched. A `--via` flag on the command itself always
-beats a peer's own recorded `via`. `peer invite` additionally derives a default
-`via` from the discovery beacon's OBSERVED source address (never its
-advertised `url`, which a loopback-bound door always claims regardless of
-who hears it) and records it on the resulting peer at pairing-approval
-commit time, even when the ceremony's own dial went direct. Reaching a
+beats a peer's own recorded `via`. `peer invite` additionally derives a
+default `via` from the discovery advertisement's OBSERVED source address
+plus its claimed ssh login (never a claimed host) and records it on the
+resulting peer at pairing-approval commit time, even when the ceremony's
+own dial went direct. Reaching a
 peer's own A2A door remains loopback-bound either way — the tunnel is a
 TRANSPORT hop, never a relay; the signed `X-Aoide-Peer` identity still
 crosses it end to end. See `docs/architecture/PAIRING.md`'s Transport
