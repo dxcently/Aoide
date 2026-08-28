@@ -11,8 +11,15 @@ Pairing is THE setup for connecting two aoide instances and the ONLY
 verification between them: one ceremony commits a `pubkey`/`verified` peer
 record on both ends and stamps the default permissions off the pair. Each
 instance holds one ed25519 identity keypair (`aoide_storage::identity`,
-minted lazily on first use, the private key at 0600 and never printed);
-the ceremony exchanges the two public keys and has both operators confirm
+minted lazily on first use through `load_or_mint`): two files under
+`state/identity/` — `ed25519.key`, the raw 32-byte seed written once at
+0600 inside the 0700 directory, never printed, logged, serialized, or put
+on any wire; and `created_at` at 0644. `aoide identity [--json]` is the
+read surface: it shows the full `pubkeyHex` and a `fingerprint` (the key's
+first 8 bytes, colon-separated hex — a display label, distinct from the
+two-sided SAS below). The daemon's session-sealing key is a SEPARATE
+ephemeral keypair held in memory only, never these files ([[Session-Graph]]'s
+identity section); the ceremony exchanges the two public keys and has both operators confirm
 the same short code out of band. Design authority:
 `docs/architecture/PAIRING.md`; wire shapes and constants: `CONTRACTS.md`
 §6 ("Pairing wire", "Pairing events feed"); handlers
@@ -221,7 +228,12 @@ A fully approved request is the ceremony's entire grant:
 (the closed capability vocabulary `PEER_CAPABILITIES`). Narrowing or
 widening that grant afterward is `peer allow <name> <cap> on|off`'s job —
 idempotent, refusing unknown capability strings — never re-run by
-re-pairing. The record is what the [[A2A-Door]]'s gates read: Spawn
+re-pairing. The upsert matches by NAME, so one remote instance paired
+under two names yields two records sharing one key — harmless, because
+identity IS the key: inbound signed requests resolve by whichever verified
+record's stored pubkey verifies the signature, the claimed name demoted to
+attribution plus an exact-name tiebreak among same-key records
+([[Peer-Federation]]'s Signature rung). The record is what the [[A2A-Door]]'s gates read: Spawn
 admits only a caller resolved through the Signature rung whose `allows`
 contains `"spawn"` (`a2a.rs::spawn_admitted`), and a signed peer's
 per-request ed25519 signature is the wire authentication the ceremony's
