@@ -72,6 +72,8 @@ central registry, no single point of failure):
    conductable: true
    socket:      "…/session-<id>.sock"
    title:       "<chat title / current task>"
+   origin:      "local"-class | "peer:<name>"  (write-once; peer:* only from the A2A door)
+   seal + sealedIssuedAt:  the daemon-sealed session credential (see [[Session-Graph]])
 ```
 
 The wrap process is the natural owner: it already holds the `Child`, already
@@ -213,15 +215,22 @@ through.
   priority order: `--yes` ▸ the global switch ▸ parent-of-target ▸
   sibling-of-target ▸ else pending.
   - **Parent-of-target.** A send delivers without a prompt when the
-    sender's own `AOIDE_SESSION_ID` equals the target session's
-    `parentSessionId` — an orchestrator freely commanding a child it
-    spawned. Cross-tree or unrelated sends stay pending. This is what makes
-    conduct-by-default a real orchestration mesh: the parent of a subtree
-    can drive it, strangers cannot. The decision is a pure, unit-tested
-    predicate: `sender_is_parent(sender, target_parent)`.
+    sender's own session is the target session's `parentSessionId` — an
+    orchestrator freely commanding a child it spawned. Cross-tree or
+    unrelated sends stay pending. This is what makes conduct-by-default a
+    real orchestration mesh: the parent of a subtree can drive it,
+    strangers cannot. The sender's session is kernel-attested, never read
+    off a forgeable env var: `aoide send` walks its own real `/proc`
+    ancestry to a live session whose seal verifies against the daemon's
+    current key (the sealed session credential, [[Session-Graph]]), and the
+    decision is a pure, unit-tested predicate over that attested pair:
+    `sender_is_parent(sender, target_parent)`. `AOIDE_SESSION_ID` survives
+    only as sender attribution (below), removed from every gate predicate.
   - **Sibling-of-target.** A send also delivers without a prompt when
     sender and target are siblings — both parented under the SAME session,
-    and that shared parent is itself still live (not `done`). Sibling
+    and that shared parent is itself still live (not `done`). The sender
+    side of the pair is the same kernel-attested session the parent rule
+    resolves. Sibling
     delivery is ON by default; opt out per-box with
     `AOIDE_CONDUCT_SIBLING_AUTOGATE` set to one of `{0,false,no}` (any other
     value, or unset, leaves it enabled). A self-send is excluded before the
@@ -247,8 +256,17 @@ through.
   read as a keystroke.
 - **Audit.** Every send (pending, approved, denied, autogated) writes an
   aoided audit line, the resolved sender folded into the audit message.
-- Socket is **user-scoped** (`$XDG_RUNTIME_DIR`, no network). Forwarded/
-  echoed agent text is untrusted data and never re-interpreted as a command.
+- Socket is **user-scoped** (`$XDG_RUNTIME_DIR`, no network). Its accept
+  reads the connector's kernel-truth uid/pid (`SO_PEERCRED`) and refuses
+  one shape outright — a connection whose own nearest live registered
+  session IS the socket's own session (self-injection). An unresolvable
+  connector fails open: the check is a loop/UX defense, not the security
+  boundary. A genuinely unrelated same-uid process connecting to the socket
+  directly, bypassing `aoide send`, still injects ungated — the socket
+  carries raw bytes with no envelope; closing that shape is one of the
+  identity lane's named open items (see [[Session-Graph]] — the lane's
+  accounting). Forwarded/ echoed agent text is untrusted data and never
+  re-interpreted as a command.
 
 ## The conductor becomes the console
 
