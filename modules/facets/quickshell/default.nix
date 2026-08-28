@@ -369,6 +369,10 @@ in
             # this flake's nixpkgs, so this qtimageformats is the exact Qt ABI.
             Environment = [
               "QT_PLUGIN_PATH=${pkgs.qt6.qtimageformats}/lib/qt-6/plugins"
+              # Runtime root for every stage/state file the QML reads
+              # (livery/cover/grimoire/sessions/usage) — the QML falls back to
+              # ~/.aoide when unset, but a configured aoide.root must win.
+              "AOIDE_ROOT=${config.aoide.root}"
             ]
             # Export the song's baked wallpaper (immutable store path) so
             # AoideWallpaper always has the right cover on boot/rebuild — the live

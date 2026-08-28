@@ -37,7 +37,7 @@ PanelWindow {
     // herald.json is a CONDUCTING file (CONTRACTS.md section 4) --
     // state/stage/, not song/stage/.
     readonly property string heraldPath:
-        Quickshell.env("HOME") + "/Aoide/state/stage/herald.json"
+        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/herald.json"
     property var records: []
     FileView {
         id: heraldFile

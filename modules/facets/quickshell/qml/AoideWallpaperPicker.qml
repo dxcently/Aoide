@@ -73,7 +73,7 @@ PanelWindow {
     }
 
     // ── Cover enumeration ───────────────────────────────────────────────────
-    readonly property string coversDir: Quickshell.env("HOME") + "/Aoide/song/covers"
+    readonly property string coversDir: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/song/covers"
     readonly property var coverExts: ["webp", "png", "jpg", "jpeg"]
     property var covers: []           // [{ name, path }]
     property int selIndex: 0

@@ -29,7 +29,7 @@ Item {
     property string wallpaperPath: bakedWallpaper
 
     readonly property string coverJsonPath:
-        Quickshell.env("HOME") + "/Aoide/song/stage/cover.json"
+        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/song/stage/cover.json"
 
     FileView {
         id: coverFile

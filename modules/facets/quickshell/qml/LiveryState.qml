@@ -19,10 +19,11 @@ QtObject {
     id: root
 
     // ── livery file path ────────────────────────────────────────────────────
-    // Stage path: ~/Aoide/song/stage/livery.json (gitignored runtime; the nix
-    // build never depends on this path — checks.no-song-read enforces that).
+    // Stage path: $AOIDE_ROOT/song/stage/livery.json (runtime root, default
+    // ~/.aoide — L-C2; the nix build never depends on this path —
+    // checks.no-song-read enforces that).
     readonly property string liveryPath:
-        Quickshell.env("HOME") + "/Aoide/song/stage/livery.json"
+        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/song/stage/livery.json"
 
     // ── Parsed livery object ─────────────────────────────────────────────────
     property var raw: ({
@@ -208,11 +209,11 @@ QtObject {
     }
 
     // ── Usage panel: path + reset-countdown (shared by UsageGadget) ────────
-    // The `aoide usage` poller writes ~/Aoide/state/usage.json (schema §0 —
+    // The `aoide usage` poller writes $AOIDE_ROOT/state/usage.json (schema §0 —
     // live plan/weekly utilization + a local this-machine estimate). Path kept
     // here alongside liveryPath so a consumer never hard-codes its own copy.
     readonly property string usagePath:
-        Quickshell.env("HOME") + "/Aoide/state/usage.json"
+        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/usage.json"
     // A compact "resets in 3h20m" from an ISO-8601 instant, relative to `nowMs`
     // (a live-ticking clock the caller threads in so the countdown counts down
     // without a re-read). Empty string for a missing/unparseable stamp, so the
@@ -263,7 +264,7 @@ QtObject {
     // file reads as the safe, non-mutating mode rather than a false
     // "staging".
     readonly property string modePath:
-        Quickshell.env("HOME") + "/Aoide/song/stage/mode.json"
+        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/song/stage/mode.json"
     property var modeRaw: ({ "mode": "declarative" })
     readonly property string riceMode: modeRaw.mode ? modeRaw.mode : "declarative"
 

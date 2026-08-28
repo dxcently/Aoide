@@ -167,7 +167,7 @@ PanelWindow {
         id: stage
         // sessions.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
         // not song/stage/.
-        path: Quickshell.env("HOME") + "/Aoide/state/stage/sessions.json"
+        path: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/sessions.json"
         watchChanges: true
         blockLoading: false
         printErrors: false

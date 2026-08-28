@@ -60,7 +60,7 @@ Item {
     id: gadget
 
     required property var livery            // palette roles
-    property string usagePath: Quickshell.env("HOME") + "/Aoide/state/usage.json"
+    property string usagePath: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/usage.json"
 
     // WidgetSlot._songProps() always passes bridge unconditionally (universal
     // widget contract, slots.md) — promoted from the facet's nullable

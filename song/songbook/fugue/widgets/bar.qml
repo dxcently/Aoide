@@ -147,7 +147,7 @@ Item {
     }
     FileView {
         id: sessionsFile
-        path: Quickshell.env("HOME") + "/Aoide/state/stage/sessions.json"
+        path: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/sessions.json"
         watchChanges: true
         onFileChanged: sessionsFile.reload()
         onTextChanged: {
@@ -162,7 +162,7 @@ Item {
     }
     FileView {
         id: hooksFile
-        path: Quickshell.env("HOME") + "/Aoide/state/stage/hooks.json"
+        path: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/hooks.json"
         watchChanges: true
         onFileChanged: hooksFile.reload()
         onTextChanged: {

@@ -44,7 +44,7 @@ QtObject {
     id: root
 
     readonly property string manifestPath:
-        Quickshell.env("HOME") + "/Aoide/run/qml/songs/manifest.json"
+        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/run/qml/songs/manifest.json"
 
     // The baseline-fallback floor (CONTRACTS.md §5): when the ACTIVE song
     // doesn't dress a slot, resolution falls back to this song before
@@ -77,7 +77,7 @@ QtObject {
     }
 
     readonly property string registryPath:
-        Quickshell.env("HOME") + "/Aoide/run/qml/songs/registry.json"
+        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/run/qml/songs/registry.json"
 
     // { "<song>": { "<slot>": {…declaration…} }, … } — empty until the first
     // successful parse.

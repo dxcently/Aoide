@@ -996,9 +996,9 @@ component WorkspaceRow: Item {
     }
     // CONDUCTING files (CONTRACTS.md §4) — state/stage/, not song/stage/.
     readonly property string sessionsPath:
-        Quickshell.env("HOME") + "/Aoide/state/stage/sessions.json"
+        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/sessions.json"
     readonly property string hooksPath:
-        Quickshell.env("HOME") + "/Aoide/state/stage/hooks.json"
+        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/hooks.json"
     FileView {
         id: sessionsFile
         path: root.sessionsPath

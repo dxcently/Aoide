@@ -37,7 +37,7 @@ QtObject {
     id: root
 
     readonly property string ledgerPath:
-        Quickshell.env("HOME") + "/Aoide/song/stage/grimoire.json"
+        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/song/stage/grimoire.json"
 
     // { "<id>": { "count": N, "lastAt": "<iso8601>" } }
     property var launches: ({})

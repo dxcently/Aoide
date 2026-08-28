@@ -138,7 +138,7 @@ Item {
     readonly property string stageDir: {
         var s = Quickshell.env("QS_STAGE")
         return (s && s.length > 0) ? s
-             : Quickshell.env("HOME") + "/Aoide/state/stage"
+             : (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage"
     }
 
     property var _sessions: []
