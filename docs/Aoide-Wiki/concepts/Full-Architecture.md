@@ -72,7 +72,7 @@ trail but exit 64 today.
 **Binary note.** The map below draws both binaries as one continuous picture
 of the data flow, labeled `aoide` throughout for readability. Ownership
 (`CONTRACTS.md` §3, [[Package-Layout]]): the AGENT INTERFACE/`aoided`/CONTENT
-PIPELINE/NIX EVAL boxes are `aoide`'s (81 commands: conducting/orchestration
+PIPELINE/NIX EVAL boxes are `aoide`'s (82 commands: conducting/orchestration
 is aoide's identity); the RICE ENGINE, LIVERY, Quickshell, and shellbridge
 boxes below them are `lyra`'s (43 commands, its own schema and dispatch,
 routed through the desktop, not through `aoided`'s CLI trunk).
@@ -85,7 +85,7 @@ routed through the desktop, not through `aoided`'s CLI trunk).
                                         ▼            │
    ┌─────────────────────────────────────────────────────────────┐
    │  AGENT INTERFACE            aoide <cmd>   ·   aoide mcp serve │   [[Agent-Interface]]
-   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   81 commands · exit 0/1/2/64
+   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   82 commands · exit 0/1/2/64
    └───────────────────────────────┬─────────────────────────────┘
                                     ▼
    ┌─────────────────────────────────────────────────────────────┐
@@ -133,7 +133,7 @@ the implemented/stubbed ladder.
 
 | Subsystem            | Inputs                                         | Outputs                                             | Status                                     |
 | -------------------- | ---------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
-| [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 74 real/7 exit 64; lyra 41 real/2 exit 64) |
+| [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 75 real/7 exit 64; lyra 41 real/2 exit 64) |
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`$AOIDE_ROOT/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; stage    | mostly real (`declare`/`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all commands exit 64)                |
@@ -307,7 +307,7 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   `aoide schema --json` is its machine-readable source of truth; the stdio
   MCP façade (`aoide mcp serve --stdio`) generates its tool list from it, and
   the [[A2A-Door]]'s AgentCard is derived from the same schema — all
-  one-to-one. **81 commands** — real (74): `guide`, `schema`,
+  one-to-one. **82 commands** — real (75): `guide`, `schema`,
   `mcp serve`, `daemon`, `events tail`, `conduct`, `conductor`, `adapter
   melete`, `identity`, bare `pair` (the interactive pairing picker —
   [[Pairing-Ceremony]]), the `melete` group (`status`/`graph`/`call` — the
@@ -320,9 +320,9 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   (`request`/`pending`/`approve`/`reject`/`watch`), and `peer list`, the
   one-glance mesh roster — cross-device peer federation,
   [[Peer-Federation]]; `peer status --json` keeps the deep per-peer row
-  the roster never duplicates), the 16-command `secrets` group
+  the roster never duplicates), the 17-command `secrets` group
   (`serve`/`exec`/`add`/`rm`/`grant`/`revoke`/`enroll`/`put`/`set-totp`/
-  `automate`/`expose`/`migrate`/`pending`/`approve`/`dismiss`/`watch` — the
+  `automate`/`expose`/`allow-remote-origin`/`migrate`/`pending`/`approve`/`dismiss`/`watch` — the
   socket-only credential broker under its own uid, [[Secrets-Broker]]),
   `usage`, `hooks install`, `soundcheck`, `who` (live presence over sessions
   and registered peers), the 3-command `inbox` group (`list`/`read`/`clear`, the
