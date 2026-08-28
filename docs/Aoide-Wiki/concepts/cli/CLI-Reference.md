@@ -40,8 +40,9 @@ start at [[aoide-cli]] and the group pages linked below.
   (conducting state) and `song/stage/` (rice staging). `~/Aoide` is the dev
   git checkout, reached via `$AOIDE_FLAKE_ROOT`, not a runtime path.
   Stage/state writes are atomic temp-then-rename.
-- **Two registries, one convention:** `aoide schema --json` holds 74
-  command paths, `lyra schema --json` holds 43 — every group page prefixes
+- **Two registries, one convention:** `aoide schema --json` holds 82
+  command paths (75 real, 7 stubs), `lyra schema --json` holds 43 — every
+  group page prefixes
   each heading `aoide `/`lyra ` so the binary a command belongs to is never
   ambiguous.
 - `secrets exec`'s parking is detailed in [[Secrets-Commands]].
@@ -82,7 +83,7 @@ start at [[aoide-cli]] and the group pages linked below.
   `make`/`update` (stubs), `onboard` (the first-boot flow, core and lyra
   halves), `usage` (→ `state/usage.json`),
   `quickshell reload`, `soundcheck` (report-only sweep).
-- [[Secrets-Commands|Secrets-Commands]] — the `aoide secrets` credential door: 16
+- [[Secrets-Commands|Secrets-Commands]] — the `aoide secrets` credential door: 17
   commands across direct-home admin, over-the-socket operator, and the daemon
   itself. State: `/run/aoide-secrets/{secrets.sock,events.jsonl}`, the
   secrets home.
