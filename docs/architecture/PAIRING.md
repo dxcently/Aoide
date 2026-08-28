@@ -109,9 +109,13 @@ nonce_A, nonce_B) — B's copy only computable once the reveal landed
                                            operator: CLI prompt on next
                                            `aoide peer pair pending` /
                                            popup via the events feed
-human confirms codes match (CLI y/N or popup confirm)
                                            aoide peer pair approve <id>
-  B's own peer record commits HERE — pubkey, verified=true,
+B's operator TYPES the code as read off A's screen (out-of-band — a
+  phone call, a glance; `--code NNN-NNN` scripted); B compares it against
+  its OWN derived SAS, never echoing that SAS in the prompt. A wrong code
+  counts a persisted try; the 3rd cumulative mismatch AUTO-DENIES (same
+  clean removal as reject, nothing committed).
+  On a match, B's own peer record commits HERE — pubkey, verified=true,
   allows=["read","spawn"], A's name bound; B's own parked entry is
   marked approved and left PARKED — no callback, nothing dials A
 aoide peer pair approve <id>  (A polls, whenever A gets around to it —
@@ -120,9 +124,10 @@ aoide peer pair approve <id>  (A polls, whenever A gets around to it —
       signature over "PAIRPOLL"+id+...)        request time; approved? →
   ◄── B's pubkey, IF approved ─────────────┘   release; else → "pending"
 A's outbound entry now shows the SAME SAS a second time (`peer pair
-pending`, state awaiting-confirm); A's own operator confirms it
-independently (the SAME `peer pair approve <id>` invocation that just
-polled) — ONLY THEN does A's own peer record commit.
+pending`, state awaiting-confirm); A's own operator confirms it y/N
+(A's screen printed this code itself at request time — the typed-code
+gate is B's side) in the SAME `peer pair approve <id>` invocation that
+just polled — ONLY THEN does A's own peer record commit.
 `aoide peer pair reject <id>` on A's outbound entry aborts at any point
 before that confirm, with no wire call and no record on either end.
 ```
@@ -135,6 +140,12 @@ complete. Now nothing ever dials IN to A — A polls B over the SAME forward
 dial its own `request`/`reveal` already used, so pairing works end to end
 even when A's door accepts no routable connection at all.
 
+- `peer pair watch --popup`'s dialog is the one approver surface that
+  does NOT take the typed code: clicking Approve on the rendered code is
+  that arm's whole confirmation (the dialog IS the gate there), and a
+  typed-code entry field in the dialog is a named follow-on. The CLI tty
+  prompt and the scripted `--code` path are where the typed-code gate
+  lives.
 - The short authentication string (SAS) is derived from a transcript
   hash over both public keys + both nonces — SHA-256 over the four
   fields, lowercased/trimmed/NUL-separated, truncated mod 1,000,000

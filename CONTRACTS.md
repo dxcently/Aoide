@@ -539,13 +539,17 @@ count.
   "outbound"`, SAS always shown, tagged with the entry's own `state`);
   `approve <id>` tries the inbound queue first — refusing an unrevealed
   entry outright — then the outbound queue, re-deriving the SAS either way
-  and requiring an explicit `y`/`yes` confirmation (`--yes` for scripted
-  use) before anything commits: on the inbound (approver) side confirmation
-  writes a `pubkey`/`verified` peer record on this end PURELY LOCALLY
-  (Design A, task #119 — no wire call at all) and marks the parked entry
-  approved for the requester's own poll to find; on the outbound
+  before anything commits: on the inbound (approver) side the gate is the
+  TYPED pairing code (task #120 P3 — the operator types the code as read
+  off the requester's screen, `--code NNN-NNN` scripted; 3 cumulative
+  mismatches auto-deny the request, and `--yes` never bypasses this), and
+  a match writes a `pubkey`/`verified` peer record on this end PURELY
+  LOCALLY (Design A, task #119 — no wire call at all) and marks the parked
+  entry approved for the requester's own poll to find; on the outbound
   (requester) side, this POLLS the approver's door (`aoide/pairPoll`, over
   the SAME forward dial the request already used) and, once approved,
+  confirms `y`/`yes` (`--yes` scripted — the requester's own screen
+  already printed the code) then
   commits the peer record directly; `reject <id>` is a clean local refusal
   on either queue, no wire call, no peer record — on an outbound entry this
   doubles as the ceremony's abort command, usable at any stage. See §6's
@@ -2217,7 +2221,7 @@ approver (`park_inbound`, written by `aoide/pairRequest`'s handler):
     "name": "box-a", "originAddr": "203.0.113.4", "url": "http://box-a:8710/",
     "requesterNonceHex": "<32-hex>", "approverNonceHex": "<32-hex>",
     "requestedAt": "2026-08-25T00:00:00Z", "expiresAt": "2026-08-25T04:00:00Z",
-    "approved": false } ] }
+    "approved": false, "tries": 0 } ] }
 ```
 
 `approved` (Design A, task #119 — additive, `#[serde(default)]`, absent on
@@ -2227,6 +2231,13 @@ a legacy record loads `false`): flipped `true` by `peer pair approve`
 stays parked, exactly so `aoide/pairPoll` (§6's pairing-wire subsection) can
 still find and release it whenever the requester gets around to polling; it
 is cleaned up only by the ordinary expiry sweep, same as any other entry.
+`tries` (task #120 P3 — additive, `#[serde(default)]`, absent loads `0`):
+how many wrong pairing codes have been typed against this entry
+(`record_inbound_code_try`), cumulative across `peer pair approve`
+invocations and across the interactive prompt and scripted `--code` paths
+alike; the third cumulative mismatch auto-denies (the CLI's own
+`take_inbound` removal, audited `auto-deny-on-code-mismatch`), so a
+persisted value is always below 3.
 
 `peer-pairing-outbound.json` — requests THIS instance sent as the
 requester and is still waiting to poll for approval on
@@ -4086,11 +4097,22 @@ consumer). On a match, A transitions its outbound entry to
 unchanged by Design A.** B already committed its OWN peer record for A the
 moment B's own operator ran `peer pair approve <id>` — now with NO wire call
 at all, purely local (`aoide-client::commands::approve_inbound`'s own doc).
-A commits its OWN record only later, once A's own operator runs `peer pair
-approve <id>` a SECOND time — now polling first, then (once approved)
-re-deriving the SAS from values already held locally and confirming it
-themselves. Both humans still see and confirm the SAME code before either
-side calls the pairing done on their own end. A never-confirmed A leaves B
+B's confirmation is the TYPED pairing code (task #120 P3): B's operator
+types the code as read off A's screen, out-of-band, and it is compared
+against B's own locally derived SAS — the approve prompt never echoes that
+SAS (printing the expected value beside the input would collapse the
+comparison into a copy exercise; `peer pair pending` still shows it — the
+threat model is the comparison, not secrecy). A wrong code counts one try,
+persisted on the parked entry across invocations (`--code NNN-NNN` is the
+scripted spelling, one try per wrong invocation); the third cumulative
+mismatch auto-denies — the same clean removal `peer pair reject` performs,
+nothing committed, audited as `auto-deny-on-code-mismatch`. A commits its
+OWN record only later, once A's own operator runs `peer pair approve <id>`
+a SECOND time — polling first, then (once approved) re-deriving the SAS
+from values already held locally and confirming it y/N (A's own screen
+already printed the code at request time, so the typed-code gate is B's
+side only). Both humans still engage the SAME code before either side
+calls the pairing done on their own end. A never-confirmed A leaves B
 holding a `verified: true` peer that simply answers nothing until A
 confirms; the fix is a visible, expiring outbound entry (`peer pair
 pending`) and an ordinary re-pair, not a special recovery path. `peer pair
@@ -4444,7 +4466,8 @@ hand-set-URL escape hatch, `peer pair` for the one ceremony that verifies a
 public key on both ends. Re-pairing an EXISTING peer name replaces only
 `pubkey`/`verified`/`url` — never `autogate`/`tokenFile`/`bearerSecret`/
 `hub`/`allows` — and only after a fresh SAS confirmation (`peer pair
-approve`'s own y/N gate), never silently. `aoide peer pair watch` (§6's
+approve`'s own gate: the typed code on the approver's side, y/N on the
+requester's), never silently. `aoide peer pair watch` (§6's
 "Pairing events feed" subsection, P-P5) is what surfaces a ceremony
 reaching this commit point WITHOUT polling `peer pair pending` by hand —
 it never reads or writes this file directly, only
@@ -4716,20 +4739,26 @@ verified, advertising, presence, addr, lastSeen, sessions[]}`, plus
 `sweep` (`{heard, dropped}` or `{error}`).
 
 `aoide peer pair request <url> [--name <n>] [--self-url <url>]` /
-`pending` / `approve <id> [--yes]` / `reject <id>` (P-P2, appended newest
+`pending` / `approve <id> [--yes] [--code NNN-NNN]` / `reject <id>` (P-P2,
+appended newest
 directly after `peer hub` — §6's "Pairing wire" subsection above has the
 exact wire shapes and SAS derivation) — the pairing ceremony's CLI half.
 `request` sends `aoide/pairRequest`, parks the answer
 (`state/peer-pairing-outbound.json`, §4), and prints the derived SAS.
 `pending` lists this instance's own parked inbound requests, each with an
 independently-derived SAS. `approve` re-derives the SAS from this
-instance's own identity (never trusting a wire-carried code), prompts
-`y/N` unless `--yes`; on an INBOUND id, commits a `pubkey`/`verified` peer
+instance's own identity (never trusting a wire-carried code); on an
+INBOUND id the gate is the TYPED pairing code (task #120 P3 — typed at a
+terminal prompt that never echoes the expected code, or `--code NNN-NNN`
+scripted; wrong codes count cumulative, persisted tries and the third
+mismatch auto-denies the request — `--yes` never bypasses this), and a
+match commits a `pubkey`/`verified` peer
 record PURELY LOCALLY (Design A, task #119 — no wire call at all) and marks
 the entry approved for later release; on an OUTBOUND id, POLLS
 `aoide/pairPoll` first (over the SAME forward dial `request` already used)
-and, once approved, commits. `reject` is a clean local refusal — no wire
-call, no peer record, the matching entry simply removed.
+and, once approved, prompts `y/N` (`--yes` scripted — this side's own
+screen already printed the code) and commits. `reject` is a clean local
+refusal — no wire call, no peer record, the matching entry simply removed.
 
 `aoide peer allow <name> <cap> on|off` (P-P3, `docs/architecture/
 PAIRING.md` decision 5, appended newest directly after `peer pair reject`
