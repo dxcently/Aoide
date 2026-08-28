@@ -36,7 +36,7 @@ ShellRoot {
     // properties, wired for its side effect (Quickshell.reload) alone.
     AoideIpc { id: ipc }
     // The staging engine (CONTRACTS.md §5) — reads the manifest
-    // the quickshell facet's build carries into ~/Aoide/run/qml/songs/, resolves
+    // the quickshell facet's build carries into $AOIDE_ROOT/run/qml/songs/, resolves
     // WidgetSlot's "does the active song dress this slot" / "where's its QML".
     StagingEngine { id: stagingEngine }
 

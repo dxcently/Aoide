@@ -14,7 +14,7 @@
 //     qs -p modules/facets/quickshell/qml/StagingEngineHarness.qml
 //
 // Prints one PASS/FAIL line per assertion plus a final HARNESS RESULT line,
-// then exits. Never touches the live `~/Aoide/run` tree or the live shell
+// then exits. Never touches the live `$AOIDE_ROOT/run` tree or the live shell
 // instance — a distinct `-p` config path is a distinct quickshell instance,
 // same posture AOIDE-DEV.md's own `qs -p shell.qml` QML-load check already
 // takes.

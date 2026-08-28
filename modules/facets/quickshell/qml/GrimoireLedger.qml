@@ -12,7 +12,7 @@
 // guessing.
 //
 // ── The file (CONTRACTS.md §4) ──────────────────────────────────────────────
-// `~/Aoide/song/stage/grimoire.json` — gitignored runtime, v0 schema:
+// `$AOIDE_ROOT/song/stage/grimoire.json` (default ~/.aoide) — gitignored runtime, v0 schema:
 //   { "schemaVersion": "0",
 //     "launches": { "<desktop-entry-id>": { "count": N, "lastAt": "<iso8601>" } } }
 // Written directly by this QML (`atomicWrites: true` on the FileView — a

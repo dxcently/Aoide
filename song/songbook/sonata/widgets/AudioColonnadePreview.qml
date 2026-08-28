@@ -3,7 +3,7 @@ import Quickshell
 import Quickshell.Wayland
 
 // Standalone harness to render the audio colonnade stele for a screenshot.
-//   qs -p ~/Aoide/run/qml/songs/sonata/AudioColonnadePreview.qml
+//   qs -p $AOIDE_ROOT/run/qml/songs/sonata/AudioColonnadePreview.qml
 // Pins an opaque marble surface top-left carrying the stub gold-marble palette,
 // and shows the widget TWICE at real size: a live state (both columns lit) and a
 // muted state (a BROKEN/ruined column) — so the two orders, the mic-vs-vol read,
