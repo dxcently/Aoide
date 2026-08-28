@@ -46,8 +46,9 @@ line; with it, an envelope `{status, command, message, gated, changed?, data?}`
 (`pkgs/aoide/crates/protocol/src/output.rs`). Exit codes: 0 ok, 1 error,
 2 usage, 64 not-implemented (no command on this page is a stub). Outbound HTTP
 in the `peer` commands is `curl -sS --max-time 15` shelled out with the
-URL/body in argv or on stdin (no local credential beyond an optional peer
-bearer secret is involved).
+URL/body in argv or on stdin. A paired peer's calls are signed per-request
+with this instance's ed25519 identity key (`state/identity/`); beyond that,
+no local credential past an optional peer bearer secret is involved.
 
 ### aoide mcp serve
 
@@ -144,7 +145,12 @@ lyra shellbridge [--run] [--json]
   stderr and skipped — nothing kills the accept loop.
 - **Notes:** not gated. The `--run` flag is registered in the schema but the
   handler (`conduct/src/commands/shellbridge.rs::handle_shellbridge`) never
-  consults it — bare `lyra shellbridge` runs the blocking loop either way. Client half:
+  consults it — bare `lyra shellbridge` runs the blocking loop either way. The
+  accept loop reads `SO_PEERCRED` on every connection and refuses one whose
+  peer uid differs from the process's own euid — a cross-uid floor,
+  fail-closed like the secrets broker's admin gate (identity lane P-ID3);
+  a same-uid caller passes, so the floor is no defense against the
+  operator's own uid. Client half:
   `shellbridge::send_line` is how `lyra herald push` and `session permit` reach
   the daemon, which stays the single ledger writer. See [[shellbridge]].
 
@@ -248,9 +254,11 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
   failure — unreachable, denied, or a bounded ~2 s timeout — fails that
   connection's bearer check closed rather than falling back to the file or
   the pre-token-open behavior). Per request: `state/stage/sessions.json`
-  (task/session state), `state/peers.json` (autogate match — by caller
-  address, or by an autogate-marked peer's own `tokenFile`, read fresh off
-  disk per request). The `aoide-a2a` systemd unit
+  (task/session state), `state/peers.json` (signed-request verification —
+  the signature tried against every `verified` peer's stored pubkey — and
+  the autogate match: by caller address, by an autogate-marked peer's own
+  `tokenFile`, or by the resolved signed peer's `autogate` flag; read fresh
+  off disk per request). The `aoide-a2a` systemd unit
   (`modules/nucleus/aoided.nix`) sets
   `AOIDE_A2A_BIND`/`PORT`/`SPAWN_AGENT`/`TOKEN_FILE` from the nix options;
   `AOIDE_A2A_PEER_NAME`/`AOIDE_A2A_BEARER_SECRET` are flag/env-only.
@@ -276,9 +284,17 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     `$AOIDE_AUDIT_LOG` passed down), then types the prompt as its first turn
     over the conduct socket with a connect-retry budget. A loopback caller's
     inject auto-delivers; non-loopback queues pending unless it matches an
-    `autogate` peer. Once a token is configured, loopback stops being a trust
-    signal (unauthenticated → never auto-delivers) and Spawn requires a valid
-    `Authorization: Bearer <token>` (`-32005` otherwise). Spawn unconfigured →
+    `autogate` peer (address, per-peer token, or the resolved signed peer's
+    own flag). Once a token is configured, loopback stops being a trust
+    signal (unauthenticated → never auto-delivers). Spawn answers to
+    pairing alone: the caller must resolve on the Signature rung — a
+    verified per-request signature against some `verified` peer's stored
+    pubkey — with `spawn` in that record's `allows`; every refusal is
+    `-32006` with a shape-specific taught message (pair first / sign the
+    request / `peer allow <name> spawn on`), and the door-wide bearer
+    never reaches the spawn arm. Signed-request failures carry their own
+    codes — `-32007` (malformed or unverifiable signature, partial header
+    set), `-32008` (timestamp skew), `-32009` (nonce replay). Spawn unconfigured →
     `-32004`; session not conductable → `-32004`; unknown contextId →
     `-32001`. A held-pending send returns a `submitted` Task immediately.
   - `aoide/graphSummary` — `{schemaVersion: "0", instance: {name, url,
@@ -294,7 +310,8 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     absolute per-request budget, 10 s read timeout, 64 in-flight connections
     (past that a fast 503). Unknown method → `-32601`, parse error → `-32700`.
 - **Notes:** not gated at the CLI level; the security model is bind-address +
-  the rebuild-gated `aoide.a2a.spawnAgent` option + the optional bearer token.
+  the rebuild-gated `aoide.a2a.spawnAgent` option + the pairing gate on Spawn
+  (Signature rung + `allows`) + the optional bearer token on the read arms.
   A client never supplies a command — the spawn path only ever launches the
   operator-configured executable, which must also appear on the unit's PATH
   via `aoide.a2a.spawnPath` (a bare-word `spawnAgent` can't resolve
@@ -430,7 +447,9 @@ aoide peer pair watch [--popup] [--json]
   `state/peer-pairing-outbound.json` (`aoide_storage::pairing`,
   tolerate-missing, expired entries swept lazily on read) and this
   instance's ed25519 identity (`state/identity/`, minted lazily on first
-  need — the private key never appears in any output). `request` POSTs
+  need — `ed25519.key` at 0600 inside the 0700 directory, never appearing
+  in any output; `aoide identity` shows the pubkey and its colon-hex
+  fingerprint). `request` POSTs
   `aoide/pairRequest` then `aoide/pairReveal` — two sequential POSTs in
   one invocation — to the target instance's A2A door. `approve` on the
   inbound (approver) side is purely local: it commits its record and marks
@@ -495,7 +514,11 @@ aoide peer allow <name> <cap> on|off
   name is refused after it — a distinct taught error for each.
 - **Notes:** the only writer of `allows` besides the pairing ceremony's
   own `["read","spawn"]` stamp; re-pairing never re-runs it, so a revoked
-  capability survives a key rotation. The A2A door's Spawn arm reads the
+  capability survives a key rotation. When several verified records share
+  one pubkey (one remote instance paired under two names), the key's
+  effective grants are the UNION across those records — revoking a
+  capability from the key means revoking it on every record sharing it.
+  The A2A door's Spawn arm reads the
   set ([[A2A-Door]], [[Pairing-Ceremony#What approval commits]]).
 
 ### aoide peer spawn
@@ -505,7 +528,9 @@ aoide peer spawn <name> [--yes] [--via ssh://[user@]host[:port]] -- <text…>
 ```
 
 - **Reads:** `state/peers.json`; this instance's identity (the POST is
-  signed, P-P4 headers). Refuses an unknown or unpaired (`verified:
+  signed — four headers: the claimed self name `X-Aoide-Peer`, timestamp,
+  nonce, and the ed25519 signature over the canonical string). Refuses an
+  unknown or unpaired (`verified:
   false`) name LOCALLY with a taught error naming `peer pair request`.
 - **Output:** POSTs a spawn-shaped `message/send` (no `contextId`) to the
   peer's A2A door; `<text…>` becomes the spawned session's first turn.
