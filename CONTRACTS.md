@@ -436,7 +436,7 @@ count.
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker, the
   Melete MCP client).
-  **78 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **79 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -4359,9 +4359,15 @@ refuses when the resolved target is this instance's OWN advertisement:
 the heard name matching this instance's own, or the datagram having come
 from loopback — either one a taught refusal (a broadcast always loops
 back to its own sender, so a box that advertises hears itself every
-sweep). `--yes` skips only the local proceed-confirm; the ceremony's own
-mutual SAS confirmation (both operators, both ends, decision 4) is
-untouched and still the sole authority.
+sweep). Known gap: a serve advertising under a custom `--peer-name`
+flag escapes the name arm (the invite side derives its own name from
+env/hostname only) and the self-heard broadcast arrives on the physical
+interface, missing the loopback arm — such an invite dials this box's
+own door and parks a self-pairing request; confusion, not compromise,
+since both SAS codes land in front of the same operator. `--yes` skips
+only the local proceed-confirm; the ceremony's own mutual SAS
+confirmation (both operators, both ends, decision 4) is untouched and
+still the sole authority.
 
 **Spoofed advertisements are phishing, and the ceremony catches them** —
 an attacker advertising a victim's name can lure an invite, but the SAS

@@ -349,7 +349,14 @@ ceremony; discovery only tells you who is there to invite.
   the resolved target is this instance's own advertisement: the heard
   name matching this instance's own, or the datagram having come from
   loopback. Either one is a taught refusal, never a ceremony run
-  against yourself.
+  against yourself. KNOWN GAP: a serve advertising under a custom
+  `--peer-name` (flag only — the env/hostname tiers agree on both
+  sides) escapes the name arm, and the self-heard broadcast arrives on
+  the physical interface so the loopback arm misses too — `peer invite
+  <own-custom-name>` will dial this box's own door and park a
+  self-pairing request. Confusion, not compromise: both SAS codes land
+  in front of the same operator, and the ceremony commits nothing
+  without their approve.
 - **Spoofed advertisements are phishing, and the ceremony catches
   them.** An attacker advertising a victim's name can lure an invite
   — but the SAS confirmation is mutual: the code on the inviter's

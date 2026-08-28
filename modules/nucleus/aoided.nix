@@ -200,14 +200,16 @@ lib.mkIf config.aoide.enable {
   # launch. Either, once set, means Spawn requires a valid token AND loopback
   # stops auto-trusting an unauthenticated caller — the fix for a reverse
   # proxy/tunnel making a remote caller look loopback. `aoide.a2a.
-  # discoveryAdvertise` (P-P6, docs/architecture/PAIRING.md's "Discovery
-  # (advertise-but-locked)" section) is a THIRD, independent off-by-default
-  # toggle: it starts a background thread inside this SAME process that
-  # sends a one-line LAN multicast beacon (name/fingerprint/url, never a
-  # credential) every ~30s so `aoide peer discover`/`peer invite` on other
-  # boxes can hear this instance — discovery grants nothing by itself, the
-  # pairing ceremony above is still the only thing that ever writes a peer
-  # record.
+  # discoveryAdvertise` (P-P6 + task #120, docs/architecture/PAIRING.md's
+  # "Discovery (advertise-but-locked)" section) FORCES advertising on for
+  # this process: the advertise thread always runs inside `a2a serve` and
+  # decides per tick — this flag OR the runtime `aoide peer advertise on`
+  # switch (state/advertise.json) makes it send a one-line UDP BROADCAST
+  # advertisement to 255.255.255.255:8711 (wire v2: name + ssh hop claim
+  # {host, user}, never a URL, key, or credential) every ~30s so `aoide
+  # peer discover`/`peer invite` on other boxes can hear this instance —
+  # discovery grants nothing by itself, the pairing ceremony above is
+  # still the only thing that ever writes a peer record.
   systemd.user.services.aoide-a2a = lib.mkIf config.aoide.a2a.enable {
     description = "Aoide A2A (Agent2Agent) door (loopback by default, user-only)";
 
@@ -290,31 +292,32 @@ lib.mkIf config.aoide.enable {
     };
   };
 
-  # ── Discovery beacon firewall (task #98 diagnosis) ────────────────────────
-  # `discoveryAdvertise` starts a background thread inside `aoide-a2a` that
-  # sends its LAN beacon on a fixed UDP multicast group+port
-  # (`aoide_storage::beacon::GROUP`/`PORT`, 239.255.87.10:8711, CONTRACTS.md
-  # §6's "Discovery beacon" subsection). NixOS's default firewall trusts only
-  # `lo` and drops every other inbound packet that isn't part of an
-  # established connection — including a beacon this SAME host's own
-  # multicast-loopback delivers to its own listening socket on a real
-  # interface, not only a beacon actually arriving from the wire. Confirmed
-  # live on yomi-strix (2026-08-26): an independent raw UDP send/receive over
-  # `lo` succeeds, the identical send/receive over `eno1` is silently
-  # dropped, and `firewall-start`'s generated ruleset shows zero
-  # `allowedUDPPorts` for this port — a socket bug was ruled out first
-  # (`ip route get 239.255.87.10` already resolves via the right interface,
-  # and pinning `IP_MULTICAST_IF` explicitly changed nothing). `bindAddress`
-  # above stays loopback-by-default and unmanaged here on purpose (going
-  # non-loopback is a deliberate, separate operator choice); the beacon is
-  # different in kind — `discoveryAdvertise` IS the deliberate opt-in for
-  # this instance to be found on the LAN, so flipping it also opens the one
-  # port that opt-in requires, the same "one option changes two things
-  # together" shape `tokenFile`/`bearerSecret` already hold in options.nix.
-  # A box that only ever wants to RECEIVE (`peer discover`/`peer invite`
-  # with `discoveryAdvertise` left off) still needs this port opened by
-  # hand — not covered by this toggle, since there is no persistent
-  # "this box discovers" state to hang a firewall rule off of.
+  # ── Discovery advertisement firewall (task #98 diagnosis, #120 wire) ─────
+  # The advertise thread inside `aoide-a2a` sends its LAN advertisement as
+  # plain UDP BROADCAST to 255.255.255.255:8711
+  # (`aoide_storage::advertise::PORT`, CONTRACTS.md §6's "Discovery
+  # advertisement" subsection — broadcast replaced the original multicast
+  # group after the LAN's router ate cross-box multicast, task #106).
+  # NixOS's default firewall trusts only `lo` and drops every other inbound
+  # packet that isn't part of an established connection — including this
+  # SAME host's own broadcast arriving back on its physical interface (a
+  # broadcast always self-loops). Confirmed live on yomi-strix (2026-08-26,
+  # multicast era; the dst-port match carries over unchanged): raw UDP over
+  # `lo` succeeds, the identical send over `eno1` is silently dropped
+  # without this rule. `bindAddress` above stays loopback-by-default and
+  # unmanaged here on purpose (going non-loopback is a deliberate, separate
+  # operator choice); the advertisement is different in kind —
+  # `discoveryAdvertise` IS the deliberate opt-in for this instance to be
+  # found on the LAN, so flipping it also opens the one port that opt-in
+  # requires, the same "one option changes two things together" shape
+  # `tokenFile`/`bearerSecret` already hold in options.nix.
+  # KNOWN ASYMMETRY: the runtime switch (`aoide peer advertise on`,
+  # state/advertise.json) turns SENDING on without nix — but this firewall
+  # carve hangs only off the nix flag, so a box advertising via the runtime
+  # switch alone still has its own `peer discover` sweeps firewalled (and
+  # never hears itself). A box that only RECEIVES (`peer discover`/`peer
+  # invite`, both toggles off) likewise opens this port by hand — there is
+  # no persistent "this box discovers" state to hang a firewall rule off.
   networking.firewall.allowedUDPPorts = lib.mkIf config.aoide.a2a.discoveryAdvertise [ 8711 ];
 
   # ── Usage widget poller (opt-in, off by default per house policy) ────────
