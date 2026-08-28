@@ -458,7 +458,7 @@ branches on the flags: `--all` widens to every anchored entry, `--id`
 narrows to one specific `sessionId`, and bare (neither flag) resumes the
 project's WHOLE undying set (`state/undying.json`, durable-sessions plan
 P-C4) — every anchored entry currently marked durable
-(`session undying on|off`), minus any id already alive (non-`done`) in
+(`session grant undying on|off`), minus any id already alive (non-`done`) in
 `sessions.json`, deduped by `sessionId` keeping the entry with the newest
 `endedAt` (an id that was resurrected and exited again can appear twice in
 the append-only ledger). `--all` and `--id` are unchanged escapes: both

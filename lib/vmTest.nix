@@ -335,7 +335,13 @@ pkgs.testers.runNixOSTest {
     # allow-remote-origin` — the per-secret remote-origin admission bit the
     # broker's origin gate enforces, deny by default (LANE IDENTITY P-ID4,
     # the first real consumer of the sealed session credential) — reached
-    # 82.
+    # 82. Session-surface redesign (command-defrag lane X): three movements
+    # in one commit — `session.undying` REMOVED (-1, absorbed into
+    # `session.grant`'s positional <kind> grammar), `session.grant` ADDED
+    # (+1, the grant family — bare `session` itself keeps its existing path
+    # throughout, only its meaning changed from the U3 undying picker to
+    # the roster), `who` REMOVED (-1, folded into bare `session`/`session
+    # --hosts`) — reached 81.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a command.
     schema_raw = machine.succeed("aoide schema --json")
@@ -349,8 +355,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 82, (
-        f"expected 82 commands, got {cmd_count}.  "
+    assert cmd_count == 81, (
+        f"expected 81 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 
