@@ -128,25 +128,35 @@ to **rebuild time** instead.
   classifies the caller's address first (`a2a::classify_origin` →
   `PeerOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`). A `Remote`
   caller falls back to the same interactive pending-approval queue
-  `send` uses — auto-delivering only when the sender's address matches
-  a peer registered with `autogate: true` in `state/peers.json`
+  `send` uses — auto-delivering on an autogate match: the OR of the
+  address check, the per-peer `tokenFile` check, and the signature-rung
+  `autogate` flag on the resolved peer's own record
   ([[Peer-Federation]]); an `Unknown` origin (the address couldn't be read
   at all) is never auto-delivered, failing safe like an unmatched `Remote`.
+  A verified signature outranks loopback for this question: a request
+  `verify_signed_request` already verified is remote by construction (an
+  ssh `-L` forward terminates at loopback on this end), so
+  `origin_for_inject` strips `Loopback`'s free pass from it and the peer's
+  own `autogate` flag — not the arrival address — decides delivery
+  ([[Peer-Transport]]).
   This is the one interactive per-request gate the wire otherwise lacks —
   added for [[Peer-Federation|peer federation]]'s non-loopback case, which
   the original loopback-only design didn't need to cover.
-- **Bearer-token authentication gates Spawn.**
-  `aoide.a2a.tokenFile` names a file holding the server's expected bearer
-  token, read once at `a2a serve` launch. Empty (the default) is the
-  off-path: every rule below is a no-op and behavior is byte-identical to a
-  server with no token configured. A caller presents the token as
-  `Authorization: Bearer <token>`; the server compares it with a
-  length-independent byte scan (`peer_store::token_bytes_eq`), never `==`.
-  With a token configured, `spawn_authorized(token_configured, token_state)`
-  must return `true` before a spawn runs — an absent or wrong bearer answers
-  `-32005`. With no token configured, Spawn reads neither origin nor token at
-  all: any caller reaching the port may run the configured agent, bounded
-  only by `spawnAgent` naming the command, never the client.
+- **Pairing gates Spawn; the door-wide bearer gates only the read arms.**
+  A spawn runs only for an identified, paired peer: `spawn_admitted`
+  requires a request resolved on the Signature rung (a verified per-request
+  ed25519 signature against some `verified` peer's stored pubkey —
+  [[Peer-Federation]]'s Signature rung) whose record's `allows` contains
+  `"spawn"`. Every refusal is `-32006` with a shape-specific taught message
+  — a paired-but-unsigned caller is told to sign, a signed caller lacking
+  the grant is told the exact `peer allow` fix, everyone else is told to
+  pair and sign. `aoide.a2a.tokenFile` (read once at `a2a serve` launch,
+  compared with a length-independent byte scan
+  `peer_store::token_bytes_eq`) is a legacy escape for unpaired callers:
+  it authenticates the read arms (`tasks/get`, the AgentCard GET,
+  `aoide/graphSummary`), still `-32005`-gating them, and answers Inject's
+  autogate question — it never reaches Spawn. Empty (the default) leaves
+  the read arms open exactly as an untokenized server always was.
 - **A secrets-broker-resolved bearer takes precedence over the file.**
   `a2a serve --bearer-secret <name>` (or `AOIDE_A2A_BEARER_SECRET`) names a
   secret this door resolves through the local [[Secrets-Broker]] as consumer
@@ -171,9 +181,11 @@ to **rebuild time** instead.
 - **Per-peer tokens identify WHICH peer, not just whether one is trusted.**
   `Peer.tokenFile` (`state/peers.json`, set via `peer add --token-file
   <path>`) is a separate, per-peer secret from the server-wide `tokenFile`
-  above. `peer_store::is_autogated_peer_token` folds a presented token
+  above — a legacy escape for unpaired callers, like it.
+  `peer_store::is_autogated_peer_token` folds a presented token
   against every registered peer's own token file, and Inject's autogate
-  match is the OR of the address check and this token check — a shared
+  match is the OR of the address check, this token check, and the
+  signature-rung `autogate` flag — a shared
   secret could never tell two peers apart, so identifying which peer called
   needs one file per peer, not one flag for the whole door.
 - **The outbound direction has its own bearer.** `peer add --bearer-secret
@@ -181,8 +193,9 @@ to **rebuild time** instead.
   broker, as consumer `a2a-client`, on every outbound call to that peer —
   the opposite direction from `Peer.tokenFile` above (what the peer presents
   to us). See [[Peer-Federation]] for the registry shape.
-- **Audited.** Every inject, spawn, and error — including Spawn's new
-  `-32005` rejection — writes to the single audit log as `Door::A2a`, the
+- **Audited.** Every inject, spawn, and error — including Spawn's `-32006`
+  pairing-gate refusals and the signed-request `-32007`/`-32008`/`-32009`
+  failures — writes to the single audit log as `Door::A2a`, the
   same log every other door writes. Loopback by default, off by default.
 
 ## Related
