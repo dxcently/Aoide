@@ -12,9 +12,11 @@ listens on `127.0.0.1` and nothing here moves that. What a **paired** peer
 can do instead is reach that loopback socket through a session-scoped ssh
 tunnel: an internal `-L` forward `aoide-client` opens on demand, dials
 through, and closes with the session that opened it. The tunnel is a
-TRANSPORT hop, not a protocol relay — the signed `X-Aoide-Peer` identity
-([[Peer-Federation]]'s pairing ceremony) crosses it end to end, and the far
-door verifies the exact same request it always did. Spec:
+TRANSPORT hop, not a protocol relay — the signed peer identity crosses it
+end to end: the signature over the canonical string (path included, host
+never) is what the far door verifies, resolving the caller by the key that
+signed, not by the `X-Aoide-Peer` name it carries ([[Peer-Federation]]'s
+Signature rung) — the exact same request it always verified. Spec:
 `docs/architecture/PAIRING.md`'s Transport section; wire shape in
 `CONTRACTS.md` §6 (signature-outranks-loopback) and §7 (`Peer.via`).
 
