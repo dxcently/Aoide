@@ -315,6 +315,29 @@ in
           run ${seedStageScript}
         '';
 
+        # ── Reassert the paint on EVERY activation ─────────────────────────────
+        # A rebuild only restarts units whose definitions changed, so a
+        # long-running quickshell survives every no-diff switch — including one
+        # that has silently lost its Wayland outputs and moved the whole scene
+        # onto a placeholder screen (live incident 2026-08-28: "There are no
+        # outputs - creating placeholder screen"; unit active, desktop bare,
+        # unrecoverable by any rebuild). House ruling: activation always brings
+        # the rice elements back up. try-restart bounces a running shell onto
+        # the freshly rsynced tree and re-acquired outputs, no-ops when the unit
+        # is stopped (headless/session-less activation must not start or fail
+        # anything), and never fails the switch. Ordered after both writes above
+        # so the restarted shell reads the new tree, never the old one.
+        home.activation.aoideRestartRice =
+          lib.hm.dag.entryAfter
+            [
+              "aoideDeployQml"
+              "aoideSeedStage"
+            ]
+            ''
+              run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) \
+                ${pkgs.systemd}/bin/systemctl --user try-restart aoide-quickshell.service || true
+            '';
+
         # ── Quickshell autostart via systemd user service ─────────────────────
         # The shell surface (bar/dock/wallpaper/notifications/OSD) is started by
         # a systemd user service rather than a Hyprland exec-once. A service is

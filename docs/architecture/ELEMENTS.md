@@ -202,8 +202,11 @@ nixos-rebuild / home-manager switch          (user-gated, house rule 2)
     └─ units / exec-once lines generated, ExecStart → run/elements/<e>/
   activation: lyra element seed <song>
     renders the STORE copy of the song's elements against the
-    declared livery → run/elements/   (re-seeds; changed units
-    restart via the ordinary home-manager restart triggers)
+    declared livery → run/elements/   (re-seeds; then EVERY element
+    unit is try-restarted unconditionally — the house ruling that
+    activation always brings the rice elements back up, same as the
+    quickshell facet's aoideRestartRice hook; changed-unit-only
+    restarts leave a wedged element invisible to every rebuild)
 ```
 
 **Capture — the mechanical freeze:**
