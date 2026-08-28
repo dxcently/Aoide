@@ -2695,6 +2695,12 @@ authenticate local ones. An UNIDENTIFIED caller (no sealed session in its
 ancestry, an unreachable daemon, an unreadable roster) is NOT refused by
 this gate — same-uid honesty (OQ1-A) means local unidentified callers
 were always admitted, and this gate keys ONLY on positive attestation.
+The same residual composes through the reseal sweep: a same-uid process
+can append an unsealed roster row asserting `origin: local` for its own
+pid, and the daemon's sweep signs whatever origin the row asserts —
+laundering a forged local class into a POSITIVE attestation, not merely
+detaching into unidentified. Both shapes are the one OQ1-A attacker;
+neither is closable without OQ1-B or an authenticated registration path.
 In the packaged cross-uid deployment (`modules/nucleus/secrets.nix` runs
 the broker as the `aoide-secrets` system user) the operator's daemon
 socket (`0600` inside their `0700` `$XDG_RUNTIME_DIR`) and their
