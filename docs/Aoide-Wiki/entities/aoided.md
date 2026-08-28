@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, daemon, orchestrator, policy]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -38,10 +38,24 @@ never executed. The user rebuild gate is **propose-only**: `propose()` records
 the proposal un-admitted; there is deliberately no `admit()` reachable by an
 agent, so the daemon can never auto-admit a rebuild.
 
+The daemon is the session-identity authority (identity lane #63,
+[[Session-Graph]]). It mints an ephemeral ed25519 keypair once per process,
+held in memory only — deliberately separate from `state/identity/`'s
+on-disk peer-wire key, which any same-uid reader could sign with — and
+seals every live, pid-carrying session record with it: at `session start`
+dispatch, and within one ~1s tick for records registered directly (the
+`seal_unsealed_live_sessions` sweep). Verification asks the daemon itself:
+its `ping` reply's `sealPubkeyHex` field is the only channel a verifier
+fetches the current seal pubkey over. The daemon's own dispatch socket
+reads `SO_PEERCRED` on accept and refuses a cross-uid connector outright —
+the same fail-closed cross-uid floor shellbridge's socket holds (P-ID3), no
+same-uid guarantee under the lane's answered threat model (OQ1-A).
+
 ## Related
 
 - [[Desktop-Architecture]]
 - [[shellbridge]]
+- [[Session-Graph]] — the sealed session credential this daemon mints
 - [[Governance]]
 - [[Agent-Interface]]
 - [[aoide-cli]]
