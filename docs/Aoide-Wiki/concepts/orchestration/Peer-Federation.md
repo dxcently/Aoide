@@ -56,10 +56,15 @@ an error.
 {
   "schemaVersion": "0",
   "peers": [
-    { "name": "yomi-strix", "url": "http://yomi-strix:8710/", "autogate": false, "addedAt": "2026-08-14T00:00:00Z" }
+    { "name": "yomi-strix", "url": "http://yomi-strix:8710/", "autogate": false, "addedAt": "2026-08-14T00:00:00Z",
+      "pubkey": "<hex>", "verified": true, "allows": ["read", "spawn"] }
   ]
 }
 ```
+
+`pubkey`/`verified`/`allows` land when the [[Pairing-Ceremony]] commits the
+record; a never-paired (legacy-registered) peer carries none of them and
+never enters the signature rung's trial set.
 
 `autogate` (default `false`) is the cross-device analogue of `send`'s
 local "sender is the target's own parent" autogate rule: a peer marked
@@ -200,10 +205,37 @@ peer's ed25519 pubkey and a closed `allows` set (default
 rungs (`CONTRACTS.md` §6 "Legacy escapes"):
 
 - **Signature** (`PeerRung::Signature`) — a paired peer's per-request
-  ed25519 signature over a canonical string binding method, path,
-  timestamp, nonce, and the body digest
-  (`a2a.rs::verify_signed_request`), replay-guarded by a ±120s timestamp
-  window and a bounded nonce cache. The ONLY rung Spawn accepts:
+  ed25519 signature over a canonical string of method, path, timestamp,
+  nonce, and the request body's sha256 hex digest — each field trimmed,
+  lowercased, NUL-separated including after the last
+  (`aoide_storage::wire_auth::canonical_string`, pinned vectors in
+  CONTRACTS.md §6) — carried on four headers (`X-Aoide-Peer`,
+  `X-Aoide-Timestamp`, `X-Aoide-Nonce`, `X-Aoide-Signature`) that arrive
+  together or not at all: a partial set is refused `-32007`, never
+  downgraded to the lower rungs. **Identity IS the key; the name is a
+  label (#63 P-ID5).** The caller is the record whose stored `pubkey`
+  verifies the signature — `a2a.rs::verify_signed_request` tries it
+  against every `verified` peer's key and takes the one that matches,
+  never the record `X-Aoide-Peer` names. That header carries the signer's
+  claimed SELF name for display/attribution only: a claimed-vs-resolved
+  mismatch is audited as attribution drift, and the RESOLVED name wins
+  everywhere downstream — the `allows` lookup, the `peer:<name>` origin
+  stamp, the autogate question — so renaming a peer locally never breaks
+  its inbound signed requests. No verifying key is one `-32007`
+  "signature verification failed" whether the key is unknown, the peer
+  unverified/keyless, or the signature bad — never an existence oracle
+  over the registry. When several verified records share the verifying
+  pubkey (one remote instance paired under two names —
+  `upsert_paired_peer` matches by name), the exact-name match wins the
+  tiebreak among equally proven keys, and no exact-name match refuses
+  `-32007` "ambiguous signer" rather than guessing among records whose
+  grants may differ; a key's effective grant set is therefore the UNION
+  across every record sharing it — revoking a capability from a key means
+  revoking it on every such record. Replay-guarded by a ±120s timestamp
+  window (`-32008`, a taught error naming both timestamps) and a bounded,
+  per-`a2a serve`-process nonce cache keyed on `(pubkey, nonce)`, capped
+  at 4096 entries (`-32009`); the cache clears on restart, which is why
+  both checks run independently. The ONLY rung Spawn accepts:
   `spawn_admitted` requires a verified peer, resolved by signature, whose
   `allows` contains `"spawn"`.
 - **Token** — a peer's own `tokenFile` presented as a bearer. A legacy
@@ -245,7 +277,9 @@ every caller's connection looks loopback to the server.
 Every inject/spawn/error, loopback or not, writes to the single audit log
 as `Door::A2a`, and a resolved peer's name is stamped on audit lines,
 pending-queue entries, and a spawned session's record as
-`origin: "peer:<name>"`.
+`origin: "peer:<name>"` — the RESOLVED name (attribution drift audited
+aside), write-once and door-stamped per [[Session-Graph]]'s identity
+section.
 
 ## Status
 
