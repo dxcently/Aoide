@@ -1204,12 +1204,26 @@ CURRENT public key, fetched fresh over its existing `ping` reply's
 `sealPubkeyHex` field** — never cached, never read from a file: a pubkey
 sitting next to the seal it vouches for on the SAME same-uid-writable
 `sessions.json` would let whoever can already forge a seal also forge the
-"trusted" key that verifies it, which is cryptographically void. Only a
-LIVE round trip to the actual running daemon process is a channel a
-same-uid attacker cannot also write to (`aoide_client::daemon::
-daemon_seal_pubkey_hex`). An unreachable daemon means every seal is
-UNVERIFIABLE, not a fallback to trust — the credential's whole security
-property rests on a live daemon existing to ask.
+"trusted" key that verifies it, which is cryptographically void, so a live
+round trip to the actual running daemon process is the only channel worth
+asking (`aoide_client::daemon::daemon_seal_pubkey_hex`). **This channel is
+only as trustworthy as the daemon socket's same-uid exclusivity, and under
+OQ1-A that is NOT attacker-proof**: `bind_socket` unlink-then-binds with
+no `flock`/pidfile guard, so a same-uid attacker can already race or evict
+the real listener and bind its own in its place, serving a forged
+`sealPubkeyHex` from an impostor `ping` reply — closing THAT is P-ID3's
+same-uid dispatch-socket floor, not this phase's. This buys the attacker
+nothing beyond the door already open (the raw per-session socket a
+same-uid process can already connect to directly, P-ID3-inherent): the
+seal's value is against a caller that follows its OWN tooling honestly
+(`aoide send`, a script, an agent that never forges argv/env but also
+never opens a raw socket) — it does not, and was never claimed to, resist
+a same-uid attacker willing to impersonate the daemon itself. An
+unreachable OR impostor daemon still means every seal is UNVERIFIABLE
+against ANY key the caller can independently confirm is the real one, not
+a fallback to trust — the credential's whole security property rests on
+a live, genuine daemon existing to ask, and confirming genuineness is
+outside this phase's scope.
 
 `aoide_conduct::graph::session_store::stamp_seal` is the sole STAMP
 function (change-once, the same shape `stamp_origin` set the precedent
@@ -1228,8 +1242,21 @@ gate consumes the seal, as of P-ID2.** `aoide_conduct::graph::conduct`'s
 per-session injection socket (`$XDG_RUNTIME_DIR/aoide/session-<id>.sock`,
 above) reads the CONNECTING process's kernel-truth uid/pid off every
 accepted connection and refuses one outright — never forwarded to the
-pty — when that pid's real `/proc` ancestry roots back to the socket's OWN
-session. This is the un-bypassable replacement for the OLD client-side
+pty — when the CONNECTOR'S OWN nearest live registered session (walking
+its ancestry nearest-first, `aoide_conduct::graph::identity::
+is_self_originated`) resolves to the socket's OWN session. **Deliberately
+NOT "the target's pid appears anywhere in the connector's ancestry"**
+(review round 1 MUST-FIX): `session_conduct` registers WITHOUT detaching,
+so a legitimate CHILD session's pid is a genuine OS descendant of its
+parent's registered pid — a raw-ancestry-containment check refused the
+single most common flow, a child sending to its own live parent, with a
+bare broken pipe `--yes` cannot route around (this runs downstream of the
+gate, at the TARGET's own accept). Resolving the connector's NEAREST
+session instead means a nested child's own registration is found first,
+never its parent's, so only a connection whose nearest resolvable session
+genuinely IS the target gets refused; an unresolvable connector fails
+OPEN (allowed) — this is a narrow UX/loop defense, not the security
+boundary. This is the un-bypassable replacement for the OLD client-side
 `is_self_send` guard `graph/send.rs` used to carry: that guard only ever
 protected a well-behaved caller of `aoide send`; a raw connection to a
 session's own socket bypassed it entirely, and still can for any OTHER

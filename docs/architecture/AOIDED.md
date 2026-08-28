@@ -232,9 +232,14 @@ reply line. One `write_json_line`-shaped formatter, one
   "sealPubkeyHex":"…"}`. The liveness probe L4's clients use;
   `sealPubkeyHex` (LANE IDENTITY P-ID2, `CONTRACTS.md` §4's `seal`
   paragraph) is this process's current seal-signing public key — never
-  secret, but only trustworthy fetched fresh from the LIVE daemon (never a
-  file, which a same-uid attacker could substitute alongside a forged
-  seal).
+  secret, but a same-uid-writable FILE next to the seal it vouches for
+  would be cryptographically void, so it is fetched fresh from a live
+  round trip instead. That round trip is NOT attacker-proof under OQ1-A:
+  `bind_socket` unlink-then-binds with no flock/pidfile, so a same-uid
+  attacker can already race or evict the real listener and answer with a
+  forged key — the same-uid dispatch-socket floor that would close it is
+  P-ID3's, not this field's; it buys no more than the raw per-session
+  socket already leaves open.
 - `subscribe` → the connection becomes a stream: each matching bus event is
   written as an interim line as it happens; the final reply only comes on
   shutdown. Classes are explicit — an empty/absent `classes` delivers
