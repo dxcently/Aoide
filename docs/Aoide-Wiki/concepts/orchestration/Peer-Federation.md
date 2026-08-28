@@ -164,7 +164,8 @@ session id they could match.
 
 `aoide peer add <name> <url> [--autogate] [--no-verify] [--via ssh://…]
 [--token-file <path>] [--bearer-secret <name>]` / `remove <name>` /
-`pull [<name>]` / `status` — plus the pairing
+`pull [<name>]` / `status` / `hub <name> [--clear]` (the single-hub
+designation, a last-resort address-resolution preference) — plus the pairing
 ceremony's `pair request|pending|approve|reject|watch`
 ([[Pairing-Ceremony]]), the per-peer capability gate `allow <name> <cap>
 on|off`, LAN discovery `discover [--secs <n>]` and `invite <name>` with

@@ -238,7 +238,7 @@ else — the door-wide bearer alone never resolves a peer identity, and
 neither rung reaches Spawn. A bare address match (`PeerRung::Addr`)
 resolves a peer identity for attribution only — Inject's `from` field,
 the autogate question — since it carries no possession proof. `peer pair
-request` is the replacement for the hand-wired shared secrets. Spec:
+request` authenticates a peer without any pre-shared secret. Spec:
 `CONTRACTS.md` §6 "Legacy escapes".
 
 ## Status
