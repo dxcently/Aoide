@@ -3751,9 +3751,14 @@ for a cheaper reason:
    instance paired under two names yields two records with one key): the
    record whose name exactly matches the claimed `X-Aoide-Peer` wins (both
    candidates hold the same PROVEN key, so the tiebreak picks among
-   equal-security records — it never elevates a name to identity); no
-   exact-name match → `-32007` "ambiguous signer", a taught refusal — the
-   records' `allows`/`autogate` may differ, so guessing is never allowed.
+   equally-AUTHENTICATED records — it never elevates a name to identity);
+   no exact-name match → `-32007` "ambiguous signer", a taught refusal —
+   the records' `allows`/`autogate` may differ, so guessing is never
+   allowed. AuthZ consequence, stated plainly: the key's holder can claim
+   whichever twin's name it likes, so a key's effective grant set is the
+   UNION across every record sharing it — revoking a capability from a
+   key means revoking it on EVERY such record, or `peer remove`-ing the
+   duplicates.
 7. **Replay guard, nonce half**: `(verifying pubkey, nonce)` has not been
    seen before by this server process — else `-32009`. Keyed on the PUBKEY,
    not any name: `X-Aoide-Peer` is outside the canonical string, so a
