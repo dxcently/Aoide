@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, cli, meta, upkeep]
 ---
 
@@ -70,7 +70,7 @@ aoide schema [--json]
   backstop every tier generates from — the MCP tool list derives from it
   ([[Agent-Interface]]). `lyra schema` mirrors it for the paint side: its own
   registry, its own golden snapshot (43 command paths, evolving independently
-  of core's 80 — see [[lyra]]).
+  of core's 82 — see [[lyra]]).
 
 ### aoide make
 
