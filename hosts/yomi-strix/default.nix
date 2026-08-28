@@ -90,6 +90,23 @@
   # and sakaki are mutual peers for the live who/send mesh checks.
   aoide.a2a.enable = true;
 
+  # Inbound ssh, keys-only — the doors are loopback-bound by policy, so an
+  # ssh tunnel is the ONLY transport a peer can ride to reach this box's
+  # far-door; without sshd here, sakaki's tunnel leg (its yomi-strix peer
+  # record dials 127.0.0.1:18711) can never come up. Password auth stays off:
+  # the enrolled peer keys below are the entire guest list.
+  services.openssh = {
+    enable = true;
+    settings = {
+      PermitRootLogin = "no";
+      PasswordAuthentication = false;
+      KbdInteractiveAuthentication = false;
+    };
+  };
+  users.users.khoa.openssh.authorizedKeys.keys = [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEyoERlxyi80OB0h+nw1NKO7Ki5gBfUCv8ufo5D8b8Kk sakaki-to-yomi-strix"
+  ];
+
   # LAN discovery: this box both announces itself and runs `peer discover`.
   # Advertising is what opens UDP 8711 (aoided.nix wires the firewall off this
   # flag), and the port has to be open to HEAR beacons as well as send them —
