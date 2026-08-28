@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, cli, session, graph, conductor]
 ---
 
@@ -472,8 +472,9 @@ aoide send (--id <id> | --to <name>) [--submit] [--yes] [--from <sender>] -- <te
 
 - **Reads:** `state/stage/sessions.json` (resolves the target's `socket` and
   `parentSessionId`, and — for the sibling rule — the SENDER's own record from
-  the same already-loaded file); env `AOIDE_SESSION_ID` (the sender's own id,
-  for the parent- and sibling-autogate rules and as the provenance fallback)
+  the same already-loaded file); env `AOIDE_SESSION_ID` (the provenance
+  fallback only — the gate rules never read it; the sender's session is
+  resolved kernel-side, below)
   and `AOIDE_CONDUCT_AUTOGATE` in {1,true,yes,all} (the box-wide
   orchestration-mode switch) and `AOIDE_CONDUCT_SIBLING_AUTOGATE` in
   {0,false,no} (the sibling-rule opt-out).
@@ -507,7 +508,20 @@ aoide send (--id <id> | --to <name>) [--submit] [--yes] [--from <sender>] -- <te
   sharing a live parent (on by default, opt out with
   `AOIDE_CONDUCT_SIBLING_AUTOGATE`; a self-send is excluded before the sibling
   check ever runs, so a session can never autogate-deliver to itself) → held
-  pending. `--from` sets the delivered/queued provenance attribution
+  pending. The sender behind both autogate rules is kernel-attested
+  (`sender_is_parent`/`siblings_share_live_parent`): `send` walks its OWN
+  real `/proc` ancestry — as unforgeable a kernel fact for the real process
+  as a peercred read of it — to a live session whose seal verifies against
+  the daemon's current `ping`-fetched key (the sealed session credential,
+  [[Session-Graph]]); no seal-verified ancestor means no autogate rule can
+  fire and the send parks. The target's control socket adds its own
+  accept-time check: `SO_PEERCRED` on every connection, refusing outright
+  the one self-injection shape (the connector's nearest live registered
+  session IS the socket's own session; an unresolvable connector fails
+  open — a loop defense, not the boundary). A same-uid process bypassing
+  `send` and connecting raw still injects ungated — a named open item of
+  the identity lane ([[Session-Graph]]'s accounting).
+  `--from` sets the delivered/queued provenance attribution
   explicitly (sanitized of embedded `\n`/`\r`); omitted, it falls back to
   `AOIDE_SESSION_ID`; `--from ""` is explicit anonymity and skips that
   fallback — attribution only, never authentication, since either source is a
@@ -712,7 +726,12 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock` (unlinked on exit and on start if
   stale); registers the session in `state/stage/sessions.json` with
   `conductable: true`, `socket`, the discovered `windowAddress`, and
-  `pid` = the conduct process itself; shell ticks push live
+  `pid` = the conduct process itself; stamps a write-once `origin` off its
+  own inherited `AOIDE_SESSION_ORIGIN` env, refusing a `peer:*` shape read
+  there (a `peer:*` value originates only at the A2A door's spawn —
+  [[Session-Graph]]); the daemon's tick sweep seals the record
+  (`seal`/`sealedIssuedAt`) within ~1s of registration, since this direct
+  write never passes through the dispatch handler. Shell ticks push live
   `cwd`/`activity`/`state`/`needsSudo` (change-only, re-staging `graph.json`);
   `do_session_end` on exit whatever happened. Spawns `<command>` on a fresh
   PTY (`openpty`; `setsid` + `TIOCSCTTY`; slave dup'd over fds 0/1/2) with
