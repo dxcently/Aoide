@@ -541,15 +541,16 @@ count.
   entry outright — then the outbound queue, re-deriving the SAS either way
   and requiring an explicit `y`/`yes` confirmation (`--yes` for scripted
   use) before anything commits: on the inbound (approver) side confirmation
-  delivers `aoide/pairApprove` before writing a `pubkey`/`verified` peer
-  record on this end; on the outbound (requester) side, reached only once
-  B's own callback has already landed, confirmation commits the peer
-  record directly with no further wire call; `reject <id>` is a clean local
-  refusal on either queue, no wire call, no peer record — on an outbound
-  entry this doubles as the ceremony's abort command, usable at any stage. See
-  §6's "Pairing wire" and §7's "Peer record" subsections below for the
-  exact wire shapes, the commitment/reveal construction, and SAS
-  derivation.
+  writes a `pubkey`/`verified` peer record on this end PURELY LOCALLY
+  (Design A, task #119 — no wire call at all) and marks the parked entry
+  approved for the requester's own poll to find; on the outbound
+  (requester) side, this POLLS the approver's door (`aoide/pairPoll`, over
+  the SAME forward dial the request already used) and, once approved,
+  commits the peer record directly; `reject <id>` is a clean local refusal
+  on either queue, no wire call, no peer record — on an outbound entry this
+  doubles as the ceremony's abort command, usable at any stage. See §6's
+  "Pairing wire" and §7's "Peer record" subsections below for the exact
+  wire shapes, the commitment/reveal construction, and SAS derivation.
   `peer allow <name> <cap> on|off`, appended newest, P-P3
   (`docs/architecture/PAIRING.md` decision 5) (+1 → 77) — flips one
   capability in a peer's own closed `allows` set (`"read"`/`"spawn"`,
@@ -2200,7 +2201,10 @@ each additive/tolerate-missing (an absent file is simply "nothing
 pending", never an error). Ids are STABLE 8-hex-char values
 (`gen_request_id`), never array-position — unlike `state/stage/pending.json`
 (§4 above), a pairing correlation must survive both processes exiting and
-an asynchronous `aoide/pairApprove` callback arriving arbitrarily later.
+an asynchronous `aoide/pairPoll` arriving arbitrarily later (Design A, task
+#119 — this used to be an asynchronous `aoide/pairApprove` callback landing
+on A's side; now it's A itself polling B's side, whenever it gets around to
+it, possibly long after `peer pair request` exited).
 
 `peer-pairing-inbound.json` — requests THIS instance has parked as the
 approver (`park_inbound`, written by `aoide/pairRequest`'s handler):
@@ -2210,11 +2214,20 @@ approver (`park_inbound`, written by `aoide/pairRequest`'s handler):
   { "id": "a1b2c3d4", "pubkeyHex": "<requester's 64-hex pubkey>",
     "name": "box-a", "originAddr": "203.0.113.4", "url": "http://box-a:8710/",
     "requesterNonceHex": "<32-hex>", "approverNonceHex": "<32-hex>",
-    "requestedAt": "2026-08-25T00:00:00Z", "expiresAt": "2026-08-25T04:00:00Z" } ] }
+    "requestedAt": "2026-08-25T00:00:00Z", "expiresAt": "2026-08-25T04:00:00Z",
+    "approved": false } ] }
 ```
 
+`approved` (Design A, task #119 — additive, `#[serde(default)]`, absent on
+a legacy record loads `false`): flipped `true` by `peer pair approve`
+(`mark_inbound_approved`) once THIS instance's own operator confirms the SAS
+— purely local, no wire call. Never removed on approval — an approved entry
+stays parked, exactly so `aoide/pairPoll` (§6's pairing-wire subsection) can
+still find and release it whenever the requester gets around to polling; it
+is cleaned up only by the ordinary expiry sweep, same as any other entry.
+
 `peer-pairing-outbound.json` — requests THIS instance sent as the
-requester and is still waiting on an approval callback for
+requester and is still waiting to poll for approval on
 (`park_outbound`, written by `peer pair request`):
 
 ```json
@@ -2226,9 +2239,11 @@ requester and is still waiting on an approval callback for
 
 Both are read via `list_inbound`/`list_outbound` (lazy-sweep expired
 entries on read, no background timer) and consumed exactly once via
-`take_inbound`/`take_outbound` (approve, reject, or a successful
-`aoide/pairApprove` callback all remove their entry; a pubkey mismatch on
-the callback re-parks the outbound entry instead of destroying it). Neither
+`take_inbound`/`take_outbound` — an inbound entry is taken only by approve
+(BEFORE approval) or reject, never by `aoide/pairPoll` itself, which only
+ever READS it; an outbound entry is taken once its own confirm-then-commit
+lands, or by reject. A pubkey mismatch on a poll's release leaves the
+outbound entry exactly as it was, never re-parked or destroyed. Neither
 file, nor anything derived from it, ever carries a private key — only the
 two sides' public keys and nonces, the same public transcript the SAS
 above is derived from. `aoide peer pair watch` (§6's "Pairing events
@@ -3721,10 +3736,15 @@ signs the canonical string, and returns the four header pairs; for an
 unverified/unpaired peer it returns an empty header list, leaving that
 call's transport byte-identical to the pre-P-P4 path. Wired into all three
 real peer-POST call sites (`pull_one_peer`, `pull_peer_live`,
-`send_message_to_peer`) — never into the pairing-ceremony's own three wire
-calls (`aoide/pairRequest`/`aoide/pairReveal`/`aoide/pairApprove`), which
-stay unauthenticated by design (P-P2 above) and always pass an empty
-header slice. `post_json`'s new `extra_headers` parameter rides as plain
+`send_message_to_peer`) — never into the pairing-ceremony's own wire calls.
+`aoide/pairRequest`/`aoide/pairReveal` stay fully unauthenticated by design
+(P-P2 above) and always pass an empty header slice; `aoide/pairPoll`
+(Design A, task #119, this section's own subsection below) carries a
+signature too, but a SEPARATE self-contained one
+(`aoide_storage::wire_auth::canonical_string`/`sign_hex` called directly,
+never through `sign_headers_for_peer`) — no `Peer` record exists yet at poll
+time for that function's `peer.verified` check to key off. `post_json`'s new
+`extra_headers` parameter rides as plain
 `-H "<name>: <value>"` curl argv literals — unlike the bearer token's
 stdin-hiding trick, nothing in a P-P4 signature header is a secret worth
 hiding from `/proc/<pid>/cmdline`.
@@ -3973,8 +3993,8 @@ On a match, B stores A's nonce on the entry and answers:
 { "jsonrpc": "2.0", "id": 1, "result": { "ok": true } }
 ```
 
-On a mismatch B DROPS the parked entry outright (unlike
-`aoide/pairApprove`'s pubkey-mismatch handling below, a false commitment is
+On a mismatch B DROPS the parked entry outright (unlike a released
+`aoide/pairPoll` pubkey's own mismatch handling below, a false commitment is
 not a recoverable data hiccup — it's the exact shape an active attacker's
 forced retry would take) and answers `-32002`. The reveal is
 unauthenticated like the rest of the bootstrap, so a third party who
@@ -3987,46 +4007,88 @@ against it refuses outright with a taught "awaiting reveal" error — there
 is nothing to confirm until A's nonce is known, since the SAS transcript
 needs it.
 
-**`aoide/pairApprove`** — once B's operator confirms the SAS (below) B
-POSTs this back to the URL A supplied in its original request:
+**`aoide/pairPoll`** (Design A, task #119 — **REPLACES the original
+`aoide/pairApprove` reverse callback outright**). The original shape had B
+POST a callback BACK to the URL A supplied in its request the moment B's
+operator approved — which meant B's door had to dial OUT to A, so a
+REQUESTER whose own door binds loopback-only (a door that never accepts a
+routable connection at all — the house policy every door in this system
+already follows) could never be reached and the ceremony could never
+complete (observed live, 2026-08-28: the callback timed out against a
+loopback door every time). Now B's `peer pair approve <id>` is **purely
+local**: it commits B's own peer record for A, then marks B's own parked
+inbound entry's `approved` field `true`
+(`aoide_storage::pairing::mark_inbound_approved`, `state/peer-pairing-inbound.json`
+§4 above) and leaves it PARKED — never taken — so A can find it later. A's
+own `peer pair approve <id>` POLLS for that release instead, over the SAME
+forward dial its `aoide/pairRequest`/`aoide/pairReveal` already used (never
+a reverse leg):
 
 ```json
-{ "jsonrpc": "2.0", "id": 1, "method": "aoide/pairApprove",
+{ "jsonrpc": "2.0", "id": 1, "method": "aoide/pairPoll",
   "params": { "id": "<the id aoide/pairRequest returned>",
-              "pubkeyHex": "<B's 64-hex pubkey>" } }
+              "timestampIso": "<ISO-8601, when this poll was signed>",
+              "nonceHex": "<a fresh 32-hex nonce>",
+              "signatureHex": "<A's own signature over the canonical string below>" } }
 ```
 
-A looks up its own outbound-parked entry by `id`; an unknown/expired id is
-`-32001`. A then checks `pubkeyHex` against the value B's OWN synchronous
-`aoide/pairRequest` answer already gave it — a mismatch leaves the outbound
-entry untouched (still `awaiting-approval`, never re-parked, never dropped
-— a legitimate retry after a transient data hiccup is not permanently
-broken) and answers `-32602`. On a match, A does **not** yet commit a peer
-record: A transitions its outbound entry to `awaiting-confirm`
-(`aoide_storage::pairing::mark_outbound_awaiting_confirm`) and answers:
+The poll carries its OWN self-contained signature — never P-P4's
+header-based scheme, which needs a VERIFIED peer record to check against,
+and none exists on B's side until the very id this poll asks about is
+approved (a bootstrapping problem P-P4 cannot solve here). A signs
+`aoide_storage::wire_auth::canonical_string("PAIRPOLL", id, timestampIso,
+nonceHex, &[])` (P-P4's own canonical-string primitive, reused with an empty
+body) with A's OWN identity — the SAME key whose `pubkeyHex` rode A's
+original `aoide/pairRequest`, so B verifies the signature directly against
+the parked entry's own stored `pubkeyHex` (`state/peer-pairing-inbound.json`
+§4 above) — the requester's own pubkey, captured at request time, with no
+peer-record lookup involved at all.
+
+**Existence-oracle discipline (mirrors this section's own 2026-08-20
+amendment for `message/send`'s `contextId` lookup, above): an unauthenticated
+or wrongly-signed poller learns nothing an authenticated one couldn't.**
+Three cases — the id doesn't exist (never parked, already expired), the
+signature doesn't verify against the entry's own stored pubkey, or the entry
+exists and verifies but isn't approved yet — all answer with the IDENTICAL:
 
 ```json
-{ "jsonrpc": "2.0", "id": 1, "result": { "ok": true, "name": "box-b" } }
+{ "jsonrpc": "2.0", "id": 1, "result": { "status": "pending" } }
 ```
 
-**The commit asymmetry is deliberate (decision 4's mutual
-confirmation).** B already committed its OWN peer
-record for A the moment B's own operator ran `peer pair approve <id>`
-(BEFORE this callback was ever sent — `aoide-client::commands::
-approve_inbound` calls out BEFORE writing anything local, unchanged from
-before). A commits its OWN record only later, once A's own operator runs
-`peer pair approve <id>` a SECOND time — now against the outbound queue,
-reached only once this callback has landed — re-derives the SAS from
-values already held locally (no further wire call needed, since B already
-committed its own side), and confirms it themselves. Both humans now see
-and confirm the SAME code before either side calls the pairing done on
-their own end. A never-confirmed A leaves B holding a `verified: true`
-peer that simply answers nothing until A confirms; the fix is a visible,
-expiring outbound entry (`peer pair pending`) and an ordinary re-pair, not
-a special recovery path. `peer pair reject <id>` against an outbound entry
-aborts it at ANY stage (`awaiting-approval` or `awaiting-confirm`) — no
-wire call, no peer record — doubling as the ceremony's own missing abort
-command.
+Only a poll that BOTH verifies AND finds the entry already approved gets the
+release — B's own identity, re-derived fresh (never stored on the parked
+entry):
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "result": { "status": "approved", "pubkeyHex": "<B's 64-hex pubkey>" } }
+```
+
+A then checks that `pubkeyHex` against the value B's OWN synchronous
+`aoide/pairRequest` answer already gave it — the SAS/transcript binding, the
+gate against a substituted reveal — a mismatch leaves the outbound entry
+untouched (still `awaiting-approval`, never re-parked, never dropped — a
+legitimate retry after a transient data hiccup is not permanently broken)
+and refuses locally (`aoide_storage::pairing::mark_outbound_awaiting_confirm`'s
+own `ConfirmMarkError::Mismatch`, unchanged from before — only its trigger
+moved from a server-side callback handler to this client-side poll
+consumer). On a match, A transitions its outbound entry to
+`awaiting-confirm` the SAME way it always did.
+
+**The commit asymmetry is deliberate (decision 4's mutual confirmation),
+unchanged by Design A.** B already committed its OWN peer record for A the
+moment B's own operator ran `peer pair approve <id>` — now with NO wire call
+at all, purely local (`aoide-client::commands::approve_inbound`'s own doc).
+A commits its OWN record only later, once A's own operator runs `peer pair
+approve <id>` a SECOND time — now polling first, then (once approved)
+re-deriving the SAS from values already held locally and confirming it
+themselves. Both humans still see and confirm the SAME code before either
+side calls the pairing done on their own end. A never-confirmed A leaves B
+holding a `verified: true` peer that simply answers nothing until A
+confirms; the fix is a visible, expiring outbound entry (`peer pair
+pending`) and an ordinary re-pair, not a special recovery path. `peer pair
+reject <id>` against an outbound entry aborts it at ANY stage
+(`awaiting-approval` or `awaiting-confirm`) — no wire call, no peer record —
+doubling as the ceremony's own missing abort command.
 
 **Park cap.** `park_inbound` refuses beyond
 `AOIDE_PAIRING_PARK_CAP` concurrently parked inbound requests (default 32,
@@ -4062,7 +4124,7 @@ requester/approver roles on the same four values yields a DIFFERENT code
 (`"847-405"`) — the transcript is order-sensitive, not a set.
 
 This subsection is **additive**: it introduces `aoide/pairReveal` alongside
-`aoide/pairRequest`/`aoide/pairApprove` on the existing A2A door, and
+`aoide/pairRequest`/`aoide/pairPoll` on the existing A2A door, and
 `state/peer-pairing-inbound.json`/`state/peer-pairing-outbound.json` (§4
 shape, both gitignored root-runtime state, both tolerate-missing-as-empty)
 gain `commitHex`/`requesterNonceHex` (now optional, absent until revealed)
@@ -4073,14 +4135,13 @@ migration entry.
 
 ### Pairing events feed (P-P5)
 
-`aoide/pairRequest`/`aoide/pairReveal`/`aoide/pairApprove` (above) were
-audit-only until P-P5: nothing told a watcher a ceremony milestone had
-landed short of polling `peer pair pending`. `a2a serve`'s
-`emit_pairing_event` (`aoide-server::a2a`) now appends one best-effort,
-never-`?`, never-panicking record onto `aoided`'s OWN events feed — the
-SAME `$XDG_RUNTIME_DIR/aoide/events.jsonl`
+`aoide/pairRequest`/`aoide/pairReveal` (above) were audit-only until P-P5:
+nothing told a watcher a ceremony milestone had landed short of polling
+`peer pair pending`. `a2a serve`'s `emit_pairing_event` (`aoide-server::a2a`)
+now appends one best-effort, never-`?`, never-panicking record onto
+`aoided`'s OWN events feed — the SAME `$XDG_RUNTIME_DIR/aoide/events.jsonl`
 (`aoide_server::daemon::events_path`) `aoided` itself writes through, via
-`aoide_protocol::feed::FeedWriter` — from the Ok arm of each of the three
+`aoide_protocol::feed::FeedWriter` — from the Ok arm of each of these
 methods, never from a mismatch or unknown-id arm:
 
 ```json
@@ -4090,11 +4151,10 @@ methods, never from a mismatch or unknown-id arm:
                "url": "http://box-a:8710/", "direction": "inbound" } }
 ```
 
-Three `kind`s: `pair-parked` (`pairRequest`'s Ok arm), `pair-revealed`
-(`pairReveal`'s Ok arm), `pair-awaiting-confirm` (`pairApprove`'s Ok
-arm) — `class: "gate"` (the existing `EventClass::Gate`, `aoide-protocol`
-§3's registry-adjacent audit module, its first emitter), `source:
-"a2a-door"`. `payload` carries fields BY NAME ONLY —
+Two `kind`s: `pair-parked` (`pairRequest`'s Ok arm), `pair-revealed`
+(`pairReveal`'s Ok arm) — `class: "gate"` (the existing `EventClass::Gate`,
+`aoide-protocol` §3's registry-adjacent audit module, its first emitter),
+`source: "a2a-door"`. `payload` carries fields BY NAME ONLY —
 `id`/`name`/`originAddr`/`url`/`direction` — **NEVER a SAS, pubkey,
 nonce, or commitment.** A watcher (`aoide peer pair watch`, below) re-
 derives the SAS locally from its own identity plus
@@ -4104,13 +4164,31 @@ same "tail is a trigger, the storage-backed list is the authority"
 stance `aoide-secrets`' own events feed already holds for its notify
 mirror.
 
+**Design A (task #119) retired the THIRD `kind`, `pair-awaiting-confirm`.**
+It used to fire from `pairApprove`'s Ok arm — the approver's callback
+landing on the requester's OWN door, a genuinely REMOTE-triggered local
+event worth surfacing. `aoide/pairPoll` (this section's "Pairing wire"
+subsection above) never emits an event on the APPROVER's side (a poll
+arriving and being answered isn't a state change on that side worth
+surfacing — the approver already knows it approved; it did so itself,
+locally) — and the REQUESTER's own side never transitions
+`OutboundState::AwaitingConfirm` asynchronously anymore either, only
+synchronously inside `peer pair approve`'s own poll-then-mark call. A
+consequence, honestly stated rather than silently absorbed: **`aoide peer
+pair watch --popup`'s outbound-completion auto-detection (below) has no
+live trigger anymore** — an outbound entry never becomes `actionable`
+(`aoide-client::pair_watch::actionable`) on its own; the operator must run
+`peer pair approve <id>` themselves to poll and complete it. The plain CLI
+path is unaffected. Wiring active polling into the watch loop's own
+30s tick is the follow-on that would close this gap; not built here.
+
 **Two writers, one file (an accepted, named race).** `a2a serve` and
 `aoided` are separate processes; both open their own `FeedWriter` onto
 the identical path, capped at `EVENTS_CAP_BYTES` (1 MiB) and
 truncated-in-place past that cap rather than rotated. A cap-truncate race
 at the exact boundary can lose a line from either writer — accepted,
 because this feed is ephemeral cues, never the durable record (the
-single audit log, written at all three call sites regardless, is that
+single audit log, written at every call site regardless, is that
 record) and because the watcher's own reconcile tick (30s, or on-demand
 before any action) re-derives the truth from `aoide_storage::pairing`
 directly rather than trusting the feed's own completeness.
@@ -4120,8 +4198,9 @@ pair_watch`, registered newest in `peer pair`, golden count 74 → 75) is
 the foreground follow: tails this feed, narrates each recognized line
 (or emits it verbatim under `--json`), and re-derives the actionable set
 (an inbound entry once revealed, an outbound entry once
-`awaiting-confirm`) on a 30s safety tick so a missed or malformed line
-never strands a request. `--popup` swaps that narration for a **zenity
+`awaiting-confirm` — see the "retired" paragraph above for what this means
+under Design A) on a 30s safety tick so a missed or malformed line never
+strands a request. `--popup` swaps that narration for a **zenity
 `--question`-only** confirm dialog per actionable request (no `lyra`
 fallback — a QML confirm dialog is a named deferral, not built): exit 0
 approves (`peer pair approve`'s own `approve_inbound`/`approve_outbound`,
@@ -4138,8 +4217,7 @@ together is a usage error. Deployed as the graphical-session USER unit
 `aoide.a2a.enable && aoide.facets.quickshell.enable`.
 
 This subsection is **additive**: a new events-feed record shape and a
-new CLI command, no change to the three wire methods above, no version
-bump.
+new CLI command, no change to the wire methods above, no version bump.
 
 ### Discovery beacon (P-P6, `docs/architecture/PAIRING.md`'s "Discovery
 (advertise-but-locked)" section)
@@ -4151,7 +4229,7 @@ per beacon, broadcast, never a connection.
 
 **Discovery grants NOTHING.** A heard beacon feeds `peer discover`'s
 printed table and `peer invite`'s URL resolution ONLY — the pairing
-ceremony above (`aoide/pairRequest`/`aoide/pairReveal`/`aoide/pairApprove`)
+ceremony above (`aoide/pairRequest`/`aoide/pairReveal`/`aoide/pairPoll`)
 is the ONLY thing that ever writes `state/peers.json`; nothing on this
 subsection's own wire ever does. A beacon carries no credential and no
 full public key, only a display fingerprint — hearing one proves nothing
@@ -4582,10 +4660,12 @@ exact wire shapes and SAS derivation) — the pairing ceremony's CLI half.
 `pending` lists this instance's own parked inbound requests, each with an
 independently-derived SAS. `approve` re-derives the SAS from this
 instance's own identity (never trusting a wire-carried code), prompts
-`y/N` unless `--yes`, delivers `aoide/pairApprove` BEFORE writing anything
-local, and only on that callback's success commits a `pubkey`/`verified`
-peer record on this end. `reject` is a clean local refusal — no wire call,
-no peer record, `state/peer-pairing-inbound.json`'s entry simply removed.
+`y/N` unless `--yes`; on an INBOUND id, commits a `pubkey`/`verified` peer
+record PURELY LOCALLY (Design A, task #119 — no wire call at all) and marks
+the entry approved for later release; on an OUTBOUND id, POLLS
+`aoide/pairPoll` first (over the SAME forward dial `request` already used)
+and, once approved, commits. `reject` is a clean local refusal — no wire
+call, no peer record, the matching entry simply removed.
 
 `aoide peer allow <name> <cap> on|off` (P-P3, `docs/architecture/
 PAIRING.md` decision 5, appended newest directly after `peer pair reject`
@@ -4613,10 +4693,11 @@ the remote gate, which is the sole security authority.
 ### Status
 
 Real: the registry, the cache, `aoide/graphSummary`, the CLI commands, and the
-graph fold all run. The pairing ceremony (P-P2) is real too: `pubkey`/
-`verified` on `Peer`, `peer pair request|pending|approve|reject`, and both
-`aoide/pairRequest`/`aoide/pairApprove` A2A methods (§6's "Pairing wire"
-subsection) all run end to end. The `allows` closed set, `peer allow`, and
+graph fold all run. The pairing ceremony (P-P2, poll-based completion under
+Design A/task #119) is real too: `pubkey`/`verified` on `Peer`, `peer pair
+request|pending|approve|reject`, and the `aoide/pairRequest`/`aoide/pairReveal`/
+`aoide/pairPoll` A2A methods (§6's "Pairing wire" subsection) all run end to
+end. The `allows` closed set, `peer allow`, and
 the A2A door's Spawn-arm hard gate (P-P3, narrowed again by P-P4) are real
 too, end to end — a paired peer's `allows` genuinely gates the spawn arm,
 and ONLY when that peer resolved via a per-request ed25519 SIGNATURE (§6's

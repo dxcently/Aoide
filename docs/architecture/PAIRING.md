@@ -112,35 +112,53 @@ nonce_A, nonce_B) — B's copy only computable once the reveal landed
 human confirms codes match (CLI y/N or popup confirm)
                                            aoide peer pair approve <id>
   B's own peer record commits HERE — pubkey, verified=true,
-  allows=["read","spawn"], A's name bound
-  ◄── B's pubkey + approval callback ─────┘   (aoide/pairApprove)
+  allows=["read","spawn"], A's name bound; B's own parked entry is
+  marked approved and left PARKED — no callback, nothing dials A
+aoide peer pair approve <id>  (A polls, whenever A gets around to it —
+  → POST signed poll ─────────────────────► verifies A's signature against
+     (id, timestamp, nonce,                    the pubkey A supplied at
+      signature over "PAIRPOLL"+id+...)        request time; approved? →
+  ◄── B's pubkey, IF approved ─────────────┘   release; else → "pending"
 A's outbound entry now shows the SAME SAS a second time (`peer pair
 pending`, state awaiting-confirm); A's own operator confirms it
-independently (`aoide peer pair approve <id>`, run a SECOND time, now
-against the outbound queue) — ONLY THEN does A's own peer record commit.
+independently (the SAME `peer pair approve <id>` invocation that just
+polled) — ONLY THEN does A's own peer record commit.
 `aoide peer pair reject <id>` on A's outbound entry aborts at any point
-before that second confirm, with no wire call and no record on either end.
+before that confirm, with no wire call and no record on either end.
 ```
+
+The poll (`aoide/pairPoll`) replaces an earlier design's reverse callback
+outright (Design A, task #119): B's door used to dial OUT to A the moment
+its operator approved, which meant a requester whose own door binds
+loopback-only could never be reached and the ceremony could never
+complete. Now nothing ever dials IN to A — A polls B over the SAME forward
+dial its own `request`/`reveal` already used, so pairing works end to end
+even when A's door accepts no routable connection at all.
 
 - The short authentication string (SAS) is derived from a transcript
   hash over both public keys + both nonces — SHA-256 over the four
   fields, lowercased/trimmed/NUL-separated, truncated mod 1,000,000
   (`aoide_storage::pairing::derive_sas`; the exact derivation and its
   pinned vectors live in CONTRACTS §6's "Pairing wire" subsection —
-  standard SAS construction, no invention).
+  standard SAS construction, no invention). The human SAS comparison is
+  THE gate against an active on-path attacker; the poll is retrieval,
+  never a second source of trust — it releases nothing until BOTH ends
+  have already committed to the SAME transcript.
 - A pairing request that is never approved (or never confirmed on A's
   own side) expires (timeout knob, default generous — hours, not
-  minutes; it waits for a human, twice).
+  minutes; it waits for a human, twice). An APPROVED-but-not-yet-polled
+  entry expires the same way — it stays parked, never removed early,
+  until either the poll releases it or the ordinary timeout sweeps it.
 - **The two ends commit asymmetrically, on purpose.** B's peer record
   for A exists the moment B's own operator approves; A's peer record
-  for B exists only once A's own operator confirms afterward, over the
-  SAME code. A never-confirmed A simply leaves B holding a verified peer
-  that answers nothing — visible on B's own `peer status`, resolved by
-  an ordinary expiring re-pair, never a silent one-sided pairing. This
-  is decision 4's mutual confirmation carried all the way through: a
-  code shown once and accepted once was never actually a MUTUAL
-  confirmation, only a promise that the other side would eventually
-  agree.
+  for B exists only once A's own operator polls-and-confirms afterward,
+  over the SAME code. A never-confirmed A simply leaves B holding a
+  verified peer that answers nothing — visible on B's own `peer status`,
+  resolved by an ordinary expiring re-pair, never a silent one-sided
+  pairing. This is decision 4's mutual confirmation carried all the way
+  through: a code shown once and accepted once was never actually a
+  MUTUAL confirmation, only a promise that the other side would
+  eventually agree.
 - Re-pairing an existing peer replaces the key material only after
   the same confirmation — never silently.
 - The inbound park queue is capped (`AOIDE_PAIRING_PARK_CAP`, default
@@ -148,6 +166,14 @@ before that second confirm, with no wire call and no record on either end.
   discipline the secrets broker's own ask-park queue holds. Outbound
   entries are operator-created, one per `peer pair request` invocation,
   and carry no cap.
+- **The poll authenticates without a peer record.** `aoide/pairPoll`
+  cannot use the paired-peer signed-header scheme below — no verified
+  peer record exists yet for the id being polled — so A signs a
+  self-contained message (the SAME canonical-string primitive, a
+  different method label) directly against the pubkey B already
+  captured at request time. An unauthenticated or wrongly-signed poll
+  gets the identical answer a not-yet-approved one gets — never a
+  distinct signal an outsider could use to learn whether an id exists.
 
 ## Wire authentication (paired peers)
 
