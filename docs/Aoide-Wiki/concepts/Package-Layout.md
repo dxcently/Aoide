@@ -63,7 +63,7 @@ songbook manifest).
 | **server** | `aoided` and the door serve-loops: MCP-over-stdio, A2A JSON-RPC/HTTP/SSE, listeners, sessions, snapshots, the audit sink. Untrusted input stops here. | aoide | `daemon`, `a2a.serve` |
 | **client** | Outbound: the A2A client registry + send, the melete adapter, transports that drive external agents and speak to `aoided`. | aoide | `adapter.melete`, `a2a.agent.*` (4), `peer.*` (5) |
 | **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, migrations. File-first (seed → build; a real embedded store is the open question below). | aoide | `usage`, `inbox.*` (3) |
-| **secrets** | The credential broker: a socket-only daemon under its own uid, TOTP-gated parked resolves, `file`/`age` backends, `secrets watch`/`--popup`. See [[Secrets-Broker]]. | aoide | `secrets.*` (16) |
+| **secrets** | The credential broker: a socket-only daemon under its own uid, TOTP-gated parked resolves, `file`/`age` backends, `secrets watch`/`--popup`. See [[Secrets-Broker]]. | aoide | `secrets.*` (17) |
 | **conductor** | The session-DAG TUI (ratatui: app/ui/graphview/theme). Depends on `{protocol, conduct, storage}` via a dependency-injection seam (`App` takes a `DispatchFn`), never on `server`. | aoide | `conductor` |
 | **upkeep** | Mechanical integrity, the working-tree half: `soundcheck` polices gitignored/uncommitted state (`result`, `state/`, stray root files) that `nix flake check` structurally cannot see. Report-only, forever — never moves, deletes, formats, or repairs. | aoide | `soundcheck` |
 | **cli** | The app shell: `aoide`/`aoided` bins, arg parse, the single dispatcher, registry assembly (`commands::all()`), guide/onboarding, and the three root-coupled groups (`meta`, `stubs`, `mcp serve`) that read the fully-assembled registry. Depends on every core domain crate; nothing depends on it. | aoide | `guide`, `schema`, `mcp.serve`, `content.*` (5, stub), `make`/`update` (stub), `onboard` |
@@ -72,7 +72,7 @@ songbook manifest).
 | **test-support** | Shared test rig only — scratch dirs, `EnvSaver`, fixture payloads, the single `env_lock`. A dev-dependency, never a production edge. | both (dev-only) | none |
 | **lyra** | The second app shell: arg parse, dispatcher, registry assembly for the paint bundle. The one binary allowed to shell out to nix. Never registers `a2a serve`, `conductor`, or any core-only group. | lyra | `guide`, `schema`, `mcp.serve`, `onboard` |
 
-Command totals: **aoide 81** (74 real, 7 stub), **lyra 43** (41 real, 2 stub)
+Command totals: **aoide 82** (75 real, 7 stub), **lyra 43** (41 real, 2 stub)
 — see [[Full-Architecture]] for the full per-group breakdown.
 
 ## Two binaries — `aoide`/`aoided` (core) and `lyra` (paint)
