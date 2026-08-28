@@ -59,10 +59,12 @@ adding, removing, or renaming a leaf shows as a deliberate diff against that
 snapshot.
 
 The command surface holds **59 leaves across the groups this page tracks**;
-`aoide schema --json | jq '.commands | length'` reports 75, since further
+`aoide schema --json | jq '.commands | length'` reports 81, since further
 commands exist that are not yet covered here: the `inbox` group, `who`,
-`events tail`, `identity`, and the `peer` group's `hub`/`allow`/`spawn`,
-`discover`/`invite`, and 5-command `pair` ceremony
+`events tail`, `identity`, bare `pair` (the interactive pairing picker),
+the `melete` group (`status`/`graph`/`call`),
+and the `peer` group's `hub`/`allow`/`spawn`,
+`discover`/`invite`/`advertise`/`list`, and 5-command `pair` ceremony
 (`request`/`pending`/`approve`/`reject`/`watch` — [[Pairing-Ceremony]]). `lyra schema --json`
 carries the painted surface — see above.
 The per-command dev reference — signature, files read, files written,
@@ -196,8 +198,9 @@ verb reach directly, not something shelled out to.
 
 ### The `peer` group — aoide-to-aoide federation
 
-`add <name> <url> [--autogate] [--token-file <path>] [--bearer-secret
-<name>]` / `remove <name>` / `pull [<name>]` / `status` register
+`add <name> <url> [--autogate] [--no-verify] [--via ssh://…] [--token-file
+<path>] [--bearer-secret <name>]` / `remove <name>` / `pull [<name>]` /
+`status` register
 OTHER aoide instances as **peers** and fold their resolved session graphs
 into this instance's own — built entirely on top of the existing
 [[A2A-Door]] rather than a new transport (`aoide/graphSummary`, one new
@@ -224,9 +227,28 @@ reachability is out of scope for this v0.
   the full registry row per peer (name/url/autogate/tokenFile/bearerSecret/
   hub/pubkey/verified/allows/addedAt) plus its `fresh`/`stale`/`never-pulled`
   classification (the same one the graph fold itself uses) and
-  `fetchedAt`/`lastError`. `peer list` folded into this command
-  (command-defrag lane D) — the full row is the only thing `peer list` used
-  to say that `peer status --json` didn't already.
+  `fetchedAt`/`lastError` — the deep per-peer detail view.
+- **`peer pair request/pending/approve/reject/watch`** — the pairing
+  ceremony's CLI half; the approver's gate is the TYPED confirmation code
+  (three cumulative misses auto-deny), its approve purely local; the
+  requester's own approve polls `aoide/pairPoll` over the same forward
+  dial and confirms `y`/`N`. Bare `aoide pair` is the interactive entry
+  (sweep, pick, the same ceremony). Full mechanism: [[Pairing-Ceremony]],
+  signatures: [[Doors-and-Peers]].
+- **`peer allow <name> <cap> on|off`** — flips one capability in a peer's
+  closed `allows` set (`"read"`/`"spawn"`); idempotent, refuses an unknown
+  peer or capability. `peer spawn <name> -- <text…>` POSTs a signed spawn
+  to a paired peer's door; the remote gate is the sole authority.
+- **`peer discover [--secs N]` / `peer invite <name>` / `peer advertise
+  on|off`** — the LAN discovery surface: a UDP broadcast advertisement
+  (255.255.255.255:8711, `{v, name, host, user}`, rendezvous only), off by
+  default; `discover` is the on-demand sweep, `invite` resolves a heard
+  name into the pairing ceremony, `advertise` is the runtime switch. Wire
+  and validation: [[Peer-Transport]], [[Doors-and-Peers]].
+- **`peer list [--json]`** — the one-glance mesh roster: every known node
+  (this host, registered peers, advertising instances) with its running
+  sessions beneath, marked `●`/`○`/`◆`; one bounded ~2 s sweep plus
+  `who`'s live probes; read-only.
 
 ### `conduct` and `conductor`
 

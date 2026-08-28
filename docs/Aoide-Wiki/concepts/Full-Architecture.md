@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, architecture, desktop, lyra, pipeline]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -72,7 +72,7 @@ trail but exit 64 today.
 **Binary note.** The map below draws both binaries as one continuous picture
 of the data flow, labeled `aoide` throughout for readability. Ownership
 (`CONTRACTS.md` §3, [[Package-Layout]]): the AGENT INTERFACE/`aoided`/CONTENT
-PIPELINE/NIX EVAL boxes are `aoide`'s (74 commands: conducting/orchestration
+PIPELINE/NIX EVAL boxes are `aoide`'s (81 commands: conducting/orchestration
 is aoide's identity); the RICE ENGINE, LIVERY, Quickshell, and shellbridge
 boxes below them are `lyra`'s (43 commands, its own schema and dispatch,
 routed through the desktop, not through `aoided`'s CLI trunk).
@@ -85,7 +85,7 @@ routed through the desktop, not through `aoided`'s CLI trunk).
                                         ▼            │
    ┌─────────────────────────────────────────────────────────────┐
    │  AGENT INTERFACE            aoide <cmd>   ·   aoide mcp serve │   [[Agent-Interface]]
-   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   74 commands · exit 0/1/2/64
+   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   81 commands · exit 0/1/2/64
    └───────────────────────────────┬─────────────────────────────┘
                                     ▼
    ┌─────────────────────────────────────────────────────────────┐
@@ -307,17 +307,20 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   `aoide schema --json` is its machine-readable source of truth; the stdio
   MCP façade (`aoide mcp serve --stdio`) generates its tool list from it, and
   the [[A2A-Door]]'s AgentCard is derived from the same schema — all
-  one-to-one. **74 commands** — real (67): `guide`, `schema`,
+  one-to-one. **81 commands** — real (74): `guide`, `schema`,
   `mcp serve`, `daemon`, `events tail`, `conduct`, `conductor`, `adapter
-  melete`, `identity`, the
+  melete`, `identity`, bare `pair` (the interactive pairing picker —
+  [[Pairing-Ceremony]]), the `melete` group (`status`/`graph`/`call` — the
+  Melete MCP client), the
   1-command `a2a` door group (`a2a serve` — the outbound client is the `peer`
   group below, not a separate `a2a agent` family),
-  the 13-command `peer` group (`peer add/remove/pull/status/hub`,
-  `peer allow`/`spawn`, the LAN `peer discover`/`invite` beacon pair, and the
-  4-command `peer pair` ceremony (`request`/`pending`/`approve`/`reject`) —
-  cross-device peer federation, [[Peer-Federation]]; `status --json` carries
-  the full peer row, folding in what `peer list` used to be the only place
-  to say), the 16-command `secrets` group
+  the 16-command `peer` group (`peer add/remove/pull/status/hub`,
+  `peer allow`/`spawn`, the LAN `peer discover`/`invite` pair with its
+  `peer advertise on|off` switch, the 5-command `peer pair` ceremony
+  (`request`/`pending`/`approve`/`reject`/`watch`), and `peer list`, the
+  one-glance mesh roster — cross-device peer federation,
+  [[Peer-Federation]]; `peer status --json` keeps the deep per-peer row
+  the roster never duplicates), the 16-command `secrets` group
   (`serve`/`exec`/`add`/`rm`/`grant`/`revoke`/`enroll`/`put`/`set-totp`/
   `automate`/`expose`/`migrate`/`pending`/`approve`/`dismiss`/`watch` — the
   socket-only credential broker under its own uid, [[Secrets-Broker]]),

@@ -189,7 +189,7 @@ to **rebuild time** instead.
 
 - [[Agent-Interface]]
 - [[Peer-Federation]] — the aoide-to-aoide door built on top of this one
-- [[Pairing-Ceremony]] — the commit-then-reveal handshake whose three wire methods ride this door
+- [[Pairing-Ceremony]] — the commit-then-reveal handshake whose wire methods (`aoide/pairRequest`/`aoide/pairReveal`/`aoide/pairPoll`) ride this door
 - [[Peer-Transport]] — reaching this door through a tunnel when a paired peer isn't directly HTTP-reachable
 - [[Governance]]
 - [[Session-Graph]]

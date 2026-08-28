@@ -162,16 +162,20 @@ session id they could match.
 
 ## CLI surface
 
-`aoide peer add <name> <url> [--autogate] [--token-file <path>] [--bearer-secret
-<name>]` / `remove <name>` / `pull [<name>]` / `status` — plus the pairing
+`aoide peer add <name> <url> [--autogate] [--no-verify] [--via ssh://…]
+[--token-file <path>] [--bearer-secret <name>]` / `remove <name>` /
+`pull [<name>]` / `status` — plus the pairing
 ceremony's `pair request|pending|approve|reject|watch`
 ([[Pairing-Ceremony]]), the per-peer capability gate `allow <name> <cap>
-on|off`, LAN discovery `discover [--secs <n>]` and `invite <name>`, and
+on|off`, LAN discovery `discover [--secs <n>]` and `invite <name>` with
+the `advertise on|off` runtime switch (off by default), `peer list
+[--json]` (the one-glance mesh roster: every known node marked
+`●`/`○`/`◆` with its running sessions beneath, read-only), and
 `spawn <name> [--yes] -- <text…>`, a signed spawn against a paired peer's
 own door — see
 [[aoide-cli#The `peer` group — aoide-to-aoide federation]] for the per-command
-behavior. `status --json` carries the full registry row per peer; `peer
-list` folded into it (command-defrag lane D).
+behavior. `status --json` carries the full registry row per peer — the
+deep per-peer detail `peer list` never duplicates.
 
 ## Sending across the fold — `send --to peer/<query>`
 

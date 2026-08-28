@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, architecture, nix, flake, rust, node]
 ---
 
@@ -103,7 +103,7 @@ home-manager/stylix modules, the pkgs overlay, and mirrored `specialArgs`
 (`host = "vm-test"`, inputs, username, system; `node.pkgsReadOnly = false`
 so the overlay applies) — so the test boots the real assembly, not a
 replica. It asserts: `multi-user.target` reached; `aoide` on
-PATH with `schema --json` reporting exactly 74 commands (a hardcoded
+PATH with `schema --json` reporting exactly 81 commands (a hardcoded
 drift-tripwire figure, [[AOIDE-DEV]] §7) and `guide` exiting
 0; greetd enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
 linger active with the `aoided` and `shellbridge` user units finishing
