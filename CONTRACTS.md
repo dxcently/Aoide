@@ -1121,8 +1121,9 @@ same-uid-writable files — a hand-crafted `sessions.json` entry claiming
 file directly (a future consumer, a dashboard, a careless `jq`); P-ID0 only
 closes the STAMP path a live `aoide resurrect`/`conduct` invocation takes.
 Sealing the files themselves so a forged on-disk value can be told apart
-from a genuine one is P-ID1 (the daemon-signed credential)/P-ID2 (the
-peercred floor) — still open, not claimed here. Absent means "not a
+from a genuine one is P-ID1 (the daemon-signed credential, below) — minted
+and stored, but nothing verifies it against an incoming connection yet;
+that's P-ID2 (the peercred floor), still open. Absent means "not a
 peer-initiated spawn" (a locally-launched `conduct`/`spawn`, the ordinary
 case, and every legacy record); readers must tolerate both forms. Unlike
 `resumedFrom`, `origin` gets NO `graph.json` projection — like `headless`/
@@ -1140,6 +1141,63 @@ specific `peer:*` forgery shape (a local process claiming to BE a
 peer-spawned session, whether via env or via an unsealed ledger line) is now
 refused at every record-STAMP path this codebase drives — not that the files
 themselves are tamper-evident, which they are not yet.
+
+**Additive in v0 (LANE IDENTITY P-ID1) — the sealed session credential.** A
+session record MAY also carry an optional `seal` (string, hex) — an ed25519
+signature (`aoide_storage::sealed_id::mint_seal`) over a canonical
+`\x00`-separated string built from five fields:
+`sessionId`, `pid`, `pidStarttime`, `originClass`, `issuedAt` (trimmed,
+lowercased, each followed by the separator — the same field-hashing shape
+`wire_auth::canonical_string` already established, restated here since the
+field SET differs). `pidStarttime` is `/proc/<pid>/stat`'s field 22
+(1-indexed), read by `aoide_conduct::graph::pid_starttime` — paired with
+`pid` so a pid REUSE (the OS recycling a pid number after the original
+process exits) can never be mistaken for the same process a seal was minted
+over.
+
+**The signing key is NOT `state/identity/`'s on-disk peer-wire key.** Under
+OQ1-A (the User-answered threat-model question, LANE IDENTITY's design pass)
+the seal's secrecy rests on PROCESS LIVENESS, not file permissions: `aoided`
+mints a SEPARATE ed25519 keypair once per process, at startup
+(`aoide_storage::identity::mint_ephemeral`), and holds it ONLY in memory —
+never written to disk, never the `identity/ed25519.key` file above. The
+reasoning: a same-uid attacker (this codebase's whole threat model, see
+"LANE IDENTITY (#63)" in the plan file) can read any `0600` file under the
+operator's own uid, including the on-disk peer-wire key, so a seal signed
+with THAT key would not be secret against it. It cannot, however, read
+another live process's heap without `ptrace` — and `ptrace` of a non-child
+same-uid process is exactly what Yama `ptrace_scope>=1` blocks by default on
+the target host. **Yama is the trust root; if it is off, this degrades
+honestly to liveness-only** (still requires a live `aoided` process to have
+signed it, but no longer resists a same-uid `ptrace` attach) — stated here
+rather than hidden, the same honesty discipline `origin`'s own paragraph
+above holds for its own boundary.
+
+`aoide_conduct::graph::session_store::stamp_seal` is the sole STAMP
+function (change-once, the same shape `stamp_origin` set the precedent
+for), with exactly ONE legitimate caller: `aoide-server`'s daemon
+`dispatch` handler, which mints the seal right after a successful
+`session start` dispatch and stamps it onto the record it just registered.
+**What P-ID1 mints the seal OVER, today, is scaffolding, not the final
+authority:** it signs over whatever `pid` the record already carries
+(`session.rs`'s own `pid` field) — the bare `session start` wire path
+carries no pid at all today (only `session_conduct`'s own direct,
+non-dispatched registration stamps one), so a seal lands only when a pid is
+already present; that is an honest, stated boundary, not a bug. P-ID2
+replaces this pid with the control socket's own peercred-authenticated
+CONNECTING pid.
+
+**No gate reads this field yet.** `seal` is inert data, exactly as inert as
+`origin` was before P-ID0 — this phase proves the mint → store → verify
+mechanism (round-tripped by `aoide-storage`'s own `sealed_id` test suite:
+verify TRUE on a genuine seal, FALSE on any single tampered field, FALSE
+under a different keypair) and nothing more. P-ID2 is the first phase to
+add a verify-on-accept caller (the control socket's peercred check); P-ID4
+is the first to gate a real decision (origin-class-scoped secrets policy)
+on it. Absent means "no daemon has sealed this record yet" (the common
+case today, and every legacy record); readers must tolerate both forms. No
+`graph.json` projection — like `origin`/`headless`/`hookAncestry`, it is
+consumed internally, never rendered into the live graph.
 
 **Additive in v0 (P-C5, durable-sessions plan):** a session record MAY also
 carry an optional `restore` (object) — a conducted SHELL's continuously-
@@ -1955,7 +2013,16 @@ with anything derivable:
 
 Lazy-minted on first need (`aoide identity`, or a future `peer pair` — both
 route through the same `identity::load_or_mint`); every call after the
-first is an idempotent read of the same two files. `aoide identity --json`:
+first is an idempotent read of the same two files.
+
+**Not the same key `aoided` signs a sealed session credential with (LANE
+IDENTITY P-ID1, §4's `seal` field above).** This on-disk keypair's role
+stays exactly the peer wire (`wire_auth.rs`'s signed A2A requests) — the
+daemon's seal key is a SEPARATE keypair, minted in-process via
+`identity::mint_ephemeral` and held only in memory, deliberately never
+written here or anywhere else on disk. See §4's `seal` paragraph for why.
+
+`aoide identity --json`:
 
 ```json
 {
