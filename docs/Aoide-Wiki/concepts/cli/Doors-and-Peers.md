@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, cli, mcp, a2a, peer, daemon]
 ---
 
@@ -304,13 +304,18 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
 ### aoide peer add
 
 ```
-aoide peer add <name> <url> [--autogate] [--token-file <path>]
-               [--bearer-secret <name>] [--json]
+aoide peer add <name> <url> [--autogate] [--no-verify]
+               [--via ssh://[user@]host[:port]]
+               [--token-file <path>] [--bearer-secret <name>] [--json]
 ```
 
 - **Reads:** `state/peers.json`; verifies the peer by fetching its AgentCard
   (`curl` GET on the resolved card URL) before registering anything — a peer
-  that fails the fetch is never added. Name must match
+  that fails the fetch is never added; `--no-verify` skips the fetch for a
+  peer that serves no card (reachability, never identity — the record lands
+  `verified: false` either way). `--via ssh://[user@]host[:port]` records an
+  ssh-transport marker: every later call dials through a lazily opened ssh
+  forward instead of `url` directly ([[Peer-Transport]]). Name must match
   `^[a-z0-9][a-z0-9-]*$` (it is joined into `state/peer-cache/<name>.json`;
   the shape check is the path-traversal guard) — else exit 1, `reason:
   invalid-name`.
@@ -384,9 +389,9 @@ aoide peer status [--json]
   bearerSecret?, hub, pubkey?, verified, allows, addedAt, state, fetchedAt,
   error}]}`. `state` is `fresh` (pulled within the 300 s TTL and not marked
   stale), `stale`, or `never-pulled` — the same three-way classification the
-  graph fold uses, so this and the DAG never disagree. `peer list` folded
-  into this command (command-defrag lane D): the full registry row that used
-  to be `peer list`'s only output rides here now, under `--json`.
+  graph fold uses, so this and the DAG never disagree. This is the deep
+  per-peer registry view; `peer list` (below) is the one-glance roster and
+  never duplicates it.
 - **Notes:** read-only. TTL constant: `PEER_CACHE_TTL_SECS` in
   `pkgs/aoide/crates/storage/src/peer_store.rs`.
 
@@ -414,11 +419,11 @@ aoide peer hub <name> [--clear]
 
 ```
 aoide peer pair request <url> [--name <n>] [--self-url <url>]
-                        [--via ssh://[user@]host[:port]]
+                        [--via ssh://[user@]host[:port]] [--json]
 aoide peer pair pending
 aoide peer pair approve <id> [--yes]
 aoide peer pair reject <id>
-aoide peer pair watch [--popup]
+aoide peer pair watch [--popup] [--json]
 ```
 
 - **Reads:** the parked pairing state `state/peer-pairing-inbound.json` /
@@ -427,20 +432,25 @@ aoide peer pair watch [--popup]
   instance's ed25519 identity (`state/identity/`, minted lazily on first
   need — the private key never appears in any output). `request` POSTs
   `aoide/pairRequest` then `aoide/pairReveal` — two sequential POSTs in
-  one invocation — to the target instance's A2A door; `approve` on the
-  inbound (approver) side POSTs the `aoide/pairApprove` callback BEFORE
-  writing anything local. `watch` follows the daemon events feed
-  (`$XDG_RUNTIME_DIR/aoide/events.jsonl`, same path `events tail` reads)
-  for the `pair-parked`/`pair-revealed`/`pair-awaiting-confirm` lines
+  one invocation — to the target instance's A2A door. `approve` on the
+  inbound (approver) side is purely local: it commits its record and marks
+  the parked entry approved, dialing nobody. `approve` on the outbound
+  (requester) side first POLLS `aoide/pairPoll` — a signed POST over the
+  SAME forward dial the request used — and completes only when the
+  approver's parked entry answers approved. `watch` follows the daemon
+  events feed (`$XDG_RUNTIME_DIR/aoide/events.jsonl`, same path
+  `events tail` reads) for the `pair-parked`/`pair-revealed` lines
   (`class: "gate"`, `source: "a2a-door"`) and re-derives the actionable
   set from `list_inbound`/`list_outbound` on a 30s reconcile tick — the
-  feed line is a trigger, the storage-backed list the authority.
+  feed line is a trigger, the storage-backed list the authority. The
+  actionable set is inbound-only: an outbound entry completes inside the
+  operator's own polling `approve`, so watch never surfaces one.
 - **Writes:** `request` parks the outbound half; `approve` commits a
   `pubkey`/`verified` peer record into `state/peers.json`
   (`peer_store::upsert_paired_peer`, default `allows: ["read","spawn"]`),
   dispatching by direction — inbound queue first, then outbound — so the
   requester's own confirm is a SECOND `approve` against the outbound
-  queue with no further wire call; `reject` removes the parked entry
+  queue, the one that polls; `reject` removes the parked entry
   locally on either queue, no wire call, no record.
 - **Output:** `request` prints the derived SAS (the `%03d-%03d`
   confirmation code, `aoide_storage::pairing::derive_sas`); `pending`
@@ -454,9 +464,139 @@ aoide peer pair watch [--popup]
   Approve/Reject drive the same approve/reject paths — on a non-CLI door
   `watch` returns a "run it from a terminal" outcome, the `events tail`
   posture.
-- **Notes:** not gated. The commit-then-reveal ceremony, the commit
-  asymmetry, the park cap (`AOIDE_PAIRING_PARK_CAP`, default 32) and the
-  4-hour expiry (`DEFAULT_PAIRING_TIMEOUT_SECS`): [[Pairing-Ceremony]].
+- **Notes:** not gated. The commit-then-reveal ceremony, the poll, the
+  commit asymmetry, the park cap (`AOIDE_PAIRING_PARK_CAP`, default 32)
+  and the 4-hour expiry (`DEFAULT_PAIRING_TIMEOUT_SECS`):
+  [[Pairing-Ceremony]].
+
+### aoide peer allow
+
+```
+aoide peer allow <name> <cap> on|off
+```
+
+- **Reads/Writes:** `state/peers.json` — flips one capability in the
+  peer's closed `allows` set (`PEER_CAPABILITIES`: `"read"` / `"spawn"`).
+- **Output:** idempotent — `on` an already-granted or `off` an
+  already-revoked capability reports a no-op, never an error. An unknown
+  capability string is refused before the peer lookup; an unknown peer
+  name is refused after it — a distinct taught error for each.
+- **Notes:** the only writer of `allows` besides the pairing ceremony's
+  own `["read","spawn"]` stamp; re-pairing never re-runs it, so a revoked
+  capability survives a key rotation. The A2A door's Spawn arm reads the
+  set ([[A2A-Door]], [[Pairing-Ceremony#What approval commits]]).
+
+### aoide peer spawn
+
+```
+aoide peer spawn <name> [--yes] [--via ssh://[user@]host[:port]] -- <text…>
+```
+
+- **Reads:** `state/peers.json`; this instance's identity (the POST is
+  signed, P-P4 headers). Refuses an unknown or unpaired (`verified:
+  false`) name LOCALLY with a taught error naming `peer pair request`.
+- **Output:** POSTs a spawn-shaped `message/send` (no `contextId`) to the
+  peer's A2A door; `<text…>` becomes the spawned session's first turn.
+  What actually runs is the PEER's configured `aoide.a2a.spawnAgent`,
+  never a remote-chosen executable. Every other refusal — `allows`
+  lacking `spawn`, an unsigned-but-paired caller, clock skew — is the
+  remote door's own call, surfaced verbatim.
+- **Notes:** `--yes` skips only the local `y`/`N`; the remote gate
+  (paired peer, signature rung, `allows` contains `"spawn"`) is the sole
+  security authority. See [[Peer-Federation]].
+
+### aoide peer discover
+
+```
+aoide peer discover [--secs N] [--json]
+```
+
+- **Reads:** one bounded on-demand sweep of the LAN advertisement wire —
+  binds UDP 8711 and listens `N` seconds (default ~4). Every line heard
+  is validated before display (size cap on the raw bytes, JSON parse,
+  `v == 2`, name/host/user shape checks); a line failing any check is
+  dropped and counted, never partially rendered. Survivors dedupe by
+  (name, source address) into a bounded in-memory fold (64 entries; a
+  flood past the cap is counted dropped).
+- **Writes:** nothing — an advertisement never reaches
+  `state/peers.json`; discovery is rendezvous, not authentication.
+- **Output:** the heard table: name, claimed ssh hop `user@host`, the
+  OBSERVED source address `srcAddr`, first/last heard, count. The claimed
+  hop is whatever the advertiser typed; `srcAddr` is measured by the
+  listening socket and is the address anything downstream dials.
+- **Notes:** no resident listener exists anywhere — hearing is always a
+  sweep. The receiving host's firewall must admit inbound UDP 8711 (the
+  nix module opens it alongside `aoide.a2a.discoveryAdvertise`). See
+  [[Peer-Transport]].
+
+### aoide peer invite
+
+```
+aoide peer invite <name> [--secs N] [--yes]
+                  [--via ssh://[user@]host[:port]] [--json]
+```
+
+- **Reads:** runs its own discover sweep and resolves `<name>` against
+  what was heard — exactly one source claiming the name proceeds; zero or
+  more than one is a taught error listing every name actually heard.
+- **Output:** composes the dial target from the advertisement's OBSERVED
+  source address on the house door port (`AOIDE_A2A_PORT` or 8710 — the
+  wire carries no URL to read a port off) and runs the same
+  `run_pair_request` core `peer pair request` drives, recording a `via`
+  from the observed address plus the claimed ssh login for the resulting
+  peer's future calls. A far end on a non-default port takes the explicit
+  `peer pair request <url>` path.
+- **Notes:** sugar over the ceremony, nothing more — the mutual SAS
+  confirmation stays the only verification, and `--yes` skips only the
+  local proceed-confirm. Refuses to invite this instance itself (heard
+  name matching its own, or the datagram from loopback). See
+  [[Pairing-Ceremony]].
+
+### aoide peer advertise
+
+```
+aoide peer advertise on|off
+```
+
+- **Writes:** `state/advertise.json` — idempotent, reports what changed;
+  an absent file is OFF.
+- **Notes:** the runtime switch for this instance's LAN advertisement.
+  `a2a serve`'s advertise thread reads the file fresh every tick (~30 s,
+  jittered), so a toggle lands within one cadence with no restart;
+  `aoide.a2a.discoveryAdvertise` / `AOIDE_DISCOVERY_ADVERTISE` /
+  `--discovery-advertise` force advertising on for the process's
+  lifetime, OR'd with the switch — the nix-declarative path. Advertising
+  is off by default; the advertisement itself is a broadcast rendezvous
+  claim (`{v, name, host, user}` — never a credential, key, or URL). See
+  [[Peer-Transport]].
+
+### aoide peer list
+
+```
+aoide peer list [--json]
+```
+
+- **Reads:** `state/peers.json`, the pull caches, and the LAN — presence
+  and sessions from `who`'s own live-probe-with-cache-fallback core (one
+  bounded ~2 s probe per peer, in parallel) plus ONE bounded ~2 s
+  discovery sweep run concurrently with the probes
+  (`aoide-conduct::graph::peer_list`; lives in `aoide-conduct` because the
+  roster folds `who`'s probe core, which `aoide-client` cannot depend on).
+- **Writes:** nothing — not `state/peers.json`, not `state/peer-cache/`.
+- **Output:** the one-glance mesh roster — one row per known node (this
+  host first, then every registered peer, then every advertising instance
+  heard), each node's running sessions (agent, state, petname/short-id)
+  indented beneath it; an offline peer's last-known sessions render
+  labeled `as of <fetchedAt>`. Marks: `●` paired/local and online, `○`
+  paired but offline (`last seen <fetchedAt>` or `never pulled`), `◆`
+  advertising — appended to a paired row (`●◆`/`○◆`) when a sweep hears
+  its name, standing alone for an unpaired pair-candidate row showing the
+  observed source address. `--json` emits `nodes[]` (`{mark, name,
+  isLocal, paired, verified, advertising, presence, addr, lastSeen,
+  sessions[]}`) plus `sweep` (`{heard, dropped}` or `{error}` — an empty
+  or unlistenable sweep annotates the roster, never fails it).
+- **Notes:** the roster, not the registry — `peer status` keeps the deep
+  per-peer detail. See [[Peer-Federation]].
 
 ## Related
 

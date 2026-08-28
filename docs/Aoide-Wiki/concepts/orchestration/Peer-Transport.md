@@ -47,11 +47,12 @@ Three ways a peer picks one up:
 
 - **`--via` on the command itself** — `peer add`/`peer invite`/`peer pair
   request`/`peer spawn` — always outranks a peer's own recorded `via`.
-- **`peer invite` derives one automatically** from the discovery beacon's
-  OBSERVED source address (never its advertised `url`, which a
-  loopback-bound door always claims regardless of who hears it), recording
-  it on the resulting peer at pairing-approval commit even when the
-  ceremony's own two dials went direct.
+- **`peer invite` derives one automatically** from the discovery
+  advertisement's OBSERVED source address plus its claimed ssh login — the
+  wire is `{v, name, host, user}`, a rendezvous claim only (never a URL,
+  key, or credential), and the observed address is what gets dialed. The
+  marker is recorded on the resulting peer at pairing-approval commit even
+  when the ceremony's own dials went direct.
 - **A plain, undecorated `peer pair`** records nothing — a peer paired
   without `--via` dials directly.
 
@@ -153,17 +154,16 @@ allowed to become a resident daemon:
 
 ## Known limitations
 
-- **The approver-side callback carries no `via`.** `aoide/pairApprove`'s
-  reveal travels back over whatever reached the approver in the first
-  place; the reverse leg of a tunneled pairing is the operator's own to
-  provide today, not something this lane resolves automatically.
-- **LAN multicast discovery does not cross segments a router filters** —
-  the gap `docs/architecture/PAIRING.md`'s Discovery section traces to a
-  default-deny firewall on the physical interface, confirmed independent of
-  any aoide code. This transport is the workaround for a door otherwise
-  unreachable across that same boundary, not a fix to discovery itself:
-  `peer pair request --via`/`peer add --via` still need the far host named
-  by hand when discovery can't hear it.
+- **LAN discovery stays link-local and firewall-gated.** The broadcast
+  advertisement (255.255.255.255:8711, heard only while the far end's
+  `peer advertise on` switch or its force-on equivalents are set) never
+  crosses a router by definition, and a default-deny firewall drops the
+  inbound datagram before any aoide socket sees it — the diagnosis
+  `docs/architecture/PAIRING.md`'s Discovery section traces, confirmed
+  independent of any aoide code. This transport is the workaround for a
+  door otherwise unreachable across that same boundary, not a fix to
+  discovery itself: `peer pair request --via`/`peer add --via` still need
+  the far host named by hand when discovery can't hear it.
 
 ## Related
 

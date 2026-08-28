@@ -17,11 +17,16 @@ the same short code out of band. Design authority:
 `docs/architecture/PAIRING.md`; wire shapes and constants: `CONTRACTS.md`
 §6 ("Pairing wire", "Pairing events feed"); handlers
 `pkgs/aoide/crates/server/src/a2a.rs` (`pair_request`/`pair_reveal`/
-`pair_approve_callback`), CLI half `pkgs/aoide/crates/client/src/
+`pair_poll`), CLI half `pkgs/aoide/crates/client/src/
 commands.rs` (`register_peer_pair`). The ceremony rides three methods on
-the EXISTING [[A2A-Door]] — no new transport, no new port — and all three
-are deliberately unauthenticated: the ceremony establishes a credential
-where none exists yet, so gating it on one is circular.
+the EXISTING [[A2A-Door]] — no new transport, no new port — and the
+request/reveal pair is deliberately unauthenticated: the ceremony
+establishes a credential where none exists yet, so gating it on one is
+circular. The poll authenticates without a peer record — none exists on
+the approver's side until the very id being polled is approved — so the
+requester signs each poll with the same identity key whose pubkey rode
+its request, and the approver verifies against the parked entry's own
+stored pubkey.
 
 ## Commit-then-reveal — A commits, B does not
 
@@ -48,26 +53,42 @@ aoide peer pair request <url> [--name b]
                                                  outright (-32002)
 both sides derive the SAME SAS locally, from values each already holds
 operator B: peer pair pending → peer pair approve <id>
-  ── aoide/pairApprove {id, pubkeyHex_B} ─────►► A marks its outbound entry
-  B's own peer record commits HERE                 awaiting-confirm (no record)
-operator A: peer pair pending shows the SAME SAS a second time;
-a SECOND peer pair approve <id> (against the outbound queue) commits
-A's own peer record. peer pair reject <id> aborts either queue at any
-stage — no wire call, no record on either end.
+  B's own peer record commits HERE — purely local,          (nothing
+  and the parked entry is marked approved, left PARKED       dials A)
+operator A: a SECOND peer pair approve <id> (against the outbound queue)
+  → aoide/pairPoll {id, timestampIso, nonceHex, ──────────► verified against
+    signatureHex} — over the SAME forward dial                 the parked entry's
+    the request/reveal used                                own pubkeyHex_A;
+  ◄── {status: approved, pubkeyHex_B} ─────────────────────┘ else the identical
+                                                              {status: pending}
+  A re-derives the SAS, its operator confirms y/N, and A's own peer
+  record commits. peer pair reject <id> aborts either queue at any
+  stage — no wire call, no record on either end.
 ```
+
+Nothing ever dials IN to the requester: the poll rides the same forward
+dial (or tunnel) the request already used, so a requester whose own door
+binds loopback-only completes the ceremony end to end. The poll's
+existence-oracle discipline is byte-uniform: an unknown id, a bad
+signature, and a not-yet-approved entry all answer `{status: pending}`;
+only a poll that verifies AND finds the entry approved releases B's
+pubkey, which A checks against the value B's synchronous
+`aoide/pairRequest` answer already gave it before marking its outbound
+entry `awaiting-confirm`.
 
 ## The commit asymmetry — both humans confirm
 
 The two ends commit their peer records asymmetrically. B's record for A
-exists the moment B's operator approves — `peer pair approve` delivers the
-`aoide/pairApprove` callback BEFORE writing anything local
-(`aoide-client::commands::approve_inbound`). A's record for B exists only
-once A's own operator runs `peer pair approve <id>` a second time, against
-the OUTBOUND queue, re-deriving the SAS from values already held locally
-with no further wire call. A code shown once and accepted once is not a
-mutual confirmation; a never-confirmed A leaves B holding a `verified:
-true` peer that answers nothing — visible on B's own `peer status`,
-resolved by an ordinary expiring re-pair.
+exists the moment B's operator approves — `peer pair approve` on an
+inbound id is purely local (`aoide-client::commands::approve_inbound`):
+it commits the record and marks the parked entry approved, dialing
+nobody. A's record for B exists only once A's own operator runs `peer
+pair approve <id>` a second time, against the OUTBOUND queue — that
+invocation polls `aoide/pairPoll` first, then re-derives the SAS from
+values already held locally and asks for the y/N confirm. A code shown
+once and accepted once is not a mutual confirmation; a never-confirmed A
+leaves B holding a `verified: true` peer that answers nothing — visible
+on B's own `peer status`, resolved by an ordinary expiring re-pair.
 
 ## The SAS
 
@@ -107,10 +128,14 @@ ssh://[user@]host[:port]]` / `pending` / `approve <id> [--yes]` /
   abort command, usable at any stage.
 - **`watch`** is the foreground follow of the events feed (below):
   narrates each recognized line (`--json` emits the event object verbatim
-  instead) and re-derives the actionable set — an inbound entry once
-  revealed, an outbound entry once `awaiting-confirm` — from
+  instead) and re-derives the actionable set from
   `aoide_storage::pairing::list_inbound`/`list_outbound` on a 30s
   reconcile tick, so a missed or malformed line never strands a request.
+  The actionable set is an inbound entry once revealed; an outbound entry
+  reaches `awaiting-confirm` only synchronously inside the operator's own
+  `peer pair approve`, so watch never surfaces an outbound completion on
+  its own — polling and confirming an outbound request is always the
+  operator's own invocation.
   `--popup` swaps the narration for a zenity `--question` confirm dialog
   per actionable request (refused up front when zenity is not on PATH;
   `--popup`+`--json` is a usage error). The dialog's exit-0 Approve and
@@ -124,15 +149,18 @@ ssh://[user@]host[:port]]` / `pending` / `approve <id> [--yes]` /
 
 ## The events surface
 
-From the Ok arm of each of the three wire methods — never from a mismatch
-or unknown-id arm — `a2a serve` appends one record to `aoided`'s own
+From the Ok arm of `aoide/pairRequest` and `aoide/pairReveal` — never from
+a mismatch or unknown-id arm — `a2a serve` appends one record to `aoided`'s own
 events feed (`emit_pairing_event` in `aoide-server::a2a`; best-effort,
 never `?`, never panicking): `$XDG_RUNTIME_DIR/aoide/events.jsonl`
 (`aoide_server::daemon::events_path`), written through its own
 `aoide_protocol::feed::FeedWriter` onto the same path the daemon writes.
 Each record is `class: "gate"`, `source: "a2a-door"`, with `kind`
-`pair-parked` (`pairRequest`), `pair-revealed` (`pairReveal`), or
-`pair-awaiting-confirm` (`pairApprove`). The payload carries
+`pair-parked` (`pairRequest`) or `pair-revealed` (`pairReveal`).
+`aoide/pairPoll` emits nothing: a poll answered is no state change on the
+approver's side worth surfacing. A third kind, `pair-awaiting-confirm`, is
+defined but has no emitter, so the watcher's outbound half never fires on
+its own. The payload carries
 `id`/`name`/`originAddr`/`url`/`direction` BY NAME ONLY — never a SAS,
 pubkey, nonce, or commitment. The feed line is a trigger, never trusted
 data: `peer pair pending`'s storage-backed list is the authority, and the
@@ -141,7 +169,7 @@ watcher's reconcile tick re-derives the truth from
 own events feed holds. Two writers (`a2a serve` and `aoided`) share the
 one file, capped at `EVENTS_CAP_BYTES` (1 MiB) and truncated in place — a
 cap-truncate race can lose a line, accepted because the durable record is
-the single audit log, written at all three call sites regardless.
+the single audit log, written at every call site regardless.
 
 ## Park cap and expiry
 
@@ -187,7 +215,8 @@ request` is the replacement for the hand-wired shared secrets. Spec:
 
 ## Status
 
-Real: the three wire methods, both parked-state files, the five CLI
+Real: the three wire methods (`aoide/pairRequest`/`aoide/pairReveal`/
+`aoide/pairPoll`), both parked-state files, the five CLI
 commands, the SAS derivation with its pinned vectors, the events feed,
 and the zenity popup all run. `--popup` is zenity `--question` only; a
 QML confirm dialog is a named deferral, not built.
