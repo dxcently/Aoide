@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, cli, reference, schema]
 ---
 
