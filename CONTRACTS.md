@@ -436,7 +436,7 @@ count.
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker, the
   Melete MCP client).
-  **79 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **80 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -4243,7 +4243,9 @@ is a plain `0.0.0.0` bind on the fixed port, which hears broadcast and
 unicast datagrams alike.
 
 **Discovery grants NOTHING.** A heard advertisement feeds `peer
-discover`'s printed table and `peer invite`'s target resolution ONLY —
+discover`'s printed table, `peer invite`'s target resolution, and `peer
+list`'s advertising marks and `◆` pair-candidate rows (§7's CLI surface)
+ONLY —
 the pairing ceremony above
 (`aoide/pairRequest`/`aoide/pairReveal`/`aoide/pairPoll`) is the ONLY
 thing that ever writes `state/peers.json`; nothing on this subsection's
@@ -4580,9 +4582,12 @@ idempotent-silent — following `rice draft drop <name>`'s precedent (§4).
 `aoide peer status --json` enumerates the registry — its `data.peers`
 carries every registered peer's full row (name/url/autogate/tokenFile/
 bearerSecret/hub/pubkey/verified/allows/addedAt) layered with that peer's
-last-pull outcome (below); there is no separate `peer list` command — its
-`--json` row was always a strict subset of this one (the human-readable
-`peer status` line stays a terse count; names and URLs live in `--json`).
+last-pull outcome (below); it is THE deep per-peer registry view (the
+human-readable `peer status` line stays a terse count; names and URLs live
+in `--json`). `aoide peer list` is a different projection, never a registry
+re-dump: the one-glance mesh roster — presence, discovery, and running
+sessions across every known node — defined under this section's CLI
+surface below.
 
 ### `state/peer-cache/<name>.json` — **v0**
 
@@ -4676,11 +4681,39 @@ all, they operate purely on `sessions.json`'s `SessionRecord`s, so a
 `status` — registered as their own command group, directly after `a2a
 serve` in `schema --json`'s order (nothing existing reorders). `peer pull`
 with no name pulls EVERY registered peer; with a name, just that one.
-`peer status --json` is also this group's list-the-registry command — its
+`peer status --json` is this group's list-the-registry command — its
 `data.peers` carries every registered peer's full row (name/url/autogate/
 tokenFile/bearerSecret/hub/pubkey/verified/allows/addedAt) alongside that
-peer's last-pull outcome, so a separate `peer list` command has nothing
-left to say it doesn't already (command-defrag lane, task #101).
+peer's last-pull outcome: the deep per-peer detail view, which `peer list`
+below never duplicates.
+
+`aoide peer list [--json]` (task #120 P2, registered appended-newest at the
+END of `schema --json`'s order, from `aoide-conduct` — the roster folds
+`who`'s probe core, and `aoide-client` cannot depend on `aoide-conduct`) is
+the one-glance MESH roster: one row per known node — this host first
+(`this host`, like `who`), every registered peer, then every advertising
+instance heard on the LAN — with each node's running sessions (agent,
+state, petname/short-id) indented beneath it. Marks: `●` paired/local and
+online, `○` paired but offline (`last seen <fetchedAt>` off the pull
+cache, or `never pulled`), `◆` advertising — appended to a paired row
+(`●◆`/`○◆`) when a sweep hears its name, standing alone for an unpaired
+pair-candidate row showing the OBSERVED source address. An online paired
+row's addr is its `via` ssh marker when set, else its registered `url`
+(doors are loopback-bound — a tunneled peer's `url` is `127.0.0.1`, so
+the hop is what distinguishes it); an offline row's addr is `—`. Presence and
+sessions come from `who`'s own live-probe-with-cache-fallback core
+(`aoide-conduct::graph`, one bounded ~2s probe per peer, in parallel —
+never a second prober), advertising from ONE bounded discovery sweep
+(`aoide-client::discover::run_sweep`, ~2s, run concurrently with the
+probes); an offline peer's last-known sessions render labeled `as of
+<fetchedAt>`. An empty sweep is normal (firewall asymmetry — §6's
+discovery subsection); even a sweep that cannot listen only annotates the
+roster (`data.sweep.error`), never fails it. Heard fields stay untrusted
+display data behind P-P6's validation gate; the roster writes nothing —
+not `state/peers.json`, not `state/peer-cache/`. `--json` emits the same
+roster structured: `nodes[]`, each `{mark, name, isLocal, paired,
+verified, advertising, presence, addr, lastSeen, sessions[]}`, plus
+`sweep` (`{heard, dropped}` or `{error}`).
 
 `aoide peer pair request <url> [--name <n>] [--self-url <url>]` /
 `pending` / `approve <id> [--yes]` / `reject <id>` (P-P2, appended newest
@@ -4723,8 +4756,8 @@ the remote gate, which is the sole security authority.
 
 ### Status
 
-Real: the registry, the cache, `aoide/graphSummary`, the CLI commands, and the
-graph fold all run. The pairing ceremony (P-P2, poll-based completion under
+Real: the registry, the cache, `aoide/graphSummary`, the CLI commands
+(`peer list`'s mesh roster included), and the graph fold all run. The pairing ceremony (P-P2, poll-based completion under
 Design A/task #119) is real too: `pubkey`/`verified` on `Peer`, `peer pair
 request|pending|approve|reject`, and the `aoide/pairRequest`/`aoide/pairReveal`/
 `aoide/pairPoll` A2A methods (§6's "Pairing wire" subsection) all run end to

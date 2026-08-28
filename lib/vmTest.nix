@@ -323,7 +323,13 @@ pkgs.testers.runNixOSTest {
     # pairing-ceremony events-feed watcher (P-P5, CONTRACTS.md §6's
     # "Pairing events feed" subsection) — reached 75. Bumped by 3 for
     # `melete status`/`melete graph`/`melete call` (M2, task #14) — the
-    # Melete MCP client, `aoide_client::mcp_client` — reached 78.
+    # Melete MCP client, `aoide_client::mcp_client` — reached 78. Bumped by
+    # 1 for `peer advertise` — the discovery advertise switch (task #120;
+    # this tripwire was never bumped with that landing and sat at
+    # stale-78-vs-actual-79 until the next entry caught it) — reached 79.
+    # Bumped by 1 for `peer list` — the one-glance mesh roster (task #120
+    # P2, registered from `aoide-conduct` because it folds `who`'s probe
+    # core) — reached 80.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a command.
     schema_raw = machine.succeed("aoide schema --json")
@@ -337,8 +343,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 78, (
-        f"expected 78 commands, got {cmd_count}.  "
+    assert cmd_count == 80, (
+        f"expected 80 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

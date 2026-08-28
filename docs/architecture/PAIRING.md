@@ -318,8 +318,12 @@ ceremony; discovery only tells you who is there to invite.
   in-memory fold (a hostile flood of fabricated names is counted
   dropped past the cap, never grown), and prints the table: name, the
   claimed ssh hop `user`@`host`, the observed source address,
-  first/last heard. That heard-set is what a later phase's `peer
-  list` consumes. An advertisement is UNTRUSTED NETWORK DATA (house
+  first/last heard. The same heard-set is what `aoide peer list`
+  (CONTRACTS §7's CLI surface) merges into its mesh roster — a heard
+  name matching a registered peer marks that row advertising (`●◆`/
+  `○◆`), an unknown name becomes a `◆` pair-candidate row, and a
+  self-heard advertisement only marks this host's own row.
+  An advertisement is UNTRUSTED NETWORK DATA (house
   rule 4's discipline): every field is validated (name shape, bounded
   metacharacter-free host, POSIX login shape, line-size cap) before
   display, a malformed advertisement is dropped and counted, and
