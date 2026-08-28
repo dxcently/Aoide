@@ -4055,6 +4055,12 @@ exists and verifies but isn't approved yet — all answer with the IDENTICAL:
 { "jsonrpc": "2.0", "id": 1, "result": { "status": "pending" } }
 ```
 
+The uniformity is byte-level, not timing-level (an unknown id refuses before
+the signature verify; a known one pays it), and the signed `nonceHex` is NOT
+replay-checked — a captured poll replays inside the skew window, accepted
+deliberately: the response is idempotent and releases only B's own pubkey,
+which `aoide/pairRequest` already hands to any caller.
+
 Only a poll that BOTH verifies AND finds the entry already approved gets the
 release — B's own identity, re-derived fresh (never stored on the parked
 entry):

@@ -245,8 +245,9 @@ the full count-site checklist (git show 9c2d05c).
   round-trip, replay rejection, skew taught error, canonical-string
   vectors pinned.
 - **P-P5 — pairing events feed + the popup watcher (S).** `a2a serve`
-  emits `pair-parked`/`pair-revealed`/`pair-awaiting-confirm` onto
-  aoided's own events feed — the same seam secrets asks already ride
+  emits `pair-parked`/`pair-revealed` onto aoided's own events feed
+  (`pair-awaiting-confirm` shipped with this phase but is dormant since
+  task #119 retired its emitter) — the same seam secrets asks already ride
   (`class: "gate"`, `source: "a2a-door"`, by-name payload, no SAS/
   pubkey/nonce/commitment ever on the wire, CONTRACTS §6's "Pairing
   events feed" subsection). `aoide peer pair watch [--popup] [--json]`
