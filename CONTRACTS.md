@@ -1090,28 +1090,38 @@ mutation, or via `aoide session prune`'s manual resync — projects a populated
 case, and every legacy record); readers must tolerate both forms and
 round-trip fields they do not know.
 
-**Additive in v0 (P-P3, `docs/architecture/PAIRING.md` decision 7):** a
-session record MAY also carry an optional `origin` (string) —
-`"peer:<name>"` for a session `aoide-server`'s A2A door spawned on behalf
-of an identified, PAIRED peer (§6's P-P3 amendment above), stamped once by
-`aoide_conduct::graph::session_store::stamp_origin` right after
-registration, the same change-once discipline `headless` already holds.
-`aoide-server`'s `a2a::do_spawn` threads the value in via the
-`AOIDE_SESSION_ORIGIN` env var it sets on the child it launches — this
-crate has no direct dependency on `aoide-server`, so the env var is the
-seam, mirroring how `AOIDE_AUDIT_LOG` already threads a per-child fact the
-same way. Absent means "not a peer-initiated spawn" (a locally-launched
-`conduct`/`spawn`, the ordinary case, and every legacy
-record); readers must tolerate both forms. Unlike `resumedFrom`, `origin`
-gets NO `graph.json` projection — like `headless`/`hookAncestry`, it is
-consumed internally (projected verbatim into `state/session-ledger.jsonl`'s
-own `origin` field at session exit, below) rather than rendered into the
-live graph. `origin` is attribution, not authentication — any same-uid
-process can set `AOIDE_SESSION_ORIGIN` before running `aoide conduct` and
-forge `"peer:X"` with no door involved at all, the same ordinary
-spoofable same-user process state `--from`/`AOIDE_SESSION_ID` already are
-(`pending.json`'s own note below); nothing may ever gate on it without
-upgrading it to an authenticated channel first (task #63's lane).
+**Additive in v0 (P-P3, `docs/architecture/PAIRING.md` decision 7; record
+authority tightened at LANE IDENTITY P-ID0, G16/G5):** a session record MAY
+also carry an optional `origin` (string) — `"peer:<name>"` for a session
+`aoide-server`'s A2A door spawned on behalf of an identified, PAIRED peer
+(§6's P-P3 amendment above). `aoide_conduct::graph::session_store::
+stamp_origin` (now `pub`, crossing the crate boundary) is the sole writer,
+change-once like `headless`, but it has exactly two legitimate callers, each
+the record-layer authority for one origin shape: `aoide-server`'s
+`a2a::do_spawn` calls it DIRECTLY on the just-spawned record, from the door
+where the peer name is actually authenticated — this is the only place a
+`peer:*` value may originate. `graph/conduct.rs::session_conduct` calls it
+for a LOCAL-CLASS value off its own inherited `AOIDE_SESSION_ORIGIN` env,
+and REFUSES a `peer:*` shape read from that env (a taught refusal, not a
+panic): inherited env is exactly what a same-uid process can set on itself
+before invoking `aoide conduct` directly, so a `peer:*` value threaded that
+way was never trustworthy — P-ID0 closes that record-layer forgery. Absent
+means "not a peer-initiated spawn" (a locally-launched `conduct`/`spawn`,
+the ordinary case, and every legacy record); readers must tolerate both
+forms. Unlike `resumedFrom`, `origin` gets NO `graph.json` projection —
+like `headless`/`hookAncestry`, it is consumed internally (projected
+verbatim into `state/session-ledger.jsonl`'s own `origin` field at session
+exit, below, AND read back on `aoide resurrect` to carry a peer-origin
+session's provenance forward onto its revived record — G6, same phase)
+rather than rendered into the live graph. **Still not a security claim**:
+`origin` is attribution, not an authenticated credential — a same-uid
+process can still forge a LOCAL-class origin, and neither the session's own
+identity nor the consumer name presenting it are authenticated yet; nothing
+may gate a security decision on it without the sealed credential task #63's
+lane builds next (P-ID1+). What P-ID0 DOES close: the specific `peer:*`
+forgery shape (any local process claiming to BE a peer-spawned session by
+setting one env var) — that shape is now record-layer impossible, not
+merely undocumented.
 
 **Additive in v0 (P-C5, durable-sessions plan):** a session record MAY also
 carry an optional `restore` (object) — a conducted SHELL's continuously-
