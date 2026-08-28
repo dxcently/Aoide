@@ -436,7 +436,7 @@ count.
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker, the
   Melete MCP client).
-  **80 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **81 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -4392,6 +4392,20 @@ since both SAS codes land in front of the same operator. `--yes` skips
 only the local proceed-confirm; the ceremony's own mutual SAS
 confirmation (both operators, both ends, decision 4) is untouched and
 still the sole authority.
+
+**Bare `aoide pair`** (task #120 P3) is the friendly, interactive entry
+onto the same rails: CLI-door + real-tty only (the same
+`pick::interactive` gate bare `session` holds — a non-tty, non-CLI, or
+`--json` invocation gets a taught pointer at the scripted spellings,
+never a hang), it runs ONE bounded ~2s sweep, filters out this box's own
+advertisement, and opens a select menu over the candidates — each row the
+already-validated name plus claimed ssh hop and OBSERVED source, claim
+and observation side by side. Picking a row IS the proceed-confirmation
+and drives the EXACT SAME shared tail `invite` uses (`pair_with_heard` →
+`run_pair_request` — one function, never a copy), so the SAS then prints
+with the approve step for both ends. Hearing nothing teaches `peer
+advertise on` (the other box) and the manual `peer pair request <url>
+[--via …]` path instead of failing.
 
 **Spoofed advertisements are phishing, and the ceremony catches them** —
 an attacker advertising a victim's name can lure an invite, but the SAS
