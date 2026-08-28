@@ -191,7 +191,8 @@ even when A's door accepts no routable connection at all.
 Per-request detached signature replaces bearer comparison for paired
 peers:
 
-- Headers: peer name, timestamp, nonce, signature. Signature is
+- Headers: peer name (attribution only — see below), timestamp, nonce,
+  signature. Signature is
   ed25519 over a canonical string binding method, path, timestamp,
   nonce, and the body digest (`sha2`). The executor writes the exact
   canonical form into CONTRACTS §6 in the same commit that lands it.
@@ -215,16 +216,25 @@ peers:
   auto-delivers. An unsigned request's loopback trust is unaffected —
   this narrowing only ever removes a free pass a signature was never
   entitled to in the first place.
-- **`X-Aoide-Peer` carries the caller's own self name**
+- **Identity IS the key; the name is a label (#63 P-ID5).**
+  `X-Aoide-Peer` carries the caller's own self name
   (`aoide_storage::display::local_host_name()`), the same value the
   pairing wire's `pairRequest.name` sends — never the caller's local
-  nickname for the counterpart. The far end resolves the caller BY
-  THAT NAME against its own registry. Known limitation, deferred to
-  #63: because resolution is by name, renaming a peer locally on the
-  far end breaks inbound signed requests from it until it re-pairs.
-  Resolving identity by public key instead (the signature already
-  proves the key) is the durable fix; it is #63's lane, not this
-  document's settled design.
+  nickname for the counterpart — but it does no identity work: the far
+  end resolves the caller BY THE KEY THAT SIGNED, trying the signature
+  against every verified peer's stored pubkey and taking the record
+  whose key verifies. The name is display/attribution — a
+  claimed-vs-resolved mismatch is audited as attribution drift and the
+  resolved name wins everywhere downstream — so renaming a peer
+  locally never breaks inbound signed requests from it. Nothing
+  name-trusted remains on the signed path; the name's one residual
+  role is the exact-name tiebreak when multiple verified records share
+  the verifying pubkey (equal proven key, possibly different grants —
+  no exact-name match refuses as ambiguous rather than guessing).
+  A signature matching no verified peer's key refuses identically to a
+  bad signature — never an existence oracle over the registry.
+  CONTRACTS §6's "Inbound verification" carries the pinned check
+  order, collision semantics, and the pubkey-keyed nonce cache.
 
 ## Phases
 
@@ -387,8 +397,8 @@ Every A2A door stays loopback-bound, always — that invariant does not move.
 What moves is HOW a request reaches it from another box: an internal ssh
 forward, opened lazily by `aoide-client` and dialed through instead of the
 peer's own host directly. The tunnel is a TRANSPORT hop, not a protocol
-relay — the signed `X-Aoide-Peer` identity (Wire authentication, above)
-still crosses it end to end, and the far door verifies the exact same
+relay — the signed peer identity (Wire authentication, above: the key that
+signed) still crosses it end to end, and the far door verifies the exact same
 request it always did. Nothing about §"Settled decisions"'s "strictly
 pairwise, no relay, every hop carries the true origin" changes; an ssh `-L`
 forward is a pipe, not a party to the protocol.

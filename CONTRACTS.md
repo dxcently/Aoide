@@ -3661,7 +3661,7 @@ present together or not at all:
 
 | Header | Carries |
 | --- | --- |
-| `X-Aoide-Peer` | The signer's claimed peer name — `peer_store::valid_peer_name`-shaped. This instance's OWN local `Peer.name` for the counterpart, which the pairing ceremony's single shared `name` value (§6's "Pairing wire (P-P2)" subsection above) makes identical to the string the counterpart's own registry resolves back to this instance. |
+| `X-Aoide-Peer` | The signer's claimed SELF name (`aoide_storage::display::local_host_name()`) — `peer_store::valid_peer_name`-shaped, display/attribution ONLY (#63 P-ID5). Identity is never resolved from it: the caller is the peer record whose stored `pubkey` verifies the signature, and a claimed-vs-resolved mismatch is audited as attribution drift with the resolved name winning everywhere downstream. Its one remaining role beyond attribution is the exact-name tiebreak among multiple verified records that share the verifying pubkey (see "Inbound verification" below). |
 | `X-Aoide-Timestamp` | ISO-8601 UTC, the moment the signer minted this request. |
 | `X-Aoide-Nonce` | A fresh random hex value per request (`aoide_storage::pairing::random_hex(16)`, the same mint the pairing ceremony already uses). |
 | `X-Aoide-Signature` | The ed25519 signature over the canonical string below, hex-encoded (128 hex chars). |
@@ -3709,6 +3709,17 @@ independently verifiable.) Case and surrounding whitespace on
 method/path/timestamp/nonce never change the canonical string; a different
 body, or a different path, always does (via the digest, and directly).
 
+**Identity IS the key; the name is a label (#63 P-ID5).** The resolved
+`Peer` is the one whose stored `pubkey` verifies the signature — the
+signature proves possession of a key, and the record is found BY that key,
+never by the `X-Aoide-Peer` name. Nothing on the signed path trusts a name:
+the claimed name is stamped into audit lines (and, on a claimed-vs-resolved
+mismatch, an `attribution-drift` audit line naming both), while the
+RESOLVED name feeds every downstream consumer — the `allows` lookup, the
+`peer:<name>` origin stamp, autogate. Renaming a peer record locally
+therefore never breaks inbound signed requests from it, and two peers
+colliding on a claimed name cannot cross-resolve.
+
 **Inbound verification** (`aoide-server::a2a::verify_signed_request`, called
 once per connection in `handle_connection`, strictly before EITHER the
 streaming or the plain-JSON-RPC dispatch path) — checks run cheapest-first,
@@ -3716,24 +3727,40 @@ never spending a signature verification on a request already disqualified
 for a cheaper reason:
 
 1. All four headers present, else `-32007`.
-2. `X-Aoide-Peer` is a well-formed name, else `-32007`.
-3. Resolves to a peer in `state/peers.json`, else `-32007` ("unknown peer").
-4. That peer is `verified`, else `-32007`.
-5. That peer has a stored `pubkey`, else `-32007`.
-6. `X-Aoide-Timestamp` parses as ISO-8601, else `-32007`.
-7. **Replay guard, timestamp half**: the timestamp is within
+2. `X-Aoide-Peer` is a well-formed name, else `-32007` — wire-format
+   validity only; the VALUE never selects a record.
+3. `X-Aoide-Timestamp` parses as ISO-8601, else `-32007`.
+4. **Replay guard, timestamp half**: the timestamp is within
    `aoide_storage::wire_auth::signature_skew_secs()` of this instance's own
    "now" (±120s default, `AOIDE_SIGNATURE_SKEW_SECS` overrides) — else
    `-32008`, a taught error naming BOTH timestamps (the request's claimed
    time and this instance's own "now") and the configured window.
-8. The signature verifies against the canonical string rebuilt from the
-   VERIFIER's own parsed request (never trusting a wire-carried canonical
-   string) and the peer's stored `pubkey` — else `-32007` ("signature
-   verification failed").
-9. **Replay guard, nonce half**: `(peer name, nonce)` has not been seen
-   before by this server process — else `-32009`. The nonce is recorded
-   ONLY after every earlier check (including the signature itself) passes,
-   so a forged or garbage nonce never consumes a cache slot.
+5. **By-key resolution**: the signature — over the canonical string rebuilt
+   from the VERIFIER's own parsed request (never trusting a wire-carried
+   canonical string) — is tried against every `verified` peer's stored
+   `pubkey` in `state/peers.json` (operator-curated small N; one ed25519
+   verify is microseconds; an unverified or keyless record never enters the
+   trial set, so an unverified peer can never be resolved by signature). No
+   key verifies → `-32007` "signature verification failed" — ONE code path
+   and ONE message whether the signing key is unknown, the peer is
+   unverified/keyless, or a known peer's signature is simply bad: the
+   refusal is never an existence oracle over the registry.
+6. **Collision semantics**: exactly one record's key verifies → that record
+   IS the caller. Multiple verified records sharing the verifying pubkey
+   (possible — `upsert_paired_peer` matches by name only, so one remote
+   instance paired under two names yields two records with one key): the
+   record whose name exactly matches the claimed `X-Aoide-Peer` wins (both
+   candidates hold the same PROVEN key, so the tiebreak picks among
+   equal-security records — it never elevates a name to identity); no
+   exact-name match → `-32007` "ambiguous signer", a taught refusal — the
+   records' `allows`/`autogate` may differ, so guessing is never allowed.
+7. **Replay guard, nonce half**: `(verifying pubkey, nonce)` has not been
+   seen before by this server process — else `-32009`. Keyed on the PUBKEY,
+   not any name: `X-Aoide-Peer` is outside the canonical string, so a
+   captured request replayed under a shared-key twin's name still lands on
+   the same cache key. The nonce is recorded ONLY after every earlier check
+   (including the signature itself) passes, so a forged or garbage nonce
+   never consumes a cache slot.
 
 A request that fails ANY of these fails CLOSED — no fallthrough to the
 addr/token resolution ladder for a request that claims to be a paired
@@ -3745,7 +3772,7 @@ arms, `tasks/get`, the AgentCard GET) apply exactly as before this phase,
 for every caller that never signs.
 
 **Nonce cache** (`aoide-server::a2a::NONCE_CACHE`) — a bounded, in-memory,
-PER-`a2a serve`-PROCESS `VecDeque<(peer, nonce)>`, capped at 4096 entries
+PER-`a2a serve`-PROCESS `VecDeque<(pubkey, nonce)>`, capped at 4096 entries
 (`NONCE_CACHE_CAP`), FIFO-evicting the oldest entry once full. No file
 behind it, unlike everything else this door's peer/pairing state persists
 — an `a2a serve` restart clears it outright, a known and accepted
@@ -3759,9 +3786,10 @@ hostile or malfunctioning peer, never expected to be reached in normal
 operation.
 
 **New JSON-RPC error codes**: `-32007` (signature verification failed —
-covers every malformed-header/unknown-peer/unverified-peer/no-pubkey/bad-
-signature shape above), `-32008` (clock skew beyond the window), `-32009`
-(nonce replay).
+covers the malformed-header and ambiguous-signer shapes above, plus the
+single no-key-verifies refusal that unknown-key/unverified-peer/keyless-
+record/bad-signature all collapse into), `-32008` (clock skew beyond the
+window), `-32009` (nonce replay).
 
 **Spawn gate narrows again: PeerRung::Signature only.** `aoide_storage::
 peer_store::PeerRung` gains a third variant, `Signature` — the new
