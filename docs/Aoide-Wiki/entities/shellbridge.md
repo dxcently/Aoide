@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, bridge, ipc, desktop]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -39,7 +39,11 @@ atomic writer (write-temp-then-rename) seeds both files with their v0
 shapes and keeps them current as sessions come and go.
 
 The socket accept loop binds the contract socket and accepts newline-JSON
-commands: a `{cmd:"focuswindow", address}` line calls `focus_window`
+commands, reading the connector's kernel-truth uid/pid (`SO_PEERCRED`,
+`graph::identity::peer_cred`) on every accept and refusing a cross-uid
+connection outright — fail-closed like the secrets broker's admin gate; a
+cross-uid floor, not a same-uid guarantee (identity lane P-ID3,
+[[Session-Graph]]'s accounting). A `{cmd:"focuswindow", address}` line calls `focus_window`
 (`hyprctl dispatch focuswindow address:…` directly), and `{cmd:"focussession",
 sessionId}` calls `focus_session` — resolving the session to its window
 first, the SAME library function (`aoide-conduct::graph::window`) the
@@ -90,7 +94,9 @@ project registry, v0 `{schemaVersion, projects: [{name, path}]}`) and
 `state/stage/graph.json` (the resolved DAG, v0 `{schemaVersion, nodes, edges:
 [{from, to, kind}]}`, restaged atomically by `restage_graph` on every
 mutation — no separate emit step). A `sessions.json` record may additionally carry the optional
-`parentSessionId` (additive, still v0), the spawned-by edge. `aoide graph
+`parentSessionId` (additive, still v0), the spawned-by edge, plus the
+identity fields `origin` and `seal`/`sealedIssuedAt` ([[Session-Graph]]'s
+identity section). `aoide graph
 link` and `aoide session start --parent` both write that field;
 shellbridge stamping it at spawn time over the socket is still an open
 thread. The graph stage rewriters round-trip unknown fields, so they never
