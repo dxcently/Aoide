@@ -1091,37 +1091,55 @@ case, and every legacy record); readers must tolerate both forms and
 round-trip fields they do not know.
 
 **Additive in v0 (P-P3, `docs/architecture/PAIRING.md` decision 7; record
-authority tightened at LANE IDENTITY P-ID0, G16/G5):** a session record MAY
-also carry an optional `origin` (string) — `"peer:<name>"` for a session
-`aoide-server`'s A2A door spawned on behalf of an identified, PAIRED peer
-(§6's P-P3 amendment above). `aoide_conduct::graph::session_store::
-stamp_origin` (now `pub`, crossing the crate boundary) is the sole writer,
-change-once like `headless`, but it has exactly two legitimate callers, each
-the record-layer authority for one origin shape: `aoide-server`'s
-`a2a::do_spawn` calls it DIRECTLY on the just-spawned record, from the door
-where the peer name is actually authenticated — this is the only place a
-`peer:*` value may originate. `graph/conduct.rs::session_conduct` calls it
-for a LOCAL-CLASS value off its own inherited `AOIDE_SESSION_ORIGIN` env,
-and REFUSES a `peer:*` shape read from that env (a taught refusal, not a
-panic): inherited env is exactly what a same-uid process can set on itself
-before invoking `aoide conduct` directly, so a `peer:*` value threaded that
-way was never trustworthy — P-ID0 closes that record-layer forgery. Absent
-means "not a peer-initiated spawn" (a locally-launched `conduct`/`spawn`,
-the ordinary case, and every legacy record); readers must tolerate both
-forms. Unlike `resumedFrom`, `origin` gets NO `graph.json` projection —
-like `headless`/`hookAncestry`, it is consumed internally (projected
-verbatim into `state/session-ledger.jsonl`'s own `origin` field at session
-exit, below, AND read back on `aoide resurrect` to carry a peer-origin
-session's provenance forward onto its revived record — G6, same phase)
-rather than rendered into the live graph. **Still not a security claim**:
-`origin` is attribution, not an authenticated credential — a same-uid
-process can still forge a LOCAL-class origin, and neither the session's own
-identity nor the consumer name presenting it are authenticated yet; nothing
-may gate a security decision on it without the sealed credential task #63's
-lane builds next (P-ID1+). What P-ID0 DOES close: the specific `peer:*`
-forgery shape (any local process claiming to BE a peer-spawned session by
-setting one env var) — that shape is now record-layer impossible, not
-merely undocumented.
+authority tightened at LANE IDENTITY P-ID0, G16/G5, review round 1):** a
+session record MAY also carry an optional `origin` (string) — `"peer:<name>"`
+for a session `aoide-server`'s A2A door spawned on behalf of an identified,
+PAIRED peer (§6's P-P3 amendment above). `aoide_conduct::graph::
+session_store::stamp_origin` (now `pub`, crossing the crate boundary) is the
+sole STAMP function, change-once like `headless`, with exactly two legitimate
+callers: `aoide-server`'s `a2a::do_spawn` calls it DIRECTLY on the
+just-spawned record, from the door where the peer name is actually
+authenticated — the only place a `peer:*` value may originate. `graph/
+conduct.rs::session_conduct` calls it for a LOCAL-CLASS value off its own
+inherited `AOIDE_SESSION_ORIGIN` env, and REFUSES a `peer:*` shape read from
+that env (a taught refusal, not a panic): inherited env is exactly what a
+same-uid process can set on itself before invoking `aoide conduct` directly.
+A THIRD path exists and is refused the same way, not silently trusted:
+`aoide resurrect` (`graph/resurrect.rs::origin_to_carry`) reads a revived
+session's `origin` back off its OWN durable ledger entry
+(`state/session-ledger.jsonl`, below) to restore a LOCAL-class session's
+class across a revival (G6) — but `origin_to_carry` refuses to carry a
+`peer:*` shape found there, because the ledger is an UNSEALED append-only
+file: a same-uid process can append a line claiming `origin:"peer:X"` and
+then run the ungated local `resurrect`, which has no door and no seal behind
+it to re-mint that authority. So at the record-STAMP layer, `peer:*` now
+comes ONLY from the door or is refused everywhere else it could be read
+back in. **This does not mean the on-disk files are sealed.**
+`state/session-ledger.jsonl` and `sessions.json` are both still plain,
+same-uid-writable files — a hand-crafted `sessions.json` entry claiming
+`"origin":"peer:X"` is still readable-as-truth by anything that reads the
+file directly (a future consumer, a dashboard, a careless `jq`); P-ID0 only
+closes the STAMP path a live `aoide resurrect`/`conduct` invocation takes.
+Sealing the files themselves so a forged on-disk value can be told apart
+from a genuine one is P-ID1 (the daemon-signed credential)/P-ID2 (the
+peercred floor) — still open, not claimed here. Absent means "not a
+peer-initiated spawn" (a locally-launched `conduct`/`spawn`, the ordinary
+case, and every legacy record); readers must tolerate both forms. Unlike
+`resumedFrom`, `origin` gets NO `graph.json` projection — like `headless`/
+`hookAncestry`, it is consumed internally (projected verbatim into
+`state/session-ledger.jsonl`'s own `origin` field at session exit, below,
+AND read back on `aoide resurrect` to carry a LOCAL-class session's own
+provenance forward onto its revived record — G6, same phase, `peer:*`
+excluded per above) rather than rendered into the live graph. **Still not a
+security claim**: `origin` is attribution, not an authenticated credential —
+a same-uid process can still forge a LOCAL-class origin, and neither the
+session's own identity nor the consumer name presenting it are authenticated
+yet; nothing may gate a security decision on it without the sealed
+credential task #63's lane builds next (P-ID1+). What P-ID0 DOES close: the
+specific `peer:*` forgery shape (a local process claiming to BE a
+peer-spawned session, whether via env or via an unsealed ledger line) is now
+refused at every record-STAMP path this codebase drives — not that the files
+themselves are tamper-evident, which they are not yet.
 
 **Additive in v0 (P-C5, durable-sessions plan):** a session record MAY also
 carry an optional `restore` (object) — a conducted SHELL's continuously-
