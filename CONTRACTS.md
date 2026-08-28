@@ -1867,9 +1867,14 @@ The undying mark: the set of session ids marked DURABLE, so a project's
 whole undying set can be resurrected together. Prototyped under the name
 "carry" (task #96, `state/carry.json`); shipped under this name at
 command-defrag lane U1 (2026-08-27) — same shape and discipline throughout,
-only the vocabulary changed. Four writers, none routed through a stage lock
-or `daemon_dispatch` (this is not a stage-tree file): `aoide session undying
-on|off` sets or clears the mark directly; `aoide spawn --undying` adds the
+only the vocabulary changed. Its command surface moved once more at the
+session-surface redesign (command-defrag lane X, 2026-08-28): the scripted
+spelling is now `aoide session grant undying on|off`, and the picker is
+`aoide session grant undying` bare — both relocated verbatim from `session
+undying`/bare `session`, which this absorbs and retires (hard cutover, no
+alias). Four writers, none routed through a stage lock
+or `daemon_dispatch` (this is not a stage-tree file): `aoide session grant
+undying on|off` sets or clears the mark directly; `aoide spawn --undying` adds the
 newly spawned id once it registers — including from TWO further internal
 call sites, still the SAME writer, not a fifth (U2's own design ruling,
 below): `resurrect`'s bare-manifest mode passes the identical `--undying`
@@ -1878,11 +1883,12 @@ path's spawn and the clean-spawn path's), so a manifest-revived session
 gets marked through the exact code `spawn --undying` itself runs, gated
 the exact same way (registered, not merely launched); `aoide resurrect`
 (flag mode, the ORIGINAL revival path) transfers an undying old id onto
-the freshly spawned session that replaces it; bare `aoide session`'s picker
-(U3, command-defrag lane U) writes the SAME store for every LOCAL row a
+the freshly spawned session that replaces it; `aoide session grant
+undying`'s picker (U3, command-defrag lane U; relocated to this spelling at
+lane X) writes the SAME store for every LOCAL row a
 confirm touches — one `load_undying`, N `set_undying` mutations, one
-`save_undying`, the same discipline `session undying`'s own single-id write
-holds, widened to cover a whole confirm's diff at once. A PEER row the
+`save_undying`, the same discipline `session grant undying`'s own single-id
+write holds, widened to cover a whole confirm's diff at once. A PEER row the
 picker touches never reaches this store at all — the id lives on the peer,
 so the picker writes a `.aoide/project.json` spec instead (see that file's
 own section below). Lives under
@@ -2099,7 +2105,8 @@ nor a registered default launch to summon WITH. Past those three,
 spawn-shaped `message/send` (`context_id: None`) `aoide peer spawn` drives,
 never a re-implementation of the wire and never a shell-out to the `aoide`
 CLI (the `conduct` → `client` dependency edge, documented in `conduct`'s
-own `Cargo.toml`, existed already for `who`'s live peer probe and gained
+own `Cargo.toml`, existed already for the roster core's live peer probe
+(reached via bare `session`/`--hosts`) and gained
 this second tenant). No confirm prompt: the manifest spec IS the
 operator's own standing declaration, the same posture the local clean-spawn
 already takes toward a spec's `command`. Text summoned is the spec's own
@@ -2151,7 +2158,10 @@ no ordinary-revive case to protect against here: every manifest-mode spawn
 already came from an explicit, operator-authored declaration.
 
 **The picker's peer writer (U3, command-defrag lane U; review round 1 fixed
-the batch-poisoning defect below, same phase).** Bare `aoide session` opens
+the batch-poisoning defect below, same phase; relocated to `aoide session
+grant undying` bare at the session-surface redesign, command-defrag lane X,
+2026-08-28 — bare `aoide session` itself now renders the roster instead).**
+`aoide session grant undying` bare opens
 a tty multi-select over local sessions AND every registered peer's CACHED
 sessions (`peer_store::load_peer_cache`, no live pull); a local row's mark
 toggles `state/undying.json` (above), but a PEER row's id lives on the
@@ -4088,7 +4098,7 @@ claude.ai
   │  root AGENTS.md Tier 3 — never enabled by an agent)
   ▼
 some mesh host's aoided-adjacent session
-  │  aoide who / peer registry (peer_store::PeerRegistry) enumerates
+  │  aoide session --hosts / peer registry (peer_store::PeerRegistry) enumerates
   │  the mesh — no second inventory (§7)
   ▼
 send --to peer/<query>  (aoide_storage::addr::resolve)
@@ -4592,8 +4602,8 @@ still the sole authority.
 
 **Bare `aoide pair`** (task #120 P3) is the friendly, interactive entry
 onto the same rails: CLI-door + real-tty only (the same
-`pick::interactive` gate bare `session` holds — a non-tty, non-CLI, or
-`--json` invocation gets a taught pointer at the scripted spellings,
+`pick::interactive` gate `aoide session grant undying` bare holds — a
+non-tty, non-CLI, or `--json` invocation gets a taught pointer at the scripted spellings,
 never a hang), it runs ONE bounded ~2s sweep, filters out this box's own
 advertisement, and opens a select menu over the candidates — each row the
 already-validated name plus claimed ssh hop and OBSERVED source, claim
@@ -4750,7 +4760,8 @@ secret THIS instance resolves through the local secrets broker's unix-socket
 wire (this document's "Secrets wire" subsection, self-asserted consumer
 `a2a-client`) and presents as `Authorization: Bearer <value>` on every
 OUTBOUND call to this peer's own A2A door (`peer pull`, `send --to`,
-and `who`'s live presence probe — `aoide-client::commands::
+and the roster core's live presence probe (bare `session`/`--hosts`) —
+`aoide-client::commands::
 resolve_peer_bearer`/`post_json`). Resolved fresh on every request, never
 cached; a resolve failure (broker unreachable, denied, or a bounded ~2s
 timeout) fails the outbound call outright with a message naming the secret
@@ -4923,9 +4934,12 @@ below never duplicates.
 
 `aoide peer list [--json]` (task #120 P2, registered appended-newest at the
 END of `schema --json`'s order, from `aoide-conduct` — the roster folds
-`who`'s probe core, and `aoide-client` cannot depend on `aoide-conduct`) is
+the roster core's own probe (`who.rs`; reached via bare `session`/
+`--hosts` — the standalone `who` command it originally backed is retired,
+session-surface redesign, command-defrag lane X, 2026-08-28), and
+`aoide-client` cannot depend on `aoide-conduct`) is
 the one-glance MESH roster: one row per known node — this host first
-(`this host`, like `who`), every registered peer, then every advertising
+(`this host`, same as bare `session --hosts`), every registered peer, then every advertising
 instance heard on the LAN — with each node's running sessions (agent,
 state, petname/short-id) indented beneath it. Marks: `●` paired/local and
 online, `○` paired but offline (`last seen <fetchedAt>` off the pull
@@ -4935,7 +4949,7 @@ pair-candidate row showing the OBSERVED source address. An online paired
 row's addr is its `via` ssh marker when set, else its registered `url`
 (doors are loopback-bound — a tunneled peer's `url` is `127.0.0.1`, so
 the hop is what distinguishes it); an offline row's addr is `—`. Presence and
-sessions come from `who`'s own live-probe-with-cache-fallback core
+sessions come from the roster core's own live-probe-with-cache-fallback core
 (`aoide-conduct::graph`, one bounded ~2s probe per peer, in parallel —
 never a second prober), advertising from ONE bounded discovery sweep
 (`aoide-client::discover::run_sweep`, ~2s, run concurrently with the

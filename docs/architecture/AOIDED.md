@@ -294,7 +294,7 @@ Remote reach composes what already exists:
 - **Ingress**: the Tier-3 Aoide MCP connector, user-enabled only, never by
   an agent (root `AGENTS.md`, Tier 3). A claude.ai session lands on some
   mesh host's door.
-- **Enumerate**: `aoide who` / the peer registry
+- **Enumerate**: `aoide session --hosts` / the peer registry
   (`storage/src/peer_store.rs:35` `Peer`, `:61` `PeerRegistry`) name the
   mesh; each peer's capability card is its A2A AgentCard, derived from that
   binary's own `schema --json` with `implemented`-only skills
