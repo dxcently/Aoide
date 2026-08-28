@@ -44,7 +44,7 @@ entries through its own `commands::register(&mut Registry)` function;
 `aoide_secrets` in turn, plus its own `meta`/`stubs`/`infra` groups.
 `aoide_secrets::commands::register` is newest, contributing the
 [[Secrets-Broker]] group (`serve`/`exec`/`add`/`rm`/`grant`/`revoke`/
-`enroll`/`put`/`set-totp`/`automate`/`expose`/`migrate`/`pending`/`approve`/
+`enroll`/`put`/`set-totp`/`automate`/`expose`/`allow-remote-origin`/`migrate`/`pending`/`approve`/
 `dismiss`/`watch`). P-A5 of the binary-split workstream moved 11 painted
 groups (rice/draft/mode/cover/livery/shellbridge/quickshell/screen/herald/
 take — 39 command paths) into `crates/lyra/src/commands/mod.rs::all()`.
@@ -58,10 +58,10 @@ unit test in `registry.rs` pins the sorted set of every command path, so
 adding, removing, or renaming a leaf shows as a deliberate diff against that
 snapshot.
 
-The command surface holds **59 leaves across the groups this page tracks**;
-`aoide schema --json | jq '.commands | length'` reports 81, since further
+The command surface holds **60 leaves across the groups this page tracks**;
+`aoide schema --json | jq '.commands | length'` reports 82, since further
 commands exist that are not yet covered here: the `inbox` group, `who`,
-`events tail`, `identity`, bare `pair` (the interactive pairing picker),
+`events tail`, `identity` (the keypair read surface — [[Pairing-Ceremony]]), bare `pair` (the interactive pairing picker),
 the `melete` group (`status`/`graph`/`call`),
 and the `peer` group's `hub`/`allow`/`spawn`,
 `discover`/`invite`/`advertise`/`list`, and 5-command `pair` ceremony
@@ -90,7 +90,7 @@ the groups it documents.
 | `conductor` | 1 | real |
 | `a2a serve` | 1 | real |
 | `peer add/remove/pull/status` | 4 | real (same-network federation — `CONTRACTS.md` §7) |
-| `secrets serve/exec/add/rm/grant/revoke/enroll/put/set-totp/automate/expose/migrate/pending/approve/dismiss/watch` | 16 | real ([[Secrets-Broker]] — TOTP-gated resolves, socket-only, own uid) |
+| `secrets serve/exec/add/rm/grant/revoke/enroll/put/set-totp/automate/expose/allow-remote-origin/migrate/pending/approve/dismiss/watch` | 17 | real ([[Secrets-Broker]] — TOTP-gated resolves, socket-only, own uid) |
 | `usage` | 1 | real |
 | `hooks install` | 1 | real |
 | `soundcheck` | 1 | real — report-only mechanical-integrity sweep of the working tree; writes nothing |
