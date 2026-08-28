@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-23
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, agent, cli, secrets, totp, security, broker]
 ---
 
@@ -33,7 +33,8 @@ releases across the socket into the CALLING process:
 ```
 agent  ──►  aoide secrets exec --as <consumer> --secret <name> [--totp NNNNNN] -- <cmd>
         ──►  client (caller's own uid) connects, sends {op:"resolve", secret, consumer, totp?}
-        ──►  broker (aoide-secrets uid): policy gate → TOTP gate (if required)
+        ──►  broker (aoide-secrets uid): policy gate (exists → consumer
+             authorized → remote-origin) → TOTP gate (if required)
              → fetch via the backend, AS THE BROKER'S OWN UID
              → release the value over the socket
         ──►  client injects it as an env var and execs the wrapped command,
@@ -56,18 +57,22 @@ terminal this becomes a `y/N` confirmation instead of a silent overwrite.
 operator-side command (run as `sudo -u aoide-secrets aoide secrets put …` in
 deployment), not an agent-facing one.
 
-## Policy: consumers, TOTP, automation, and remote reachability
+## Policy: consumers, TOTP, automation, remote reachability, and caller origin
 
 Every secret is exactly one policy entry: a name, a backend, a key, a
-`consumers[]` list, a `requireTotp` bit, an `automation` gate, and a
-`remote` bit. A credential with multiple fields (a username and a password)
-is modeled as multiple named secrets, each with its own policy — there is
-no multi-field resolve.
+`consumers[]` list, a `requireTotp` bit, an `automation` gate, a `remote`
+bit, and an `allowRemoteOrigin` bit. A credential with multiple fields (a
+username and a password) is modeled as multiple named secrets, each with its
+own policy — there is no multi-field resolve.
 
 `consumers[]` is checked against the wire's `consumer` field, which is
 **self-asserted** — nothing on the socket authenticates it. The group
 membership required to reach the socket at all is the real boundary;
 `consumers[]` is a courtesy label on top of it, not a cryptographic one.
+The sealed session credential authenticates the calling SESSION and its
+origin class, never this string — consumer-name authentication is a
+separate, unbuilt axis (the identity lane's first named remainder,
+[[Session-Graph]]'s accounting).
 
 **TOTP.** A secret with `requireTotp: true` verifies a caller-supplied code
 against a per-host RFC 6238 enrollment (`aoide secrets enroll`, hand-rolled
@@ -97,6 +102,40 @@ so an operator can pre-declare which secrets are meant to ever leave the
 host; every non-local entry point added later refuses a secret whose
 `remote` is `false` before touching its backend. `secrets expose <name>
 on|off` flips it.
+
+**Caller origin.** A policy's `allowRemoteOrigin` bit (default `false`;
+`secrets allow-remote-origin <name> on|off` flips it) is the third axis and
+the sealed session credential's first policy consumer ([[Session-Graph]]).
+The three axes answer three different questions and are never conflated:
+`remote` is transport — may this secret be SERVED through a non-local entry
+point; `automation` is the code — may a listed consumer skip TOTP;
+`allowRemoteOrigin` is caller provenance — may a session a REMOTE PEER
+created resolve this secret LOCALLY. Gate order is exists → consumer
+authorized → remote-origin → TOTP → fetch. The broker resolves each
+connection's caller from kernel facts alone — the connection's
+`SO_PEERCRED` pid, a walk of its real `/proc` ancestry to a sealed session
+record, and the seal verified against the daemon's live `ping`-fetched
+public key (`aoide_storage::attest::attested_caller`, the same walk and
+verify the send gate uses; nothing the wire asserts enters it) — and
+refuses a caller whose sealed `originClass` is `peer:*` before the
+TOTP/park branch unless the bit is on. The refusal names the flag, the
+session, and its origin, and audits name-only. The boundary is exact: the
+gate narrows positively-attested remote-origin sessions; it does not
+authenticate local ones. An UNIDENTIFIED caller — no sealed session in its
+ancestry, an unreachable daemon, an unreadable roster — is not refused:
+local unidentified callers were always admitted, and the gate keys only on
+positive attestation (the lane's same-uid honesty, OQ1-A). The same
+residual composes through the daemon's reseal sweep: a same-uid process
+can append an unsealed roster row asserting `origin: local` for its own
+pid, and the sweep signs whatever the row asserts — laundering a forged
+local class into a POSITIVE attestation, closable only by an authenticated
+registration path (a named remainder). In the packaged cross-uid deployment
+(the broker runs as the `aoide-secrets` system user) the operator's daemon
+socket and session roster are unreachable from the broker, so every caller
+there resolves unidentified and the gate is dormant; a cross-uid
+attestation channel is a named, deliberately unbuilt remainder, and the
+gate bites wherever the broker runs as the operator's own uid (the
+cargo-only deployment).
 
 ## Parked asks — a codeless TOTP resolve waits instead of refusing
 
@@ -213,7 +252,7 @@ dependency — the broker has no business caring whether a desktop session
 exists) with the socket path and secrets home set explicitly.
 `aoide.secrets.members` names which users join `aoide-secrets-access`; no
 sudo rule ships, so every admin command (`add`/`rm`/`grant`/`revoke`/
-`enroll`/`set-totp`/`automate`/`expose`/`migrate`) runs by hand as
+`enroll`/`set-totp`/`automate`/`expose`/`allow-remote-origin`/`migrate`) runs by hand as
 `sudo -u aoide-secrets aoide secrets …`, refused outright — root included —
 if the invoking uid doesn't own the secrets home. The service's own `path`
 carries `bash`, `coreutils`, and `age` (the backend templates shell out to
@@ -236,6 +275,7 @@ events feed `watch` tails moved off it.
 - [[Agent-Interface]]
 - [[Governance]]
 - [[A2A-Door]]
+- [[Session-Graph]] — the sealed session credential the origin gate consumes
 - [[aoide-cli]]
 - [[Secrets-Commands]]
 - [[CLI-Reference]]
