@@ -618,14 +618,17 @@ count.
   authoritative count at any given moment; the headline above tracks it,
   the prose trail does not.
 - `lyra schema --json` — the AoideOS-surface contract: onboard/rice/draft/
-  mode/cover/livery/quickshell/screen/shellbridge/herald, the painted
-  surface. **43 commands** (`crates/lyra/src/registry.rs`'s golden test —
-  two more than the group list alone: `mcp.serve` must itself be a
-  registered path for `aoide_protocol::door::parse` to ever reach lyra's
-  `special` closure on `mcp serve --stdio`, and `onboard` (P-I3,
-  docs/architecture/ONBOARD.md) is lyra's own root-coupled command, not
-  named in any painted group). Lyra alone may shell out to nix
-  (`song/widgets.rs`, and `onboard`'s own `nix eval`/`nix-instantiate`).
+  mode/cover/livery/quickshell/screen/shellbridge/herald/take/element, the
+  painted surface. **45 commands** (`crates/lyra/src/registry.rs`'s golden
+  test — `mcp.serve` must itself be a registered path for
+  `aoide_protocol::door::parse` to ever reach lyra's `special` closure on
+  `mcp serve --stdio`, one of the root-coupled extras beyond the named
+  groups, alongside `onboard` (P-I3, docs/architecture/ONBOARD.md) and
+  `secrets ask` (P3)). `element seed` (L-E1, docs/architecture/ELEMENTS.md)
+  renders a song's committed `elements/*/element.json` — non-QML rice
+  targets (waybar, dunst, anything with a config file) — into
+  `run/elements/`. Lyra alone may shell out to nix (`song/widgets.rs`, and
+  `onboard`'s own `nix eval`/`nix-instantiate`).
 
 A consumer wanting the whole desktop's capability inventory reads both.
 This was never a version bump: `schemaVersion` stays `"0"` on both —
@@ -3164,6 +3167,88 @@ one `kind = "surface"` entry (`demo`), proving the whole pipeline —
 nix option → build-time `registry.json` walk → `rice lint` → `rice
 stage` hot-sync → `SongSurfaces.qml` render — end to end. No
 committed song declares a `kind = "dock"` entry yet.
+
+### Elements
+
+A song may also carry non-QML rice targets — waybar, dunst, a compositor,
+anything with a config file — the same EDIT/SAVE/DRAFT loop the QML
+widgets above already get. The design authority is
+`docs/architecture/ELEMENTS.md` (task #121); this subsection pins the
+descriptor's on-disk contract and `run/elements/`'s runtime shape.
+`crates/song/src/elements.rs` is the one parser/render pipeline every
+consumer (`element seed`, and later `rice stage`/the elements facet) calls
+through — never a second implementation.
+
+**The descriptor:** one `song/songbook/<song>/elements/<element>/element.json`
+per element, v0:
+
+```json
+{
+  "v": 0,
+  "element": "waybar",
+  "files": [
+    { "src": "config.jsonc", "dest": "config", "template": false },
+    { "src": "style.css", "template": true }
+  ],
+  "surfaces": ["bar"],
+  "run": { "exec": "waybar -c {run}/config -s {run}/style.css", "via": "unit" },
+  "reload": "pkill -SIGUSR2 -x waybar"
+}
+```
+
+Field rules, all enforced natively (`elements::parse_descriptor`), taught
+on refusal:
+
+- `v` — descriptor version. `0` is the only version this parser knows;
+  any other value refuses.
+- `element` — must match `^[a-z0-9][a-z0-9-]*$` (the same shape
+  `compose::valid_song_name` enforces on song names — one function, not a
+  second regex) AND must equal the directory it was read from; a mismatch
+  refuses.
+- `files` — the ordered manifest, at least one entry. `src` is relative to
+  the element dir; `dest` is relative to `run/elements/<element>/` and
+  defaults to `src`. Both are validated against traversal: every path
+  component must be an ordinary segment — no `..`, no leading `/`, no bare
+  `.` — or the descriptor refuses. `template` defaults to `false`
+  (verbatim byte copy, no UTF-8 requirement); `true` renders the file
+  through `livery::emit::file::render` (`{{group.key}}`, group ∈
+  palette|base16|bar|notif|window) against the resolved livery — an
+  unknown or malformed placeholder is a structured error, never a silent
+  no-op.
+- `surfaces` — optional list of surface names the element claims; folded
+  into `aoide.surfaces` with `owner = "<element>"` once the elements facet
+  (L-E3) lands. Not consumed by the cargo pipeline itself.
+- `run.exec` — the full command line; the literal token `{run}` is
+  substituted with the absolute `run/elements/<element>` path at
+  generation time (`elements::substitute_run_token`) — never re-expanded
+  at runtime.
+- `run.via` — exactly `"unit"` or `"exec-once"`; anything else refuses.
+- `reload` / `restart` — optional command overrides for the facet's
+  restart derivation (L-E2/L-E3); not read by the cargo render pipeline.
+
+**Render pipeline:** for each element, every declared file is rendered
+into memory FIRST — verbatim copy or template render — and only written
+(atomically, `aoide_storage::fs::atomic_write_bytes`) once every file for
+that element rendered without error. A render error therefore fails only
+that one element and leaves its existing `run/elements/<element>/`
+completely untouched, never partially overwritten; every other element in
+the same call still renders. `_`-prefixed element directories are skipped
+(the same shelving convention `_widgets/` gets everywhere else).
+
+**`run/elements/`:** `$AOIDE_ROOT/run/elements/<element>/`
+(`aoide_storage::fs::run_elements_dir`) — a sibling of `run/qml`, resolving
+off the exact same runtime root and the same `$AOIDE_STAGE_DIR` override.
+The ONLY place a running element reads its config from; nothing under
+`~/.config` is ever managed or symlinked. `element seed <song>` (lyra-only,
+`crates/lyra`) is the shell-reachable bridge that renders one song's whole
+`elements/` tree into it, against that song's own committed `livery.json`.
+
+**Landed vs. designed (L-E1 only):** the descriptor parser, the render
+pipeline, `run_elements_dir()`, and `element seed` are implemented and
+tested. `rice stage` does not yet render elements as part of the stage
+loop, and no nix facet yet reads `elements/` at eval or generates a
+systemd unit / exec-once line / `aoide.surfaces` claim — those are L-E2
+and L-E3, later phases in the same lane, not yet built.
 
 ---
 
