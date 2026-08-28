@@ -23,7 +23,7 @@ updated: 2026-08-28
 - [[Song-Vocabulary]] — what each song term maps to in the performed half, and how replay makes a committed song host-agnostic
 - [[Song-Anatomy]] — what every `song/` subfolder is for, committed score vs gitignored runtime, who writes each, and the six stage files
 - [[Agent-Interface]] — the `aoide` command surface, MCP as a generated façade, the guide tiers, and per-command ergonomics
-- [[A2A-Door]] — the bidirectional Agent2Agent door: `a2a serve` agent, the `peer` group as the outbound client, concept mapping, rebuild-time admission, token auth
+- [[A2A-Door]] — the bidirectional Agent2Agent door: `a2a serve` agent, the `peer` group as the outbound client, concept mapping, rebuild-time admission, pairing-gated spawn with signed requests
 - [[Peer-Federation]] — folding another instance's session graph in as a subtree: `state/peers.json`, the peer-cache TTL, the `peer` CLI group; direct dial by default
 - [[Pairing-Ceremony|Pairing Ceremony]] — the one verification between two instances: commit-then-reveal over the A2A door, a locally-derived SAS both humans confirm, the five `peer pair` commands, the gate-classed events feed
 - [[Peer-Transport|Peer Transport]] — reaching a loopback-bound door from another box: the `Peer.via` marker, dial resolution through a session-scoped ssh tunnel, signature-outranks-loopback for Inject
@@ -40,7 +40,7 @@ updated: 2026-08-28
 - [[Package-Layout]] — the landed pi-style single-charter crate split of `pkgs/aoide`, the per-crate charters, and the two-binary split (`aoide`/`aoided` vs `lyra`)
 - [[Agent-Hooking]] — how any harness registers on the conductor: hook payloads through the `AgentProfile` seam, the `session` commands, the conduct wrapper
 - [[Conductor-TUI]] — the `aoide conductor` interactive terminal frontend: seven panels, keys, what each dispatches
-- [[Secrets-Commands]] — the `aoide secrets` credential door's 16 commands: direct-home admin, over-the-socket operator, and the daemon itself
+- [[Secrets-Commands]] — the `aoide secrets` credential door's 17 commands: direct-home admin, over-the-socket operator, and the daemon itself
 - [[Controls]] — the day-to-day surface: rebuild aliases, compositor keybinds, the bar's click/scroll/hover interactions, shell aliases
 - [[Screen-Control]] — `lyra screen`, AoideOS's computer-use surface: look, ground, act, verify — fourteen commands behind one CLI group
 
