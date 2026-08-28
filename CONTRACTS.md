@@ -1146,16 +1146,21 @@ case, and every legacy record); readers must tolerate both forms. Unlike
 `state/session-ledger.jsonl`'s own `origin` field at session exit, below,
 AND read back on `aoide resurrect` to carry a LOCAL-class session's own
 provenance forward onto its revived record — G6, same phase, `peer:*`
-excluded per above) rather than rendered into the live graph. **Still not a
-security claim**: `origin` is attribution, not an authenticated credential —
-a same-uid process can still forge a LOCAL-class origin, and neither the
-session's own identity nor the consumer name presenting it are authenticated
-yet; nothing may gate a security decision on it without the sealed
-credential task #63's lane builds next (P-ID1+). What P-ID0 DOES close: the
-specific `peer:*` forgery shape (a local process claiming to BE a
-peer-spawned session, whether via env or via an unsealed ledger line) is now
-refused at every record-STAMP path this codebase drives — not that the files
-themselves are tamper-evident, which they are not yet.
+excluded per above) rather than rendered into the live graph. **The RAW field is attribution,
+never a gate**: a same-uid process can still forge a LOCAL-class `origin`
+string, so nothing gates a security decision on the field as read off
+disk. The AUTHENTICATED form is the sealed credential below (P-ID1+): a
+consumer trusts only the `originClass` carried inside a seal that VERIFIES
+against the daemon's live key — the secrets broker's origin gate (P-ID4,
+the "Secrets home" section's origin-gate paragraph) is the model consumer,
+and the consumer NAME presenting a request stays unauthenticated either
+way (a separate, unbuilt axis — the lane accounting below). What P-ID0
+closes: the specific `peer:*` forgery shape (a local process claiming to
+BE a peer-spawned session, whether via env or via an unsealed ledger line)
+is refused at every record-STAMP path this codebase drives; what the files
+themselves are and are not is the paragraph above, and the
+sweep-relaunder residual (the origin-gate paragraph in "Secrets home")
+names the forged-LOCAL-row shape that still slips through under OQ1-A.
 
 **Additive in v0 (LANE IDENTITY P-ID1/P-ID2) — the sealed session
 credential.** A session record MAY also carry an optional `seal` (string,
@@ -1362,6 +1367,30 @@ incapable of impersonating one. Threading the connecting peer's real pid
 into the gate itself — so a proxied `send` resolves the ACTUAL caller
 rather than merely failing closed — would touch `graph/send.rs`'s gate,
 out of this phase's scope fence; deferred, not forgotten.
+
+**The lane's accounting — what LANE IDENTITY (#63) enforces, and what it
+leaves open.** Enforced, end to end: `origin` is write-once and
+door-stamped (P-ID0); every live, pid-carrying session carries a
+daemon-sealed credential (P-ID1, the `seal` field above); the send gate
+and the per-session socket's accept key on kernel facts plus a verified
+seal, never env (P-ID2); shellbridge and the dispatch socket hold a
+cross-uid peercred floor (P-ID3); the secrets broker's `allowRemoteOrigin`
+gate is the credential's first policy consumer (P-ID4, the "Secrets home"
+section); the peer wire resolves identity by verifying KEY, never claimed
+name (P-ID5, §6). Open, each named deliberately rather than implied
+closed: (1) consumer-name authentication — the seal authenticates the
+SESSION and its CLASS, never the self-asserted `consumer` string; a
+separate, unbuilt axis. (2) OQ1-B, the own-uid daemon — not taken; Yama
+`ptrace_scope>=1` plus process liveness stay the trust root, and the
+same-uid daemon-impersonation and sweep-relaunder residuals (above, and
+the origin-gate paragraph) are inherent to that choice. (3) A cross-uid
+attestation channel — the packaged `aoide-secrets` broker cannot reach the
+operator's daemon socket or session roster, so the origin gate is dormant
+in that deployment. (4) An authenticated registration path — the closer
+for the sweep-relaunder shape. (5) Per-surface dispatch-door gates riding
+the attested-caller lookup. (For readers following the plan file's "LANE
+IDENTITY (#63)": G1–G17 are its gap catalogue, OQ1-A/OQ1-B its
+threat-model fork — OQ1-A is the answered choice.)
 
 **Additive in v0 (P-C5, durable-sessions plan):** a session record MAY also
 carry an optional `restore` (object) — a conducted SHELL's continuously-
@@ -2659,8 +2688,10 @@ consumer/secret name in this crate). **Honesty note, same shape as
 `resolve`'s own `consumer` field above:** `automation.consumers` names are
 matched against the SAME self-asserted wire `consumer` field, so an
 automation-open secret is effectively code-free for any local socket
-caller claiming a listed name until authenticated session identity exists
-(#63-adjacent) — this is a documented limitation, not a bug, mirroring the
+caller claiming a listed name — the sealed session credential (§4's
+identity section) authenticates the calling SESSION and its origin CLASS,
+never this string, so consumer-NAME authentication remains a separate,
+unbuilt axis. This is a documented limitation, not a bug, mirroring the
 replay-ledger ruling `crates/secrets/AGENTS.md` already carries for the
 identical reason.
 

@@ -47,8 +47,12 @@ there is no "this peer may spawn, that one may not."
    exactly what changed. Unknown capability strings are refused.
    `autogate` stays its own field (landed semantics, not churned).
    Default for a PAIRED (verified) peer: `["read", "spawn"]`.
-   An unpaired peer: empty set. Session-level granularity is #63's
-   lane, not this one.
+   An unpaired peer: empty set. Session-level granularity stays open:
+   the identity lane (#63) landed the sealed session credential and
+   the broker's origin gate, but per-session capability gates (the
+   per-surface dispatch-door gates riding the attested-caller lookup)
+   are a named, unbuilt remainder — CONTRACTS.md's identity-lane
+   accounting.
 6. **The spawn gate flips hard.** Spawning requires an identified
    (paired) peer whose `allows` contains `"spawn"`. The door-wide
    bearer alone no longer reaches the spawn arm; the refusal is a
