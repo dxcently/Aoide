@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-30
-updated: 2026-08-27
+updated: 2026-08-28
 tags: [aoide, bridge, desktop, widget, quickshell, session, ipc]
 ---
 
@@ -46,6 +46,7 @@ IPC. This page is the contract both sides are built to.
 | `cwd` | live working directory (a conducted shell's follows `cd`). |
 | `parentSessionId` | the tree edge — a sub-agent's owner, or a nested claude's launcher. |
 | `agent`, `windowAddress`, `workspace`, `pid`, `conductable`, `socket` | identity + jump/lifecycle. |
+| `origin`, `seal`, `sealedIssuedAt` | provenance and the sealed session credential (identity lane #63, [[Session-Graph]]) — `origin` is write-once attribution, the seal authenticates it; both are consumed by aoide's own gates, never by a widget. |
 
 **Canonical state vocabulary** — the daemon emits these verbatim; the widget
 switches on the string, it does NOT regex-guess:
