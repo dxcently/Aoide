@@ -436,7 +436,7 @@ count.
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker, the
   Melete MCP client).
-  **81 commands** (`crates/cli/src/registry.rs`'s golden test —
+  **80 commands** (`crates/cli/src/registry.rs`'s golden test —
   `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
   `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
   SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
@@ -576,7 +576,7 @@ count.
   as the prompt `do_spawn` types into the newly spawned session's first
   turn (which agent runs is the PEER's own configured
   `aoide.a2a.spawnAgent`, never client-chosen). Refuses an unknown or
-  unpaired peer LOCALLY with a taught error naming `peer pair request`
+  unpaired peer LOCALLY with a taught error naming `peer pair`
   (an unsigned request could never satisfy the remote's `PeerRung::
   Signature`-only gate anyway); every OTHER refusal (allows lacking
   `spawn`, an unsigned/too-old caller, clock skew) is the remote door's
@@ -611,9 +611,12 @@ count.
   to the same constraint (plain unix socket + shell-outs, no nix eval).
   The running `(+N → M)` narrative above stops at 80 (P-P6) — it is
   historical color for how the count reached that point, not a live
-  ledger; the command-defrag lanes (task #101) and the pairing-events
-  watcher (P-P5) that followed changed the count several more times
-  without extending the narrative. `crates/cli/src/registry.rs`'s golden
+  ledger; the command-defrag lanes (task #101), the pairing-events
+  watcher (P-P5), and P-PV2 (the User's locked spec — `peer invite`/
+  `peer pair request` collapsed into ONE smart-target `peer pair
+  <target>`, `peer pair pending` renamed to `peer pending`) all changed
+  the count several more times without extending the narrative.
+  `crates/cli/src/registry.rs`'s golden
   snapshot (mirrored by `lib/vmTest.nix`'s own tripwire) is the ONE
   authoritative count at any given moment; the headline above tracks it,
   the prose trail does not.
@@ -2257,7 +2260,7 @@ pending", never an error). Ids are STABLE 8-hex-char values
 an asynchronous `aoide/pairPoll` arriving arbitrarily later (Design A, task
 #119 — this used to be an asynchronous `aoide/pairApprove` callback landing
 on A's side; now it's A itself polling B's side, whenever it gets around to
-it, possibly long after `peer pair request` exited).
+it, possibly long after `peer pair` exited).
 
 `peer-pairing-inbound.json` — requests THIS instance has parked as the
 approver (`park_inbound`, written by `aoide/pairRequest`'s handler):
@@ -2305,7 +2308,7 @@ same shape this file's commit path always produced before task #131.
 
 `peer-pairing-outbound.json` — requests THIS instance sent as the
 requester and is still waiting to poll for approval on
-(`park_outbound`, written by `peer pair request`):
+(`park_outbound`, written by `peer pair`):
 
 ```json
 { "schemaVersion": "0", "requests": [
@@ -3759,7 +3762,7 @@ message_send`:
   refuse with the SAME taught error (`-32006`, distinct from `-32005`'s
   "no/bad token"): *"spawn refused: spawn requires the caller be
   identified via its own `token_file` (an address match alone never admits
-  spawn) — pair first via `peer pair request`, set `peer add --token-file
+  spawn) — pair first via `peer pair`, set `peer add --token-file
   <path>` if not already configured, then `peer allow <name> spawn on`."*
   The door-wide bearer alone no longer reaches the spawn arm at all — it
   is necessary (Phase G above still gates Spawn's entry point when a token
@@ -4048,7 +4051,7 @@ POST.** Two closes, one commit:
   or an Inject (always `contextId: Some(..)`). The CLIENT gates LOCALLY on
   exactly one question — is `name` a registered, `verified` peer at all —
   refusing an unknown or merely-`peer add`-registered (unpaired) name with
-  a taught error naming `peer pair request`, since an unsigned request
+  a taught error naming `peer pair`, since an unsigned request
   could never satisfy the remote's `PeerRung::Signature`-only requirement
   regardless. It gates on NOTHING else: `allows` lacking `spawn`, an
   unsigned-but-paired caller, clock skew — every other refusal shape is
@@ -4217,7 +4220,7 @@ ADDRESS the kernel routes toward the peer being dialed
 (`aoide-client::commands::outbound_ip_toward` — a `UdpSocket::connect`
 that sends no packet, only resolves a route; falls back to the claimed OS
 hostname only if that lookup itself fails), overridable via `--self-via`
-on `peer pair request`/`peer invite`. The HOST half is deliberately NOT a
+on `peer pair`, either arm. The HOST half is deliberately NOT a
 claimed hostname by default — a live LAN check found hostnames resolving
 only through the router's DHCP-DNS, and two boxes on the same network
 coming back as IPv6/link-local mixes: resolution by luck, exactly the
@@ -4253,7 +4256,7 @@ timer. Nothing about parking ever appears in `state/peers.json` until an
 explicit approval and confirm (below).
 
 **`aoide/pairReveal`** — A's SECOND POST, sent to the SAME door immediately
-after the response above, inside the SAME `peer pair request` invocation
+after the response above, inside the SAME `peer pair` invocation
 (two sequential POSTs, then the CLI prints the SAS):
 
 ```json
@@ -4365,8 +4368,10 @@ B's confirmation is the TYPED pairing code (task #120 P3): B's operator
 types the code as read off A's screen, out-of-band, and it is compared
 against B's own locally derived SAS — the approve prompt never echoes that
 SAS (printing the expected value beside the input would collapse the
-comparison into a copy exercise; `peer pair pending` still shows it — the
-threat model is the comparison, not secrecy). A wrong code counts one try,
+comparison into a copy exercise; `peer pending` shows NO code at all
+either, P-PV2 — the threat model is the comparison, and a listing either
+operator could glance at defeats it the same way an echoed prompt would).
+A wrong code counts one try,
 persisted on the parked entry across invocations (`--code NNN-NNN` is the
 scripted spelling, one try per wrong invocation); the third cumulative
 mismatch auto-denies — the same clean removal `peer pair reject` performs,
@@ -4378,7 +4383,7 @@ already printed the code at request time, so the typed-code gate is B's
 side only). Both humans still engage the SAME code before either side
 calls the pairing done on their own end. A never-confirmed A leaves B
 holding a `verified: true` peer that simply answers nothing until A
-confirms; the fix is a visible, expiring outbound entry (`peer pair
+confirms; the fix is a visible, expiring outbound entry (`peer
 pending`) and an ordinary re-pair, not a special recovery path. `peer pair
 reject <id>` against an outbound entry aborts it at ANY stage
 (`awaiting-approval` or `awaiting-confirm`) — no wire call, no peer record —
@@ -4392,7 +4397,7 @@ discipline `aoide-secrets::park::park_if_room` already holds, closing the
 same unauthenticated-and-unbounded-queue shape that function was built to
 close. The refusal is the distinct `-32000`, a taught error naming the cap
 and its override env var. Outbound entries are operator-created (one `peer
-pair request` invocation each, never wire-driven) and carry no cap.
+pair` invocation each, never wire-driven) and carry no cap.
 
 **SAS derivation** — UNCHANGED by this ceremony rework: a standard
 numeric-comparison Short Authentication String (Bluetooth-SSP-style), no
@@ -4431,7 +4436,7 @@ migration entry.
 
 `aoide/pairRequest`/`aoide/pairReveal` (above) were audit-only until P-P5:
 nothing told a watcher a ceremony milestone had landed short of polling
-`peer pair pending`. `a2a serve`'s `emit_pairing_event` (`aoide-server::a2a`)
+`peer pending`. `a2a serve`'s `emit_pairing_event` (`aoide-server::a2a`)
 now appends one best-effort, never-`?`, never-panicking record onto
 `aoided`'s OWN events feed — the SAME `$XDG_RUNTIME_DIR/aoide/events.jsonl`
 (`aoide_server::daemon::events_path`) `aoided` itself writes through, via
@@ -4503,8 +4508,9 @@ the dialog's own `"Reject request"` extra button (a distinct label from
 `aoide-secrets`' own `"Dismiss ask"` — two ceremonies, two labels, one
 shared reader) rejects; a bare Cancel/Escape ignores the request for the
 rest of that session only; a spawn/infra failure backs off the retry
-cadence and is NEVER treated as a dismissal. The dialog shows no more
-than `peer pair pending` already prints — no fingerprint. `--popup` is
+cadence and is NEVER treated as a dismissal. The dialog is
+the ONE place a pending SAS is ever shown for this arm — `peer
+pending` itself carries none at all, P-PV2 — no fingerprint either way. `--popup` is
 refused up front when `zenity` isn't installed; `--popup`+`--json`
 together is a usage error. Deployed as the graphical-session USER unit
 `aoide-pair-watch.service` (`modules/nucleus/aoided.nix`), gated on
@@ -4529,9 +4535,9 @@ is a plain `0.0.0.0` bind on the fixed port, which hears broadcast and
 unicast datagrams alike.
 
 **Discovery grants NOTHING.** A heard advertisement feeds `peer
-discover`'s printed table, `peer invite`'s target resolution, and `peer
-list`'s advertising marks and `◆` pair-candidate rows (§7's CLI surface)
-ONLY —
+discover`'s printed table, `peer pair`'s hostname arm's target resolution,
+and `peer list`'s advertising marks and `◆` pair-candidate rows (§7's CLI
+surface) ONLY —
 the pairing ceremony above
 (`aoide/pairRequest`/`aoide/pairReveal`/`aoide/pairPoll`) is the ONLY
 thing that ever writes `state/peers.json`; nothing on this subsection's
@@ -4631,30 +4637,33 @@ advertiser CLAIMS; `srcAddr` is what was actually OBSERVED, and the
 address anything downstream dials. This command NEVER writes
 `state/peers.json`.
 
-**Invite** — `aoide peer invite <name> [--secs N] [--yes]` is sugar over
-the ceremony, nothing more: it runs its OWN discover sweep, resolves
-`<name>` against what was heard (exactly one source claiming that name →
-proceed; zero or more than one → a taught error listing every name
-actually heard), composes its dial target from that advertisement's
-OBSERVED `srcAddr` on the house door port (`AOIDE_A2A_PORT` or `8710` —
-the wire deliberately carries no door URL to read a port off; a far end
-on a non-default port takes the explicit `peer pair request <url>` path),
-and on a single match runs the EXACT SAME `run_pair_request` core `peer
-pair request` calls — a shared function, not a copy — against that
-composed target, recording a `via` derived from `srcAddr` plus the
-claimed `user` for the resulting peer's future calls. Before dialing, it
-refuses when the resolved target is this instance's OWN advertisement:
-the heard name matching this instance's own, or the datagram having come
-from loopback — either one a taught refusal (a broadcast always loops
-back to its own sender, so a box that advertises hears itself every
-sweep). Known gap: a serve advertising under a custom `--peer-name`
-flag escapes the name arm (the invite side derives its own name from
-env/hostname only) and the self-heard broadcast arrives on the physical
-interface, missing the loopback arm — such an invite dials this box's
-own door and parks a self-pairing request; confusion, not compromise,
-since both SAS codes land in front of the same operator. `--yes` skips
-only the local proceed-confirm; the ceremony's own mutual SAS
-confirmation (both operators, both ends, decision 4) is untouched and
+**`peer pair`'s hostname arm** — `aoide peer pair <target> [--secs N]
+[--yes]`, when `<target>` does not read as a URL (P-PV2, the User's locked
+spec, superseding the former separate `peer invite` command outright —
+hard cutover, no alias) is sugar over the ceremony, nothing more: it runs
+its OWN discover sweep (default 45s, not `peer discover`'s own ~4s —
+task #129's known miss), resolves `<target>` against what was heard
+(exactly one source claiming that name → proceed; zero or more than one →
+a taught error listing every name actually heard), composes its dial
+target from that advertisement's OBSERVED `srcAddr` on the house door
+port (`AOIDE_A2A_PORT` or `8710` — the wire deliberately carries no door
+URL to read a port off; a far end on a non-default port takes the
+explicit URL-target arm, `peer pair <url>`), and on a single match runs
+the EXACT SAME `run_pair_request` core the url arm calls — a shared
+function, not a copy — against that composed target, recording a `via`
+derived from `srcAddr` plus the claimed `user` for the resulting peer's
+future calls. Before dialing, it refuses when the resolved target is this
+instance's OWN advertisement: the heard name matching this instance's
+own, or the datagram having come from loopback — either one a taught
+refusal (a broadcast always loops back to its own sender, so a box that
+advertises hears itself every sweep). Known gap: a serve advertising
+under a custom `--peer-name` flag escapes the name arm (this arm derives
+its own name from env/hostname only) and the self-heard broadcast arrives
+on the physical interface, missing the loopback arm — such a pair dials
+this box's own door and parks a self-pairing request; confusion, not
+compromise, since both SAS codes land in front of the same operator.
+`--yes` skips only the local proceed-confirm; the ceremony's own mutual
+SAS confirmation (both operators, both ends, decision 4) is untouched and
 still the sole authority.
 
 **Bare `aoide pair`** (task #120 P3) is the friendly, interactive entry
@@ -4665,19 +4674,20 @@ never a hang), it runs ONE bounded ~2s sweep, filters out this box's own
 advertisement, and opens a select menu over the candidates — each row the
 already-validated name plus claimed ssh hop and OBSERVED source, claim
 and observation side by side. Picking a row IS the proceed-confirmation
-and drives the EXACT SAME shared tail `invite` uses (`pair_with_heard` →
-`run_pair_request` — one function, never a copy), so the SAS then prints
-with the approve step for both ends. Hearing nothing teaches `peer
-advertise on` (the other box) and the manual `peer pair request <url>
-[--via …]` path instead of failing.
+and drives the EXACT SAME shared tail `peer pair`'s hostname arm uses
+(`pair_with_heard` → `run_pair_request` — one function, never a copy), so
+the SAS then prints with the approve step for both ends. Hearing nothing
+teaches `peer advertise on` (the other box) and the manual `peer pair
+<url> [--via …]` path instead of failing.
 
 **Spoofed advertisements are phishing, and the ceremony catches them** —
-an attacker advertising a victim's name can lure an invite, but the SAS
-confirmation is mutual: the code on the inviter's terminal must match the
-code on the REAL counterpart's terminal, and that counterpart's own
-operator must approve. An advertisement can misdirect a request; it
+an attacker advertising a victim's name can lure a pair attempt, but the
+SAS confirmation is mutual: the code on the requester's terminal must
+match the code on the REAL counterpart's terminal, and that counterpart's
+own operator must approve. An advertisement can misdirect a request; it
 cannot survive the code comparison. (With two sources claiming one name
-in the same sweep, `invite` refuses as ambiguous before dialing either.)
+in the same sweep, the hostname arm refuses as ambiguous before dialing
+either.)
 
 This subsection introduces no new door and no new field on any existing
 wire shape (§4's peer-pairing files are untouched by this feature) — an
@@ -4747,7 +4757,7 @@ public key on both ends. Re-pairing an EXISTING peer name replaces only
 approve`'s own gate: the typed code on the approver's side, y/N on the
 requester's), never silently. `aoide peer pair watch` (§6's
 "Pairing events feed" subsection, P-P5) is what surfaces a ceremony
-reaching this commit point WITHOUT polling `peer pair pending` by hand —
+reaching this commit point WITHOUT polling `peer pending` by hand —
 it never reads or writes this file directly, only
 `aoide_storage::pairing`'s own parked-request state, the same source
 `upsert_paired_peer` itself commits from.
@@ -4833,7 +4843,7 @@ different questions and are independent of each other — `tokenFile` is what
 THIS peer must present TO us; `bearerSecret` is what we present TO it.
 
 `via` (string, optional, additive per P-S4, ssh-transport lane; set via
-`peer add --via`/`peer invite [--via]`/`peer pair request [--via]`/`peer
+`peer add --via`/`peer pair [--via]`/`peer
 spawn --via`) is an `ssh://[user@]host[:port]` transport marker
 (`aoide_storage::tunnel::parse_via`'s shape). Absent by default (today's
 every peer): every outbound call to this peer — every signed POST AND
@@ -4852,11 +4862,12 @@ such a peer if this one call bypassed the funnel. Either way `peer add`
 registers the peer under its LOGICAL `url`, never the rewritten one.
 `set_peer_via` is the only writer, a sibling to `upsert_paired_peer` rather
 than a parameter on it — and a caller passing `None` means "nothing to
-record," never "clear a previously-set marker": a plain `peer pair
-request` re-pair with no `--via` leaves an existing `via` (e.g. one `peer
-invite` recorded) untouched. A `--via` flag on the command itself always
-beats a peer's own recorded `via`. `peer invite`/bare `pair` additionally
-derive a default `via` from the discovery advertisement's OBSERVED source
+record," never "clear a previously-set marker": a plain `peer pair`
+re-pair with no `--via` leaves an existing `via` (e.g. one an earlier
+`peer pair` hostname-arm pair recorded) untouched. A `--via` flag on the
+command itself always beats a peer's own recorded `via`. `peer pair`'s
+hostname arm/bare `pair` additionally derive a default `via` from the
+discovery advertisement's OBSERVED source
 address plus its claimed ssh login (never a claimed host) and record it on
 the resulting peer at pairing-approval commit time — and (task #131,
 loopback-only doors) that SAME derived default now rides the ceremony's
@@ -5036,29 +5047,46 @@ roster structured: `nodes[]`, each `{mark, name, isLocal, paired,
 verified, advertising, presence, addr, lastSeen, sessions[]}`, plus
 `sweep` (`{heard, dropped}` or `{error}`).
 
-`aoide peer pair request <url> [--name <n>] [--self-url <url>] [--self-via
-<ssh-target>]` / `pending` / `approve <id> [--yes] [--code NNN-NNN]` /
-`reject <id>` (P-P2,
-appended newest
-directly after `peer hub` — §6's "Pairing wire" subsection above has the
-exact wire shapes and SAS derivation) — the pairing ceremony's CLI half.
-`request` sends `aoide/pairRequest` (`--self-via`, task #131, overrides its
-default reach-back hop claim), parks the answer
-(`state/peer-pairing-outbound.json`, §4), and prints the derived SAS.
-`pending` lists this instance's own parked inbound requests, each with an
-independently-derived SAS. `approve` re-derives the SAS from this
-instance's own identity (never trusting a wire-carried code); on an
-INBOUND id the gate is the TYPED pairing code (task #120 P3 — typed at a
-terminal prompt that never echoes the expected code, or `--code NNN-NNN`
-scripted; wrong codes count cumulative, persisted tries and the third
-mismatch auto-denies the request — `--yes` never bypasses this), and a
-match commits a `pubkey`/`verified` peer
-record PURELY LOCALLY (Design A, task #119 — no wire call at all) and marks
-the entry approved for later release; on an OUTBOUND id, POLLS
-`aoide/pairPoll` first (over the SAME forward dial `request` already used)
-and, once approved, prompts `y/N` (`--yes` scripted — this side's own
-screen already printed the code) and commits. `reject` is a clean local
-refusal — no wire call, no peer record, the matching entry simply removed.
+`aoide peer pair <target> [--name <n>] [--self-url <url>] [--self-via
+<ssh-target>] [--via <ssh-target>] [--secs N] [--yes]` / `peer pending` /
+`peer pair approve [<id>] [--yes] [--code NNN-NNN]` / `peer pair reject
+<id>` / `peer pair watch` (P-P2, P-PV2 — the User's locked spec, three
+grill rounds, appended newest directly after `peer hub` — §6's "Pairing
+wire" subsection above has the exact wire shapes and SAS derivation) — the
+pairing ceremony's CLI half. `peer pair`'s `<target>` is SMART: a
+URL-shaped target (containing `"://"`) dials it directly (the former `peer
+pair request`); anything else resolves it by a discovery beacon sweep
+(default 45s — the 4s `peer discover` default proved too short in
+practice, task #129 — the former `peer invite`, which DIED outright in
+the same cutover, no alias). Either arm sends `aoide/pairRequest`
+(`--self-via`, task #131, overrides its default reach-back hop claim),
+parks the answer (`state/peer-pairing-outbound.json`, §4), and prints the
+derived SAS alongside the pending id (the id is the secondary identifier,
+for disambiguating multiple pending requests). `peer pending` lists this
+instance's own parked requests, both directions, by id/direction/name/
+state — NEVER the SAS/confirmation code (P-PV2): the code is read off the
+requester's own screen and typed on the approver's, out-of-band, and a
+listing either operator could glance at would defeat that comparison.
+`peer pair approve` re-derives the SAS from this instance's own identity
+(never trusting a wire-carried code); its `<id>` is OPTIONAL when exactly
+one request is pending (that one is resolved; zero or multiple pending
+without an id is a taught refusal, the multiple case listing every
+pending id). On an INBOUND id the gate is the TYPED pairing code (task
+#120 P3 — typed at a terminal prompt that never echoes the expected code,
+or `--code NNN-NNN` scripted; wrong codes count cumulative, persisted
+tries and the third mismatch auto-denies the request — `--yes` never
+bypasses this), and a match commits a `pubkey`/`verified` peer record
+PURELY LOCALLY (Design A, task #119 — no wire call at all) and marks the
+entry approved for later release; on an OUTBOUND id, POLLS
+`aoide/pairPoll` first (over the SAME forward dial the request already
+used) and, once approved, prompts `y/N` (`--yes` scripted — this side's
+own screen already printed the code) and commits. `peer pair reject` is a
+clean local refusal — no wire call, no peer record, the matching entry
+simply removed. `peer pair approve`/`reject`/`watch` are SUBCOMMANDS of
+`peer pair` and WIN over a hostname positional of the same literal
+spelling (the registry's own greedy longest-prefix match) — a box
+literally named `approve`/`reject`/`watch` cannot be paired by bare
+hostname and needs the explicit URL form instead.
 
 `aoide peer allow <name> <cap> on|off` (P-P3, `docs/architecture/
 PAIRING.md` decision 5, appended newest directly after `peer pair reject`
@@ -5077,7 +5105,7 @@ A2A door; `<text…>` is the prompt typed as the newly spawned session's
 first turn, never a remote-chosen executable (the PEER's own configured
 `aoide.a2a.spawnAgent` is what actually runs). Refuses an unknown or
 unpaired (`verified: false`) `name` LOCALLY with a taught error naming
-`peer pair request`; every OTHER refusal — `allows` lacking `spawn`, an
+`peer pair`; every OTHER refusal — `allows` lacking `spawn`, an
 unsigned-but-paired caller, clock skew — is the remote door's own call,
 surfaced verbatim, never re-derived here. `--yes` skips only the LOCAL
 `y`/`N` confirmation (`peer pair approve`'s idiom); it has no bearing on

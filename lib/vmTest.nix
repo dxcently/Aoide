@@ -341,7 +341,14 @@ pkgs.testers.runNixOSTest {
     # (+1, the grant family — bare `session` itself keeps its existing path
     # throughout, only its meaning changed from the U3 undying picker to
     # the roster), `who` REMOVED (-1, folded into bare `session`/`session
-    # --hosts`) — reached 81.
+    # --hosts`) — reached 81. P-PV2 (the User's locked spec, three grill
+    # rounds) collapses the pairing command surface, net 81 -> 80: `peer
+    # invite` and `peer pair request` DIE outright (hard cutover, no
+    # aliases, -1 -1), folded into ONE smart-target `peer pair <target>`
+    # (+1: a URL dials directly, anything else resolves by discovery
+    # sweep, both arms reusing the same `run_pair_request` core); `peer
+    # pair pending` RENAMES to `peer pending` (path change only, net 0)
+    # and drops the SAS/confirmation code from its rows.
     # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
     # bump BOTH in the same commit that registers a command.
     schema_raw = machine.succeed("aoide schema --json")
@@ -355,8 +362,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 81, (
-        f"expected 81 commands, got {cmd_count}.  "
+    assert cmd_count == 80, (
+        f"expected 80 commands, got {cmd_count}.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 
