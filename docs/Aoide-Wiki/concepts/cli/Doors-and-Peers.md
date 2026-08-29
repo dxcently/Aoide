@@ -503,7 +503,7 @@ aoide peer pair watch [--popup] [--json]
   code at request time).
   `watch` blocks until Ctrl-C, narrating each recognized line; `--json`
   emits one event object per line instead, and `--popup` (opt-in, off by
-  default — `aoide.pairing.popup`) raises a dialog shaped by direction —
+  default — `aoide.a2a.pairingPopup`) raises a dialog shaped by direction —
   `lyra pair ask`/`lyra pair confirm` when `lyra` resolves, `zenity
   --entry`/`zenity --question` otherwise (refused up front only when
   neither resolves; `--popup`+`--json` is a usage error). An inbound

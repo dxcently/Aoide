@@ -23,7 +23,7 @@ module builds against what nucleus declares.
   by pairing direction + `lyra`/zenity feature-detection at P-PV3, task
   #132), running `aoide peer pair watch --popup` — gated on
   `aoide.a2a.enable && aoide.facets.quickshell.enable &&
-  aoide.pairing.popup` (the last DEFAULT FALSE, opt-in on top of the
+  aoide.a2a.pairingPopup` (the last DEFAULT FALSE, opt-in on top of the
   desktop-facet gate, never assumed just because a2a and quickshell are
   both on), the same unit shape `secrets.nix`'s own
   `aoide-secrets-watch.service` below holds — including its

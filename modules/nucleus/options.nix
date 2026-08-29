@@ -639,6 +639,29 @@ in
           writes a peer record.
         '';
       };
+
+      # ── Pairing-ceremony popup (P-PV3, task #132) ─────────────────────────
+      pairingPopup = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Enable the `aoide-pair-watch.service` graphical-session user unit
+          (`aoide peer pair watch --popup`) — a typed-code entry dialog per
+          actionable pairing request, `lyra pair ask` when it resolves
+          (the same six-boxes-plus-dash surface `lyra secrets ask` renders),
+          `zenity --entry` otherwise. Off by default, same house policy as
+          the MCP façade/A2A door/usage poller/secrets broker: the unit is
+          desktop-facet-gated exactly like `aoide-secrets-watch`
+          (`aoide.a2a.enable && aoide.facets.quickshell.enable`), but this
+          flag is the deliberate opt-in ON TOP of that gate — a host with
+          a2a and the quickshell facet both on does NOT get the popup
+          unless it also sets this. It lives in the `a2a` family because it
+          is meaningless without the door (`aoide.a2a.enable` is part of
+          its gate). See `modules/nucleus/aoided.nix` for the unit and
+          CONTRACTS.md §6's "Pairing events feed" subsection for the
+          popup's own typed-code contract.
+        '';
+      };
     };
 
     # ── Usage widget + poller (opt-in, off by default) ───────────────────────
@@ -695,29 +718,6 @@ in
           per-secret/per-consumer after that). Empty by default:
           `aoide.secrets.enable = true` alone grants nobody access until a
           host names its operator here.
-        '';
-      };
-    };
-
-    # ── Pairing-ceremony popup (P-PV3, task #132) ───────────────────────────
-    pairing = {
-      popup = mkOption {
-        type = types.bool;
-        default = false;
-        description = ''
-          Enable the `aoide-pair-watch.service` graphical-session user unit
-          (`aoide peer pair watch --popup`) — a typed-code entry dialog per
-          actionable pairing request, `lyra pair ask` when it resolves
-          (the same six-boxes-plus-dash surface `lyra secrets ask` renders),
-          `zenity --entry` otherwise. Off by default, same house policy as
-          the MCP façade/A2A door/usage poller/secrets broker above: the
-          unit is desktop-facet-gated exactly like `aoide-secrets-watch`
-          (`aoide.a2a.enable && aoide.facets.quickshell.enable`), but this
-          flag is the deliberate opt-in ON TOP of that gate — a host with
-          a2a and the quickshell facet both on does NOT get the popup
-          unless it also sets this. See `modules/nucleus/aoided.nix` for
-          the unit and CONTRACTS.md §6's "Pairing events feed" subsection
-          for the popup's own typed-code contract.
         '';
       };
     };

@@ -197,7 +197,7 @@ approve [<id>] [--yes] [--code NNN-NNN]` / `reject <id>` / `watch [--popup]
   always sufficient, and the popup is a second door over the same
   primitive. A graphical session runs it as the `aoide-pair-watch.service`
   user unit (`modules/nucleus/aoided.nix`), gated on `aoide.a2a.enable &&
-  aoide.facets.quickshell.enable && aoide.pairing.popup` — the last of
+  aoide.facets.quickshell.enable && aoide.a2a.pairingPopup` — the last of
   those OFF by default; a host with a2a and the quickshell facet on does
   not get the popup unless it also opts in.
 
@@ -288,7 +288,7 @@ Real: the three wire methods (`aoide/pairRequest`/`aoide/pairReveal`/
 the SAS derivation with its pinned vectors, the typed-code gate with its
 persisted tries and auto-deny, the events feed, and the popup (typed-code
 entry via `lyra
-pair ask` or zenity `--entry`, opt-in behind `aoide.pairing.popup`) all
+pair ask` or zenity `--entry`, opt-in behind `aoide.a2a.pairingPopup`) all
 run.
 
 ## Related

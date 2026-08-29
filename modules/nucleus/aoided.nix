@@ -266,7 +266,7 @@ lib.mkIf config.aoide.enable {
   # the same reasoning `aoide-secrets-watch` already holds against the
   # SYSTEM-unit `aoide-secrets-serve` above.
   #
-  # Gated on `aoide.pairing.popup` (DEFAULT FALSE, `options.nix`) IN
+  # Gated on `aoide.a2a.pairingPopup` (DEFAULT FALSE, `options.nix`) IN
   # ADDITION to the desktop-facet gate `aoide-secrets-watch` uses
   # (`aoide.a2a.enable && aoide.facets.quickshell.enable`) — modules' own
   # "flags default off" house rule: a host with a2a and the quickshell
@@ -274,7 +274,7 @@ lib.mkIf config.aoide.enable {
   # before this phase where the unit's only gate was the desktop-facet
   # check. Never flipped on here — deployment flips are the User's.
   systemd.user.services.aoide-pair-watch =
-    lib.mkIf (config.aoide.a2a.enable && config.aoide.facets.quickshell.enable && config.aoide.pairing.popup)
+    lib.mkIf (config.aoide.a2a.enable && config.aoide.facets.quickshell.enable && config.aoide.a2a.pairingPopup)
       {
         description = "Aoide pairing-ceremony popup watcher — surfaces actionable pairing requests as a typed-code entry dialog";
 

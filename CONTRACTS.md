@@ -4538,7 +4538,7 @@ when NEITHER `lyra` nor `zenity` resolves; `--popup`+`--json` together is
 a usage error. Deployed as the graphical-session USER unit
 `aoide-pair-watch.service` (`modules/nucleus/aoided.nix`), gated on
 `aoide.a2a.enable && aoide.facets.quickshell.enable &&
-aoide.pairing.popup` — the last of those DEFAULT FALSE (modules' own
+aoide.a2a.pairingPopup` — the last of those DEFAULT FALSE (modules' own
 "flags default off" house rule): the unit exists and is desktop-facet-
 gated the same way `aoide-secrets-watch` is, but the popup itself is
 opt-in on top of that, never assumed just because a2a and the quickshell

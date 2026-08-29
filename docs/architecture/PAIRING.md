@@ -152,7 +152,7 @@ complete. Now nothing ever dials IN to A — A polls B over the SAME forward
 dial its own `request`/`reveal` already used, so pairing works end to end
 even when A's door accepts no routable connection at all.
 
-- **`peer pair watch --popup` is opt-in** (`aoide.pairing.popup`, nix
+- **`peer pair watch --popup` is opt-in** (`aoide.a2a.pairingPopup`, nix
   option, default off) and shows a dialog shaped by pairing DIRECTION,
   never one bare yes/no for both. The INBOUND (approver) direction
   collects the typed code the same way the CLI tty prompt and the scripted
@@ -406,7 +406,7 @@ the full count-site checklist (git show 9c2d05c).
   surface with the code pre-shown as context) as copy-the-pixels theater,
   since the code is already on screen in the same window the retry field
   sat in; `code_matches`' own outbound-comparison call is gone, not merely
-  undocumented. Deployed behind a NEW flag, `aoide.pairing.popup` (default
+  undocumented. Deployed behind a NEW flag, `aoide.a2a.pairingPopup` (default
   false) — the unit's desktop-facet gate is unchanged, this flag is the
   deliberate opt-in on top of it, modules' own "flags default off" house
   rule.
