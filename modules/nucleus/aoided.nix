@@ -22,6 +22,7 @@
   config,
   lib,
   pkgs,
+  inputs,
   ...
 }:
 
@@ -245,52 +246,80 @@ lib.mkIf config.aoide.enable {
     };
   };
 
-  # ── Pairing events watcher (P-P5) ─────────────────────────────────────────
+  # ── Pairing events watcher (P-P5; popup upgraded to a typed-code entry
+  # dialog + lyra/zenity feature-detection, and gated behind its own opt-in
+  # flag, at P-PV3 task #132) ────────────────────────────────────────────────
   # Surfaces the pairing ceremony's own events feed (`peer pair watch
   # --popup`, CONTRACTS.md §6's "Pairing events feed" subsection) as a
-  # zenity confirm dialog per actionable request — the same unit shape
+  # typed-code entry dialog per actionable request — the same unit shape
   # `secrets.nix`'s own `aoide-secrets-watch` holds (graphical-session.target,
-  # `Type = simple` + `Restart = on-failure`, an explicit zenity `path` entry,
-  # journal both streams, NoNewPrivileges) — zenity-only (F6: no
-  # `AOIDE_RICE_BIN`, no `lyra` fallback for this ceremony; a QML confirm
-  # dialog is a named deferral, not built). No ordering against `aoide-a2a`
-  # (the process that actually emits onto this feed) — `pair_watch::
-  # wait_for_follower` already retries until the events feed appears rather
-  # than exiting 1, so this unit starting before `a2a serve` has bound its
-  # socket, or before `aoided` itself has created the feed file, is a
-  # normal, harmless race, the same reasoning `aoide-secrets-watch` already
-  # holds against the SYSTEM-unit `aoide-secrets-serve` above.
-  systemd.user.services.aoide-pair-watch = lib.mkIf (config.aoide.a2a.enable && config.aoide.facets.quickshell.enable) {
-    description = "Aoide pairing-ceremony popup watcher — surfaces actionable pairing requests as a dialog";
+  # `Type = simple` + `Restart = on-failure`, explicit `zenity`/`quickshell`
+  # `path` entries, journal both streams, NoNewPrivileges), including that
+  # unit's own `lyra`-preferred-with-zenity-fallback shape: `lyra pair ask`
+  # (`pair_watch::resolve_lyra_bin`) when `AOIDE_RICE_BIN` resolves it, else
+  # `zenity --entry`. No ordering against `aoide-a2a` (the process that
+  # actually emits onto this feed) — `pair_watch::wait_for_follower` already
+  # retries until the events feed appears rather than exiting 1, so this
+  # unit starting before `a2a serve` has bound its socket, or before
+  # `aoided` itself has created the feed file, is a normal, harmless race,
+  # the same reasoning `aoide-secrets-watch` already holds against the
+  # SYSTEM-unit `aoide-secrets-serve` above.
+  #
+  # Gated on `aoide.pairing.popup` (DEFAULT FALSE, `options.nix`) IN
+  # ADDITION to the desktop-facet gate `aoide-secrets-watch` uses
+  # (`aoide.a2a.enable && aoide.facets.quickshell.enable`) — modules' own
+  # "flags default off" house rule: a host with a2a and the quickshell
+  # facet both on does NOT get this popup unless it also opts in, unlike
+  # before this phase where the unit's only gate was the desktop-facet
+  # check. Never flipped on here — deployment flips are the User's.
+  systemd.user.services.aoide-pair-watch =
+    lib.mkIf (config.aoide.a2a.enable && config.aoide.facets.quickshell.enable && config.aoide.pairing.popup)
+      {
+        description = "Aoide pairing-ceremony popup watcher — surfaces actionable pairing requests as a typed-code entry dialog";
 
-    wantedBy = [ "graphical-session.target" ];
-    after = [ "graphical-session.target" ];
-    partOf = [ "graphical-session.target" ];
+        wantedBy = [ "graphical-session.target" ];
+        after = [ "graphical-session.target" ];
+        partOf = [ "graphical-session.target" ];
 
-    # `zenity` must resolve off a bare-name `PATH` lookup
-    # (`pair_watch::zenity_available`/`spawn_pair_confirm`, both take the
-    # binary NAME, never a hardcoded path) — the same PATH gap
-    # `aoide-secrets-watch` documents in `secrets.nix`.
-    path = [ pkgs.zenity ];
+        # `zenity` must resolve off a bare-name `PATH` lookup
+        # (`pair_watch::zenity_available`/`spawn_zenity_entry`, both take the
+        # binary NAME, never a hardcoded path) — the same PATH gap
+        # `aoide-secrets-watch` documents in `secrets.nix`. `quickshell`
+        # rides the same rule for the lyra dialog path: `lyra pair ask`
+        # spawns it by bare name, so the unit that spawns lyra must carry it
+        # — the exact live gap `secrets.nix`'s own `aoide-secrets-watch`
+        # comment documents for its sibling dialog.
+        path = [
+          pkgs.zenity
+          inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default
+        ];
 
-    serviceConfig = {
-      Type = "simple";
-      Restart = "on-failure";
-      RestartSec = "3s";
+        serviceConfig = {
+          Type = "simple";
+          Restart = "on-failure";
+          RestartSec = "3s";
 
-      ExecStart = "${pkgs.aoide}/bin/aoide peer pair watch --popup";
+          ExecStart = "${pkgs.aoide}/bin/aoide peer pair watch --popup";
 
-      Environment = [
-        "AOIDE_ROOT=${config.aoide.root}"
-        "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
-        "AOIDE_USER=${config.aoide.user}"
-      ];
+          Environment = [
+            "AOIDE_ROOT=${config.aoide.root}"
+            "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+            "AOIDE_USER=${config.aoide.user}"
+          ]
+          # `pair_watch::resolve_lyra_bin` resolves `lyra` via
+          # `AOIDE_RICE_BIN` (tier 1, trusted unconditionally) or a sibling
+          # of `current_exe()` (tier 2) — `lyra` ships from `pkgs.aoide.rice`,
+          # a SEPARATE output from the `aoide` binary this unit execs, so
+          # sibling resolution would silently fail here without this. Only
+          # set when `aoide.lyra.enable` is actually on — mirrors
+          # `aoide-secrets-watch`'s own identical guard.
+          ++ lib.optional config.aoide.lyra.enable "AOIDE_RICE_BIN=${pkgs.aoide.rice}/bin/lyra";
 
-      NoNewPrivileges = true;
-      StandardOutput = "journal";
-      StandardError = "journal";
-    };
-  };
+          NoNewPrivileges = true;
+          StandardOutput = "journal";
+          StandardError = "journal";
+        };
+      };
 
   # ── Discovery advertisement firewall (task #98 diagnosis, #120 wire) ─────
   # The advertise thread inside `aoide-a2a` sends its LAN advertisement as

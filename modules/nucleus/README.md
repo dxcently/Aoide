@@ -10,8 +10,8 @@ module builds against what nucleus declares.
   `aoide.surfaces` — the enumerated, closed set facets are allowed to read
   (root `AGENTS.md` house rule 5). Versioned in CONTRACTS.md (livery schema
   v0). Also carries the non-facet-read option namespaces (`aoide.mcp`,
-  `aoide.a2a`, `aoide.usage`, `aoide.lyra`, `aoide.secrets` — deployment/door
-  toggles, not part of the facet whitelist).
+  `aoide.a2a`, `aoide.usage`, `aoide.lyra`, `aoide.secrets`, `aoide.pairing`
+  — deployment/door toggles, not part of the facet whitelist).
 - `aoided.nix` — the orchestrator daemon service: the neutral event stream,
   default-deny-per-class subscriptions, the user-gated rebuild pipeline, the
   single audit log. Also opens the LAN discovery advertisement's inbound
@@ -19,10 +19,16 @@ module builds against what nucleus declares.
   discoveryAdvertise` is on — the stock firewall trusts only `lo`, and an
   advertisement never reaches a listening socket on a real interface
   without it (task #98). Declares a graphical-session USER unit,
-  `aoide-pair-watch.service` (P-P5), running `aoide peer pair watch
-  --popup` — gated on `aoide.a2a.enable && aoide.facets.quickshell.enable`,
-  zenity-only (F6, no `lyra` fallback for this ceremony), the same unit
-  shape `secrets.nix`'s own `aoide-secrets-watch.service` below holds.
+  `aoide-pair-watch.service` (P-P5; the popup upgraded to a typed-code
+  entry dialog + `lyra`/zenity feature-detection at P-PV3, task #132),
+  running `aoide peer pair watch --popup` — gated on `aoide.a2a.enable &&
+  aoide.facets.quickshell.enable && aoide.pairing.popup` (the last DEFAULT
+  FALSE, opt-in on top of the desktop-facet gate, never assumed just
+  because a2a and quickshell are both on), the same unit shape
+  `secrets.nix`'s own `aoide-secrets-watch.service` below holds — including
+  its `lyra`/`quickshell` `path` entries and `AOIDE_RICE_BIN` env, since
+  the popup now prefers `lyra pair ask` over `zenity --entry` the same way
+  the secrets watcher prefers `lyra secrets ask`.
 - `melete-adapter.nix` — the concrete thin-adapter exemplar on the `aoided`
   event stream.
 - `shellbridge.nix` — the bidirectional bridge service: atomic JSON state

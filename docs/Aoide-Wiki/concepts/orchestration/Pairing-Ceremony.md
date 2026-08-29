@@ -158,18 +158,28 @@ together in `register_peer_pair`:
   `peer pair approve`, so watch never surfaces an outbound completion on
   its own — polling and confirming an outbound request is always the
   operator's own invocation.
-  `--popup` swaps the narration for a zenity `--question` confirm dialog
-  per actionable request (refused up front when zenity is not on PATH;
-  `--popup`+`--json` is a usage error). The dialog is the one approver
-  surface that does NOT take the typed code: clicking Approve on the
-  rendered code is that arm's whole confirmation. Its exit-0 Approve and
-  its `"Reject request"` extra button drive the SAME
-  `approve_inbound`/`approve_outbound` paths the CLI runs (`skip_confirm:
-  true` — the dialog itself IS the confirmation): the CLI is always
-  sufficient, and the popup is a second door over the same primitive. A
-  graphical session runs it as the `aoide-pair-watch.service` user unit
-  (`modules/nucleus/aoided.nix`), gated on `aoide.a2a.enable &&
-  aoide.facets.quickshell.enable`.
+  `--popup` swaps the narration for a TYPED-CODE entry dialog per
+  actionable request — never a bare yes/no. `lyra pair ask` (the same
+  six-boxes-plus-dash surface `lyra secrets ask` renders for TOTP) when
+  `lyra` resolves, `zenity --entry` otherwise, falling back to zenity on a
+  `lyra` failure for that one attempt (refused up front only when NEITHER
+  binary resolves; `--popup`+`--json` is a usage error). The typed code
+  drives the SAME gate the CLI's own `--code`/tty prompt use: on an
+  inbound (approver) request it runs `InboundGate::Code` — the identical
+  SAS comparison and three-try auto-deny, and the dialog NEVER shows the
+  code, matching the tty prompt's own "never echo the SAS" rule; on an
+  outbound (requester) request the dialog SHOWS this instance's own
+  locally-derived code (not a leak — the CLI's own `y`/`N` confirm already
+  prints it) and the typed value is compared against it before committing,
+  with no persisted-try counter. Its exit-0 Approve and its `"Reject
+  request"` extra button/dismiss control drive the SAME
+  `approve_inbound`/`approve_outbound` paths the CLI runs: the CLI is
+  always sufficient, and the popup is a second door over the same
+  primitive. A graphical session runs it as the `aoide-pair-watch.service`
+  user unit (`modules/nucleus/aoided.nix`), gated on `aoide.a2a.enable &&
+  aoide.facets.quickshell.enable && aoide.pairing.popup` — the last of
+  those OFF by default; a host with a2a and the quickshell facet on does
+  not get the popup unless it also opts in.
 
 Bare **`aoide pair`** is the interactive entry onto the same rails, CLI
 door + real tty only (a non-tty, non-CLI, or `--json` invocation gets a
@@ -259,9 +269,9 @@ Real: the three wire methods (`aoide/pairRequest`/`aoide/pairReveal`/
 `aoide/pairPoll`), both parked-state files, the five CLI
 commands, the interactive bare `aoide pair` entry, the SAS derivation
 with its pinned vectors, the typed-code gate with its persisted tries and
-auto-deny, the events feed, and the zenity popup all run. `--popup` is
-zenity `--question` only; a QML confirm dialog is a named deferral, not
-built.
+auto-deny, the events feed, and the popup (typed-code entry via `lyra
+pair ask` or zenity `--entry`, opt-in behind `aoide.pairing.popup`) all
+run.
 
 ## Related
 

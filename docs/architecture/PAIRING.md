@@ -149,12 +149,15 @@ complete. Now nothing ever dials IN to A — A polls B over the SAME forward
 dial its own `request`/`reveal` already used, so pairing works end to end
 even when A's door accepts no routable connection at all.
 
-- `peer pair watch --popup`'s dialog is the one approver surface that
-  does NOT take the typed code: clicking Approve on the rendered code is
-  that arm's whole confirmation (the dialog IS the gate there), and a
-  typed-code entry field in the dialog is a named follow-on. The CLI tty
-  prompt and the scripted `--code` path are where the typed-code gate
-  lives.
+- `peer pair watch --popup`'s dialog (P-PV3, task #132) collects the
+  typed code the same way the CLI tty prompt and the scripted `--code`
+  path do, and runs it through the identical gate — a six-boxes-plus-dash
+  entry surface (`lyra pair ask` when `lyra` resolves, `zenity --entry`
+  otherwise), opt-in behind `aoide.pairing.popup` (default off). The
+  inbound (approver) direction never shows the code in the dialog, same
+  as the tty prompt; the outbound (requester) direction shows this
+  instance's own locally-derived code (as its own `y`/`N` confirm already
+  does) and compares the retyped value before committing.
 - The short authentication string (SAS) is derived from a transcript
   hash over both public keys + both nonces — SHA-256 over the four
   fields, lowercased/trimmed/NUL-separated, truncated mod 1,000,000
@@ -340,6 +343,20 @@ the full count-site checklist (git show 9c2d05c).
   the code stays purely out-of-band, read off the requester's screen and
   typed on the approver's. `peer pair approve`'s `<id>` becomes optional
   when exactly one request is pending.
+- **P-PV3 — the popup's typed-code upgrade, opt-in (M, task #132).**
+  `peer pair watch --popup`'s dialog stops being a bare Approve/Reject:
+  it collects the typed code through the SAME six-boxes-plus-dash surface
+  the secrets TOTP dialog already has (`lyra pair ask`, sharing that
+  command's own QML component via the new `dialog_qml` module, `zenity
+  --entry` as the fallback) and runs it through the identical
+  `InboundGate::Code`/`code_matches` gate the CLI already holds — no new
+  no-prompt gate variant (`InboundGate::DialogConfirmed` is retired). The
+  inbound direction never shows the code in the dialog; the outbound one
+  shows this instance's own locally-derived code, matching its `y`/`N`
+  confirm's own display. Deployed behind a NEW flag, `aoide.pairing.popup`
+  (default false) — the unit's desktop-facet gate is unchanged, this flag
+  is the deliberate opt-in on top of it, modules' own "flags default off"
+  house rule.
 
 Live gates at the end of the lane: a real pair between yomi and
 sakaki via the ceremony (codes compared on real terminals), a spawn

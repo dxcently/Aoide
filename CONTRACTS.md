@@ -622,12 +622,13 @@ count.
   the prose trail does not.
 - `lyra schema --json` — the AoideOS-surface contract: onboard/rice/draft/
   mode/cover/livery/quickshell/screen/shellbridge/herald/take/element, the
-  painted surface. **45 commands** (`crates/lyra/src/registry.rs`'s golden
+  painted surface. **46 commands** (`crates/lyra/src/registry.rs`'s golden
   test — `mcp.serve` must itself be a registered path for
   `aoide_protocol::door::parse` to ever reach lyra's `special` closure on
   `mcp serve --stdio`, one of the root-coupled extras beyond the named
-  groups, alongside `onboard` (P-I3, docs/architecture/ONBOARD.md) and
-  `secrets ask` (P3)). `element seed` (L-E1, docs/architecture/ELEMENTS.md)
+  groups, alongside `onboard` (P-I3, docs/architecture/ONBOARD.md),
+  `secrets ask` (P3), and `pair ask` (P-PV3, task #132)). `element seed`
+  (L-E1, docs/architecture/ELEMENTS.md)
   renders a song's committed `elements/*/element.json` — non-QML rice
   targets (waybar, dunst, anything with a config file) — into
   `run/elements/`. Lyra alone may shell out to nix (`song/widgets.rs`, and
@@ -4499,22 +4500,38 @@ the foreground follow: tails this feed, narrates each recognized line
 (an inbound entry once revealed, an outbound entry once
 `awaiting-confirm` — see the "retired" paragraph above for what this means
 under Design A) on a 30s safety tick so a missed or malformed line never
-strands a request. `--popup` swaps that narration for a **zenity
-`--question`-only** confirm dialog per actionable request (no `lyra`
-fallback — a QML confirm dialog is a named deferral, not built): exit 0
-approves (`peer pair approve`'s own `approve_inbound`/`approve_outbound`,
-`skip_confirm: true` — the dialog itself already IS the confirmation);
-the dialog's own `"Reject request"` extra button (a distinct label from
-`aoide-secrets`' own `"Dismiss ask"` — two ceremonies, two labels, one
-shared reader) rejects; a bare Cancel/Escape ignores the request for the
-rest of that session only; a spawn/infra failure backs off the retry
-cadence and is NEVER treated as a dismissal. The dialog is
-the ONE place a pending SAS is ever shown for this arm — `peer
-pending` itself carries none at all, P-PV2 — no fingerprint either way. `--popup` is
-refused up front when `zenity` isn't installed; `--popup`+`--json`
-together is a usage error. Deployed as the graphical-session USER unit
-`aoide-pair-watch.service` (`modules/nucleus/aoided.nix`), gated on
-`aoide.a2a.enable && aoide.facets.quickshell.enable`.
+strands a request. `--popup` swaps that narration for a **TYPED-CODE
+entry dialog, never a bare yes/no** (upgraded P-PV3, task #132): `lyra
+pair ask` — the SAME six-boxes-plus-dash surface `lyra secrets ask`
+renders (`crates/lyra/src/commands/dialog_qml.rs`) — when
+`aoide_client::pair_watch::resolve_lyra_bin` feature-detects it (the
+identical three-tier check `aoide_secrets::watch::resolve_lyra_bin` uses),
+else `zenity --entry`, falling back to zenity on a `lyra` spawn/infra
+failure for that one attempt. Exit 0 hands back the TYPED code, gated
+through `peer pair approve`'s own `approve_inbound`/`approve_outbound`:
+on the INBOUND (approver) direction, `InboundGate::Code(<typed>)` — the
+SAME SAS comparison and three-cumulative-mismatch auto-deny machinery the
+CLI tty/`--code` paths already hold, byte-identical, and the dialog NEVER
+shows the code (showing it would collapse the out-of-band comparison into
+a copy exercise); on the OUTBOUND (requester) direction, the dialog SHOWS
+this instance's own locally-derived SAS (not a leak — the CLI's own
+`confirm_sas` already prints it) and the typed value is compared against
+it in-process before `approve_outbound(true, ...)` ever runs, with no
+persisted-try counter (a click-through guard, not the approver's security
+gate). The dialog's own `"Reject request"` extra button/dismiss control
+(a distinct label from `aoide-secrets`' own `"Dismiss ask"` — two
+ceremonies, two labels, one shared reader) rejects; a bare Cancel/Escape
+ignores the request for the rest of that session only; a spawn/infra
+failure on BOTH binaries backs off the retry cadence and is NEVER treated
+as a dismissal. `--popup` is refused up front when NEITHER `lyra` nor
+`zenity` resolves; `--popup`+`--json` together is a usage error. Deployed
+as the graphical-session USER unit `aoide-pair-watch.service`
+(`modules/nucleus/aoided.nix`), gated on `aoide.a2a.enable &&
+aoide.facets.quickshell.enable && aoide.pairing.popup` — the last of
+those DEFAULT FALSE (modules' own "flags default off" house rule): the
+unit exists and is desktop-facet-gated the same way `aoide-secrets-watch`
+is, but the popup itself is opt-in on top of that, never assumed just
+because a2a and the quickshell facet are both on.
 
 This subsection is **additive**: a new events-feed record shape and a
 new CLI command, no change to the wire methods above, no version bump.
