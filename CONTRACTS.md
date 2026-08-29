@@ -5086,7 +5086,14 @@ simply removed. `peer pair approve`/`reject`/`watch` are SUBCOMMANDS of
 `peer pair` and WIN over a hostname positional of the same literal
 spelling (the registry's own greedy longest-prefix match) — a box
 literally named `approve`/`reject`/`watch` cannot be paired by bare
-hostname and needs the explicit URL form instead.
+hostname and needs the explicit URL form instead. **A second collision
+edge, review-caught:** `peer pair` takes exactly ONE positional; the old
+three-token `peer pair request <url>` has no `peer.pair.request` path
+left to match, so a typist's muscle memory lands `request`/`<url>` as
+`peer.pair`'s OWN two args, past its single declared `target` — refused
+outright as a usage error (naming the fold) rather than silently reading
+only the first token and burning a full sweep window hunting a host
+named "request" while quietly discarding the url.
 
 `aoide peer allow <name> <cap> on|off` (P-P3, `docs/architecture/
 PAIRING.md` decision 5, appended newest directly after `peer pair reject`
