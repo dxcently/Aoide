@@ -99,7 +99,10 @@ messages later.
 
 ```
 box A                                      box B
-aoide peer pair <url> [--name b]
+aoide peer pair <target> [--name b]
+  (a URL dials directly; a bare hostname
+   resolves it first, a ~45s discovery
+   sweep — see Discovery, below)
   → POST commitment to B's door ─────────► parks pending, UNREVEALED
      (A's pubkey, A's name,                (id, A's pubkey, A's claimed
       commit = H(pubkey_A, nonce_A),        name, origin addr, commit,
@@ -149,20 +152,30 @@ complete. Now nothing ever dials IN to A — A polls B over the SAME forward
 dial its own `request`/`reveal` already used, so pairing works end to end
 even when A's door accepts no routable connection at all.
 
-- `peer pair watch --popup` (P-PV3, task #132) is opt-in behind
-  `aoide.pairing.popup` (default off) and shows a dialog shaped by
-  direction, never one bare yes/no for both. The INBOUND (approver)
-  direction collects the typed code the same way the CLI tty prompt and
-  the scripted `--code` path do, through the identical gate — a
-  six-boxes-plus-dash entry surface (`lyra pair ask` when `lyra` resolves,
-  `zenity --entry` otherwise) — and never shows the code, same as the tty
-  prompt. The OUTBOUND (requester) direction shows this instance's own
-  locally-derived code (as its own `y`/`N` confirm already does) and asks
-  for a single Approve/Reject — `lyra pair confirm` or `zenity --question`
-  — never a retype: an earlier pass within this same phase collected a
-  retype there too, which review correctly called copy-the-pixels theater
-  (the code is already on screen in the same window), so the outbound arm
-  keeps the ceremony's original confirm shape.
+- **`peer pair watch --popup` is opt-in** (`aoide.pairing.popup`, nix
+  option, default off) and shows a dialog shaped by pairing DIRECTION,
+  never one bare yes/no for both. The INBOUND (approver) direction
+  collects the typed code the same way the CLI tty prompt and the scripted
+  `--code` path do, through the identical gate — a six-boxes-plus-dash
+  entry surface, `lyra pair ask` when `lyra` resolves, `zenity --entry`
+  otherwise — and never shows the code, same as the tty prompt. The
+  OUTBOUND (requester) direction shows this instance's own locally-derived
+  code (as its own `y`/`N` confirm already does) and asks for a single
+  Approve/Reject — `lyra pair confirm` or `zenity --question` — never a
+  retype: the code is already on screen, so retyping it would prove
+  nothing an Approve click doesn't already prove. Both dialogs share a
+  `"Reject request"` rejection control; a bare Cancel/Escape leaves the
+  request offered again next tick; either binary failing to spawn backs
+  off the retry cadence rather than silently dropping the request.
+- **`peer pair` takes exactly ONE positional, and its three subcommands win
+  over a same-named hostname target.** A second positional — old `peer
+  pair request <url>` muscle memory is the one that bites — is refused
+  outright, before either the URL or hostname arm ever runs, naming the
+  fold in the refusal itself; `peer pair approve`/`reject`/`watch` are
+  registered subcommands and match BEFORE a bare hostname positional of
+  the same literal spelling, so a box actually named `approve` (or
+  `reject`/`watch`) cannot be paired by that bare name — the explicit URL
+  form always works.
 - The short authentication string (SAS) is derived from a transcript
   hash over both public keys + both nonces — SHA-256 over the four
   fields, lowercased/trimmed/NUL-separated, truncated mod 1,000,000
@@ -336,6 +349,28 @@ the full count-site checklist (git show 9c2d05c).
   bounded dedupe, invite resolves a heard advertisement and refuses
   an unheard/ambiguous name, advertise switch default-off, discovery
   writes nothing to the registry.
+- **P-PV1 — reach-back through a loopback-only door (M, task #131).**
+  The requester-side `via` derivation (P-P6's discovery-observed-address
+  default) only ever solves HALF the tunnel problem — it lets the
+  requester dial the approver. The approver's OWN commit still needed the
+  SAME answer in the opposite direction: every `aoide/pairRequest` a
+  tunneled requester sends arrives looking like loopback, with no
+  observed address the approver could derive a `via` from. `selfVia`
+  closes it — an OPTIONAL, self-asserted `ssh://[user@]host` field the
+  requester rides on `aoide/pairRequest` (login defaults to `$USER`/
+  `$LOGNAME`, host defaults to the LOCAL OUTBOUND ADDRESS routed toward
+  the approver, `--self-via` overrides both). Present on the parked
+  entry, `peer pair approve`'s commit rewrites the resulting peer's `url`
+  to `http://127.0.0.1:<port>/` — loopback-as-seen-from-the-far-side,
+  `<port>` parsed off the REQUESTER's own advertised door port, never
+  this box's own `AOIDE_A2A_PORT` — and sets `via` to the claim itself, in
+  the SAME write as the pairing commit; absent, the commit is exactly the
+  pre-P-PV1 shape (`url` verbatim, `via` unset). The ceremony's own dial
+  (both `peer pair` arms) also starts riding the SAME derived `via` a
+  discovered peer already gets, not only the record. Tests: loopback
+  record correctness with and without a claim, the requester's own port
+  parsed off the right field, the ceremony's dial itself using the
+  derived `via`.
 - **P-PV2 — the collapsed command surface (M, the User's locked spec,
   three grill rounds).** `peer pair request`/`peer invite` DIE outright
   (hard cutover, no aliases) and fold into ONE smart-target `aoide peer
@@ -347,7 +382,12 @@ the full count-site checklist (git show 9c2d05c).
   RENAMES to `peer pending` (golden net 0) and its rows drop the SAS —
   the code stays purely out-of-band, read off the requester's screen and
   typed on the approver's. `peer pair approve`'s `<id>` becomes optional
-  when exactly one request is pending.
+  when exactly one request is pending. Review follow-up in the same lane:
+  `peer pair` refuses a SECOND positional outright rather than silently
+  reading only the first — old `peer pair request <url>` muscle memory
+  would otherwise land `request`/`<url>` as `peer pair`'s own two args,
+  past its single declared target, burning a full sweep window hunting a
+  host literally named "request" while discarding the url unremarked.
 - **P-PV3 — the popup's typed-code upgrade, opt-in, one dialog shape per
   direction (M, task #132).** `peer pair watch --popup`'s INBOUND
   (approver) dialog stops being a bare Approve/Reject: it collects the

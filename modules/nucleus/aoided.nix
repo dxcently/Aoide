@@ -208,7 +208,8 @@ lib.mkIf config.aoide.enable {
   # switch (state/advertise.json) makes it send a one-line UDP BROADCAST
   # advertisement to 255.255.255.255:8711 (wire v2: name + ssh hop claim
   # {host, user}, never a URL, key, or credential) every ~30s so `aoide
-  # peer discover`/`peer invite` on other boxes can hear this instance —
+  # peer discover`/`peer pair`'s hostname arm on other boxes can hear this
+  # instance —
   # discovery grants nothing by itself, the pairing ceremony above is
   # still the only thing that ever writes a peer record.
   systemd.user.services.aoide-a2a = lib.mkIf config.aoide.a2a.enable {
