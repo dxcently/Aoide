@@ -320,13 +320,19 @@ in
         # long-running quickshell survives every no-diff switch — including one
         # that has silently lost its Wayland outputs and moved the whole scene
         # onto a placeholder screen (live incident 2026-08-28: "There are no
-        # outputs - creating placeholder screen"; unit active, desktop bare,
-        # unrecoverable by any rebuild). House ruling: activation always brings
-        # the rice elements back up. try-restart bounces a running shell onto
-        # the freshly rsynced tree and re-acquired outputs, no-ops when the unit
-        # is stopped (headless/session-less activation must not start or fail
-        # anything), and never fails the switch. Ordered after both writes above
-        # so the restarted shell reads the new tree, never the old one.
+        # outputs - creating placeholder screen"; unit active, desktop bare).
+        # House ruling: activation always brings the rice elements back up.
+        # try-restart bounces a running shell onto the freshly rsynced tree and
+        # re-acquired outputs, no-ops when the unit is stopped (headless/
+        # session-less activation must not start or fail anything), and never
+        # fails the switch. Ordered after both writes above so the restarted
+        # shell reads the new tree, never the old one.
+        #
+        # This is the REBUILD-side half of the recovery, not the whole of it:
+        # the identical lockup recurring live, mid-session, with no rebuild in
+        # sight is what `aoide-quickshell-healthcheck.timer` (below) exists to
+        # catch — of the two, that timer is the only one that ever runs
+        # unprompted.
         home.activation.aoideRestartRice =
           lib.hm.dag.entryAfter
             [
@@ -406,6 +412,93 @@ in
             ];
             Restart = "on-failure";
             RestartSec = 3;
+          };
+          Install.WantedBy = [ "graphical-session.target" ];
+        };
+
+        # ── Live mid-session watchdog: the placeholder-screen lockup ───────────
+        # `aoideRestartRice` (above) only reasserts the paint on a REBUILD.
+        # Nothing caught the SAME failure live, mid-session, with no rebuild in
+        # sight — the incident it documents recurred twice more the next day
+        # (2026-08-29), the last one unnoticed for ~9 hours. `Restart=on-failure`
+        # is structurally blind to this lockup: the process never exits, it just
+        # sits `active` painted onto Qt's internal placeholder screen, so
+        # systemd has nothing to restart on. `lyra quickshell healthcheck`
+        # (crates/song/src/health.rs) is the periodic check that closes the gap
+        # — it confirms BOTH the journal's placeholder-screen line AND a live
+        # `hyprctl layers` zero-surface reading before acting (health.rs's own
+        # module doc carries the two-signal reasoning), then restarts the unit
+        # itself, withholding and notifying instead once repeated triggers land
+        # inside a short window so a genuinely flapping output can't turn this
+        # into an infinite restart loop.
+        #
+        # `quickshell` is a lyra-only command family (left core's registry at
+        # P-A5), so this execs `pkgs.aoide.rice` — lyra's own droppable output
+        # (P-A8) — the same reference shellbridge.nix's `shellbridge` service
+        # uses for the same reason. Gated on `aoide.lyra.enable` like that
+        # service too: a host that flips it off while leaving this facet on
+        # must not start a unit that execs a binary this build left uninstalled.
+        #
+        # Unlike `shellbridge`/`aoide-graph-reap` (NixOS-level `systemd.user.
+        # services`, whose module gives a flat `path`/`description` sugar),
+        # this pair is nested inside `home-manager.users.${config.aoide.user}`
+        # like `aoide-quickshell` right above — home-manager's OWN systemd
+        # module has no such sugar (checked against its `modules/systemd.nix`:
+        # only `Unit`/`Service`/`Install` freeform sections exist, and no
+        # `path` option at all), so this follows `aoide-quickshell`'s own
+        # Unit/Service/Install shape instead, with `hyprctl`/`notify-send`
+        # (needed by health.rs's `hyprctl_json`/`notify_backoff_engaged`,
+        # neither of which is guaranteed present on this manager's PATH) added
+        # via an explicit `PATH=` `Environment` entry — the only knob this
+        # schema offers for it. `systemctl`/`journalctl` ride the same
+        # `lib.makeBinPath` list (health.rs's `active_enter_timestamp`/
+        # `journal_tail_since`/`restart_service` all shell out to them) rather
+        # than leaning on an ambient default the way `aoide-graph-reap` does
+        # under NixOS's richer default environment.
+        systemd.user.services.aoide-quickshell-healthcheck = lib.mkIf config.aoide.lyra.enable {
+          Unit = {
+            Description = "Aoide Quickshell healthcheck — detect and recover a placeholder-screen lockup Restart=on-failure cannot catch";
+            PartOf = [ "graphical-session.target" ];
+            After = [ "graphical-session.target" ];
+          };
+          Service = {
+            Type = "oneshot";
+            ExecStart = "${pkgs.aoide.rice}/bin/lyra quickshell healthcheck";
+
+            Environment = [
+              "PATH=${
+                lib.makeBinPath [
+                  pkgs.systemd
+                  pkgs.hyprland
+                  pkgs.libnotify
+                ]
+              }"
+              # Same "a configured aoide.root must win" reasoning as
+              # aoide-quickshell's own Environment above — health.rs's restart
+              # backoff marker lives under $AOIDE_ROOT/state.
+              "AOIDE_ROOT=${config.aoide.root}"
+            ];
+
+            NoNewPrivileges = true;
+            StandardOutput = "journal";
+            StandardError = "journal";
+          };
+        };
+
+        systemd.user.timers.aoide-quickshell-healthcheck = lib.mkIf config.aoide.lyra.enable {
+          Unit = {
+            Description = "Aoide Quickshell healthcheck timer — periodic placeholder-screen sweep (~15s)";
+            PartOf = [ "graphical-session.target" ];
+          };
+          Timer = {
+            # First check 20s after the session comes up (let the shell finish
+            # its own startup/output-negotiation first); thereafter every 15s
+            # since the previous run finished — cheap enough (one systemctl
+            # show, a short journalctl tail, two hyprctl calls) to run often,
+            # and every check speeds up how quickly a live lockup is noticed.
+            OnActiveSec = "20s";
+            OnUnitActiveSec = "15s";
+            AccuracySec = "2s";
           };
           Install.WantedBy = [ "graphical-session.target" ];
         };
