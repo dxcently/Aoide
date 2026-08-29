@@ -485,14 +485,16 @@ aoide peer pair watch [--popup] [--json]
   code at request time).
   `watch` blocks until Ctrl-C, narrating each recognized line; `--json`
   emits one event object per line instead, and `--popup` (opt-in, off by
-  default — `aoide.pairing.popup`) raises a TYPED-CODE entry dialog per
-  actionable request — `lyra pair ask` when `lyra` resolves, `zenity
-  --entry` otherwise (refused up front only when neither resolves;
-  `--popup`+`--json` is a usage error). The typed code drives the SAME
-  gate the CLI's own `--code`/tty prompt use: an inbound request never
-  shows the code in the dialog (typed blind, like the tty prompt); an
-  outbound one shows this instance's own locally-derived code and compares
-  the retyped value against it before committing. On a non-CLI door
+  default — `aoide.pairing.popup`) raises a dialog shaped by direction —
+  `lyra pair ask`/`lyra pair confirm` when `lyra` resolves, `zenity
+  --entry`/`zenity --question` otherwise (refused up front only when
+  neither resolves; `--popup`+`--json` is a usage error). An inbound
+  request COLLECTS a typed code through the SAME gate the CLI's own
+  `--code`/tty prompt use, and never shows the code in the dialog (typed
+  blind, like the tty prompt); an outbound one SHOWS this instance's own
+  locally-derived code and asks for a single Approve/Reject, never a
+  retype — the code is already on screen, so retyping it would prove
+  nothing an Approve click doesn't already prove. On a non-CLI door
   `watch` returns a "run it from a terminal" outcome, the `events tail`
   posture.
 - **Notes:** not gated. The commit-then-reveal ceremony, the poll, the

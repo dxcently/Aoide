@@ -19,16 +19,19 @@ module builds against what nucleus declares.
   discoveryAdvertise` is on — the stock firewall trusts only `lo`, and an
   advertisement never reaches a listening socket on a real interface
   without it (task #98). Declares a graphical-session USER unit,
-  `aoide-pair-watch.service` (P-P5; the popup upgraded to a typed-code
-  entry dialog + `lyra`/zenity feature-detection at P-PV3, task #132),
-  running `aoide peer pair watch --popup` — gated on `aoide.a2a.enable &&
-  aoide.facets.quickshell.enable && aoide.pairing.popup` (the last DEFAULT
-  FALSE, opt-in on top of the desktop-facet gate, never assumed just
-  because a2a and quickshell are both on), the same unit shape
-  `secrets.nix`'s own `aoide-secrets-watch.service` below holds — including
-  its `lyra`/`quickshell` `path` entries and `AOIDE_RICE_BIN` env, since
-  the popup now prefers `lyra pair ask` over `zenity --entry` the same way
-  the secrets watcher prefers `lyra secrets ask`.
+  `aoide-pair-watch.service` (P-P5; the popup upgraded to a dialog shaped
+  by pairing direction + `lyra`/zenity feature-detection at P-PV3, task
+  #132), running `aoide peer pair watch --popup` — gated on
+  `aoide.a2a.enable && aoide.facets.quickshell.enable &&
+  aoide.pairing.popup` (the last DEFAULT FALSE, opt-in on top of the
+  desktop-facet gate, never assumed just because a2a and quickshell are
+  both on), the same unit shape `secrets.nix`'s own
+  `aoide-secrets-watch.service` below holds — including its
+  `lyra`/`quickshell` `path` entries and `AOIDE_RICE_BIN` env, since the
+  popup now prefers `lyra pair ask` (inbound, typed-code entry) or `lyra
+  pair confirm` (outbound, a single Approve/Reject over the already-known
+  code) over their zenity equivalents, the same way the secrets watcher
+  prefers `lyra secrets ask`.
 - `melete-adapter.nix` — the concrete thin-adapter exemplar on the `aoided`
   event stream.
 - `shellbridge.nix` — the bidirectional bridge service: atomic JSON state

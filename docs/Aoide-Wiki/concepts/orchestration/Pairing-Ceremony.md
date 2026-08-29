@@ -158,21 +158,25 @@ together in `register_peer_pair`:
   `peer pair approve`, so watch never surfaces an outbound completion on
   its own — polling and confirming an outbound request is always the
   operator's own invocation.
-  `--popup` swaps the narration for a TYPED-CODE entry dialog per
-  actionable request — never a bare yes/no. `lyra pair ask` (the same
-  six-boxes-plus-dash surface `lyra secrets ask` renders for TOTP) when
-  `lyra` resolves, `zenity --entry` otherwise, falling back to zenity on a
-  `lyra` failure for that one attempt (refused up front only when NEITHER
-  binary resolves; `--popup`+`--json` is a usage error). The typed code
-  drives the SAME gate the CLI's own `--code`/tty prompt use: on an
-  inbound (approver) request it runs `InboundGate::Code` — the identical
-  SAS comparison and three-try auto-deny, and the dialog NEVER shows the
-  code, matching the tty prompt's own "never echo the SAS" rule; on an
-  outbound (requester) request the dialog SHOWS this instance's own
-  locally-derived code (not a leak — the CLI's own `y`/`N` confirm already
-  prints it) and the typed value is compared against it before committing,
-  with no persisted-try counter. Its exit-0 Approve and its `"Reject
-  request"` extra button/dismiss control drive the SAME
+  `--popup` swaps the narration for a dialog shaped by DIRECTION — never
+  one bare yes/no for both. `lyra pair ask`/`lyra pair confirm` (sharing
+  `lyra secrets ask`'s own quickshell surface via `dialog_qml`) when
+  `lyra` resolves, `zenity --entry`/`zenity --question` otherwise, falling
+  back to zenity on a `lyra` failure for that one attempt (refused up
+  front only when NEITHER binary resolves; `--popup`+`--json` is a usage
+  error). On an inbound (approver) request the dialog COLLECTS a typed
+  code and runs it through `InboundGate::Code` — the identical SAS
+  comparison and three-try auto-deny the CLI's `--code`/tty prompt use,
+  and the dialog NEVER shows the code, matching the tty prompt's own
+  "never echo the SAS" rule. On an outbound (requester) request the dialog
+  SHOWS this instance's own locally-derived code (not a leak — the CLI's
+  own `y`/`N` confirm already prints it) and asks for a single
+  Approve/Reject, never a retype — `approve_outbound` commits
+  unconditionally on Approve, exactly as it always has (a design-review
+  round within this same phase caught an earlier pass collecting a retype
+  on this arm too as copy-the-pixels theater, since the code was already
+  on screen in the same window). Both directions' exit-0 Approve and
+  `"Reject request"` extra button/dismiss control drive the SAME
   `approve_inbound`/`approve_outbound` paths the CLI runs: the CLI is
   always sufficient, and the popup is a second door over the same
   primitive. A graphical session runs it as the `aoide-pair-watch.service`
