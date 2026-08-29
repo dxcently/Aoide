@@ -344,6 +344,34 @@ in
                 ${pkgs.systemd}/bin/systemctl --user try-restart aoide-quickshell.service || true
             '';
 
+        # ── Confirm the restart above actually landed ──────────────────────────
+        # `aoideRestartRice` is fire-and-forget: `try-restart ... || true` means
+        # a switch reports success whether the shell came back painted or landed
+        # straight in the placeholder-screen lockup its own restart was meant to
+        # fix. `aoide-quickshell-healthcheck.timer` (below) WOULD catch that
+        # within ~15s regardless — this entry doesn't close a hole the timer
+        # leaves open, it exists so the confirmation is immediate and visible in
+        # the rebuild output itself, instead of waiting on the first timer tick
+        # (or on someone noticing a bare desktop). Sleep 5s first: quickshell
+        # logs "Configuration Loaded" ~1s after launch and its layer surfaces
+        # follow shortly after (live journal), so checking instantly would just
+        # race the shell's own startup — not a false positive (health.rs's
+        # journal-line gate means a fresh clean start always reads healthy,
+        # never falsely stuck), just a wasted check. Gated on `aoide.lyra.enable`
+        # like the healthcheck units below, since it execs the same lyra binary
+        # they do — folded into the script body (an `''${lib.optionalString …}''`
+        # around the run lines) rather than `lib.mkIf` on the whole DAG-entry
+        # value or `lib.optionalAttrs` around this binding, since a plain `if`
+        # inside the script is the one idiom that never has to ask whether
+        # `mkIf` composes through `hm.dag.entryAfter`'s attrset shape.
+        home.activation.aoideVerifyRice = lib.hm.dag.entryAfter [ "aoideRestartRice" ] ''
+          ${lib.optionalString config.aoide.lyra.enable ''
+            run ${pkgs.coreutils}/bin/sleep 5
+            run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) \
+              ${pkgs.aoide.rice}/bin/lyra quickshell healthcheck || true
+          ''}
+        '';
+
         # ── Quickshell autostart via systemd user service ─────────────────────
         # The shell surface (bar/dock/wallpaper/notifications/OSD) is started by
         # a systemd user service rather than a Hyprland exec-once. A service is
