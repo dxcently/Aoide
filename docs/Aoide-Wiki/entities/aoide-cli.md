@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-08-28
+updated: 2026-08-29
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
@@ -59,13 +59,14 @@ adding, removing, or renaming a leaf shows as a deliberate diff against that
 snapshot.
 
 The command surface holds **60 leaves across the groups this page tracks**;
-`aoide schema --json | jq '.commands | length'` reports 82, since further
+`aoide schema --json | jq '.commands | length'` reports 80, since further
 commands exist that are not yet covered here: the `inbox` group, `who`,
-`events tail`, `identity` (the keypair read surface — [[Pairing-Ceremony]]), bare `pair` (the interactive pairing picker),
+`events tail`, `identity` (the keypair read surface — [[Pairing-Ceremony]]),
 the `melete` group (`status`/`graph`/`call`),
 and the `peer` group's `hub`/`allow`/`spawn`,
-`discover`/`invite`/`advertise`/`list`, and 5-command `pair` ceremony
-(`request`/`pending`/`approve`/`reject`/`watch` — [[Pairing-Ceremony]]). `lyra schema --json`
+`discover`/`advertise`/`list`, and the pairing ceremony — `pair <target>`
+with its `approve`/`reject`/`watch` subcommands plus `pending`
+([[Pairing-Ceremony]]). `lyra schema --json`
 carries the painted surface — see above.
 The per-command dev reference — signature, files read, files written,
 where output pipes to — lives at [[CLI-Reference]]; the table below sums
@@ -228,23 +229,25 @@ reachability is out of scope for this v0.
   hub/pubkey/verified/allows/addedAt) plus its `fresh`/`stale`/`never-pulled`
   classification (the same one the graph fold itself uses) and
   `fetchedAt`/`lastError` — the deep per-peer detail view.
-- **`peer pair request/pending/approve/reject/watch`** — the pairing
-  ceremony's CLI half; the approver's gate is the TYPED confirmation code
+- **`peer pair <target>` / `peer pending` / `peer pair
+  approve`/`reject`/`watch`** — the pairing
+  ceremony's CLI half; `<target>` is a URL dialed directly or a bare
+  hostname resolved by a ~45s discovery sweep, the approver's gate is the
+  TYPED confirmation code
   (three cumulative misses auto-deny), its approve purely local; the
   requester's own approve polls `aoide/pairPoll` over the same forward
-  dial and confirms `y`/`N`. Bare `aoide pair` is the interactive entry
-  (sweep, pick, the same ceremony). Full mechanism: [[Pairing-Ceremony]],
+  dial and confirms `y`/`N`. Full mechanism: [[Pairing-Ceremony]],
   signatures: [[Doors-and-Peers]].
 - **`peer allow <name> <cap> on|off`** — flips one capability in a peer's
   closed `allows` set (`"read"`/`"spawn"`); idempotent, refuses an unknown
   peer or capability. `peer spawn <name> -- <text…>` POSTs a signed spawn
   to a paired peer's door; the remote gate is the sole authority.
-- **`peer discover [--secs N]` / `peer invite <name>` / `peer advertise
+- **`peer discover [--secs N]` / `peer advertise
   on|off`** — the LAN discovery surface: a UDP broadcast advertisement
   (255.255.255.255:8711, `{v, name, host, user}`, rendezvous only), off by
-  default; `discover` is the on-demand sweep, `invite` resolves a heard
-  name into the pairing ceremony, `advertise` is the runtime switch. Wire
-  and validation: [[Peer-Transport]], [[Doors-and-Peers]].
+  default; `discover` is the on-demand sweep, `peer pair <name>` resolves a
+  heard name into the pairing ceremony, `advertise` is the runtime switch.
+  Wire and validation: [[Peer-Transport]], [[Doors-and-Peers]].
 - **`peer list [--json]`** — the one-glance mesh roster: every known node
   (this host, registered peers, advertising instances) with its running
   sessions beneath, marked `●`/`○`/`◆`; one bounded ~2 s sweep plus

@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-15
-updated: 2026-08-28
+updated: 2026-08-29
 tags: [aoide, agent, a2a, orchestration, interop, federation]
 ---
 
@@ -171,9 +171,10 @@ session id they could match.
 [--token-file <path>] [--bearer-secret <name>]` / `remove <name>` /
 `pull [<name>]` / `status` / `hub <name> [--clear]` (the single-hub
 designation, a last-resort address-resolution preference) — plus the pairing
-ceremony's `pair request|pending|approve|reject|watch`
+ceremony's `pair <target>` with its `approve`/`reject`/`watch` subcommands
+and the renamed `peer pending`
 ([[Pairing-Ceremony]]), the per-peer capability gate `allow <name> <cap>
-on|off`, LAN discovery `discover [--secs <n>]` and `invite <name>` with
+on|off`, LAN discovery `discover [--secs <n>]` with
 the `advertise on|off` runtime switch (off by default), `peer list
 [--json]` (the one-glance mesh roster: every known node marked
 `●`/`○`/`◆` with its running sessions beneath, read-only), and

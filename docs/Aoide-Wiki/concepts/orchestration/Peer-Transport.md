@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-27
-updated: 2026-08-28
+updated: 2026-08-29
 tags: [aoide, agent, a2a, orchestration, peer, transport, ssh]
 ---
 
@@ -42,21 +42,32 @@ dials `url` directly. Present, it
 names the ssh target `aoide-client`'s dial resolution forwards through.
 `set_peer_via` is the sole writer, a sibling to `upsert_paired_peer` rather
 than a parameter on it, and a caller passing no value never clears an
-existing marker — a plain `peer pair request` re-pair leaves an earlier
+existing marker — a plain `peer pair` re-pair leaves an earlier
 `via` untouched.
 
-Three ways a peer picks one up:
+Four ways a peer picks one up:
 
-- **`--via` on the command itself** — `peer add`/`peer invite`/`peer pair
-  request`/`peer spawn` — always outranks a peer's own recorded `via`.
-- **`peer invite` derives one automatically** from the discovery
-  advertisement's OBSERVED source address plus its claimed ssh login — the
-  wire is `{v, name, host, user}`, a rendezvous claim only (never a URL,
-  key, or credential), and the observed address is what gets dialed. The
-  marker is recorded on the resulting peer at pairing-approval commit even
-  when the ceremony's own dials went direct.
-- **A plain, undecorated `peer pair`** records nothing — a peer paired
-  without `--via` dials directly.
+- **`--via` on the command itself** — `peer add`/`peer pair`/`peer spawn` —
+  always outranks a peer's own recorded `via`.
+- **`peer pair <name>`'s hostname arm derives one automatically** from the
+  discovery advertisement's OBSERVED source address plus its claimed ssh
+  login — the wire is `{v, name, host, user}`, a rendezvous claim only
+  (never a URL, key, or credential), and the observed address is what gets
+  dialed. The same derived `via` drives the ceremony's own two POSTs and is
+  recorded on the resulting peer once pairing is approved, so its future
+  calls have a working transport marker too.
+- **The approver's own commit records one from the requester's `selfVia`
+  claim.** A loopback-only requester's `aoide/pairRequest` arrives over its
+  own tunnel looking like loopback, so the approver has no observed address
+  to derive anything from; the request carries an optional self-asserted
+  `ssh://[user@]host` claim (`--self-via` overrides the `$USER`/ outbound-address
+  default), and `peer pair approve`'s commit sets the peer's `via` to the
+  claim and rewrites its `url` to `http://127.0.0.1:<port>/` — `<port>`
+  parsed off the requester's own advertised url — in the same write.
+  Self-asserted data, a transport marker only: trust stays in the pubkeys
+  and the SAS comparison.
+- **A plain, URL-targeted `peer pair` with no claim** records nothing — a
+  peer paired without `--via` dials directly.
 
 ## Dial resolution
 
@@ -164,7 +175,7 @@ allowed to become a resident daemon:
   `docs/architecture/PAIRING.md`'s Discovery section traces, confirmed
   independent of any aoide code. This transport is the workaround for a
   door otherwise unreachable across that same boundary, not a fix to
-  discovery itself: `peer pair request --via`/`peer add --via` still need
+  discovery itself: `peer pair <url> --via`/`peer add --via` still need
   the far host named by hand when discovery can't hear it.
 
 ## Related
@@ -175,8 +186,9 @@ allowed to become a resident daemon:
 - [[Peer-Federation]] — the peer registry `Peer.via` lives on, and the
   federation door the tunnel carries requests to.
 - [[Pairing-Ceremony]] — the ceremony that records the `via` marker on the
-  resulting peer at approve (`peer invite` derives it; `--via` sets it
-  explicitly).
+  resulting peer at approve (`peer pair <name>`'s hostname arm derives it,
+  the requester's `selfVia` claim sets it on the approver's commit; `--via`
+  sets it explicitly).
 - [[Conductor-Channel]] — `send`'s remote delivery, gated the same way
   whether or not the call happened to travel through a tunnel.
 - [[Session-Graph]] — the liveness reaping a tunnel's own backstop sweep

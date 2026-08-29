@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-28
+updated: 2026-08-29
 tags: [aoide, cli, mcp, a2a, peer, daemon]
 ---
 
@@ -432,13 +432,13 @@ aoide peer hub <name> [--clear]
   else matches, never shadowing a real registered name. See
   [[Peer-Federation]].
 
-### aoide peer pair request / pending / approve / reject / watch
+### aoide peer pair / peer pending
 
 ```
-aoide peer pair request <url> [--name <n>] [--self-url <url>]
-                        [--via ssh://[user@]host[:port]] [--json]
-aoide peer pair pending
-aoide peer pair approve <id> [--yes] [--code NNN-NNN]
+aoide peer pair <target> [--name <n>] [--via ssh://[user@]host[:port]]
+                  [--self-via ssh://[user@]host] [--json]
+aoide peer pending
+aoide peer pair approve [<id>] [--yes] [--code NNN-NNN]
 aoide peer pair reject <id>
 aoide peer pair watch [--popup] [--json]
 ```
@@ -449,9 +449,20 @@ aoide peer pair watch [--popup] [--json]
   instance's ed25519 identity (`state/identity/`, minted lazily on first
   need — `ed25519.key` at 0600 inside the 0700 directory, never appearing
   in any output; `aoide identity` shows the pubkey and its colon-hex
-  fingerprint). `request` POSTs
-  `aoide/pairRequest` then `aoide/pairReveal` — two sequential POSTs in
-  one invocation — to the target instance's A2A door. `approve` on the
+  fingerprint). `peer pair <target>` takes exactly ONE positional — a
+  second is refused outright, before either arm runs, naming the fold in
+  the refusal, and the `approve`/`reject`/`watch` subcommand names match
+  BEFORE a bare hostname positional of the same spelling (a box named
+  `approve` pairs only by the explicit URL form). A URL-shaped target
+  (`"://"`) POSTs `aoide/pairRequest` then `aoide/pairReveal` — two
+  sequential POSTs in one invocation — to that instance's A2A door; a bare
+  hostname first runs its own ~45s discovery sweep, resolving the name to
+  the matching advertisement's OBSERVED source address on the house door
+  port (`AOIDE_A2A_PORT` or 8710 — the wire carries no port to read), and
+  an ambiguous or absent name is a taught error listing what WAS heard.
+  Both arms drive the same `run_pair_request` core, and the hostname arm
+  refuses to pair with this instance itself (heard name matching its own,
+  or the datagram from loopback). `approve` on the
   inbound (approver) side is purely local: it commits its record and marks
   the parked entry approved, dialing nobody. `approve` on the outbound
   (requester) side first POLLS `aoide/pairPoll` — a signed POST over the
@@ -464,18 +475,25 @@ aoide peer pair watch [--popup] [--json]
   feed line is a trigger, the storage-backed list the authority. The
   actionable set is inbound-only: an outbound entry completes inside the
   operator's own polling `approve`, so watch never surfaces one.
-- **Writes:** `request` parks the outbound half; `approve` commits a
+- **Writes:** `peer pair` parks the outbound half; `approve` commits a
   `pubkey`/`verified` peer record into `state/peers.json`
   (`peer_store::upsert_paired_peer`, default `allows: ["read","spawn"]`),
   dispatching by direction — inbound queue first, then outbound — so the
   requester's own confirm is a SECOND `approve` against the outbound
-  queue, the one that polls; `reject` removes the parked entry
+  queue, the one that polls. When the parked request carries the
+  requester's `selfVia` claim, the inbound commit also sets the peer's
+  `url` to `http://127.0.0.1:<port>/` (port parsed off the requester's
+  advertised url) and `via` to the claim in the same write
+  ([[Peer-Transport]]); `reject` removes the parked entry
   locally on either queue, no wire call, no record.
-- **Output:** `request` prints the derived SAS (the `%03d-%03d`
-  confirmation code, `aoide_storage::pairing::derive_sas`); `pending`
-  lists both directions, each entry with its own independently-derived
-  SAS (an unrevealed inbound entry shows `revealed: false` and no code);
-  `approve` re-derives the SAS and the gate differs by side — an INBOUND
+- **Output:** `peer pair` prints the derived SAS (the `%03d-%03d`
+  confirmation code, `aoide_storage::pairing::derive_sas`) plus the
+  request's short id; `peer pending`
+  lists both directions, each row carrying host, id, direction, and state —
+  NEVER the code, which stays out-of-band (an unrevealed inbound entry
+  shows `revealed: false`);
+  `approve [<id>]` re-derives the SAS (the id optional when exactly one
+  request is pending) and the gate differs by side — an INBOUND
   id asks the operator to TYPE the code as read off the requester's
   screen (the prompt never echoes the expected value; `--code NNN-NNN`
   scripted; a wrong code counts a persisted try, the third cumulative
@@ -500,10 +518,7 @@ aoide peer pair watch [--popup] [--json]
 - **Notes:** not gated. The commit-then-reveal ceremony, the poll, the
   commit asymmetry, the park cap (`AOIDE_PAIRING_PARK_CAP`, default 32)
   and the 4-hour expiry (`DEFAULT_PAIRING_TIMEOUT_SECS`):
-  [[Pairing-Ceremony]]. Bare `aoide pair` (CLI door + real tty only) is
-  the interactive entry: one ~2 s advertisement sweep, a select menu over
-  the candidates heard, and the picked row runs the same ceremony tail
-  `peer invite` drives.
+  [[Pairing-Ceremony]].
 
 ### aoide peer allow
 
@@ -536,7 +551,7 @@ aoide peer spawn <name> [--yes] [--via ssh://[user@]host[:port]] -- <text…>
   signed — four headers: the claimed self name `X-Aoide-Peer`, timestamp,
   nonce, and the ed25519 signature over the canonical string). Refuses an
   unknown or unpaired (`verified:
-  false`) name LOCALLY with a taught error naming `peer pair request`.
+  false`) name LOCALLY with a taught error naming `peer pair`.
 - **Output:** POSTs a spawn-shaped `message/send` (no `contextId`) to the
   peer's A2A door; `<text…>` becomes the spawned session's first turn.
   What actually runs is the PEER's configured `aoide.a2a.spawnAgent`,
@@ -570,29 +585,6 @@ aoide peer discover [--secs N] [--json]
   sweep. The receiving host's firewall must admit inbound UDP 8711 (the
   nix module opens it alongside `aoide.a2a.discoveryAdvertise`). See
   [[Peer-Transport]].
-
-### aoide peer invite
-
-```
-aoide peer invite <name> [--secs N] [--yes]
-                  [--via ssh://[user@]host[:port]] [--json]
-```
-
-- **Reads:** runs its own discover sweep and resolves `<name>` against
-  what was heard — exactly one source claiming the name proceeds; zero or
-  more than one is a taught error listing every name actually heard.
-- **Output:** composes the dial target from the advertisement's OBSERVED
-  source address on the house door port (`AOIDE_A2A_PORT` or 8710 — the
-  wire carries no URL to read a port off) and runs the same
-  `run_pair_request` core `peer pair request` drives, recording a `via`
-  from the observed address plus the claimed ssh login for the resulting
-  peer's future calls. A far end on a non-default port takes the explicit
-  `peer pair request <url>` path.
-- **Notes:** sugar over the ceremony, nothing more — the mutual SAS
-  confirmation stays the only verification, and `--yes` skips only the
-  local proceed-confirm. Refuses to invite this instance itself (heard
-  name matching its own, or the datagram from loopback). See
-  [[Pairing-Ceremony]].
 
 ### aoide peer advertise
 
