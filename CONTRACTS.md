@@ -2268,7 +2268,7 @@ approver (`park_inbound`, written by `aoide/pairRequest`'s handler):
     "name": "box-a", "originAddr": "203.0.113.4", "url": "http://box-a:8710/",
     "requesterNonceHex": "<32-hex>", "approverNonceHex": "<32-hex>",
     "requestedAt": "2026-08-25T00:00:00Z", "expiresAt": "2026-08-25T04:00:00Z",
-    "approved": false, "tries": 0 } ] }
+    "approved": false, "tries": 0, "selfVia": "ssh://khoa@box-a" } ] }
 ```
 
 `approved` (Design A, task #119 — additive, `#[serde(default)]`, absent on
@@ -2285,6 +2285,18 @@ invocations and across the interactive prompt and scripted `--code` paths
 alike; the third cumulative mismatch auto-denies (the CLI's own
 `take_inbound` removal, audited `auto-deny-on-code-mismatch`), so a
 persisted value is always below 3.
+`selfVia` (task #131 — additive, `#[serde(default, skip_serializing_if =
+"Option::is_none")]`, absent on a legacy record loads `None` and is never
+written back when absent) is the wire's own `selfVia` claim, carried
+through verbatim from `aoide/pairRequest`'s params with no validation here
+(never eagerly parsed — the same "only ever parsed at dial time" stance
+every other recorded `via` string already holds). `peer pair approve`
+reads it at commit time: present, the resulting peer record gets `url:
+http://127.0.0.1:<AOIDE_A2A_PORT or 8710>/` (loopback-as-seen-from-the-far-
+side — B, reached only through A's own tunnel, can never dial `entry.url`'s
+requester-observed host directly) and `via` set to the claim itself;
+absent, the record gets `entry.url` verbatim and `via` stays unset — the
+same shape this file's commit path always produced before task #131.
 
 `peer-pairing-outbound.json` — requests THIS instance sent as the
 requester and is still waiting to poll for approval on
@@ -4176,7 +4188,8 @@ APPROVER's box (B)'s A2A door:
 ```json
 { "jsonrpc": "2.0", "id": 1, "method": "aoide/pairRequest",
   "params": { "pubkeyHex": "<64 lowercase hex>", "name": "box-a",
-              "commitHex": "<64 lowercase hex>", "url": "http://box-a:8710/" } }
+              "commitHex": "<64 lowercase hex>", "url": "http://box-a:8710/",
+              "selfVia": "ssh://khoa@box-a" } }
 ```
 
 `pubkeyHex` is A's own ed25519 public key (P-P1's `identity::load_or_mint`,
@@ -4184,14 +4197,28 @@ minted on first use if absent); `name` is A's claimed nickname for B's own
 registry entry — validated server-side against the same `valid_peer_name`
 `peer add`/`peer remove` already enforce, since `peer pair approve` reuses
 it verbatim with no separate override; `url` is A's own advertised A2A door
-URL, for B's later approval callback. `commitHex` is
+URL, recorded on B's resulting peer record for B's future non-ceremony
+calls (Design A, task #119: the ceremony's own completion no longer dials
+this URL — nothing "callback"-shaped exists on this wire). `commitHex` is
 `SHA256(pubkeyHex || 0x00 || nonceHex || 0x00)`, hex-encoded
 (`aoide_storage::pairing::derive_commit`, the same canonical
 lowercased/trimmed/NUL-separated field style `derive_sas` already used) —
 A's own nonce itself is chosen locally and does NOT ride this message.
 
-B parks the request (`aoide_storage::pairing::park_inbound`, disk-persisted
-under `state/peer-pairing-inbound.json`, STABLE non-array-position ids —
+`selfVia` (OPTIONAL, task #131) is A's own self-asserted reach-back hop
+claim — `ssh://[user@]host`, defaulting to `ssh://<local user>@<local
+hostname>`, overridable via `--self-via` on `peer pair request`/`peer
+invite`. It exists because a request that reaches B over A's own ssh
+tunnel arrives, as far as B can observe, from loopback: B has no way to
+derive a working `via` for A from the connection itself. `selfVia` is A's
+own claim of that hop — the same trust class as `url` (self-asserted DATA,
+a transport marker only; trust stays in pubkeys + SAS, never this field).
+Absent when A has no such claim, or when A predates this field; B never
+refuses a request over its absence.
+
+B parks the request whole, `selfVia` included
+(`aoide_storage::pairing::park_inbound`, disk-persisted under
+`state/peer-pairing-inbound.json`, STABLE non-array-position ids —
 correlation must survive both processes exiting and an async callback
 arriving arbitrarily later, unlike `state/stage/pending.json`'s idiom, and
 capped — see below) and answers SYNCHRONOUSLY with its own public identity
@@ -4813,11 +4840,24 @@ than a parameter on it — and a caller passing `None` means "nothing to
 record," never "clear a previously-set marker": a plain `peer pair
 request` re-pair with no `--via` leaves an existing `via` (e.g. one `peer
 invite` recorded) untouched. A `--via` flag on the command itself always
-beats a peer's own recorded `via`. `peer invite` additionally derives a
-default `via` from the discovery advertisement's OBSERVED source address
-plus its claimed ssh login (never a claimed host) and records it on the
-resulting peer at pairing-approval commit time, even when the ceremony's
-own dial went direct. Reaching a
+beats a peer's own recorded `via`. `peer invite`/bare `pair` additionally
+derive a default `via` from the discovery advertisement's OBSERVED source
+address plus its claimed ssh login (never a claimed host) and record it on
+the resulting peer at pairing-approval commit time — and (task #131,
+loopback-only doors) that SAME derived default now rides the ceremony's
+OWN dial too, unless the advertisement carried no ssh claim at all, in
+which case the dial stays direct exactly as before task #131.
+
+The APPROVER side gets its own `via` a different way: `aoide/pairRequest`'s
+OPTIONAL `selfVia` param (this document's pairing-wire subsection, task
+#131) is the requester's own self-asserted reach-back hop claim, carried
+through the parked inbound entry to `peer pair approve`'s commit — present,
+the resulting peer's `via` becomes the claim itself (and `url` becomes
+`http://127.0.0.1:<AOIDE_A2A_PORT or 8710>/`, never the requester-observed
+host `aoide/pairRequest`'s `url` param carried, which the approver can
+never dial directly through the very tunnel that delivered this request);
+absent, the approver's commit leaves `via` unset, exactly as it always has.
+Reaching a
 peer's own A2A door remains loopback-bound either way — the tunnel is a
 TRANSPORT hop, never a relay; the signed `X-Aoide-Peer` identity still
 crosses it end to end. See `docs/architecture/PAIRING.md`'s Transport
@@ -4978,12 +5018,14 @@ roster structured: `nodes[]`, each `{mark, name, isLocal, paired,
 verified, advertising, presence, addr, lastSeen, sessions[]}`, plus
 `sweep` (`{heard, dropped}` or `{error}`).
 
-`aoide peer pair request <url> [--name <n>] [--self-url <url>]` /
-`pending` / `approve <id> [--yes] [--code NNN-NNN]` / `reject <id>` (P-P2,
+`aoide peer pair request <url> [--name <n>] [--self-url <url>] [--self-via
+<ssh-target>]` / `pending` / `approve <id> [--yes] [--code NNN-NNN]` /
+`reject <id>` (P-P2,
 appended newest
 directly after `peer hub` — §6's "Pairing wire" subsection above has the
 exact wire shapes and SAS derivation) — the pairing ceremony's CLI half.
-`request` sends `aoide/pairRequest`, parks the answer
+`request` sends `aoide/pairRequest` (`--self-via`, task #131, overrides its
+default reach-back hop claim), parks the answer
 (`state/peer-pairing-outbound.json`, §4), and prints the derived SAS.
 `pending` lists this instance's own parked inbound requests, each with an
 independently-derived SAS. `approve` re-derives the SAS from this

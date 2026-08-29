@@ -102,7 +102,8 @@ box A                                      box B
 aoide peer pair request <url> [--name b]
   → POST commitment to B's door ─────────► parks pending, UNREVEALED
      (A's pubkey, A's name,                (id, A's pubkey, A's claimed
-      commit = H(pubkey_A, nonce_A))        name, origin addr, commit)
+      commit = H(pubkey_A, nonce_A),        name, origin addr, commit,
+      selfVia = A's own reach-back claim)   A's selfVia claim if given)
   ◄── B's pubkey + B's own nonce ─────────┘
   → POST reveal ──────────────────────────► verifies H(pubkey_A, nonce_A)
      (id, nonce_A)                             == commit; stores nonce_A
@@ -120,8 +121,10 @@ B's operator TYPES the code as read off A's screen (out-of-band — a
   counts a persisted try; the 3rd cumulative mismatch AUTO-DENIES (same
   clean removal as reject, nothing committed).
   On a match, B's own peer record commits HERE — pubkey, verified=true,
-  allows=["read","spawn"], A's name bound; B's own parked entry is
-  marked approved and left PARKED — no callback, nothing dials A
+  allows=["read","spawn"], A's name bound, and (task #131) url/via set
+  from A's parked selfVia claim if one rode the request — see below;
+  B's own parked entry is marked approved and left PARKED — no
+  callback, nothing dials A
 aoide peer pair approve <id>  (A polls, whenever A gets around to it —
   → POST signed poll ─────────────────────► verifies A's signature against
      (id, timestamp, nonce,                    the pubkey A supplied at
@@ -174,6 +177,27 @@ even when A's door accepts no routable connection at all.
   through: a code shown once and accepted once was never actually a
   MUTUAL confirmation, only a promise that the other side would
   eventually agree.
+- **B's commit records a peer A can actually be reached at, even through
+  a tunnel (task #131).** A door reachable only through ssh (the
+  loopback-only case Transport's own section below covers) means every
+  `aoide/pairRequest` B ever sees from A arrives over A's own tunnel — B
+  can only OBSERVE the connection as loopback, and nothing about the
+  connection itself says how to dial A back. So the ceremony's OWN dial
+  (A's `peer pair request`/`peer invite`) rides the SAME derived `via` its
+  record always got — no longer only the record, per Transport's own
+  section — and A's request carries an OPTIONAL `selfVia` claim (`ssh://
+  [user@]host`, defaulting to A's own `$USER`/hostname, overridable via
+  `--self-via`): A's own self-asserted answer to "how do you reach me
+  back," the same trust class as the `url` field beside it (self-asserted
+  data, a transport marker only — trust stays in pubkeys + SAS, never
+  either field). When B's parked entry carries that claim, `peer pair
+  approve`'s commit sets the resulting peer's `url` to
+  `http://127.0.0.1:<AOIDE_A2A_PORT or 8710>/` (loopback-as-seen-from-the-
+  far-side — the sakaki/chiyo/osaka rows in a live `peers.json` are this
+  exact shape) and `via` to the claim itself, in the same write as the
+  pairing commit. No claim — an old A, or one with nothing to claim —
+  commits exactly the shape B's commit always produced: `url` is A's
+  advertised door verbatim, `via` stays unset.
 - Re-pairing an existing peer replaces the key material only after
   the same confirmation — never silently.
 - The inbound park queue is capped (`AOIDE_PAIRING_PARK_CAP`, default
@@ -422,17 +446,39 @@ forward is a pipe, not a party to the protocol.
   `aoide_storage::tunnel::dial_url` is the one place this cut happens,
   deliberately sharing `peer_store::url_path` with the signer rather than
   re-deriving it, so the two can never drift apart.
-- **`peer invite` records a `via` automatically; the ceremony itself does
-  not require one.** Discovery's own observed source address (this
-  document's Discovery section, above) is a real, reachable LAN target —
-  the ceremony's own two POSTs still dial it directly by default, exactly
-  as before this lane. What `peer invite` DOES do automatically is derive a
-  `via` from that same observed address plus the advertisement's claimed
-  ssh login and record it on the resulting peer once pairing is approved,
-  so that peer's FUTURE calls (pull, spawn,
-  send) have a working transport marker without a second manual step. An
-  explicit `--via` on either `peer invite` or `peer pair request`
-  overrides this for both the ceremony's own dial and the recorded marker.
+- **`peer invite`/bare `pair` derive a `via` automatically, and (task #131)
+  the ceremony's OWN dial rides it too.** Discovery's own observed source
+  address (this document's Discovery section, above) is only ever reachable
+  directly when the advertising box's door itself binds somewhere routable
+  — against a loopback-only door (this section's own opening invariant),
+  a direct dial to that address never connects at all. So `peer invite`/
+  bare `pair` derive a `via` from the observed address plus the
+  advertisement's claimed ssh login, and that SAME default now drives BOTH
+  halves: the ceremony's own two POSTs dial through it, and it is recorded
+  on the resulting peer once pairing is approved, so that peer's FUTURE
+  calls (pull, spawn, send) have a working transport marker too. The one
+  exception is an advertisement with no ssh claim at all (empty login) —
+  nothing to tunnel through, so the dial stays direct, the same shape it
+  held before task #131. An explicit `--via` on either `peer invite` or
+  `peer pair request` overrides this for both the ceremony's own dial and
+  the recorded marker, exactly as before.
+- **The APPROVER'S side needs the SAME answer, from the OTHER direction —
+  this is what `selfVia` is for (task #131).** Everything above describes
+  the REQUESTER deriving a `via` to reach the approver. But when the
+  requester's OWN door is loopback-only, the approver faces the identical
+  problem in reverse: every `aoide/pairRequest` it receives arrives over
+  the requester's tunnel, so the connection LOOKS like loopback no matter
+  where the requester actually is — there is no observed address to derive
+  anything from. `aoide/pairRequest` carries an OPTIONAL `selfVia` field
+  for exactly this: the requester's own self-asserted `ssh://[user@]host`
+  claim of its own reach-back hop (default `ssh://<local user>@<local
+  hostname>`, override `--self-via`) — the same trust class as the `url`
+  field beside it on that same wire message: self-asserted data, a
+  transport marker only, never itself a source of trust (trust stays in
+  pubkeys + the SAS comparison, "The ceremony" section above). `peer pair
+  approve`'s commit reads it: present, the resulting peer gets `url:
+  http://127.0.0.1:<AOIDE_A2A_PORT or 8710>/` and `via` set to the claim;
+  absent, the commit is unchanged from before task #131.
 - **Ssh keys are the substrate; aoide never manages them.** The client
   spawns `ssh -N -T -o BatchMode=yes …` — no password or host-key prompt
   can ever appear, so a box missing the far side's key in its
