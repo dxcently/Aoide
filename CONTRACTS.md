@@ -2292,9 +2292,14 @@ through verbatim from `aoide/pairRequest`'s params with no validation here
 (never eagerly parsed — the same "only ever parsed at dial time" stance
 every other recorded `via` string already holds). `peer pair approve`
 reads it at commit time: present, the resulting peer record gets `url:
-http://127.0.0.1:<AOIDE_A2A_PORT or 8710>/` (loopback-as-seen-from-the-far-
-side — B, reached only through A's own tunnel, can never dial `entry.url`'s
-requester-observed host directly) and `via` set to the claim itself;
+http://127.0.0.1:<port>/` (loopback-as-seen-from-the-far-side — B, reached
+only through A's own tunnel, can never dial `entry.url`'s
+requester-observed host directly), where `<port>` is A's OWN door port
+parsed off `entry.url` (`aoide-client::commands::port_from_url` — A's own
+`self_url` already encodes it; falling back to `AOIDE_A2A_PORT`/`8710`
+only when that parse fails, never defaulting to it outright — an earlier
+pass of this fix wrongly read B's OWN port here, which names nothing
+about A), and `via` set to the claim itself;
 absent, the record gets `entry.url` verbatim and `via` stays unset — the
 same shape this file's commit path always produced before task #131.
 
@@ -4206,15 +4211,25 @@ lowercased/trimmed/NUL-separated field style `derive_sas` already used) —
 A's own nonce itself is chosen locally and does NOT ride this message.
 
 `selfVia` (OPTIONAL, task #131) is A's own self-asserted reach-back hop
-claim — `ssh://[user@]host`, defaulting to `ssh://<local user>@<local
-hostname>`, overridable via `--self-via` on `peer pair request`/`peer
-invite`. It exists because a request that reaches B over A's own ssh
-tunnel arrives, as far as B can observe, from loopback: B has no way to
-derive a working `via` for A from the connection itself. `selfVia` is A's
-own claim of that hop — the same trust class as `url` (self-asserted DATA,
-a transport marker only; trust stays in pubkeys + SAS, never this field).
-Absent when A has no such claim, or when A predates this field; B never
-refuses a request over its absence.
+claim — `ssh://[user@]host`, the LOGIN half defaulting to
+`$USER`/`$LOGNAME` and the HOST half defaulting to the LOCAL OUTBOUND
+ADDRESS the kernel routes toward the peer being dialed
+(`aoide-client::commands::outbound_ip_toward` — a `UdpSocket::connect`
+that sends no packet, only resolves a route; falls back to the claimed OS
+hostname only if that lookup itself fails), overridable via `--self-via`
+on `peer pair request`/`peer invite`. The HOST half is deliberately NOT a
+claimed hostname by default — a live LAN check found hostnames resolving
+only through the router's DHCP-DNS, and two boxes on the same network
+coming back as IPv6/link-local mixes: resolution by luck, exactly the
+fragility `default_via`'s own "never a claimed host" stance (this
+document, `Peer.via` section) exists to avoid; every live `via` row is
+IP-based for the same reason. It exists because a request that reaches B
+over A's own ssh tunnel arrives, as far as B can observe, from loopback: B
+has no way to derive a working `via` for A from the connection itself.
+`selfVia` is A's own claim of that hop — the same trust class as `url`
+(self-asserted DATA, a transport marker only; trust stays in pubkeys +
+SAS, never this field). Absent when A has no such claim, or when A
+predates this field; B never refuses a request over its absence.
 
 B parks the request whole, `selfVia` included
 (`aoide_storage::pairing::park_inbound`, disk-persisted under
@@ -4853,10 +4868,13 @@ OPTIONAL `selfVia` param (this document's pairing-wire subsection, task
 #131) is the requester's own self-asserted reach-back hop claim, carried
 through the parked inbound entry to `peer pair approve`'s commit — present,
 the resulting peer's `via` becomes the claim itself (and `url` becomes
-`http://127.0.0.1:<AOIDE_A2A_PORT or 8710>/`, never the requester-observed
-host `aoide/pairRequest`'s `url` param carried, which the approver can
-never dial directly through the very tunnel that delivered this request);
-absent, the approver's commit leaves `via` unset, exactly as it always has.
+`http://127.0.0.1:<port>/`, `<port>` parsed off the requester's OWN
+`url` param — never a claimed hostname reaching back onto the
+requester-observed host itself, which the approver can never dial
+directly through the very tunnel that delivered this request, and never
+the approver's OWN `AOIDE_A2A_PORT` either, which names nothing about the
+requester's door); absent, the approver's commit leaves `via` unset,
+exactly as it always has.
 Reaching a
 peer's own A2A door remains loopback-bound either way — the tunnel is a
 TRANSPORT hop, never a relay; the signed `X-Aoide-Peer` identity still

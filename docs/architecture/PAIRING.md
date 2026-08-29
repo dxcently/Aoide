@@ -186,18 +186,22 @@ even when A's door accepts no routable connection at all.
   (A's `peer pair request`/`peer invite`) rides the SAME derived `via` its
   record always got — no longer only the record, per Transport's own
   section — and A's request carries an OPTIONAL `selfVia` claim (`ssh://
-  [user@]host`, defaulting to A's own `$USER`/hostname, overridable via
-  `--self-via`): A's own self-asserted answer to "how do you reach me
-  back," the same trust class as the `url` field beside it (self-asserted
-  data, a transport marker only — trust stays in pubkeys + SAS, never
-  either field). When B's parked entry carries that claim, `peer pair
-  approve`'s commit sets the resulting peer's `url` to
-  `http://127.0.0.1:<AOIDE_A2A_PORT or 8710>/` (loopback-as-seen-from-the-
-  far-side — the sakaki/chiyo/osaka rows in a live `peers.json` are this
-  exact shape) and `via` to the claim itself, in the same write as the
-  pairing commit. No claim — an old A, or one with nothing to claim —
-  commits exactly the shape B's commit always produced: `url` is A's
-  advertised door verbatim, `via` stays unset.
+  [user@]host`, defaulting to A's own `$USER`/`$LOGNAME` login at the
+  LOCAL OUTBOUND ADDRESS routed toward B — never a claimed OS hostname,
+  which this LAN proved resolves only through the router's DHCP-DNS —
+  overridable via `--self-via`): A's own self-asserted answer to "how do
+  you reach me back," the same trust class as the `url` field beside it
+  (self-asserted data, a transport marker only — trust stays in pubkeys +
+  SAS, never either field). When B's parked entry carries that claim,
+  `peer pair approve`'s commit sets the resulting peer's `url` to
+  `http://127.0.0.1:<port>/` (loopback-as-seen-from-the-far-side — the
+  sakaki/chiyo/osaka rows in a live `peers.json` are this exact shape),
+  where `<port>` is A's OWN door port, parsed off A's `url` on the parked
+  entry (never B's own `AOIDE_A2A_PORT`, which names nothing about A —
+  only a fallback when that parse itself fails), and `via` to the claim
+  itself, in the same write as the pairing commit. No claim — an old A, or
+  one with nothing to claim — commits exactly the shape B's commit always
+  produced: `url` is A's advertised door verbatim, `via` stays unset.
 - Re-pairing an existing peer replaces the key material only after
   the same confirmation — never silently.
 - The inbound park queue is capped (`AOIDE_PAIRING_PARK_CAP`, default
@@ -471,14 +475,24 @@ forward is a pipe, not a party to the protocol.
   where the requester actually is — there is no observed address to derive
   anything from. `aoide/pairRequest` carries an OPTIONAL `selfVia` field
   for exactly this: the requester's own self-asserted `ssh://[user@]host`
-  claim of its own reach-back hop (default `ssh://<local user>@<local
-  hostname>`, override `--self-via`) — the same trust class as the `url`
-  field beside it on that same wire message: self-asserted data, a
-  transport marker only, never itself a source of trust (trust stays in
-  pubkeys + the SAS comparison, "The ceremony" section above). `peer pair
-  approve`'s commit reads it: present, the resulting peer gets `url:
-  http://127.0.0.1:<AOIDE_A2A_PORT or 8710>/` and `via` set to the claim;
-  absent, the commit is unchanged from before task #131.
+  claim of its own reach-back hop — the LOGIN half defaults to
+  `$USER`/`$LOGNAME`, and the HOST half defaults to the LOCAL OUTBOUND
+  ADDRESS routed toward the peer being dialed (`UdpSocket::connect` picks
+  a route with no packet sent; a claimed OS hostname was tried first and
+  found to resolve only through the router's DHCP-DNS on this LAN —
+  resolution by luck, not something a transport marker can lean on),
+  falling back to the claimed hostname only if that route lookup itself
+  fails; `--self-via` overrides the whole default. Same trust class as the
+  `url` field beside it on that same wire message either way:
+  self-asserted data, a transport marker only, never itself a source of
+  trust (trust stays in pubkeys + the SAS comparison, "The ceremony"
+  section above). `peer pair approve`'s commit reads it: present, the
+  resulting peer gets `via` set to the claim and `url` rewritten to
+  `http://127.0.0.1:<port>/`, where `<port>` is parsed off the
+  REQUESTER's own `url` (their real door port — never this box's own
+  `AOIDE_A2A_PORT`, which names nothing about the requester), falling back
+  to `AOIDE_A2A_PORT`/`8710` only when that parse itself fails; absent, the
+  commit is unchanged from before task #131.
 - **Ssh keys are the substrate; aoide never manages them.** The client
   spawns `ssh -N -T -o BatchMode=yes …` — no password or host-key prompt
   can ever appear, so a box missing the far side's key in its
