@@ -129,6 +129,7 @@ entities/shellbridge.md
 ingest/index.md
 ingest/log.md
 protocol/AOIDE-DEV.md
+protocol/dev/CRAFT.md
 protocol/dev/DEV.md
 protocol/dev/HARNESS-CLAUDE-CODE.md
 protocol/dev/ORCHESTRATION.md

@@ -107,20 +107,13 @@ Diff the derivation's own source path to confirm.
 
 ---
 
-## Repo
+## Before landing
 
-Active development, not branch-protected. Small, coherent, verified changes
-land directly.
+- The gates above are green for what you touched.
+- You read the diff yourself. An agent's report is evidence, never the
+  verdict.
+- New files are tracked, or the checks never saw them.
+- Docs for the directory you changed are in the same commit.
 
-- **Ask before branching.** Large, risky, or churn-heavy work → ask.
-  Default: land directly.
-- **Pathspec commits only** — `git commit -- <paths>`.
-- **No AI co-author trailer.** Push as the repo's configured author.
-- **Authored content says "the User"** — never a personal name.
-- **Never commit** a harness's own settings file, `node_modules`, or
-  `song/stage/*` / `state/stage/*` (live desktop state).
-- **Push at milestones** — lane or phase completion, or on request. Commit
-  freely in between.
-- **Docs accompany the code change.** A commit that changes a directory's
-  seams, invariants, or extension points updates that directory's docs in
-  the SAME commit, never a follow-up.
+Branching, commit scope, pathspec discipline, and push cadence live in
+`CRAFT.md`.

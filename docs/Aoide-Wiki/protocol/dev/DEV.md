@@ -18,7 +18,8 @@ protocol:
 |---|---|
 | **DEV.md** (this) | preferences, prime loop, where state lives |
 | `ORCHESTRATION.md` | tiers, routing, dispatch gates, parallelism |
-| `VERIFICATION.md` | build, gates, proofs, repo discipline |
+| `CRAFT.md` | repo handling, how code is written, the voice of commits and comments |
+| `VERIFICATION.md` | build, gates, proofs, what never to run |
 | `HARNESS-CLAUDE-CODE.md` | one harness's specifics |
 
 `AGENTS.md` at the repo root holds the house rules and binds harder than
@@ -66,27 +67,15 @@ twice → take the default and flag it.
 **Show, don't describe.** Processes, architecture, and data flow get ASCII,
 tables, or trees. Prose fills only the gaps a picture cannot.
 
-**Comments minimal — fix the code instead.** A comment justifies its
-existence or it does not ship. Never brief an agent to match a heavy
-comment density.
-
 **Docs are timeless.** Edit a page integrally so it reads as always-so.
 Never append dated UPDATE or AMENDMENT blocks. Decisions and change records
 go to the log — commit message, changelog, memory. Ledgers are exempt; they
 *are* the log.
 
-**Build what was asked.** No speculative features, no abstractions for a
-future that has not arrived, no configurability nobody will touch. A
-capability's config section lands with its consumer, not before it.
-
-**Convention over invention.** The established pattern beats a rule
-invented to enforce your own. No new guard, flag, or config where a
-convention already answers.
-
-**Enforce what review cannot see; document what review catches naturally.**
-A violation living only in prose is invisible to code review — that is when
-it earns a mechanical check. A style whose breach is glaring in any diff
-does not.
+**How code, comments, and commits are written is `CRAFT.md`.** Convention
+over invention; deleting more wins; readability over commentary; a comment
+justifies its existence or it does not ship; one voice for everything the
+repo stores.
 
 **Say commands, not verbs.** Spoken as `aoide <cmd>` / `lyra <cmd>`.
 

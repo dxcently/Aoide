@@ -15,7 +15,8 @@ this wiki:
 |---|---|
 | `protocol/dev/DEV.md` | entry point — preferences, prime loop, where state lives |
 | `protocol/dev/ORCHESTRATION.md` | tiers, routing, dispatch gates, parallelism |
-| `protocol/dev/VERIFICATION.md` | build, gates, proofs, repo discipline |
+| `protocol/dev/CRAFT.md` | repo handling, how code is written, the voice of commits and comments |
+| `protocol/dev/VERIFICATION.md` | build, gates, proofs, what never to run |
 | `protocol/dev/HARNESS-CLAUDE-CODE.md` | one harness's specifics |
 
 Start at `protocol/dev/DEV.md`.
