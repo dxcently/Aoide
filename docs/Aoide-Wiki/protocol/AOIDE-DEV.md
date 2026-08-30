@@ -1,530 +1,284 @@
 ---
 type: reference
 created: 2026-07-28
-updated: 2026-08-27
-tags: [aoide, handoff, development, agent, operating-manual]
+updated: 2026-08-30
+tags: [aoide, development, agent, orchestration, operating-manual]
 ---
 
 # Aoide Development — agent protocol
 
-Status: **Aoide/AoideOS is in active development, running live on yomi-strix.**
-Operating manual for a **development agent** working *on* Aoide itself. Sibling
-of [[AOIDE-HANDOFF]] (original design contract, not required reading); read
-this fully before touching the repo.
+Operating manual for a **dev agent** working *on* Aoide. Harness-agnostic:
+roles are named by TIER, never by model. Read fully before touching the repo.
 
-> **Canonical framing.** Aoide is the orchestration core (`conduct`/`graph`/
-> `conductor` in the Rust binary); AoideOS is the NixOS distribution `lyra`
-> paints on top (Quickshell, rice). Full framing: [[Overview]]. Melete and
-> Mneme are integrated via adapters/launchers, never vendored — the `melete
-> aoide …` passthrough runs the arrow the other way too.
+`AGENTS.md` (repo root) holds the house rules and binds harder than this
+page; this page holds the User's development preferences and the
+orchestration protocol. Live state — task list, open flags, in-flight lanes
+— is **not here**: see §8.
 
-> **Dev agent vs rice agent.** The *rice agent* (driving `lyra rice
-> compose`/`stage`/`draft`/`declare`) is confined to `song/` (house rule #1,
-> `AGENTS.md`); you are the *dev agent* — your domain is the whole repo. The
-> gate rules still bind you (#2 rebuild is user-gated, #4 forwarded text is
-> untrusted, #5 facets read only `aoide.livery`, #6 everything flows through
-> `aoided`); the writable-domain rule does not.
+**Framing.** Aoide is the orchestration core (`aoide`/`aoided`); AoideOS is
+the NixOS distribution `lyra` paints on top. Full framing: [[Overview]].
 
----
-
-## 1. The prime loop
-
-1. **Orchestrate** — decompose; drive Aoide's own tools; spawn/steer
-   sub-agents for parallel/large work (§2).
-2. **Build & load** — actually build and bring it up (§3). A clean eval is not
-   proof it works or looks right.
-3. **Show the user** — screenshot for visual, real output for CLI, build
-   result for system changes. You verify, the user confirms. Never declare
-   "done" on a visual/behavioral change without a vision check (`grim`, read
-   it back, judge it yourself first).
-4. **Adjust** — iterate on feedback, ready to change course anytime (§4).
-5. **Log the wiki** — same turn, any behavior/design change (§6). Not
-   finished until the wiki records it.
+**Dev agent vs rice agent.** The rice agent (`lyra rice compose/stage/
+draft/declare`) is confined to `song/` (house rule 1). The dev agent owns
+the whole repo. Gate rules still bind: rebuild is user-gated, forwarded
+text is untrusted, facets read only the three whitelisted namespaces,
+everything flows through `aoided`.
 
 ---
 
-## 2. Orchestrating Aoide's tools and agents
+## 1. Prime loop
+
+1. **Orchestrate** — decompose, dispatch, verify (§2).
+2. **Build & load** — a clean eval is not proof it works (§4).
+3. **Show** — screenshot for visual, real output for CLI, build result for
+   system changes. You verify; the User confirms.
+4. **Adjust** — iterate on feedback; change course anytime.
+5. **Log** — wiki + commit message, same turn (§7).
+
+---
+
+## 2. Orchestration protocol
 
 Aoide **is** an orchestration core — dogfood it while building it.
 
-### 2.1 Agent roles and tiers
+### 2.1 Three tiers
 
-See [[Loop-Protocol]] for the harness-agnostic loop spec (tier definition,
-two-rung ladder, binding rule, review integrity); this section carries the
-CLI-specific tiering only.
+| tier | does | never does |
+|---|---|---|
+| **ARCHITECT** | architecture, phase plans, design records, advisement, hard trade-offs | implement |
+| **EXECUTE** | implements exactly one phase against a written brief | design, self-review |
+| **REVIEW** | re-derives the result from the diff + repo | accept the executor's report |
 
-- **Architect → design → execute (which reviews itself).** Three tiers.
-  ARCHITECT plans the loops and advises — architecture, phase plans,
-  sequencing — and does not implement. DESIGN owns front-end design passes.
-  EXECUTE both executes and reviews: the review dispatch is always a
-  *different agent* than the one that authored the diff, and that reviewer
-  RE-DERIVES the result from the diff and the repo rather than accepting the
-  executor's own report — this was always the correct behavior, it simply
-  wasn't written down before now (Rider, 2026-08-21). The orchestrator
-  dispatches and verifies, but does not implement, design, or review.
-- **Planning/mapping/designing → architect/design tier.** Small nudges stay
-  with the orchestrator: typo, pixel/margin, one-line tweak, or config bump.
-- **Tiers by CLI.** The model-to-tier mapping below applies to the **Claude
-  harness only** — every other harness is addressed by TIER ROLE
-  (architect/design/execute), not by re-deriving its own model-name mapping
-  here. Claude: Fable architects and advises, Opus designs, Sonnet executes
-  (a second, independent Sonnet dispatch reviews — never the authoring
-  session grading its own diff). Kimi: `k3` for architect/design, `k3-256k`
-  for execute, K2.7 coding aliases as fallback.
-- **Outward-facing artifacts name tiers, never models.** The architecture
-  report (`docs/architecture/aoide-report.html`) and anything else shown
-  outside this protocol doc say ARCHITECT/DESIGN/EXECUTE — never
-  Fable/Opus/Sonnet/Kimi/k3 by name.
-- **Design:** the User looks first and closes the pass; the advisor is on call
-  only when the User asks. **Wiki:** the execute-tier librarian maintains it (§6),
-  outside the orchestrator's context.
+The **orchestrator** dispatches, verifies, lands, and logs. It does not
+implement, design, or review. Small nudges stay with it: typo, one-line
+tweak, config bump, a probe.
 
-### 2.2 Session control and parallelism
+### 2.2 Routing — by capability, not by name
 
-- Drive sessions with `aoide conduct -- <cmd>` and command them with
-  `aoide send --id <id> [--submit] [--yes] -- <text>`. Parent-autogate
-  applies to children spawned by the orchestrator; other sessions need `--yes`.
-- Batch independent agents so they run concurrently; keep conclusions, not
-  file dumps. Resume a failed agent by id (`SendMessage`) rather than spawning
-  it cold. Test hook/socket/graph/reaper changes end-to-end: register, command,
-  kill, and observe reaping. See [[Session-Graph]], [[Terminal-Commander]],
-  [[Agent-Hooking]].
+Rank the available models by reasoning depth. Then:
 
-### 2.3 Shared-worktree discipline
+- **Deepest available → ARCHITECT.** Design work is where model quality
+  compounds; a weak plan costs every phase after it.
+- **Fast/cheap tier → EXECUTE and REVIEW.** Execution against a good brief
+  is throughput work.
+- **Front-end/visual design** takes the strongest *design* model available,
+  which is not always the strongest reasoning model.
+- **Only one tier available?** Run ARCHITECT prompts on it with an explicit
+  thinking budget, and still dispatch REVIEW as a **separate instance**.
 
-Other agents may be editing this repository. Check `git status --short` before
-any dispatch, leave their files alone, and never overlap writer paths. Give
-children bounded paths and acceptance evidence; use read-only agents when
-ownership is unclear. Follow §5 for branches, staging, and commits.
+**The invariant that survives any model set: the session that authored a
+diff never reviews it.** A reviewer grades "is this wrong", not "did my
+change regress it". Everything else here is a preference; this is a rule.
 
-### 2.4 Pi specifics
+**Outward-facing artifacts name TIERS, never models.** Any harness-to-tier
+mapping is a local deployment detail and stays out of published docs.
 
-This parent Pi session owns the User's request; Pi children supplement, not replace,
-Aoide's `conduct`/`graph`. `pi-subagents` is installed: use `subagent`, `/run`,
-`/parallel`, or `/chain` only when delegation materially speeds in-scope work;
-skip small edits, focused reads, and work another agent already owns. Children
-ask their supervisor when blocked; the parent verifies their result (§3).
-`pi-mcp-adapter` is on-demand: search the `mcp` proxy first and connect a
-server only when the task needs external MCP capability.
+### 2.3 Dispatch gates
+
+Per phase, in order:
+
+| gate | do |
+|---|---|
+| concretize | restate the ask as one phase with a definite end |
+| map | read the actual code; verify every claim the brief will assert |
+| advise | ARCHITECT ruling on any open fork — no forks reach EXECUTE |
+| brief | scope, seams, count sites, verification, hard constraints |
+| execute | one agent, foreground, no `Monitor`, no backgrounded builds |
+| review | different instance, re-derives from the diff |
+| land | orchestrator reads the diff itself, then pathspec commit |
+| log | commit message + wiki + memory delta |
+
+**Briefs go stale silently.** Verify count sites, file paths, and line
+numbers at brief time; do not copy them from memory. A brief that names a
+site that moved sends the executor to rewrite the wrong thing.
+
+**Ask the executor to report what the brief got wrong.** It is the most
+valuable line in any report and it is routinely there.
+
+### 2.4 Parallelism and the shared worktree
+
+- Batch independent agents; keep conclusions, not file dumps.
+- **Serialize anything that runs cargo.** Concurrent cargo on a shared
+  `target/` produces flaky counts that read as real failures.
+- Resume a stalled agent by id rather than respawning cold.
+- Other sessions share this worktree. `git status --short` before dispatch;
+  bounded paths per agent; never overlap writer paths.
 
 ---
 
-## 3. Build, load, and show — the concrete mechanics
+## 3. The User's standing preferences
 
-Verified recipe on yomi-strix (host `yomi-strix`, user `khoa`):
+**Build for longevity, not for the fastest green.** Judge a design by
+maintenance cost and reach. Between two working designs, pick the one that
+deletes more.
+
+**Critique before building.** If an idea is bad, say why *first*, then
+build it if the User reaffirms. An objection after the fact is worthless.
+
+**Ask often; one question per turn — the blocking one.** The User is vague
+on purpose, to surface edge cases. Ambiguity gets a question, not an option
+menu; menus only when a fork genuinely blocks. Unanswered twice → take the
+default and flag it.
+
+**Show, don't describe.** Processes, architecture, and data flow get ASCII,
+tables, or trees. Prose fills only the gaps a picture cannot.
+
+**Comments minimal — fix the code instead.** A comment justifies its
+existence or it does not ship. Never brief an agent to match a heavy
+comment density.
+
+**Docs are timeless.** Edit a page integrally so it reads as always-so.
+Never append dated UPDATE/AMENDMENT blocks. Decisions and change records go
+to the log — commit message, changelog, memory. Ledgers are exempt; they
+*are* the log.
+
+**Say commands, not verbs.** Spoken as `aoide <cmd>` / `lyra <cmd>`.
+
+**Backend first.** Doors, policies, protocol, crates before QML/rice/web.
+In-flight front-end finishes; new front-end waits.
+
+**Menus over hand-typed input.** Use the `inquire` wrappers in
+`protocol/src/pick.rs` (`choose`, `choose_many`, `confirm`, `text_input`,
+`hidden_input`). `inquire` is declared in `aoide-protocol` only — every
+other crate reaches the wrappers. Keep the `*_reading` non-tty half so the
+command stays agent-drivable and testable. **Ask the User which menu type
+each time.** Carve-out: never convert an input to a menu where the typing
+*is* the verification — a pairing SAS must stay typed, because selecting is
+not attesting.
+
+**Version bumps by phase.** One patch digit at the end of each completed
+major phase, inside that phase's landing commit — never a commit of its
+own. `pkgs/aoide/Cargo.toml`'s `[workspace.package].version` is the single
+source: every crate inherits it, the runtime `AOIDE_VERSION` derives from
+it via `env!("CARGO_PKG_VERSION")`, and the nix derivation reads it back
+out of the manifest. Let cargo rewrite `Cargo.lock`. "Major phase" means a
+numbered phase of a tracked lane, not every commit and not a review pass.
+
+**Verify or say you could not.** "Looks done" is not done. Report failures
+with the output; say plainly when a step was skipped.
+
+---
+
+## 4. Build, load, show
 
 ```
-# eval + build the whole system (validates all nix)
-nix build .#nixosConfigurations.yomi-strix.config.system.build.toplevel --no-link --print-out-paths
+# eval + build (validates all nix)
+nix build .#nixosConfigurations.<host>.config.system.build.toplevel --no-link
 
-# activate — USER-GATED (Rebuild-Gate). Only when the user has admitted it.
+# activate — USER-GATED. Only when the User has admitted it.
 sudo nix-env -p /nix/var/nix/profiles/system --set <toplevel>
 sudo <toplevel>/bin/switch-to-configuration switch
 
-# desktop-only reloads (no full switch needed for QML/hyprctl-live changes)
-hyprctl reload                                  # compositor rules / plugins
-systemctl --user restart aoide-quickshell.service   # bar / dock / gadgets
-lyra rice stage <song>                         # stage livery.json for hot-reload
-qs -p modules/facets/quickshell/qml/shell.qml   # QML load/parse check
+# desktop-only reloads (no switch needed)
+hyprctl reload                                     # compositor rules
+systemctl --user restart aoide-quickshell.service  # bar / dock / gadgets
+lyra rice stage <song>                             # livery hot-reload
+qs -p modules/facets/quickshell/qml/shell.qml      # QML parse check
 
-# SHOW the user
-grim out.png ; grim -g "0,0 1920x60" bar.png    # full + crops → read them back
+# show
+grim out.png ; grim -g "0,0 1920x60" bar.png       # read them back yourself
 ```
 
-- **Switch is user-gated** ([[Rebuild-Gate]]). Propose and prepare the build;
-  the user admits it. Without durable authorization this session, stop at
-  the built toplevel and hand it over.
+- **Switch is the User's gate** ([[Rebuild-Gate]]). Never hold or use a
+  password, even when handed one. Say the gate exists once, then move on.
 - **Smallest reload that proves the change.** QML → quickshell restart;
-  compositor rule → `hyprctl reload`; Stylix/base16/kitty → nix-baked, needs
-  a rebuild. Values staged via `rice stage` hot-reload without a rebuild.
-- **Staging can be locked.** `rice stage`/`cover set` refuse with
-  `declarative-mode-locked` while `lyra rice mode status` reports
-  `declarative` (the default — nothing has unlocked staging yet). Run
-  `lyra rice mode stage [<song>]` first to unlock; `lyra rice mode
-  declarative [<song>]` locks it back. See
-  [[Self-Ricing#Staging vs Declarative Mode]].
-- **Edit a rice's live state through mode commands — never by hand.**
-  `song/stage/livery.json` and the `song/songbook/<song>/drafts/*` targets it
-  can symlink to are CLI-owned: hand-writing them directly bypasses the
-  declarative lock check and the draft routing (a draft only receives writes
-  because `rice mode draft <name>` pointed the stage path at it). Go through
-  `lyra rice mode stage/draft/declarative`, `rice stage`, or `cover set` —
-  never `Write`/`Edit` the stage JSON itself. A song's own
-  `song/songbook/<song>/widgets/*.qml` (versioned score, not runtime state) is
-  always fair game to edit directly. See AGENTS.md's rice loop and
-  [[Self-Ricing#Drafts — durable scratch, reached by ROUTING not copying]].
-- **Always look.** Screenshot, read it back, judge coherence (light/dark
-  polarity, bar↔terminal↔gadget agreement) *before* showing the user — the
-  [[Ricing-Protocol|Ricing Protocol]] vision check, for any visual change.
-- **Ricing/design changes are ALWAYS deployed live — the executor stages
-  them.** Not "finished" at qmllint-clean: hot-sync changed QML into the live
-  tree and restart the shell (or smallest reload that proves it) so review
-  happens on the render. Order: the User looks first — the advisor
-  is on call only (§2). **Live path: the service reads `run/qml/shell.qml`, so the
-  deployed tree is `run/qml/` (writable working copies) — NOT
-  `modules/facets/quickshell/qml/` and NOT `~/Aoide/qml/`.** Sync only the
-  files you changed (`cp modules/facets/quickshell/qml/<f> run/qml/<f>` then
-  `lyra quickshell reload` — a Quickshell IPC call
-  (`quickshell ipc call shell reload`) that rebuilds the whole scene
-  in-process, no systemd restart needed; `systemctl --user restart
-  aoide-quickshell.service` still works as a fallback); leave files another
-  agent is mid-editing untouched (shared-worktree discipline, §5). **This
-  manual `cp` is unnecessary for SONG widget bodies**
-  (`song/songbook/<song>/widgets/*.qml`) — `lyra rice stage <song>` syncs
-  those into `run/qml/songs/<song>/` itself, live, no manual copy or
-  restart (CONTRACTS.md §5). It is still required for FACET-owned QML
-  (`shell.qml`, `StagingEngine.qml`, `WidgetSlot.qml`, `SurfaceSlot.qml`,
-  etc.) — this feature doesn't touch that tree.
-
-### Living report — the HTML artifact carries status
-
-Progress/system state live in one HTML **report artifact**, edited in place.
-Current URL:
-`https://claude.ai/code/artifact/f4df295c-128e-40f1-b2fc-a7c5ba7a8241`. Carries
-overview, architecture (ASCII + Mermaid), running-process table, and a
-workstream ledger (status pills + changelog keyed by commit hash). A synced
-copy is tracked in-repo at `docs/architecture/aoide-report.html`, which is
-what survives a fresh clone and git history; the artifact is the live/shared
-URL.
-
-- **Update it, don't repeat it.** After landing/milestone: edit + republish to
-  the *same file path* (keeps the URL), flip the ledger pill
-  (`pending → active → landed · <hash>`), add a changelog line. Reserve chat
-  for decisions/questions/blockers. Copy the same edit into
-  `docs/architecture/aoide-report.html` and commit it — the two must not
-  drift.
-- **Keep identity stable.** Same `<title>` and favicon (🏛️) across redeploys.
-  House style: dual light/dark, self-contained, Mermaid on cool-paper,
-  verdigris+bronze.
-- Complements §6 (wiki records behavior/design; the report is at-a-glance
-  build state). Visual changes still need the vision check before "done."
+  compositor rule → `hyprctl reload`; Stylix/base16 → needs a rebuild.
+- **Staging can be locked.** `rice stage` refuses while
+  `lyra rice mode status` reports `declarative`. Unlock with
+  `lyra rice mode stage [<song>]`. See [[Self-Ricing]].
+- **Never hand-edit** `song/stage/livery.json` or draft targets — that
+  bypasses the lock check and the draft routing.
 
 ---
 
-## 4. Flags, uncertainty, and adjusting on the fly
+## 5. Verification discipline
 
-**Flag behavior; ask when uncertain; never guess silently.** Unsure how
-something is *supposed* to behave (socket contract, gate, rename, compositor
-rule) → raise it or ask, don't ship a guess as fact.
-
-Loop: **flag → (maybe) park on request → handle → reopen.** You may be told
-to ignore open flags and make a quick change — do it, but reopen every parked
-flag afterward, and restore any test-only toggle (debug switch, bypassed
-gate) to its prior state once the test is done. Nothing raised is ever
-quietly lost.
-
----
-
-## 5. Managing the repo (development-mode git)
-
-Aoide is in active development, not branch-protected — branches matter less.
-Small, coherent, verified changes land directly.
-
-- **Ask before branching.** Large/risky/long-running/likely-to-churn-shared-
-  files → ask the user whether it wants its own branch. Default: land
-  directly.
-- **Shared-worktree discipline.** Other agents may hold the same index.
-  Commit with **explicit pathspecs** (`git add -- <your files>`), never
-  `git add -A`; never `git reset` a shared index. Check `git status` first;
-  leave files another agent is mid-editing alone.
-- **No AI co-author trailer** on Aoide commits — push as khoa, plain.
-- **Never commit** `.claude/settings.json` (user commits by hand),
-  `node_modules`, or `song/stage/*`/`state/stage/*` (live desktop state, not a
-  commit target).
-- **Gates before landing:** `nix build .#<pkg>` for touched packages,
-  `nixfmt --check` on changed nix, a toplevel eval, the relevant
-  `aoide … --json` smoke check. Stage new files before a flake eval — it
-  can't see untracked paths.
+- **`nix flake check` is the committed-tree gate.** `aoide soundcheck` is
+  the working-tree sweep, report-only. Both exist; run them.
+- **Flake checks see unstaged edits to TRACKED files, and are blind to
+  UNTRACKED ones.** A new `.nix` file is invisible until `git add`ed —
+  check `git status` before trusting a green.
+- **Prove a refactor inert by drv identity.** Compare
+  `nixosConfigurations.<host>.config.system.build.toplevel.drvPath` across
+  a detached worktree. Pass the worktree as a **path literal**, never an
+  interpolated string — a string leaks the temp path and fakes a
+  difference. `pkgs/aoide/default.nix` can never pass this test: its
+  `src = lib.cleanSource ./.` contains the recipe itself.
+- **Prove a gate can go red.** A gate never seen failing is theatre.
+- **Never `cargo fmt` or `rustfmt`.** No Rust fmt gate exists; HEAD is
+  deliberately not fmt-clean and a run manufactures hundreds of churn
+  lines. `nixfmt` on `.nix` files is required — the `fmt` check enforces it.
+- **Never `cargo test --workspace`** — it deadlocks, since the conduct
+  crate binds real sockets. Scope to changed crates, with `TMPDIR=/tmp`.
+- **Read `PoisonError` as a cascade, not a cause.** Find the first failure.
 
 ---
 
-## 6. Adjusting the wiki — delegated to the librarian
+## 6. Repo and git
 
-Wiki work is delegated to a standing **mid-tier "librarian" agent** (see §2
-tier mapping), kept out of the orchestrator's own context. Mandate: every page states **what
-currently IS the case** — present-indicative, matching the live repo/system —
-never a plan or future intent (that's what open flags are for). Can run on a
-broad standing brief in the background rather than one page per call.
+Active development, not branch-protected. Small, coherent, verified changes
+land directly.
 
-- Update the page that owns the concept (conductor change →
-  [[Conductor-Channel]]; graph/session → [[Session-Graph]]; new gadget →
-  [[Widget-Maker]]/[[Gadget-Dock]]).
-- **Rice design → the songbook, not the wiki.** Design decisions about a rice
-  (key, opacity, surface element) land in `song/songbook/<name>/design/`
-  (cross-cutting grammar historically lived in the now-retired `default`
-  song, kept as reference at `docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`).
-  The wiki keeps only protocol ([[Ricing-Protocol]], under `concepts/song/`).
-- Follow [[Wiki-Protocol]]/`SCHEMA.md`: wikilinks, frontmatter, house voice.
-- Record the *why*, not just the *what*.
+- **Ask before branching.** Large, risky, or churn-heavy → ask. Default:
+  land directly.
+- **Pathspec commits only** (`git commit -- <paths>`). Never `git add -A`,
+  never `git reset`/`checkout`/`restore`/`stash` in a shared worktree.
+- **No AI co-author trailer.** Push as the repo's configured author.
+- **Authored content says "the User"** — never a personal name.
+- **Never commit** `.claude/settings.json`, `node_modules`, or
+  `song/stage/*` / `state/stage/*` (live desktop state).
+- **Push at milestones** — lane or phase completion, or on ask. Commit
+  freely.
 
 ---
 
-## 7. Open flags — live ledger
+## 7. Wiki
 
-Flags raised but not yet closed, so the next agent inherits them. Close a
-flag by resolving it AND deleting its line; add one the moment you raise it.
+Delegated to a standing execute-tier **librarian**, kept out of the
+orchestrator's context. Mandate: every page states **what currently IS the
+case**, present-indicative, matching the live repo. Never a plan or a
+future intent.
 
-- **[landed, docs-only] Fork-and-Run retired → Clone-and-Run.** Your clone is
-  your instance; a remote fork is now optional (backup, fleet sync,
-  contributing back), not a prerequisite. `concepts/governance/Fork-and-Run.md`
-  → `Clone-and-Run.md` (`git mv`) and the model-mention sweep landed across
-  wiki/README/flake description/`onboard` stub summary (2026-08-14). Residual:
-  the live report artifact (`claude.ai/code/artifact/f4df295c…`) still says
-  "fork and run" until its next republish — the repo copy
-  (`docs/architecture/aoide-report.html`) is already updated.
-- **[landed, switched] kimi CLI integration via the agent-profile
-  seam — committed as `2a21f80` (2026-08-03); the gated switch landed
-  2026-08-12 (`392mgwkhf…` toplevel — its `aoide` carries the profile
-  registry, `hooks install`, and the reaper fix).**
-  `protocol::agents` `AgentProfile` registry (every harness fact — hook
-  event map, permission vocab, subagent tools, model ceilings, transcript
-  spec, settings spec, payload normalizer — behind one table; claude
-  extracted verbatim, kimi second); `graph session hook --agent`; `aoide
-  hooks install <agent> [--capture]`; kimi payload normalization + real
-  `TranscriptSpec`; wrapper-of-agent eviction fix. 10 kimi hooks
-  live-installed in `~/.kimi-code/config.toml`. Toplevel built green:
-  `/nix/store/fp63rfc1ac0lfdiyqmr2knhxi9gnyf52-nixos-system-yomi-strix-26.11.20260723.e2587ca`
-  (verified: its `aoide` carries `hooks install`). Known gaps (kimi 0.31.1):
-  `SubagentStop`/`PermissionResult` never fire (sub-nodes close on
-  PostToolUse(Agent)); `Stop` doesn't fire on Esc interrupt; kimi sub-nodes
-  have no transcript probe. Operator facts: kimi TUI submits on `\r` not
-  `\n` (`graph send --submit` resolves the submit keystroke from the
-  target's agent profile, so it just works); model aliases are prefixed (`-m kimi-code/kimi-for-coding`);
-  one unexplained instant-exit at 02:14, unreproduced. Capture log (Step-4
-  evidence, deletable): `~/Aoide/state/kimi-hooks.jsonl`. Test-model note:
-  use `kimi-code/kimi-for-coding` (K2.7) for e2e — don't burn K3.
-- **[landed, switched] pi session tracking via the agent-profile seam — committed as `ca08b73` (2026-08-12); the gated switch landed the same day (`392mgwkhf…` toplevel — its `aoide` resolves `--agent pi`; the home re-link deployed `aoide-pi-session.ts` into `~/.pi/agent/extensions/`).** `PI_PROFILE` in `protocol::agents` (claude-shaped hook event map, identity normalize, shared model ceiling, `TranscriptSpec` tail-reading pi's own jsonl at `~/.pi/agent/sessions/--<bucket(cwd)>--/<ts>_<sid>.jsonl` for say/title/model/context — bucket preserves dots per pi's own rule, hook-supplied `transcript_path` hint preferred); `aoide hooks install pi` reports `declarative` (new `SettingsFormat::Declarative` — pi's wiring is the dendrite-managed extension, not a settings file); the `aoide-pi-session.ts` extension (`modules/dendrites/pi-coding-agent.nix`) pipes SessionStart/UserPromptSubmit/Pre/PostToolUse/Stop/SessionEnd into the hook door (tui-mode only — pi-subagents' `--mode json -p` children never register; per-process Set dedupes resume/reload; graceful quit ends the session). E2E-verified live on yomi-strix: idle→working→stopped→done, prompt-named, model (`deepseek/deepseek-v4-flash`) + ctx (`⧉ 11k`) tail-read from the transcript. Operator facts: extensions hot-reload via `/reload` in the TUI (session_start re-fires with reason `reload`; the fresh instance reports — a pre-existing pi process needs `/reload` or restart to track). Known gaps: killed pi (SIGKILL/terminal close) leaks `working` until the reaper's pid/window signal (same as claude/kimi); settings.json `sessionDir`-only configs (no env var) are a transcript-locate miss; `hooks install pi --capture` is N/A (declarative).
-- **[decision] App-launch exec discipline.** `DesktopEntry.execute()` is used
-  for app-launch (Quickshell-native idiom) rather than routing through
-  `aoided` (rule #6) — no such command exists and adding one buys nothing. Open
-  only as a contract question for khoa: if he wants *all* side effects through
-  `aoided`, that's a ruling to make; otherwise closes as-is. Sibling
-  `SUPER+ESCAPE → aoide shell lock` is still an unimplemented stub. See
-  [[Quickshell]].
-- **[cleanup] `lib/checks.nix` carries pre-existing nixfmt-1.4.0 drift** —
-  formatting-only pass owed. See [[Self-Ricing]].
-- **[bug] `lyra rice stage <name>` derives cover by song-name convention**
-  instead of reading `aoide.livery.wallpaper`. Mitigated live by
-  `AOIDE_WALLPAPER` env baked into the quickshell service; proper fix (stage
-  reads the song's wallpaper note) still owed. See [[Self-Ricing]].
-- **[feature, partially resolved] Wallpaper switcher.** `set`/picker UI
-  shipped; still owed: `list`/`next` commands (only `set` exists), crossfade
-  transition (currently a hard `source` swap), per-monitor selection once
-  multi-output lands. Residual: `qt6.qtimageformats` plugin-path export
-  bounds format support — keep it when touching the service.
-- **[resolved 2026-08-12, class fixed] Sessions untrack after a rebuild.** Previously-
-  tracked agent sessions stop showing as tracked (roster/DAG/✎N) after
-  `nixos-rebuild switch`. The confirmed live instance: the kimi session
-  `569f4c26` got a SessionEnd hook payload at 05:42Z while the process was
-  still running (kimi never exited — the payload was not its own; likely a
-  test/cleanup run), was pruned as `done` 21s later, and no further event
-  could ever re-register it — harnesses fire SessionStart only at launch, so
-  every later event for the missing id was a silent no-op plus a ghost
-  `hooks.json` record. **Fix (`1334176`): the hook door self-heals — any real
-  event (prompt/stop/tool) on a missing top-level id re-registers it first
-  (fresh idle, mirroring the Start arm: window discovery, env-parent
-  threading, cwd from payload); SessionEnd for an unknown id stays a no-op;
-  `sub:` ids are never implicit-started. Disappearance is now transient —
-  the next real event brings the session back.** Residual edges (parked):
-  the SubEnd arm is not healed (a lone late SubagentStop after its parent
-  was pruned stays a no-op); a heal can re-link under a pruned
-  `AOIDE_SESSION_ID` parent (dangling until the next prune's
-  `resolved_parent` pass); the other three seams (a/c/d above) were not
-  individually confirmed. Repro: track a session, switch, diff
-  `stage/sessions.json` + `aoide graph emit` before/after.
-- ~~**[bug] `lib/vmTest.nix` command-count assertion is stale**~~ **closed**:
-  fixed alongside the `rice design` cut / `rice draft` add / `rice gen`
-  removal pass (khoa 2026-08-14), then bumped again for the `peer`
-  group (§7 below), then again for the new `shell reload` command
-  (Quickshell IPC hot-reload trigger) — asserts `cmd_count == 60` now,
-  matching `aoide schema --json`. See [[Codebase]].
-- ~~**[bug] `lib/vmTest.nix` command-count assertion has drifted again**~~
-  **closed**: bumped again across the command-defrag lane D pass (the `a2a
-  agent` family deleted, `graph wrap`/`graph emit`/`graph focus` deleted,
-  `peer list` folded into `peer status`) — asserts `cmd_count == 73` now,
-  matching `aoide schema --json`. Same bug class as the struck entry above;
-  watch for a next drift the same way.
-- **[bug] Rice keybinds invoke retired commands.** `modules/dendrites/hyprland.nix`
-  binds `SUPER SHIFT, P` → `lyra rice preview` and `SUPER SHIFT, A` → `aoide
-  rice adopt` — both spellings were retired in the renames (`preview` →
-  `stage`, `adopt` → `declare`; no aliases), so both keybinds are no-ops.
-  Repoint to `rice stage` / `rice declare`. See [[Controls]].
-- **[docs] `README.md` (repo root) lags the wiki.** Known stale points: shipped
-  song is `sonata` not `hero`; launcher trigger is `aoide:launcher` not the
-  old CLI-stub form; command count is 36 (three gated) not 28; `rice stage`
-  is real not planned; `aoide.rebuild` has no `options.nix` option yet.
-  Reconcile alongside any songbook-touching pass.
-- **[limitation, by design] Window→session listener can't resolve a
-  hook-only session with no recorded pid** (never conducted). The hook-time
-  backfill is the fallback for exactly this case — don't remove it. See
-  [[Terminal-Commander]], [[Session-Graph]].
-- **[decision] "Conductor" CLI naming scope.** A `conductor` command/alias +
-  brand was proposed (keeping the `aoide` binary/namespace); alias-vs-hard-
-  rename scope never confirmed. Not implemented. See [[Conductor-Channel]].
-- **[planned] Dark `moonlight-sonata` song** — dark counterpart to `sonata`,
-  scheduled for after merge/rebuild.
-- **[retired] Default song with Pantheon thematics.** The `default` song
-  this once planned to dress is gone — retired outright and renamed
-  `sonata`, which draws its own grammar (`greek-grammar.md`) instead. The
-  Pantheon grammar doc survives only as historical reference
-  (`docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`); nothing plans
-  to wear it. See [[Self-Ricing]].
-- **[planned, wiki-excluded by design] External-Edit-Tracking.** Detect a
-  human's direct file edits (nvim/vim) inside a conducted shell and report
-  back to the orchestrating session. Not implemented. Design on record:
-  `conduct`'s PTY tick already detects editor-foreground
-  (`EDITOR_BASENAMES`/`friendly_editor_command`,
-  `crates/conduct/src/graph/conduct.rs`) — snapshot `git
-  status --porcelain` around that window, diff to newly-changed paths, write
-  `state/stage/edits.json` (atomic write-temp-rename, same contract as other
-  conducting stage files); `aoide graph edits [list|ack]` CLI. Undecided: how the
-  orchestrator learns without polling — PTY injection (collision risk with a
-  human mid-keystroke) vs. a visual badge on the session row (no collision,
-  relies on being noticed). Scope git-repos-only, no mtime fallback. See
-  [[Conductor-Channel]], [[Session-Graph]], [[Widget-Bridge-Contract]].
-- **[flagged, not designed] Session continuity across a shellbridge
-  restart.** Every gated switch restarts `shellbridge.service`, wiping
-  `RuntimeDirectory` (`/run/user/1000/aoide/`) and every live `conduct`
-  process's injection socket, though the process itself keeps running.
-  Preferred direction (khoa): a conducted session detects its socket is gone
-  and reconnects, rather than the daemon preserving continuity across its
-  own restart. Not designed. See [[Conductor-Channel]].
-- **[gap, not fixed] `reconcile_untracked_terminals` has no transient-read
-  grace, unlike the reaper.** `sync_untracked_terminal_windows`
-  (`pkgs/aoide/crates/conduct/src/graph/window.rs:846`) only short-circuits when `hyprctl_clients()`
-  returns `None`; a call that *succeeds* with an empty client list (IPC
-  hiccup) looks identical to "every terminal closed," so
-  `reconcile_untracked_terminals` (`window.rs:692`) drops every synthetic
-  `win:*` record that pass and recreates them fresh next tick. The reaper
-  already guards this for its own liveness sweep
-  (`crates/conduct/src/reap.rs:144`,
-  `effective_live_addresses`/`is_recent`) — this function has no analogous
-  fallback. Effect: visible flicker + wasted restage; also means any
-  per-session state keyed to a window (relevant to External-Edit-Tracking
-  above) would silently drop on a false-negative empty read. Fix: mirror the
-  reaper's grace (don't trust an empty list unless it persists, or diff
-  against the previous snapshot). See [[Terminal-Commander]].
-- **[residual] Legacy widget audit.** `Γ`/`dag.trace` order-mark unused in
-  `GadgetFrame`'s map; `aoide.surfaces.sessionGraph` registry entry has no
-  QML body. See [[Gadget-Dock]].
-- **[residual] Grimoire launcher chrome.** Two commits (`802e603` dock +
-  ruled empty pages, `4b56ae6` Greek/Roman/English numeral+text balance) —
-  verify pushed to origin. Book height (621) is still a magic number, not
-  derived from content — low priority. See [[Quickshell]].
-- **[landed] Per-song flavor widgets — declared widget-type registry.**
-  `calendar`/`herald-center`/`bar` slots (`WidgetSlot`) and
-  `powermenu`/`launcher` slots (`SurfaceSlot`, window-owning) are the
-  anchored catalog, built and live (`StagingEngine.qml`, hot-swaps via
-  `lyra rice stage <name>`) — see `modules/facets/quickshell/qml/slots.md`.
-  A song is no longer limited to filling an anchor the facet already wired:
-  `aoide.arrangement.widgets.<slot>` (`modules/nucleus/options.nix`) lets a
-  song register an entirely new slot via nix (`kind = "surface" | "dock"`),
-  validated by `rice lint` (`pkgs/aoide/crates/song/src/livery/schema.rs`)
-  and hosted at runtime by `SongSurfaces.qml` (surface) /
-  `SongGadgets.qml` (dock) — reusing the same `WidgetSlot`/`SurfaceSlot`
-  primitives, not a new rendering mechanism. `song/songbook/etude/` is the
-  real worked example (one `kind: "surface"` entry). `greeter`/`lockscreen`/
-  `osd`/`nowPlaying` still have no host anchor of ANY kind — a registered
-  `surface`/`dock` slot is a compositor overlay or dock `Item` in an
-  already-running session, not a greetd/session-manager integration point,
-  so the registry doesn't close this gap. See `CONTRACTS.md` §5,
-  [[Widget-Maker]], [[Gadget-Dock]], [[Quickshell]].
-- **[open, v2] Declared dock-widget ordering doesn't interleave with the
-  shipped gadgets.** `order` (`aoide.arrangement.widgets.<slot>.order`,
-  dock-only) sorts declared `kind: "dock"` entries against EACH OTHER only —
-  `SongGadgets.qml` always mounts as the last children of `AoidePanel`'s
-  gadget column (`modules/facets/quickshell/qml/AoidePanel.qml`), after the
-  six shipped gadgets (Conductor/Terminals/Usage/Meters/Power/herald-center).
-  A declared `dock` widget can never be ordered before or between the
-  shipped gadgets, only reordered among other declared `dock` widgets.
-  Deferred, not scheduled.
-- **[plan, not started] Conductor/Terminals: dedupe rows, name by cwd, show
-  `say`.** Partially landed with the Phase 9 crate split: the reaper is
-  extracted (`pkgs/aoide/crates/conduct/src/reap.rs`) and
-  `superseded_agent_duplicates` exists there (`reap.rs:208`) to retire
-  same-window agent-record duplicates (the live bug — one terminal showing
-  three "claude" rows, phantom masking `say`). Still owed: name untitled rows
-  by cwd
-  basename in both gadgets, suppress the Conductor's flat `shell → claude`
-  row, surface `say` on the Terminals claude row. First candidate for the
-  plan→execute→review pipeline. See [[Conductor-Channel]], [[Session-Graph]].
-- **[in-progress, unreviewed] Conductor gadget redesign (RosterTemple).**
-  `ConductorGadget.qml` rewritten: root id `gadget` → `temple`, project
-  grouping via roman numerals (`roman(n)`), state indicated by
-  `lampGlyph`/`lampColor` — replaces the old mood-face/kaomoji system
-  (`MoodFaces`, `kaomojiFor`) and the hover-clear/emphasis machinery
-  (`setHover`/`requestHoverClear`/`computeEmph`) wholesale. `ConductorPreview.qml`
-  updated to match: the harness now instantiates real `LiveryState` +
-  `ShellBridge` instead of a stub palette object, since the new roster reads
-  `livery`'s real `ctxPercent`/`ctxBar`/`noteColor`/`elapsedSince` helpers.
-  Deployed live to `run/qml/` for testing, service is up — but this has not
-  yet had the khoa-looks-first vision check (§3) before landing as reviewed
-  design. See [[Conductor-Channel]].
-- **[landed + switched] Livery merge + rename.**
-  Plan: `docs/architecture/LIVERY-MERGE.md`. Phases 1–3 executed and reviewed
-  2026-08-13 (native engine in `crates/song/src/livery/` with the
-  stage/hyprctl/osc/file emitter registry; the old Node package deleted, Node
-  out of the core; the option namespace renamed with a `mkRenamedOptionModule`
-  alias; songbook `livery.json`; stage dual-write/dual-read compat live).
-  **Phase 4 executed 2026-08-13:** the stage mirror write + fallback reads +
-  the option alias are dropped (staged no-arg reads in `rice.rs`
-  `resolve_rice_notes`, `commands/livery.rs` `resolve_notes`, and
-  `conductor/src/ui.rs:517` retargeted to `livery.json`), the QML singleton
-  file rename to `LiveryState.qml` is done, and the comment-only sweep
-  (`qml/shell.qml`, `StagingEngine.qml`, `WorkspaceRow.qml`,
-  `dendrites/hyprland.nix`, `nucleus/shellbridge.nix`,
-  `hosts/yomi-strix/default.nix`) is complete — khoa switched to the Phase-4
-  build 2026-08-13. See [[livery (rename to lyra)]], [[Self-Ricing]].
-- **[landed + switched] Separate Aoide from AoideOS — two flakes.**
-  Phase 5 executed 2026-08-13: `pkgs/aoide/flake.nix` (nixpkgs-only) is
-  consumed as the `aoide` path input; `lib/pkgs.nix` skips self-flaked package
-  dirs; `packages.aoide`/`default`, `pkg-aoide`, and the mkHost/vmTest
-  overlays re-source the input's package. Evidence: yomi-strix toplevel green
-  at
-  `/nix/store/95v47pjvl2ivlxl8dla7vwwly4hwjz98-nixos-system-yomi-strix-26.11.20260723.e2587ca`
-  (`nix flake check` incl. vm-boot passes; `aoide schema --json`
-  byte-identical vs the workspace binary).
-  Topology DECIDED 2026-08-13 (three-way agent deliberation, khoa approved):
-  (b) in-repo subdir flake `pkgs/aoide/flake.nix` consumed by the root flake
-  as a `path:` input, nixpkgs-only — the "no NixOS below `cli`" invariant
-  becomes build-enforced; graduation to (a) a separate repo is a one-line
-  input swap + `git filter-repo` when a real external consumer appears.
-  Sequencing: AFTER the livery merge (Phase 5) — the merge deleted the
-  cross-package note-engine-binary seam, making `pkgs/aoide` self-contained Rust,
-  the precondition for extraction. Rewire points mapped: `lib/pkgs.nix`
-  discovery must skip a package dir carrying its own `flake.nix`; the overlay,
-  `packages.default`, `pkg-aoide`, and `vm-boot` source the input's package.
-  Still open for khoa: off-NixOS runtime home (stage/state default to
-  `~/Aoide/...`; XDG defaults vs `aoide init`). AoideOS = the NixOS flake
-  built on top, adding Quickshell/rice. Matches the crate split in
-  `docs/architecture/PACKAGE-LAYOUT.md`: no NixOS assumption below `cli`;
-  `management` host-abstracted (NixOS vs portable nix-profile/home-manager,
-  runtime-detected); `song` rices portably; `steward` manages packages
-  through Aoide's own Nix set. See `docs/architecture/PACKAGE-LAYOUT.md`,
-  [[Package-Layout]].
+- Update the page that owns the concept, not a new page.
+- **Rice design → `song/songbook/<name>/design/`, not the wiki.** The wiki
+  keeps only protocol ([[Ricing-Protocol]]).
+- Follow [[Wiki-Protocol]] and `SCHEMA.md`: wikilinks, frontmatter, voice.
+- Record the *why*, not only the *what*.
 
 ---
 
-## 8. Quick reference
+## 8. Live state lives in memory, not here
 
-| Need | Do |
-| --- | --- |
-| Build the system | `nix build .#nixosConfigurations.yomi-strix.…toplevel` |
-| Activate (gated) | `nix-env --set` + `switch-to-configuration switch` |
-| Reload compositor | `hyprctl reload` |
-| Reload shell | `lyra quickshell reload` (or `systemctl --user restart aoide-quickshell.service`) |
-| Stage a song live | `lyra rice stage <song>` |
-| Check QML loads | `qs -p …/shell.qml` |
-| Show the user | `grim` → read the PNG back → judge → send |
-| Command a session | `aoide send --id <id> [--submit] [--yes] -- <text>` |
-| Machine-readable API | `aoide schema --json` |
+This page is timeless. Everything that changes — the task list, open flags,
+in-flight lanes, per-agent quirks, deploy state, blocked items — lives in
+the orchestrator's memory store and is read at session start.
+
+| want | read |
+|---|---|
+| task list, lane state, blocking gates | the task-stack memory |
+| what changed since last session | the newest handoff memory |
+| per-agent quirks and dead ends | the per-agent memories |
+
+A flag raised in conversation goes to memory the same turn. Nothing raised
+is quietly lost; a parked flag is reopened after the detour that parked it.
+
+---
+
+## 9. Quick reference
+
+| need | command |
+|---|---|
+| command ground truth | `aoide schema --json` |
+| tier map at runtime | `aoide guide` |
+| working-tree sweep | `aoide soundcheck` |
+| committed-tree gate | `nix flake check` |
+| conduct a session | `aoide conduct -- <cmd>` |
+| command a session | `aoide send --id <id> [--submit] [--yes] -- <text>` |
+| session roster | `aoide session` |
+| mesh roster | `aoide peer list` |
 
 ## Related
 
-- [[AOIDE-HANDOFF]] — the original design contract (what Aoide *is*)
-- [[Agent-Interface]] — the CLI/MCP action layer
-- [[Ricing-Protocol]] — the vision-check discipline
-- [[Rebuild-Gate]] — why the switch is user-gated
-- [[Conductor-Channel]] · [[Session-Graph]] · [[Terminal-Commander]] — the
-  orchestration surfaces you both use and test
-- [[Codebase]] — how the built repo actually works
+[[Overview]] · [[Loop-Protocol]] · [[Agent-Interface]] · [[Session-Graph]] ·
+[[Conductor-Channel]] · [[Rebuild-Gate]] · [[Self-Ricing]] ·
+[[Ricing-Protocol]] · [[Wiki-Protocol]]
