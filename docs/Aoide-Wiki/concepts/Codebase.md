@@ -103,7 +103,7 @@ home-manager/stylix modules, the pkgs overlay, and mirrored `specialArgs`
 (`host = "vm-test"`, inputs, username, system; `node.pkgsReadOnly = false`
 so the overlay applies) — so the test boots the real assembly, not a
 replica. It asserts: `multi-user.target` reached; `aoide` on
-PATH with `schema --json` reporting exactly 82 commands (a hardcoded
+PATH with `schema --json` reporting exactly 80 commands (a hardcoded
 drift-tripwire figure, [[AOIDE-DEV]] §7) and `guide` exiting
 0; greetd enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
 linger active with the `aoided` and `shellbridge` user units finishing
@@ -299,7 +299,7 @@ nix build .#checks.x86_64-linux.vm-boot -L             # headless QEMU boot test
 --workspace`: `aoide-conduct`/`aoide-server` bind real sockets and a
 workspace-wide run deadlocks on this machine. Each crate carries its own
 `registry.rs` golden test pinning its exact command-path set (`aoide-cli`:
-82 paths; `aoide-lyra`: 43), plus schema validity, exit-code, and MCP
+80 paths; `aoide-lyra`: 48), plus schema validity, exit-code, and MCP
 tool-list-parity tests; the conduct crate's graph domain
 (`crates/conduct/src/graph/{model,doc,common,commands,window,session_store,
 conduct,send}.rs`) carries handlers for all 20 commands the bare `graph`

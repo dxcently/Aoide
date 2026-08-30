@@ -103,6 +103,40 @@ misstates the stub count: `rice transpose` is lyra's one remaining stub per
 against the current registries, not a bare-number patch — left as found,
 not fixed, while landing the quickshell-healthcheck sweep below.
 
+**Closed 2026-08-29** (see the command-count reconciliation entry below):
+every core-82 and lyra-43 citation swept to 80/48 across `CLI-Reference.md`,
+`Meta-and-Upkeep.md`, `Package-Layout.md`, `Codebase.md` (both the vm-boot
+tripwire figure and the per-crate golden-test figure, cross-checked against
+the actual `assert cmd_count == 80` in `lib/vmTest.nix`), `Doors-and-Peers.md`,
+and `Full-Architecture.md`. `entities/lyra.md`'s command-surface table and
+`Full-Architecture.md`'s itemized lyra paragraph both gained the five rows
+that took lyra 43 → 48 (`secrets ask`, `element seed`, `pair ask`, `pair
+confirm`, `quickshell healthcheck`) and now sum to 48. `Package-Layout.md`'s
+stub count is fixed to "47 real, 1 stub" (`rice transpose` only — `rice
+declare` is real, gated code, not a stub) and its `song`/`lyra` crate rows
+gained the same five commands.
+
+### [2026-08-29] open: `who`/`session undying` naming drift under the count fix
+Found while re-verifying `aoide schema --json` for the command-count sweep
+above — a naming drift, not a count drift, so left unfixed here. Live
+`aoide schema --json` has no `who` command and no `session undying`
+command; `lib/vmTest.nix`'s own bump-history comment explains why:
+"Session-surface redesign (command-defrag lane X): `session.undying`
+REMOVED, absorbed into `session.grant`'s positional `<kind>` grammar;
+`session.grant` ADDED; `who` REMOVED, folded into bare `session`/`session
+--hosts`." The bare-total counts these pages state (80 for core, 73 real)
+are unaffected — the redesign is a net wash — but `entities/aoide-cli.md`
+(command tree + the "further commands" enumeration), `concepts/cli/
+Doors-and-Peers.md` (documents `aoide who` in full, with its own flags and
+output shape), `concepts/Package-Layout.md`'s `conduct` crate row, and
+`concepts/Full-Architecture.md`'s core command paragraph all still name
+`who` as a live command and never mention `session grant`. `concepts/
+Package-Layout.md`'s `client` crate row is separately stale in the same
+family: it lists `a2a.agent.*` (4) — a family `lib/vmTest.nix` records as
+deleted outright — and `peer.*` (5), where the live `peer` group is 15
+paths. None of this was in scope for a count-only pass; a content sweep
+against the actual `session grant`/`peer`/`who` surface is queued here.
+
 ## [2026-07-25] mint | Aoide-Wiki
 - Standalone wiki minted from the librarian `_template` for the Aoide project.
 
@@ -1993,3 +2027,59 @@ and stay untouched this pass — see the Open Thread above.
 Pages touched: entities/Quickshell.md, concepts/cli/Meta-and-Upkeep.md,
 concepts/cli/CLI-Reference.md, concepts/Full-Architecture.md, Overview.md,
 ingest/index.md.
+
+## [2026-08-29] refactor | command-count reconciliation (core 82→80, lyra 43→48)
+
+Follow-up to commit a084fdd, which bumped some command-count citations and
+deliberately left others — the "command-count drift" Open Thread above.
+Ground truth re-verified directly against the live binaries this pass:
+`aoide schema --json | jq '(.data.commands // .commands)|length'` → 80 (73
+`implemented: true`, 7 `implemented: false` — the `content`
+register/propose/ingest/query/approve group, `make`, `update`); `lyra
+schema --json` → 48 (47 real, 1 stub — `rice transpose` alone; `rice
+declare` is real, gated code). Both figures match their respective golden
+snapshots (`pkgs/aoide/crates/cli/src/registry.rs`,
+`pkgs/aoide/crates/lyra/src/registry.rs`'s `assert_eq!(got.len(), 48)`) and
+`lib/vmTest.nix`'s `assert cmd_count == 80`.
+
+Bare-number citations swept from 82→80 (core) or 43→48 (lyra):
+`concepts/cli/CLI-Reference.md` (both — its "82 command paths (75 real, 7
+stubs)" line was a core-count error the original a084fdd pass and its own
+Open Thread had missed entirely), `concepts/cli/Meta-and-Upkeep.md`
+(core), `concepts/cli/Doors-and-Peers.md` (lyra), `concepts/Codebase.md`
+(core, two places — the vm-boot tripwire figure and the per-crate golden-
+test figure, both cross-checked against source rather than taken on
+citation), `concepts/Full-Architecture.md` (lyra, the Self-Ricing status
+row's stray `declare`/`transpose` double-stub claim fixed to `transpose`
+alone in the same edit).
+
+Itemized reconciliation (the hard part a084fdd left standing): `entities/
+lyra.md`'s command-surface table and `concepts/Full-Architecture.md`'s
+itemized lyra paragraph were both frozen at 43, five commands short of the
+live 48. Five rows added to each, verified against `lyra schema --json`
+rather than assumed from the Open Thread's list: `element seed` (song
+crate, `run/elements/` render), `secrets ask` and the 2-command `pair`
+group (`ask`/`confirm` — both register in lyra's own crate, not `song`),
+and `quickshell healthcheck` folded into what was a 1-leaf `quickshell
+reload` row, now a 2-leaf `quickshell` group. `concepts/Package-Layout.md`'s
+per-crate table gained the same five commands (`element.seed` and
+`quickshell.*` on the `song` row; `secrets.ask`/`pair.ask`/`pair.confirm`
+on the `lyra` row) and its stub tally corrected from "41 real, 2 stub" to
+"47 real, 1 stub" — the prior "2 stub" count wrongly carried `rice declare`
+alongside `rice transpose`; `declare` is real (it byte-diff-copies a
+composed song into the checkout, gated but not a stub).
+
+`concepts/Full-Architecture.md`'s aoide-side paragraph (`**80 commands** —
+real (73): ...`) was independently verified against the schema's
+`implemented` field and left untouched — its enumeration already sums
+correctly once `who` is set aside (see the new Open Thread below, opened
+during this same verification: `who` and `session undying` are stale
+command names carried in several pages, a naming drift the live schema
+confirms via `lib/vmTest.nix`'s own bump-history comment, distinct from
+the count drift this entry fixes and out of scope for a count-only pass).
+
+Pages touched: entities/lyra.md, concepts/cli/CLI-Reference.md,
+concepts/cli/Meta-and-Upkeep.md, concepts/cli/Doors-and-Peers.md,
+concepts/Package-Layout.md, concepts/Codebase.md,
+concepts/Full-Architecture.md, ingest/log.md (this entry, plus closing the
+command-count-drift Open Thread and opening the who/session-grant one).

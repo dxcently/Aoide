@@ -135,7 +135,7 @@ the implemented/stubbed ladder.
 | -------------------- | ---------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
 | [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 73 real/7 exit 64; lyra 47 real/1 exit 64) |
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`$AOIDE_ROOT/log`); default-deny event bus   | implemented (skeleton)                     |
-| [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; stage    | mostly real (`declare`/`transpose` exit 64) |
+| [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; stage    | mostly real (`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all commands exit 64)                |
 | [[livery]]         | `aoide.livery` (palette + component tiers)   | `song/stage/livery.json`; baked facets + Stylix   | implemented (v0)                           |
 | [[shellbridge]]      | unix-socket commands; Hyprland IPC             | atomic JSON in `state/stage/` (conducting) + `song/stage/` (rice); `hyprctl` dispatch    | implemented (accept loop live: `focuswindow`) |
@@ -351,21 +351,28 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   `approve`), `make`, `update`. Core is nix-independent: cargo
   build, zero nix shell-outs.
 - **`lyra`** — the AoideOS paint binary. `lyra schema --json` holds the other
-  **43 commands**: the 18-command `rice` group (`lint`, `stage`, `compose`, the
-  3-command `rice draft` group, the 4-command `rice mode` group, the 5-command `rice
-  take` rehearsal-snapshot group, `rice back`; `declare`/`transpose` are the
-  2 stubs), `cover set`, the 3-command `livery` group (`lint`/`resolve`/`emit`
-  — the native design-token engine), `shellbridge`, `quickshell reload` (the
-  Quickshell IPC hot-reload trigger — rebuilds the whole scene from
-  `shell.qml` in-process, picking up dynamically-loaded widget/facet QML the
-  file watcher can't track), `herald push`, `onboard` (the nix half of
-  installation: generates `./aoide.nix` — or `--out <path>` — listing every
+  **48 commands**: the same `guide`/`schema`/`mcp serve` trio as their
+  `aoide` spellings, over lyra's own registry; the 18-command `rice` group
+  (`lint`, `stage`, `compose`, the 3-command `rice draft` group, the
+  4-command `rice mode` group, the 5-command `rice take` rehearsal-snapshot
+  group, `rice back`, `declare`; `transpose` is the 1 stub), `cover set`,
+  the 3-command `livery` group (`lint`/`resolve`/`emit`
+  — the native design-token engine), `element seed` (renders a song's
+  committed `elements/*/element.json` into `run/elements/`), `shellbridge`,
+  the 2-command `quickshell` group (`reload` — the Quickshell IPC hot-reload
+  trigger, rebuilding the whole scene from `shell.qml` in-process to pick up
+  dynamically-loaded widget/facet QML the file watcher can't track — and
+  `healthcheck`, the placeholder-screen lockup watchdog), `herald push`,
+  `onboard` (the nix half of installation: generates `./aoide.nix` — or
+  `--out <path>` — listing every
   `aoide.*` module option, 142 today, derived live from the modules via the
   flake's `aoideOptions` output, defaults commented out with one-line
   descriptions, plus the env-knob appendix as comments, and prints the
   `imports = [ ./aoide.nix ];` line for the user's own flake — it never edits
   that flake; re-running warns and backs up the old file to `<out>.bak`, and
-  a file it did not generate is refused, never overwritten), and the
+  a file it did not generate is refused, never overwritten), `secrets ask`
+  and the 2-command `pair` group (`ask`/`confirm` — the pairing-ceremony's
+  popup dialogs, sharing `secrets ask`'s six-box QML component), and the
   14-command `screen` group
   (capture, OCR, and synthesized-pointer control — [[Screen-Control]]). Only
   `lyra` may shell out to nix.
