@@ -93,10 +93,15 @@
           pkgs = nixpkgs.legacyPackages.${system};
           discovered = pkgsWalk.discover pkgs;
           aoide = inputs.aoide.packages.${system}.default;
+          # aoide-static — the musl/`+crt-static` core build (pkgs/aoide's
+          # own flake), for a machine with no nix store. Exposed alongside
+          # `aoide`, never as `default` — see pkgs/aoide/default.nix's
+          # `paint` argument and flake.nix's `aoide-static` package.
+          aoide-static = inputs.aoide.packages.${system}.aoide-static;
         in
         discovered
         // {
-          inherit aoide;
+          inherit aoide aoide-static;
           default = aoide;
         }
       );
@@ -166,6 +171,9 @@
             lib.mapAttrs' (name: drv: lib.nameValuePair "pkg-${name}" drv) (pkgsWalk.discover pkgs)
             // {
               pkg-aoide = inputs.aoide.packages.${system}.default;
+              # The static-musl variant builds too — a link-and-run proof,
+              # not a second test run (default.nix's `doCheck` comment).
+              pkg-aoide-static = inputs.aoide.packages.${system}.aoide-static;
             };
         in
         pkgChecks

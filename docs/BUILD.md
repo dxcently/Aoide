@@ -216,6 +216,11 @@ Provide:
   rice loop (`gen`/`lint`/`preview`/`adopt`), and `aoide mcp serve --stdio`
   (façade generated from the schema). Policy, lint, and the single audit log
   (`aoide.auditLog`) live in `aoided`; the rebuild is user-gated.
+- `default.nix`'s `paint ? true` argument: `false` builds only the core pair
+  (`-p aoide-cli`, no `rice` output, no test phase). `pkgs/aoide/flake.nix`
+  uses it for `aoide-static` — a musl/`+crt-static` build for a host with no
+  nix store, exposed as `packages.<system>.aoide-static`, never as
+  `packages.default`.
 
 ### Wave-1 facet/module agents (C, D)
 

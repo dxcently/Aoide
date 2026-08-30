@@ -369,6 +369,21 @@ surface: everything that paints, or that only a desktop needs.
   `widgets.rs` `nix eval` call lives in `lyra` now — only `lyra` may be
   nix-dependent. This is the load-bearing half of "What Aoide is" above,
   made structural rather than aspirational.
+- **A third artifact, not a third binary — `aoide-static`.** Core has no C
+  dependencies (HTTP shells out to `curl` rather than linking
+  openssl/rustls), which makes it staticable: `pkgs/aoide/flake.nix`
+  exposes `aoide-static`, the same `aoide`/`aoided` pair cross-built
+  against musl with `+crt-static`
+  (`pkgs.pkgsStatic.callPackage ./default.nix { paint = false; }` —
+  nixpkgs retargets rustc, cargo, and the linker together, so proc-macro
+  crates need no hand-holding to still build native). It carries no `rice`
+  output and skips its own test phase — the dynamic `pkg-aoide` check
+  already runs the identical suite over identical sources, so this
+  variant's only job is proving core links and runs with zero dynamic
+  interpreter and no reference to a nix store. Reachable as
+  `packages.<system>.aoide-static` and the `pkg-aoide-static` check, never
+  as `packages.default` — NixOS hosts keep the dynamic multi-output build
+  `aoide.lyra.enable` depends on.
 
 ## Open questions (each tagged with when it must be settled)
 
