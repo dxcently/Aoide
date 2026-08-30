@@ -274,7 +274,8 @@ lib.mkIf config.aoide.enable {
   # before this phase where the unit's only gate was the desktop-facet
   # check. Never flipped on here — deployment flips are the User's.
   systemd.user.services.aoide-pair-watch =
-    lib.mkIf (config.aoide.a2a.enable && config.aoide.facets.quickshell.enable && config.aoide.a2a.pairingPopup)
+    lib.mkIf
+      (config.aoide.a2a.enable && config.aoide.facets.quickshell.enable && config.aoide.a2a.pairingPopup)
       {
         description = "Aoide pairing-ceremony popup watcher — surfaces actionable pairing requests as a typed-code entry dialog";
 

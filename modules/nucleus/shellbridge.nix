@@ -64,268 +64,269 @@ in
 # gate the unit rather than assert the combination is an error, since
 # "quickshell but no lyra" is a legitimate (if unusual) configuration this
 # option exists to allow.
-lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config.aoide.lyra.enable) {
+lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config.aoide.lyra.enable)
+  {
 
-  # ── Runtime directories ──────────────────────────────────────────────────
-  # song/stage/ is shared with aoided.nix's tmpfiles rules; systemd-tmpfiles
-  # deduplicates identical rules so declaring it here as well is safe.
-  systemd.user.tmpfiles.rules = [
-    "d ${config.aoide.root}/song/stage 0755 - - -"
-  ];
-
-  # ── shellbridge systemd user service ─────────────────────────────────────
-  systemd.user.services.shellbridge = {
-    description = "Aoide shellbridge — desktop ↔ agent bridge (socket in, stage-files out)";
-
-    wantedBy = [ "graphical-session.target" ];
-    after = [
-      "graphical-session.target"
-      "aoided.service"
+    # ── Runtime directories ──────────────────────────────────────────────────
+    # song/stage/ is shared with aoided.nix's tmpfiles rules; systemd-tmpfiles
+    # deduplicates identical rules so declaring it here as well is safe.
+    systemd.user.tmpfiles.rules = [
+      "d ${config.aoide.root}/song/stage 0755 - - -"
     ];
-    partOf = [ "graphical-session.target" ];
 
-    # hyprctl MUST be on the service PATH: the socket handler's session-jump
-    # (focus_window) and the window→session event listener both shell out to
-    # `hyprctl`. A systemd user unit's default PATH is minimal (coreutils &c.)
-    # and does NOT include the compositor, so without this every widget click
-    # failed with `hyprctl unavailable: No such file or directory` and the
-    # listener could not read `hyprctl clients` — the click never jumped.
-    # (This is a unit-level option, NOT a serviceConfig key.)
+    # ── shellbridge systemd user service ─────────────────────────────────────
+    systemd.user.services.shellbridge = {
+      description = "Aoide shellbridge — desktop ↔ agent bridge (socket in, stage-files out)";
+
+      wantedBy = [ "graphical-session.target" ];
+      after = [
+        "graphical-session.target"
+        "aoided.service"
+      ];
+      partOf = [ "graphical-session.target" ];
+
+      # hyprctl MUST be on the service PATH: the socket handler's session-jump
+      # (focus_window) and the window→session event listener both shell out to
+      # `hyprctl`. A systemd user unit's default PATH is minimal (coreutils &c.)
+      # and does NOT include the compositor, so without this every widget click
+      # failed with `hyprctl unavailable: No such file or directory` and the
+      # listener could not read `hyprctl clients` — the click never jumped.
+      # (This is a unit-level option, NOT a serviceConfig key.)
+      #
+      # Everything else the daemon can reach rides the same PATH — each entry
+      # is a bare-name spawn inside an `aoide` subcommand the socket handler
+      # re-execs, each verified absent from the default unit PATH:
+      #   curl       — UsageGadget's ❋ refresh: RefreshUsage re-execs
+      #                `aoide usage`, whose live claude.ai fetch spawns `curl`;
+      #                without it every daemon-routed refresh degraded to
+      #                {error: "curl failed"} while a shell-run succeeded.
+      #   hyprlock   — the powermenu's `lock` (PowerAction::Lock).
+      #   libnotify  — `notify-send`: the rice-mode toggle's success toast.
+      #   procps     — `kill`: the stray-process sweep `rice mode stage` opens
+      #                with (reap_stray_processes); systemctl is already covered
+      #                by the default PATH's systemd package.
+      #   quickshell — `quickshell ipc call shell reload` when a daemon-routed
+      #                `rice mode stage` syncs changed widget bodies.
+      path = [
+        pkgs.curl
+        pkgs.hyprland
+        pkgs.hyprlock
+        pkgs.libnotify
+        pkgs.procps
+        quickshellPkg
+      ];
+
+      serviceConfig = {
+        # shellbridge is a sub-command of the aoide binary. `--run` seeds the
+        # stage files, then binds the unix socket and serves commands on a
+        # blocking accept loop — a long-running foreground process, so the default
+        # Type=simple is correct (declared explicitly here) and keeps the unit
+        # active on the loop rather than treating an immediate return as done.
+        Type = "simple";
+        # `shellbridge` left core's registry at P-A5 of the binary-split
+        # workstream — it now lives only in `lyra` (crates/lyra/src/registry.rs;
+        # core's registration lines were dropped, per the doc comment at
+        # crates/cli/src/commands/mod.rs::all()). Both binaries ship from the
+        # same `pkgs.aoide` derivation (P-A7), but as of P-A8 `lyra` lives in
+        # that derivation's separate `rice` output (`pkgs.aoide.rice`) —
+        # sibling resolution breaks across store paths (protocol::bin's
+        # resolver walks current_exe's own directory), so this must name the
+        # rice output explicitly rather than lean on that inference.
+        ExecStart = "${pkgs.aoide.rice}/bin/lyra shellbridge --run";
+
+        Restart = "on-failure";
+        RestartSec = "3s";
+
+        Environment = [
+          # Stable socket path — adapters and QML widgets bind to this.
+          # Convention: XDG_RUNTIME_DIR is available inside user services.
+          "AOIDE_BRIDGE_SOCKET=%t/aoide/shellbridge.sock"
+          # No AOIDE_STAGE_DIR override (command-defrag lane S2): the two
+          # stage trees (CONTRACTS.md §4) now live at different roots —
+          # song/stage/ for rice/paint, state/stage/ for CONDUCTING state —
+          # and AOIDE_ROOT below is enough to resolve both correctly on the
+          # default layout. Setting AOIDE_STAGE_DIR here would pin BOTH trees
+          # back onto one directory, undoing the split for this unit alone.
+          # Hyprland socket (standard Hyprland env; shellbridge reads it directly).
+          # HYPRLAND_INSTANCE_SIGNATURE is set by the compositor at session start.
+          "AOIDE_USER=${config.aoide.user}"
+          "AOIDE_ROOT=${config.aoide.root}"
+          "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+          # This unit execs `lyra shellbridge --run` (below) — the ONE unit in
+          # this file whose process actually reads `AOIDE_SONG_TEMPLATES`
+          # (`aoide-song::widgets`, `lyra`-only). `aoide-graph-reap` further
+          # down execs plain `aoide`, never touches paint data, and does not
+          # carry this var — review finding, task #107: paint data belongs on
+          # the unit that paints, not every unit this file happens to declare.
+          "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
+        ]
+        # Nix-declared baseline song — same env-baked-into-the-service
+        # precedent as quickshell's AOIDE_WALLPAPER (modules/facets/quickshell/
+        # default.nix). Read by dispatch_rice_mode_toggle's declarative-
+        # direction re-exec (shellbridge.rs) so the bar's rice-mode toggle
+        # re-pins to the shipped baseline instead of whatever song happens to
+        # be staged. Null when no song is named ("no song, no service" —
+        # options.nix) — omit the var entirely rather than interpolate null;
+        # shellbridge.rs already reads it as an Option (std::env::var(..).ok()),
+        # so an absent var and a re-pin with nothing to re-pin to are the same
+        # thing to the reader.
+        ++ lib.optionals (config.aoide.song != null) [
+          "AOIDE_DEFAULT_SONG=${config.aoide.song}"
+        ]
+        ++ [
+          # The process running this unit IS lyra now, so shellbridge's core_bin()
+          # re-exec sites (protocol::bin's sibling resolver — the usage/recheck
+          # calls, shellbridge.rs) need this set explicitly (P-A7 of the
+          # binary-split workstream). As of P-A8 that is no longer optional
+          # belt-and-suspenders: `lyra` runs out of the `rice` output while
+          # `aoide` stays in `out` — two different store paths — so the
+          # sibling-directory inference would not find `aoide` next to `lyra`
+          # even if left to it.
+          "AOIDE_CORE_BIN=${pkgs.aoide}/bin/aoide"
+        ];
+
+        # Create the socket directory under XDG_RUNTIME_DIR.
+        RuntimeDirectory = "aoide";
+        RuntimeDirectoryMode = "0700";
+
+        NoNewPrivileges = true;
+        StandardOutput = "journal";
+        StandardError = "journal";
+      };
+    };
+
+    # ── Liveness reaper: timer + oneshot service ─────────────────────────────
+    # A terminal killed with SUPER+Q / SIGKILL is torn down uncatchably, so the
+    # `conduct`/`wrap` process can never run its own `session end` — the
+    # session record is stranded `running` in the roster forever (22 dead
+    # `conduct-*` shells piled up in ~8 minutes of use). No QML surface can fix
+    # this: widgets/conductor cannot spawn `hyprctl` (no process-spawning in QML).
     #
-    # Everything else the daemon can reach rides the same PATH — each entry
-    # is a bare-name spawn inside an `aoide` subcommand the socket handler
-    # re-execs, each verified absent from the default unit PATH:
-    #   curl       — UsageGadget's ❋ refresh: RefreshUsage re-execs
-    #                `aoide usage`, whose live claude.ai fetch spawns `curl`;
-    #                without it every daemon-routed refresh degraded to
-    #                {error: "curl failed"} while a shell-run succeeded.
-    #   hyprlock   — the powermenu's `lock` (PowerAction::Lock).
-    #   libnotify  — `notify-send`: the rice-mode toggle's success toast.
-    #   procps     — `kill`: the stray-process sweep `rice mode stage` opens
-    #                with (reap_stray_processes); systemctl is already covered
-    #                by the default PATH's systemd package.
-    #   quickshell — `quickshell ipc call shell reload` when a daemon-routed
-    #                `rice mode stage` syncs changed widget bodies.
-    path = [
-      pkgs.curl
-      pkgs.hyprland
-      pkgs.hyprlock
-      pkgs.libnotify
-      pkgs.procps
-      quickshellPkg
-    ];
+    # So the sweep lives HERE, next to the stage/graph infra it repairs: a cheap
+    # periodic `aoide session reap` that gathers live `hyprctl clients -j` window
+    # addresses (falling back to pid-only liveness off Hyprland), marks every dead
+    # session `done`, and prunes it — re-staging graph.json atomically only when
+    # something actually changed. One hyprctl call + a stage read/write; it never
+    # exits non-zero on "nothing to reap".
+    #
+    # Seam: this is the OUT-OF-BAND cleanup path for sessions whose IN-BAND
+    # cleanup (do_session_end on normal exit) could not run. It is gated with the
+    # rest of shellbridge on the quickshell facet, ordered into the graphical
+    # session so it inherits HYPRLAND_INSTANCE_SIGNATURE (the compositor imports
+    # its env into the user manager), and resolves the same state/stage/ tree
+    # shellbridge itself writes — neither unit overrides AOIDE_STAGE_DIR.
+    # Unit name kept as `aoide-graph-reap` (command-defrag lane R2): renaming it
+    # would churn enabled-unit state at the next switch for no functional gain.
+    # Only the ExecStart spelling follows the CLI's dissolved `graph` prefix.
+    systemd.user.services.aoide-graph-reap = {
+      description = "Aoide graph reaper — resolve KILLED sessions (SUPER+Q/SIGKILL) that could not self-clean";
 
-    serviceConfig = {
-      # shellbridge is a sub-command of the aoide binary. `--run` seeds the
-      # stage files, then binds the unix socket and serves commands on a
-      # blocking accept loop — a long-running foreground process, so the default
-      # Type=simple is correct (declared explicitly here) and keeps the unit
-      # active on the loop rather than treating an immediate return as done.
-      Type = "simple";
-      # `shellbridge` left core's registry at P-A5 of the binary-split
-      # workstream — it now lives only in `lyra` (crates/lyra/src/registry.rs;
-      # core's registration lines were dropped, per the doc comment at
-      # crates/cli/src/commands/mod.rs::all()). Both binaries ship from the
-      # same `pkgs.aoide` derivation (P-A7), but as of P-A8 `lyra` lives in
-      # that derivation's separate `rice` output (`pkgs.aoide.rice`) —
-      # sibling resolution breaks across store paths (protocol::bin's
-      # resolver walks current_exe's own directory), so this must name the
-      # rice output explicitly rather than lean on that inference.
-      ExecStart = "${pkgs.aoide.rice}/bin/lyra shellbridge --run";
+      after = [ "graphical-session.target" ];
+      partOf = [ "graphical-session.target" ];
 
-      Restart = "on-failure";
-      RestartSec = "3s";
-
-      Environment = [
-        # Stable socket path — adapters and QML widgets bind to this.
-        # Convention: XDG_RUNTIME_DIR is available inside user services.
-        "AOIDE_BRIDGE_SOCKET=%t/aoide/shellbridge.sock"
-        # No AOIDE_STAGE_DIR override (command-defrag lane S2): the two
-        # stage trees (CONTRACTS.md §4) now live at different roots —
-        # song/stage/ for rice/paint, state/stage/ for CONDUCTING state —
-        # and AOIDE_ROOT below is enough to resolve both correctly on the
-        # default layout. Setting AOIDE_STAGE_DIR here would pin BOTH trees
-        # back onto one directory, undoing the split for this unit alone.
-        # Hyprland socket (standard Hyprland env; shellbridge reads it directly).
-        # HYPRLAND_INSTANCE_SIGNATURE is set by the compositor at session start.
-        "AOIDE_USER=${config.aoide.user}"
-        "AOIDE_ROOT=${config.aoide.root}"
-        "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
-        # This unit execs `lyra shellbridge --run` (below) — the ONE unit in
-        # this file whose process actually reads `AOIDE_SONG_TEMPLATES`
-        # (`aoide-song::widgets`, `lyra`-only). `aoide-graph-reap` further
-        # down execs plain `aoide`, never touches paint data, and does not
-        # carry this var — review finding, task #107: paint data belongs on
-        # the unit that paints, not every unit this file happens to declare.
-        "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
-      ]
-      # Nix-declared baseline song — same env-baked-into-the-service
-      # precedent as quickshell's AOIDE_WALLPAPER (modules/facets/quickshell/
-      # default.nix). Read by dispatch_rice_mode_toggle's declarative-
-      # direction re-exec (shellbridge.rs) so the bar's rice-mode toggle
-      # re-pins to the shipped baseline instead of whatever song happens to
-      # be staged. Null when no song is named ("no song, no service" —
-      # options.nix) — omit the var entirely rather than interpolate null;
-      # shellbridge.rs already reads it as an Option (std::env::var(..).ok()),
-      # so an absent var and a re-pin with nothing to re-pin to are the same
-      # thing to the reader.
-      ++ lib.optionals (config.aoide.song != null) [
-        "AOIDE_DEFAULT_SONG=${config.aoide.song}"
-      ]
-      ++ [
-        # The process running this unit IS lyra now, so shellbridge's core_bin()
-        # re-exec sites (protocol::bin's sibling resolver — the usage/recheck
-        # calls, shellbridge.rs) need this set explicitly (P-A7 of the
-        # binary-split workstream). As of P-A8 that is no longer optional
-        # belt-and-suspenders: `lyra` runs out of the `rice` output while
-        # `aoide` stays in `out` — two different store paths — so the
-        # sibling-directory inference would not find `aoide` next to `lyra`
-        # even if left to it.
-        "AOIDE_CORE_BIN=${pkgs.aoide}/bin/aoide"
+      # The reaper gathers live window addresses via `hyprctl clients -j`; like
+      # shellbridge it needs hyprctl on PATH (else it silently falls back to
+      # pid-only liveness and never sees the window-gone signal). Unit-level option.
+      # libnotify rides along for `notify-send`: a sweep that actually changed the
+      # roster raises a toast through dunst (a quiet sweep stays silent), and a
+      # unit PATH without it would degrade that to a journal line nobody reads.
+      path = [
+        pkgs.hyprland
+        pkgs.libnotify
       ];
 
-      # Create the socket directory under XDG_RUNTIME_DIR.
-      RuntimeDirectory = "aoide";
-      RuntimeDirectoryMode = "0700";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${pkgs.aoide}/bin/aoide session reap";
 
-      NoNewPrivileges = true;
-      StandardOutput = "journal";
-      StandardError = "journal";
+        # No AOIDE_STAGE_DIR override either (command-defrag lane S2, same
+        # reasoning as shellbridge's own unit above): the reaper touches only
+        # CONDUCTING files (graph.json/sessions.json), which resolve under
+        # state/stage/ on the default layout with no override needed.
+        # AOIDE_USER is set explicitly like every other unit — resolution
+        # works off systemd's inherited HOME without it, but no unit in this
+        # tree leans on that inheritance alone.
+        Environment = [
+          "AOIDE_USER=${config.aoide.user}"
+          "AOIDE_ROOT=${config.aoide.root}"
+          "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+        ];
+
+        NoNewPrivileges = true;
+        StandardOutput = "journal";
+        StandardError = "journal";
+      };
     };
-  };
 
-  # ── Liveness reaper: timer + oneshot service ─────────────────────────────
-  # A terminal killed with SUPER+Q / SIGKILL is torn down uncatchably, so the
-  # `conduct`/`wrap` process can never run its own `session end` — the
-  # session record is stranded `running` in the roster forever (22 dead
-  # `conduct-*` shells piled up in ~8 minutes of use). No QML surface can fix
-  # this: widgets/conductor cannot spawn `hyprctl` (no process-spawning in QML).
-  #
-  # So the sweep lives HERE, next to the stage/graph infra it repairs: a cheap
-  # periodic `aoide session reap` that gathers live `hyprctl clients -j` window
-  # addresses (falling back to pid-only liveness off Hyprland), marks every dead
-  # session `done`, and prunes it — re-staging graph.json atomically only when
-  # something actually changed. One hyprctl call + a stage read/write; it never
-  # exits non-zero on "nothing to reap".
-  #
-  # Seam: this is the OUT-OF-BAND cleanup path for sessions whose IN-BAND
-  # cleanup (do_session_end on normal exit) could not run. It is gated with the
-  # rest of shellbridge on the quickshell facet, ordered into the graphical
-  # session so it inherits HYPRLAND_INSTANCE_SIGNATURE (the compositor imports
-  # its env into the user manager), and resolves the same state/stage/ tree
-  # shellbridge itself writes — neither unit overrides AOIDE_STAGE_DIR.
-  # Unit name kept as `aoide-graph-reap` (command-defrag lane R2): renaming it
-  # would churn enabled-unit state at the next switch for no functional gain.
-  # Only the ExecStart spelling follows the CLI's dissolved `graph` prefix.
-  systemd.user.services.aoide-graph-reap = {
-    description = "Aoide graph reaper — resolve KILLED sessions (SUPER+Q/SIGKILL) that could not self-clean";
+    systemd.user.timers.aoide-graph-reap = {
+      description = "Aoide graph reaper timer — periodic liveness sweep (~12s)";
 
-    after = [ "graphical-session.target" ];
-    partOf = [ "graphical-session.target" ];
+      wantedBy = [ "graphical-session.target" ];
+      partOf = [ "graphical-session.target" ];
 
-    # The reaper gathers live window addresses via `hyprctl clients -j`; like
-    # shellbridge it needs hyprctl on PATH (else it silently falls back to
-    # pid-only liveness and never sees the window-gone signal). Unit-level option.
-    # libnotify rides along for `notify-send`: a sweep that actually changed the
-    # roster raises a toast through dunst (a quiet sweep stays silent), and a
-    # unit PATH without it would degrade that to a journal line nobody reads.
-    path = [
-      pkgs.hyprland
-      pkgs.libnotify
-    ];
-
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart = "${pkgs.aoide}/bin/aoide session reap";
-
-      # No AOIDE_STAGE_DIR override either (command-defrag lane S2, same
-      # reasoning as shellbridge's own unit above): the reaper touches only
-      # CONDUCTING files (graph.json/sessions.json), which resolve under
-      # state/stage/ on the default layout with no override needed.
-      # AOIDE_USER is set explicitly like every other unit — resolution
-      # works off systemd's inherited HOME without it, but no unit in this
-      # tree leans on that inheritance alone.
-      Environment = [
-        "AOIDE_USER=${config.aoide.user}"
-        "AOIDE_ROOT=${config.aoide.root}"
-        "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
-      ];
-
-      NoNewPrivileges = true;
-      StandardOutput = "journal";
-      StandardError = "journal";
+      timerConfig = {
+        # Cheap and frequent: a killed terminal resolves within ~12s. First sweep
+        # 15s after the session comes up (let shellbridge seed the stage first);
+        # thereafter every 12s since the previous run finished.
+        OnActiveSec = "15s";
+        OnUnitActiveSec = "12s";
+        AccuracySec = "2s";
+      };
     };
-  };
 
-  systemd.user.timers.aoide-graph-reap = {
-    description = "Aoide graph reaper timer — periodic liveness sweep (~12s)";
-
-    wantedBy = [ "graphical-session.target" ];
-    partOf = [ "graphical-session.target" ];
-
-    timerConfig = {
-      # Cheap and frequent: a killed terminal resolves within ~12s. First sweep
-      # 15s after the session comes up (let shellbridge seed the stage first);
-      # thereafter every 12s since the previous run finished.
-      OnActiveSec = "15s";
-      OnUnitActiveSec = "12s";
-      AccuracySec = "2s";
-    };
-  };
-
-  # ── Stage-file paths exposed as options for downstream modules ────────────
-  # These are the stable v0 stage paths (CONTRACTS.md §4), split by tree.
-  # Facets and the Quickshell widget must read exactly these paths; never
-  # compute them independently. Note: these are RUNTIME paths — they are
-  # NEVER imported by any nix module (checks.no-song-read enforces this).
-  #
-  # Documented here as comments (not as options) because they are live-side
-  # constants, not build-time configuration:
-  #
-  #   song/stage/livery.json     — resolved note colours (written by the native livery engine)
-  #   state/stage/sessions.json — agent session roster (written by shellbridge)
-  #   state/stage/hooks.json    — live Claude Code hook states (written by shellbridge)
-  #
-  # sessions.json schema (v0):
-  # {
-  #   "schemaVersion": "0",
-  #   "sessions": [
-  #     {
-  #       "sessionId":     "string — claude-CLI session identifier",
-  #       "agent":         "string — 'claude' | 'melete-run' | …",
-  #       "windowAddress": "string — Hyprland window address for focuswindow dispatch",
-  #       "cwd":           "string — working directory / repo path",
-  #       "state":         "string — 'running' | 'awaiting-input' | 'idle' | 'done'",
-  #       "startedAt":     "ISO-8601 timestamp",
-  #       # --- additive v0-safe fields (absent on legacy/shell records) ---
-  #       "kind":          "string? — 'agent' | 'shell' | 'subagent'",
-  #       "parentSessionId": "string? — spawned-by edge (subagent → parent)",
-  #       "title":         "string? — session name (custom-title / graph-send)",
-  #       "activity":      "string? — current tool/command being run",
-  #       "say":           "string? — agent's latest words (transcript tail)",
-  #       "tool":          "string? — agent's latest tool call, 'Name: subject' (transcript tail); unlike `activity` it outlives the turn",
-  #       "model":         "string? — active Claude model id, e.g. 'claude-sonnet-5'",
-  #       "workspace":     "int?    — Hyprland workspace id of the window",
-  #       "pid":           "int?    — lifecycle-owning process pid",
-  #       "conductable":   "bool?   — spawned under `aoide conduct`",
-  #       "socket":        "string? — per-session injection socket path",
-  #       "contextTokens": "int?    — context-window fill of the last request (input+cache tokens); absent until the first assistant turn",
-  #       "contextCeiling": "int?   — context-window ceiling for the current model; re-derived on model change",
-  #       "needsSudo":     "bool?   — true while a conducted shell is blocked at a sudo prompt; cleared (not set false) once the prompt clears",
-  #       "restore":       "object? — a conducted shell's continuously-captured restore snapshot: { cwd, idle, argv, typed }; absent for non-shell sessions"
-  #     }
-  #   ]
-  # }
-  #
-  # hooks.json schema (v0):
-  # {
-  #   "schemaVersion": "0",
-  #   "hooks": [
-  #     {
-  #       "sessionId": "string",
-  #       "phase":     "string — 'Notification' | 'Stop' | 'PreToolUse' | 'PostToolUse'",
-  #       "updatedAt": "ISO-8601 timestamp"
-  #     }
-  #   ]
-  # }
-}
+    # ── Stage-file paths exposed as options for downstream modules ────────────
+    # These are the stable v0 stage paths (CONTRACTS.md §4), split by tree.
+    # Facets and the Quickshell widget must read exactly these paths; never
+    # compute them independently. Note: these are RUNTIME paths — they are
+    # NEVER imported by any nix module (checks.no-song-read enforces this).
+    #
+    # Documented here as comments (not as options) because they are live-side
+    # constants, not build-time configuration:
+    #
+    #   song/stage/livery.json     — resolved note colours (written by the native livery engine)
+    #   state/stage/sessions.json — agent session roster (written by shellbridge)
+    #   state/stage/hooks.json    — live Claude Code hook states (written by shellbridge)
+    #
+    # sessions.json schema (v0):
+    # {
+    #   "schemaVersion": "0",
+    #   "sessions": [
+    #     {
+    #       "sessionId":     "string — claude-CLI session identifier",
+    #       "agent":         "string — 'claude' | 'melete-run' | …",
+    #       "windowAddress": "string — Hyprland window address for focuswindow dispatch",
+    #       "cwd":           "string — working directory / repo path",
+    #       "state":         "string — 'running' | 'awaiting-input' | 'idle' | 'done'",
+    #       "startedAt":     "ISO-8601 timestamp",
+    #       # --- additive v0-safe fields (absent on legacy/shell records) ---
+    #       "kind":          "string? — 'agent' | 'shell' | 'subagent'",
+    #       "parentSessionId": "string? — spawned-by edge (subagent → parent)",
+    #       "title":         "string? — session name (custom-title / graph-send)",
+    #       "activity":      "string? — current tool/command being run",
+    #       "say":           "string? — agent's latest words (transcript tail)",
+    #       "tool":          "string? — agent's latest tool call, 'Name: subject' (transcript tail); unlike `activity` it outlives the turn",
+    #       "model":         "string? — active Claude model id, e.g. 'claude-sonnet-5'",
+    #       "workspace":     "int?    — Hyprland workspace id of the window",
+    #       "pid":           "int?    — lifecycle-owning process pid",
+    #       "conductable":   "bool?   — spawned under `aoide conduct`",
+    #       "socket":        "string? — per-session injection socket path",
+    #       "contextTokens": "int?    — context-window fill of the last request (input+cache tokens); absent until the first assistant turn",
+    #       "contextCeiling": "int?   — context-window ceiling for the current model; re-derived on model change",
+    #       "needsSudo":     "bool?   — true while a conducted shell is blocked at a sudo prompt; cleared (not set false) once the prompt clears",
+    #       "restore":       "object? — a conducted shell's continuously-captured restore snapshot: { cwd, idle, argv, typed }; absent for non-shell sessions"
+    #     }
+    #   ]
+    # }
+    #
+    # hooks.json schema (v0):
+    # {
+    #   "schemaVersion": "0",
+    #   "hooks": [
+    #     {
+    #       "sessionId": "string",
+    #       "phase":     "string — 'Notification' | 'Stop' | 'PreToolUse' | 'PostToolUse'",
+    #       "updatedAt": "ISO-8601 timestamp"
+    #     }
+    #   ]
+    # }
+  }
