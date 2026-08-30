@@ -66,6 +66,19 @@
   # owns everything a re-rice must not touch.
   aoide.hyprland.enable = true;
 
+  # The Samsung C24F390 hangs in PORTRAIT. Its EDID still reports the panel's
+  # native landscape geometry (520x290mm), so the rotation has to be declared:
+  # transform 3 is counter-clockwise, giving an effective 1080x1920. Flip the
+  # 3 to a 1 for clockwise — that single token is the whole change, and either
+  # direction can be tried live first with
+  #   hyprctl keyword monitor HDMI-A-1,1920x1080@60,0x0,1,transform,1
+  aoide.hyprland.monitors = [ "HDMI-A-1,1920x1080@60,0x0,1,transform,3" ];
+
+  # Scrolling columns suit the tall geometry; every other output keeps the
+  # global dwindle default, so this survives plugging a landscape monitor
+  # back in.
+  aoide.hyprland.scrollingMonitor = "HDMI-A-1";
+
   # Screen capture — two callers, two dendrites (see each module header):
   # hyprshot+satty for the human (SUPER+S), grim/slurp for agents ("vision").
   aoide.screenshot.enable = true;

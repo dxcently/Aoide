@@ -54,6 +54,41 @@ in
 {
   options.aoide.hyprland.enable = lib.mkEnableOption "host-invariant Hyprland behaviour (keybinds, input, layout, window rules)";
 
+  # Monitor topology is the one host-SPECIFIC thing this otherwise
+  # host-invariant dendrite emits: the module stays invariant, the host
+  # supplies the value. Raw Hyprland `monitor =` strings rather than a
+  # structured submodule — the grammar is Hyprland's, already documented
+  # upstream, and a submodule would only re-spell it with more to keep in
+  # sync. Empty list emits nothing, so a host that says nothing keeps
+  # Hyprland's own autodetection.
+  options.aoide.hyprland.monitors = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [ ];
+    example = [ "HDMI-A-1,1920x1080@60,0x0,1,transform,3" ];
+    description = ''
+      Hyprland `monitor =` lines, verbatim. A physically rotated panel needs
+      an explicit `transform` (1 = clockwise, 3 = counter-clockwise): EDID
+      reports the panel's native landscape geometry, so nothing in software
+      can infer how it was mounted.
+    '';
+  };
+
+  # Hyprland's `general:layout` is GLOBAL — there is no monitor-level layout
+  # rule. Per-monitor is expressed as "every workspace bound to that monitor
+  # carries layout:<name>", which is what this option generates. Naming a
+  # monitor here leaves `general:layout` (dwindle) untouched as the default
+  # every other output keeps.
+  options.aoide.hyprland.scrollingMonitor = lib.mkOption {
+    type = lib.types.nullOr lib.types.str;
+    default = null;
+    example = "HDMI-A-1";
+    description = ''
+      Monitor whose workspaces use the scrolling layout (PaperWM-style
+      columns, built into Hyprland core since 0.54 — no plugin). Null leaves
+      every workspace on the global dwindle default.
+    '';
+  };
+
   config = lib.mkIf cfg.enable {
     home-manager.users.${config.aoide.user} = {
       wayland.windowManager.hyprland.extraConfig = ''
@@ -82,6 +117,10 @@ in
             }
         }
 
+        # ── Monitors ──────────────────────────────────────────────────────────
+        # Host-supplied (aoide.hyprland.monitors); empty on a host that says
+        # nothing, leaving Hyprland's autodetection alone.
+        ${lib.concatMapStrings (m: "monitor = ${m}\n") cfg.monitors}
         # ── Tiling layout ─────────────────────────────────────────────────────
         # `layout` is behaviour, so it lives here — while the sibling
         # general{} keys the facet writes (gaps, border_size, col.*_border) are
@@ -90,6 +129,20 @@ in
         general {
             layout = dwindle
         }
+
+        # ── Per-monitor scrolling layout ──────────────────────────────────────
+        # `general:layout` above stays the global default. Scrolling is scoped
+        # to one monitor by binding each workspace to it with `layout:` — a
+        # WORKSPACE rule, because Hyprland has no monitor-level layout rule.
+        # Verified live on 0.56.2: with this rule, `hyprctl activeworkspace`
+        # reports `tiledLayout: scrolling` while `general:layout` still reads
+        # dwindle, so another output plugged in later keeps dwindle untouched.
+        # Ten workspaces matches the ten SUPER+<n> binds below.
+        ${lib.optionalString (cfg.scrollingMonitor != null) (
+          lib.concatMapStrings (
+            n: "workspace = ${toString n}, monitor:${cfg.scrollingMonitor}, layout:scrolling\n"
+          ) (lib.range 1 10)
+        )}
 
         dwindle {
             preserve_split = true
