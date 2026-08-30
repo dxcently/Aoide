@@ -95,7 +95,7 @@ discipline, written to throw legibly at eval time on a violation:
 Alongside these, `flake.nix` auto-generates a `pkg-<name>` check per discovered
 package (from `lib/pkgs.nix`) so every package builds under `nix flake check`.
 
-**`lib/vmTest.nix`** wires `checks.<system>.vm-boot` — a
+**`tests/vm-boot.nix`** wires `checks.<system>.vm-boot` — a
 headless QEMU boot of the whole stack via `pkgs.testers.runNixOSTest`
 (4 GiB / 4 vCPU, KVM). Its node is assembled from the **same** parts
 `mkHost.nix` uses — the walked module tree, the songbook walk, the

@@ -22,7 +22,7 @@
 #
 # Naming rule: a package name must NOT shadow an existing nixpkgs attribute.
 # Because these packages are also injected via a nixpkgs overlay
-# (lib/mkHost.nix, lib/vmTest.nix), a name that collides with a stock attribute
+# (lib/mkHost.nix, tests/vm-boot.nix), a name that collides with a stock attribute
 # would silently mask it. The `overlay` collision guard `throw`s a legible
 # error when a discovered name already exists in `prev` (the overlay is the
 # only path with the previous attrset in scope; the flake `packages` output has

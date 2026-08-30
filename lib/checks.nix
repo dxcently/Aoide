@@ -1,6 +1,6 @@
 # lib/checks.nix — the contractual coupling discipline, as flake checks.
 #
-# Seven checks ride as flake `checks` (see concepts/Governance and
+# Eight checks ride as flake `checks` (see concepts/Governance and
 # concepts/Notes in the wiki, and the mechanical-integrity design for fmt +
 # discovery specifically):
 #
@@ -43,12 +43,20 @@
 #      then asserts the closure never reaches `aoide-song`/`aoide-screen`/
 #      `aoide-lyra` and that no closure crate's `src/` shells out to nix.
 #
+#   8. portability — the static artifact (`packages.aoide-static`, Phase C)
+#      is genuinely free of nix, not merely built with the right cargo flags:
+#      `aoide`/`aoided` carry zero `PT_INTERP` segments, bake in no real
+#      `/nix/store/<hash>-…` path, and run `schema --json` / `guide` with no
+#      nix on PATH. Content lives in tests/portability.nix — this file only
+#      invokes it (the lib/ = wiring, tests/ = content split, see
+#      tests/README.md).
+#
 # 1–3 and 5 are written so they PASS TRIVIALLY where nothing populates the
 # registry they inspect yet (1) and become real as Wave-1 facets/packages
 # land. Each resolves to a trivial derivation: it either builds (assertion
 # held) or the eval fails with a readable message (assertion broken). 4, 6,
-# and 7 are real `runCommand`s — each has to actually run a binary, so it can
-# only fail at build time, not eval time.
+# 7, and 8 are real `runCommand`s — each has to actually run a binary, so it
+# can only fail at build time, not eval time.
 { lib, pkgs }:
 let
   # A check that succeeds as a buildable derivation, or throws at eval time
@@ -487,6 +495,11 @@ let
       cd ${src}/pkgs/aoide
       perl ${script} > "$out"
     '';
+
+  # ── Check 8: static artifact is genuinely portable ──────────────────────
+  # Thin wiring only — the assertions live in tests/portability.nix (see that
+  # file's header, and this file's own header above).
+  portability = pkg: (import ../tests/portability.nix { inherit lib pkgs; }) pkg;
 in
 {
   inherit
@@ -498,5 +511,6 @@ in
     discovery
     phantomCommands
     nixIndependence
+    portability
     ;
 }

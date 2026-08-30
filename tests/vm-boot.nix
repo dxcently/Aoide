@@ -1,5 +1,8 @@
-# lib/vmTest.nix — NixOS integration test: headless boot of the Aoide desktop
-# stack.
+# tests/vm-boot.nix — NixOS integration test: headless boot of the Aoide
+# desktop stack.
+#
+# Lives in tests/, not lib/: lib/ holds build/eval machinery (checks.nix,
+# mkHost.nix, pkgs.nix, walk.nix); this is test content. See tests/README.md.
 #
 # Exercises the walked module tree (same assembly as mkHost), the aoide
 # package, greetd wiring, the aoided user service, and the graph commands —
@@ -8,7 +11,7 @@
 # quickshell UI), and this VM disables that facet — see the trims below.
 #
 # Wired in flake.nix as:
-#   checks.<system>.vm-boot = import ./lib/vmTest.nix { inherit pkgs inputs lib; };
+#   checks.<system>.vm-boot = import ./tests/vm-boot.nix { inherit pkgs inputs lib; };
 #
 # ── Trims applied (headless VM) ───────────────────────────────────────────────
 #   aoide.facets.stylix.enable = false
@@ -50,7 +53,7 @@
   system ? "x86_64-linux",
 }:
 let
-  walk = import ./walk.nix { inherit lib; };
+  walk = import ../lib/walk.nix { inherit lib; };
 
   # Walked module tree — identical to mkHost's discovery pass.
   discovered = walk ../modules;
@@ -70,7 +73,7 @@ let
   # walker — injected from the `aoide` input, exactly as mkHost does.
   overlayModule = _: {
     nixpkgs.overlays = [
-      (import ./pkgs.nix { inherit lib; }).overlay
+      (import ../lib/pkgs.nix { inherit lib; }).overlay
       (_final: _prev: { aoide = inputs.aoide.packages.${system}.default; })
     ];
   };

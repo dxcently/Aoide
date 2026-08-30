@@ -66,7 +66,7 @@
 
       # The packages walker — auto-discovers pkgs/<name>/default.nix. One source
       # feeds the `packages` output, the auto-generated `pkg-<name>` checks, and
-      # the host + vm overlays (lib/mkHost.nix, lib/vmTest.nix).
+      # the host + vm overlays (lib/mkHost.nix, tests/vm-boot.nix).
       pkgsWalk = import ./lib/pkgs.nix { inherit lib; };
     in
     {
@@ -204,13 +204,27 @@
           # the stack comes up (multi-user.target, aoide on PATH,
           # greetd enabled, aoided + shellbridge user services active, graph
           # commands pass).  Requires KVM on the build host.
-          vm-boot = import ./lib/vmTest.nix { inherit pkgs inputs lib; };
+          vm-boot = import ./tests/vm-boot.nix { inherit pkgs inputs lib; };
+          # Static artifact is genuinely portable — zero PT_INTERP segments,
+          # no baked-in /nix/store path, schema/guide run with no nix on
+          # PATH (see lib/checks.nix's Check 8 and tests/portability.nix).
+          # Runs against aoide-static, never packages.default (which is
+          # dynamically linked and legitimately fails both assertions).
+          portability = checks.portability inputs.aoide.packages.${system}.aoide-static;
         }
       );
 
-      # ── Dev shell ──────────────────────────────────────────────────────────
-      # Rust (cargo/rustc) + nix tools. This is the build
-      # surface the CLI/daemon agents develop in.
+      # ── Dev shells ─────────────────────────────────────────────────────────
+      # `default`: Rust (cargo/rustc) + nix tools. This is the build surface
+      # the CLI/daemon agents develop in.
+      # `testing`: distrobox + podman, for tests/distrobox.md's manual
+      # portability suite. Kept separate from `default` — container tooling
+      # is a test-tooling concern, not everyday-dev weight. `/etc/subuid` and
+      # `/etc/subgid` already carry ranges for the user by NixOS default (no
+      # `virtualisation.podman` configured anywhere), so rootless podman/
+      # distrobox works from this shell with no host configuration — a
+      # dendrite was considered and rejected: test tooling is developer
+      # environment, not a host capability.
       devShells = forAllSystems (
         system:
         let
@@ -231,6 +245,14 @@
               nil
               deadnix
               statix
+            ];
+          };
+
+          testing = pkgs.mkShell {
+            name = "aoide-testing";
+            packages = with pkgs; [
+              distrobox
+              podman
             ];
           };
         }

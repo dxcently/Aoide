@@ -342,7 +342,7 @@ four** consumers from one source:
 
 - the flake `packages.<system>.<name>` output,
 - the host overlay (`lib/mkHost.nix` → `pkgs.<name>` inside every module),
-- the vm overlay (`lib/vmTest.nix` — literally the same import), and
+- the vm overlay (`tests/vm-boot.nix` — literally the same import), and
 - a `pkg-<name>` flake check that builds it.
 
 Rules:

@@ -14,6 +14,14 @@ core plumbing discovered unconditionally (`modules/nucleus/*`, which has no
 `mkIf` guard by design — see `options.nix`'s header). A dendrite ships
 disabled; a host opts in with one line in `hosts/<host>/default.nix`.
 
+## Flat option assignment
+
+Write host and module options one per line — `aoide.enable = true;`,
+`aoide.song = "sonata";` — never gathered into `aoide = { … }`. The two are
+identical to nix; the flat form greps and diffs cleanly, and enabling a
+capability stays one copyable line. `statix.toml` disables `repeated_keys`
+for this reason, so the linter does not fight the style.
+
 ## Walk discipline
 
 `lib/walk.nix` discovers every `.nix` file under `modules/dendrites/` and

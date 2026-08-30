@@ -431,7 +431,8 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 │                    · checks · devShells · formatter
 ├── lib/             walk.nix (dendritic walker) · mkHost.nix (host assembly + pkgs
 │                    overlay) · checks.nix (surface-ownership · no-song-read · song-shape)
-│                    · vmTest.nix (the vm-boot headless QEMU check)
+├── tests/           non-cargo tests: vm-boot.nix (headless QEMU boot check) ·
+│                    portability.nix (static-artifact check) · distrobox.md (manual)
 ├── modules/         the snowflake — walker-discovered layers
 │   ├── nucleus/     options.nix (THE contract) · aoided · shellbridge · melete-adapter
 │   │                · packages.nix (aoide + git on PATH) · nix.nix (flakes on)

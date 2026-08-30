@@ -9,7 +9,7 @@
 #
 # Found live on first switch: the vm-boot test node added these to
 # systemPackages itself, masking their absence from the nucleus. The test node
-# now relies on this module instead (lib/vmTest.nix keeps only jq).
+# now relies on this module instead (tests/vm-boot.nix keeps only jq).
 {
   config,
   lib,
