@@ -195,6 +195,11 @@
           # resolves against the binaries built from this source (see
           # lib/checks.nix's Check 6).
           phantom-commands = checks.phantomCommands self inputs.aoide.packages.${system}.default;
+          # Core's crate closure (derived from pkgs/aoide/Cargo.toml, walked
+          # from crates/cli) never reaches aoide-song/aoide-screen/aoide-lyra
+          # and never shells out to nix — AGENTS.md's nix-independence claim
+          # made a real gate (see lib/checks.nix's Check 7).
+          nix-independence = checks.nixIndependence self;
           # VM boot test — boots the Aoide desktop config headless and asserts
           # the stack comes up (multi-user.target, aoide on PATH,
           # greetd enabled, aoided + shellbridge user services active, graph

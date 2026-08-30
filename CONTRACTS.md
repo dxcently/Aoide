@@ -602,7 +602,11 @@ count.
   the pinned constants, and the "discovery grants nothing" statement. Core
   is nix-independent (cargo build, no nix shell-outs) — see the HARD
   CONSTRAINT note in the binary-split plan; the secrets broker holds to
-  the same constraint (plain unix socket + shell-outs, no nix eval).
+  the same constraint (plain unix socket + shell-outs, no nix eval). Held
+  by the `nix-independence` flake check (`lib/checks.nix`), which derives
+  core's crate closure from `pkgs/aoide/Cargo.toml` and asserts it never
+  reaches `aoide-song`/`aoide-screen`/`aoide-lyra` and never shells out to
+  nix.
 - `lyra schema --json` — the AoideOS-surface contract: onboard/rice/draft/
   mode/cover/livery/quickshell/screen/shellbridge/herald/take/element,
   the painted surface. `crates/lyra/src/registry.rs`'s golden test pins the

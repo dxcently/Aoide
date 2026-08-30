@@ -1,6 +1,6 @@
 # lib/checks.nix — the contractual coupling discipline, as flake checks.
 #
-# Six checks ride as flake `checks` (see concepts/Governance and
+# Seven checks ride as flake `checks` (see concepts/Governance and
 # concepts/Notes in the wiki, and the mechanical-integrity design for fmt +
 # discovery specifically):
 #
@@ -34,12 +34,21 @@
 #      the check red naming the file, line, and spelling — the gate that stops
 #      doc copies of the command surface from growing back.
 #
+#   7. nix-independence — AGENTS.md's claim that core (`aoide`/`aoided`) is
+#      cargo-buildable, no nix shell-outs, no NixOS assumption, made real
+#      instead of discipline-only. Derives the crate closure from
+#      `pkgs/aoide/Cargo.toml`'s `[workspace.dependencies]` and a transitive
+#      walk of `[dependencies]`/`[build-dependencies]` starting at
+#      `crates/cli` (never `[dev-dependencies]` — test-support never ships),
+#      then asserts the closure never reaches `aoide-song`/`aoide-screen`/
+#      `aoide-lyra` and that no closure crate's `src/` shells out to nix.
+#
 # 1–3 and 5 are written so they PASS TRIVIALLY where nothing populates the
 # registry they inspect yet (1) and become real as Wave-1 facets/packages
 # land. Each resolves to a trivial derivation: it either builds (assertion
-# held) or the eval fails with a readable message (assertion broken). 4 and 6
-# are real `runCommand`s — each has to actually run a binary, so it can only
-# fail at build time, not eval time.
+# held) or the eval fails with a readable message (assertion broken). 4, 6,
+# and 7 are real `runCommand`s — each has to actually run a binary, so it can
+# only fail at build time, not eval time.
 { lib, pkgs }:
 let
   # A check that succeeds as a buildable derivation, or throws at eval time
@@ -271,6 +280,213 @@ let
         printf 'aoide check phantom-commands: ok (%d spellings checked)\n' \
           "$(wc -l < "$TMPDIR/candidates")" > "$out"
       '';
+  # ── Check 7: core is nix-independent ────────────────────────────────────
+  # AGENTS.md's own claim — core is cargo-buildable, no nix shell-outs, no
+  # NixOS assumption; only `lyra` (and the deployment modules) may depend on
+  # nix (P-A5 of the binary-split workstream; cli/Cargo.toml:36-43 documents
+  # the boundary this check makes real). The closure is DERIVED, never
+  # hardcoded: `pkgs/aoide/Cargo.toml`'s `[workspace.dependencies]` gives an
+  # aoide-* name -> `crates/` directory map, then a transitive walk of
+  # `[dependencies]`/`[build-dependencies]` from `crates/cli` builds the
+  # closure — `[dev-dependencies]` is never walked (test-support never
+  # ships, same reasoning `aoide-cli`'s own manifest states for
+  # `aoide-test-support`). Regex-based, like Check 6: any aoide-* entry
+  # neither TOML file states as a plain single-line `{ path = "crates/…" }`
+  # or `{ workspace = true }` (a multi-line inline table, a `package = "…"`
+  # rename) fails the build naming the offending line instead of walking
+  # past it unseen.
+  #
+  # Two assertions. First, the closure must not contain `aoide-song`,
+  # `aoide-screen`, or `aoide-lyra` — a directory denylist would pass this
+  # while core silently grew an `aoide-song` dependency and inherited its
+  # nix-eval transitively; deriving the closure is what catches that.
+  # Second, no closure crate's `src/` shells out to nix: a quoted `"nix"` /
+  # `"nix-<word>"` literal, or a quoted string naming `nixos-rebuild` or
+  # `nix eval|build|flake|develop|run|shell|store|copy`, on a line that also
+  # spawns a process (`Command::new(`/`.arg(`/`.args(`) — gated on the
+  # process-spawn call so a `--help` summary that merely mentions `nix flake
+  # check`, or a test fixture mocking a `"sudo nixos-rebuild switch"`
+  # activity label, is prose/data rather than a violation.
+  nixIndependence =
+    src:
+    let
+      script = pkgs.writeText "nix-independence.pl" ''
+        use strict;
+        use warnings;
+
+        my $root = "crates";
+        my $ws_toml = "Cargo.toml";
+
+        sub read_file {
+            my ($path) = @_;
+            open my $fh, '<', $path or die "cannot open $path: $!\n";
+            local $/;
+            my $t = <$fh>;
+            close $fh;
+            return $t;
+        }
+
+        # Full-line TOML comments (first non-whitespace char '#') stripped
+        # before any aoide-* scanning below: both the workspace manifest and
+        # every crate manifest carry long prose comments naming
+        # aoide-song/aoide-screen/aoide-lyra that are not dependency edges.
+        sub strip_comment_lines {
+            my ($text) = @_;
+            return join "\n", grep { !/^\s*#/ } split /\n/, $text, -1;
+        }
+
+        # One [section] block: from its header line to the next top-level
+        # [..] header or EOF.
+        sub section {
+            my ($text, $name) = @_;
+            my @lines = split /\n/, $text, -1;
+            my $start;
+            for my $i (0 .. $#lines) {
+                if ($lines[$i] =~ /^\[\Q$name\E\]\s*$/) { $start = $i + 1; last; }
+            }
+            return "" unless defined $start;
+            my @out;
+            for my $i ($start .. $#lines) {
+                last if $lines[$i] =~ /^\[/;
+                push @out, $lines[$i];
+            }
+            return join "\n", @out;
+        }
+
+        # ── 1. workspace.dependencies: aoide-* name -> crates/ directory ────
+        my $ws_text = read_file($ws_toml);
+        my $ws_deps = strip_comment_lines(section($ws_text, "workspace.dependencies"));
+
+        my %dir_of;
+        my @ws_ambiguous;
+        for my $line (split /\n/, $ws_deps) {
+            next unless $line =~ /aoide-/;
+            if ($line =~ /^(aoide-[\w-]+)\s*=\s*\{\s*path\s*=\s*"crates\/([\w-]+)"\s*\}\s*$/) {
+                $dir_of{$1} = $2;
+            } else {
+                push @ws_ambiguous, $line;
+            }
+        }
+        if (@ws_ambiguous) {
+            die "aoide check nix-independence FAILED: workspace.dependencies has an aoide-* "
+              . "entry this check cannot parse as a single-line { path = \"crates/...\" }:\n"
+              . join("\n", @ws_ambiguous) . "\n";
+        }
+
+        # ── 2. walk [dependencies] + [build-dependencies] from crates/cli,
+        # never [dev-dependencies] (test-support never ships) ───────────────
+        my %visited = (cli => 1);
+        my %parent;
+        my @queue = ("cli");
+
+        while (@queue) {
+            my $dir = shift @queue;
+            my $toml = "$root/$dir/Cargo.toml";
+            die "aoide check nix-independence FAILED: no $toml (closure walk reached "
+              . "an unresolved crate)\n" unless -f $toml;
+            my $text = read_file($toml);
+            for my $sect ("dependencies", "build-dependencies") {
+                my $block = strip_comment_lines(section($text, $sect));
+                for my $line (split /\n/, $block) {
+                    next unless $line =~ /aoide-/;
+                    if ($line =~ /^(aoide-[\w-]+)\s*=\s*\{\s*workspace\s*=\s*true\s*\}\s*$/) {
+                        my $name = $1;
+                        my $child = $dir_of{$name};
+                        die "aoide check nix-independence FAILED: $toml [$sect] depends on "
+                          . "$name, which workspace.dependencies never maps to a crates/ "
+                          . "directory\n" unless defined $child;
+                        unless ($visited{$child}) {
+                            $visited{$child} = 1;
+                            $parent{$child} = $dir;
+                            push @queue, $child;
+                        }
+                    } else {
+                        die "aoide check nix-independence FAILED: $toml [$sect] has an "
+                          . "aoide-* entry this check cannot parse as a single-line "
+                          . "{ workspace = true }:\n$line\n";
+                    }
+                }
+            }
+        }
+
+        sub closure_path {
+            my ($node) = @_;
+            my @chain = ($node);
+            while (exists $parent{$chain[0]}) {
+                unshift @chain, $parent{$chain[0]};
+            }
+            return join(" -> ", @chain);
+        }
+
+        # ── Assertion 1: the P-A5 boundary ──────────────────────────────────
+        my @forbidden = grep { $visited{$_} } ("song", "screen", "lyra");
+        if (@forbidden) {
+            die "aoide check nix-independence FAILED: core closure reaches "
+              . join(", ", map { "aoide-$_ (" . closure_path($_) . ")" } @forbidden)
+              . " — the P-A5 split is broken\n";
+        }
+
+        # ── Assertion 2: no nix shell-out in any closure crate's src/ ───────
+        # A quoted nix-flavored literal only counts on a line that also spawns
+        # a process (`Command::new(`/`.arg(`/`.args(`) — otherwise it is prose
+        # (a `--help` summary describing this very check) or fixture data (a
+        # mocked "sudo nixos-rebuild switch" activity label in a test), never
+        # an invocation.
+        my @nix_subs = qw(eval build flake develop run shell store copy);
+        my $sub_alt = join("|", @nix_subs);
+
+        sub find_rs_files {
+            my ($dir) = @_;
+            my @out;
+            return @out unless -d $dir;
+            opendir(my $dh, $dir) or die "cannot opendir $dir: $!\n";
+            for my $entry (readdir $dh) {
+                next if $entry eq "." || $entry eq "..";
+                my $path = "$dir/$entry";
+                if (-d $path) {
+                    push @out, find_rs_files($path);
+                } elsif ($entry =~ /\.rs$/) {
+                    push @out, $path;
+                }
+            }
+            closedir $dh;
+            return @out;
+        }
+
+        my @violations;
+        for my $dir (sort keys %visited) {
+            my @files = sort(find_rs_files("$root/$dir/src"));
+            for my $file (@files) {
+                my $text = read_file($file);
+                my @lines = split /\n/, $text, -1;
+                for my $i (0 .. $#lines) {
+                    my $line = $lines[$i];
+                    next if $line =~ /^\s*(\/\/|\*)/;
+                    next unless $line =~ /\b(?:Command::new|\.arg|\.args)\s*\(/;
+                    if ($line =~ /"nix(-\w+)?"/
+                        || $line =~ /"[^"]*nixos-rebuild[^"]*"/
+                        || $line =~ /"[^"]*nix (?:$sub_alt)[^"]*"/) {
+                        my $lineno = $i + 1;
+                        push @violations,
+                          sprintf("%s:%d: %s  (closure: %s)", $file, $lineno, $line, closure_path($dir));
+                    }
+                }
+            }
+        }
+        if (@violations) {
+            die "aoide check nix-independence FAILED: nix shell-out pattern found in "
+              . "the core closure's src/:\n" . join("\n", @violations) . "\n";
+        }
+
+        printf "aoide check nix-independence: ok (%d crates: %s)\n",
+          scalar(keys %visited), join(", ", sort keys %visited);
+      '';
+    in
+    pkgs.runCommand "aoide-check-nix-independence" { nativeBuildInputs = [ pkgs.perl ]; } ''
+      set -euo pipefail
+      cd ${src}/pkgs/aoide
+      perl ${script} > "$out"
+    '';
 in
 {
   inherit
@@ -281,5 +497,6 @@ in
     fmt
     discovery
     phantomCommands
+    nixIndependence
     ;
 }
