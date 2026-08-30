@@ -19,7 +19,7 @@ protocol:
 | **DEV.md** (this) | preferences, prime loop, where state lives |
 | [[PRINCIPLES]] | what to build: everything-is-a-plugin, and nix's thesis as instructions |
 | [[ORCHESTRATION]] | tiers, routing, dispatch gates, parallelism |
-| [[CRAFT]] | repo handling, how code is written, the voice of commits and comments |
+| [[CRAFT]] | repo handling, how code is written, what a commit carries |
 | [[VERIFICATION]] | build, gates, proofs, what never to run |
 | [[HARNESS-CLAUDE-CODE]] | one harness's specifics |
 
@@ -75,8 +75,8 @@ go to the log — commit message, changelog, memory. Ledgers are exempt; they
 
 **How code, comments, and commits are written is [[CRAFT]].** Convention
 over invention; deleting more wins; readability over commentary; a comment
-justifies its existence or it does not ship; one voice for everything the
-repo stores.
+justifies its existence or it does not ship; a commit carries the reasoning,
+not just the change.
 
 **Say commands, not verbs.** Spoken as `aoide <cmd>` / `lyra <cmd>`.
 

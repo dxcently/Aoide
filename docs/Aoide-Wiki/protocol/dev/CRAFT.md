@@ -2,21 +2,24 @@
 type: reference
 created: 2026-08-30
 updated: 2026-08-30
-tags: [aoide, code, style, commits, voice, git, protocol]
+tags: [aoide, code, style, commits, git, protocol]
 ---
 
-# Craft — repo, code, and voice
+# Craft — repo, code, and commits
 
 How work is made: how the repository is handled, how code is written, and
-how the words shipped inside the repo read. Harness-agnostic. Dependency of
+what a comment and a commit must carry. Harness-agnostic. Dependency of
 [[DEV]].
 
 **Scope boundary.** This page governs *the repo* — code, comments, commit
-messages, READMEs, briefs, reports. **Wiki content pages are out of scope**
-and keep the wiki's own style and assertion rules: a controlled technical
-register, present indicative, no filler constructions. Do not apply this
-page's voice to a wiki page, and do not apply the wiki's register to a
-commit message.
+messages, READMEs, briefs, reports. **Wiki content pages are out of scope**:
+they keep the wiki's own style and assertion rules (controlled technical
+register, present indicative, no filler constructions), which a commit
+message does not.
+
+**Style is the editor's own.** These are requirements of substance — what a
+piece of writing has to contain and prove. How it sounds is whoever is
+editing, and the requirements hold either way.
 
 ---
 
@@ -108,55 +111,30 @@ goes to the log.
 
 ---
 
-## Voice — commits, comments, prose
+## Commits
 
-Everything written inside the repo carries one voice. It is blunt and
-technical, and it never softens first.
+**Subject:** `type(scope): declarative statement of the new state` — present
+tense, lowercase, no trailing period. It describes the tree after the
+commit, not the activity that produced it. A subject needing "and also" is
+two commits.
 
-**Schema:**
+**Body.** A commit is the log, so it carries the reasoning and not just the
+change:
 
-1. **Lead with the change.** First line states what is now true. No
-   throat-clearing, no "this commit", no announcing the subject.
-2. **One reason per claim.** A second justification is padding or belongs
-   elsewhere.
-3. **Show the work.** What was checked, what was ruled out, why this over
-   that. A claim that needed evidence carries it — a hash, a count, a
-   measured number, a command's real output.
-4. **Findings are bullets, one line each.** No closing summary; the reader
-   just read it.
-5. **Record what was worked out with the User.** A commit is the log, so it
-   carries the decision and its provenance — what was proposed, what the
-   User decided, what changed course and why. Name an overruled proposal in
-   one line so it is not raised again. This is the difference between a log
-   of changes and a log of *reasoning*, and the second is the one worth
-   keeping.
-6. **Flags last, one line each.** Uncertainties, parked branches, a
-   consequence the reader will meet later.
-7. **Length follows the change.** A one-line fix gets a one-line message.
-   Depth is earned by being architectural, not by being long.
+| carries | shape |
+|---|---|
+| what is now true | first line; no throat-clearing, no "this commit" |
+| why | one reason per claim — a second is padding, or belongs elsewhere |
+| the proof | named: a hash, a count, a measured number, a command's real output |
+| what was settled with the User | what was proposed, what they decided, what changed course and why |
+| what was rejected | one line each, so it is not re-proposed |
+| flags | last, one line each — uncertainties, parked branches, a consequence met later |
 
-**Kaomoji are welcome** in commits, code comments, and dev-facing writing.
-They carry tone the words do not, and this repo is written by and for people
-who read them. Build one for the moment rather than reaching for a stock
-face. Keep them out of a commit *subject* line, which is read in a list, and
-out of wiki content pages, which keep the register described above.
+Findings are bullets, one line each, stated as found — a breakage says it is
+broken and for how long. No closing summary; the reader just read it. Length
+follows the change: a one-line fix gets a one-line message, and depth is
+earned by being architectural, not by being long.
 
-**Never:**
-
-- **A personal name.** Authored content says "the User".
-- **Apology, hedging, or ceremony.** State the fact. A mistake gets a
-  correction, not a preamble about the mistake.
-- **Softening a real finding.** If something is broken, the message says it
-  is broken, and says for how long.
-
-**Commit subject:** `type(scope): declarative statement of the new state`.
-Present tense, lowercase, no trailing period. It describes the tree after
-the commit, not the activity that produced it.
-
-**Commit body:** the schema above. State what changed, why it changed, and
-what was settled with the User to get there. Where a claim was proven, name
-the proof — the identical hash, the negative test that went red, the
-measured timing. Where something was rejected, say what and why in one
-line, so it is not re-proposed. Where the User overruled a proposal, say so
-plainly and record the reasoning that replaced it; a commit that hides
-whose call it was is a commit whose decision cannot be revisited.
+**Never a personal name** — authored content says "the User". A commit that
+hides whose call a decision was is a commit whose decision cannot be
+revisited.
