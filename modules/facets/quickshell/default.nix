@@ -456,9 +456,11 @@ in
         # — it confirms BOTH the journal's placeholder-screen line AND a live
         # `hyprctl layers` zero-surface reading before acting (health.rs's own
         # module doc carries the two-signal reasoning), then restarts the unit
-        # itself, withholding and notifying instead once repeated triggers land
-        # inside a short window so a genuinely flapping output can't turn this
-        # into an infinite restart loop.
+        # on a retry ladder rather than immediately every tick: immediate on
+        # the first restart, then 15s/60s/5m, settling at a 15-minute floor it
+        # never drops below — but never gives up either, so a genuinely
+        # flapping output still gets restarted forever instead of eventually
+        # being abandoned.
         #
         # `quickshell` is a lyra-only command family (left core's registry at
         # P-A5), so this execs `pkgs.aoide.rice` — lyra's own droppable output
@@ -475,7 +477,7 @@ in
         # only `Unit`/`Service`/`Install` freeform sections exist, and no
         # `path` option at all), so this follows `aoide-quickshell`'s own
         # Unit/Service/Install shape instead, with `hyprctl`/`notify-send`
-        # (needed by health.rs's `hyprctl_json`/`notify_backoff_engaged`,
+        # (needed by health.rs's `hyprctl_json`/`notify_still_flapping`,
         # neither of which is guaranteed present on this manager's PATH) added
         # via an explicit `PATH=` `Environment` entry — the only knob this
         # schema offers for it. `systemctl`/`journalctl` ride the same
