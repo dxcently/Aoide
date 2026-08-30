@@ -3,7 +3,7 @@
 #
 # `pkgs/aoide` is self-flaked, nixpkgs-only, and its own source tree does NOT
 # contain `song/songbook/` (that lives in this outer repo) — see that
-# package's own `flake.nix` header, "Topology (b) of AOIDE-DEV §7". So the
+# package's own `flake.nix` header, "Topology (b)". So the
 # committed songbook cannot ride the core package derivation; it lives here
 # instead, in the outer repo, discovered by `lib/pkgs.nix` like any other
 # `pkgs/<name>`.

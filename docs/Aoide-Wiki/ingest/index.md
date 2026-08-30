@@ -61,5 +61,5 @@ updated: 2026-08-29
 ## References
 
 - [[references/AOIDE-HANDOFF|AOIDE-HANDOFF]] — the original design contract: what Aoide is (the primary source for this wiki)
-- [[AOIDE-DEV|AOIDE-DEV]] — the development agent's operating manual: the prime loop, build/show mechanics, git discipline, the §7 open-flags ledger
+- [[DEV]] — the development agent’s operating manual, a self-contained set under `protocol/dev/`: preferences and prime loop, then what to build ([[PRINCIPLES]]), tiers and routing ([[ORCHESTRATION]]), repo and commits ([[CRAFT]]), gates and proofs ([[VERIFICATION]])
 - [[CLI-Reference]] — the per-command dev reference: signature, files read/written, output targets; hub page plus eight group pages

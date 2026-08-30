@@ -106,8 +106,9 @@ home-manager/stylix modules, the pkgs overlay, and mirrored `specialArgs`
 (`host = "vm-test"`, inputs, username, system; `node.pkgsReadOnly = false`
 so the overlay applies) — so the test boots the real assembly, not a
 replica. It asserts: `multi-user.target` reached; `aoide` on
-PATH with `schema --json` reporting exactly 80 commands (a hardcoded
-drift-tripwire figure, [[AOIDE-DEV]] §7) and `guide` exiting
+PATH with `schema --json` reporting a non-zero command count (the golden
+snapshot in `crates/cli/src/registry.rs` owns the exact figure; the boot
+test only proves the surface is there) and `guide` exiting
 0; greetd enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
 linger active with the `aoided` and `shellbridge` user units finishing
 `Result=success` (the skeleton binaries seed state and exit 0); stage files

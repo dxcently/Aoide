@@ -48,7 +48,7 @@ scheme — see [[Lexicon]] for the full vocabulary and the [[Mneme]]/Aoide split
   never routing its own command execution through Melete's `run_shell`. (This
   repo's own dev sessions never invoke the real Melete connector: an earlier
   session used "Melete" as an informal codename for a local `Agent`-tool
-  coding subagent; see `AOIDE-DEV.md` §2.)
+  coding subagent; see [[ORCHESTRATION]].)
 - **Declarative surface:** one `config.toml`; self-update swaps which Nix store
   path the service points at (a `canary` channel — a flake-generation rollback in
   spirit).

@@ -34,8 +34,9 @@
     };
 
     # The aoide core (CLI + daemon) as a self-flaked package — topology (b) of
-    # AOIDE-DEV §7: pkgs/aoide owns a nixpkgs-only flake of its own and is
-    # consumed here as a path input, NOT discovered by the packages walker
+    # `docs/architecture/PACKAGE-LAYOUT.md` ("Two binaries"): pkgs/aoide owns a
+    # nixpkgs-only flake of its own and is consumed here as a path input,
+    # NOT discovered by the packages walker
     # (lib/pkgs.nix skips any package dir carrying its own flake.nix).
     aoide = {
       url = "path:./pkgs/aoide";

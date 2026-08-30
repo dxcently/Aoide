@@ -47,8 +47,8 @@ modifier.
 | `SUPER + G` | Toggle the gadget dock (`global, aoide:dock`) — see [[Gadget-Dock]]. |
 | `SUPER + C` | Toggle clipboard history — opens the launcher on its clipboard chapter (`global, aoide:clipboard`). |
 | `SUPER + ESCAPE` | Lock the screen — `exec, aoide shell lock`; no `shell` command group exists in either binary's registry, so this binding is dead (report only, not repointed). |
-| `SUPER SHIFT + P` | Bound to `lyra rice preview` in `modules/dendrites/hyprland.nix` — a retired command, so the keybind is a no-op until repointed to `rice stage` (flagged in [[AOIDE-DEV]] §7). |
-| `SUPER SHIFT + A` | Bound to `lyra rice adopt` in `modules/dendrites/hyprland.nix` — a retired command, so the keybind is a no-op until repointed to `rice declare` (a stub — `implemented: false`; flagged in [[AOIDE-DEV]] §7). |
+| `SUPER SHIFT + P` | Bound to `lyra rice preview` in `modules/dendrites/hyprland.nix` — a retired command, so the keybind is a no-op until repointed to `rice stage` (report only, not repointed). |
+| `SUPER SHIFT + A` | Bound to `lyra rice adopt` in `modules/dendrites/hyprland.nix` — a retired command, so the keybind is a no-op until repointed to `rice declare` (a stub — `implemented: false`; report only, not repointed). |
 | `SUPER + RETURN` | Open a terminal (kitty). |
 | `SUPER + Q` | Close the active window. |
 | `SUPER + V` / `SUPER + F` | Toggle floating / fullscreen. |
