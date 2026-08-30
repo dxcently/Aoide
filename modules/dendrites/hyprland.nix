@@ -138,9 +138,18 @@ in
         # reports `tiledLayout: scrolling` while `general:layout` still reads
         # dwindle, so another output plugged in later keeps dwindle untouched.
         # Ten workspaces matches the ten SUPER+<n> binds below.
+        # `layoutopt:direction:down` grows the tape downward rather than
+        # rightward — new windows land below instead of beside, which is what
+        # suits a portrait panel. It is a WORKSPACE option, so the global
+        # `scrolling:direction` (right) is untouched and a landscape monitor
+        # keeps the default. Accepted values are left/right/down/up only;
+        # note that `hyprctl keyword` accepts any string here and the layout
+        # resolves it later, so an invalid value fails silently rather than
+        # erroring.
         ${lib.optionalString (cfg.scrollingMonitor != null) (
           lib.concatMapStrings (
-            n: "workspace = ${toString n}, monitor:${cfg.scrollingMonitor}, layout:scrolling\n"
+            n:
+            "workspace = ${toString n}, monitor:${cfg.scrollingMonitor}, layout:scrolling, layoutopt:direction:down\n"
           ) (lib.range 1 10)
         )}
 
@@ -232,6 +241,21 @@ in
 
         # Terminal (the kitty dendrite ships kitty)
         bind = SUPER, RETURN, exec, kitty
+
+        # ── Scrolling-layout controls ─────────────────────────────────────────
+        # Emitted only when a monitor actually uses the scrolling layout —
+        # these dispatchers are no-ops on a dwindle workspace. Binds themselves
+        # are global (Hyprland has no per-monitor bind), so they simply do
+        # nothing where scrolling is not in play. `+conf`/`-conf` cycle the
+        # widths in `scrolling:explicit_column_widths` (0.333/0.5/0.667/1.0).
+        # SUPER+C is the clipboard, so `center` takes SUPER+slash.
+        ${lib.optionalString (cfg.scrollingMonitor != null) ''
+          bind = SUPER, period, layoutmsg, move +col
+          bind = SUPER, comma, layoutmsg, move -col
+          bind = SUPER, equal, layoutmsg, colresize +conf
+          bind = SUPER, minus, layoutmsg, colresize -conf
+          bind = SUPER, slash, layoutmsg, center
+        ''}
 
         # Window controls
         bind = SUPER, Q, killactive
