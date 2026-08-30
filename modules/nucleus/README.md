@@ -12,6 +12,9 @@ module builds against what nucleus declares.
   v0). Also carries the non-facet-read option namespaces (`aoide.mcp`,
   `aoide.a2a`, `aoide.usage`, `aoide.lyra`, `aoide.secrets`, `aoide.pairing`
   — deployment/door toggles, not part of the facet whitelist).
+  `aoide.config` is the one namespace declared elsewhere, in `config.nix`
+  beside the rendering it exists for: its `settings` type comes from
+  `pkgs.formats.toml`, so the option and the generator are one unit.
 - `aoided.nix` — the orchestrator daemon service: the neutral event stream,
   default-deny-per-class subscriptions, the user-gated rebuild pipeline, the
   single audit log. Also opens the LAN discovery advertisement's inbound
@@ -52,6 +55,21 @@ module builds against what nucleus declares.
   condition the broker's own `zenity` package pull already uses), since the
   popup is a desktop surface belonging to the logged-in operator, never the
   secrets-uid broker.
+- `config.nix` (task #135 P-C) — nix as ONE authoring front-end for the
+  PORTABLE runtime config (`$AOIDE_ROOT/config.toml`, CONTRACTS.md §4's own
+  subsection). Core is cargo-buildable on any Linux with no NixOS
+  assumption, so a core command's configuration cannot LIVE in a NixOS
+  option; this module renders `aoide.config.settings` through
+  `pkgs.formats.toml` to a read-only store path and points `AOIDE_CONFIG` at
+  it — for interactive shells (`environment.sessionVariables`) and for every
+  aoide user unit at once (the user manager's own `DefaultEnvironment`,
+  rather than an enumeration of unit names that would drift each time a unit
+  is added). Nix POINTS, never copies: immutability is the provenance, and
+  the two worlds never write the same file, so a rebuild cannot eat an
+  `aoide config set` edit. Gated on `aoide.config.enable`, default `false`
+  (same house policy as the MCP façade / A2A door / usage poller / secrets
+  broker) — and whole-file-or-nothing: enabled, nix owns the entire config
+  and the CLI's own write refuses with a taught error naming this option.
 - `nix.nix` — flake-native nix settings (Aoide IS a flake; every rebuild/
   check/`aoide update` runs through the flake CLI).
 - `packages.nix` — puts the `aoide`/`aoided`/`lyra` binaries on the system

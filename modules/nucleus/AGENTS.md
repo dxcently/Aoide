@@ -13,6 +13,16 @@ covers only what's specific to nucleus.
   Widening the read whitelist (`aoide.livery`/`aoide.arrangement`/
   `aoide.surfaces`) is a decision that touches root `AGENTS.md` house rule 5
   too — don't add a fourth namespace without updating both.
+- **Nix authors runtime config; it never owns it (`config.nix`, task #135
+  P-C).** A CORE command's configuration lives in the portable runtime file
+  (`$AOIDE_ROOT/config.toml`, CONTRACTS.md §4) because core is
+  cargo-buildable on any Linux — `config.nix` renders that file to a
+  read-only store path and POINTS `AOIDE_CONFIG` at it, whole-file or
+  nothing. Don't add a NixOS option for a new core setting: add a
+  `config::SCHEMA` key in `aoide-storage` and let `aoide.config.settings`
+  carry it like every other key. And don't grow partial management (nix
+  owning one section, the CLI another) — two writers on one document is the
+  split-brain the point-don't-copy design exists to avoid.
 - **Changes here land by upstream merge, not agent edit** (root `AGENTS.md`
   house rule 1 — `song/` is the only agent-writable domain). An agent
   proposing a nucleus change writes the diff and gets it reviewed/merged

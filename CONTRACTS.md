@@ -374,7 +374,7 @@ Top-level shape (stable keys):
 ```json
 {
   "schemaVersion": "0",
-  "aoide": "0.0.1",
+  "aoide": "0.0.2",
   "commands": [
     {
       "path": ["rice", "compose"],
@@ -605,7 +605,22 @@ count.
   by the `nix-independence` flake check (`lib/checks.nix`), which derives
   core's crate closure from `pkgs/aoide/Cargo.toml` and asserts it never
   reaches `aoide-song`/`aoide-screen`/`aoide-lyra` and never shells out to
-  nix.
+  nix. `config`/`config set`, appended newest, task #135 P-C — the portable
+  runtime config file (`$AOIDE_ROOT/config.toml`, `aoide_storage::config`),
+  the direct consequence of that same portability constraint: a CORE
+  command's configuration cannot live in a NixOS option, because on a
+  non-nix host that option does not exist and "rebuild to change a grant"
+  is not an operation. `config` prints the effective values, the path they
+  resolved from, and whether that path is MANAGED (rendered read-only
+  elsewhere, `$AOIDE_CONFIG`) or UNMANAGED (this host's own editable file);
+  `config set <section>.<key> <value>` is the one schema-validated write,
+  refusing a managed or unwritable config, an unknown key, and an
+  out-of-vocabulary value with a taught error apiece and nothing written in
+  any of them. Nix is ONE authoring front-end
+  (`modules/nucleus/config.nix`, whole-file or nothing) that renders the
+  file to a read-only store path and points `$AOIDE_CONFIG` at it — see
+  §4's `config.toml` subsection below for the resolution order, the schema,
+  and the intent-vs-state line.
 - `lyra schema --json` — the AoideOS-surface contract: onboard/rice/draft/
   mode/cover/livery/quickshell/screen/shellbridge/herald/take/element,
   the painted surface. `crates/lyra/src/registry.rs`'s golden test pins the
@@ -797,6 +812,84 @@ correctly with S1 in either order: whichever migration a given process's
 `main()` runs first, S1 always resolves its OWN old/new dirs dynamically
 via `stage_dir()`/`state_dir()`, so it finds files wherever L-C2 most
 recently left them.
+
+### `$AOIDE_ROOT/config.toml` — **v0** (task #135 P-C, the portable runtime config)
+
+The one file in this section that carries INTENT rather than state. Every
+other format below records what HAPPENED — a session's live record, a peer's
+committed grant, a parked ask, a switch that was flipped. This one records
+what an operator WANTS, ahead of anything happening, and nothing ever
+migrates between the two: a value written by code lives in `state/*.json`, a
+value written by a human lives here.
+
+It exists because core is portable. `aoide`/`aoided` are cargo-buildable on
+any Linux, with no nix shell-outs and no NixOS assumption (root `AGENTS.md`),
+so a CORE command's configuration cannot live in a NixOS module option — on a
+non-nix host that option does not exist, and "rebuild to change a grant" is
+not an operation. `peer_store::Peer.hub` set the precedent: a runtime field,
+set by a runtime command, portable by construction.
+
+**Resolution**, two tiers, absolute-path-wins like every other override in §4
+above, and IDENTICAL at every entry point (`aoide`, `aoided`, the stdio MCP
+façade all reach one function, so there is no per-door variant to drift):
+
+1. `$AOIDE_CONFIG` set to an absolute path → that file, **managed** —
+   rendered read-only by something else, so `aoide config set` refuses it
+   with a taught error naming both it and the unmanaged path to use instead.
+2. else `$AOIDE_ROOT/config.toml` → **unmanaged**, the operator's own
+   editable file and the one `aoide config set` writes.
+
+A relative or empty `$AOIDE_CONFIG` is ignored outright rather than resolved
+against a cwd. A MISSING file is every default, never an error (the same
+tolerate-missing stance `state/advertise.json` and `state/peers.json` hold). A
+file that EXISTS but does not parse, carries an unknown key or section, or
+holds a value outside its vocabulary is a LOUD error naming the offence — this
+file carries grants, so a typo must never resolve to a silently-ignored key.
+
+**TOML, one runtime format.** This is the one file a human edits, and the
+reasoning behind a grant belongs beside it, which JSON has nowhere to put.
+YAML's implicit coercion and whitespace sensitivity are the opposite posture
+to the one a grants file needs. `pkgs.formats.toml` renders the nix side
+through the same format, so both worlds speak one schema.
+
+**Nix POINTS, never copies.** `modules/nucleus/config.nix`'s
+`aoide.config.settings` renders through `pkgs.formats.toml` to a read-only
+store path and `AOIDE_CONFIG` names it (exported into interactive shells via
+`environment.sessionVariables`, and into every aoide user unit via the user
+manager's `DefaultEnvironment`). Immutability IS the provenance: there is no
+marker field to lie or go stale, and the two worlds never write the same path,
+so a rebuild structurally cannot eat a CLI edit. Management is
+**whole-file-or-nothing** — `aoide.config.enable` is off by default (same
+house policy as every other door), and partial management (nix owning one
+section while the CLI owns another) is deliberately not offered: two writers
+on one document is the split-brain the design exists to avoid.
+
+Schema v0 — exactly one section, and a new section lands with the consumer
+that reads it, never ahead of one:
+
+```toml
+# Comments are the point of the format: this is the one file a human edits.
+[pairing]
+defaultGrant = ["read"]
+```
+
+- `pairing.defaultGrant` (list of strings, default `["read"]`) — the
+  capability set a peer is granted when it FIRST becomes verified. The
+  vocabulary IS §7's own closed peer-capability set
+  (`aoide_storage::peer_store::PEER_CAPABILITIES`, `"read"`/`"spawn"` — the
+  same one `peer allow` enforces), never a second list; an unknown
+  capability is refused by name, exactly as an unknown key is.
+
+The schema lives in code as a walkable TABLE (`aoide_storage::config::SCHEMA`
+— sections, keys, each key's vocabulary, and how to read it off a typed
+config), and the validator, the `aoide config` listing, and `aoide config
+set` all walk that one table. `aoide config set <section>.<key> <value>` is
+the only writer: it refuses a managed config, an unknown key, an
+out-of-vocabulary value, and a config already on disk that does not load —
+each with a taught error and nothing written — then edits the file's own TEXT
+in place (`toml_edit`, so an operator's comments survive a write that a
+serialize-the-struct round trip would erase), re-parses the result through
+the identical gate the next read applies, and commits it atomically.
 
 ### `song/stage/livery.json` — **v0**
 
@@ -5342,15 +5435,17 @@ manufacturing the hazard: a throwaway client pressed a button and called
 
 Aoide itself carries a release version — `pkgs/aoide/Cargo.toml`'s
 `[workspace.package].version`, the single source every crate inherits via
-`version.workspace = true` and `pkgs/aoide/default.nix` matches by hand
-(User-directed, 2026-08-22). This is NOT a contract version: bumping it
-never implies a §1–§6 contract broke, and a contract bump never requires a
-release bump either — they move independently.
+`version.workspace = true` and `pkgs/aoide/default.nix` READS with
+`builtins.fromTOML` rather than copying (a literal there would drift on the
+first bump that forgot it). This is NOT a contract version: bumping it never
+implies a §1–§6 contract broke, and a contract bump never requires a release
+bump either — they move independently.
 
 - **Prebeta is `0.0.X`.** Every release today is `0.0.X`; `0.1.0` is beta,
   out of scope until the User calls it.
-- **The patch number (`X`) bumps only at a User-directed release point** —
-  never automatically per commit, per phase, or per merge.
+- **The patch number (`X`) bumps by one at the end of each completed major
+  phase** — one edit, in the workspace manifest, in that phase's own landing
+  commit. Never per commit and never mid-phase.
 - **`aoide schema --json`'s `"aoide"` field is the runtime-readable
   version** (`aoide_protocol::registry::AOIDE_VERSION`, itself
   `env!("CARGO_PKG_VERSION")` off the workspace version above) — the doc
