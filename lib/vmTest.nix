@@ -187,170 +187,10 @@ pkgs.testers.runNixOSTest {
     # ── 2. aoide on PATH ────────────────────────────────────────────────────
     machine.succeed("which aoide")
 
-    # `aoide schema --json` must parse and report exactly cmd_count commands.
-    # This is a deliberate drift tripwire: adding or removing a command must
-    # consciously update this count (it caught 8 commands that had landed
-    # unrecorded — graph wrap/reap/send, conduct, conductor, and the graph session
-    # write-commands; bumped by 4 for the a2a serve / agent add|list|remove stubs
-    # (CONTRACTS.md §6); bumped by 1 for `usage` (CONTRACTS.md §4); bumped by 1
-    # for `a2a agent send` — the Phase D client-side drive command;
-    # bumped by 1 for `hooks install` — the generic hook-installer command;
-    # bumped by 3 for `livery emit|resolve|lint` — the native note-engine
-    # commands (LIVERY-MERGE Phase 1); bumped by 3 for `rice mode
-    # status|stage|declarative` — the staging/declarative mode toggle
-    # (reached 54, but this count was never bumped for it until now);
-    # bumped by −3 for deleting a since-removed `rice design status/enter/exit`
-    # group outright — it added nothing mechanically over `rice mode stage`
-    # and was cut clean (landed at 51); bumped by 4 for a since-reworked `rice
-    # draft save|list|stage|drop` — the durable-scratch-snapshot group (reached
-    # 55); bumped by −1 for cutting `rice gen` outright — a speculative
-    # prompt/wallpaper generator that was never built and had no design behind
-    # it, not left as a permanent stub (landed at 54); net unchanged (−1, +1)
-    # for replacing `rice draft stage` (copy-based) with `rice mode draft` —
-    # symlink-routes stage/livery.json into a saved draft instead of
-    # snapshotting into/out of it, superseding the copy-based command outright
-    # (no-internal-aliases rule) — landed at 54; bumped by 5 for the new
-    # `peer add|list|remove|pull|status` group (cross-device peer federation,
-    # CONTRACTS.md §7) — reached 59; bumped by 1 for the new `shell reload`
-    # command (Quickshell IPC hot-reload trigger) — reached 60; bumped by 2
-    # for the new `screen info`/`screen shot` group (Phase 1 of the `screen`
-    # command family, docs/architecture/PACKAGE-LAYOUT.md) — reached 62; bumped
-    # by 6 for the new `screen point move|click|scroll|idle|save|restore`
-    # group (Phase 2 of the `screen` command family — pointer synthesis via
-    # wlrctl, ported from tools/pointer.sh) — reached 68; bumped by 1 for the
-    # new `screen ocr` command (Phase 3 — tesseract text extraction) — reached
-    # 69; bumped by 1 for the new `screen send` command (Phase 5 — hand a
-    # capture to a conducted session or a registered A2A agent, routed
-    # through the existing `graph send`/`a2a agent send` gates) — reached 70;
-    # bumped by 1 for `graph permit` (the herald's approve/deny summons,
-    # commit 717708a — landed in this same shared tree while Phase B below
-    # was in flight; that commit updated the golden snapshot in
-    # crates/cli/src/registry.rs but missed this tripwire, so this count was
-    # briefly wrong on disk between the two — caught and fixed here rather
-    # than left silently stale) — reached 71; bumped by 2 for the new
-    # `screen point drag`/`screen point hover` commands (Phase B of the
-    # pointer-emulation workstream, khoa 2026-08-17 — atomic
-    # press-move-release drag, and a hover command that reports which layer
-    # surfaces/windows appeared/disappeared/retitled while parked) — reached
-    # 73; bumped by 1 for the new `screen diff` command (Phase E of the
-    # pointer-emulation workstream, same day — mechanical act-verification:
-    # re-shoot a prior capture's identical rect, pixel-diff the two images,
-    # report a hyprctl inventory delta alongside it) — reached 74; bumped by
-    # 1 for the new `screen point text` command (Phase F of the
-    # pointer-emulation workstream, khoa 2026-08-17 — click a word/phrase an
-    # earlier `screen ocr` pass already located, by name instead of a
-    # picked-by-eye pixel) — reached 75; bumped by 1 for `herald push`, the
-    # feed command of the herald retcon (khoa 2026-08-17 — dunst stops drawing
-    # and becomes the daemon only, handing each notification to this command
-    # through its `script` hook; the Quickshell herald draws the card from
-    # the resulting stage/herald.json) — reached 76; bumped by 7 for the
-    # self-ricing take tree and the flake integrity checker (`rice back`,
-    # `rice take` and its `list`/`mark`/`diff`/`prune` leaves, and
-    # `soundcheck`) — reached 83, though this tripwire had already drifted
-    # to stale-83-vs-actual-87 by the time P-A5 (binary-split workstream)
-    # landed — never bumped for whatever pushed the true count to 87
-    # (task #71 territory). P-A5 removed the 39-path graphical bundle
-    # (rice/draft/mode/cover/livery/shellbridge/quickshell/screen/herald/
-    # take) from `aoide` outright — it now lives ONLY in the separate
-    # `lyra` binary (docs/architecture/PACKAGE-LAYOUT.md, CONTRACTS.md §3)
-    # — landing core at 48. The messaging workstream then added `who` (49)
-    # and `inbox list|read|clear` (52), and the secrets workstream added
-    # `secrets serve|exec|add|rm|grant|revoke` (58) and `secrets enroll` (59)
-    # (spelled `vault ...` until the P-V4b rename — paths rename in place,
-    # count holds); bumped by 1 for `secrets put` — the write half (backend
-    # `set` templates + the built-in `file` backend, Workstream SECRETS
-    # P-V4c) — reached 60; bumped by 1 for `secrets set-totp` — flips an
-    # existing policy's requireTotp bit without hand-editing policy.json
-    # (Workstream SECRETS P-V4e; the same phase also added `secrets enroll
-    # --show` and a tty-hidden-input prompt for `secrets put`, neither of
-    # which registers a new path) — reached 61; bumped by 2 for
-    # `secrets automate` + `secrets expose` — the per-secret automation
-    # and remote-reachability gates (Workstream SECRETS P-N1) — reached 63;
-    # bumped by 3 for `secrets pending`/`approve`/`dismiss` — the parked-ask
-    # lifecycle (P-N2) — reached 66; bumped by 1 for `secrets watch` — the
-    # terminal surface over parked asks and broker events — reached 67;
-    # bumped by 1 for `secrets migrate` — moves a secret's stored value
-    # between backends (P-G2, task #72) — reached 68 (this assert was
-    # updated to 68 with that landing, though this historical comment
-    # wasn't extended to say so until now); bumped by 1 for `events tail`
-    # — the aoided event bus's own terminal-reachable follow command (P-D3,
-    # docs/architecture/AOIDED.md) — reached 69; bumped by 1 for `peer hub`
-    # — designates at most one registered peer as the hub address
-    # resolution prefers as a last-resort remote target (P-D5,
-    # docs/architecture/AOIDED.md) — reached 70; bumped by 1 for `graph
-    # resurrect` — revives a project's most recently-ended resumable
-    # session off the durable session ledger, the ledger/resume phase of
-    # harness summoning (P-D8, docs/architecture/AOIDED.md's "L5") —
-    # reached 71; bumped by 1 for `identity` — this instance's lazily-minted
-    # ed25519 identity show command (P-P1, docs/architecture/PAIRING.md) —
-    # reached 72; bumped by 4 for `peer pair request|pending|approve|
-    # reject` — the pairing ceremony's CLI half (P-P2,
-    # docs/architecture/PAIRING.md) — reached 76; bumped by 1 for `peer
-    # allow` — the closed-capability-set grant/revoke command backing the A2A
-    # spawn arm's hard gate (P-P3, docs/architecture/PAIRING.md decisions
-    # 5/6) — reached 77; bumped by 1 for `peer spawn` — the signed,
-    # spawn-shaped message/send that actually reaches that gate from the
-    # CLI (P-P5b, docs/architecture/PAIRING.md) — reached 78; bumped by 2
-    # for `peer discover`/`peer invite` — the LAN discovery beacon's CLI
-    # half, a read-only multicast sweep plus a sugar-over-the-ceremony
-    # invite (P-P6, docs/architecture/PAIRING.md's "Discovery
-    # (advertise-but-locked)" section) — reached 80; bumped by 1 for
-    # `graph session carry` — the durable-session mark (task #96, 562c8f6;
-    # this tripwire was never bumped with that landing and sat at
-    # stale-80-vs-actual-81 until the next entry's review caught it) —
-    # reached 81; bumped by −4 for deleting the legacy `a2a agent
-    # add|list|remove|send` family outright (pre-pairing legacy — unsigned,
-    # ungated, structurally superseded by the `peer` family) — reached 77;
-    # bumped by −1 for deleting `graph wrap` outright — zero production
-    # callers (superseded by `conduct`/`graph spawn`), command-defrag lane
-    # (task #101) — reached 76; bumped by −1 for deleting `graph emit` —
-    # restage_graph fires at every mutation site and `graph prune` is the
-    # blessed manual resync, command-defrag lane (task #101) — reached 75;
-    # bumped by −1 for deleting `graph focus` — conductor and shellbridge
-    # call focus_session directly — reached 74; bumped by −1 for folding
-    # `peer list` into `peer status --json` (full Peer row) — reached 73;
-    # the graph-prefix cutover (task #101, Lane R, Phase R1) then renamed 18
-    # of the 19 `graph.*` spellings IN PLACE — `graph view` -> bare `graph`
-    # (the render; `graph link` alone survives the family), `graph
-    # send`/`graph spawn`/`graph resurrect` -> bare `send`/`spawn`/
-    # `resurrect`, `graph session *`/`graph permit`/`graph pending *`/`graph
-    # reap`/`graph prune` -> `session *`, `graph project *` -> `project *` —
-    # a hard cutover, no aliases; the PATH SET changed, the COUNT did not:
-    # still 73. Bumped by 1 for bare `session` — the undying picker over
-    # local and peer sessions (U3, command-defrag lane U, a parent command
-    # alongside `session.*` the same way bare `graph` sits alongside
-    # `graph.link`) — reached 74. Bumped by 1 for `peer pair watch` — the
-    # pairing-ceremony events-feed watcher (P-P5, CONTRACTS.md §6's
-    # "Pairing events feed" subsection) — reached 75. Bumped by 3 for
-    # `melete status`/`melete graph`/`melete call` (M2, task #14) — the
-    # Melete MCP client, `aoide_client::mcp_client` — reached 78. Bumped by
-    # 1 for `peer advertise` — the discovery advertise switch (task #120;
-    # this tripwire was never bumped with that landing and sat at
-    # stale-78-vs-actual-79 until the next entry caught it) — reached 79.
-    # Bumped by 1 for `peer list` — the one-glance mesh roster (task #120
-    # P2, registered from `aoide-conduct` because it folds `who`'s probe
-    # core) — reached 80. Bumped by 1 for bare `pair` — the interactive
-    # pairing picker over one sweep, driving the same ceremony core `peer
-    # invite` uses (task #120 P3) — reached 81. Bumped by 1 for `secrets
-    # allow-remote-origin` — the per-secret remote-origin admission bit the
-    # broker's origin gate enforces, deny by default (LANE IDENTITY P-ID4,
-    # the first real consumer of the sealed session credential) — reached
-    # 82. Session-surface redesign (command-defrag lane X): three movements
-    # in one commit — `session.undying` REMOVED (-1, absorbed into
-    # `session.grant`'s positional <kind> grammar), `session.grant` ADDED
-    # (+1, the grant family — bare `session` itself keeps its existing path
-    # throughout, only its meaning changed from the U3 undying picker to
-    # the roster), `who` REMOVED (-1, folded into bare `session`/`session
-    # --hosts`) — reached 81. P-PV2 (the User's locked spec, three grill
-    # rounds) collapses the pairing command surface, net 81 -> 80: `peer
-    # invite` and `peer pair request` DIE outright (hard cutover, no
-    # aliases, -1 -1), folded into ONE smart-target `peer pair <target>`
-    # (+1: a URL dials directly, anything else resolves by discovery
-    # sweep, both arms reusing the same `run_pair_request` core); `peer
-    # pair pending` RENAMES to `peer pending` (path change only, net 0)
-    # and drops the SAS/confirmation code from its rows.
-    # This tripwire tracks `crates/cli/src/registry.rs`'s golden count —
-    # bump BOTH in the same commit that registers a command.
+    # `aoide schema --json` must parse and report a non-empty command list —
+    # proof the built binary runs in a booted system and emits parseable
+    # schema JSON. The exact command-path set is pinned by
+    # `crates/cli/src/registry.rs`'s golden snapshot test, not here.
     schema_raw = machine.succeed("aoide schema --json")
     schema_doc = json.loads(schema_raw)
     # schema --json emits a JSON Outcome envelope:
@@ -362,8 +202,8 @@ pkgs.testers.runNixOSTest {
         cmd_count = len(schema_doc["data"]["commands"])
     else:
         raise Exception(f"unexpected schema --json shape: {list(schema_doc.keys())}")
-    assert cmd_count == 80, (
-        f"expected 80 commands, got {cmd_count}.  "
+    assert cmd_count > 0, (
+        f"schema --json reported zero commands.  "
         f"schema output (first 500 chars): {schema_raw[:500]}"
     )
 

@@ -436,204 +436,187 @@ count.
   surface: conducting, the project/session graph, A2A, peers, presence,
   the daemon, usage, hooks, the message inbox, the secrets broker, the
   Melete MCP client).
-  **80 commands** (`crates/cli/src/registry.rs`'s golden test —
-  `inbox list|read|clear`, appended newest, messaging workstream C6 (52);
-  `secrets serve|exec|add|rm|grant|revoke`, appended newest, Workstream
-  SECRETS P-V2 (+6 → 58); `secrets enroll`, appended newest, Workstream
-  SECRETS P-V3 (+1 → 59); spelled `vault ...` until the P-V4b rename —
-  paths rename in place, registration order and count unchanged; `secrets
-  put`, appended newest, Workstream SECRETS P-V4c (+1 → 60) — the write
+  `crates/cli/src/registry.rs`'s golden test pins the authoritative
+  command-path set; `aoide schema --json` is the live enumeration. Notes
+  on individual commands, newest first: `inbox list|read|clear`, appended
+  newest, messaging workstream C6; `secrets serve|exec|add|rm|grant|revoke`,
+  appended newest, Workstream SECRETS P-V2; `secrets enroll`, appended
+  newest, Workstream SECRETS P-V3; spelled `vault ...` until the P-V4b
+  rename — paths rename in place, registration order and count unchanged;
+  `secrets put`, appended newest, Workstream SECRETS P-V4c — the write
   half: backend `set` templates plus the built-in `file` backend, both
   documented in the "Secrets home" subsection below; `secrets set-totp`,
-  appended newest, Workstream SECRETS P-V4e (+1 → 61) — flips an existing
-  policy's `requireTotp` bit without hand-editing `policy.json`; the same
-  phase also added `secrets enroll --show` (reprint an existing
-  enrollment, no rotation, no new path) and a tty-hidden-input prompt for
-  `secrets put` (no new path either — both ride the existing `enroll`/`put`
-  commands); `secrets automate`/`secrets expose`, appended newest,
-  Workstream SECRETS P-N1 (+2 → 63) — the per-secret automation gate
-  (`on`/`off`/`grant`/`revoke`, "Secrets wire" subsection below) and the
-  `remote` reachability flag (`on`/`off`, no non-local door reads it yet);
-  `secrets pending`/`secrets approve`/`secrets dismiss`, appended newest,
-  Workstream SECRETS P-N2 (+3 → 66) — a TOTP-gated `resolve` with no code
-  now PARKS instead of refusing outright (the requesting connection blocks
-  until an operator completes the ask, or a configurable timeout elapses);
-  see the "Secrets wire" subsection below for the full parked-ask lifecycle
-  and the wire's new `wait`/`pending`/`approve`/`dismiss` shapes. `secrets
-  watch`, appended newest, tracker #71 Part 1 (+1 → 67) — a foreground,
-  line-mode terminal surface that tail-follows the mirrored aoide log and
-  narrates every broker event (`released`/`parked`/`completed`/`dismissed`/
-  `expired`), prompting inline for a parked ask when stdin is a terminal;
-  `--json` emits one event object per line instead — see `crates/secrets/
-  README.md`'s "Watching events" section for the exact shape; `secrets
-  migrate`, appended newest, P-G2 (task #72) (+1 → 68) — moves an existing
-  secret's stored value from its policy's current backend to a target one
-  (default `age`) and flips the policy row, an admin command mirroring
-  `add`/`rm`/`grant`'s direct-home shape — see `crates/secrets/README.md`'s
-  "Migrating a secret between backends" section for the full flow;
-  `events tail`, appended newest, P-D3 (`docs/architecture/AOIDED.md`)
-  (+1 → 69) — a foreground, line-mode follow of `aoided`'s own events feed
-  (the secrets-feed mirror's name-only lines, the #69 hand-edit watcher,
-  and any future tick producer), `--class` filtering to matching event
-  classes (comma-separated), blocking until Ctrl-C; CLI-only, the same
-  door-policy shape `secrets watch` already holds for a foreground/
-  blocking command — see `crates/server/README.md`'s "Named seams" section
-  for the producer/tail mechanism; `peer hub`, appended newest, P-D5
-  (`docs/architecture/AOIDED.md`'s "The hub option") (+1 → 70) — designates
-  one registered peer as THE hub (`peer_store::Peer.hub`, additive/v0-safe,
-  same discipline `SessionRecord.headless` set the precedent for);
-  `--clear` removes the designation; both directions are idempotent and
-  report exactly what changed (set/moved/cleared/no-op) — see §6's "Remote
-  reach" subsection for how the hub composes with the rest of the mesh;
-  `resurrect` (`graph resurrect` at the time), appended newest, P-D8
-  (`docs/architecture/AOIDED.md`'s "L5 — harness summoning") (+1 → 71) —
-  revives a project's resumable
-  sessions off the durable session ledger (`state/session-ledger.jsonl`,
-  §4 below); `--project <name>` resolves against `projects.json`.
-  Selection: `--all` widens to every anchored ledger entry, `--id
-  <ledgerSessionId>` narrows to one specific entry, and bare (neither flag)
-  resumes the project's WHOLE undying set (`state/undying.json`,
-  durable-sessions plan P-C4 — see this section's own `state/undying.json`
-  subsection below) — anchored entries currently marked durable, minus any
-  id already alive (non-`done`) in `sessions.json`, deduped by `sessionId`
-  keeping the newest `endedAt`. `--all`/`--id` never consult the undying
-  mark. An empty bare-mode selection is an `Outcome::ok` no-op naming the
-  undying set as empty for the project. Each surviving candidate then
-  resolves through TWO arms (durable-sessions plan P-C6): a harness with a
-  verified `resume_args` (`aoide_protocol::agents::AgentProfile`) spawns
-  windowed running `<harness> --resume <id>`; a candidate the harness arm
-  finds nothing for falls to the TERMINAL arm — a captured `restore`
-  snapshot (P-C5) marks it a conducted shell, so it spawns windowed running
-  its own login shell (`$SHELL` → passwd → `/bin/sh`, `-l`) instead. A
-  candidate neither arm resolves is skipped with a taught message naming
-  it, never a guessed invocation. Once a terminal candidate's spawn
-  registers, its `restore` snapshot drives one more step, in-process
-  through `send`, never a direct socket write: a foreground command
-  it was demonstrably running re-execs with `--yes --submit` (never for a
-  recorded `sudo …`, which only restores the cwd); an idle session's clean
-  unsubmitted `typed` line preloads with `--yes` and permanently no
-  `--submit`, so it sits in the new prompt until a human presses Enter;
-  idle with no `typed` delivers nothing. Also the command core the
-  daemon's own boot-time auto-resume trigger calls in-process — see
-  `state/stage/projects.json`'s `autoResume` paragraph below for that
-  trigger's own contract.
-  `identity`, appended newest, P-P1 (`docs/architecture/PAIRING.md`) (+1 →
-  72) — this instance's lazily-minted ed25519 keypair (`aoide-storage`'s
-  new `identity` module, `state/identity/`): prints the public key
-  (hex), a short display fingerprint, and the mint timestamp; minting on
-  the first call is a `changed` entry, every later call an idempotent
-  read. The private key never appears in `schema --json`, an `Outcome`,
-  or any log — see §4's "`state/identity/`" subsection below for the
-  wire/storage shape.
-  `peer pair request|pending|approve|reject`, appended newest, P-P2
-  (`docs/architecture/PAIRING.md`) (+4 → 76) — the pairing ceremony's CLI
-  half, both directions behind the SAME four commands (no fifth command for the
-  requester's own confirm step — `approve`/`reject` dispatch by
-  direction): `request <url>` sends
-  a commitment (`aoide/pairRequest`) to another instance's A2A door,
-  immediately reveals it (`aoide/pairReveal`, same invocation, two
-  sequential POSTs), and parks the outbound half locally
-  (`aoide_storage::pairing`); `pending` lists BOTH this instance's own
-  parked INBOUND requests (no SAS until revealed — an unrevealed entry
+  appended newest, Workstream SECRETS P-V4e — flips an existing policy's
+  `requireTotp` bit without hand-editing `policy.json`; the same phase
+  also added `secrets enroll --show` (reprint an existing enrollment, no
+  rotation, no new path) and a tty-hidden-input prompt for `secrets put`
+  (no new path either — both ride the existing `enroll`/`put` commands);
+  `secrets automate`/`secrets expose`, appended newest, Workstream SECRETS
+  P-N1 — the per-secret automation gate (`on`/`off`/`grant`/`revoke`,
+  "Secrets wire" subsection below) and the `remote` reachability flag
+  (`on`/`off`, no non-local door reads it yet); `secrets pending`/`secrets
+  approve`/`secrets dismiss`, appended newest, Workstream SECRETS P-N2
+  — a TOTP-gated `resolve` with no code now PARKS instead of refusing
+  outright (the requesting connection blocks until an operator completes
+  the ask, or a configurable timeout elapses); see the "Secrets wire"
+  subsection below for the full parked-ask lifecycle and the wire's new
+  `wait`/`pending`/`approve`/`dismiss` shapes. `secrets watch`, appended
+  newest, tracker #71 Part 1 — a foreground, line-mode terminal surface
+  that tail-follows the mirrored aoide log and narrates every broker event
+  (`released`/`parked`/`completed`/`dismissed`/`expired`), prompting inline
+  for a parked ask when stdin is a terminal; `--json` emits one event
+  object per line instead — see `crates/secrets/README.md`'s "Watching
+  events" section for the exact shape; `secrets migrate`, appended newest,
+  P-G2 (task #72) — moves an existing secret's stored value from its
+  policy's current backend to a target one (default `age`) and flips the
+  policy row, an admin command mirroring `add`/`rm`/`grant`'s direct-home
+  shape — see `crates/secrets/README.md`'s "Migrating a secret between
+  backends" section for the full flow; `events tail`, appended newest, P-D3
+  (`docs/architecture/AOIDED.md`) — a foreground, line-mode follow of
+  `aoided`'s own events feed (the secrets-feed mirror's name-only lines,
+  the #69 hand-edit watcher, and any future tick producer), `--class`
+  filtering to matching event classes (comma-separated), blocking until
+  Ctrl-C; CLI-only, the same door-policy shape `secrets watch` already holds
+  for a foreground/blocking command — see `crates/server/README.md`'s
+  "Named seams" section for the producer/tail mechanism; `peer hub`,
+  appended newest, P-D5 (`docs/architecture/AOIDED.md`'s "The hub option")
+  — designates one registered peer as THE hub (`peer_store::Peer.hub`,
+  additive/v0-safe, same discipline `SessionRecord.headless` set the
+  precedent for); `--clear` removes the designation; both directions are
+  idempotent and report exactly what changed (set/moved/cleared/no-op)
+  — see §6's "Remote reach" subsection for how the hub composes with
+  the rest of the mesh; `resurrect` (`graph resurrect` at the time),
+  appended newest, P-D8 (`docs/architecture/AOIDED.md`'s "L5 — harness
+  summoning") — revives a project's resumable sessions off the durable
+  session ledger (`state/session-ledger.jsonl`, §4 below); `--project
+  <name>` resolves against `projects.json`. Selection: `--all` widens
+  to every anchored ledger entry, `--id <ledgerSessionId>` narrows to
+  one specific entry, and bare (neither flag) resumes the project's
+  WHOLE undying set (`state/undying.json`, durable-sessions plan P-C4
+  — see this section's own `state/undying.json` subsection below) —
+  anchored entries currently marked durable, minus any id already alive
+  (non-`done`) in `sessions.json`, deduped by `sessionId` keeping the
+  newest `endedAt`. `--all`/`--id` never consult the undying mark. An
+  empty bare-mode selection is an `Outcome::ok` no-op naming the undying
+  set as empty for the project. Each surviving candidate then resolves
+  through TWO arms (durable-sessions plan P-C6): a harness with a verified
+  `resume_args` (`aoide_protocol::agents::AgentProfile`) spawns windowed
+  running `<harness> --resume <id>`; a candidate the harness arm finds
+  nothing for falls to the TERMINAL arm — a captured `restore` snapshot
+  (P-C5) marks it a conducted shell, so it spawns windowed running its
+  own login shell (`$SHELL` → passwd → `/bin/sh`, `-l`) instead. A
+  candidate neither arm resolves is skipped with a taught message naming it,
+  never a guessed invocation. Once a terminal candidate's spawn registers,
+  its `restore` snapshot drives one more step, in-process through `send`,
+  never a direct socket write: a foreground command it was demonstrably
+  running re-execs with `--yes --submit` (never for a recorded `sudo …`,
+  which only restores the cwd); an idle session's clean unsubmitted
+  `typed` line preloads with `--yes` and permanently no `--submit`,
+  so it sits in the new prompt until a human presses Enter; idle with no
+  `typed` delivers nothing. Also the command core the daemon's own boot-time
+  auto-resume trigger calls in-process — see `state/stage/projects.json`'s
+  `autoResume` paragraph below for that trigger's own contract. `identity`,
+  appended newest, P-P1 (`docs/architecture/PAIRING.md`) — this instance's
+  lazily-minted ed25519 keypair (`aoide-storage`'s new `identity` module,
+  `state/identity/`): prints the public key (hex), a short display
+  fingerprint, and the mint timestamp; minting on the first call is a
+  `changed` entry, every later call an idempotent read. The private
+  key never appears in `schema --json`, an `Outcome`, or any log —
+  see §4's "`state/identity/`" subsection below for the wire/storage
+  shape. `peer pair request|pending|approve|reject`, appended newest,
+  P-P2 (`docs/architecture/PAIRING.md`) — the pairing ceremony's CLI
+  half, both directions behind the SAME four commands (no fifth command
+  for the requester's own confirm step — `approve`/`reject` dispatch by
+  direction): `request <url>` sends a commitment (`aoide/pairRequest`) to
+  another instance's A2A door, immediately reveals it (`aoide/pairReveal`,
+  same invocation, two sequential POSTs), and parks the outbound half
+  locally (`aoide_storage::pairing`); `pending` lists BOTH this instance's
+  own parked INBOUND requests (no SAS until revealed — an unrevealed entry
   shows `"revealed": false`) and its own OUTBOUND requests (`"direction":
   "outbound"`, SAS always shown, tagged with the entry's own `state`);
   `approve <id>` tries the inbound queue first — refusing an unrevealed
-  entry outright — then the outbound queue, re-deriving the SAS either way
-  before anything commits: on the inbound (approver) side the gate is the
-  TYPED pairing code (task #120 P3 — the operator types the code as read
-  off the requester's screen, `--code NNN-NNN` scripted; 3 cumulative
-  mismatches auto-deny the request, and `--yes` never bypasses this), and
-  a match writes a `pubkey`/`verified` peer record on this end PURELY
-  LOCALLY (Design A, task #119 — no wire call at all) and marks the parked
-  entry approved for the requester's own poll to find; on the outbound
-  (requester) side, this POLLS the approver's door (`aoide/pairPoll`, over
-  the SAME forward dial the request already used) and, once approved,
-  confirms `y`/`yes` (`--yes` scripted — the requester's own screen
-  already printed the code) then
-  commits the peer record directly; `reject <id>` is a clean local refusal
-  on either queue, no wire call, no peer record — on an outbound entry this
-  doubles as the ceremony's abort command, usable at any stage. See §6's
-  "Pairing wire" and §7's "Peer record" subsections below for the exact
-  wire shapes, the commitment/reveal construction, and SAS derivation.
-  `peer allow <name> <cap> on|off`, appended newest, P-P3
-  (`docs/architecture/PAIRING.md` decision 5) (+1 → 77) — flips one
-  capability in a peer's own closed `allows` set (`"read"`/`"spawn"`,
-  `aoide_storage::peer_store::PEER_CAPABILITIES` — never a per-capability
-  serde bool scatter); idempotent (`on` on an already-on capability, or
-  `off` on an already-off one, both report a no-op), refuses an unknown
-  peer or an unknown capability string with a distinct taught error for
-  each (the capability check runs before the peer lookup). A paired peer
-  is stamped `["read","spawn"]` by default the moment it FIRST becomes
-  verified (`upsert_paired_peer`, both ceremony commit sites) — this command
-  is for narrowing or widening that grant afterward, and is the ONLY other
-  writer of the field. See §6's "Security posture" (the P-P3 amendment)
-  and §7's "Peer record" subsections below for the gate this feeds and
-  the wire shape.
-  `peer spawn <name> [--yes] -- <text…>`, appended newest, P-P5b
-  (`docs/architecture/PAIRING.md`) (+1 → 78) — makes the spawn gate above
-  actually REACHABLE: POSTs a signed, spawn-shaped `message/send`
-  (`contextId` omitted) to a PAIRED peer's own A2A door, `<text…>` riding
-  as the prompt `do_spawn` types into the newly spawned session's first
-  turn (which agent runs is the PEER's own configured
-  `aoide.a2a.spawnAgent`, never client-chosen). Refuses an unknown or
-  unpaired peer LOCALLY with a taught error naming `peer pair`
-  (an unsigned request could never satisfy the remote's `PeerRung::
-  Signature`-only gate anyway); every OTHER refusal (allows lacking
-  `spawn`, an unsigned/too-old caller, clock skew) is the remote door's
-  own call, surfaced verbatim — this command never re-implements or
-  second-guesses that gate. `--yes` skips a LOCAL `y`/`N` confirmation
-  only (mirrors `peer pair approve`'s idiom); the remote door's own gate
-  is the sole security authority either way. See §6's "Security posture"
-  and §7's "CLI surface" subsections below for the wire shape and the
-  live gate this closes.
-  `peer discover [--secs N]`/`peer invite <name> [--secs N] [--yes]`,
-  appended newest, P-P6 (`docs/architecture/PAIRING.md`'s "Discovery
-  (advertise-but-locked)" section) (+2 → 80) — the LAN discovery
-  advertisement's CLI half. `discover` listens on a fixed UDP port a few
-  seconds (default ~4) and prints every DISTINCT (name, source) heard
-  (name, claimed ssh hop `user`@`host`, observed source address,
-  first/last heard, a heard count) — read-only, it never writes
-  `state/peers.json`. `invite` runs its own discover sweep, resolves
-  `<name>` against what was heard, and on EXACTLY one match runs the SAME
-  `peer pair request` core through a shared function (never a copy)
-  against that advertisement's OBSERVED source address; zero or multiple
-  matches refuse with a taught error listing every name that was heard.
-  `--yes` skips only the local proceed-confirm — the ceremony's own SAS
-  confirmation (both operators, both ends) is untouched either way.
-  Advertising (the OTHER half — `a2a serve` emitting its OWN
-  advertisement) is off by default, switched at runtime by `peer
-  advertise on|off` (task #120) or forced for a process's lifetime by
-  `AOIDE_DISCOVERY_ADVERTISE`/`aoide.a2a.discoveryAdvertise` — see §6's
-  "Discovery advertisement" subsection below for the wire format, the
-  pinned constants, and the "discovery grants nothing" statement.
-  Core is nix-independent (cargo build, no nix shell-outs) — see the
-  HARD CONSTRAINT note in the binary-split plan; the secrets broker holds
-  to the same constraint (plain unix socket + shell-outs, no nix eval).
-  The running `(+N → M)` narrative above stops at 80 (P-P6) — it is
-  historical color for how the count reached that point, not a live
-  ledger; the command-defrag lanes (task #101), the pairing-events
-  watcher (P-P5), and P-PV2 (the User's locked spec — `peer invite`/
-  `peer pair request` collapsed into ONE smart-target `peer pair
-  <target>`, `peer pair pending` renamed to `peer pending`) all changed
-  the count several more times without extending the narrative.
-  `crates/cli/src/registry.rs`'s golden
-  snapshot (mirrored by `lib/vmTest.nix`'s own tripwire) is the ONE
-  authoritative count at any given moment; the headline above tracks it,
-  the prose trail does not.
+  entry outright — then the outbound queue, re-deriving the SAS either
+  way before anything commits: on the inbound (approver) side the gate
+  is the TYPED pairing code (task #120 P3 — the operator types the
+  code as read off the requester's screen, `--code NNN-NNN` scripted;
+  3 cumulative mismatches auto-deny the request, and `--yes` never
+  bypasses this), and a match writes a `pubkey`/`verified` peer record
+  on this end PURELY LOCALLY (Design A, task #119 — no wire call at
+  all) and marks the parked entry approved for the requester's own poll
+  to find; on the outbound (requester) side, this POLLS the approver's
+  door (`aoide/pairPoll`, over the SAME forward dial the request already
+  used) and, once approved, confirms `y`/`yes` (`--yes` scripted — the
+  requester's own screen already printed the code) then commits the peer
+  record directly; `reject <id>` is a clean local refusal on either queue,
+  no wire call, no peer record — on an outbound entry this doubles as the
+  ceremony's abort command, usable at any stage. See §6's "Pairing wire"
+  and §7's "Peer record" subsections below for the exact wire shapes, the
+  commitment/reveal construction, and SAS derivation. `peer allow <name>
+  <cap> on|off`, appended newest, P-P3 (`docs/architecture/PAIRING.md`
+  decision 5) — flips one capability in a peer's own closed `allows`
+  set (`"read"`/`"spawn"`, `aoide_storage::peer_store::PEER_CAPABILITIES`
+  — never a per-capability serde bool scatter); idempotent (`on` on an
+  already-on capability, or `off` on an already-off one, both report a
+  no-op), refuses an unknown peer or an unknown capability string with
+  a distinct taught error for each (the capability check runs before
+  the peer lookup). A paired peer is stamped `["read","spawn"]` by
+  default the moment it FIRST becomes verified (`upsert_paired_peer`,
+  both ceremony commit sites) — this command is for narrowing or
+  widening that grant afterward, and is the ONLY other writer of the
+  field. See §6's "Security posture" (the P-P3 amendment) and §7's
+  "Peer record" subsections below for the gate this feeds and the wire
+  shape. `peer spawn <name> [--yes] -- <text…>`, appended newest, P-P5b
+  (`docs/architecture/PAIRING.md`) — makes the spawn gate above actually
+  REACHABLE: POSTs a signed, spawn-shaped `message/send` (`contextId`
+  omitted) to a PAIRED peer's own A2A door, `<text…>` riding as the
+  prompt `do_spawn` types into the newly spawned session's first turn
+  (which agent runs is the PEER's own configured `aoide.a2a.spawnAgent`,
+  never client-chosen). Refuses an unknown or unpaired peer LOCALLY with
+  a taught error naming `peer pair` (an unsigned request could never
+  satisfy the remote's `PeerRung::Signature`-only gate anyway); every
+  OTHER refusal (allows lacking `spawn`, an unsigned/too-old caller, clock
+  skew) is the remote door's own call, surfaced verbatim — this command
+  never re-implements or second-guesses that gate. `--yes` skips a LOCAL
+  `y`/`N` confirmation only (mirrors `peer pair approve`'s idiom); the
+  remote door's own gate is the sole security authority either way. See
+  §6's "Security posture" and §7's "CLI surface" subsections below for
+  the wire shape and the live gate this closes. `peer discover [--secs
+  N]`/`peer invite <name> [--secs N] [--yes]`, appended newest, P-P6
+  (`docs/architecture/PAIRING.md`'s "Discovery (advertise-but-locked)"
+  section) — the LAN discovery advertisement's CLI half. `discover`
+  listens on a fixed UDP port a few seconds (default ~4) and prints every
+  DISTINCT (name, source) heard (name, claimed ssh hop `user`@`host`,
+  observed source address, first/last heard, a heard count) — read-only,
+  it never writes `state/peers.json`. `invite` runs its own discover
+  sweep, resolves `<name>` against what was heard, and on EXACTLY one
+  match runs the SAME `peer pair request` core through a shared function
+  (never a copy) against that advertisement's OBSERVED source address;
+  zero or multiple matches refuse with a taught error listing every
+  name that was heard. `--yes` skips only the local proceed-confirm
+  — the ceremony's own SAS confirmation (both operators, both ends)
+  is untouched either way. Advertising (the OTHER half — `a2a serve`
+  emitting its OWN advertisement) is off by default, switched at runtime by
+  `peer advertise on|off` (task #120) or forced for a process's lifetime
+  by `AOIDE_DISCOVERY_ADVERTISE`/`aoide.a2a.discoveryAdvertise` — see
+  §6's "Discovery advertisement" subsection below for the wire format,
+  the pinned constants, and the "discovery grants nothing" statement. Core
+  is nix-independent (cargo build, no nix shell-outs) — see the HARD
+  CONSTRAINT note in the binary-split plan; the secrets broker holds to
+  the same constraint (plain unix socket + shell-outs, no nix eval).
 - `lyra schema --json` — the AoideOS-surface contract: onboard/rice/draft/
-  mode/cover/livery/quickshell/screen/shellbridge/herald/take/element, the
-  painted surface. **47 commands** (`crates/lyra/src/registry.rs`'s golden
-  test — `mcp.serve` must itself be a registered path for
+  mode/cover/livery/quickshell/screen/shellbridge/herald/take/element,
+  the painted surface. `crates/lyra/src/registry.rs`'s golden test pins the
+  authoritative command-path set; `lyra schema --json` is the live
+  enumeration — `mcp.serve` must itself be a registered path for
   `aoide_protocol::door::parse` to ever reach lyra's `special` closure on
   `mcp serve --stdio`, one of the root-coupled extras beyond the named
-  groups, alongside `onboard` (P-I3, docs/architecture/ONBOARD.md),
-  `secrets ask` (P3), and `pair ask`/`pair confirm` (P-PV3, task #132, one
-  dialog shape per pairing direction)). `element seed`
-  (L-E1, docs/architecture/ELEMENTS.md)
-  renders a song's committed `elements/*/element.json` — non-QML rice
-  targets (waybar, dunst, anything with a config file) — into
-  `run/elements/`. Lyra alone may shell out to nix (`song/widgets.rs`, and
-  `onboard`'s own `nix eval`/`nix-instantiate`).
+  groups, alongside `onboard` (P-I3, docs/architecture/ONBOARD.md), `secrets
+  ask` (P3), and `pair ask`/`pair confirm` (P-PV3, task #132, one dialog
+  shape per pairing direction). `element seed` (L-E1,
+  docs/architecture/ELEMENTS.md) renders a song's committed
+  `elements/*/element.json` — non-QML rice targets (waybar, dunst, anything
+  with a config file) — into `run/elements/`. Lyra alone may shell out to
+  nix (`song/widgets.rs`, and `onboard`'s own `nix eval`/`nix-instantiate`).
 
 A consumer wanting the whole desktop's capability inventory reads both.
 This was never a version bump: `schemaVersion` stays `"0"` on both —
