@@ -12,6 +12,12 @@ song/songbook/*/drafts/
 # pi's own runtime dir (conduct sessions):
 .pi/
 
+# Obsidian per-user UI state — pane layout, open tabs, scroll positions.
+# The vault's shared settings (app/appearance/core-plugins/graph) stay
+# tracked; only this one rewrites itself on every session.
+docs/Aoide-Wiki/.obsidian/workspace.json
+docs/Aoide-Wiki/.obsidian/workspace-mobile.json
+
 # Content-pipeline + audit runtime (repo root):
 catalog/
 index/
