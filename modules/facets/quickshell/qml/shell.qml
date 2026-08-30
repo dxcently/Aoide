@@ -29,6 +29,17 @@ import Quickshell.Io
 import Quickshell.Wayland
 
 ShellRoot {
+    id: shellRoot
+
+    // A Variants delegate does not resolve this file's ids in its binding
+    // scope — `livery: livery` inside one silently binds to undefined rather
+    // than failing loudly, and the first symptom is a TypeError deep inside the
+    // delegate's own child (observed live: "Cannot read property 'paletteBg' of
+    // undefined" from AoideWallpaper). This handle is the delegate-safe way to
+    // reach the shared LiveryState: it is resolved HERE, in root scope, and
+    // read through the root id from inside the delegate.
+    readonly property var liveryRef: livery
+
     // ── Shared singletons (one instance for the whole session) ─────────────
     LiveryState { id: livery }
     ShellBridge { id: bridge }
@@ -88,22 +99,45 @@ ShellRoot {
     // ── Wallpaper (background layer, full screen, click-through) ───────────
     // Solid palette-bg fallback until a cover is staged; sits beneath every
     // window. Empty input mask → never intercepts desktop clicks.
-    PanelWindow {
-        id: wallpaperWin
-        anchors { top: true; bottom: true; left: true; right: true }
-        // -1 = ignore other surfaces' exclusive zones, so the Background layer
-        // spans the WHOLE output (0,0 → full) and reaches UNDER the bar's 36px
-        // reservation. With 0 the bar's exclusiveZone evicts the wallpaper to
-        // y=36 and the cover never renders behind the translucent strip.
-        exclusiveZone: -1
-        color: "transparent"
-        WlrLayershell.layer: WlrLayer.Background
-        WlrLayershell.namespace: "aoide-wallpaper"
-        mask: Region { width: 0; height: 0 }
+    //
+    // ONE LAYER SURFACE PER OUTPUT. A bare PanelWindow binds to a single
+    // screen, so on a multi-head rig the cover painted exactly one monitor and
+    // every other output fell through to bare compositor ground — invisible on
+    // a single-panel laptop, immediate on a two-monitor desk (osaka, 2026-08-30).
+    // Variants is quickshell's idiom for this: its default property IS the
+    // delegate, so the PanelWindow below is instantiated once per entry in
+    // Quickshell.screens, and `screen: modelData` pins each instance to its own
+    // output. The delegate needs `required property var modelData` for Variants
+    // to inject the row at all.
+    //
+    // Every instance draws the SAME cover — AoideWallpaper resolves one path
+    // (AOIDE_WALLPAPER, or stage/cover.json when staged), and the cover note is
+    // a single value on the song. Per-output DIFFERENT covers would need a
+    // per-screen cover map in the livery schema; deliberately not invented here.
+    Variants {
+        model: Quickshell.screens
 
-        AoideWallpaper {
-            anchors.fill: parent
-            livery: livery
+        PanelWindow {
+            id: wallpaperWin
+            required property var modelData
+            screen: modelData
+
+            anchors { top: true; bottom: true; left: true; right: true }
+            // -1 = ignore other surfaces' exclusive zones, so the Background layer
+            // spans the WHOLE output (0,0 → full) and reaches UNDER the bar's 36px
+            // reservation. With 0 the bar's exclusiveZone evicts the wallpaper to
+            // y=36 and the cover never renders behind the translucent strip.
+            exclusiveZone: -1
+            color: "transparent"
+            WlrLayershell.layer: WlrLayer.Background
+            WlrLayershell.namespace: "aoide-wallpaper"
+            mask: Region { width: 0; height: 0 }
+
+            AoideWallpaper {
+                anchors.fill: parent
+                // Root-qualified on purpose — see shellRoot.liveryRef above.
+                livery: shellRoot.liveryRef
+            }
         }
     }
 
