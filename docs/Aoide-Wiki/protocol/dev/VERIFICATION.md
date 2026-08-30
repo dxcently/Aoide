@@ -8,7 +8,7 @@ tags: [aoide, verification, testing, nix, git, protocol]
 # Verification and Repo Discipline
 
 What counts as proof, and how work lands. Harness-agnostic. Dependency of
-`DEV.md`.
+[[DEV]].
 
 ---
 
@@ -116,4 +116,4 @@ Diff the derivation's own source path to confirm.
 - Docs for the directory you changed are in the same commit.
 
 Branching, commit scope, pathspec discipline, and push cadence live in
-`CRAFT.md`.
+[[CRAFT]].

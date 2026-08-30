@@ -7,8 +7,8 @@ tags: [aoide, harness, agent, hooks, claude-code, protocol]
 
 # Harness — Claude Code
 
-One harness's specifics. The protocol itself (`DEV.md`,
-`ORCHESTRATION.md`, `VERIFICATION.md`) assumes none of this; a second
+One harness's specifics. The protocol itself ([[DEV]],
+[[ORCHESTRATION]], [[VERIFICATION]]) assumes none of this; a second
 harness gets its own page beside this one rather than edits to those.
 
 Scope: how this harness supplies the tier roles and the session plumbing
@@ -45,7 +45,7 @@ plain ones and must be removed by hand when done.
 
 This harness exposes several models at different reasoning depths and can
 dispatch subagents with an explicit model override per dispatch — which is
-exactly what `ORCHESTRATION.md`'s routing rule needs.
+exactly what [[ORCHESTRATION]]'s routing rule needs.
 
 **The concrete model-to-tier mapping is a deployment detail and lives in
 the orchestrator's memory, not in this wiki.** It changes when the
@@ -94,7 +94,7 @@ evidence, never the verdict.
 
 The harness's own task list is session-scoped and does not survive
 compaction. The durable task list lives in the orchestrator's memory store
-— see `DEV.md`, "Live state lives in memory".
+— see [[DEV]], "Live state lives in memory".
 
 Scratch files go to the harness's scratchpad directory, never to the repo:
 a stray top-level path can trip the packaging-discovery check.

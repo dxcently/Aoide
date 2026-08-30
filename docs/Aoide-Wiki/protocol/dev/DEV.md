@@ -17,10 +17,10 @@ protocol:
 | page | holds |
 |---|---|
 | **DEV.md** (this) | preferences, prime loop, where state lives |
-| `ORCHESTRATION.md` | tiers, routing, dispatch gates, parallelism |
-| `CRAFT.md` | repo handling, how code is written, the voice of commits and comments |
-| `VERIFICATION.md` | build, gates, proofs, what never to run |
-| `HARNESS-CLAUDE-CODE.md` | one harness's specifics |
+| [[ORCHESTRATION]] | tiers, routing, dispatch gates, parallelism |
+| [[CRAFT]] | repo handling, how code is written, the voice of commits and comments |
+| [[VERIFICATION]] | build, gates, proofs, what never to run |
+| [[HARNESS-CLAUDE-CODE]] | one harness's specifics |
 
 `AGENTS.md` at the repo root holds the house rules and binds harder than
 this set.
@@ -72,7 +72,7 @@ Never append dated UPDATE or AMENDMENT blocks. Decisions and change records
 go to the log — commit message, changelog, memory. Ledgers are exempt; they
 *are* the log.
 
-**How code, comments, and commits are written is `CRAFT.md`.** Convention
+**How code, comments, and commits are written is [[CRAFT]].** Convention
 over invention; deleting more wins; readability over commentary; a comment
 justifies its existence or it does not ship; one voice for everything the
 repo stores.

@@ -9,14 +9,14 @@ tags: [aoide, code, style, commits, voice, git, protocol]
 
 How work is made: how the repository is handled, how code is written, and
 how the words shipped inside the repo read. Harness-agnostic. Dependency of
-`DEV.md`.
+[[DEV]].
 
 **Scope boundary.** This page governs *the repo* — code, comments, commit
 messages, READMEs, briefs, reports. **Wiki content pages are out of scope**
-and follow the wiki's own style and assertion protocol under
-`protocol/OPERATIONS/`: a distilled technical register, present indicative,
-no filler constructions. Do not apply this page's voice to a wiki page, and
-do not apply the wiki's register to a commit message.
+and keep the wiki's own style and assertion rules: a controlled technical
+register, present indicative, no filler constructions. Do not apply this
+page's voice to a wiki page, and do not apply the wiki's register to a
+commit message.
 
 ---
 

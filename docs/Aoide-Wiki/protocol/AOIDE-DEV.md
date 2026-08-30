@@ -8,18 +8,18 @@ tags: [aoide, development, agent, deprecated]
 # Aoide Development — agent protocol (deprecated)
 
 **Deprecated.** The dev protocol is now a self-contained set under
-`protocol/dev/`, harness-agnostic and free of dependencies on the rest of
+the `dev/` set, harness-agnostic and free of dependencies on the rest of
 this wiki:
 
 | page | holds |
 |---|---|
-| `protocol/dev/DEV.md` | entry point — preferences, prime loop, where state lives |
-| `protocol/dev/ORCHESTRATION.md` | tiers, routing, dispatch gates, parallelism |
-| `protocol/dev/CRAFT.md` | repo handling, how code is written, the voice of commits and comments |
-| `protocol/dev/VERIFICATION.md` | build, gates, proofs, what never to run |
-| `protocol/dev/HARNESS-CLAUDE-CODE.md` | one harness's specifics |
+| [[DEV]] | entry point — preferences, prime loop, where state lives |
+| [[ORCHESTRATION]] | tiers, routing, dispatch gates, parallelism |
+| [[CRAFT]] | repo handling, how code is written, the voice of commits and comments |
+| [[VERIFICATION]] | build, gates, proofs, what never to run |
+| [[HARNESS-CLAUDE-CODE]] | one harness's specifics |
 
-Start at `protocol/dev/DEV.md`.
+Start at [[DEV]].
 
 This page carried the operating manual through 2026-08-30. Its open-flag
 ledger moved to the orchestrator's memory store, where live state belongs;

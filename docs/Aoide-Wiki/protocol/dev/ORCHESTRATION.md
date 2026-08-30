@@ -8,7 +8,7 @@ tags: [aoide, orchestration, agent, harness, protocol]
 # Orchestration Protocol
 
 How a dev agent dispatches work. Harness-agnostic — roles are TIERS, and
-nothing here assumes a particular agent tool. Dependency of `DEV.md`.
+nothing here assumes a particular agent tool. Dependency of [[DEV]].
 
 Aoide **is** an orchestration core. Dogfood it while building it.
 
