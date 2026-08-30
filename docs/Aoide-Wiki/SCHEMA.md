@@ -8,7 +8,7 @@ The standalone wiki for the Aoide project — the agent-agnostic Hyprland/Quicks
 
 ## Read the whole thing
 
-Working entry cost, in order: `Overview.md` → every page under `concepts/` (including its `orchestration/`, `desktop/`, `song/`, `governance/`, and `cli/` subfolders) and `entities/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; the handoff and ricing design docs; `pantheon/` — the design reference stills). The dev-facing CLI reference lives at `concepts/cli/` (`CLI-Reference.md` is its hub). The development agent's operating manual is `protocol/AOIDE-DEV.md`. The wiki is deliberately small enough to read end to end. **Rice design memory lives in the songbook under `song/`, per song** — each song's current elements in `song/songbook/<name>/design/` ([[Song-Anatomy]]). The cross-cutting house grammar is historical reference at `references/pantheon/pantheon-grammar.md`; `concepts/song/Ricing-Protocol.md` carries protocol only. Design content written about a rice goes to that rice's `design/` folder in the repo, not here.
+Working entry cost, in order: `Overview.md` → every page under `concepts/` (including its `orchestration/`, `desktop/`, `song/`, `governance/`, and `cli/` subfolders) and `entities/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; the handoff and ricing design docs; `pantheon/` — the design reference stills). The dev-facing CLI reference lives at `concepts/cli/` (`CLI-Reference.md` is its hub). The development agent's operating manual is the self-contained set under `protocol/dev/`, entered at `protocol/dev/DEV.md` (`protocol/AOIDE-DEV.md` is its deprecated predecessor). The wiki is deliberately small enough to read end to end. **Rice design memory lives in the songbook under `song/`, per song** — each song's current elements in `song/songbook/<name>/design/` ([[Song-Anatomy]]). The cross-cutting house grammar is historical reference at `references/pantheon/pantheon-grammar.md`; `concepts/song/Ricing-Protocol.md` carries protocol only. Design content written about a rice goes to that rice's `design/` folder in the repo, not here.
 
 ## The shape
 
@@ -28,7 +28,8 @@ Aoide-Wiki/
     index.md       ← content catalog
     log.md         ← append-only history + Open Threads
   references/      ← raw sources (AOIDE-HANDOFF.md, the handoff + ricing design docs, pantheon/ stills + grammar)
-  protocol/        ← the wiki protocol (Mneme/Melete-owned) staged here + AOIDE-DEV.md (the dev agent's operating manual); not Aoide content
+  protocol/        ← the wiki protocol (Mneme/Melete-owned) staged here; not Aoide content
+    dev/           ← the dev agent's operating manual: DEV.md + orchestration, verification, and one page per harness. Self-contained — no links out
 ```
 
 ## The wiki protocol
@@ -128,6 +129,10 @@ entities/shellbridge.md
 ingest/index.md
 ingest/log.md
 protocol/AOIDE-DEV.md
+protocol/dev/DEV.md
+protocol/dev/HARNESS-CLAUDE-CODE.md
+protocol/dev/ORCHESTRATION.md
+protocol/dev/VERIFICATION.md
 protocol/OPERATIONS/Assertion.md
 protocol/OPERATIONS/Frontmatter.md
 protocol/OPERATIONS/Indexing.md
