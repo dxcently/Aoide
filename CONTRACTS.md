@@ -288,7 +288,6 @@ glob, not a literal entry:
 
 ```
 AGENTS.md        closed-file
-audit-report.md  closed-file
 .claude          closed-dir
 CONTRACTS.md     closed-file
 docs             closed-dir
