@@ -1,6 +1,6 @@
 # lib/checks.nix — the contractual coupling discipline, as flake checks.
 #
-# Eight checks ride as flake `checks` (see concepts/Governance and
+# Nine checks ride as flake `checks` (see concepts/Governance and
 # concepts/Notes in the wiki, and the mechanical-integrity design for fmt +
 # discovery specifically):
 #
@@ -51,12 +51,17 @@
 #      invokes it (the lib/ = wiring, tests/ = content split, see
 #      tests/README.md).
 #
+#   9. nix-lint — `statix check` over the committed tree, the style half
+#      Check 4 does not cover. Pairs with `statix.toml` at the repo root,
+#      which exempts the flat-option-assignment house style; every other
+#      lint is a hard failure naming file, line, and lint code.
+#
 # 1–3 and 5 are written so they PASS TRIVIALLY where nothing populates the
 # registry they inspect yet (1) and become real as Wave-1 facets/packages
 # land. Each resolves to a trivial derivation: it either builds (assertion
 # held) or the eval fails with a readable message (assertion broken). 4, 6,
-# 7, and 8 are real `runCommand`s — each has to actually run a binary, so it
-# can only fail at build time, not eval time.
+# 7, 8, and 9 are real `runCommand`s — each has to actually run a binary, so
+# it can only fail at build time, not eval time.
 { lib, pkgs }:
 let
   # A check that succeeds as a buildable derivation, or throws at eval time
@@ -500,6 +505,27 @@ let
   # Thin wiring only — the assertions live in tests/portability.nix (see that
   # file's header, and this file's own header above).
   portability = pkg: (import ../tests/portability.nix { inherit lib pkgs; }) pkg;
+
+  # ── Check 9: nix lint ───────────────────────────────────────────────────
+  # `statix check` over the same COMMITTED tree Check 4 formats — style's
+  # other half, and the half nothing ran. statix shipped in the devShell
+  # from the start, so it only fired when someone remembered to type it; as
+  # a check it fires for every agent, in the place `nix flake check` already
+  # reports formatting. `errfmt` output is `file>line:col:W:code:msg`, one
+  # finding per line, so a failure reads as a fix list rather than prose.
+  #
+  # `statix.toml` sits at the repo root and is discovered from the cwd, so it
+  # rides along in `src` and the house style stays exempt: `repeated_keys`
+  # (W20) would otherwise flag every flat option assignment the style writes
+  # deliberately (modules/AGENTS.md, "Flat option assignment").
+  nixLint =
+    src:
+    pkgs.runCommand "aoide-check-nix-lint" { nativeBuildInputs = [ pkgs.statix ]; } ''
+      set -euo pipefail
+      cd ${src}
+      statix check . -o errfmt
+      touch "$out"
+    '';
 in
 {
   inherit
@@ -512,5 +538,6 @@ in
     phantomCommands
     nixIndependence
     portability
+    nixLint
     ;
 }

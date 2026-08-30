@@ -187,6 +187,10 @@
           # nothing ran it before this check existed. Scoped to `self`, the
           # git-filtered committed tree (see lib/checks.nix's Check 4).
           fmt = checks.fmt self;
+          # Style's other half — `statix check` over the same committed tree,
+          # exempting the flat-option house style via statix.toml at the root
+          # (see lib/checks.nix's Check 9).
+          nix-lint = checks.nixLint self;
           # pkgs/ discovery completeness — see lib/pkgs.nix's `strayEntries`
           # and lib/checks.nix's Check 5.
           discovery = checks.discovery pkgsWalk.strayEntries;

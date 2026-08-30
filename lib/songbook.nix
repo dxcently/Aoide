@@ -140,7 +140,7 @@ let
                           + " name a `file` that does not exist under their owner's widgets/"
                         )
                         {
-                          manifest = composed.manifest;
+                          inherit (composed) manifest;
                           registry = composed.arrangement.widgets;
                         }
                     )

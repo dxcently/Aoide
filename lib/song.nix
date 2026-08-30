@@ -278,7 +278,7 @@ in
       # generated value is complete at this layer too — the derivation reads
       # this attrset directly, and it never passes through the module system.
       arrangementWidgets = lib.mapAttrs (_: w: {
-        kind = w.kind;
+        inherit (w) kind;
         namespace = w.namespace or null;
         layer = w.layer or "overlay";
         shortcut = w.shortcut or null;

@@ -46,9 +46,9 @@ let
     modules = discovered ++ [ { config._module.check = false; } ];
     specialArgs = {
       inherit inputs pkgs;
+      inherit (pkgs) system;
       username = "khoa";
       host = "aoide-options-eval";
-      system = pkgs.system;
     };
   };
 

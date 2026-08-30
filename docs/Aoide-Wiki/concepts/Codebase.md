@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-28
+updated: 2026-08-30
 tags: [aoide, architecture, nix, flake, rust, node]
 ---
 
@@ -26,8 +26,11 @@ Outputs, all tolerant of empty layers so eval stays robust:
   (`callPackage`, `_`-shelving); currently `{aoide, hyprglass, kimi-code,
   melete, mneme}` plus `default` (= aoide). Adding a package is one folder —
   this file never changes.
-- `checks` — the three coupling assertions, one auto-generated `pkg-<name>` per
-  discovered package, plus the `vm-boot` headless boot test (below).
+- `checks` — nine checks from `lib/checks.nix` (three coupling assertions —
+  `surface-ownership`/`no-song-read`/`song-shape` — plus `fmt`, `discovery`,
+  `phantom-commands`, `nix-independence`, `portability`, `nix-lint`), one
+  auto-generated `pkg-<name>` per discovered package, plus the `vm-boot`
+  headless boot test (below).
 - `devShells.default` — Rust (cargo/rustc/clippy/rust-analyzer) + nix
   tooling (nixfmt/nil/deadnix/statix).
 - `formatter` — nixfmt.

@@ -63,8 +63,7 @@ let
   # registry emptiness asymmetry (below) is deliberate.
   songbookData = import ../../../lib/songbook.nix { inherit lib songbook; };
 
-  manifestAttrs = songbookData.manifestAttrs;
-  registryAttrs = songbookData.registryAttrs;
+  inherit (songbookData) manifestAttrs registryAttrs;
 
   manifestJsonFile = pkgs.writeText "aoide-quickshell-manifest.json" (builtins.toJSON manifestAttrs);
   registryJsonFile = pkgs.writeText "aoide-quickshell-registry.json" (builtins.toJSON registryAttrs);

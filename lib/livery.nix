@@ -61,7 +61,7 @@ rec {
       palette =
         subAttrs livery.palette
         // lib.optionalAttrs (livery.palette.hot == null && (o.hot or null) != null) {
-          hot = o.hot; # null-hot direct set — no authored value to chase
+          inherit (o) hot; # null-hot direct set — no authored value to chase
         };
       base16 = if livery.base16 == null then null else subAttrs livery.base16;
       bar = subAttrs livery.bar;
