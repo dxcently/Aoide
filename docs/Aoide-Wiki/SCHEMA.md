@@ -133,6 +133,7 @@ protocol/dev/CRAFT.md
 protocol/dev/DEV.md
 protocol/dev/HARNESS-CLAUDE-CODE.md
 protocol/dev/ORCHESTRATION.md
+protocol/dev/PRINCIPLES.md
 protocol/dev/VERIFICATION.md
 protocol/OPERATIONS/Assertion.md
 protocol/OPERATIONS/Frontmatter.md

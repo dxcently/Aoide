@@ -17,6 +17,7 @@ protocol:
 | page | holds |
 |---|---|
 | **DEV.md** (this) | preferences, prime loop, where state lives |
+| [[PRINCIPLES]] | what to build: everything-is-a-plugin, and nix's thesis as instructions |
 | [[ORCHESTRATION]] | tiers, routing, dispatch gates, parallelism |
 | [[CRAFT]] | repo handling, how code is written, the voice of commits and comments |
 | [[VERIFICATION]] | build, gates, proofs, what never to run |
