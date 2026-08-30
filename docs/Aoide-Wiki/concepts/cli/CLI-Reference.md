@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-28
+updated: 2026-08-29
 tags: [aoide, cli, reference, schema]
 ---
 
@@ -41,7 +41,7 @@ start at [[aoide-cli]] and the group pages linked below.
   git checkout, reached via `$AOIDE_FLAKE_ROOT`, not a runtime path.
   Stage/state writes are atomic temp-then-rename.
 - **Two registries, one convention:** `aoide schema --json` holds 82
-  command paths (75 real, 7 stubs), `lyra schema --json` holds 43 — every
+  command paths (75 real, 7 stubs), `lyra schema --json` holds 48 — every
   group page prefixes
   each heading `aoide `/`lyra ` so the binary a command belongs to is never
   ambiguous.
@@ -82,7 +82,8 @@ start at [[aoide-cli]] and the group pages linked below.
 - [[Meta-and-Upkeep|Meta-and-Upkeep]] — `guide`, `schema`,
   `make`/`update` (stubs), `onboard` (the first-boot flow, core and lyra
   halves), `usage` (→ `state/usage.json`),
-  `quickshell reload`, `soundcheck` (report-only sweep).
+  `quickshell reload`/`healthcheck` (the live placeholder-screen watchdog),
+  `soundcheck` (report-only sweep).
 - [[Secrets-Commands|Secrets-Commands]] — the `aoide secrets` credential door: 17
   commands across direct-home admin, over-the-socket operator, and the daemon
   itself. State: `/run/aoide-secrets/{secrets.sock,events.jsonl}`, the

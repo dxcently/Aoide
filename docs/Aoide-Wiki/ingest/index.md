@@ -1,6 +1,6 @@
 ---
 type: index
-updated: 2026-08-28
+updated: 2026-08-29
 ---
 
 # Aoide — Index
@@ -47,7 +47,7 @@ updated: 2026-08-28
 ## Entities
 
 - [[aoide-cli]] — the `aoide` binary: the self-registering command registry behind `dispatch()`/`schema --json`/MCP, exit codes 0/1/2/64, and the `aoided` daemon
-- [[lyra]] — the AoideOS paint binary: its own registry, its own 43-command schema, the nix boundary core never crosses
+- [[lyra]] — the AoideOS paint binary: its own registry, its own 48-command schema, the nix boundary core never crosses
 - [[livery]] — the livery schema and tiers, the two-fan-out (stage/livery.json + Stylix), the native `lyra livery` engine and its four emitters
 - [[aoided]] — the orchestrator daemon: event stream, policy, lint, audit log, gated rebuild; per-agent adapters; the notification-text security boundary
 - [[shellbridge]] — daemon↔desktop: JSON state files out, socket commands in, Hyprland IPC; the stage files and the `AOIDE_STAGE_DIR` seam

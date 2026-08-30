@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-08-27
+updated: 2026-08-29
 tags: [aoide, shell, ui, qml, quickshell]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -225,6 +225,54 @@ bad load from bringing the desktop down for good:
   systemd parks the unit `failed`. Five tries still absorbs a transient failure
   (e.g. Wayland not ready yet).
 
+None of the three catch the placeholder-screen lockup: after a transient
+output blip, Qt's wayland QPA backend can fall onto an internal placeholder
+screen and never reattach even once the real output returns. The process
+stays `active` — no crash, no exit — so systemd has nothing to restart on,
+and the desktop (bar/dock/wallpaper/herald) sits bare until something
+restarts the unit. `Quickshell.screens` is populated below QML by
+`QGuiApplication`'s wayland platform plugin, so no in-process
+`Quickshell.reload()`/`onScreensChanged` handler can reach or reset the
+stuck state — only a full process re-exec does, which is what the watchdog
+below provides.
+
+**`aoide-quickshell-healthcheck.timer`**
+(`modules/facets/quickshell/default.nix`, gated on `aoide.lyra.enable`) is
+the live watchdog: a oneshot `systemd.user.service` running `lyra quickshell
+healthcheck` (`pkgs/aoide/crates/song/src/health.rs`, [[Meta-and-Upkeep]])
+20s after the session comes up and every 15s thereafter.
+**`home.activation.aoideVerifyRice`** runs the same check again, 5s after
+every rebuild's `aoideRestartRice` bounce, so a `switch` reports which of
+the two happened — painted, or dropped straight back into the lockup its
+own restart was meant to clear — instead of finishing green over a bare
+desktop.
+
+The check requires two independent signals before it acts, scoped to the
+unit's own `ActiveEnterTimestamp` so a recovered occurrence can never
+re-trigger after a restart moves that timestamp forward: the journal
+(`There are no outputs - creating placeholder screen`, Qt's own line)
+confirms the event happened; `hyprctl layers -j` reporting zero
+`aoide-`-namespaced surfaces anywhere confirms it is still true right now. A
+failed or unparsable `hyprctl` call reads as unconfirmed, never as the stuck
+signal. The surface count is summed system-wide, never per-monitor — no
+`PanelWindow` in `modules/facets/quickshell/qml/` binds to a screen, so this
+shell always paints exactly one output, and every other enabled monitor
+legitimately and permanently carries zero layers by design.
+
+Recovery runs on a retry ladder: minimum gaps of 0s, 15s, 60s, 300s indexed
+by how many restarts already sit in the last hour, settling on a 900s floor
+it repeats indefinitely — a floor, never a stop, so a genuinely flapping
+output is never abandoned. An hour of quiet
+resets the ladder to its bottom rung. A notification fires once, only when
+the ladder reaches its floor, reporting the output connection as suspect.
+The journal carries the authoritative record of what happened: dunst is
+configured `skip_display` and only forwards to the herald ledger, which the
+stuck shell itself draws, so the notification cannot render while the
+failure it describes is still live. `AoideIpc.qml` logs every
+`Quickshell.screens` change (`onScreensChanged`) to the journal as a further
+breadcrumb — the screen list collapsing at the moment of the lockup, not a
+fix; no QML-side fix is possible for the reason above.
+
 **The wallpaper engine *is* this shell.** The wallpaper is a
 `wlr-layer-shell` `Background` surface (`AoideWallpaper.qml` inside `shell.qml`),
 the sole live painter (Stylix's `hyprpaper` is force-disabled via the
@@ -256,3 +304,4 @@ the shell — no bar, no dock, no wallpaper. See
 - [[Codebase]]
 - [[Hyprland]]
 - [[Widget-Bridge-Contract]]
+- [[Meta-and-Upkeep]]

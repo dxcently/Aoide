@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-28
+updated: 2026-08-29
 tags: [aoide, cli, meta, upkeep]
 ---
 
@@ -9,15 +9,17 @@ tags: [aoide, cli, meta, upkeep]
 
 The meta commands (`guide`, `schema`) orient an agent. The stubs (`make`,
 `update`) are walking-skeleton reservations of schema surface for planned
-flows. The upkeep commands (`usage`, `quickshell reload`, `soundcheck`)
-maintain local state and sweep the working tree; `onboard` runs the
-first-boot install flow. Handlers live in
+flows. The upkeep commands (`usage`, `quickshell reload`/`healthcheck`,
+`soundcheck`) maintain local state and sweep the working tree; `onboard`
+runs the first-boot install flow. Handlers live in
 `pkgs/aoide/crates/cli/src/commands/meta.rs` (`guide`/`schema`),
 `pkgs/aoide/crates/cli/src/commands/stubs.rs` (the stubs),
 `pkgs/aoide/crates/cli/src/commands/onboard.rs` (`onboard`),
 `pkgs/aoide/crates/storage/src/commands.rs` (`usage`),
-`pkgs/aoide/crates/song/src/commands/quickshell.rs` (`quickshell reload`),
-and `pkgs/aoide/crates/upkeep/src/{commands,scan}.rs` (`soundcheck`).
+`pkgs/aoide/crates/song/src/commands/quickshell.rs` (`quickshell
+reload`/`healthcheck`, the latter over
+`pkgs/aoide/crates/song/src/health.rs`), and
+`pkgs/aoide/crates/upkeep/src/{commands,scan}.rs` (`soundcheck`).
 
 Every command takes `--json`. Without it the CLI prints the human `message`
 line; with it, an envelope `{status, command, message, gated, changed?, data?}`
@@ -69,7 +71,7 @@ aoide schema [--json]
 - **Notes:** read-only; not gated. This document is the machine-readable
   backstop every tier generates from — the MCP tool list derives from it
   ([[Agent-Interface]]). `lyra schema` mirrors it for the paint side: its own
-  registry, its own golden snapshot (43 command paths, evolving independently
+  registry, its own golden snapshot (48 command paths, evolving independently
   of core's 82 — see [[lyra]]).
 
 ### aoide make
@@ -235,6 +237,40 @@ lyra quickshell reload [--json]
   because a top-level `shell` command collided with the `--agent shell`
   flag value (see the module doc in
   `pkgs/aoide/crates/song/src/commands/quickshell.rs`).
+
+### lyra quickshell healthcheck
+
+```
+lyra quickshell healthcheck [--json]
+```
+
+- **Reads:** `systemctl --user show aoide-quickshell.service
+  --property=ActiveEnterTimestamp --value` (absent/not-running is
+  `HealthOutcome::Healthy` — nothing to watch); the journal since that
+  timestamp (`journalctl --user -u aoide-quickshell.service --since
+  <timestamp>`) for Qt's placeholder-screen line; `hyprctl -j layers` for the
+  live surface count. A restart-history marker at
+  `state/quickshell-healthcheck-restarts` under the state dir
+  (`pkgs/aoide/crates/song/src/health.rs`).
+- **Writes:** the marker file (restart timestamps plus an optional
+  `notified:<epoch>` sentinel), and — on a confirmed, ladder-permitted
+  lockup — restarts `aoide-quickshell.service` via `systemctl --user
+  restart`.
+- **Pipes to / output:** always `status: "ok"`; `--json` data `{status:
+  "healthy" | "restarted" | "deferred"}` with a matching human message (a
+  `deferred` message names the seconds until the next attempt and the
+  restart count in the last hour). Meant to run off
+  `aoide-quickshell-healthcheck.timer`, not interactively.
+- **Notes:** not gated; best-effort throughout — a failed
+  `systemctl`/`journalctl`/`hyprctl` call reads as `healthy` (nothing
+  confirmed), never as a command failure. Acts only once BOTH the journal's
+  placeholder-screen line (scoped to the unit's own `ActiveEnterTimestamp`,
+  so a recovered occurrence can never re-trigger) and a live `hyprctl
+  layers -j` reading of zero `aoide-*`-surfaces confirm the lockup — see
+  [[Quickshell]]'s "Session service & resilience" for the full detection and
+  retry-ladder reasoning. Restarts are throttled on a retry ladder
+  (0s/15s/60s/300s, floor 900s, indexed by restarts in the trailing hour)
+  that never stops trying — the floor repeats indefinitely.
 
 ### aoide soundcheck
 

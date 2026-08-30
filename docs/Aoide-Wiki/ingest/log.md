@@ -82,6 +82,27 @@ A per-song `design/palette-usage.md` is proposed — a table mapping each slot/w
 ### [2026-08-01] closed: the QML deploy target still symlinks into the repo root; a home-manager-native fix is diagnosed
 ~~[[Quickshell]] already carries the deploy-target question (`~/Aoide/qml`, untracked at the repo root). The mechanism causing a `switch` to fail there is now understood: `home.file."Aoide/qml"` with `recursive = true` manages that tree as home-manager symlinks, and copying live QML edits over those managed symlinks (the ordinary dev loop) makes `checkLinkTargets` abort on the next `switch` (no `backupFileExtension`/`force` set). A replacement — deploying via `rsync -a --delete` into a gitignored `~/Aoide/run/qml/` instead of managed symlinks at the repo root, with the service repointed there — is sketched but not switched to.~~ **Closed 2026-08-01** (`252c3d4`): switched to. `home.activation.aoideDeployQml` rsyncs into `~/Aoide/run/qml/`; `aoide-quickshell.service` reads `run/qml/shell.qml`; the repo root carries no `qml/` directory. See [[Quickshell]], [[Full-Architecture]].
 
+### [2026-08-29] open: command-count drift — core 82 vs 80, lyra 43 vs 48
+`concepts/cli/CLI-Reference.md`, `concepts/cli/Meta-and-Upkeep.md`, and
+`concepts/Package-Layout.md` still say core holds 82 commands. The P-PV2
+pairing-surface collapse (`peer.invite`/`peer.pair.request` retired into one
+smart-target `peer.pair`; `peer.pair.pending` renamed `peer.pending`) landed
+it at 80 (`pkgs/aoide/crates/cli/src/registry.rs`'s golden-snapshot
+comment is ground truth); `entities/aoide-cli.md` already reflects 80, those
+three pages don't. `concepts/Codebase.md`'s vm-boot tripwire figure (82,
+[[AOIDE-DEV]] §7) is unverified against the actual hardcoded assertion in
+`lib/vmTest.nix`. Separately, `entities/lyra.md`'s
+command-surface table and `concepts/Full-Architecture.md`'s itemized lyra
+paragraph (in "The control plane") are both frozen at 43 — the `onboard`
+checkpoint (`pkgs/aoide/crates/lyra/src/registry.rs`'s golden comment) —
+never updated through `secrets ask` (44), `element seed` (45), `pair ask`
+(46), `pair confirm`'s revert (47), or `quickshell healthcheck` (48, see the
+entry below). `Package-Layout.md`'s lyra breakdown ("41 real, 2 stub") also
+misstates the stub count: `rice transpose` is lyra's one remaining stub per
+`entities/aoide-cli.md`. Both tables need a full itemized reconciliation
+against the current registries, not a bare-number patch — left as found,
+not fixed, while landing the quickshell-healthcheck sweep below.
+
 ## [2026-07-25] mint | Aoide-Wiki
 - Standalone wiki minted from the librarian `_template` for the Aoide project.
 
@@ -1936,3 +1957,39 @@ concepts/cli/Meta-and-Upkeep.md, concepts/Full-Architecture.md,
 concepts/Package-Layout.md, concepts/Codebase.md,
 concepts/desktop/Widget-Bridge-Contract.md, entities/shellbridge.md,
 entities/aoided.md, entities/aoide-cli.md, ingest/index.md.
+
+## [2026-08-29] refactor | quickshell placeholder-screen watchdog
+
+Brings the wiki current for the live watchdog closing the
+`aoide-quickshell.service` placeholder-screen lockup
+(`4c8a93a`/`27eb159`/`42475e4`): `Restart=on-failure` cannot catch a Qt
+wayland QPA fallback that leaves the process `active` but painting nothing,
+so `aoide-quickshell-healthcheck.timer` (~15s, `lyra quickshell
+healthcheck` → `pkgs/aoide/crates/song/src/health.rs`) and
+`home.activation.aoideVerifyRice` (rebuild-time confirmation, 5s after
+`aoideRestartRice`) watch for it live instead.
+
+`entities/Quickshell.md`'s "Session service & resilience" section gains the
+watchdog as a fourth layer: the two-signal detection (the journal's
+placeholder line scoped to the unit's own `ActiveEnterTimestamp`, plus a
+live `hyprctl layers -j` zero-`aoide-*`-surface reading), the
+whole-system-not-per-monitor surface count and why, the 0s/15s/60s/300s/900s
+retry ladder that floors at 900s without ever stopping, and the
+once-per-episode notification's dependence on the journal (dunst's
+`skip_display` means the
+toast cannot render while the shell it reports on is stuck).
+`concepts/cli/Meta-and-Upkeep.md` gains the `lyra quickshell healthcheck`
+command doc section, mirroring `lyra quickshell reload`'s shape.
+
+lyra's golden command-path count moves 47 → 48 (`quickshell.healthcheck`,
+real); core's stays 80 — `quickshell` has been a lyra-only family since the
+P-A5 binary split. Bumped in `concepts/cli/Meta-and-Upkeep.md`,
+`concepts/cli/CLI-Reference.md`, `concepts/Full-Architecture.md` (two
+mentions), `Overview.md`, and `ingest/index.md` — all bare totals. The
+itemized lyra breakdowns in `entities/lyra.md` and `Full-Architecture.md`'s
+control-plane section were already stale before this pass (frozen at 43)
+and stay untouched this pass — see the Open Thread above.
+
+Pages touched: entities/Quickshell.md, concepts/cli/Meta-and-Upkeep.md,
+concepts/cli/CLI-Reference.md, concepts/Full-Architecture.md, Overview.md,
+ingest/index.md.
