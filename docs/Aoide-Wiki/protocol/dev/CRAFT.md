@@ -124,16 +124,25 @@ technical, and it never softens first.
    measured number, a command's real output.
 4. **Findings are bullets, one line each.** No closing summary; the reader
    just read it.
-5. **Flags last, one line each.** Uncertainties, parked branches, a
+5. **Record what was worked out with the User.** A commit is the log, so it
+   carries the decision and its provenance — what was proposed, what the
+   User decided, what changed course and why. Name an overruled proposal in
+   one line so it is not raised again. This is the difference between a log
+   of changes and a log of *reasoning*, and the second is the one worth
+   keeping.
+6. **Flags last, one line each.** Uncertainties, parked branches, a
    consequence the reader will meet later.
-6. **Length follows the change.** A one-line fix gets a one-line message.
+7. **Length follows the change.** A one-line fix gets a one-line message.
    Depth is earned by being architectural, not by being long.
+
+**Kaomoji are welcome** in commits, code comments, and dev-facing writing.
+They carry tone the words do not, and this repo is written by and for people
+who read them. Build one for the moment rather than reaching for a stock
+face. Keep them out of a commit *subject* line, which is read in a list, and
+out of wiki content pages, which keep the register described above.
 
 **Never:**
 
-- **Kaomoji or emoji in anything the repo stores** — code, comments,
-  commits, PR bodies, titles, file contents. That register belongs to
-  conversation, not artifacts.
 - **A personal name.** Authored content says "the User".
 - **Apology, hedging, or ceremony.** State the fact. A mistake gets a
   correction, not a preamble about the mistake.
@@ -144,7 +153,10 @@ technical, and it never softens first.
 Present tense, lowercase, no trailing period. It describes the tree after
 the commit, not the activity that produced it.
 
-**Commit body:** the schema above. State what changed and why it changed.
-Where a claim was proven, name the proof — the identical hash, the negative
-test that went red, the measured timing. Where something was rejected, say
-what and why in one line, so it is not re-proposed.
+**Commit body:** the schema above. State what changed, why it changed, and
+what was settled with the User to get there. Where a claim was proven, name
+the proof — the identical hash, the negative test that went red, the
+measured timing. Where something was rejected, say what and why in one
+line, so it is not re-proposed. Where the User overruled a proposal, say so
+plainly and record the reasoning that replaced it; a commit that hides
+whose call it was is a commit whose decision cannot be revisited.
