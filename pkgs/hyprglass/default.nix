@@ -7,20 +7,25 @@
 # layer of the rice's Aero glass, on top of Hyprland's own blur.
 #
 # Version discipline: a Hyprland plugin is ABI-locked to the compositor
-# commit it was built against. hyprglass ships an explicit pin table
-# (hyprpm.toml): hyprland 0.56.0 (36b2e0cf) → hyprglass v0.7.0 (c96940a).
-# This derivation pins that vetted pair; bump BOTH together when nixpkgs'
-# hyprland moves (check hyprpm.toml upstream for the new mapping).
+# commit it was built against. mkHyprlandPlugin does not pin that pairing —
+# it builds hyprglass against whatever hyprland nixpkgs ships (currently
+# 0.56.2), not the version hyprglass's own hyprpm.toml pin table names; the
+# ABI handshake at plugin load is what actually gates compatibility, and it
+# passes because both are built from the same flake input. Bump hyprglass's
+# rev/hash when upstream moves; nixpkgs' hyprland moves independently of it.
 #
-# layer-mask-transform-frame.patch: on a 90/270-transformed monitor, the
-# layer-surface glass pass mixed two coordinate frames — the mask UV
-# (compositeAndRestore) and the temp-FBO clear box (sampleAndRedirect) were
-# computed from transformBox (native-pixel frame) but m_surfaceTempFramebuffer
-# is allocated at m_transformedSize (rawBox/layerBox's own frame), so the mask
-# sampled a sliver of itself and stretched across the whole surface. Window
-# decorations don't hit this (no mask/temp-FBO redirect), which is why only
-# layer surfaces (dock/launcher/powermenu) showed it. Identity on transform 0,
-# where the two frames coincide.
+# layer-temp-fbo-native-alloc.patch: Hyprland writes into any mid-pass
+# framebuffer in native window coordinates — the viewport and
+# outputProjection are both m_pixelSize — but the layer-surface temp FBO
+# was allocated at m_transformedSize (the portrait-swapped logical frame).
+# On a 90/270-transformed monitor every write past the swapped width was
+# silently clipped by the buffer edge, in both sampleAndRedirect (the
+# alloc and its clear-box intersection) and compositeAndRestore (the mask
+# UV divisors). Allocating at m_pixelSize instead makes the buffer match
+# the frame its content is actually written in. Window decorations don't
+# hit this path (no mask/temp-FBO redirect), which is why only layer
+# surfaces (dock/launcher/powermenu) showed it. Identity on transform 0 and
+# 180 (and their FLIPPED variants), where m_pixelSize == m_transformedSize.
 #
 # Discovered by lib/pkgs.nix (the packages walker) → flake package
 # `hyprglass` + host overlay attr `pkgs.hyprglass` (no nixpkgs collision).
@@ -40,7 +45,7 @@ hyprlandPlugins.mkHyprlandPlugin {
     hash = "sha256-u+Rk8l7oidgxQsVWOYuQCmnvGqRpuU07k8wIk/0PTyE=";
   };
 
-  patches = [ ./layer-mask-transform-frame.patch ];
+  patches = [ ./layer-temp-fbo-native-alloc.patch ];
 
   # Upstream Makefile: pkg-config hyprland/pixman/libdrm (provided by
   # mkHyprlandPlugin's dep set), emits hyprglass.so at the repo root.

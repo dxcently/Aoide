@@ -1,0 +1,30 @@
+--- a/src/GlassLayerSurface.cpp	2026-08-31 06:53:41.013266344 -0400
++++ b/src/GlassLayerSurface.cpp	2026-08-31 06:54:32.203179395 -0400
+@@ -173,8 +173,12 @@
+     // Redirect surface rendering to a temp FBO cleared to transparent.
+     // The original renderLayer (called between pre/post elements) will render
+     // the surface into this FBO. compositeAndRestore uses its alpha as a mask.
+-    int monitorWidth  = static_cast<int>(monitor->m_transformedSize.x);
+-    int monitorHeight = static_cast<int>(monitor->m_transformedSize.y);
++    // The redirected FBO stands in for the monitor FB mid-pass: writes land in
++    // native window coordinates (viewport and outputProjection are both
++    // m_pixelSize). Allocate it native — at m_transformedSize, every write
++    // beyond the swapped width is clipped on a 90/270 monitor.
++    int monitorWidth  = static_cast<int>(monitor->m_pixelSize.x);
++    int monitorHeight = static_cast<int>(monitor->m_pixelSize.y);
+ 
+     // In FP16/HDR mode, the source FB uses RGBA16F which has full alpha precision.
+     // Use the source format to avoid clipping HDR color values.
+@@ -244,8 +248,10 @@
+     // Use the temp FBO's rendered alpha as a mask: glass only where the surface
+     // has visible content (alpha > 0). The temp FBO is in monitor coordinates,
+     // so we map from the glass quad UV to monitor UV.
+-    int monitorWidth  = static_cast<int>(monitor->m_transformedSize.x);
+-    int monitorHeight = static_cast<int>(monitor->m_transformedSize.y);
++    // Native frame on both axes: the FBO is allocated at m_pixelSize and its
++    // content addressed in native window coordinates (transformBox's frame).
++    int monitorWidth  = static_cast<int>(monitor->m_pixelSize.x);
++    int monitorHeight = static_cast<int>(monitor->m_pixelSize.y);
+ 
+     float maskThreshold = 0.001f;
+     auto threshIt = g_pGlobalState->layerNamespaceMaskThresholds.find(layerSurface->m_namespace);
