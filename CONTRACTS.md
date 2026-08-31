@@ -875,13 +875,16 @@ house policy as every other door), and partial management (nix owning one
 section while the CLI owns another) is deliberately not offered: two writers
 on one document is the split-brain the design exists to avoid.
 
-Schema v0 — exactly one section, and a new section lands with the consumer
-that reads it, never ahead of one:
+Schema v0 — two sections, and a new section lands with the consumer that
+reads it, never ahead of one:
 
 ```toml
 # Comments are the point of the format: this is the one file a human edits.
 [pairing]
 defaultGrant = ["read"]
+
+[upkeep]
+verifyCommand = "nix flake check .#checks.x86_64-linux.{fmt,nix-lint}"
 ```
 
 - `pairing.defaultGrant` (list of strings, default `["read"]`) — the
@@ -894,15 +897,31 @@ defaultGrant = ["read"]
   `resolve_grant`) unless that invocation named `--allow`; a config that does
   not load REFUSES the commit rather than falling back to the built-in
   default, because the one file carrying grants must fail loudly.
+- `upkeep.verifyCommand` (string, default `""`) — the shell command the
+  check lane (`aoide session hook`'s SessionStart/Stop wiring,
+  `aoide_upkeep::checklane`) runs to answer "is the working tree clean": a
+  `nix flake check` invocation on a nix host, `cargo test`/`make check`/
+  whatever the project uses on a non-nix host. A free-form scalar, not a list
+  from a closed vocabulary — core cannot know what "clean" means on every
+  host, so this is the one config value it never passes judgment on. Empty
+  (the default) disables the lane outright. **On a nix host, this MUST name
+  the fast checks only** (the example above: `fmt`/`nix-lint`, joined by
+  `lib/checks.nix`'s own `discovery`/`song-shape`/`no-song-read`/
+  `surface-ownership` — the check lane's fast-lane budget), never bare
+  `nix flake check` — the lane runs SYNCHRONOUSLY inside the hook, so an
+  unscoped invocation also evaluates the slow attributes (vm-boot,
+  `pkg-*`, portability), which routinely run for minutes and can stall
+  every `SessionStart`/`Stop` up to the harness's own hook timeout.
 
 The schema lives in code as a walkable TABLE (`aoide_storage::config::SCHEMA`
-— sections, keys, each key's vocabulary, and how to read it off a typed
-config), and the validator, the `aoide config` listing, and `aoide config
-set` all walk that one table. `aoide config set <section>.<key> <value>` is
-the only writer: it refuses a managed config, an unknown key, an
-out-of-vocabulary value, and a config already on disk that does not load —
-each with a taught error and nothing written — then edits the file's own TEXT
-in place (`toml_edit`, so an operator's comments survive a write that a
+— sections, keys, each key's [`ValueKind`] (a closed-vocabulary list, or a
+free-form scalar) and how to read it off a typed config), and the validator,
+the `aoide config` listing, and `aoide config set` all walk that one table.
+`aoide config set <section>.<key> <value>` is the only writer: it refuses a
+managed config, an unknown key, an out-of-vocabulary value (scalars have none
+to violate), and a config already on disk that does not load — each with a
+taught error and nothing written — then edits the file's own TEXT in place
+(`toml_edit`, so an operator's comments survive a write that a
 serialize-the-struct round trip would erase), re-parses the result through
 the identical gate the next read applies, and commits it atomically.
 
