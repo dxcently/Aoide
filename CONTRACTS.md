@@ -4577,10 +4577,15 @@ directly rather than trusting the feed's own completeness.
 pair_watch`, registered newest in `peer pair`, golden count 74 → 75) is
 the foreground follow: tails this feed, narrates each recognized line
 (or emits it verbatim under `--json`), and re-derives the actionable set
-(an inbound entry once revealed, an outbound entry once
-`awaiting-confirm` — see the "retired" paragraph above for what this means
-under Design A) on a 30s safety tick so a missed or malformed line never
-strands a request. `--popup` swaps that narration for a dialog shaped by
+(an inbound entry once revealed and only while still unapproved, an
+outbound entry once `awaiting-confirm` — see the "retired" paragraph above
+for what this means under Design A) on a 30s safety tick so a missed or
+malformed line never strands a request. **The inbound gate reads
+`InboundPairingRequest::approved`, not the SAS alone.** An approved
+inbound entry stays parked (§ "Pairing files" above — the requester's own
+`aoide/pairPoll` still has to find it) and keeps its derivable SAS
+forever, so a SAS-only gate re-raises the typed-code dialog on every tick
+for a request the operator already answered. `--popup` swaps that narration for a dialog shaped by
 DIRECTION (upgraded P-PV3, task #132) — `lyra pair ask`/`lyra pair
 confirm` (`crates/lyra/src/commands/dialog_qml.rs`'s shared quickshell
 surface) when `aoide_client::pair_watch::resolve_lyra_bin` feature-detects
