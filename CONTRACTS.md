@@ -558,9 +558,10 @@ count.
   already-on capability, or `off` on an already-off one, both report a
   no-op), refuses an unknown peer or an unknown capability string with
   a distinct taught error for each (the capability check runs before
-  the peer lookup). A paired peer is stamped `["read","spawn"]` by
-  default the moment it FIRST becomes verified (`upsert_paired_peer`,
-  both ceremony commit sites) — this command is for narrowing or
+  the peer lookup). A paired peer is stamped `[pairing] defaultGrant`
+  (`config.toml`, `["read"]` unless widened) the moment it FIRST becomes
+  verified, or the `--allow` typed on that one `peer pair approve`
+  (`upsert_paired_peer`, both ceremony commit sites) — this command is for narrowing or
   widening that grant afterward, and is the ONLY other writer of the
   field. See §6's "Security posture" (the P-P3 amendment) and §7's
   "Peer record" subsections below for the gate this feeds and the wire
@@ -878,7 +879,11 @@ defaultGrant = ["read"]
   vocabulary IS §7's own closed peer-capability set
   (`aoide_storage::peer_store::PEER_CAPABILITIES`, `"read"`/`"spawn"` — the
   same one `peer allow` enforces), never a second list; an unknown
-  capability is refused by name, exactly as an unknown key is.
+  capability is refused by name, exactly as an unknown key is. Read by both
+  ceremony commit sites (`approve_inbound`/`approve_outbound`, through
+  `resolve_grant`) unless that invocation named `--allow`; a config that does
+  not load REFUSES the commit rather than falling back to the built-in
+  default, because the one file carrying grants must fail loudly.
 
 The schema lives in code as a walkable TABLE (`aoide_storage::config::SCHEMA`
 — sections, keys, each key's vocabulary, and how to read it off a typed
@@ -3807,8 +3812,9 @@ operator had ever actually paired with (`peer pair request`/`approve`,
 P-P2, decisions above). `docs/architecture/PAIRING.md` decisions 5–7 close
 that gap: `allows` (a closed capability set, `aoide_storage::peer_store::
 PEER_CAPABILITIES` = `"read"`/`"spawn"`, never a per-capability serde bool
-scatter) lives on `Peer`, stamped `["read","spawn"]` by `upsert_paired_peer`
-the moment a peer FIRST becomes verified and left untouched on a later key
+scatter) lives on `Peer`, stamped by `upsert_paired_peer` from the grant its
+caller resolved (`config.toml`'s `[pairing] defaultGrant`, or `--allow`) the
+moment a peer FIRST becomes verified and left untouched on a later key
 rotation (so a revoked capability survives re-pairing); `peer allow <name>
 <cap> on|off` (§3 above, +1 → 77) is the only other writer, idempotent,
 refusing an unknown peer or unknown capability. Fixed in `a2a.rs::
@@ -4248,9 +4254,9 @@ unauthenticated** (`read_ok`/bearer gating never applies to any of them):
 the ceremony's whole point is establishing a credential where none exists
 yet, so gating it on one would be circular. A parked or revealed request
 grants nothing at all — only a fully APPROVED request commits a peer
-record, and that record's own `verified: true` plus its default `allows`
-(`["read","spawn"]`, P-P3, stamped by `upsert_paired_peer` the moment the
-peer first becomes verified) is the entire grant this ceremony makes; the
+record, and that record's own `verified: true` plus its `allows`
+(P-P3, stamped by `upsert_paired_peer` from `[pairing] defaultGrant` or the
+commit's own `--allow`, the moment the peer first becomes verified) is the entire grant this ceremony makes; the
 wire methods themselves flip no OTHER gate and change no spawn/bearer
 behavior beyond that one stamp — narrowing or widening `allows` afterward
 is `peer allow`'s job (§3 above), never re-run by re-pairing. Unknown
@@ -4878,8 +4884,10 @@ it never reads or writes this file directly, only
 PAIRING.md` decision 5; omitted from the wire when empty) is a CLOSED
 capability set — `aoide_storage::peer_store::PEER_CAPABILITIES` = `"read"`,
 `"spawn"`, never a per-capability serde bool scatter. `upsert_paired_peer`
-stamps it `["read","spawn"]` the moment a peer FIRST becomes `verified`
-(both ceremony commit sites — `approve_inbound` and `approve_outbound`),
+stamps it the moment a peer FIRST becomes `verified` (both ceremony commit
+sites — `approve_inbound` and `approve_outbound`) from the grant its caller
+resolved: `config.toml`'s `[pairing] defaultGrant` (`["read"]` by default),
+or the `--allow` typed on that commit,
 and leaves it untouched on a LATER re-pairing of an already-verified
 name — a revoked capability survives key rotation. An unpaired (`peer add`)
 peer and a legacy record predating this field both load `allows: []`. The

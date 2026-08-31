@@ -243,8 +243,10 @@ until an explicit approve.
 
 A fully approved request is the ceremony's entire grant:
 `peer_store::upsert_paired_peer` commits a peer record carrying
-`pubkey`, `verified: true`, and the default `allows: ["read","spawn"]`
-(the closed capability vocabulary `PEER_CAPABILITIES`). When the parked
+`pubkey`, `verified: true`, and an `allows` set drawn from the closed
+capability vocabulary `PEER_CAPABILITIES` — `config.toml`'s `[pairing]
+defaultGrant` (`["read"]` by default), or the `--allow` typed on that one
+`peer pair approve`. When the parked
 request carries the requester's optional `selfVia` claim (its
 self-asserted `ssh://[user@]host` reach-back hop — self-asserted data, a
 transport marker only, never a source of trust), the approver's commit

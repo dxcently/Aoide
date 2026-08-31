@@ -477,7 +477,8 @@ aoide peer pair watch [--popup] [--json]
   operator's own polling `approve`, so watch never surfaces one.
 - **Writes:** `peer pair` parks the outbound half; `approve` commits a
   `pubkey`/`verified` peer record into `state/peers.json`
-  (`peer_store::upsert_paired_peer`, default `allows: ["read","spawn"]`),
+  (`peer_store::upsert_paired_peer`, stamping `config.toml`'s `[pairing]
+  defaultGrant` or the commit's own `--allow`),
   dispatching by direction — inbound queue first, then outbound — so the
   requester's own confirm is a SECOND `approve` against the outbound
   queue, the one that polls. When the parked request carries the
@@ -533,7 +534,7 @@ aoide peer allow <name> <cap> on|off
   capability string is refused before the peer lookup; an unknown peer
   name is refused after it — a distinct taught error for each.
 - **Notes:** the only writer of `allows` besides the pairing ceremony's
-  own `["read","spawn"]` stamp; re-pairing never re-runs it, so a revoked
+  own first-verification stamp; re-pairing never re-runs it, so a revoked
   capability survives a key rotation. When several verified records share
   one pubkey (one remote instance paired under two names), the key's
   effective grants are the UNION across those records — revoking a

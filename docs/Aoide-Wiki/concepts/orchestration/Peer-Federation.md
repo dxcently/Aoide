@@ -200,8 +200,8 @@ a remote send never sits in the sender's local pending queue. `--to` and
 
 The [[Pairing-Ceremony]] is the only verification between two instances:
 a completed pair commits a `verified: true` peer record carrying the
-peer's ed25519 pubkey and a closed `allows` set (default
-`["read","spawn"]`), and the door's per-request gates read that record.
+peer's ed25519 pubkey and a closed `allows` set (`config.toml`'s
+`[pairing] defaultGrant`, `["read"]` by default), and the door's per-request gates read that record.
 `peer_store::resolve_peer` answers "who is this caller" on a ladder of
 rungs (`CONTRACTS.md` §6 "Legacy escapes"):
 

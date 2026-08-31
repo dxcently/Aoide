@@ -46,7 +46,10 @@ there is no "this peer may spawn, that one may not."
    `aoide peer allow <name> <cap> on|off` — idempotent, reports
    exactly what changed. Unknown capability strings are refused.
    `autogate` stays its own field (landed semantics, not churned).
-   Default for a PAIRED (verified) peer: `["read", "spawn"]`.
+   Default for a PAIRED (verified) peer: `config.toml`'s `[pairing]
+   defaultGrant`, itself `["read"]` — `spawn` is an explicit widening,
+   either standing (`aoide config set pairing.defaultGrant read,spawn`) or
+   for one ceremony (`peer pair approve --allow read,spawn`).
    An unpaired peer: empty set. Session-level granularity stays open:
    the identity lane (#63) landed the sealed session credential and
    the broker's origin gate, but per-session capability gates (the
@@ -124,7 +127,8 @@ B's operator TYPES the code as read off A's screen (out-of-band — a
   counts a persisted try; the 3rd cumulative mismatch AUTO-DENIES (same
   clean removal as reject, nothing committed).
   On a match, B's own peer record commits HERE — pubkey, verified=true,
-  allows=["read","spawn"], A's name bound, and (task #131) url/via set
+  allows=the resolved grant (defaultGrant, or this commit's --allow),
+  A's name bound, and (task #131) url/via set
   from A's parked selfVia claim if one rode the request — see below;
   B's own parked entry is marked approved and left PARKED — no
   callback, nothing dials A
