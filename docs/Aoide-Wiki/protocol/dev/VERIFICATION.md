@@ -28,8 +28,11 @@ systemctl --user restart aoide-quickshell.service  # bar / dock / gadgets
 lyra rice stage <song>                             # livery hot-reload
 qs -p modules/facets/quickshell/qml/shell.qml      # QML parse check
 
-# show
-grim out.png ; grim -g "0,0 1920x60" bar.png       # read them back yourself
+# show — capture through lyra, never bare grim
+lyra screen shot                                   # full layout + JSON sidecar
+lyra screen shot --region "0,0 1080x36"            # one rect
+lyra screen shot --session <id>                    # a conducted session's window
+lyra screen info                                   # monitors, clients, layer surfaces
 ```
 
 - **The switch is the User's gate.** Propose and prepare the build; they
@@ -44,7 +47,13 @@ grim out.png ; grim -g "0,0 1920x60" bar.png       # read them back yourself
 - **Never hand-edit** `song/stage/livery.json` or the draft targets it
   symlinks to — that bypasses the lock check and the draft routing.
 - **Never declare a visual change done without looking at it.** Capture it,
-  read it back, judge it yourself, then show the User.
+  read it back, judge it yourself, then show the User. `lyra screen shot` is
+  the capture path, not bare `grim`: it writes a JSON sidecar beside every
+  image — origin, scale, and the whole desktop at that instant (cursor, every
+  client and layer surface) — so a coordinate read off the image inverts back
+  to screen space through `screen point --from-shot`, and `--session <id>`
+  frames a conducted agent's own window. Aoide is the orchestration core;
+  shelling past its own surface leaves that surface unproven.
 
 ---
 

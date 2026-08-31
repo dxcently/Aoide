@@ -149,3 +149,5 @@ at the next compaction.
 | command a session | `aoide send --id <id> [--submit] [--yes] -- <text>` |
 | session roster | `aoide session` |
 | mesh roster | `aoide peer list` |
+| capture the screen | `lyra screen shot` |
+| desktop readout | `lyra screen info` |
