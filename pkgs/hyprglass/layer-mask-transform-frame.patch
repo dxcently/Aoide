@@ -1,0 +1,37 @@
+--- a/src/GlassLayerSurface.cpp
++++ b/src/GlassLayerSurface.cpp
+@@ -194,7 +194,10 @@
+     g_pHyprRenderer->m_renderData.currentFB = m_surfaceTempFramebuffer;
+     glBindFramebuffer(GL_FRAMEBUFFER, dynamic_cast<Render::GL::CGLFramebuffer*>(m_surfaceTempFramebuffer.get())->getFBID());
+ 
+-    CBox clearBox = transformBox;
++    // m_surfaceTempFramebuffer is allocated at m_transformedSize (below), the
++    // same frame layerBox is already in — transformBox is native-pixel-frame
++    // (m_pixelSize) and would clear the wrong region on a 90/270 monitor.
++    CBox clearBox = *layerBox;
+     clearBox.expand(GlassRenderer::SAMPLE_PADDING_PX);
+     clearBox = clearBox.intersection(CBox{0.0, 0.0, static_cast<double>(monitorWidth), static_cast<double>(monitorHeight)}).noNegativeSize().round();
+ 
+@@ -242,8 +245,9 @@
+     float roundingPower = 2.0f;
+ 
+     // Use the temp FBO's rendered alpha as a mask: glass only where the surface
+-    // has visible content (alpha > 0). The temp FBO is in monitor coordinates,
+-    // so we map from the glass quad UV to monitor UV.
++    // has visible content (alpha > 0). The temp FBO is m_transformedSize-shaped
++    // (rawBox's own frame, not transformBox's native-pixel one), so we map from
++    // the glass quad UV into that frame directly.
+     int monitorWidth  = static_cast<int>(monitor->m_transformedSize.x);
+     int monitorHeight = static_cast<int>(monitor->m_transformedSize.y);
+ 
+@@ -260,8 +264,8 @@
+     GlassRenderer::SMaskInfo maskInfo{
+         .textureId         = m_surfaceTempFramebuffer->getTexture()->m_texID,
+         .target            = GL_TEXTURE_2D,
+-        .uvOffset          = {transformBox.x / monitorWidth, transformBox.y / monitorHeight},
+-        .uvScale           = {transformBox.w / monitorWidth, transformBox.h / monitorHeight},
++        .uvOffset          = {rawBox.x / monitorWidth, rawBox.y / monitorHeight},
++        .uvScale           = {rawBox.w / monitorWidth, rawBox.h / monitorHeight},
+         .alphaThreshold    = maskThreshold,
+     };
+ 
