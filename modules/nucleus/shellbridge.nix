@@ -107,11 +107,17 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
       #                by the default PATH's systemd package.
       #   quickshell — `quickshell ipc call shell reload` when a daemon-routed
       #                `rice mode stage` syncs changed widget bodies.
+      #   nix        — `nix eval <checkout>#songbookManifest`: the widget-body
+      #                sync `rice mode stage` runs before it can hot-load. The
+      #                bar's mode cell is the only caller that reaches this
+      #                without a login shell, so its absence broke the toggle
+      #                there while the same command worked by hand.
       path = [
         pkgs.curl
         pkgs.hyprland
         pkgs.hyprlock
         pkgs.libnotify
+        config.nix.package
         pkgs.procps
         quickshellPkg
       ];

@@ -5228,10 +5228,11 @@ mid-wait cannot defeat it. `--yes` skips THIS side's own confirmations
 final code confirm), never the far side's typed code.
 
 Approving an inbound request re-derives the SAS from this instance's
-own identity (never trusting a wire-carried code); the target is
-OPTIONAL when exactly one request is pending (that one is resolved;
-zero or multiple pending with no target is a taught refusal, the
-multiple case listing every pending id). The gate is the TYPED pairing
+own identity (never trusting a wire-carried code). A target NAMES the
+request to act on — bare `pair` never approves, whatever the queue holds:
+with no target it lists (or, on a tty, offers a menu whose pick is the
+explicit act), so a scripted approval always carries the id or the name.
+The gate is the TYPED pairing
 code (task #120 P3 — typed at a terminal prompt that never echoes the
 expected code, or `--code NNN-NNN` scripted; wrong codes count
 cumulative, persisted tries and the third mismatch auto-denies the

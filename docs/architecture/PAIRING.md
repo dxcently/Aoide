@@ -199,8 +199,10 @@ even when A's door accepts no routable connection at all.
   would collapse that out-of-band comparison into a copy exercise. Each
   side's own `aoide pair` independently re-derives it, exactly as
   above; bare `aoide pair`'s rows carry the id, direction, name, and state — never the code.
-  Targeting a request by id is only required when more than
-  one request is pending — with exactly one, the target is optional.
+  A target names the request to act on: bare `aoide pair` lists, and
+  never approves on its own even when exactly one request is pending —
+  approving is always an explicit act (the id or name on the command
+  line, or a pick from the tty menu).
 - A pairing request that is never approved (or never confirmed on A's
   own side) expires (timeout knob, default generous — hours, not
   minutes; it waits for a human, twice). An APPROVED-but-not-yet-polled
