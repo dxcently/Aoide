@@ -5168,8 +5168,9 @@ verified, advertising, presence, addr, lastSeen, sessions[]}`, plus
 `sweep` (`{heard, dropped}` or `{error}`).
 
 `aoide peer pair <target> [--name <n>] [--self-url <url>] [--self-via
-<ssh-target>] [--via <ssh-target>] [--secs N] [--yes]` / `peer pending` /
-`peer pair approve [<id>] [--yes] [--code NNN-NNN]` / `peer pair reject
+<ssh-target>] [--via <ssh-target>] [--secs N] [--wait SECS]
+[--allow read,spawn] [--yes]` / `peer pending` /
+`peer pair approve [<id>] [--yes] [--code NNN-NNN] [--allow read,spawn]` / `peer pair reject
 <id>` / `peer pair watch` (P-P2, P-PV2 — the User's locked spec, three
 grill rounds, appended newest directly after `peer hub` — §6's "Pairing
 wire" subsection above has the exact wire shapes and SAS derivation) — the
@@ -5182,11 +5183,23 @@ the same cutover, no alias). Either arm sends `aoide/pairRequest`
 (`--self-via`, task #131, overrides its default reach-back hop claim),
 parks the answer (`state/peer-pairing-outbound.json`, §4), and prints the
 derived SAS alongside the pending id (the id is the secondary identifier,
-for disambiguating multiple pending requests). `peer pending` lists this
-instance's own parked requests, both directions, by id/direction/name/
-state — NEVER the SAS/confirmation code (P-PV2): the code is read off the
-requester's own screen and typed on the approver's, out-of-band, and a
-listing either operator could glance at would defeat that comparison.
+for disambiguating multiple pending requests).
+**`peer pair` then BLOCKS through the rest of the ceremony** (task #135
+P2): it re-polls the approver's door every 5s for up to `--wait` seconds
+(default 600), and on release runs the same confirm-and-commit
+`peer pair approve` would, so one command completes this end. Only a
+`pending` answer is retried — an unreachable door or a refused reveal
+returns on the first tick. A timeout is NOT a failed pair: the request
+stays parked and `peer pair approve <id>` still finishes it, which is also
+what makes Ctrl-C safe. `--wait 0` restores the park-and-return shape for
+scripted callers. `--yes` skips THIS side's own confirmations (the sweep
+prompt and the final code confirm), never the far side's typed code.
+
+`peer pending` lists this instance's own parked requests, both
+directions, by id/direction/name/state — NEVER the SAS/confirmation
+code (P-PV2): the code is read off the requester's own screen and typed
+on the approver's, out-of-band, and a listing either operator could glance
+at would defeat that comparison.
 `peer pair approve` re-derives the SAS from this instance's own identity
 (never trusting a wire-carried code); its `<id>` is OPTIONAL when exactly
 one request is pending (that one is resolved; zero or multiple pending

@@ -70,7 +70,8 @@ operator B: peer pending → peer pair approve [<id>]
   the 3rd cumulative mismatch auto-denies (nothing committed)
   On a match, B's own peer record commits HERE — purely     (nothing
   local, and the parked entry is marked approved, left PARKED  dials A)
-operator A: a SECOND peer pair approve <id> (against the outbound queue)
+A's peer pair is STILL RUNNING, re-polling every 5s up to --wait (600s);
+  peer pair approve <id> is the same poll on demand, after --wait 0 or a timeout
   → aoide/pairPoll {id, timestampIso, nonceHex, ──────────► verified against
     signatureHex} — over the SAME forward dial                 the parked entry's
     the request/reveal used                                own pubkeyHex_A;
@@ -104,13 +105,14 @@ echoes the expected value. A wrong code counts one try, persisted on the
 parked entry across invocations; the third cumulative mismatch
 auto-denies (the same clean removal `reject` performs, audited
 `auto-deny-on-code-mismatch`), and an entry already at the try limit is
-denied on sight. A's record for B exists only once A's own operator runs
-`peer pair approve <id>` a second time, against the OUTBOUND queue — that
-invocation polls `aoide/pairPoll` first, then re-derives the SAS from
-values already held locally and asks for the y/N confirm (A's own screen
-printed the code at request time, so the typed-code gate is B's side
-only; `--yes` scripts A's confirm but never bypasses B's). A code shown
-once and accepted once is not a mutual confirmation; a never-confirmed A
+denied on sight. A's record for B exists only once A's own operator
+confirms the code — which A's still-running `peer pair` asks for as soon
+as the poll comes back released, or which `peer pair approve <id>` asks
+for on demand against the OUTBOUND queue. Same poll, same confirm, same
+commit; the SAS is re-derived from values already held locally either way
+(A's own screen printed the code at request time, so the typed-code gate
+is B's side only; `--yes` scripts A's confirm but never bypasses B's).
+A code shown once and accepted once is not a mutual confirmation; a never-confirmed A
 leaves B holding a `verified: true` peer that answers nothing — visible
 on B's own `peer status`, resolved by an ordinary expiring re-pair.
 

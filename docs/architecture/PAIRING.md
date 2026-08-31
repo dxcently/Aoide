@@ -132,7 +132,9 @@ B's operator TYPES the code as read off A's screen (out-of-band — a
   from A's parked selfVia claim if one rode the request — see below;
   B's own parked entry is marked approved and left PARKED — no
   callback, nothing dials A
-aoide peer pair approve <id>  (A polls, whenever A gets around to it —
+A's own `peer pair` is STILL RUNNING and polling every 5s (task #135 P2,
+  up to --wait, default 600s); `aoide peer pair approve <id>` is the same
+  poll on demand, for a request A detached from (--wait 0) or timed out on
   → POST signed poll ─────────────────────► verifies A's signature against
      (id, timestamp, nonce,                    the pubkey A supplied at
       signature over "PAIRPOLL"+id+...)        request time; approved? →
@@ -143,7 +145,9 @@ pending`'s row as that state — never the code itself, P-PV2); A's own
 operator confirms it y/N
 (A's screen printed this code itself at request time — the typed-code
 gate is B's side) in the SAME `peer pair approve <id>` invocation that
-just polled — ONLY THEN does A's own peer record commit.
+just polled — or in A's still-running `peer pair`, which reaches the same
+confirm-and-commit — ONLY THEN does A's own peer record commit. A timeout
+leaves the request parked, so the two paths are interchangeable.
 `aoide peer pair reject <id>` on A's outbound entry aborts at any point
 before that confirm, with no wire call and no record on either end.
 ```
