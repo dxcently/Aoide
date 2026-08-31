@@ -18,6 +18,22 @@ covers only what's specific to facets.
 - **`quickshell/` never reads `song/` runtime paths at build time** —
   `checks.no-song-read` enforces this structurally, not just by
   convention.
+- **A surface takes its size from its CONTENT; content never sizes itself
+  from the SCREEN.** A layer anchors only the edges it genuinely occupies
+  and lets `implicitWidth`/`implicitHeight` follow what it draws (the
+  herald anchors bottom+right and sizes off its own card stack; the bar
+  anchors top+left+right at a fixed height). A full-screen overlay is
+  legitimate for a modal (launcher, powermenu), but its CONTENT is then
+  naturally sized and centred — never anchored to the layer's own edges,
+  and never scaled off `screen.height`. A card keeps its own aspect
+  ratio; a panel derives from what it stacks, capped, not from a screen
+  fraction. **Every geometry constant is a claim about a screen you have
+  not seen** — a portrait panel, a second monitor, a different scale.
+  Surface-sized content hides its own breakage: on the screen it was
+  written for, the derived number sits near what the content wanted, so
+  it reads as correct until the geometry changes and every
+  height-derived value inflates while every width-derived one clips.
+  Verify a new surface at more than one aspect before landing it.
 - **`compositor/` is LOOK + session plumbing only.** Host-invariant
   behavior (keybinds, input devices, tiling layout, misc window rules)
   belongs in `modules/dendrites/hyprland.nix` so a re-rice can't disturb it.

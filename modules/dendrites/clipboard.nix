@@ -15,11 +15,11 @@
   ...
 }:
 let
-  clipboardCopy = pkgs.writeShellScriptBin "aoide-clipboard-copy" ''
+  clipboardCopy = pkgs.writeShellScriptBin "lyra-clipboard-copy" ''
     # Accept only the numeric cliphist identifier. Clipboard contents never
     # become shell source or an interpolated command argument.
     if [ "$#" -ne 1 ]; then
-      echo "usage: aoide-clipboard-copy <cliphist-id>" >&2
+      echo "usage: lyra-clipboard-copy <cliphist-id>" >&2
       exit 2
     fi
     set -o pipefail
@@ -33,12 +33,12 @@ let
     ${pkgs.cliphist}/bin/cliphist decode "$1" | ${pkgs.wl-clipboard}/bin/wl-copy
   '';
 
-  clipboardPreview = pkgs.writeShellScriptBin "aoide-clipboard-preview" ''
+  clipboardPreview = pkgs.writeShellScriptBin "lyra-clipboard-preview" ''
     # Decode a single cliphist image entry to a private runtime preview file.
     # Only accepts a numeric cliphist id — clipboard payloads are never
     # interpolated into shell source or a command argument.
     if [ "$#" -ne 1 ]; then
-      echo "usage: aoide-clipboard-preview <cliphist-id>" >&2
+      echo "usage: lyra-clipboard-preview <cliphist-id>" >&2
       exit 2
     fi
     set -o pipefail
@@ -66,7 +66,7 @@ let
   # recommends separate type-specific watchers.  Text+image offers from the
   # same copy may create two separate cliphist entries; this is cliphist's
   # expected behaviour (it deduplicates by content hash, not source offer).
-  clipboardWatch = pkgs.writeShellScriptBin "aoide-clipboard-watch" ''
+  clipboardWatch = pkgs.writeShellScriptBin "lyra-clipboard-watch" ''
     set -o pipefail
 
     cleanup() {
@@ -111,7 +111,7 @@ in
         # A typeless `wl-paste --watch` misses image offers when the source
         # also advertises text.  Text+image copies may create two cliphist
         # entries; this is expected cliphist behaviour.
-        ExecStart = "${clipboardWatch}/bin/aoide-clipboard-watch";
+        ExecStart = "${clipboardWatch}/bin/lyra-clipboard-watch";
         Restart = "on-failure";
         RestartSec = "3s";
         # The DB and previews live under ~/.cache — the watcher sandbox

@@ -2,7 +2,7 @@
 //
 // Entries are display-only metadata. Copying accepts only a validated numeric
 // cliphist identifier; clipboard contents never become a command. Image
-// thumbnails are decoded through the fixed-path aoide-clipboard-preview helper
+// thumbnails are decoded through the fixed-path lyra-clipboard-preview helper
 // (never by a shell command built from user data).
 
 import QtQuick
@@ -81,7 +81,7 @@ QtObject {
         }
     }
 
-    // The runtime cache path atomically written by aoide-clipboard-preview.
+    // The runtime cache path atomically written by lyra-clipboard-preview.
     function previewPath(id) {
         var cache = Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")
         return "file://" + cache + "/aoide-clipboard/previews/" + id
@@ -102,7 +102,7 @@ QtObject {
         if (!/^[0-9]+$/.test(id)) return false
         // Deliberately pass only the validated identifier. Never pass preview
         // text, and never construct a shell command from clipboard contents.
-        Quickshell.execDetached(["aoide-clipboard-copy", id])
+        Quickshell.execDetached(["lyra-clipboard-copy", id])
         return true
     }
 
@@ -111,7 +111,7 @@ QtObject {
     property Component previewFactory: Component {
         Process {
             property string clipId: ""
-            command: ["aoide-clipboard-preview", clipId]
+            command: ["lyra-clipboard-preview", clipId]
             onExited: function (exitCode, exitStatus) {
                 var st = root.imageStates[clipId]
                 if (st) {
