@@ -1,6 +1,6 @@
 ---
 type: index
-updated: 2026-08-29
+updated: 2026-08-31
 ---
 
 # Aoide — Index
@@ -61,5 +61,6 @@ updated: 2026-08-29
 ## References
 
 - [[references/AOIDE-HANDOFF|AOIDE-HANDOFF]] — the original design contract: what Aoide is (the primary source for this wiki)
+- [[references/Glass-Stretch-on-a-Rotated-Monitor|Glass-Stretch-on-a-Rotated-Monitor]] — why three layer surfaces smeared on the portrait monitor: the hyprglass layer-mask frame mismatch, the two wrong diagnoses, and why a rebuild alone does not load the fix
 - [[DEV]] — the development agent’s operating manual, a self-contained set under `protocol/dev/`: preferences and prime loop, then what to build ([[PRINCIPLES]]), tiers and routing ([[ORCHESTRATION]]), repo and commits ([[CRAFT]]), gates and proofs ([[VERIFICATION]])
 - [[CLI-Reference]] — the per-command dev reference: signature, files read/written, output targets; hub page plus eight group pages
