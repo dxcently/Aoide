@@ -1397,7 +1397,7 @@ component WorkspaceRow: Item {
     Row {
         id: leftContent
         anchors.left: clefText.right
-        anchors.leftMargin: 12
+        anchors.leftMargin: 16   // clear of the staff-line start (edgePad+26); 12 sat the pencil right on top of it
         anchors.verticalCenter: parent.verticalCenter
         spacing: 9
 
@@ -1433,7 +1433,7 @@ component WorkspaceRow: Item {
         Text {
             id: clockText
             anchors.verticalCenter: parent.verticalCenter
-            text: Qt.formatDateTime(root.now, "hh:mm AP  dddd MMM dd")
+            text: Qt.formatDateTime(root.now, "hh:mm AP  ddd MMM dd")
             color: root.calShown ? root.livery.paletteAccent : root.livery.paletteFg
             font.family: "monospace"
             font.pixelSize: 14
@@ -1451,6 +1451,7 @@ component WorkspaceRow: Item {
         }
         // The " / " separator — a slur between clock and title.
         Text {
+            id: slashText
             anchors.verticalCenter: parent.verticalCenter
             text: "/"
             color: root.livery.paletteFg
@@ -1460,6 +1461,12 @@ component WorkspaceRow: Item {
         }
         // Active-window title (music kaomoji when empty). khoa, 2026-07-31:
         // primary-color ink — paletteAccent, not paletteFg.
+        // Width capped to whatever room is left before the centre stave, so
+        // elide actually engages — a Row gives a Text its implicitWidth
+        // otherwise, and ElideRight never fires. Bound in terms of the
+        // stave's own x plus the fixed-width neighbors and the Row's own
+        // spacing (never the title's own x — that's Row-managed, a binding
+        // loop waiting to happen).
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: root.winTitle()
@@ -1468,6 +1475,10 @@ component WorkspaceRow: Item {
             font.pixelSize: 14
             font.bold: true
             elide: Text.ElideRight
+            width: Math.min(implicitWidth, Math.max(0,
+                centreStave.x - leftContent.x - sessionsCell.width -
+                slashText.width - clockText.width -
+                3 * leftContent.spacing - 14))
         }
     }
 

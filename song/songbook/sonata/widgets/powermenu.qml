@@ -56,8 +56,8 @@
 // system action (hyprlock / hyprctl dispatch exit / systemctl …). QML never
 // shells out; the bridge is the gate.
 //
-// Escape or a scrim click dismisses. ←/→ (or h/l) walk the steles, Enter
-// commits the selected ending.
+// Escape or a scrim click dismisses. ←/→ (or h/l) walk a row, ↑/↓ (or k/j)
+// hop rows in the 3×2 grid, Enter commits the selected ending.
 //
 // ── Motion ─────────────────────────────────────────────────────────────────
 // The summon DEALS the hand: a linear master clock (`rise`) that each stele
@@ -189,19 +189,37 @@ PanelWindow {
         }
     }
 
-    // ── Keyboard: walk the row, commit, or stay ────────────────────────────
+    // ── Keyboard: walk the grid, commit, or stay ────────────────────────────
+    // ←/→ (h/l) move within the current row, wrapping at its own edge; ↑/↓
+    // (k/j) hop between the two rows, same column held. Tab keeps the old
+    // flat reading-order advance (0..5, wraps end-to-start) since that still
+    // matches the grid's own left-to-right/top-to-bottom fill. cols/rows are
+    // the fixed 3×2 shape (see Grid geometry, below) — cheap enough not to
+    // derive them here too.
     Item {
         id: keyCatcher
         focus: true
         Keys.onPressed: function (event) {
             var n = root.endings.length
+            var cols = root.gridCols
+            var rows = root.gridRows
+            var row = root.sel < 0 ? 0 : Math.floor(root.sel / cols)
+            var col = root.sel < 0 ? 0 : root.sel % cols
             if (event.key === Qt.Key_Escape) {
                 root.hide(); event.accepted = true
             } else if (event.key === Qt.Key_Left || event.key === Qt.Key_H) {
-                root.sel = (root.sel <= 0) ? n - 1 : root.sel - 1
+                root.sel = root.sel < 0 ? n - 1 : row * cols + (col + cols - 1) % cols
                 event.accepted = true
-            } else if (event.key === Qt.Key_Right || event.key === Qt.Key_L
-                       || event.key === Qt.Key_Tab) {
+            } else if (event.key === Qt.Key_Right || event.key === Qt.Key_L) {
+                root.sel = root.sel < 0 ? 0 : row * cols + (col + 1) % cols
+                event.accepted = true
+            } else if (event.key === Qt.Key_Up || event.key === Qt.Key_K) {
+                root.sel = root.sel < 0 ? 0 : ((row + rows - 1) % rows) * cols + col
+                event.accepted = true
+            } else if (event.key === Qt.Key_Down || event.key === Qt.Key_J) {
+                root.sel = root.sel < 0 ? 0 : ((row + 1) % rows) * cols + col
+                event.accepted = true
+            } else if (event.key === Qt.Key_Tab) {
                 root.sel = (root.sel < 0 || root.sel >= n - 1) ? 0 : root.sel + 1
                 event.accepted = true
             } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -212,6 +230,32 @@ PanelWindow {
         }
     }
 
+    // ── Grid geometry — 3×2, sized off THIS surface ─────────────────────────
+    // The six steles used to sit in one Row sized for a 1920-wide screen; on
+    // a narrower or portrait output that row still claimed its full logical
+    // width, so LOCK/SHUTDOWN landed off both edges. Fixed: three columns,
+    // two rows, order preserved (LOCK LOGOUT SUSPEND / HIBERNATE REBOOT
+    // SHUTDOWN — reading order, top-left to bottom-right). The card itself
+    // is sized as a FRACTION of root.width/root.height, never a literal
+    // screen pixel count — clamped to the original 196×306 stele on any
+    // screen roomy enough to afford it, shrunk (aspect held constant, so no
+    // card balloons tall and empty) on anything tighter.
+    readonly property int gridCols: 3
+    readonly property int gridRows: 2
+    readonly property int gridSpacing: 22
+    readonly property real steleAspect: 306 / 196   // original stele's h:w
+
+    readonly property real chromeAboveGrid: 96   // the heading block, see `heading`
+    readonly property real chromeBelowGrid: 46   // the stay-line's rough vertical claim
+    readonly property real chromeMargin: 40      // breathing room outside `rig`, top+bottom
+
+    readonly property real cardWMax: (root.width * 0.92 - gridSpacing * (gridCols - 1)) / gridCols
+    readonly property real cardHMax: (root.height - chromeAboveGrid - chromeBelowGrid
+                                       - chromeMargin - gridSpacing * (gridRows - 1)) / gridRows
+
+    readonly property real cardWidth: Math.max(130, Math.min(196, cardWMax, cardHMax / steleAspect))
+    readonly property real cardHeight: cardWidth * steleAspect
+
     // ── One ending — a glass stele in the shared temple-bay chrome ─────────
     component EndingStele: Rectangle {
         id: stele
@@ -220,8 +264,8 @@ PanelWindow {
         readonly property bool lit: root.sel === stele.index
         readonly property color hue: stele.modelData.hue
 
-        width: 196
-        height: 306
+        width: root.cardWidth
+        height: root.cardHeight
         radius: 0
         color: root.withA(root.livery.paletteBg, stele.lit ? 0.85 : 0.74)
         Behavior on color { ColorAnimation { duration: 160 } }
@@ -565,12 +609,13 @@ PanelWindow {
             }
         }
 
-        // ── the six steles ─────────────────────────────────────────────────
-        Row {
+        // ── the six steles — 3×2, reading order preserved ───────────────────
+        Grid {
             id: steleRow
             anchors.top: heading.bottom; anchors.topMargin: 24
             anchors.horizontalCenter: parent.horizontalCenter
-            spacing: 22
+            columns: root.gridCols
+            spacing: root.gridSpacing
             Repeater {
                 model: root.endings
                 EndingStele { }

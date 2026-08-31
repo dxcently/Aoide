@@ -215,7 +215,7 @@ PanelWindow {
     // ── Geometry ────────────────────────────────────────────────────────────
     readonly property real screenH: root.screen ? root.screen.height : 1080
     readonly property real maxPanelH: screenH * 0.92
-    readonly property real panelH: Math.min(root.maxPanelH, 960)   // ≤ 92% of the output
+    readonly property real panelH: root.maxPanelH   // ≤ 92% of the output
 
     readonly property int innerW: 360        // the gadgets' native column width
     // ── ONE width source for every dock gadget ──────────────────────────────
