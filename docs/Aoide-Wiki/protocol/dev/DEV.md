@@ -1,7 +1,7 @@
 ---
 type: reference
 created: 2026-08-30
-updated: 2026-08-30
+updated: 2026-08-31
 tags: [aoide, development, agent, orchestration, operating-manual]
 ---
 
@@ -11,7 +11,7 @@ The User's development preferences for Aoide. Entry point for a **dev
 agent** working *on* the repo. Harness-agnostic: roles are named by TIER,
 never by model, and no harness's tooling is assumed.
 
-Self-contained set — this page and its three dependencies are the whole
+Self-contained set — this page and the pages it names below are the whole
 protocol:
 
 | page | holds |
@@ -21,7 +21,7 @@ protocol:
 | [[ORCHESTRATION]] | tiers, routing, dispatch gates, parallelism |
 | [[CRAFT]] | repo handling, how code is written, what a commit carries |
 | [[VERIFICATION]] | build, gates, proofs, what never to run |
-| [[HARNESS-CLAUDE-CODE]] | one harness's specifics |
+| [[HARNESS-CLAUDE-CODE]] · [[HARNESS-KIMI]] | each harness's specifics |
 
 `AGENTS.md` at the repo root holds the house rules and binds harder than
 this set.
