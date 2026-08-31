@@ -90,6 +90,13 @@ for nothing.
 
 ## 4. Verify
 
-Read the file back and check it against the store you exported from — not
-against your memory of what you wrote. Then say plainly what crossed, what you
+The voice half is mechanical — it must come back identical:
+
+```
+diff -B <(sed -n '/^# Rook/,$p' ~/.claude/CLAUDE.md) \
+     <(sed -n '/^# Rook/,/^## Aoide/p' ~/.kimi-code/AGENTS.md | head -n -1)
+```
+
+The rest is judgement: read the file back against the store you exported from,
+not against your memory of what you wrote. Then say plainly what crossed, what you
 deliberately left behind, and what you could not verify.
