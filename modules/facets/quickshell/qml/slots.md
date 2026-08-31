@@ -75,15 +75,22 @@ Every widget QML file, whatever slot it fills, must follow this shape:
 | `calendar` | `WidgetSlot` | `bar.qml` (sonata) — the clock's calendar popout (`WidgetSlot { slot: "calendar" }`) | none | none — an unauthored `calendar` slot renders nothing (the popout itself gates on `stagingEngine.has(...)` before opening) |
 | `notifications` | retired 2026-08-16 — the Quickshell `NotificationServer` surface (AoideNotifications.qml) is gone; dunst owns `org.freedesktop.Notifications`. Superseded by `herald` below, which draws the popup WITHOUT owning the bus name | — | — |
 | `herald` | `SurfaceSlot` | `shell.qml` (facet) — `SurfaceSlot { slot: "herald" }`; the notification popup, drawn from `state/stage/herald.json` (dunst draws nothing — see `modules/dendrites/dunst.nix`) | none | none — sonata's `widgets/herald.qml` is the floor |
-| `herald-center` | `WidgetSlot` | `AoidePanel.qml` (facet) — the dock's gadget column (`WidgetSlot { slot: "herald-center" }`), under the Conductor | none | none — sonata's own `widgets/herald-center.qml` IS the baseline floor; no facet-side Component fallback is wired |
+| `dock` | `SurfaceSlot` | `shell.qml` (facet) — `SurfaceSlot { slot: "dock" }`; the bar's ✎N cell and the `aoide:dock` (SUPER+G) `GlobalShortcut`, both in the facet, call `.item.toggle()` | `shared` (session-state QtObject), `stagingEngine` (so the dock's own embedded gadget `WidgetSlot`s can resolve) | none — sonata's `widgets/dock.qml` is the floor |
+| `conductor` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "conductor" }`) | `shared` | none — sonata's own `widgets/conductor.qml` IS the baseline floor |
+| `terminals` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "terminals" }`) | `shared` | none — sonata's own `widgets/terminals.qml` IS the baseline floor |
+| `usage` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "usage" }`), visible only once it reports nonzero `implicitHeight` | none | none — sonata's own `widgets/usage.qml` IS the baseline floor |
+| `meters` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "meters" }`) | none | none — sonata's own `widgets/meters.qml` IS the baseline floor |
+| `power` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "power" }`) | none | none — sonata's own `widgets/power.qml` IS the baseline floor |
+| `herald-center` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "herald-center" }`), the column's last shipped gadget | none | none — sonata's own `widgets/herald-center.qml` IS the baseline floor; no facet-side Component fallback is wired |
 | `powermenu` | `SurfaceSlot` | `shell.qml` (facet) — `SurfaceSlot { slot: "powermenu" }`; the bar's clef calls `.item.toggle()` | none | none — sonata's `widgets/powermenu.qml` is the floor |
 | `launcher` | `SurfaceSlot` | `shell.qml` (facet) — `SurfaceSlot { slot: "launcher" }` | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the facet, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
-| `bar` | `WidgetSlot` | `shell.qml` (facet) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }` | `shared` (session-state QtObject), `powermenu` (the powermenu slot's live `.item`), `stagingEngine` (so the bar's own embedded calendar `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
+| `bar` | `WidgetSlot` | `shell.qml` (facet) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }` | `shared` (session-state QtObject), `powermenu` (the powermenu slot's live `.item`), `dock` (the dock slot's live `.item`), `stagingEngine` (so the bar's own embedded calendar `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
 
 ### Window-owning slot namespaces (`SurfaceSlot` contract)
 
 | slot | WlrLayershell namespace | layer |
 | --- | --- | --- |
+| `dock` | `aoide-dock` | Overlay |
 | `powermenu` | `aoide-powermenu` | Overlay |
 | `launcher` | `aoide-launcher` | Overlay |
 
@@ -185,7 +192,7 @@ exclusive (`rice lint` rejects a field from the wrong kind):
 | kind | fields | renders |
 | --- | --- | --- |
 | `surface` | `namespace` (nullOr str; derives `aoide-<slot>` when null), `layer` (`overlay` \| `top`, default `overlay`), `shortcut` (nullOr str — a `GlobalShortcut` name, split on `:` into appid/name), `blur` (bool, default true) | its own `PanelWindow`/layer-shell surface — hosted by `SongSurfaces.qml`, a non-visual `Instantiator` of `SurfaceSlot`s, one per declared surface-kind entry the active song carries |
-| `dock` | `order` (nullOr int, sort key; default treated as 0) | an `Item` mounted into `AoidePanel`'s gadget column — hosted by `SongGadgets.qml`, a `Repeater` of `WidgetSlot`s, sorted `(order ?? 0, slot-name)` ascending; mounted as the column's last children, after the shipped gadgets and `herald-center` |
+| `dock` | `order` (nullOr int, sort key; default treated as 0) | an `Item` mounted into sonata's `dock.qml`'s gadget column — hosted by `SongGadgets.qml`, a `Repeater` of `WidgetSlot`s, sorted `(order ?? 0, slot-name)` ascending; mounted as the column's last children, after the shipped gadgets and `herald-center` |
 
 `order` exists because the registry is serialized through
 `serde_json::Value`/`BTreeMap` (no `preserve_order` feature), so a song's

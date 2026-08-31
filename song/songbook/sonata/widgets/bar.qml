@@ -484,16 +484,17 @@ component WorkspaceRow: Item {
     // directly — the old `{ cmd: "powermenu" }` bridge line was a dead end
     // (shellbridge never parsed that command).
     required property var powermenu
-    // The center-left dock (AoidePanel instance), injected by shell.qml the
-    // SAME way — audit-report.md flagged the ✎N cell's `{ cmd: "dock",
-    // action: "toggle" }` as a silent no-op and suggested teaching shellbridge
-    // the command, but that goes against this file's own already-stated rule two
-    // lines up: ShellBridge is OUTBOUND-only by design (hazards.md §5,
-    // AoidePanel.qml's own header — "no inbound CLI command to toggle a
-    // surface"), and adding one here would be a second, inconsistent path to
-    // the exact toggle GlobalShortcut (SUPER+G → aoide:dock) already owns
-    // cleanly. Fixed the same way powermenu was: call .toggle() on the
-    // injected instance directly.
+    // The center-left dock (`dockSlot.item` — sonata's own `dock.qml`,
+    // hosted by a `SurfaceSlot`), injected by shell.qml the SAME way —
+    // audit-report.md flagged the ✎N cell's `{ cmd: "dock", action: "toggle" }`
+    // as a silent no-op and suggested teaching shellbridge the command, but
+    // that goes against this file's own already-stated rule two lines up:
+    // ShellBridge is OUTBOUND-only by design (hazards.md §5, dock.qml's own
+    // header — "no inbound CLI command to toggle a surface"), and adding one
+    // here would be a second, inconsistent path to the exact toggle
+    // GlobalShortcut (SUPER+G → aoide:dock) already owns cleanly. Fixed the
+    // same way powermenu was: call .toggle() on the injected instance
+    // directly.
     required property var dock
     // Shared session state (shell.qml's QtObject). Threaded through so the
     // centre WorkspaceRow can read `shared.hoveredWorkspace` — the gadget-dock

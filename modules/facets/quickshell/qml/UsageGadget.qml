@@ -43,7 +43,9 @@ Item {
     required property var livery            // palette roles
     property string usagePath: "/home/khoa/Aoide/state/usage.json"
 
-    // Injected by AoidePanel (the dock). null on a bridge-less host — the
+    // Historically injected by the dock (AoidePanel.qml, retired — the dock
+    // is now sonata's own `widgets/usage.qml`, a WidgetSlot anchor). Nothing
+    // instantiates this component today. null on a bridge-less host — the
     // manual-refresh click null-guards on it and silently no-ops, exactly like
     // Meters/Power which declare no bridge at all. OUTBOUND-only (hazards §5):
     // the only thing ever sent is the `refreshusage` command, via refreshUsage().
@@ -80,7 +82,9 @@ Item {
 
     // ── PARSED USAGE ────────────────────────────────────────────────────────────
     // The whole document, or {} when the file is missing/empty/garbage. hasData
-    // gates the ENTIRE gadget's visibility (see AoidePanel) so a host without the
+    // gates the ENTIRE gadget's visibility (historically read by AoidePanel;
+    // sonata's `widgets/usage.qml` reads its own `implicitHeight` instead)
+    // so a host without the
     // poller enabled shows nothing at all.
     property var usage: ({})
     // TICK HOOK — `usage` is reassigned to a FRESH object (JSON.parse always

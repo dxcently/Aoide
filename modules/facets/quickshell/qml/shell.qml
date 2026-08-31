@@ -27,6 +27,7 @@ import QtQml.Models
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Quickshell.Hyprland
 
 ShellRoot {
     id: shellRoot
@@ -178,24 +179,46 @@ ShellRoot {
             extraProps: ({
                 shared: shared,
                 powermenu: powermenuSlot.item,
-                dock: aoidePanel,
+                dock: dockSlot.item,
                 stagingEngine: stagingEngine
             })
         }
     }
 
-    // ── Center-left dock (surface: "dock") ─────────────────────────────────
-    // The temple's home: four self-framed stele gadgets (Conductor, Terminals,
-    // Meters, Power) stacked into one summoned column pinned to the LEFT edge,
-    // vertically centred. Owns its own PanelWindow + WlrLayershell + toggle
-    // GlobalShortcut (SUPER+G → aoide:dock) internally — shell.qml just hands it
-    // the shared singletons. Replaces the old AoideAgentWidgets hot-edge drawer.
-    AoidePanel {
-        id: aoidePanel
+    // ── Center-left dock (surface: "dock") ──────────────────────────────────
+    // The temple's home: five self-framed stele gadgets (Conductor, Usage,
+    // Terminals, Meters, Power) stacked into one summoned column pinned to the
+    // LEFT edge, vertically centred. Sonata's own `widgets/dock.qml` owns the
+    // whole surface — its own PanelWindow, WlrLayershell namespace and
+    // keyboard focus — the same `SurfaceSlot` contract powermenu/launcher/
+    // herald already carry (slots.md); it replaced the facet's own
+    // `AoidePanel.qml`, retired once this slot anchor landed. The toggle
+    // keybind stays a facet contract on purpose (so a song's dock body can
+    // never forget to bind it): `aoide:dock` (SUPER+G) is a Hyprland global
+    // shortcut registered here, dispatching into whatever `.item` the slot
+    // resolves — the same pattern SongSurfaces uses for a declared widget's
+    // own shortcut.
+    SurfaceSlot {
+        id: dockSlot
+        slot: "dock"
         livery: livery
         bridge: bridge
-        shared: shared
         stagingEngine: stagingEngine
+        // SurfaceSlot's fixed contract forwards only livery+bridge to the
+        // loaded body; `shared` and `stagingEngine` are threaded as extras
+        // because dock.qml's own embedded WidgetSlot gadgets (conductor,
+        // terminals, …) need both to resolve and render their own column —
+        // the same two-reads-of-one-singleton idiom barSlot uses above.
+        extraProps: ({ shared: shared, stagingEngine: stagingEngine })
+    }
+    GlobalShortcut {
+        appid: "aoide"
+        name: "dock"
+        description: "Summon the Aoide center-left codex dock"
+        onPressed: {
+            var item = dockSlot.item
+            if (item && item.toggle) item.toggle()
+        }
     }
 
     // ── Overlay surfaces — each owns its own PanelWindow internally, wired

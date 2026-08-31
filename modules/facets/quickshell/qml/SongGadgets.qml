@@ -6,14 +6,14 @@
 // (`stagingEngine.declaredWidgets(song)`), same overall shape as
 // SongSurfaces.qml, but the opposite mount: a `dock` entry has no layer
 // surface of its own (the compositor facet already filters it out of
-// layerrule generation) — it mounts as a plain Item straight into
-// AoidePanel's existing gadget column, alongside the shipped
-// ConductorGadget/TerminalsGadget/etc.
+// layerrule generation) — it mounts as a plain Item straight into sonata's
+// `widgets/dock.qml`'s existing gadget column, alongside the shipped
+// conductor/terminals/etc. `WidgetSlot`s.
 //
 // Rooted at Repeater, not Instantiator: SongSurfaces.qml hosts non-visual
 // `SurfaceSlot` QtObjects, so Instantiator (QtQml.Models) is the only tool
 // that fits. This is the opposite case — a VISUAL delegate list going
-// straight into `AoidePanel`'s `Column { id: stack }` — so `Repeater` is
+// straight into dock.qml's `Column { id: stack }` — so `Repeater` is
 // correct: it's `transparentForPositioner`, so zero delegates (today, since
 // no committed song declares a `kind: "dock"` entry) contributes zero
 // footprint and zero spacing, matching every other `Repeater`-in-a-`Column`
@@ -29,7 +29,7 @@
 // `Object.keys()` iteration order.
 //
 // Delegate: the real `WidgetSlot.qml` component directly (the same one
-// `herald-center` uses in AoidePanel.qml) — resolve/load logic is not
+// `herald-center` uses in dock.qml) — resolve/load logic is not
 // reimplemented here. Fixed injected-prop contract (CONTRACTS.md §5
 // containment): `livery` + `bridge` only, nothing else — no `extraProps`,
 // and that omission is load-bearing, not a style choice. `WidgetSlot

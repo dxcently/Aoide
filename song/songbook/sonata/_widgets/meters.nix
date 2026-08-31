@@ -1,7 +1,8 @@
 # sonata's `meters` slot — the compact CPU/RAM stele. `kind` absent → null:
-# no `WidgetSlot { slot: "meters" }` anchor is wired in the shipped dock yet
-# (its own header notes this), so it registers nothing today either way.
-# No sibling slots embedded, no uppercase helper instantiated.
+# facet-anchored, never a declared registry entry. Hosted by sonata's own
+# `widgets/dock.qml` (the shipped dock), one `WidgetSlot { slot: "meters" }`
+# in its gadget column. No sibling slots embedded, no uppercase helper
+# instantiated.
 _: {
   file = "meters.qml";
 }

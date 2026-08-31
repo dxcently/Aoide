@@ -1,7 +1,8 @@
-# sonata's `terminals` slot — the shells roster. `kind` absent → null: no
-# `WidgetSlot { slot: "terminals" }` anchor is wired in the shipped dock yet
-# (its own header notes this), so it registers nothing today either way.
-# No sibling slots embedded, no uppercase helper instantiated.
+# sonata's `terminals` slot — the shells roster. `kind` absent → null:
+# facet-anchored, never a declared registry entry. Hosted by sonata's own
+# `widgets/dock.qml` (the shipped dock), one `WidgetSlot { slot: "terminals" }`
+# in its gadget column. No sibling slots embedded, no uppercase helper
+# instantiated.
 _: {
   file = "terminals.qml";
 }

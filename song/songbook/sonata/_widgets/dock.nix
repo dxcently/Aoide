@@ -1,8 +1,7 @@
-# sonata's `dock` slot — the center-left codex, ported from the facet's
-# AoidePanel.qml (its own header: "the facet original stays in place until a
-# later phase retires it"). `kind` absent → null: no `SurfaceSlot { slot:
-# "dock" }` anchor is wired yet (that lands with the phase this file's header
-# names), so it registers nothing today.
+# sonata's `dock` slot — the center-left codex. `kind` absent → null:
+# facet-anchored (`shell.qml`'s `SurfaceSlot { slot: "dock" }`), never a
+# declared registry entry — same shape as `powermenu.nix`/`launcher.nix`.
+# The facet's own AoidePanel.qml, this slot's predecessor, is retired.
 #
 # `dependsOn`: dock.qml embeds one `WidgetSlot` per stele in its gadget
 # column, in stack order — conductor, terminals, usage (the ACTIVE one, under

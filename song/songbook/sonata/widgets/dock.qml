@@ -1,13 +1,11 @@
 // dock.qml — sonata's "dock" slot: the center-left DOCK (surface: "dock").
 //
-// Ported from the facet's AoidePanel.qml (per-song widget-slot expansion,
-// CONTRACTS.md §5) — ownership moves from the facet to sonata's score; the
-// facet original stays in place until a later phase (Phase 6) retires it, so
-// this file and AoidePanel.qml are momentarily twins. This slot is hosted by
-// `SurfaceSlot`, not `WidgetSlot` — the root below is a `PanelWindow`, not an
-// `Item`, so it owns its own layer, namespace and keyboard focus, the same
-// contract powermenu.qml and launcher.qml already carry (see slots.md). That
-// SurfaceSlot host wiring itself lands with Phase 6, not here.
+// The facet's former AoidePanel.qml is retired; this file is the dock —
+// ownership moved from the facet to sonata's score (per-song widget-slot
+// expansion, CONTRACTS.md §5). Hosted by `SurfaceSlot`, not `WidgetSlot` —
+// the root below is a `PanelWindow`, not an `Item`, so it owns its own
+// layer, namespace and keyboard focus, the same contract powermenu.qml and
+// launcher.qml already carry (see slots.md).
 //
 // A left-edge SLIDE-OUT dock whose container reads as the SIDE OF A BOOK peeking
 // out at the screen edge. The five self-framed marble-stele gadgets — Conductor ·
@@ -20,15 +18,14 @@
 // spread, no rotation — just a horizontal slide.
 //
 // ── Why GlobalShortcut stays OUT of this file ───────────────────────────────
-// The facet's AoidePanel.qml registers its own `aoide:dock` Hyprland global
-// shortcut in-process — ShellBridge is OUTBOUND-only and there is no inbound
-// CLI command to toggle a surface, same rationale as the old AoideLauncher's. That
-// keybind stays a FACET contract on purpose: Phase 6 keeps it in shell.qml,
-// dispatching into this slot, so a future song's dock body can't silently
-// forget to bind it. This file instead exposes the unconditional
-// `show()`/`hide()`/`toggle()` trio on its own root (below) — the same shape
-// powermenu.qml and launcher.qml already expose — for the host to call once
-// SurfaceSlot hands back `.item`.
+// `shell.qml` registers the `aoide:dock` Hyprland global shortcut itself,
+// dispatching into `dockSlot.item.toggle()` — ShellBridge is OUTBOUND-only
+// and there is no inbound CLI command to toggle a surface, same rationale as
+// AoideLauncher's. That keybind is a FACET contract on purpose, kept out of
+// this file, so a future song's dock body can't silently forget to bind it.
+// This file instead exposes the unconditional `show()`/`hide()`/`toggle()`
+// trio on its own root (below) — the same shape powermenu.qml and
+// launcher.qml already expose — for the host to call via `.item`.
 //
 // ── The slide + the peeking fore-edge ───────────────────────────────────────
 // The window is anchored to the LEFT edge only (top/bottom unanchored → pinned
@@ -42,7 +39,7 @@
 // elsewhere fall straight through; exclusiveZone 0 reserves nothing.
 //
 // `reveal` is driven by `dockOpen = shown || hotEdge || overPanel`:
-//   · shown    — the pinned toggle (SUPER+P / show()/hide()/toggle()); stays out.
+//   · shown    — the pinned toggle (SUPER+G / show()/hide()/toggle()); stays out.
 //   · hotEdge  — pointer inside the thin left hot strip (hover-peek).
 //   · overPanel— pointer anywhere over the drawn codex (keeps a peek open).
 // A ~450ms auto-hide grace after the hover union drops keeps it from flapping;
@@ -88,7 +85,7 @@ PanelWindow {
     id: root
 
     // ── Note + bridge + shared + stagingEngine dependencies (injected as
-    // SurfaceSlot extras by the host, Phase 6) ──────────────────────────────
+    // SurfaceSlot extras by shell.qml's `dockSlot`) ─────────────────────────
     required property var livery
     required property var bridge
     required property var shared

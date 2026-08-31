@@ -4,13 +4,11 @@
 // slot in this directory).
 //
 // Ported from the facet's ConductorGadget.qml (per-song widget-slot
-// expansion, CONTRACTS.md §5) — ownership moves from the facet to sonata's
-// score; the facet original stays in place until a later phase retires it,
-// so this file and ConductorGadget.qml are momentarily twins. No anchor
-// embeds `WidgetSlot { slot: "conductor" }` in the shipped dock yet — that
-// lands with the real dock host, not here (see slots.md for the anchored
-// catalog's own discipline: a slot is only listed there once a real anchor
-// is wired).
+// expansion, CONTRACTS.md §5) — ownership moved from the facet to sonata's
+// score. Live: sonata's own `widgets/dock.qml` embeds
+// `WidgetSlot { slot: "conductor" }` in its gadget column (slots.md's wired
+// table). The facet's ConductorGadget.qml stays in the tree but is no
+// longer instantiated by anything.
 //
 // THE PROGRAM — the roster reads as a CONCERT PLAYBILL: a pantheon entablature
 // over a hall of collapsible per-project FOLDERS, each folder a numbered

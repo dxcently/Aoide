@@ -34,7 +34,7 @@
 // Optional shortcut (options.nix `widgetType.shortcut`, e.g. "aoide:grimoire"):
 // one Hyprland GlobalShortcut per entry that declares a non-null shortcut,
 // split on ":" into appid/name (the same "appid, name" pair every other
-// GlobalShortcut in this codebase declares — AoidePanel's aoide:dock,
+// GlobalShortcut in this codebase declares — shell.qml's own aoide:dock,
 // AoideWallpaperPicker's aoide:wallpaper), calling `.toggle()` on the
 // loaded item IF it exposes one — same pattern CONTRACTS.md documents for
 // "the bar's clef calling `.item.toggle()`" on the powermenu slot, guarded

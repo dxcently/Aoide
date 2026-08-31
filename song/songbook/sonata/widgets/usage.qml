@@ -3,19 +3,17 @@
 // itself off its content, same as every other slot in this directory).
 //
 // Ported from the facet's UsageGadget.qml (per-song widget-slot expansion,
-// CONTRACTS.md §5) — ownership moves from the facet to sonata's score; the
-// facet original stays in place until a later phase retires it, so this
-// file and UsageGadget.qml are momentarily twins. No anchor embeds
-// `WidgetSlot { slot: "usage" }` in the shipped dock yet — that lands with
-// the real dock host, not here (see slots.md for the anchored catalog's own
-// discipline: a slot is only listed there once a real anchor is wired).
+// CONTRACTS.md §5) — ownership moved from the facet to sonata's score. Live:
+// sonata's own `widgets/dock.qml` embeds `WidgetSlot { slot: "usage" }` in
+// its gadget column (slots.md's wired table). The facet's UsageGadget.qml
+// stays in the tree but is no longer instantiated by anything.
 //
 // Through a WidgetSlot the old facet-host inversion (`UsageGadget { visible:
 // hasData }`, reaching into the child's own property) can't travel — the
-// slot sizes off THIS file's implicitHeight, so implicitHeight itself now
+// slot sizes off THIS file's implicitHeight, so implicitHeight itself
 // carries the collapse: zero while hasData is false, the real content
-// height once it's true. Phase 3 wires the anchor's own
-// `visible: implicitHeight > 0`.
+// height once it's true. The anchor's own `visible: implicitHeight > 0`
+// (dock.qml) reads that back.
 //
 import QtQuick
 import Quickshell

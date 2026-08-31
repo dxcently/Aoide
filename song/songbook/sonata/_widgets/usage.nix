@@ -1,7 +1,8 @@
 # sonata's `usage` slot — the claude.ai ledger stele. `kind` absent → null:
-# no `WidgetSlot { slot: "usage" }` anchor is wired in the shipped dock yet,
-# so it registers nothing today either way. No sibling slots embedded, no
-# uppercase helper instantiated.
+# facet-anchored, never a declared registry entry. Hosted by sonata's own
+# `widgets/dock.qml` (the shipped dock), one `WidgetSlot { slot: "usage" }`
+# in its gadget column. No sibling slots embedded, no uppercase helper
+# instantiated.
 _: {
   file = "usage.qml";
 }
