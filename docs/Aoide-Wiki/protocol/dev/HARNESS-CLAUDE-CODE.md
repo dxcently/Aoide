@@ -32,7 +32,7 @@ command through the agent's profile and never exits non-zero on a payload
 problem:
 
 `SessionStart` · `UserPromptSubmit` · `PreToolUse` · `PostToolUse` ·
-`Notification` · `Stop` · `SubagentStop` · `PreCompact` · `SessionEnd`
+`Notification` · `Stop` · `SubagentStop` · `SubagentStart` · `SessionEnd`
 
 `--capture` tees raw payloads for debugging; capture entries coexist with
 plain ones and must be removed by hand when done.
@@ -62,6 +62,14 @@ Two harness affordances the protocol depends on:
 ---
 
 ## Traps
+
+**A hook's stdout reaches the model on two events only.** `SessionStart` and
+`UserPromptSubmit` have their plain-text stdout added to context; every other
+event's stdout goes to a debug log and is seen by nobody. A hook that means to
+tell the agent something must speak on one of those two, or record now and be
+drained by one of them later. Stop has a model-reaching channel — a blocking
+decision — but it forces the conversation to continue, which makes a report
+into a command; the installed wrapper forecloses it deliberately.
 
 **Agents stall on backgrounded work.** A dispatched agent that starts a
 long build with a monitoring tool, or backgrounds it, routinely parks
