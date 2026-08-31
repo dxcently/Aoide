@@ -884,7 +884,7 @@ reads it, never ahead of one:
 defaultGrant = ["read"]
 
 [upkeep]
-verifyCommand = "nix flake check .#checks.x86_64-linux.{fmt,nix-lint}"
+verifyCommand = "nix build --no-link .#checks.x86_64-linux.fmt .#checks.x86_64-linux.nix-lint"
 ```
 
 - `pairing.defaultGrant` (list of strings, default `["read"]`) — the
@@ -900,18 +900,21 @@ verifyCommand = "nix flake check .#checks.x86_64-linux.{fmt,nix-lint}"
 - `upkeep.verifyCommand` (string, default `""`) — the shell command the
   check lane (`aoide session hook`'s SessionStart/Stop wiring,
   `aoide_upkeep::checklane`) runs to answer "is the working tree clean": a
-  `nix flake check` invocation on a nix host, `cargo test`/`make check`/
-  whatever the project uses on a non-nix host. A free-form scalar, not a list
-  from a closed vocabulary — core cannot know what "clean" means on every
-  host, so this is the one config value it never passes judgment on. Empty
-  (the default) disables the lane outright. **On a nix host, this MUST name
-  the fast checks only** (the example above: `fmt`/`nix-lint`, joined by
-  `lib/checks.nix`'s own `discovery`/`song-shape`/`no-song-read`/
-  `surface-ownership` — the check lane's fast-lane budget), never bare
-  `nix flake check` — the lane runs SYNCHRONOUSLY inside the hook, so an
-  unscoped invocation also evaluates the slow attributes (vm-boot,
-  `pkg-*`, portability), which routinely run for minutes and can stall
-  every `SessionStart`/`Stop` up to the harness's own hook timeout.
+  scoped `nix build` over the fast check attributes on a nix host,
+  `cargo test`/`make check`/whatever the project uses on a non-nix host. A
+  free-form scalar, not a list from a closed vocabulary — core cannot know
+  what "clean" means on every host, so this is the one config value it never
+  passes judgment on. Empty (the default) disables the lane outright. **On a
+  nix host, this MUST name the fast checks only** (the example above:
+  `fmt`/`nix-lint`, joined by `lib/checks.nix`'s own `discovery`/
+  `song-shape`/`no-song-read`/`surface-ownership` — the check lane's
+  fast-lane budget), never bare `nix flake check` — the lane runs
+  SYNCHRONOUSLY inside the hook, so an unscoped invocation also evaluates the
+  slow attributes (vm-boot, `pkg-*`, portability), which routinely run for
+  minutes and can stall every `SessionStart`/`Stop` up to the harness's own
+  hook timeout. The verb is `nix build`, not `nix flake check`: the latter
+  takes no attribute fragment, so scoping is only expressible as a build of
+  the check derivations.
 
 The schema lives in code as a walkable TABLE (`aoide_storage::config::SCHEMA`
 — sections, keys, each key's [`ValueKind`] (a closed-vocabulary list, or a
