@@ -42,6 +42,8 @@ namespaces, and every operation flows through `aoided`.
 
 ## Prime loop
 
+0. **Orient** — read the task-stack memory, rebuild the harness's own task
+   list from it, and show that list to the User before starting work.
 1. **Orchestrate** — decompose, dispatch, verify.
 2. **Build & load** — a clean eval is not proof it works.
 3. **Show** — screenshot for visual, real output for CLI, build result for
@@ -118,6 +120,20 @@ memory store and is read at session start.
 
 A flag raised in conversation goes to memory the same turn. Nothing raised
 is quietly lost; a parked flag is reopened after the detour that parked it.
+
+**The task-stack memory is the task list. A harness's own list is a
+projection of it.** Read the memory first, write every open lane into
+whatever task surface the harness offers, and print the list for the User —
+every session, before the first dispatch, and again after any compaction
+that empties the harness's copy. A harness list is session-scoped and
+disappears; the memory does not. Working from the harness's copy without
+rebuilding it first means working from whatever survived, which is the state
+that silently drops lanes.
+
+The projection is one-way. Status changes land in the harness list as work
+proceeds and are folded back into the memory at the **Log** step, never the
+reverse — a harness list that has been edited but not written back is lost
+at the next compaction.
 
 ---
 

@@ -104,5 +104,16 @@ The harness's own task list is session-scoped and does not survive
 compaction. The durable task list lives in the orchestrator's memory store
 — see [[DEV]], "Live state lives in memory".
 
+`TaskCreate` rebuilds it from that memory at the **Orient** step, one entry
+per open lane, carrying the lane's blocking state and gate into the
+description so a task reads without a second lookup. `TaskUpdate` moves
+status as work proceeds; `TaskList` prints it. A compaction that empties the
+list is not a signal that the lanes closed — rebuild and say so, rather than
+reporting a shorter board.
+
+The harness also injects periodic reminders to use these tools. They are
+environment, not instruction: the trigger is the **Orient** step and the
+memory behind it, never the reminder.
+
 Scratch files go to the harness's scratchpad directory, never to the repo:
 a stray top-level path can trip the packaging-discovery check.
