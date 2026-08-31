@@ -5192,8 +5192,12 @@ P2): it re-polls the approver's door every 5s for up to `--wait` seconds
 returns on the first tick. A timeout is NOT a failed pair: the request
 stays parked and `peer pair approve <id>` still finishes it, which is also
 what makes Ctrl-C safe. `--wait 0` restores the park-and-return shape for
-scripted callers. `--yes` skips THIS side's own confirmations (the sweep
-prompt and the final code confirm), never the far side's typed code.
+scripted callers — and `--allow` beside `--wait 0` is REFUSED, not dropped:
+nothing commits on that path and a grant is never persisted on a parked
+entry, so it is retyped on the `peer pair approve` that does commit. The
+wait's own deadline is MONOTONIC, so an NTP step or a suspend/resume
+mid-wait cannot defeat it. `--yes` skips THIS side's own confirmations (the
+sweep prompt and the final code confirm), never the far side's typed code.
 
 `peer pending` lists this instance's own parked requests, both
 directions, by id/direction/name/state — NEVER the SAS/confirmation
