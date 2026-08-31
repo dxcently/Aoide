@@ -150,6 +150,8 @@ protocol/_template/ingest/index.md
 protocol/_template/ingest/log.md
 references/AOIDE-HANDOFF.md
 references/AOIDE-VS-LANGCHAIN-HANDOFF.md
+references/Glass-Stretch-on-a-Rotated-Monitor.md
+references/audit-report.md
 references/fleshing-out-aoide-ricing.md
 references/pantheon/pantheon-grammar.md
 ```
