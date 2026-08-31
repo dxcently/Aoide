@@ -95,6 +95,13 @@
   # Audio backend (PipeWire + WirePlumber) — real volume control for the bar.
   aoide.audio.enable = true;
 
+  # claude.ai usage ledger — the dock's Usage stele reads state/usage.json,
+  # and this flag is the only thing that keeps it fed; without the poller the
+  # gadget draws whatever the last hand-run left and marks itself stale. The
+  # live half spends this account's own OAuth token, which is why the option
+  # ships off and a host opts in by name.
+  aoide.usage.enable = true;
+
   # NetworkManager applet (nm-connection-editor + nm-applet; NM itself is the
   # venue's own `networking.networkmanager.enable` above).
   aoide.networkmanager.enable = true;

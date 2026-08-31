@@ -681,8 +681,10 @@ in
         default = "300s";
         description = ''
           Poller cadence (systemd `OnUnitActiveSec` duration) for `aoide
-          usage`, which writes the local-estimate half of `state/usage.json`
-          (CONTRACTS.md §4). No network, no credentials.
+          usage`, which writes `state/usage.json` (CONTRACTS.md §4): the
+          local token/cost rollup from this machine's own transcripts, plus
+          the live claude.ai block the unit spawns `curl` for. The widget
+          calls a document stale at three times this cadence.
         '';
       };
     };
