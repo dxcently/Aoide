@@ -174,7 +174,20 @@ even when A's door accepts no routable connection at all.
   nothing an Approve click doesn't already prove. Both dialogs share a
   `"Reject request"` rejection control; a bare Cancel/Escape leaves the
   request offered again next tick; either binary failing to spawn backs
-  off the retry cadence rather than silently dropping the request.
+  off the retry cadence rather than silently dropping the request. Both
+  dialogs run on a 60s TIMER — an unanswered dialog closes as a TIMEOUT,
+  which is never a rejection and never lands in the ignored set
+  ("didn't answer within a minute" is not "no"): the request is offered
+  again after a 30s cooldown. The watcher polls outbound entries still
+  `awaiting-approval` on its OWN 60s timer (through the same
+  poll-once seam the blocking command uses), which is what lets a
+  detached (`--wait 0`) or timed-out request's confirm dialog ever fire;
+  the 200ms popup tick itself never makes a network call. And a LIVE
+  blocking `aoide pair` holds a pid marker for its id
+  (`$XDG_RUNTIME_DIR/aoide/`, the tunnel-record convention) that
+  suppresses the watcher's dialog for that id — two surfaces never race
+  one commit; a marker naming a dead pid is stale, cleaned up, and
+  suppresses nothing.
 - **`aoide pair` takes exactly ONE positional, and its two subcommands win
   over a same-named hostname target.** A second positional — old `peer
   pair request <url>` muscle memory is the one that bites — is refused
