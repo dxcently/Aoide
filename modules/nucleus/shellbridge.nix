@@ -201,6 +201,37 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
       };
     };
 
+    # ── polkit: the powermenu's power actions ────────────────────────────────
+    # The bridge runs as a systemd USER service, so everything it spawns sits
+    # in `user@<uid>.service/app.slice/shellbridge.service` — outside any
+    # `session-N.scope`. polkit resolves a subject's session from its cgroup,
+    # finds none here, and so never reaches `allow_active` on the login1
+    # actions: it falls through to `allow_any = auth_admin_keep` and the
+    # powermenu's `systemctl reboot` dies with "Access denied … interactive
+    # authentication has not been enabled by the calling program". LOCK and
+    # LOGOUT are unaffected because hyprlock and hyprctl never ask polkit.
+    #
+    # The grant keys on the user alone, deliberately: `subject.active` is
+    # exactly the condition that cannot hold for a user unit. It widens
+    # nothing in practice — a shell inside the graphical session already
+    # authorizes for these four without a password (`pkcheck --action-id
+    # org.freedesktop.login1.reboot --process $$` exits 0), so this extends
+    # the same reach to the bridge acting on that session's behalf.
+    #
+    # The four ids are PowerAction::command()'s table in
+    # `crates/conduct/src/shellbridge.rs` — suspend, hibernate, reboot, poweroff.
+    security.polkit.extraConfig = ''
+      polkit.addRule(function(action, subject) {
+        if (subject.user === "${config.aoide.user}" &&
+            (action.id === "org.freedesktop.login1.reboot" ||
+             action.id === "org.freedesktop.login1.power-off" ||
+             action.id === "org.freedesktop.login1.suspend" ||
+             action.id === "org.freedesktop.login1.hibernate")) {
+          return polkit.Result.YES;
+        }
+      });
+    '';
+
     # ── Liveness reaper: timer + oneshot service ─────────────────────────────
     # A terminal killed with SUPER+Q / SIGKILL is torn down uncatchably, so the
     # `conduct`/`wrap` process can never run its own `session end` — the

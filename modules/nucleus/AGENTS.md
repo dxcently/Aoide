@@ -27,6 +27,15 @@ covers only what's specific to nucleus.
   house rule 1 — `song/` is the only agent-writable domain). An agent
   proposing a nucleus change writes the diff and gets it reviewed/merged
   the normal way, same as any other core-structure change.
+- **A user unit gets no polkit session.** Anything spawned from a
+  `systemd.user.services.*` here lands outside `session-N.scope`, so polkit
+  resolves no session for it and `allow_active` never fires — the action
+  falls through to `allow_any` and is refused for want of interactive auth.
+  A privileged action reached that way needs an explicit
+  `security.polkit.extraConfig` rule keyed on `config.aoide.user`, declared
+  in the same file as the unit (`shellbridge.nix` and its power actions).
+  `pkcheck --action-id <id> --process <pid>` is the check: exit 0 is
+  authorized, exit 2 is the refusal.
 
 ## Extension points
 
