@@ -208,7 +208,7 @@ lib.mkIf config.aoide.enable {
   # switch (state/advertise.json) makes it send a one-line UDP BROADCAST
   # advertisement to 255.255.255.255:8711 (wire v2: name + ssh hop claim
   # {host, user}, never a URL, key, or credential) every ~30s so `aoide
-  # peer discover`/`peer pair`'s hostname arm on other boxes can hear this
+  # peer discover`/`aoide pair`'s hostname arm on other boxes can hear this
   # instance —
   # discovery grants nothing by itself, the pairing ceremony above is
   # still the only thing that ever writes a peer record.
@@ -250,7 +250,7 @@ lib.mkIf config.aoide.enable {
   # ── Pairing events watcher (P-P5; popup upgraded to a typed-code entry
   # dialog + lyra/zenity feature-detection, and gated behind its own opt-in
   # flag, at P-PV3 task #132) ────────────────────────────────────────────────
-  # Surfaces the pairing ceremony's own events feed (`peer pair watch
+  # Surfaces the pairing ceremony's own events feed (`aoide pair watch
   # --popup`, CONTRACTS.md §6's "Pairing events feed" subsection) as a
   # typed-code entry dialog per actionable request — the same unit shape
   # `secrets.nix`'s own `aoide-secrets-watch` holds (graphical-session.target,
@@ -301,7 +301,7 @@ lib.mkIf config.aoide.enable {
           Restart = "on-failure";
           RestartSec = "3s";
 
-          ExecStart = "${pkgs.aoide}/bin/aoide peer pair watch --popup";
+          ExecStart = "${pkgs.aoide}/bin/aoide pair watch --popup";
 
           Environment = [
             "AOIDE_ROOT=${config.aoide.root}"

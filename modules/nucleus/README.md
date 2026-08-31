@@ -24,7 +24,7 @@ module builds against what nucleus declares.
   without it (task #98). Declares a graphical-session USER unit,
   `aoide-pair-watch.service` (P-P5; the popup upgraded to a dialog shaped
   by pairing direction + `lyra`/zenity feature-detection at P-PV3, task
-  #132), running `aoide peer pair watch --popup` — gated on
+  #132), running `aoide pair watch --popup` — gated on
   `aoide.a2a.enable && aoide.facets.quickshell.enable &&
   aoide.a2a.pairingPopup` (the last DEFAULT FALSE, opt-in on top of the
   desktop-facet gate, never assumed just because a2a and quickshell are

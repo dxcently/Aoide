@@ -25,7 +25,7 @@ there is no "this peer may spawn, that one may not."
    versions and minimal features). This deliberately breaks the
    zero-new-deps discipline; the User authorized the break for
    cryptography specifically, 2026-08-25.
-2. **One ceremony: `aoide peer pair`.** Pairing is THE setup for
+2. **One ceremony: `aoide pair`.** Pairing is THE setup for
    connecting instances, and the ONLY verification. It exchanges
    public keys, marks the peer verified on both ends, and stamps the
    default permissions. The old mechanisms (`token_file`, hand-set
@@ -49,7 +49,7 @@ there is no "this peer may spawn, that one may not."
    Default for a PAIRED (verified) peer: `config.toml`'s `[pairing]
    defaultGrant`, itself `["read"]` — `spawn` is an explicit widening,
    either standing (`aoide config set pairing.defaultGrant read,spawn`) or
-   for one ceremony (`peer pair approve --allow read,spawn`).
+   for one ceremony (`aoide pair --allow read,spawn`).
    An unpaired peer: empty set. Session-level granularity stays open:
    the identity lane (#63) landed the sealed session credential and
    the broker's origin gate, but per-session capability gates (the
@@ -78,7 +78,7 @@ there is no "this peer may spawn, that one may not."
 
 ## Identity
 
-- Keypair minted lazily on first need (`peer pair` or an explicit
+- Keypair minted lazily on first need (`aoide pair` or an explicit
   `aoide identity` command — the executor proposes the command shape),
   stored under the state dir, private key 0600, never printed, never
   in an Outcome. The public key and its fingerprint are freely
@@ -102,7 +102,7 @@ messages later.
 
 ```
 box A                                      box B
-aoide peer pair <target> [--name b]
+aoide pair <target> [--name b]
   (a URL dials directly; a bare hostname
    resolves it first, a ~45s discovery
    sweep — see Discovery, below)
@@ -118,9 +118,9 @@ aoide peer pair <target> [--name b]
 both sides now display the SAME SAS, derived from (pubkey_A, pubkey_B,
 nonce_A, nonce_B) — B's copy only computable once the reveal landed
                                            operator: CLI prompt on next
-                                           `aoide peer pending` /
+                                           bare `aoide pair` /
                                            popup via the events feed
-                                           aoide peer pair approve [<id>]
+                                           aoide pair [<id>]
 B's operator TYPES the code as read off A's screen (out-of-band — a
   phone call, a glance; `--code NNN-NNN` scripted); B compares it against
   its OWN derived SAS, never echoing that SAS in the prompt. A wrong code
@@ -132,23 +132,23 @@ B's operator TYPES the code as read off A's screen (out-of-band — a
   from A's parked selfVia claim if one rode the request — see below;
   B's own parked entry is marked approved and left PARKED — no
   callback, nothing dials A
-A's own `peer pair` is STILL RUNNING and polling every 5s (task #135 P2,
-  up to --wait, default 600s); `aoide peer pair approve <id>` is the same
+A's own `aoide pair` is STILL RUNNING and polling every 5s (task #135 P2,
+  up to --wait, default 600s); `aoide pair <id>` is the same
   poll on demand, for a request A detached from (--wait 0) or timed out on
   → POST signed poll ─────────────────────► verifies A's signature against
      (id, timestamp, nonce,                    the pubkey A supplied at
       signature over "PAIRPOLL"+id+...)        request time; approved? →
   ◄── B's pubkey, IF approved ─────────────┘   release; else → "pending"
 A's outbound entry now carries the SAME SAS a second time, re-derived by
-`peer pair approve` itself (state awaiting-confirm, visible in `peer
-pending`'s row as that state — never the code itself, P-PV2); A's own
+`aoide pair` itself (state awaiting-confirm, visible in bare `aoide
+pair`'s row as that state — never the code itself, P-PV2); A's own
 operator confirms it y/N
 (A's screen printed this code itself at request time — the typed-code
-gate is B's side) in the SAME `peer pair approve <id>` invocation that
-just polled — or in A's still-running `peer pair`, which reaches the same
+gate is B's side) in the SAME `aoide pair <id>` invocation that
+just polled — or in A's still-running `aoide pair`, which reaches the same
 confirm-and-commit — ONLY THEN does A's own peer record commit. A timeout
 leaves the request parked, so the two paths are interchangeable.
-`aoide peer pair reject <id>` on A's outbound entry aborts at any point
+`aoide pair reject <id>` on A's outbound entry aborts at any point
 before that confirm, with no wire call and no record on either end.
 ```
 
@@ -160,7 +160,7 @@ complete. Now nothing ever dials IN to A — A polls B over the SAME forward
 dial its own `request`/`reveal` already used, so pairing works end to end
 even when A's door accepts no routable connection at all.
 
-- **`peer pair watch --popup` is opt-in** (`aoide.a2a.pairingPopup`, nix
+- **`aoide pair watch --popup` is opt-in** (`aoide.a2a.pairingPopup`, nix
   option, default off) and shows a dialog shaped by pairing DIRECTION,
   never one bare yes/no for both. The INBOUND (approver) direction
   collects the typed code the same way the CLI tty prompt and the scripted
@@ -175,14 +175,14 @@ even when A's door accepts no routable connection at all.
   `"Reject request"` rejection control; a bare Cancel/Escape leaves the
   request offered again next tick; either binary failing to spawn backs
   off the retry cadence rather than silently dropping the request.
-- **`peer pair` takes exactly ONE positional, and its three subcommands win
+- **`aoide pair` takes exactly ONE positional, and its two subcommands win
   over a same-named hostname target.** A second positional — old `peer
   pair request <url>` muscle memory is the one that bites — is refused
   outright, before either the URL or hostname arm ever runs, naming the
-  fold in the refusal itself; `peer pair approve`/`reject`/`watch` are
+  fold in the refusal itself; `pair reject`/`pair watch` are
   registered subcommands and match BEFORE a bare hostname positional of
-  the same literal spelling, so a box actually named `approve` (or
-  `reject`/`watch`) cannot be paired by that bare name — the explicit URL
+  the same literal spelling, so a box actually named `reject` (or
+  `watch`) cannot be paired by that bare name — the explicit URL
   form always works.
 - The short authentication string (SAS) is derived from a transcript
   hash over both public keys + both nonces — SHA-256 over the four
@@ -193,14 +193,14 @@ even when A's door accepts no routable connection at all.
   THE gate against an active on-path attacker; the poll is retrieval,
   never a second source of trust — it releases nothing until BOTH ends
   have already committed to the SAME transcript.
-- **`aoide peer pending` never shows the SAS (P-PV2, the User's locked
+- **Bare `aoide pair` never shows the SAS (P-PV2, the User's locked
   spec).** The code is read off the REQUESTER's own screen and typed on
   the APPROVER's — printing it in a listing either operator can glance at
   would collapse that out-of-band comparison into a copy exercise. Each
-  side's own `peer pair approve` independently re-derives it, exactly as
-  above; `peer pending`'s rows carry the id, direction, and state only.
-  `peer pair approve` itself takes its `<id>` argument only when more than
-  one request is pending — with exactly one, the id is optional.
+  side's own `aoide pair` independently re-derives it, exactly as
+  above; bare `aoide pair`'s rows carry the id, direction, name, and state — never the code.
+  Targeting a request by id is only required when more than
+  one request is pending — with exactly one, the target is optional.
 - A pairing request that is never approved (or never confirmed on A's
   own side) expires (timeout knob, default generous — hours, not
   minutes; it waits for a human, twice). An APPROVED-but-not-yet-polled
@@ -222,7 +222,7 @@ even when A's door accepts no routable connection at all.
   `aoide/pairRequest` B ever sees from A arrives over A's own tunnel — B
   can only OBSERVE the connection as loopback, and nothing about the
   connection itself says how to dial A back. So the ceremony's OWN dial
-  (A's `peer pair`, either arm) rides the SAME derived `via` its
+  (A's `aoide pair`, either arm) rides the SAME derived `via` its
   record always got — no longer only the record, per Transport's own
   section — and A's request carries an OPTIONAL `selfVia` claim (`ssh://
   [user@]host`, defaulting to A's own `$USER`/`$LOGNAME` login at the
@@ -232,7 +232,7 @@ even when A's door accepts no routable connection at all.
   you reach me back," the same trust class as the `url` field beside it
   (self-asserted data, a transport marker only — trust stays in pubkeys +
   SAS, never either field). When B's parked entry carries that claim,
-  `peer pair approve`'s commit sets the resulting peer's `url` to
+  `aoide pair`'s commit sets the resulting peer's `url` to
   `http://127.0.0.1:<port>/` (loopback-as-seen-from-the-far-side — the
   sakaki/chiyo/osaka rows in a live `peers.json` are this exact shape),
   where `<port>` is A's OWN door port, parsed off A's `url` on the parked
@@ -246,7 +246,7 @@ even when A's door accepts no routable connection at all.
 - The inbound park queue is capped (`AOIDE_PAIRING_PARK_CAP`, default
   32) — an unauthenticated door refusing to park indefinitely, the same
   discipline the secrets broker's own ask-park queue holds. Outbound
-  entries are operator-created, one per `peer pair` invocation,
+  entries are operator-created, one per `aoide pair` invocation,
   and carry no cap.
 - **The poll authenticates without a peer record.** `aoide/pairPoll`
   cannot use the paired-peer signed-header scheme below — no verified
@@ -418,6 +418,21 @@ the full count-site checklist (git show 9c2d05c).
   false) — the unit's desktop-facet gate is unchanged, this flag is the
   deliberate opt-in on top of it, modules' own "flags default off" house
   rule.
+- **Task #135 P3' — the one-verb collapse (M, "the command set can just
+  be `aoide pair`").** `peer.pair`, `peer.pair.approve`, `peer.pair.
+  reject`, `peer.pair.watch`, and `peer.pending` DIE outright — hard
+  cutover, no aliases, same as `peer.invite` before them. Bare `pair`
+  (already registered) becomes the ONE verb: with no target it is the
+  pending listing (interactive menu over pending requests plus heard
+  advertisers on a real CLI tty, the JSON-friendly listing off a tty /
+  with `--json` / on a non-CLI door); with a target, an exact
+  pending-request-id match wins over a name match, a pending inbound
+  request from the target is approved, a pending outbound one is
+  resumed, and anything else starts a new request. `pair.reject` and
+  `pair.watch` register as the two remaining subcommands of `pair`. The
+  `peer` family keeps the roster (add/list/allow/hub/spawn/pull/status/
+  discover/advertise); `pair` mints the verified records those operate
+  on. Golden count 82 → 79.
 
 Live gates at the end of the lane: a real pair between yomi and
 sakaki via the ceremony (codes compared on real terminals), a spawn
@@ -465,7 +480,7 @@ ceremony; discovery only tells you who is there to invite.
   `aoide.a2a.discoveryAdvertise` is on, since that flag is already
   the operator's deliberate opt-in to being found on the LAN; a box
   that only ever wants to receive (advertising off, running `peer
-  discover`/`peer pair` against others) must open that port itself.
+  discover`/`aoide pair` against others) must open that port itself.
 - **`aoide peer discover [--secs N]`** listens briefly (default a few
   seconds), dedupes by (name, source address) into a BOUNDED
   in-memory fold (a hostile flood of fabricated names is counted
@@ -488,20 +503,20 @@ ceremony; discovery only tells you who is there to invite.
   a self-reported field can. `peer discover` shows both, side by
   side, precisely so the two can be seen disagreeing; anything that
   dials uses the OBSERVED address, never the claimed one.
-- **`aoide peer pair <name>`'s hostname arm** is sugar over the ceremony,
+- **`aoide pair <name>`'s hostname arm** is sugar over the ceremony,
   nothing more: any target that isn't URL-shaped (no `"://"`) runs its
   own discover sweep, resolves `<name>` to the matching advertisement
   (ambiguous or absent name = taught error listing what WAS heard),
   composes a dial target from that advertisement's OBSERVED source
   address on the house door port (`AOIDE_A2A_PORT` or 8710 — the wire
   carries no port to read; a far end on a non-default port takes the
-  explicit URL-target arm, `peer pair <url>`), shows the claimed hop and
+  explicit URL-target arm, `pair <url>`), shows the claimed hop and
   the observed address, and then runs the SAME `run_pair_request` flow
   the URL arm runs against the composed target — recording a `via`
   derived from the observed address plus the claimed login for the
   resulting peer's future calls. One ceremony stays the only
   verification.
-- **`peer pair`'s hostname arm refuses to pair with yourself.** A
+- **`pair`'s hostname arm refuses to pair with yourself.** A
   broadcast always loops back to its own sender, so a box that advertises
   hears itself every sweep. Before dialing anything, it checks whether
   the resolved target is this instance's own advertisement: the heard
@@ -510,7 +525,7 @@ ceremony; discovery only tells you who is there to invite.
   against yourself. KNOWN GAP: a serve advertising under a custom
   `--peer-name` (flag only — the env/hostname tiers agree on both
   sides) escapes the name arm, and the self-heard broadcast arrives on
-  the physical interface so the loopback arm misses too — `peer pair
+  the physical interface so the loopback arm misses too — `aoide pair
   <own-custom-name>` will dial this box's own door and park a
   self-pairing request. Confusion, not compromise: both SAS codes land
   in front of the same operator, and the ceremony commits nothing
@@ -551,13 +566,13 @@ forward is a pipe, not a party to the protocol.
   `aoide_storage::tunnel::dial_url` is the one place this cut happens,
   deliberately sharing `peer_store::url_path` with the signer rather than
   re-deriving it, so the two can never drift apart.
-- **`peer pair`'s hostname arm/bare `pair` derive a `via` automatically, and
+- **`pair`'s hostname arm/bare `pair` derive a `via` automatically, and
   (task #131) the ceremony's OWN dial rides it too.** Discovery's own
   observed source address (this document's Discovery section, above) is
   only ever reachable directly when the advertising box's door itself
   binds somewhere routable — against a loopback-only door (this section's
   own opening invariant), a direct dial to that address never connects at
-  all. So `peer pair`'s hostname arm/bare `pair` derive a `via` from the
+  all. So `pair`'s hostname arm/bare `pair` derive a `via` from the
   observed address plus the advertisement's claimed ssh login, and that
   SAME default now drives BOTH halves: the ceremony's own two POSTs dial
   through it, and it is recorded on the resulting peer once pairing is
@@ -565,7 +580,7 @@ forward is a pipe, not a party to the protocol.
   transport marker too. The one exception is an advertisement with no ssh
   claim at all (empty login) — nothing to tunnel through, so the dial
   stays direct, the same shape it held before task #131. An explicit
-  `--via` on `peer pair`, either arm, overrides this for both the
+  `--via` on `pair`, either arm, overrides this for both the
   ceremony's own dial and the recorded marker, exactly as before.
 - **The APPROVER'S side needs the SAME answer, from the OTHER direction —
   this is what `selfVia` is for (task #131).** Everything above describes
@@ -587,7 +602,7 @@ forward is a pipe, not a party to the protocol.
   `url` field beside it on that same wire message either way:
   self-asserted data, a transport marker only, never itself a source of
   trust (trust stays in pubkeys + the SAS comparison, "The ceremony"
-  section above). `peer pair approve`'s commit reads it: present, the
+  section above). `aoide pair`'s commit reads it: present, the
   resulting peer gets `via` set to the claim and `url` rewritten to
   `http://127.0.0.1:<port>/`, where `<port>` is parsed off the
   REQUESTER's own `url` (their real door port — never this box's own

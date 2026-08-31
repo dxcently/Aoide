@@ -309,19 +309,20 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   the [[A2A-Door]]'s AgentCard is derived from the same schema — all
   one-to-one. **80 commands** — real (73): `guide`, `schema`,
   `mcp serve`, `daemon`, `events tail`, `conduct`, `conductor`, `adapter
-  melete`, `identity`, bare `pair` (the interactive pairing picker —
-  [[Pairing-Ceremony]]), the `melete` group (`status`/`graph`/`call` — the
+  melete`, `identity`, `pair`/`pair reject`/`pair watch` (the whole
+  pairing ceremony behind one smart verb, bare `pair` the interactive
+  pending listing — [[Pairing-Ceremony]]), the `melete` group
+  (`status`/`graph`/`call` — the
   Melete MCP client), the
   1-command `a2a` door group (`a2a serve` — the outbound client is the `peer`
   group below, not a separate `a2a agent` family),
-  the 15-command `peer` group (`peer add/remove/pull/status/hub`,
+  the 10-command `peer` group (`peer add/remove/pull/status/hub`,
   `peer allow`/`spawn`, the LAN `peer discover` listener with its
-  `peer advertise on|off` switch, the pairing ceremony — smart-target
-  `peer pair <target>` with `approve`/`reject`/`watch` beneath it and
-  `peer pending` beside it — and `peer list`, the
+  `peer advertise on|off` switch, and `peer list`, the
   one-glance mesh roster — cross-device peer federation,
   [[Peer-Federation]]; `peer status --json` keeps the deep per-peer row
-  the roster never duplicates), the 17-command `secrets` group
+  the roster never duplicates — the pairing ceremony that mints these
+  records lives under `pair`, above), the 17-command `secrets` group
   (`serve`/`exec`/`add`/`rm`/`grant`/`revoke`/`enroll`/`put`/`set-totp`/
   `automate`/`expose`/`allow-remote-origin`/`migrate`/`pending`/`approve`/`dismiss`/`watch` — the
   socket-only credential broker under its own uid, [[Secrets-Broker]]),

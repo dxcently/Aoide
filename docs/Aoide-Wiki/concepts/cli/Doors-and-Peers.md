@@ -432,16 +432,19 @@ aoide peer hub <name> [--clear]
   else matches, never shadowing a real registered name. See
   [[Peer-Federation]].
 
-### aoide peer pair / peer pending
+### aoide pair
 
 ```
-aoide peer pair <target> [--name <n>] [--via ssh://[user@]host[:port]]
-                  [--self-via ssh://[user@]host] [--json]
-aoide peer pending
-aoide peer pair approve [<id>] [--yes] [--code NNN-NNN]
-aoide peer pair reject <id>
-aoide peer pair watch [--popup] [--json]
+aoide pair [<name|url|id>] [--name <n>] [--via ssh://[user@]host[:port]]
+            [--self-via ssh://[user@]host] [--secs N] [--wait SECS]
+            [--allow read,spawn] [--yes] [--json]
+aoide pair reject <id|name>
+aoide pair watch [--popup] [--json]
 ```
+
+One smart verb (`handle_pair`) for the whole ceremony — the old
+`peer pair`/`peer pending`/`peer pair approve|reject|watch` family died
+outright at task #135 P3', hard cutover, no aliases.
 
 - **Reads:** the parked pairing state `state/peer-pairing-inbound.json` /
   `state/peer-pairing-outbound.json` (`aoide_storage::pairing`,
@@ -449,57 +452,72 @@ aoide peer pair watch [--popup] [--json]
   instance's ed25519 identity (`state/identity/`, minted lazily on first
   need — `ed25519.key` at 0600 inside the 0700 directory, never appearing
   in any output; `aoide identity` shows the pubkey and its colon-hex
-  fingerprint). `peer pair <target>` takes exactly ONE positional — a
-  second is refused outright, before either arm runs, naming the fold in
-  the refusal, and the `approve`/`reject`/`watch` subcommand names match
-  BEFORE a bare hostname positional of the same spelling (a box named
-  `approve` pairs only by the explicit URL form). A URL-shaped target
-  (`"://"`) POSTs `aoide/pairRequest` then `aoide/pairReveal` — two
-  sequential POSTs in one invocation — to that instance's A2A door; a bare
-  hostname first runs its own ~45s discovery sweep, resolving the name to
-  the matching advertisement's OBSERVED source address on the house door
-  port (`AOIDE_A2A_PORT` or 8710 — the wire carries no port to read), and
-  an ambiguous or absent name is a taught error listing what WAS heard.
-  Both arms drive the same `run_pair_request` core, and the hostname arm
-  refuses to pair with this instance itself (heard name matching its own,
-  or the datagram from loopback). `approve` on the
-  inbound (approver) side is purely local: it commits its record and marks
-  the parked entry approved, dialing nobody. `approve` on the outbound
-  (requester) side first POLLS `aoide/pairPoll` — a signed POST over the
-  SAME forward dial the request used — and completes only when the
-  approver's parked entry answers approved. `watch` follows the daemon
+  fingerprint). `aoide pair` takes exactly ONE positional — a second is
+  refused outright, before any arm runs, naming the fold in the refusal,
+  and the `reject`/`watch` subcommand names match BEFORE a bare hostname
+  positional of the same spelling (a box named `reject` or `watch` pairs
+  only by the explicit URL form). Bare `pair` (`pair_overview`) is the
+  pending listing — an interactive menu over pending requests plus heard
+  advertisers on a real CLI tty, the JSON-friendly listing off a tty /
+  with `--json` / on a non-CLI door. A target (`pair_continue_or_request`)
+  dispatches by match: an exact pending-request-id wins over a name
+  match; a pending INBOUND request from the target is approved
+  (`approve_inbound_leg`); a pending OUTBOUND one is resumed
+  (`resume_outbound_leg`); a target matching nothing pending starts a NEW
+  request — a URL-shaped target (`"://"`) POSTs `aoide/pairRequest` then
+  `aoide/pairReveal` — two sequential POSTs in one invocation — to that
+  instance's A2A door; a bare hostname first runs its own ~45s discovery
+  sweep, resolving the name to the matching advertisement's OBSERVED
+  source address on the house door port (`AOIDE_A2A_PORT` or 8710 — the
+  wire carries no port to read), and an ambiguous or absent name is a
+  taught error listing what WAS heard. Both arms drive the same
+  `run_pair_request` core, and the hostname arm refuses to pair with this
+  instance itself (heard name matching its own, or the datagram from
+  loopback). A target resolving to an already-`verified: true` peer
+  confirms (`confirm_repair_if_verified`) before re-running the ceremony
+  and replacing its key material — `--yes` scripted, the explicit URL arm
+  stays ungated. Approving an inbound request is purely local: it commits
+  its record and marks the parked entry approved, dialing nobody.
+  Resuming an outbound request first POLLS `aoide/pairPoll` — a signed
+  POST over the SAME forward dial the request used — and completes only
+  when the approver's parked entry answers approved; starting a NEW
+  request then BLOCKS (`wait_and_commit`) up to `--wait` seconds (default
+  600) polling every 5s to complete the pair in the one command —
+  `--wait 0` parks and returns (`--allow` is refused on that path, a
+  grant never persisted on a parked entry); on a resume, `--wait 0`
+  polls exactly once. `watch` (`handle_pair_watch`) follows the daemon
   events feed (`$XDG_RUNTIME_DIR/aoide/events.jsonl`, same path
   `events tail` reads) for the `pair-parked`/`pair-revealed` lines
   (`class: "gate"`, `source: "a2a-door"`) and re-derives the actionable
   set from `list_inbound`/`list_outbound` on a 30s reconcile tick — the
   feed line is a trigger, the storage-backed list the authority. The
   actionable set is inbound-only: an outbound entry completes inside the
-  operator's own polling `approve`, so watch never surfaces one.
-- **Writes:** `peer pair` parks the outbound half; `approve` commits a
-  `pubkey`/`verified` peer record into `state/peers.json`
-  (`peer_store::upsert_paired_peer`, stamping `config.toml`'s `[pairing]
-  defaultGrant` or the commit's own `--allow`),
-  dispatching by direction — inbound queue first, then outbound — so the
-  requester's own confirm is a SECOND `approve` against the outbound
-  queue, the one that polls. When the parked request carries the
-  requester's `selfVia` claim, the inbound commit also sets the peer's
-  `url` to `http://127.0.0.1:<port>/` (port parsed off the requester's
-  advertised url) and `via` to the claim in the same write
-  ([[Peer-Transport]]); `reject` removes the parked entry
-  locally on either queue, no wire call, no record.
-- **Output:** `peer pair` prints the derived SAS (the `%03d-%03d`
-  confirmation code, `aoide_storage::pairing::derive_sas`) plus the
-  request's short id; `peer pending`
-  lists both directions, each row carrying host, id, direction, and state —
-  NEVER the code, which stays out-of-band (an unrevealed inbound entry
-  shows `revealed: false`);
-  `approve [<id>]` re-derives the SAS (the id optional when exactly one
-  request is pending) and the gate differs by side — an INBOUND
-  id asks the operator to TYPE the code as read off the requester's
+  operator's own `aoide pair`, so watch never surfaces one.
+- **Writes:** starting or resuming a request parks/re-polls the outbound
+  half; approving commits a `pubkey`/`verified` peer record into
+  `state/peers.json` (`peer_store::upsert_paired_peer`, stamping
+  `config.toml`'s `[pairing] defaultGrant` or the commit's own
+  `--allow`), dispatching by direction — inbound queue first, then
+  outbound — so the requester's own confirm is a SECOND `aoide pair`
+  against the outbound queue, the one that polls. When the parked
+  request carries the requester's `selfVia` claim, the inbound commit
+  also sets the peer's `url` to `http://127.0.0.1:<port>/` (port parsed
+  off the requester's advertised url) and `via` to the claim in the same
+  write ([[Peer-Transport]]); `aoide pair reject <id|name>` removes the
+  parked entry locally on either queue, no wire call, no record — by
+  name it matches exactly one pending request or refuses as ambiguous.
+- **Output:** starting a new request prints the derived SAS (the
+  `%03d-%03d` confirmation code, `aoide_storage::pairing::derive_sas`)
+  plus the request's short id; bare `pair` lists both directions, each
+  row carrying host, id, direction, and state — NEVER the code, which
+  stays out-of-band (an unrevealed inbound entry shows `revealed:
+  false`); a target re-derives the SAS (the target optional when exactly
+  one request is pending) and the gate differs by side — an INBOUND
+  match asks the operator to TYPE the code as read off the requester's
   screen (the prompt never echoes the expected value; `--code NNN-NNN`
   scripted; a wrong code counts a persisted try, the third cumulative
   mismatch auto-denies, an entry at the try limit is denied on sight, and
-  `--yes` never bypasses any of this), an OUTBOUND id polls and then
+  `--yes` never bypasses any of this), an OUTBOUND match polls and then
   prompts `y`/`N` (`--yes` scripted — this side's own screen printed the
   code at request time).
   `watch` blocks until Ctrl-C, narrating each recognized line; `--json`
@@ -552,7 +570,7 @@ aoide peer spawn <name> [--yes] [--via ssh://[user@]host[:port]] -- <text…>
   signed — four headers: the claimed self name `X-Aoide-Peer`, timestamp,
   nonce, and the ed25519 signature over the canonical string). Refuses an
   unknown or unpaired (`verified:
-  false`) name LOCALLY with a taught error naming `peer pair`.
+  false`) name LOCALLY with a taught error naming `aoide pair`.
 - **Output:** POSTs a spawn-shaped `message/send` (no `contextId`) to the
   peer's A2A door; `<text…>` becomes the spawned session's first turn.
   What actually runs is the PEER's configured `aoide.a2a.spawnAgent`,
@@ -637,8 +655,8 @@ aoide peer list [--json]
 
 - [[A2A-Door]] — the inbound A2A contract (CONTRACTS.md §6)
 - [[Peer-Federation]] — same-network aoide-to-aoide federation (§7)
-- [[Pairing-Ceremony]] — the commit-then-reveal handshake the `peer pair`
-  group drives
+- [[Pairing-Ceremony]] — the commit-then-reveal handshake `aoide pair`
+  drives
 - [[Agent-Interface]] — the one-schema, two-doors MCP contract
 - [[aoided]] — the daemon entity and policy surface
 - [[shellbridge]] — the stage-state bridge concept

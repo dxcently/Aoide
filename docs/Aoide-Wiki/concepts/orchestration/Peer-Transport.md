@@ -42,14 +42,14 @@ dials `url` directly. Present, it
 names the ssh target `aoide-client`'s dial resolution forwards through.
 `set_peer_via` is the sole writer, a sibling to `upsert_paired_peer` rather
 than a parameter on it, and a caller passing no value never clears an
-existing marker — a plain `peer pair` re-pair leaves an earlier
+existing marker — a plain `aoide pair` re-pair leaves an earlier
 `via` untouched.
 
 Four ways a peer picks one up:
 
-- **`--via` on the command itself** — `peer add`/`peer pair`/`peer spawn` —
+- **`--via` on the command itself** — `peer add`/`aoide pair`/`peer spawn` —
   always outranks a peer's own recorded `via`.
-- **`peer pair <name>`'s hostname arm derives one automatically** from the
+- **`aoide pair <name>`'s hostname arm derives one automatically** from the
   discovery advertisement's OBSERVED source address plus its claimed ssh
   login — the wire is `{v, name, host, user}`, a rendezvous claim only
   (never a URL, key, or credential), and the observed address is what gets
@@ -61,12 +61,12 @@ Four ways a peer picks one up:
   own tunnel looking like loopback, so the approver has no observed address
   to derive anything from; the request carries an optional self-asserted
   `ssh://[user@]host` claim (`--self-via` overrides the `$USER`/ outbound-address
-  default), and `peer pair approve`'s commit sets the peer's `via` to the
+  default), and `aoide pair`'s commit sets the peer's `via` to the
   claim and rewrites its `url` to `http://127.0.0.1:<port>/` — `<port>`
   parsed off the requester's own advertised url — in the same write.
   Self-asserted data, a transport marker only: trust stays in the pubkeys
   and the SAS comparison.
-- **A plain, URL-targeted `peer pair` with no claim** records nothing — a
+- **A plain, URL-targeted `aoide pair` with no claim** records nothing — a
   peer paired without `--via` dials directly.
 
 ## Dial resolution
@@ -175,7 +175,7 @@ allowed to become a resident daemon:
   `docs/architecture/PAIRING.md`'s Discovery section traces, confirmed
   independent of any aoide code. This transport is the workaround for a
   door otherwise unreachable across that same boundary, not a fix to
-  discovery itself: `peer pair <url> --via`/`peer add --via` still need
+  discovery itself: `aoide pair <url> --via`/`peer add --via` still need
   the far host named by hand when discovery can't hear it.
 
 ## Related
@@ -186,7 +186,7 @@ allowed to become a resident daemon:
 - [[Peer-Federation]] — the peer registry `Peer.via` lives on, and the
   federation door the tunnel carries requests to.
 - [[Pairing-Ceremony]] — the ceremony that records the `via` marker on the
-  resulting peer at approve (`peer pair <name>`'s hostname arm derives it,
+  resulting peer at approve (`aoide pair <name>`'s hostname arm derives it,
   the requester's `selfVia` claim sets it on the approver's commit; `--via`
   sets it explicitly).
 - [[Conductor-Channel]] — `send`'s remote delivery, gated the same way

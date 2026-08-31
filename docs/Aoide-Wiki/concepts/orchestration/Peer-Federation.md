@@ -171,8 +171,8 @@ session id they could match.
 [--token-file <path>] [--bearer-secret <name>]` / `remove <name>` /
 `pull [<name>]` / `status` / `hub <name> [--clear]` (the single-hub
 designation, a last-resort address-resolution preference) — plus the pairing
-ceremony's `pair <target>` with its `approve`/`reject`/`watch` subcommands
-and the renamed `peer pending`
+ceremony's `aoide pair [<name|url|id>]` with its `reject`/`watch`
+subcommands, one verb for both the pending listing and the request itself
 ([[Pairing-Ceremony]]), the per-peer capability gate `allow <name> <cap>
 on|off`, LAN discovery `discover [--secs <n>]` with
 the `advertise on|off` runtime switch (off by default), `peer list

@@ -629,12 +629,12 @@ in
           `{v, name, host, user}` UDP broadcast advertisement (name plus
           its ssh hop claim — never a door URL, never a key or
           fingerprint: rendezvous, not authentication) on a fixed port,
-          ~30s jittered cadence, for `aoide peer discover`/`aoide peer
+          ~30s jittered cadence, for `aoide peer discover`/`aoide
           pair`'s hostname arm (and bare `aoide pair`) on the same LAN to
           hear. Off by default, same house policy as every other A2A
           knob above; the runtime switch beside this declarative force is
           `aoide peer advertise on|off`. Discovery only ever feeds `peer
-          discover`'s table and `peer pair`'s hostname-target resolution;
+          discover`'s table and `pair`'s hostname-target resolution;
           the pairing ceremony above remains the ONLY thing that ever
           writes a peer record.
         '';
@@ -646,7 +646,7 @@ in
         default = false;
         description = ''
           Enable the `aoide-pair-watch.service` graphical-session user unit
-          (`aoide peer pair watch --popup`) — a typed-code entry dialog per
+          (`aoide pair watch --popup`) — a typed-code entry dialog per
           actionable pairing request, `lyra pair ask` when it resolves
           (the same six-boxes-plus-dash surface `lyra secrets ask` renders),
           `zenity --entry` otherwise. Off by default, same house policy as

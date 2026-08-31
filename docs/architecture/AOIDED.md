@@ -153,7 +153,7 @@ ephemeral cues, never the durable record (the single audit log, written
 at all three call sites regardless of feed success, is that record — the
 SAME "best-effort, never blocks the caller's own hot path" posture
 `emit_notify`/`append_events_feed` already hold for the secrets side),
-and because every consumer (`aoide peer pair watch`) already re-derives
+and because every consumer (`aoide pair watch`) already re-derives
 its actionable set from `aoide_storage::pairing` directly on a safety
 tick rather than trusting the feed's own completeness — the identical
 "tail is a TRIGGER, the storage-backed state is the AUTHORITY" rule the
