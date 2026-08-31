@@ -3229,7 +3229,7 @@ the slot name), with one required field, `kind`:
   `shortcut` (nullOr str — a `GlobalShortcut` name a venue's compositor
   config may bind; naming one is not binding it, keeping the song/venue
   split intact), `blur` (bool, default true).
-- **`kind = "dock"`** — mounts as an `Item` into `AoidePanel`'s existing
+- **`kind = "dock"`** — mounts as an `Item` into the dock surface's existing
   gadget column, alongside the shipped Conductor/Terminals/Meters/Power/
   Usage gadgets and `herald-center`. Extra field: `order` (nullOr int) — the
   only sort key among multiple declared `dock` entries, because the
@@ -3294,7 +3294,7 @@ gets no wider surface than any other slot body):
   `GlobalShortcut` per entry that names a non-null `shortcut`.
 - **`SongGadgets.qml`** — visual host for `kind = "dock"` entries. A
   `Repeater` of `WidgetSlot`s (the same anchor `herald-center` uses),
-  mounted as the last children of `AoidePanel`'s gadget column, sorted by
+  mounted as the last children of the dock surface's gadget column, sorted by
   `order`.
 
 Both reuse the SAME `resolveSong` → `Qt.createComponent` →
