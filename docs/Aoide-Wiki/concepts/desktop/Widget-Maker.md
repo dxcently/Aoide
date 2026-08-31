@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-25
+updated: 2026-08-31
 tags: [aoide, extensibility, declarative, widget, agent]
 ---
 
@@ -48,6 +48,28 @@ A development agent builds the same dendrite + widget + adapter by hand, preview
 ## The hard line: a widget is a render surface
 
 House rule 7 ([[Plugin-Architecture#The corollary for Quickshell: render surfaces only]]), applied at the widget level. A widget **paints**; it is never where a capability *lives*. State, policy, IPC, and system access sit behind an agnostic bridge — a CLI command, a stage file (`CONTRACTS.md` §4), an IPC socket — reachable with no desktop running. The widget picks that bridge up by name and draws it: a bridge lands first, the QML picks it up second. The test: delete every `.qml` in the repo — a capability not reachable from a terminal after that was in the wrong place. Sonata's own `design/widget-structure.md` carries the same rule for the ricing agents that read it directly.
+
+## Sizing — content decides, never the screen
+
+A widget body anchors only the edges it genuinely occupies, and its
+`implicitWidth`/`implicitHeight` follow what it draws — a fraction of
+`screen.height`/`screen.width` is a number tuned for one aspect ratio, not a
+size.
+
+`herald.qml` anchors `{ bottom: true; right: true }` and sets
+`implicitHeight: Math.max(1, stack.implicitHeight)`: two edges occupied,
+height following the notification stack it draws. `bar.qml` anchors
+`{ top: true; left: true; right: true }` in `shell.qml`, which reads the
+song's own `implicitHeight` back onto the `PanelWindow`'s
+`implicitHeight`/`exclusiveZone` rather than a facet-pinned constant —
+sonata's strip picks 36px for itself, and the facet only reads it back.
+
+`launcher.qml` and `powermenu.qml` anchor all four edges: a full-screen
+overlay, correct for a modal that takes exclusive keyboard focus behind a
+scrim. A four-edge overlay carries an obligation with it: the frame fills
+the output, so the content inside it must size and centre itself — a
+grimoire page, a power stele — and never take its dimensions from the
+frame it happens to sit in.
 
 ## The staging engine — a song overrides desktop chrome
 

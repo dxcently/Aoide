@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-28
-updated: 2026-08-27
+updated: 2026-08-31
 tags: [aoide, song, rice, architecture]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -84,7 +84,12 @@ Six are wired to a live host anchor (`calendar`, `herald`, `herald-center`,
 the other eight (`dock`, `conductor`, `terminals`, `meters`, `power`,
 `usage`, `wallpaper`, `wallpaper-picker`) are twins of facet originals still
 doing the live drawing, carried but unanchored until the facet switch lands
-([[Gadget-Dock#What the dock holds]]).
+([[Gadget-Dock#What the dock holds]]). A content or sizing edit
+([[Widget-Maker#Sizing — content decides, never the screen]]) has to land on
+whichever file actually paints: the wired six take it directly in
+`widgets/`; the other eight take it in the facet original under
+`modules/facets/quickshell/qml/` — editing the `widgets/` twin changes
+nothing on screen until the switch lands.
 
 ### `songbook/` root — cross-cutting design memory
 

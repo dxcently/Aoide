@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-26
-updated: 2026-08-27
+updated: 2026-08-31
 tags: [aoide, widget, qml, desktop, gadget]
 ---
 
@@ -111,6 +111,11 @@ fore-edge also peeks out on its own, unprompted, whenever any session is
 `awaiting` and that alert hasn't yet been acknowledged (opening the dock any
 way acknowledges it). The dock is **non-exclusive** — it reserves no screen
 space.
+
+**Geometry.** `AoidePanel.qml` derives the panel's height (`panelH`) from
+`screen.height * 0.92`, capped at that fraction of the output, rather than
+from the height of the gadget column it stacks
+([[Widget-Maker#Sizing — content decides, never the screen]]).
 
 ## Related
 
