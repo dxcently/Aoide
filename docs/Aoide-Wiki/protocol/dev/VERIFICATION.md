@@ -65,6 +65,14 @@ lyra screen info                                   # monitors, clients, layer su
 | `aoide soundcheck` | the working tree — repo slop, orphans, build clutter; report-only, never repairs |
 | `cargo test -p <crate>` | the crate you touched |
 
+**`cargo` exists only inside the devshell.** It is on no system or user
+profile path, so a bare `cargo test` reports `No such file or directory` and
+reads like a broken toolchain:
+
+```
+nix develop --command bash -c 'cd pkgs/aoide && TMPDIR=/tmp cargo test -p <crate>'
+```
+
 **Flake checks see unstaged edits to TRACKED files, and are blind to
 UNTRACKED ones.** A new `.nix` file is invisible to the whole check suite
 until it is `git add`ed, so a green on new work means nothing until
