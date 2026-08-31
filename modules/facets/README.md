@@ -10,7 +10,10 @@ decisions (that's `song/songbook/*/widgets/`'s job). Three facets today:
 
 - `compositor/` — wires Hyprland as the Wayland compositor; applies
   compositor-side livery (gaps/radius/borders/blur) at build time, with the
-  livery engine able to re-dispatch it live via hyprctl. Scope: LOOK +
+  livery engine able to re-dispatch it live via hyprctl. Owns the greeter
+  too — `ly` on tty1, coloured straight from `aoide.livery.palette` (ly
+  takes 32-bit `0xSSRRGGBB`, so the palette needs no approximation), which
+  authenticates through PAM and launches the Hyprland session. Scope: LOOK +
   session plumbing only — host-invariant behavior (keybinds, input,
   tiling, window rules) lives in `modules/dendrites/hyprland.nix` instead.
 - `quickshell/` — renders the complete shell surface (bar, notifications,

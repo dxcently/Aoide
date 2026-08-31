@@ -5,7 +5,7 @@
 # mkHost.nix, pkgs.nix, walk.nix); this is test content. See tests/README.md.
 #
 # Exercises the walked module tree (same assembly as mkHost), the aoide
-# package, greetd wiring, the aoided user service, and the graph commands —
+# package, greeter wiring, the aoided user service, and the graph commands —
 # without real hardware or external network access.  shellbridge is NOT
 # exercised: its module gates on the quickshell facet (it exists to feed the
 # quickshell UI), and this VM disables that facet — see the trims below.
@@ -23,11 +23,11 @@
 #     Reason: Quickshell sources an upstream flake input with a significant
 #     NixOS Wayland closure; its autostart (`quickshell -c shell.qml`) cannot
 #     render on the virtual GPU.  The compositor facet is KEPT because it wires
-#     greetd + programs.hyprland.  This also removes shellbridge.service
+#     the ly greeter + programs.hyprland.  This also removes shellbridge.service
 #     entirely: shellbridge.nix gates on this facet, so the test neither
 #     starts nor asserts it.
 #
-#   greetd: will attempt to spawn Hyprland on the virtual GPU and loop.
+#   ly: will attempt to spawn Hyprland on the virtual GPU and loop.
 #     Mitigation: the test asserts the unit exists and is enabled rather than
 #     asserting active state, so a respawn loop does not fail the test.
 #
@@ -134,7 +134,7 @@ pkgs.testers.runNixOSTest {
               aoide.user = "khoa";
               aoide.song = "sonata";
 
-              # Compositor kept: wires greetd so the unit exists + is enabled.
+              # Compositor kept: wires the ly greeter so the unit exists + is enabled.
               aoide.facets.compositor.enable = true;
               # Quickshell omitted: heavy closure + cannot render headless.
               aoide.facets.quickshell.enable = false;
@@ -182,6 +182,7 @@ pkgs.testers.runNixOSTest {
 
   testScript = ''
     import json
+    import re
     import shlex
 
     # ── 1. multi-user.target reached ────────────────────────────────────────
@@ -213,11 +214,26 @@ pkgs.testers.runNixOSTest {
     # `aoide guide` exits 0.
     machine.succeed("aoide guide")
 
-    # ── 3. greetd ────────────────────────────────────────────────────────────
-    # greetd will attempt to spawn Hyprland on the virtual GPU and loop.
-    # We assert the unit is *enabled* (exists in the service graph) rather than
+    # ── 3. ly (the greeter) ──────────────────────────────────────────────────
+    # ly will attempt to spawn Hyprland on the virtual GPU and loop. We assert
+    # the unit is *enabled* (exists in the service graph) rather than
     # asserting active/activating, so a respawn loop does not fail the test.
-    machine.succeed("systemctl is-enabled greetd.service")
+    machine.succeed("systemctl is-enabled display-manager.service")
+
+    # The rice half. The greeter's colours are a livery read (compositor facet,
+    # `lyPlain`/`lyBold`), so assert the generated config carries palette-shaped
+    # values AND that they are not ly's stock ones. Shape plus "not stock"
+    # rather than a specific hex: pinning the song's palette here would turn
+    # every re-rice into a test edit.
+    ly_cfg = machine.succeed("cat /etc/ly/config.ini")
+    for key, style in (("bg", "00"), ("fg", "00"), ("border_fg", "00"), ("error_fg", "01")):
+        assert re.search(
+            rf"^{key}=0x{style}[0-9a-fA-F]{{6}}$", ly_cfg, re.M
+        ), f"ly config missing a livery-shaped {key}:\n{ly_cfg}"
+    for stock in ("bg=0x00000000", "fg=0x00FFFFFF", "error_fg=0x01FF0000"):
+        assert stock not in ly_cfg, (
+            f"ly kept its stock {stock} — the palette read did not reach the greeter"
+        )
 
     # ── 4. User service: aoided ──────────────────────────────────────────────
     # shellbridge.service does not exist in this VM at all: shellbridge.nix

@@ -21,7 +21,7 @@
   nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
 
   # The aoide user: a normal account every facet/service hangs off (user
-  # services, home-manager files, greetd session). Hosts override freely.
+  # services, home-manager files, the greeter session). Hosts override freely.
   users.users.${config.aoide.user} = {
     isNormalUser = lib.mkDefault true;
     extraGroups = lib.mkDefault [

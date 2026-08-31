@@ -207,7 +207,7 @@
           nix-independence = checks.nixIndependence self;
           # VM boot test — boots the Aoide desktop config headless and asserts
           # the stack comes up (multi-user.target, aoide on PATH,
-          # greetd enabled, aoided + shellbridge user services active, graph
+          # greeter enabled, aoided + shellbridge user services active, graph
           # commands pass).  Requires KVM on the build host.
           vm-boot = import ./tests/vm-boot.nix { inherit pkgs inputs lib; };
           # Static artifact is genuinely portable — zero PT_INTERP segments,

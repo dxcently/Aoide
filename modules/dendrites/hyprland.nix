@@ -16,7 +16,7 @@
 #     blur, the aoide-* layerrules, hyprglass, the kitty opacity/rounding
 #     rules. Re-riced whenever the song changes. That file also owns the
 #     session plumbing (programs.hyprland, the systemd/Wayland env handoff,
-#     hyprpolkitagent, xdg.portal, greetd).
+#     hyprpolkitagent, xdg.portal, the ly greeter).
 #
 #   BEHAVIOUR     → THIS FILE
 #     What you want no matter what the desktop looks like: keybinds, input

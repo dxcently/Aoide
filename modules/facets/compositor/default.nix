@@ -49,6 +49,15 @@ let
   windowBorderInactive =
     if t.window.borderInactive != null then t.window.borderInactive else t.palette.bg;
 
+  # ── Greeter colour helpers ────────────────────────────────────────────────
+  # ly takes colours as 32-bit `0xSSRRGGBB`: a styling byte ahead of the RGB
+  # (00 plain, 01 bold), with `full_color` on by default. So the palette's own
+  # hex goes in unmapped — no eight-colour approximation, and no second colour
+  # vocabulary in this facet. Same read-side discipline as windowBorder above:
+  # a note read, never a literal.
+  lyPlain = hex: "0x00${lib.removePrefix "#" hex}";
+  lyBold = hex: "0x01${lib.removePrefix "#" hex}";
+
   # ── Derived geometry values ───────────────────────────────────────────────
   # v0 geometry tier (additive-optional, CONTRACTS.md §1): a song MAY set
   # aoide.livery.geometry.*; every field is nullOr and falls back to the
@@ -312,7 +321,7 @@ in
       };
 
       # ── Polkit authentication agent ───────────────────────────────────────
-      # security.polkit (the daemon) is pulled up by programs.hyprland/greetd,
+      # security.polkit (the daemon) is pulled up by programs.hyprland,
       # but a polkit DAEMON without an AGENT means privileged GUI actions
       # (mounts, network edits, the aoided rebuild gate's future polkit prompt)
       # have nothing to present the authentication dialog — they silently fail.
@@ -362,17 +371,43 @@ in
       SDL_VIDEODRIVER = "wayland";
     };
 
-    # ── greetd (login greeter) ─────────────────────────────────────────────
-    # Quickshell greeter surface needs greetd as the session manager.
-    # The Quickshell greeter will implement the greetd IPC protocol.
-    # STUB: greetd.enable wired here; actual Quickshell greeter session
-    # command is set when AoideGreeter.qml implements greetd protocol.
-    services.greetd = {
+    # ── ly (login greeter) ─────────────────────────────────────────────────
+    # The greeter: a TUI display manager on tty1 that authenticates through
+    # PAM and launches the Hyprland wayland-session `programs.hyprland`
+    # already registers. Session plumbing, which is this facet's other half.
+    #
+    # It replaces greetd, wired here as a stub for a Quickshell greeter that
+    # was never written — no `AoideGreeter.qml` ever existed. That stub put
+    # Hyprland in greetd's `default_session`, the GREETER slot rather than
+    # `initial_session`, so the desktop came up with no authentication step
+    # at all and logind classed the whole session `greeter`. ly restores the
+    # login prompt, and the `user` class follows from PAM registering a real
+    # login.
+    #
+    # Riced by palette read alone. Everything else — animation, clock, box
+    # title, key hints — stays at ly's defaults: a song dresses the greeter
+    # through `aoide.livery`, and none of those are a taste decision this
+    # facet gets to make on a song's behalf.
+    services.displayManager.ly = {
       enable = true;
-      settings.default_session = {
-        command = "${lib.getExe' config.programs.hyprland.package "Hyprland"}";
-        user = config.aoide.user;
+      settings = {
+        bg = lyPlain t.palette.bg;
+        fg = lyPlain t.palette.fg;
+        border_fg = lyPlain t.palette.accent;
+        # Bold, as ly's own default red is — an error stays emphatic.
+        error_fg = lyBold t.palette.urgent;
       };
     };
+
+    # Upstream gap, not a preference. nixpkgs' ly module builds
+    # `systemd.services.display-manager` through the deprecated
+    # `services.displayManager.generic` path, and neither that module nor the
+    # shared display-manager module ever gives the unit a `wantedBy` — so it
+    # is installed and never started, and the machine boots to a bare tty1
+    # with no greeter. greetd did not have the problem because its own module
+    # carries `wantedBy = [ "graphical.target" ]` and aliases
+    # display-manager.service onto it. Supply the missing link; drop this the
+    # day the ly module carries it.
+    systemd.services.display-manager.wantedBy = [ "graphical.target" ];
   };
 }
