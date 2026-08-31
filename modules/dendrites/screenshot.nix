@@ -42,7 +42,7 @@
           initial-tool = "brush"
           copy-command = "wl-copy"
           annotation-size-factor = 1
-          output-filename = "${config.home.homeDirectory}/Pictures/Screenshots/satty-%Y%m%d-%H%M%S.png"
+          output-filename = "${config.home.homeDirectory}/Pictures/satty-captures/satty-%Y%m%d-%H%M%S.png"
           save-after-copy = false
           default-hide-toolbars = false
           default-fill-shapes = false
