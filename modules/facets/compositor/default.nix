@@ -384,18 +384,34 @@ in
     # login prompt, and the `user` class follows from PAM registering a real
     # login.
     #
-    # Riced by palette read alone. Everything else — animation, clock, box
-    # title, key hints — stays at ly's defaults: a song dresses the greeter
-    # through `aoide.livery`, and none of those are a taste decision this
-    # facet gets to make on a song's behalf.
+    # Two halves. Behaviour comes from dxflake's ly dendrite so the reference
+    # rig and this one greet alike; every colour, the animation's included, is
+    # an `aoide.livery` read, so a re-rice redresses the greeter with no edit
+    # here. Box title and key hints stay at ly's defaults.
     services.displayManager.ly = {
       enable = true;
       settings = {
+        # Behaviour lifted verbatim from dxflake's own ly dendrite
+        # (modules/dendrites/displaymanager.nix on the reference rig) so both
+        # rigs' greeters behave alike: the colour-mixing shader, stopped after
+        # five minutes rather than painting an idle machine forever, a locale
+        # clock, and a password field that clears on a failed attempt.
+        animation = "colormix";
+        animation_timeout_sec = 300;
+        clock = "%c";
+        clear_password = true;
+
+        # The dress is Aoide's, and every colour here is a palette read.
         bg = lyPlain t.palette.bg;
         fg = lyPlain t.palette.fg;
         border_fg = lyPlain t.palette.accent;
         # Bold, as ly's own default red is — an error stays emphatic.
         error_fg = lyBold t.palette.urgent;
+        # The shader mixes the two chromatic anchors instead of ly's stock
+        # red/blue. colormix_col3 keeps its default: its styling byte (0x20)
+        # is undocumented upstream, and that is not a value to guess at.
+        colormix_col1 = lyPlain t.palette.accent;
+        colormix_col2 = lyPlain t.palette.urgent;
       };
     };
 

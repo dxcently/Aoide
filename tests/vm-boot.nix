@@ -226,14 +226,33 @@ pkgs.testers.runNixOSTest {
     # rather than a specific hex: pinning the song's palette here would turn
     # every re-rice into a test edit.
     ly_cfg = machine.succeed("cat /etc/ly/config.ini")
-    for key, style in (("bg", "00"), ("fg", "00"), ("border_fg", "00"), ("error_fg", "01")):
+    livery_keys = (
+        ("bg", "00"),
+        ("fg", "00"),
+        ("border_fg", "00"),
+        ("error_fg", "01"),
+        ("colormix_col1", "00"),
+        ("colormix_col2", "00"),
+    )
+    for key, style in livery_keys:
         assert re.search(
             rf"^{key}=0x{style}[0-9a-fA-F]{{6}}$", ly_cfg, re.M
         ), f"ly config missing a livery-shaped {key}:\n{ly_cfg}"
-    for stock in ("bg=0x00000000", "fg=0x00FFFFFF", "error_fg=0x01FF0000"):
+    for stock in (
+        "bg=0x00000000",
+        "fg=0x00FFFFFF",
+        "error_fg=0x01FF0000",
+        "colormix_col1=0x00FF0000",
+        "colormix_col2=0x000000FF",
+    ):
         assert stock not in ly_cfg, (
             f"ly kept its stock {stock} — the palette read did not reach the greeter"
         )
+
+    # The behaviour half, carried from dxflake's ly dendrite. Asserted as
+    # literals because these ARE the decision, unlike the colours.
+    for line in ("animation=colormix", "animation_timeout_sec=300", "clear_password=true"):
+        assert line in ly_cfg, f"ly config missing {line}:\n{ly_cfg}"
 
     # ── 4. User service: aoided ──────────────────────────────────────────────
     # shellbridge.service does not exist in this VM at all: shellbridge.nix
