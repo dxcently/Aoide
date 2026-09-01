@@ -1195,6 +1195,25 @@ headless wrap, or a legacy record" (ordinary address-emptiness still
 applies); readers must tolerate both forms and round-trip fields they do
 not know.
 
+**Additive in v0:** a session record MAY also carry an optional `spawned`
+(bool, default/absent means `false`) — a PERMANENT registration fact stamped
+exactly once, inside the child `aoide spawn` re-execs, and never cleared. It
+records that the record exists because an agent spawned it, in EITHER launch
+mode: `spawn --windowed` execs a real terminal running the same `aoide
+conduct`, and carries the flag no less than the headless default does. It is
+stamped in the child rather than by `spawn` after registration because
+`spawn` returns `registered: false` once its socket wait times out, and a
+spawn that got that far wrong is precisely the one most likely to be
+abandoned.
+
+`spawned` is the "left over by an agent, not opened by a human" test, and it
+is decidable only because `aoide spawn` is the sole writer: a terminal the
+operator opened themselves can never carry it. `parentSessionId` cannot serve
+that purpose — the reaper clears a child's parent edge when the parent leaves
+the roster, so it is empty at exactly the moment a shell becomes leftover.
+Absent means "not a spawn, or a legacy record"; readers must tolerate both
+forms and round-trip fields they do not know.
+
 **Additive in v0 (P-D7, `docs/architecture/AOIDED.md`'s "L5"):** a session
 record MAY also carry an optional `harnessSessionId` (string) — the
 harness's OWN session id, straight off the raw hook payload's own
