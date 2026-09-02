@@ -122,6 +122,9 @@ pkgs/aoide/
            · commands.rs (secrets * — broker admin + resolve commands)
     test-support/        (Phase 9)  # shared test rig — DEV-dependency only
       src/ scratch-dirs · EnvSaver · fixture payloads · env_lock
+    upkeep/                     # mechanical integrity — the working-tree gap
+                                # `nix flake check` structurally can't see
+      src/ scan · commands (soundcheck) · checklane (session-hook wired)
     steward/             ★NEW   # the STEWARD — system-management agent
       src/ harness/      —  the run loop (turn loop, tool dispatch, compaction)
            tools/        —  system-management commands (wraps management/conduct/song)
@@ -141,6 +144,12 @@ pkgs/aoide/
       src/ bin/{aoide,aoided} · cli(parse) · dispatch · guide
            · commands/ (ONLY the root-coupled groups: meta, stubs, mcp serve)
       tests/ conductor_integration (+ fixtures)
+    screen/                     # read-only desktop view + pointer synthesis — lyra-only
+      src/ hypr · capture · point/synth · ocr/text · diff · commands
+    lyra/                       # the paint app: lyra bin, second composition
+                                # root over the rice/screen/quickshell bundle
+      src/ bin/lyra · dispatch/registry(own golden) · guide
+           · commands/ (song*, screen*, shellbridge/herald regs, onboard)
 ```
 
 ## Per-crate charter
@@ -154,12 +163,15 @@ pkgs/aoide/
 | **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, migrations, search — plus its CLI command (`usage`). The steward's `canon` and session memory persist through here. | `graph/session_store.rs`, `state/stage/*`, `state/*`, `commands/usage.rs` | landed (Phase 3a); backend is still file-first (seed → build); commands landed (Phase 9) |
 | **secrets** | The secrets broker: policy-gated resolve over a unix socket, TOTP enrollment, pluggable backends (`file` built-in), admin commands — plus its CLI commands (`secrets *`). A secret's value never crosses into a `Serialize`/`Deserialize` type; audit happens broker-side only. | `crates/secrets/` (broker·client·policy·backend·enroll·store·commands) | landed (Workstream SECRETS, P-V1–P-V4f) |
 | **test-support** | Shared test rig (scratch dirs, `EnvSaver`, fixture payloads, the single `env_lock`). **Dev-dependency only** — never a production edge. | `commands/mod.rs::test_support`, root `env_lock` | landed (Phase 9) |
+| **upkeep** | Mechanical integrity on the working tree: the gap `nix flake check` structurally can't see (gitignored/uncommitted state, a stray file at repo root, an untracked `.nix` file). `aoide soundcheck` (human/agent-invoked report) and `checklane` (the same gap wired into the agent loop via `session hook`'s SessionStart/Stop/UserPromptSubmit events) — plus its CLI command (`soundcheck`). Report-only, forever: neither ever moves, deletes, formats, or repairs. | *(new)* | landed |
 | **steward** ★ | A system-management agent driven by the conductor. Runs a harness loop; its tools act on the host via `management`/`conduct`/`song`; it remembers design primitives in `canon`; it self-audits against canon + contracts. | *(new)* | skeleton — DEFER (Phase 7) |
 | **song** | The ricing / design engine: the native livery engine (`src/livery/` — schema · resolve · emit; formerly a standalone Node package), apply songs, mint palettes, write the stage, the Pantheon design language — plus its CLI commands (`rice *`, `livery *`, `cover set`). **Rices portably** — applies a song on generic Linux too, not only via Stylix/NixOS modules. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs` | landed (Phase 5a+5b); commands landed (Phase 9) |
 | **management** | The privileged hands: rebuild/switch, `rice mint`, hypr control, service/daemon ops, sudo-tracking. **Host-abstracted** — a NixOS backend (nixos-rebuild/modules) and a portable-Nix backend (`nix profile`/home-manager-style) behind one seam, chosen by what the host is. The capabilities the steward's tools invoke. | `hypr.rs`, `commands/infra.rs`(host ops), sudo-track (44c6ec9) | carve-out — DEFERRED out of Phase 5 (no ETA) |
 | **evals** | Eval harness: golden snapshots (existing), agent-behavior evals for the steward, door-contract evals, ricing/design evals. | golden-snapshot tests | elevate — DEFER (Phase 8) |
 | **conductor** | The CLI/TUI surface: session DAG view, roster, and the steward's control panel — plus its one CLI command (`conductor`). | `crates/conductor/` (app·ui·graphview·theme), `commands/infra.rs`(conductor command) | landed (Phase 6a+6b); commands landed (Phase 9) |
 | **cli** | The app that wires everything into `aoide` + `aoided`: arg parse, the single dispatcher, registry assembly (`commands/mod.rs::all()`), guide/onboarding, and the three root-coupled groups (`meta`, `stubs`, `mcp serve`) that read the assembled registry. The DAG sink: depends on everything, nothing depends on it. Its lib keeps the name `aoide` so no caller changes. | `crates/cli/` (bin/*, cli.rs, dispatch.rs, registry.rs, commands/{mod,meta,stubs,infra}.rs, guide.rs, lib.rs) | landed as `crates/cli` (Phase 9 — supersedes the Phase 6 "stays the root package" finding, see the Phase 9 status note) |
+| **screen** | Read-only desktop view for agents plus pointer synthesis: `screen info` (hyprctl monitors/cursor/workspace/clients), `screen shot` (grim/slurp + JSON sidecar), `screen point` (native `zwlr_virtual_pointer_v1` synthesis, no `wlrctl`), `screen ocr` (tesseract), `screen diff` (pixel/inventory act-verification), `screen point text` (click by OCR'd word) — plus its CLI commands. Carries the workspace's only heavy deps (`wayland-client`, `wayland-protocols-wlr`, `image`); `lyra`-only, core never depends on it. | `conduct`'s former screen/pointer modules | landed (P-A1) |
+| **lyra** | The paint app crate: bin `lyra`, package `aoide-lyra` — the second composition root over the same domain-crate handler code `cli` assembles, its own independent `Registry`/dispatcher/golden command-path snapshot. Owns the self-ricing loop, `screen`, `herald`, `shellbridge`, and `quickshell`; deliberately never conducting, the graph, A2A, peers, or the daemon — those stay core identity in `cli`. The one binary allowed to be nix-dependent. | *(new)* | landed (Workstream A, P-A0–A8) |
 
 ## The steward (`steward`) — detail
 
@@ -228,16 +240,22 @@ this is structure, not features.
   originally paired `management` with `song` as one phase ("extract `song` +
   `management`"). Planning research for Phase 5 found `management`'s charter
   is largely *aspirational*, not just unextracted: there is no
-  `nixos-rebuild`/`switch`/`systemctl` code anywhere in the Rust binary today
-  — by deliberate house policy (rebuild is user-gated, no self-updaters; see
-  `AGENTS.md`). The only real host-effect anywhere in the ricing surface is
-  one env-guarded `hyprctl` call, which stayed inside `song::live` —
-  specifically kept as a separate function from
-  `song::live::geometry_keywords` so a future `management` crate could lift
-  just the host-effect half out later without touching the pure computation.
-  `management` is deferred indefinitely until real host-ops commands
-  (rebuild/switch/service control) actually get built — there's no ETA, it's
-  not "next," it's "whenever that work exists to extract."
+  `nixos-rebuild`/`switch`/package-install-or-upgrade code anywhere in the
+  Rust binary today — by deliberate house policy (rebuild is user-gated, no
+  self-updaters; see `AGENTS.md`). What host effect does exist is narrow and
+  explicitly user-triggered, never autonomous: `shellbridge`'s power actions
+  (`systemctl suspend`/`hibernate`/`reboot`/`poweroff`, `hyprctl dispatch
+  exit`, fired only by a UI button press) and, inside the ricing surface
+  itself, one env-guarded `hyprctl` call in `song::live` plus `song::reap`'s
+  `kill` of a stale quickshell pid — none of it reaches `nixos-rebuild`,
+  `switch`, or service *installation*, the shape `management`'s charter
+  actually names. The env-guarded `hyprctl` call stayed a function separate
+  from `song::live::geometry_keywords` so a future `management` crate could
+  lift just the host-effect half out later without touching the pure
+  computation. `management` is deferred indefinitely until real host-ops
+  commands (rebuild/switch/service installation) actually get built —
+  there's no ETA, it's not "next," it's "whenever that work exists to
+  extract."
 - **Phase 6 — extract `conductor`; `cli` stays the root package. LANDED
   (6a: d6b771d, 6b: 1f5ae31).** Planning corrected the original scope: `cli`
   was never a separate crate to build — the root `aoide` package already is
@@ -322,7 +340,7 @@ reasoning is fixed before code follows it (Workstream A, phase P-A0 of
 `functional-singing-boole.md`).
 
 Core keeps `aoide`/`aoided` over `protocol` · `storage` · `client` ·
-`conduct` · `server` · `conductor` · `upkeep` · `cli`. A second binary —
+`conduct` · `server` · `secrets` · `conductor` · `upkeep` · `cli`. A second binary —
 **`lyra`** (crate `aoide-lyra`, `crates/lyra`) — owns the
 rice/draft/mode/cover/livery/quickshell/screen/shellbridge/herald command
 surface: everything that paints, or that only a desktop needs.
