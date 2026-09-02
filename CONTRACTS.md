@@ -3507,6 +3507,7 @@ of) the 0.3.x form without a contract break here.
 | TaskState `INPUT_REQUIRED` | canonical_state `awaiting` |
 | TaskState `AUTH_REQUIRED` | the `needsSudo` signal (`SessionRecord.needs_sudo`) |
 | TaskState `SUBMITTED` | canonical_state `idle` (aoide's at-rest/cold state — acknowledged but not actively processing; this is the honest A2A state for it, NOT `WORKING`) |
+| TaskState `FAILED` | **read-time only** (task #33): `is_session_dead` (`aoide-conduct`'s reap predicate — the reaper's sole liveness authority) resolving true for the session at the moment `tasks/get` is asked, regardless of its last WRITTEN canonical_state — a session that died between two polls is not still `SUBMITTED`/`WORKING` just because nothing has swept a `done` over it yet. The reaper stays the ONLY writer of session state; this changes what a read reports, never what is stored. Applies to every resolved session, spawned or not, and is not vetoed by `exempt`/`undying` (those veto REAPING, not truth-telling) |
 | `message/stream` (initial SSE) / `tasks/resubscribe` (reconnect) | the hooks + transcript tail already driving `say`/`activity`/`model` |
 | transport (JSON-RPC 2.0/HTTP + SSE) | a new `aoide a2a serve` door |
 
@@ -3522,12 +3523,14 @@ today. `needsSudo` is a signal carried *alongside* `state`, not a state — so a
 session that is both `awaiting` **and** `needsSudo` surfaces as `AUTH_REQUIRED`
 (**auth-required takes precedence over `INPUT_REQUIRED`**).
 
-`TaskState`'s `FAILED`, `CANCELED`, `REJECTED` (and 0.3.x's `unknown`) have no
-canonical_state counterpart yet — aoide's five-state vocabulary has no failure
-or cancellation notion and predates this mapping; a later phase either
-extends the canonical vocabulary or folds them at the edge. Not resolved in
-v0. (`SUBMITTED` is no longer in this unresolved set — canonical_state `idle`
-now produces it, per the table above.)
+`TaskState`'s `CANCELED`, `REJECTED` (and 0.3.x's `unknown`) have no
+canonical_state counterpart yet — aoide's five-state vocabulary has no
+cancellation or rejection notion and predates this mapping; a later phase
+either extends the canonical vocabulary or folds them at the edge. Not
+resolved in v0. (`SUBMITTED` is no longer in this unresolved set — canonical_state
+`idle` now produces it, per the table above. `FAILED` is no longer in this
+unresolved set either — task #33's read-time `is_session_dead` override,
+above, produces it without touching the canonical_state vocabulary at all.)
 
 ### Transport and MVP surface
 
