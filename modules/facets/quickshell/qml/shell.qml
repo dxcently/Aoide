@@ -44,7 +44,7 @@ ShellRoot {
     // ── Shared singletons (one instance for the whole session) ─────────────
     LiveryState { id: livery }
     ShellBridge { id: bridge }
-    // `aoide quickshell reload`'s IPC target (crates/song/src/ipc.rs) — no
+    // `lyra reload`'s IPC target (crates/song/src/ipc.rs) — no
     // properties, wired for its side effect (Quickshell.reload) alone.
     AoideIpc { id: ipc }
     // The staging engine (CONTRACTS.md §5) — reads the manifest
