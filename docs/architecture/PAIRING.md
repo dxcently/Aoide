@@ -497,11 +497,11 @@ the full count-site checklist (git show 9c2d05c).
   Deployed behind a NEW flag, `aoide.a2a.pairingPopup` (default false) —
   the unit's desktop-facet gate is unchanged, this flag is the deliberate
   opt-in on top of it, modules' own "flags default off" house rule.
-- **Task #135 P3' — the one-verb collapse (M, "the command set can just
+- **Task #135 P3' — the one-command collapse (M, "the command set can just
   be `aoide pair`").** `peer.pair`, `peer.pair.approve`, `peer.pair.
   reject`, `peer.pair.watch`, and `peer.pending` DIE outright — hard
   cutover, no aliases, same as `peer.invite` before them. Bare `pair`
-  (already registered) becomes the ONE verb: with no target it is the
+  (already registered) becomes the ONE command: with no target it is the
   pending listing (interactive menu over pending requests plus heard
   advertisers on a real CLI tty, the JSON-friendly listing off a tty /
   with `--json` / on a non-CLI door); with a target, an exact

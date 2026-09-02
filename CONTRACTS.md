@@ -523,7 +523,7 @@ count.
   key never appears in `schema --json`, an `Outcome`, or any log —
   see §4's "`state/identity/`" subsection below for the wire/storage
   shape. `aoide pair [<name|url|id>]`, appended newest at P-P2
-  (`docs/architecture/PAIRING.md`), collapsed to its current one-verb
+  (`docs/architecture/PAIRING.md`), collapsed to its current one-command
   shape at task #135 P3' (the old `request`/`pending`/`approve`/`reject`
   subcommands died outright, no aliases) — bare `pair` lists what's
   pending: an interactive menu over pending requests plus heard
@@ -917,7 +917,7 @@ verifyCommand = "nix build --no-link .#checks.x86_64-linux.fmt .#checks.x86_64-l
   SYNCHRONOUSLY inside the hook, so an unscoped invocation also evaluates the
   slow attributes (vm-boot, `pkg-*`, portability), which routinely run for
   minutes and can stall every `SessionStart`/`Stop` up to the harness's own
-  hook timeout. The verb is `nix build`, not `nix flake check`: the latter
+  hook timeout. The command is `nix build`, not `nix flake check`: the latter
   takes no attribute fragment, so scoping is only expressible as a build of
   the check derivations.
 
@@ -5359,10 +5359,10 @@ verified, advertising, presence, addr, lastSeen, sessions[]}`, plus
 [--allow read,spawn] [--yes]` / `aoide pair reject <id|name>` /
 `aoide pair watch [--popup|--json]` (P-P2, P-PV2 — the User's locked
 spec, three grill rounds, appended newest directly after `peer hub`;
-collapsed to this one-verb shape at task #135 P3' — the old `request`/
+collapsed to this one-command shape at task #135 P3' — the old `request`/
 `pending`/`approve`/`reject` subcommands died outright, no aliases —
 §6's "Pairing wire" subsection above has the exact wire shapes and SAS
-derivation) — the pairing ceremony's ENTIRE CLI face, one smart verb.
+derivation) — the pairing ceremony's ENTIRE CLI face, one smart command.
 Bare `pair` is the pending listing: an interactive menu over pending
 requests plus heard advertisers on a real CLI tty, the JSON-friendly
 listing off a tty / with `--json` / on a non-CLI door — NEVER the SAS/
@@ -5383,7 +5383,7 @@ overrides its default reach-back hop claim), parks the answer
 alongside the pending id (the id is the secondary identifier, for
 disambiguating multiple pending requests).
 **`pair` then BLOCKS through the rest of the ceremony** (task #135 P2,
-carried onto the single verb at P3'): it re-polls the approver's door
+carried onto the single command at P3'): it re-polls the approver's door
 every 5s for up to `--wait` seconds (default 600), and on release runs
 the same confirm-and-commit an id-targeted `pair <id>` would, so one
 command completes this end. Only a `pending` answer is retried — an
@@ -5465,7 +5465,7 @@ the remote gate, which is the sole security authority.
 
 Real: the registry, the cache, `aoide/graphSummary`, the CLI commands
 (`peer list`'s mesh roster included), and the graph fold all run. The pairing ceremony (P-P2, poll-based completion under
-Design A/task #119, collapsed to one verb at task #135 P3') is real too:
+Design A/task #119, collapsed to one command at task #135 P3') is real too:
 `pubkey`/`verified` on `Peer`, `aoide pair`/`pair reject`/`pair watch`,
 and the `aoide/pairRequest`/`aoide/pairReveal`/
 `aoide/pairPoll` A2A methods (§6's "Pairing wire" subsection) all run end to

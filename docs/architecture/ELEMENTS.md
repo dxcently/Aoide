@@ -59,7 +59,7 @@ management seam"). This lane completes that seam.
    store copy of the song dir) — never config text transcribed
    through an LLM's context. Agents drive capture: the AGENT decides
    which elements exist, which files matter, how each starts; the
-   helper verb `lyra rice capture` does only the mechanical freeze.
+   helper command `lyra rice capture` does only the mechanical freeze.
    Captured configs start with hardcoded colors BY DESIGN; a later
    mint/tokenize pass (designed here, NOT built in this lane)
    rewrites colors into `{{palette.*}}` placeholders, promoting the
@@ -70,7 +70,7 @@ management seam"). This lane completes that seam.
 6. **Drop-in is flake-input shaped.** A foreign flake (dxflake)
    imports Aoide's modules, keeps its OWN layout, sets `aoide.*` in
    host files — chiyo already proves the shape. Zero-ceremony folder
-   creation (compose/capture auto-create); NO onboard verb;
+   creation (compose/capture auto-create); NO onboard command;
    foreign-flake wiring guidance goes into `aoide guide` and docs.
    Aoide-with-lyra ships nix on non-NixOS hosts (standalone
    home-manager), so the Stylix/declarative tier exists everywhere
@@ -275,7 +275,7 @@ the same commit as the seams they describe.
   validation, `{run}` substitution, the render pipeline (verbatim
   copy + `emit::file::render` for templated files), and
   `run_elements_dir()` in `storage/src/fs.rs` beside
-  `run_qml_dir()`. Plumbing verb `lyra element seed <song>` (golden
+  `run_qml_dir()`. Plumbing command `lyra element seed <song>` (golden
   +1) doing a full render into `run/elements/` from the songbook —
   the shell-reachable bridge the facet will call. CONTRACTS §5
   "Elements" subsection in the same commit. Tests: descriptor
@@ -311,7 +311,7 @@ the same commit as the seams they describe.
   with waybar claiming `bar` — Stylix disables the mapped targets,
   quickshell keeps its other eight surfaces; fixture without
   elements — drv-identical to today.
-- **L-E5 — `lyra rice capture` (cargo, M).** The freeze verb (golden
+- **L-E5 — `lyra rice capture` (cargo, M).** The freeze command (golden
   +1): copy-with-symlink-resolve, scaffold, `--unit`/`--exec`/
   `--surface` flags, auto-create of the song and element dirs,
   idempotent re-capture (same files → same bytes, manifest merged
@@ -334,7 +334,7 @@ the same commit as the seams they describe.
   prose — this phase supplies the facts): flake-input import, host
   `aoide.*` settings, standalone home-manager on non-NixOS, where
   capture puts things when there is no repo checkout (the L-C3
-  share/-templates path). No onboard verb.
+  share/-templates path). No onboard command.
 
 Live gates at the end of the lane: the L-E6 trio on the User's rig —
 a staged restyle of a running non-QML bar with no rebuild, a rebuild
@@ -379,7 +379,7 @@ the built system.
 - No mint/tokenize implementation — the per-file `template` flag is
   the complete, designed seam; the pass itself is a later lane.
 - GTK/Qt stay Stylix. No element ever wraps a GTK theme.
-- No onboard verb; no scaffolding ceremony beyond what compose and
+- No onboard command; no scaffolding ceremony beyond what compose and
   capture auto-create (User ruling, decision 6).
 - No per-element-class hot-reload engineering, no inotify/watch
   daemon for elements, no niri live seam — one descriptor line
