@@ -45,8 +45,8 @@ the same way:
   that cannot be backed out is not finished.
 
 This is Nix's own thesis (declarative, additive, atomically reversible) applied
-above the nix layer, and it is why the two doors — CLI and MCP — are one
-implementation with two façades rather than two features.
+above the nix layer, and it is why the three doors — CLI, MCP, and A2A — are
+one implementation with three façades rather than three features.
 
 **What it forbids, concretely:** a registry an author must edit to be seen; a
 module reaching into another module; a capability that only exists inside one
