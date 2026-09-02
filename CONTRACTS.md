@@ -1219,6 +1219,38 @@ the roster, so it is empty at exactly the moment a shell becomes leftover.
 Absent means "not a spawn, or a legacy record"; readers must tolerate both
 forms and round-trip fields they do not know.
 
+**Additive in v0 (task #20):** a session record MAY also carry an optional
+`exempt` (bool, default/absent means `false`) — set or cleared by `aoide
+session grant exempt on|off [--self | --id <id>]`, the second kind in the
+`session grant <kind>` grammar alongside `undying` (`state/undying.json`
+below), the safety valve for `session reap --now` — which otherwise takes
+every idle spawned shell,
+including one an agent is merely between commands on. It vetoes exactly two
+of the reaper's judgments: `is_session_dead`'s third signal
+(`stale_abandoned`, all three of its bands) and the whole
+`abandoned_spawned_shells` arm — never the window-gone/pid-gone signals, a
+pre-boot ghost, a superseded duplicate, an orphaned subagent, or a
+done-sibling tombstone, which fire on positive evidence a session is gone or
+is structural cruft rather than on staleness. It survives `--now`
+structurally, not as a special case: both vetoed judgments filter an exempt
+record out of candidacy before any band or human-gesture question is asked,
+so a person pressing `[ reap ]` still cannot take a live exempt session.
+
+Unlike `undying` (below), whose meaning STARTS at death, `exempt`'s meaning
+ENDS there: a resurrected session mints a fresh id (see `resurrect` below),
+so a surviving mark would only ever be a stale id, and the field lives on
+the record itself rather than a durable state file — it vanishes with the
+record the moment a genuine death signal takes it, never lingering, never
+needing a cleanup sweep of its own. There is no inheritance: a spawned child
+mints its own record with `exempt` absent, and an agent that wants its own
+worker shell shielded marks it after spawn. `--id` must name a session
+CURRENTLY on the roster — a dead/unknown id is a refusal here (`` `<id>` is
+not on the roster — an exemption lives on a live session's record ``),
+deliberately the opposite of `undying`'s own post-mortem posture below,
+because an exemption has nothing to mean once there is no record to hold it.
+Absent means "not exempt, or a legacy record"; readers must tolerate both
+forms and round-trip fields they do not know.
+
 **Additive in v0 (P-D7, `docs/architecture/AOIDED.md`'s "L5"):** a session
 record MAY also carry an optional `harnessSessionId` (string) — the
 harness's OWN session id, straight off the raw hook payload's own
