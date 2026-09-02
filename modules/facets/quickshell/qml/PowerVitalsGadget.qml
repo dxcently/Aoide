@@ -37,7 +37,7 @@ Item {
     required property var livery            // palette roles
     property string routePath: "/proc/net/route"
 
-    implicitWidth: 340
+    implicitWidth: 360
     implicitHeight: 268
 
     // type voices ──────────────────────────────────────────────────────────────

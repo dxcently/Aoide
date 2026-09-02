@@ -49,7 +49,7 @@ Item {
     property string statPath: "/proc/stat"
     property string memPath:  "/proc/meminfo"
 
-    implicitWidth: 340
+    implicitWidth: 360
     implicitHeight: 268
 
     // type voices ──────────────────────────────────────────────────────────────

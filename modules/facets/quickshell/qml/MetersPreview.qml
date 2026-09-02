@@ -4,7 +4,7 @@ import Quickshell.Wayland
 
 // Standalone harness to render the sonata meters temple for a screenshot.
 //   qs -p modules/facets/quickshell/qml/MetersPreview.qml
-// Floats a ~340x300 overlay surface carrying a stub gold-marble palette; the
+// Floats a ~360x300 overlay surface carrying a stub gold-marble palette; the
 // widget reads the machine's real /proc/stat + /proc/meminfo live.
 //
 // The meters body is per-song score (song/songbook/<song>/widgets/), NOT a
@@ -30,7 +30,7 @@ ShellRoot {
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.namespace: "aoide-meters-preview"
-        implicitWidth: 340
+        implicitWidth: 360
         implicitHeight: 300
 
         Rectangle {

@@ -4,7 +4,7 @@ import Quickshell.Wayland
 
 // Standalone harness to render the sonata power temple for a screenshot.
 //   qs -p modules/facets/quickshell/qml/PowerPreview.qml
-// Floats a ~340x300 overlay surface carrying a stub gold-marble palette; the
+// Floats a ~360x300 overlay surface carrying a stub gold-marble palette; the
 // widget reads real UPower (battery) + /proc/net/route (network) live. On a
 // desktop with no battery it exercises the honest "AC — no battery" path.
 //
@@ -31,7 +31,7 @@ ShellRoot {
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.namespace: "aoide-power-preview"
-        implicitWidth: 340
+        implicitWidth: 360
         implicitHeight: 300
 
         Rectangle {
