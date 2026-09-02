@@ -758,7 +758,15 @@ against. `$AOIDE_SONG_TEMPLATES` names a THIRD dir for exactly that case:
 `<templates>/registry.json` are what `aoide-song::widgets`'s registry/
 manifest regeneration falls back to reading once `flake_root()` has no
 `flake.nix` to shell `nix eval` against — both nix-free, never a `nix`
-invocation. Two tiers, absolute-path-wins like every override above:
+invocation. A third consumer (task #41): the first `rice stage <name>`/
+`rice mode stage <name>` for a song the RUNTIME `songbook_dir(name)` lacks
+entirely — never composed on this host, only shipped — copies
+`<templates>/<name>/`'s whole tree in via
+`commands::rice::seed_songbook_from_templates`, once, before
+`handle_rice_stage` (the sync) ever reads the songbook; a songbook dir with
+anything in it already, even partially, is left untouched, so a second
+stage of an already-seeded song is a no-op by the same check. Two tiers,
+absolute-path-wins like every override above:
 `$AOIDE_SONG_TEMPLATES` itself, else a sibling of `current_exe()`'s
 directory (`<exe_dir>/../share/lyra/songbook`, gated on that directory
 actually existing — `aoide_protocol::bin`'s sibling-binary resolver shape,

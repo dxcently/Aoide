@@ -80,6 +80,15 @@ nix — baked baseline, surviving host-songbook entries overlaid, the staged
 song's own scan patched in last. A song with a `_widgets/` shelf still
 needs a real checkout.
 
+The same templates dir also seeds the runtime songbook itself: the first
+`lyra rice stage <name>` / `lyra rice mode stage <name>` for a song that is
+SHIPPED but was never composed on this host — `songbook/<name>/` missing
+outright, not just missing a file — copies that song's whole template tree
+in before staging proceeds, once, never touching a songbook dir that
+already has anything for the song, even partially. This is what gives a
+fresh host's very first `rice mode stage sonata` somewhere to read from and
+write back to, without requiring `rice compose` first.
+
 ## Drafts — durable scratch, reached by ROUTING not copying
 
 Between staging a song and declaring it, drafts give the rice loop a way to
