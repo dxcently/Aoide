@@ -170,9 +170,10 @@ The defect is upstream's, in `hyprnux/hyprglass` — not Hyprland, not the
 compositor facet's configuration, not the QML. Everything below is verified
 against the pinned source.
 
-**Affected build.** hyprglass v0.7.0, commit
-`c96940a86e6c5c9290dacb9fde204e4172186a96`, built against Hyprland 0.56.2
-(`efb50993780079460b0cbed1363e2166a2de1d9f`) and hyprutils 0.14.0.
+**Affected build.** hyprglass at `c96940a86e6c5c9290dacb9fde204e4172186a96`, one
+commit before the `v0.7.0` tag `5bc835dcc909cef6980291688143048cf16942b5` and
+identical to it under `src/`, built against Hyprland 0.56.2
+(`efb50993780079460b0cbed1363e2166a2de1d9f`).
 hyprglass's own `hyprpm.toml` pin table stops at Hyprland 0.55.4, so this
 pairing comes from nixpkgs' `mkHyprlandPlugin` building against the hyprland
 the same flake input ships, not from the table. The ABI handshake at plugin
@@ -245,9 +246,20 @@ An alternative that also holds: read `m_surfaceTempFramebuffer->m_size` back at
 the composite site, the shape issue #41 settled on. It fixes the divisors
 without fixing the allocation, so it needs the allocation change anyway.
 
-**Check before filing.** Whether a hyprglass newer than v0.7.0 already corrects
-this. A newer release cannot be adopted here without moving the Hyprland pin
-with it, but it decides whether the report is a fix or a duplicate.
+**Upstream already has this fix, unmerged.** PR
+[#66](https://github.com/hyprnux/hyprglass/pull/66), "fix: size layer FBOs from
+the framebuffer, not the monitor transform," opened 2026-08-14 against the same
+two sites — `sampleAndRedirect` reading `source->m_size`, `compositeAndRestore`
+reading `m_surfaceTempFramebuffer->m_size`. Those are the alternative shape
+above, and they are numerically `m_pixelSize`, since `source` is the monitor
+framebuffer. It reports the same symptom from a `1920x1080 @ transform 90`
+panel. So a bug report is a duplicate; what the PR needs is a second confirmed
+reproduction and a review, and this page is that reproduction.
+
+No release carries it. `v0.7.0` (`5bc835dcc909cef6980291688143048cf16942b5`,
+2026-07-20) is the newest tag and `main` has not moved since — upstream's own
+hyprland-0.56.2 compatibility bump, PR #60, is likewise still open. The local
+patch stays until one of them lands.
 
 ## Related
 
