@@ -636,9 +636,9 @@ count.
   §4's `config.toml` subsection below for the resolution order, the schema,
   and the intent-vs-state line.
 - `lyra schema --json` — the AoideOS-surface contract: onboard/rice/draft/
-  mode/cover/livery/quickshell/screen/shellbridge/herald/take/element,
-  the painted surface. `crates/lyra/src/registry.rs`'s golden test pins the
-  authoritative command-path set; `lyra schema --json` is the live
+  mode/cover/livery/quickshell/reload/screen/shellbridge/herald/take/
+  element, the painted surface. `crates/lyra/src/registry.rs`'s golden test
+  pins the authoritative command-path set; `lyra schema --json` is the live
   enumeration — `mcp.serve` must itself be a registered path for
   `aoide_protocol::door::parse` to ever reach lyra's `special` closure on
   `mcp serve --stdio`, one of the root-coupled extras beyond the named
@@ -646,7 +646,15 @@ count.
   ask` (P3), and `pair ask`/`pair show` (P-PV3, task #132 — `pair ask`
   is the ONE entry-dialog shape both pairing directions use under the
   mutual-code redesign, R1; `pair show` is the approver-side stay-open
-  reply-code display it spawns after an inbound commit). `element seed` (L-E1,
+  reply-code display it spawns after an inbound commit). `reload` (`lyra
+  reload` design, settled 2026-08-31) is the one mode-aware iteration
+  command of the agent rice loop — it absorbed `quickshell reload` outright
+  (hard cutover, no alias: `quickshell` now registers only `healthcheck`,
+  the placeholder-screen watchdog), reading `stage/mode.json` to dispatch
+  shell-reload-only (declarative) or snapshot-then-sync-then-reload
+  (staging/draft, the take hanging off `songbook/<song>/takes/` when staged
+  or the routed draft's own `takes/` when drafted, deduped against the head
+  take so an unchanged reload mints nothing). `element seed` (L-E1,
   docs/architecture/ELEMENTS.md) renders a song's committed
   `elements/*/element.json` — non-QML rice targets (waybar, dunst, anything
   with a config file) — into `run/elements/`. Lyra alone may shell out to
@@ -3230,10 +3238,11 @@ set of "flavor" surfaces — committed files, not nix options:
   to an EXISTING widget file reaches Quickshell's own file-watcher live too.
   A brand-new slot file still needs a service restart to be discovered
   (the manifest is only read at startup) — **may no longer require a
-  restart** now that `lyra quickshell reload` (Quickshell IPC hot-reload
-  trigger) rebuilds the whole scene fresh from `shell.qml`, which should
-  also re-read `manifest.json`; unconfirmed against a live instance, don't
-  rely on this until verified.
+  restart** now that `lyra reload` (§3 — the mode-aware iteration command
+  that absorbed `quickshell reload`'s IPC hot-reload trigger) rebuilds the
+  whole scene fresh from `shell.qml`, which should also re-read
+  `manifest.json`; unconfirmed against a live instance, don't rely on this
+  until verified.
 - **Fixed injected-prop contract:** a loaded widget receives `livery`
   (`LiveryState`) and `bridge` (`ShellBridge`) always, plus whatever
   slot-specific extras the anchor declares (e.g. the bar slot's `shared`)

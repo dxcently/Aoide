@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Aoide ships the rice engine as a builtin. The engine provides the loop, the schema, and the staging mechanism. Everything else — the songs, the preferences, the accumulated taste — it learns by doing.
 
-**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[livery]] engine), `rice stage`, `rice compose`, the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, and geometry + window-border colours apply to the running compositor over `hyprctl` in the same step (terminal-OSC fan-out is not yet wired into it) — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, `stage/livery.json` is also reseeded from the active song's committed notes on every activation ([[Codebase#Runtime contracts (socket + stage files)]]), so a host that boots without ever staging still carries the correct stage twin. `rice declare` is implemented — gated, it copies the composed song from the runtime songbook into the checkout's `song/songbook/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
+**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[livery]] engine), `rice stage`, `rice compose`, `lyra reload` (the one mode-aware iteration command — absorbed `quickshell reload` outright), the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, and geometry + window-border colours apply to the running compositor over `hyprctl` in the same step (terminal-OSC fan-out is not yet wired into it) — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, `stage/livery.json` is also reseeded from the active song's committed notes on every activation ([[Codebase#Runtime contracts (socket + stage files)]]), so a host that boots without ever staging still carries the correct stage twin. `rice declare` is implemented — gated, it copies the composed song from the runtime songbook into the checkout's `song/songbook/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
 
 ## The Rice Loop
 
@@ -19,14 +19,21 @@ lyra rice compose <name> [--from <song>]   (real — scaffolds a new song, below
     ↓  copies palette/window/geometry from --from (default "sonata")
 lyra rice mode stage <name>                (real — unlocks staging, stages declared content)
     ↓  edit the song's files (hand or agent)
+lyra reload                                 (real — THE iteration command: reads
+    ↓                                          stage/mode.json and reloads accordingly;
+    ↓                                          staging snapshots the current rice —
+    ↓                                          deduped against the head take, so an
+    ↓                                          unchanged reload mints nothing — syncs it
+    ↓                                          live, and reloads Quickshell, all in one
+    ↓                                          call; loop this with edits freely)
 rice lint                                    (real — livery schema validation)
     ↓  fail → reject + songbook note
 lyra rice mode draft <draft-name>           (real — ROUTES stage/livery.json into a saved
     ↓                                          draft via a symlink; forks it from the
     ↓                                          current stage if new; see Drafts below)
-    ⋯ iterate freely: every future write (rice stage, a hand-edit, Quickshell's own
-       reload) lands directly in the draft file — no separate save step; switch to a
-       different saved iteration any time with another `rice mode draft <name>` ⋯
+    ⋯ iterate freely: edit → `lyra reload` → look, no separate save step; every
+       reload snapshots the routed draft too (undo for free via `rice back`); switch
+       to a different saved iteration any time with another `rice mode draft <name>` ⋯
 lyra rice mode declarative                  (real — tears the routing down, re-pins
     ↓                                          the declared truth; the draft itself
     ↓                                          stays saved on disk)
@@ -84,6 +91,17 @@ flat top-level dir: a draft is a variation of an already-composed song, so
 it belongs inside that song's own directory, which the mechanism enforces
 for free (a song can only ever be staged, and therefore have a resolvable
 "current song," once it already exists under `songbook/`).
+
+**A draft forks the DRESS, not the widgets.** `livery.json` + `cover.json`
+are the whole of what a draft snapshots — widget QML bodies
+(`song/songbook/<song>/widgets/*.qml`) are SONG-scoped, never
+draft-scoped, because nothing routes them through the `stage/livery.json`
+symlink the way palette/cover values are routed. Practically: editing a
+widget file while routed into ANY draft of that song mutates what EVERY
+draft of that song renders, not just the one currently live — there is no
+per-draft widget fork to isolate the edit into. `lyra reload`'s take (below)
+still captures widget bodies alongside livery+cover on every mint, in every
+mode; it is the take store, not the draft mechanism, that remembers them.
 
 Outside the git checkout entirely — the runtime root owns
 `song/songbook/*/drafts/`, same as `song/stage/` — and banned from
@@ -196,8 +214,10 @@ else in this section — locked under `declarative`, allowed under
 brand-new widget file is the one thing this doesn't cover: `manifest.json`
 is only read at Quickshell startup, so a new slot still needs a
 `systemctl --user restart aoide-quickshell.service` to be discovered.
-Whether `lyra quickshell reload` (which rebuilds the whole scene from
-`shell.qml`) also re-reads `manifest.json` and closes this gap is
+`lyra reload`'s final beat, in every mode, is an unconditional Quickshell
+IPC reload (rebuilds the whole scene fresh from `shell.qml` — the absorbed
+`quickshell reload` mechanism, byte-for-byte in the `declarative` arm);
+whether that also re-reads `manifest.json` and closes this gap is still
 unconfirmed against a live instance.
 
 `lyra rice mode status` reports the current mode plus, in `staging`/
