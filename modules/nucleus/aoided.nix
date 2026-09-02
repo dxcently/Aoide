@@ -138,7 +138,12 @@ lib.mkIf config.aoide.enable {
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
       ]
-      ++ lib.optional (config.aoide.terminal != "") "AOIDE_TERMINAL=${config.aoide.terminal}";
+      # Quoted as one assignment per systemd.exec(5)'s own `Environment=`
+      # syntax (`Environment="VAR=word1 word2"`): the template carries
+      # spaces (e.g. `kitty -e {cmd}`), and an unquoted assignment is
+      # whitespace-split into separate tokens, silently dropping everything
+      # after the first word as an invalid assignment.
+      ++ lib.optional (config.aoide.terminal != "") ''"AOIDE_TERMINAL=${config.aoide.terminal}"'';
       # The interactive half of the same need: `spawn --windowed` and
       # `resurrect` are ordinary commands an operator runs in a shell,
       # and a shell has no more of this variable than the unit does. The unit
