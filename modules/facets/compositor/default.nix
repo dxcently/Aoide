@@ -354,15 +354,7 @@ in
     };
 
     # ── Environment variables for the Hyprland session ─────────────────────
-    # HYPRLAND_INSTANCE_SIGNATURE and XDG_CURRENT_DESKTOP are set by Hyprland
-    # itself; we expose the socket path for shellbridge.
     environment.sessionVariables = {
-      # shellbridge reads this to locate the Hyprland IPC socket:
-      #   $XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock
-      # This variable is set by Hyprland at session start; we advertise the
-      # pattern so shellbridge can construct the path without hardcoding it.
-      AOIDE_HYPRLAND_SOCKET_PATTERN = "$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock";
-
       # Wayland-first hints for common apps
       NIXOS_OZONE_WL = "1";
       MOZ_ENABLE_WAYLAND = "1";
