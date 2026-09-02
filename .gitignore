@@ -37,5 +37,7 @@ result-*
 # Obsidian editor state (workspace layout churns on every open):
 docs/Aoide-Wiki/.obsidian/workspace.json
 
+docs/Aoide-Wiki/.syncthing/
+
 # Obsidian's own trash (a deleted wiki page lands here; git already has it)
 docs/Aoide-Wiki/.trash/
