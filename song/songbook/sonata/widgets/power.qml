@@ -73,7 +73,7 @@ Item {
     // ── BATTERY (UPower) ─────────────────────────────────────────────────────
     readonly property var battDev: UPower.displayDevice
     readonly property bool battAvail: battDev && battDev.isLaptopBattery && battDev.isPresent
-    readonly property int battPct: battDev ? Math.round(battDev.percentage) : 0
+    readonly property int battPct: battDev ? Math.round(battDev.percentage * 100) : 0
     readonly property bool battCharging: battDev && battDev.state === UPowerDeviceState.Charging
     readonly property bool battFull: battDev && battDev.state === UPowerDeviceState.FullyCharged
     readonly property bool battLow: battAvail && !battCharging && battPct <= gadget.lowAt
