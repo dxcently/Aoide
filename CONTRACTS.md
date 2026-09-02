@@ -422,6 +422,30 @@ Contract guarantees:
   enumerates internal commands in full; `internal` is not a second
   `implemented`-style capability filter, it is purely a display hint for one
   consumer.
+- `external` (optional array, task #138) — external subcommands: `aoide foo`
+  with no registered `foo` falls through to an executable `aoide-foo` on
+  `PATH`, the same pattern git/cargo use for their own plugins (`aoide
+  clipboard-copy` → `aoide-clipboard-copy`, `lyra deploy` → `lyra-deploy`).
+  Each entry is `{"name": "deploy", "command": "aoide-deploy", "path":
+  "/resolved/absolute/path"}` — names and resolved paths only, never a
+  second command inventory: no summary, no args/flags, no `gated` bit
+  (`<name> --help` answers for the plugin's own grammar). **Additive**, same
+  discipline as `implemented`/`examples`/`internal`: omitted from `schema
+  --json` entirely when no plugin is installed, so a host with none emits a
+  schema byte-identical to before this key existed. **An external command is
+  NEVER gated, by construction, permanently** — it carries no schema entry
+  to hang a `gated` bit off, and the operator typing it at a terminal IS the
+  admission the user-rebuild gate exists to obtain; a plugin that needs a
+  gated operation calls `aoide`/`lyra` back for it. It never becomes a
+  `Command`: the fallthrough is CLI-door only, structurally (`door::run` is
+  the only place that probes `PATH`, and only the two CLI entry points call
+  `run`) — MCP, A2A, and the aoided socket dispatch a path lookup directly
+  and never see an unregistered name resolve to anything. `aoide --help`/
+  `lyra --help` list installed externals in a separate trailing section,
+  never interleaved with the built-in command groups (a foreign binary
+  carries no `--json`/exit-code/`gated` contract to advertise alongside
+  them); `guide` never lists them — tier-0 onboarding is a fixed narrative
+  about aoide's own four tiers, not a host-dependent plugin list.
 
 **Per-binary schema (two binaries, P-A5 of the binary-split workstream,
 `docs/architecture/PACKAGE-LAYOUT.md`, "Two binaries").** This schema is
