@@ -35,11 +35,18 @@ there is no "this peer may spawn, that one may not."
    request to another's door; it parks pending (the same
    park-and-approve idiom as sends and secrets asks). The approver
    confirms via a plain CLI prompt or the desktop popup surface.
-4. **UX is a short confirmation code.** Both sides display the same
-   short code derived from both public keys (numeric-comparison
-   pairing, the Bluetooth idiom); the human confirms the codes match
-   before the pair is committed. CLI-first: every step must be
-   drivable from a plain terminal on both ends; the popup is sugar.
+4. **UX is a short confirmation code — one per direction, both typed,
+   never a bare yes/no on either end (the mutual-code redesign, R1).**
+   Both sides independently derive the SAME short code from both public
+   keys plus both nonces (numeric-comparison pairing, the Bluetooth
+   idiom): the approver types it, read off the requester's screen,
+   out-of-band, before committing its own side. The approver then
+   derives a SECOND, DIFFERENT short code — the same transcript, plus a
+   leading domain-separation tag — and relays it back; the requester
+   types THAT code, read off the approver's screen, before committing
+   its own side. Two humans, two out-of-band comparisons, one ceremony.
+   CLI-first: every step must be drivable from a plain terminal on both
+   ends; the popup is sugar.
 5. **Per-peer permissions: a closed `allows` set.** Capabilities
    today: `"spawn"` (create a session via the A2A spawn arm),
    `"read"` (graph/who summaries over A2A). Commands:
@@ -139,15 +146,19 @@ A's own `aoide pair` is STILL RUNNING and polling every 5s (task #135 P2,
      (id, timestamp, nonce,                    the pubkey A supplied at
       signature over "PAIRPOLL"+id+...)        request time; approved? →
   ◄── B's pubkey, IF approved ─────────────┘   release; else → "pending"
-A's outbound entry now carries the SAME SAS a second time, re-derived by
-`aoide pair` itself (state awaiting-confirm, visible in bare `aoide
-pair`'s row as that state — never the code itself, P-PV2); A's own
-operator confirms it y/N
-(A's screen printed this code itself at request time — the typed-code
-gate is B's side) in the SAME `aoide pair <id>` invocation that
-just polled — or in A's still-running `aoide pair`, which reaches the same
-confirm-and-commit — ONLY THEN does A's own peer record commit. A timeout
-leaves the request parked, so the two paths are interchangeable.
+A's outbound entry now sits at awaiting-confirm (visible in bare `aoide
+pair`'s row as that state — never a code itself, P-PV2); B, having
+already approved, derives a SECOND, DIFFERENT code from the SAME
+transcript (a leading domain-separation tag makes it un-collidable with
+the first) and relays it back to A's operator out-of-band; A's own
+operator TYPES that reply code in the SAME `aoide pair <id>` invocation
+that just polled — or in A's still-running `aoide pair`, which reaches
+the same confirm-and-commit — never a bare yes/no acknowledgment of the
+code A's own screen already showed. A wrong reply code counts a
+persisted try the same way B's leg does; the 3rd cumulative mismatch
+AUTO-ABORTS the outbound entry. ONLY on a match does A's own peer record
+commit. A timeout leaves the request parked, so the two paths are
+interchangeable.
 `aoide pair reject <id>` on A's outbound entry aborts at any point
 before that confirm, with no wire call and no record on either end.
 ```
@@ -161,33 +172,46 @@ dial its own `request`/`reveal` already used, so pairing works end to end
 even when A's door accepts no routable connection at all.
 
 - **`aoide pair watch --popup` is opt-in** (`aoide.a2a.pairingPopup`, nix
-  option, default off) and shows a dialog shaped by pairing DIRECTION,
-  never one bare yes/no for both. The INBOUND (approver) direction
-  collects the typed code the same way the CLI tty prompt and the scripted
-  `--code` path do, through the identical gate — a six-boxes-plus-dash
-  entry surface, `lyra pair ask` when `lyra` resolves, `zenity --entry`
-  otherwise — and never shows the code, same as the tty prompt. The
-  OUTBOUND (requester) direction shows this instance's own locally-derived
-  code (as its own `y`/`N` confirm already does) and asks for a single
-  Approve/Reject — `lyra pair confirm` or `zenity --question` — never a
-  retype: the code is already on screen, so retyping it would prove
-  nothing an Approve click doesn't already prove. Both dialogs share a
+  option, default off) and shows ONE dialog shape on BOTH pairing
+  directions now (the mutual-code redesign, R1), never a direction-shaped
+  split and never a bare yes/no on either. Either direction collects the
+  typed code the same way the CLI tty prompt and the scripted `--code`
+  path do, through the identical gate — a six-boxes-plus-dash entry
+  surface, `lyra pair ask` when `lyra` resolves, `zenity --entry`
+  otherwise — and never shows the code, same as the tty prompt: inbound
+  against `derive_sas`, outbound against its own second, different reply
+  code (`derive_reply_sas`) rather than the code this instance already
+  generated and showed itself. This reverses the OUTBOUND dialog's
+  original shape (P-PV3, task #132) — a plain Approve/Reject over its own
+  already-displayed code — because that code failed the retype-is-theater
+  test only for a value already on the SAME screen; the reply code comes
+  from a genuinely different one. Both entry dialogs share a
   `"Reject request"` rejection control; a bare Cancel/Escape leaves the
   request offered again next tick; either binary failing to spawn backs
-  off the retry cadence rather than silently dropping the request. Both
-  dialogs run on a 60s TIMER — an unanswered dialog closes as a TIMEOUT,
-  which is never a rejection and never lands in the ignored set
-  ("didn't answer within a minute" is not "no"): the request is offered
-  again after a 30s cooldown. The watcher polls outbound entries still
-  `awaiting-approval` on its OWN 60s timer (through the same
-  poll-once seam the blocking command uses), which is what lets a
-  detached (`--wait 0`) or timed-out request's confirm dialog ever fire;
-  the 200ms popup tick itself never makes a network call. And a LIVE
-  blocking `aoide pair` holds a pid marker for its id
-  (`$XDG_RUNTIME_DIR/aoide/`, the tunnel-record convention) that
-  suppresses the watcher's dialog for that id — two surfaces never race
-  one commit; a marker naming a dead pid is stale, cleaned up, and
-  suppresses nothing.
+  off the retry cadence rather than silently dropping the request. **No
+  pairing dialog closes on a timer (R2, the mutual-code redesign's popup
+  phase).** The entry dialog and the reply-code display dialog below both
+  sit open until the operator answers, the request is resolved elsewhere,
+  a live blocking `aoide pair` claims the same id, or Ctrl-C interrupts
+  the watcher itself. No timeout and no re-offer cadence exist: a
+  genuine answer is worth waiting for, and a single-operator desktop
+  only ever has one modal question open at a time regardless. The
+  accepted cost: while a dialog sits open, the
+  watcher's own feed narration and outbound poll both pause. **After a
+  popup-driven INBOUND commit succeeds, the approver's own reply code gets
+  a SECOND, separate dialog** — `lyra pair show` (`zenity --info
+  --no-markup` otherwise), the code shown large with a Copy control and a
+  Done control, no reject control at all: it fires only after the commit
+  it belongs to already succeeded, so there is nothing left to approve or
+  reject, only to relay out-of-band and dismiss. The watcher polls
+  outbound entries still `awaiting-approval` on its OWN 60s timer (through
+  the same poll-once seam the blocking command uses), which is what lets a
+  detached (`--wait 0`) request's entry dialog ever fire; the 200ms popup
+  tick itself never makes a network call. And a LIVE blocking `aoide pair`
+  holds a pid marker for its id (`$XDG_RUNTIME_DIR/aoide/`, the
+  tunnel-record convention) that suppresses the watcher's dialog for that
+  id — two surfaces never race one commit; a marker naming a dead pid is
+  stale, cleaned up, and suppresses nothing.
 - **`aoide pair` takes exactly ONE positional, and its two subcommands win
   over a same-named hostname target.** A second positional — old `peer
   pair request <url>` muscle memory is the one that bites — is refused
@@ -202,10 +226,14 @@ even when A's door accepts no routable connection at all.
   fields, lowercased/trimmed/NUL-separated, truncated mod 1,000,000
   (`aoide_storage::pairing::derive_sas`; the exact derivation and its
   pinned vectors live in CONTRACTS §6's "Pairing wire" subsection —
-  standard SAS construction, no invention). The human SAS comparison is
-  THE gate against an active on-path attacker; the poll is retrieval,
-  never a second source of trust — it releases nothing until BOTH ends
-  have already committed to the SAME transcript.
+  standard SAS construction, no invention). `derive_reply_sas` (R1) is a
+  SECOND derivation over the identical transcript plus a leading
+  domain-separation tag — B's own reply code, never the same code
+  A already computed — same subsection, its own pinned vectors. The
+  human SAS comparison, on EITHER code, is THE gate against an active
+  on-path attacker; the poll is retrieval, never a second source of
+  trust — it releases nothing until BOTH ends have already committed to
+  the SAME transcript.
 - **Bare `aoide pair` never shows the SAS (P-PV2, the User's locked
   spec).** The code is read off the REQUESTER's own screen and typed on
   the APPROVER's — printing it in a listing either operator can glance at
@@ -220,11 +248,15 @@ even when A's door accepts no routable connection at all.
   own side) expires (timeout knob, default generous — hours, not
   minutes; it waits for a human, twice). An APPROVED-but-not-yet-polled
   entry expires the same way — it stays parked, never removed early,
-  until either the poll releases it or the ordinary timeout sweeps it.
+  until either the poll releases it or the ordinary timeout sweeps it —
+  with one exception (R3, below): a fresh request from the SAME
+  requester pubkey supersedes it early, on the theory that the
+  keyholder retrying IS the requester abandoning its own ceremony.
 - **The two ends commit asymmetrically, on purpose.** B's peer record
   for A exists the moment B's own operator approves; A's peer record
   for B exists only once A's own operator polls-and-confirms afterward,
-  over the SAME code. A never-confirmed A simply leaves B holding a
+  over a SECOND, DIFFERENT code (R1) — B's own reply code, never the
+  first code shown twice. A never-confirmed A simply leaves B holding a
   verified peer that answers nothing — visible on B's own `peer status`,
   resolved by an ordinary expiring re-pair, never a silent one-sided
   pairing. This is decision 4's mutual confirmation carried all the way
@@ -263,6 +295,30 @@ even when A's door accepts no routable connection at all.
   discipline the secrets broker's own ask-park queue holds. Outbound
   entries are operator-created, one per `aoide pair` invocation,
   and carry no cap.
+- **One live parked request per requester identity (R3): SUPERSEDE, not
+  refuse.** A fresh `aoide/pairRequest` from the SAME `pubkeyHex` evicts
+  whatever this identity already has parked — approved-but-unpolled
+  included — rather than coexisting with it or refusing outright; the
+  eviction runs BEFORE the cap check, so a retry never burns cap
+  headroom. The match is case-insensitive: the same canonicalization
+  `transcript_digest` already applies to every field before hashing, so
+  two hex-case variants of the same key already commit and reveal
+  identically and must supersede as one requester. `aoide pair`'s own
+  outbound queue mirrors this: `park_outbound` replaces by id OR by the
+  approver's own pubkey, the same case-insensitive match, one live
+  outbound entry per far identity. A cross-direction pair — an inbound
+  request FROM X alongside an outbound request TO X — is a legitimate
+  simultaneous mutual pairing and is left alone. Supersede widens who
+  can evict a pending request from "on-path" to "knows the pubkey" —
+  the same accepted denial-of-one-attempt class CONTRACTS.md §6 already
+  accepts for a bogus reveal, never an impersonation — and holds only
+  because the A2A door binds loopback by default (this document's own
+  Transport section, below): reaching `pairRequest` at all already
+  requires a shell on the box or an ssh tunnel into it, and that reach
+  already grants a direct read of the parked file itself. Bound
+  routably instead, that condition no longer holds and refuse-the-second
+  becomes the safer default (CONTRACTS.md §6's own park-cap paragraph
+  carries the full statement).
 - **The poll authenticates without a peer record.** `aoide/pairPoll`
   cannot use the paired-peer signed-header scheme below — no verified
   peer record exists yet for the id being polled — so A signs a
@@ -411,28 +467,33 @@ the full count-site checklist (git show 9c2d05c).
   would otherwise land `request`/`<url>` as `peer pair`'s own two args,
   past its single declared target, burning a full sweep window hunting a
   host literally named "request" while discarding the url unremarked.
-- **P-PV3 — the popup's typed-code upgrade, opt-in, one dialog shape per
-  direction (M, task #132).** `peer pair watch --popup`'s INBOUND
-  (approver) dialog stops being a bare Approve/Reject: it collects the
-  typed code through the SAME six-boxes-plus-dash surface the secrets TOTP
-  dialog already has (`lyra pair ask`, sharing that command's own QML
-  component via the new `dialog_qml` module, `zenity --entry` as the
-  fallback) and runs it through the identical `InboundGate::Code` gate the
-  CLI already holds — no new no-prompt gate variant (`InboundGate::
-  DialogConfirmed` is retired) — and never shows the code in the dialog.
-  The OUTBOUND (requester) dialog keeps its ORIGINAL confirm shape (`lyra
-  pair confirm`/`zenity --question`): it shows this instance's own
-  locally-derived code, matching its `y`/`N` confirm's own display, and a
-  single Approve/Reject commits unconditionally, exactly as before this
-  phase — a design-review round within the SAME task caught an earlier
-  pass collecting a retype on this arm too (reusing the inbound entry
-  surface with the code pre-shown as context) as copy-the-pixels theater,
-  since the code is already on screen in the same window the retry field
-  sat in; `code_matches`' own outbound-comparison call is gone, not merely
-  undocumented. Deployed behind a NEW flag, `aoide.a2a.pairingPopup` (default
-  false) — the unit's desktop-facet gate is unchanged, this flag is the
-  deliberate opt-in on top of it, modules' own "flags default off" house
-  rule.
+- **P-PV3 — the popup's typed-code upgrade, opt-in (M, task #132).**
+  `peer pair watch --popup`'s INBOUND (approver) dialog stops being a bare
+  Approve/Reject: it collects the typed code through the SAME
+  six-boxes-plus-dash surface the secrets TOTP dialog already has
+  (`lyra pair ask`, sharing that command's own QML component via the new
+  `dialog_qml` module, `zenity --entry` as the fallback) and runs it
+  through the identical `CodeGate::Code` gate the CLI already holds — no
+  new no-prompt gate variant (`InboundGate::DialogConfirmed` is retired)
+  — and never shows the code in the dialog. The OUTBOUND (requester)
+  dialog originally kept a plain confirm shape (`lyra pair confirm`/
+  `zenity --question`): this instance's own locally-derived code shown
+  large, a single Approve/Reject committing unconditionally — a
+  design-review round within this SAME task had already caught an
+  earlier pass collecting a retype on this arm too (reusing the inbound
+  entry surface with the code pre-shown as context) as copy-the-pixels
+  theater, since the code was already on screen in the same window the
+  retry field sat in. That confirm shape held only until the mutual-code
+  redesign (R1) gave the outbound leg a genuinely SECOND code (the
+  approver's own reply code, arriving from a different screen) to gate
+  on — at which point the SAME retype-is-theater argument this task's own
+  review round established points the other way: a value from a
+  different surface is exactly the case that argument named as real
+  typed entry, not theater. `run_ask_dialog` now runs on BOTH directions;
+  `run_confirm_dialog` and the plain-confirm outbound shape are gone.
+  Deployed behind a NEW flag, `aoide.a2a.pairingPopup` (default false) —
+  the unit's desktop-facet gate is unchanged, this flag is the deliberate
+  opt-in on top of it, modules' own "flags default off" house rule.
 - **Task #135 P3' — the one-verb collapse (M, "the command set can just
   be `aoide pair`").** `peer.pair`, `peer.pair.approve`, `peer.pair.
   reject`, `peer.pair.watch`, and `peer.pending` DIE outright — hard

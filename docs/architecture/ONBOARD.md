@@ -100,8 +100,8 @@ one seam and no crate imports `inquire` directly except `protocol`:
   keeps the current `BufRead` behavior byte-identical (the
   table-driven `choose_reading` tests stay the contract).
 - A new `protocol::pick::confirm` — `inquire::Confirm` on a tty, the
-  current stdin y/N read otherwise; `client`'s `confirm_spawn` and
-  `confirm_sas` retrofit onto it.
+  current stdin y/N read otherwise; `client`'s `confirm_spawn`
+  retrofits onto it.
 - A new hidden-input helper — `inquire::Password` (no confirmation
   echo) on a tty; `secrets put`'s value entry and `secrets watch`'s
   TOTP entry retrofit onto it. `secrets put`'s piped-bytes contract
