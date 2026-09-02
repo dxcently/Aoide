@@ -286,8 +286,7 @@ lib.mkIf config.aoide.enable {
   # resolves. Gating on the facet would have made the popup structurally
   # unreachable there for a reason that has nothing to do with pairing.
   systemd.user.services.aoide-pair-watch =
-    lib.mkIf
-      (config.aoide.a2a.enable && config.aoide.a2a.pairingPopup)
+    lib.mkIf (config.aoide.a2a.enable && config.aoide.a2a.pairingPopup)
       {
         description = "Aoide pairing-ceremony popup watcher — surfaces actionable pairing requests as a typed-code entry dialog";
 
@@ -314,8 +313,9 @@ lib.mkIf config.aoide.enable {
           pkgs.zenity
           pkgs.libnotify
         ]
-        ++ lib.optional config.aoide.lyra.enable
-          inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        ++
+          lib.optional config.aoide.lyra.enable
+            inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
         serviceConfig = {
           Type = "simple";
