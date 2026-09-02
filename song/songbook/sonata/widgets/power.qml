@@ -51,7 +51,7 @@ Item {
                                             // universal widget contract (slots.md)
     property string routePath: "/proc/net/route"
 
-    implicitWidth: 340
+    implicitWidth: 360
     implicitHeight: 268
 
     // type voices ──────────────────────────────────────────────────────────────

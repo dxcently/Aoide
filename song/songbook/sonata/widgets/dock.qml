@@ -589,10 +589,11 @@ PanelWindow {
                             visible: implicitHeight > 0
                         }
 
-                        // Meters + Power — the compact steles, native height 268. No
-                        // centring wrapper anymore — they take root.gadgetW directly
-                        // and share the column's left edge with the others. Their
-                        // frames anchors.fill, so the wider 360 width just fills.
+                        // Meters + Power — the compact steles, native height 268.
+                        // Native width IS gadgetW (360, like every dock gadget):
+                        // WidgetSlot never stretches its loaded item (slots.md —
+                        // the widget reports its own footprint), so a narrower
+                        // declaration would sit left-flush and break the column.
                         WidgetSlot {
                             slot: "meters"
                             width: root.gadgetW; height: 268
