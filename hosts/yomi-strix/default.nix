@@ -137,6 +137,16 @@
   # peer record.
   aoide.a2a.discoveryAdvertise = true;
 
+  # The pairing popup (task #135). An inbound request otherwise waits in
+  # `aoide pair`'s own terminal for someone to go looking; with this on,
+  # `aoide-pair-watch` runs beside the session and raises the typed-code
+  # dialog the moment a request parks. Opt-in on top of the desktop-facet
+  # gate by design (`aoided.nix`: a2a + quickshell are not enough), and this
+  # is the deployment flip that turns it on for this box — the User's call,
+  # made 2026-09-02. It grants nothing: the dialog still demands the code
+  # read off the requester's own screen, and a rejection is one click.
+  aoide.a2a.pairingPopup = true;
+
   # Secrets broker (workstream #58, P-V4 deployment): own uid, socket-only
   # door. The operator joins the access group; enrollment happens only when
   # the User says connect.
