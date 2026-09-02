@@ -64,6 +64,7 @@ lyra screen info                                   # monitors, clients, layer su
 | `nix flake check` | the committed tree — formatting, lint, coupling, packages, boot, portability |
 | `aoide soundcheck` | the working tree — repo slop, orphans, build clutter; report-only, never repairs |
 | `cargo test -p <crate>` | the crate you touched |
+| `cargo check --workspace --all-targets` | every crate's test code, when a shared type changed |
 
 **`cargo` exists only inside the devshell.** It is on no system or user
 profile path, so a bare `cargo test` reports `No such file or directory` and
@@ -72,6 +73,17 @@ reads like a broken toolchain:
 ```
 nix develop --command bash -c 'cd pkgs/aoide && TMPDIR=/tmp cargo test -p <crate>'
 ```
+
+**A new field on a shared struct breaks crates you never tested.** Per-crate
+`cargo test -p` compiles that crate's test code and no one else's, and
+`cargo build` compiles no test code at all — so a struct literal in another
+crate's `#[cfg(test)]` fixture stays invisible until the nix derivation runs
+`cargo test` over the whole workspace and the rebuild dies on `E0063`. Adding
+a field to a type other crates construct means running
+`cargo check --workspace --all-targets` before landing: it compiles every
+target including tests and runs nothing, so it costs seconds and cannot
+deadlock the way `cargo test --workspace` does. `nix build .#aoide` is the
+same proof end to end when the cheap check is not enough.
 
 **Flake checks see unstaged edits to TRACKED files, and are blind to
 UNTRACKED ones.** A new `.nix` file is invisible to the whole check suite
@@ -118,7 +130,9 @@ Diff the derivation's own source path to confirm.
   deliberately not format-clean, and a run manufactures hundreds of churn
   lines. (`nixfmt` on `.nix` files *is* required — a check enforces it.)
 - **`cargo test --workspace`.** It deadlocks: the conduct crate binds real
-  sockets. Scope to the crates you changed, with `TMPDIR=/tmp`.
+  sockets. Scope to the crates you changed, with `TMPDIR=/tmp`. Scoping is
+  what leaves other crates' test code uncompiled, so a shared-type change
+  owes `cargo check --workspace --all-targets` on top — see the gates above.
 - **`git add -A`, `git reset`, `git checkout`, `git restore`, `git stash`**
   in the shared worktree. Other sessions hold the same index.
 
