@@ -7,9 +7,10 @@ import Quickshell.Io
 // rolling 5-hour window, the weekly caps (overall + per-model), any extra-usage
 // credits — over a LOCAL this-machine token/cost estimate. Reads the file the
 // `aoide usage` poller writes (state/usage.json, schema §0); the gadget only
-// exists while that file does, so it is effectively toggled on by
-// `aoide usage enable` (which starts the poller). Fifth of the pantheon; it
-// wears the shared marble-stele grammar but stands in its OWN order and hue:
+// exists while that file does, so it is effectively toggled on by the nix
+// option `aoide.usage.enable` (which instantiates the poller and its timer).
+// Fifth of the pantheon; it wears the shared marble-stele grammar but stands
+// in its OWN order and hue:
 //
 //   · ORDER      — a LEDGER stele, re-skinned to read as CLAUDE. Its signature is
 //                  base09 — in the light sonata scheme a CLAY / kiln-fired orange
@@ -41,7 +42,7 @@ Item {
     id: gadget
 
     required property var livery            // palette roles
-    property string usagePath: "/home/khoa/Aoide/state/usage.json"
+    property string usagePath: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/usage.json"
 
     // Historically injected by the dock (AoidePanel.qml, retired — the dock
     // is now sonata's own `widgets/usage.qml`, a WidgetSlot anchor). Nothing

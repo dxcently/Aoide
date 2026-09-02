@@ -66,7 +66,7 @@ Item {
     property var shared: null              // cross-widget state (shared.tracedSessionId)
     // sessions.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
     // not song/stage/.
-    property string stagePath: "/home/khoa/Aoide/state/stage/sessions.json"
+    property string stagePath: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/sessions.json"
 
     implicitWidth: 360
     implicitHeight: 520

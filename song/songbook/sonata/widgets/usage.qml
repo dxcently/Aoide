@@ -24,9 +24,10 @@ import Quickshell.Io
 // rolling 5-hour window, the weekly caps (overall + per-model), any extra-usage
 // credits — over a LOCAL this-machine token/cost estimate. Reads the file the
 // `aoide usage` poller writes (state/usage.json, schema §0); the gadget only
-// exists while that file does, so it is effectively toggled on by
-// `aoide usage enable` (which starts the poller). Fifth of the pantheon; it
-// wears the shared marble-stele grammar but stands in its OWN order and hue:
+// exists while that file does, so it is effectively toggled on by the nix
+// option `aoide.usage.enable` (which instantiates the poller and its timer).
+// Fifth of the pantheon; it wears the shared marble-stele grammar but stands
+// in its OWN order and hue:
 //
 //   · ORDER      — a LEDGER stele, re-skinned to read as CLAUDE. Its signature is
 //                  base09 — in the light sonata scheme a CLAY / kiln-fired orange
