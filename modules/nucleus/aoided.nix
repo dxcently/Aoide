@@ -266,16 +266,23 @@ lib.mkIf config.aoide.enable {
   # the same reasoning `aoide-secrets-watch` already holds against the
   # SYSTEM-unit `aoide-secrets-serve` above.
   #
-  # Gated on `aoide.a2a.pairingPopup` (DEFAULT FALSE, `options.nix`) IN
-  # ADDITION to the desktop-facet gate `aoide-secrets-watch` uses
-  # (`aoide.a2a.enable && aoide.facets.quickshell.enable`) — modules' own
-  # "flags default off" house rule: a host with a2a and the quickshell
-  # facet both on does NOT get this popup unless it also opts in, unlike
-  # before this phase where the unit's only gate was the desktop-facet
-  # check. Never flipped on here — deployment flips are the User's.
+  # Gated on `aoide.a2a.enable` plus `aoide.a2a.pairingPopup` (DEFAULT
+  # FALSE, `options.nix`) — modules' own "flags default off" house rule is
+  # carried by the opt-in flag itself: no host gets this popup without
+  # asking for it. Never flipped on here; deployment flips are the User's.
+  #
+  # Deliberately NOT gated on `aoide.facets.quickshell.enable`, unlike its
+  # sibling `aoide-secrets-watch`. What this unit needs is a graphical
+  # session and A DIALOG BINARY, and the facet is neither: it is Aoide's own
+  # shell (bar, dock, notifications). A host whose desktop is painted by
+  # something else — osaka, running core Aoide beside dxflake's own Hyprland
+  # and Stylix — has the session and gets zenity from the `path` below, and
+  # `pair_watch` itself only refuses when NEITHER `lyra` nor `zenity`
+  # resolves. Gating on the facet would have made the popup structurally
+  # unreachable there for a reason that has nothing to do with pairing.
   systemd.user.services.aoide-pair-watch =
     lib.mkIf
-      (config.aoide.a2a.enable && config.aoide.facets.quickshell.enable && config.aoide.a2a.pairingPopup)
+      (config.aoide.a2a.enable && config.aoide.a2a.pairingPopup)
       {
         description = "Aoide pairing-ceremony popup watcher — surfaces actionable pairing requests as a typed-code entry dialog";
 
@@ -286,15 +293,21 @@ lib.mkIf config.aoide.enable {
         # `zenity` must resolve off a bare-name `PATH` lookup
         # (`pair_watch::zenity_available`/`spawn_zenity_entry`, both take the
         # binary NAME, never a hardcoded path) — the same PATH gap
-        # `aoide-secrets-watch` documents in `secrets.nix`. `quickshell`
-        # rides the same rule for the lyra dialog path: `lyra pair ask`
-        # spawns it by bare name, so the unit that spawns lyra must carry it
-        # — the exact live gap `secrets.nix`'s own `aoide-secrets-watch`
-        # comment documents for its sibling dialog.
+        # `aoide-secrets-watch` documents in `secrets.nix`. It rides
+        # unconditionally: it is the fallback the whole unit's reachability
+        # rests on, and the only dialog a host without lyra ever gets.
+        #
+        # `quickshell` rides the SAME condition as `AOIDE_RICE_BIN` below,
+        # and for the same one reason: `lyra pair ask` spawns quickshell by
+        # bare name, so the unit that can spawn lyra must carry it — and the
+        # unit can only spawn lyra when `aoide.lyra.enable` put the binary
+        # there. A host without lyra takes the zenity path and has no use
+        # for quickshell in its closure.
         path = [
           pkgs.zenity
-          inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default
-        ];
+        ]
+        ++ lib.optional config.aoide.lyra.enable
+          inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
         serviceConfig = {
           Type = "simple";

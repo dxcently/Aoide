@@ -25,10 +25,16 @@ module builds against what nucleus declares.
   `aoide-pair-watch.service` (P-P5; the popup upgraded to a dialog shaped
   by pairing direction + `lyra`/zenity feature-detection at P-PV3, task
   #132), running `aoide pair watch --popup` — gated on
-  `aoide.a2a.enable && aoide.facets.quickshell.enable &&
-  aoide.a2a.pairingPopup` (the last DEFAULT FALSE, opt-in on top of the
-  desktop-facet gate, never assumed just because a2a and quickshell are
-  both on), the same unit shape `secrets.nix`'s own
+  `aoide.a2a.enable && aoide.a2a.pairingPopup` (the last DEFAULT FALSE, so
+  no host gets the popup without asking for it). NOT gated on
+  `aoide.facets.quickshell.enable`, unlike its sibling below: this unit
+  needs a graphical session and a dialog binary, and the facet is Aoide's
+  own SHELL — a host painted by something else (osaka, core Aoide beside
+  dxflake's Hyprland) has the session, takes the zenity path, and would
+  otherwise be locked out for an unrelated reason. `quickshell` on the
+  unit's `path` follows `aoide.lyra.enable`, the same flag that decides
+  whether `lyra` is there to spawn it at all. Otherwise the same unit shape
+  `secrets.nix`'s own
   `aoide-secrets-watch.service` below holds — including its
   `lyra`/`quickshell` `path` entries and `AOIDE_RICE_BIN` env, since the
   popup now prefers `lyra pair ask` (inbound, typed-code entry) or `lyra
