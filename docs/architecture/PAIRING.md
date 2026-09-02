@@ -203,7 +203,10 @@ even when A's door accepts no routable connection at all.
   --no-markup` otherwise), the code shown large with a Copy control and a
   Done control, no reject control at all: it fires only after the commit
   it belongs to already succeeded, so there is nothing left to approve or
-  reject, only to relay out-of-band and dismiss. The watcher polls
+  reject, only to relay out-of-band and dismiss. The same commit also
+  fires a `notify-send` toast carrying the same code, first and
+  independently of the dialog — a persistent glance-backup that still
+  lands the code when `lyra`/`zenity` are both missing. The watcher polls
   outbound entries still `awaiting-approval` on its OWN 60s timer (through
   the same poll-once seam the blocking command uses), which is what lets a
   detached (`--wait 0`) request's entry dialog ever fire; the 200ms popup

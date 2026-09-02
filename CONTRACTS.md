@@ -4797,7 +4797,9 @@ old outbound confirm. After an inbound
 commit the watcher spawns the stay-open reply-code display
 (`lyra pair show`, `zenity --info` fallback) — code shown large with a
 Copy control and a Done control, no reject, closed only by a button or
-the watcher's own exit.
+the watcher's own exit — and, independently and first, a `notify-send`
+toast carrying the same code, best-effort so a popup-infra failure still
+leaves the code somewhere durable.
 Both directions share the dialog's own `"Reject request"` extra
 button/dismiss control (a distinct label from `aoide-secrets`' own
 `"Dismiss ask"` — two ceremonies, two labels, one shared reader), which

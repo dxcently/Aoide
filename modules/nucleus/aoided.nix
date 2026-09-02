@@ -308,8 +308,11 @@ lib.mkIf config.aoide.enable {
         # unit can only spawn lyra when `aoide.lyra.enable` put the binary
         # there. A host without lyra takes the zenity path and has no use
         # for quickshell in its closure.
+        # `libnotify` provides `notify-send`, resolved the SAME bare-name way
+        # for the reply-code toast (`pair_watch::notify_reply_code`).
         path = [
           pkgs.zenity
+          pkgs.libnotify
         ]
         ++ lib.optional config.aoide.lyra.enable
           inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
