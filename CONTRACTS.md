@@ -1174,13 +1174,13 @@ this. Same lifecycle as `say`: absent for shells and until the session's first
 tool call, readers tolerate both forms and round-trip fields they do not know.
 
 **Additive in v0:** a session record MAY also carry an optional `logPath`
-(string) — the absolute path to the pty-master transcript of a HEADLESS
-`aoide conduct` session (`state/sessions/<sessionId>.log`, below). Stamped
-once, right after the session registers, by `aoide conduct --headless`; every
-INTERACTIVE session (conduct with a real controlling tty, a hook-only agent)
-never sets it. Absent means "no headless log" (the common
-case); readers must tolerate both forms and round-trip fields they do not
-know.
+(string) — the absolute path to the pty-master transcript of a
+conduct-owned pty (`state/sessions/<sessionId>.log`, below). Stamped once,
+right after the session registers, by every `aoide conduct` invocation,
+headless and interactive alike (task #15, "everything tees"); a hook-only
+agent session (no pty at all) never sets it. Absent means "no conduct-owned
+pty for this session" (the hook-only case); readers must tolerate both
+forms and round-trip fields they do not know.
 
 **Additive in v0:** a session record MAY also carry an optional `petname`
 (string, `<word>-<word>`) — a human-readable display handle minted once, at
@@ -2014,17 +2014,27 @@ OAuth restricted to Claude Code)" }` and the widget falls back to `local`.
 
 ### `state/sessions/<sessionId>.log` — **v0**
 
-The pty-master transcript of one HEADLESS `aoide conduct --headless` session —
-raw bytes read off the pty, mirrored verbatim as they arrive (no framing, no
-encoding, not necessarily valid UTF-8). Lives in the same gitignored
-root-runtime `state/` dir as `usage.json` (state-dir resolution as above), one
-file per headless session, created on first write and opened append-only for
-the session's whole lifetime. Append-only and UNROTATED — a deliberate known
-gap, not a design goal: nothing truncates or rolls this file, so a
-long-running or noisy headless session grows its log without bound. Written
-only by `aoide conduct --headless`; an interactive `conduct` session never
-creates one. The session's `sessions.json` record (above) publishes this
-file's absolute path as `logPath` the moment it's open.
+The pty-master transcript of every conduct-owned pty — `aoide conduct
+--headless` AND an interactive `aoide conduct` session alike (task #15,
+the "everything tees" ruling: no opt-out flag) — raw bytes read off the
+pty, mirrored verbatim as they arrive (no framing, no encoding, not
+necessarily valid UTF-8). Only the pty's own output crosses this mirror:
+typed stdin is never itself written, so a no-echo `sudo` password prompt
+never lands in the log even though everything the pty prints back in
+response does. Lives in the same gitignored root-runtime `state/` dir as
+`usage.json` (state-dir resolution as above), one file per conducted
+session, created on first write and opened append-only for the session's
+whole lifetime — `0600` on the file and `0700` on its parent
+`state/sessions/` directory, both set explicitly rather than left to
+umask. Append-only and UNROTATED — a deliberate known gap, not a design
+goal: nothing truncates or rolls this file, so a long-running or noisy
+session grows its log without bound. A log write that fails degrades
+silently (the mirror is simply skipped) rather than interrupting the
+session — best-effort, the same posture as every other side-channel write
+here. Written by every `aoide conduct`-owned pty, headless and interactive
+alike; a hook-only agent session (registered without ever spawning a pty)
+never creates one. The session's `sessions.json` record (above) publishes
+this file's absolute path as `logPath` the moment it's open.
 
 ### `state/session-ledger.jsonl` — **v0** (P-D8, `docs/architecture/AOIDED.md`'s "L5")
 
