@@ -3054,12 +3054,12 @@ serializing every `policy.json`/backend-store mutation, closing the TOCTOU
 a concurrent `put`/`exec` and an admin command used to have when both raced a
 direct-home write:
 ```text
--> {"op":"admin","verb":"add","name":"<name>","backend":"<backend>","key":"<key>","requireTotp":<bool>?,"consumers":[<name>,...]?}
--> {"op":"admin","verb":"rm","name":"<name>"}
--> {"op":"admin","verb":"grant"|"revoke","name":"<name>","consumer":"<consumer>"}
--> {"op":"admin","verb":"set-totp"|"expose","name":"<name>","state":"on"|"off"}
--> {"op":"admin","verb":"automate","name":"<name>","action":"on"|"off"|"grant"|"revoke","consumer":"<consumer>"?}
--> {"op":"admin","verb":"migrate","name":"<name>","target":"<backend>"}
+-> {"op":"admin","command":"add","name":"<name>","backend":"<backend>","key":"<key>","requireTotp":<bool>?,"consumers":[<name>,...]?}
+-> {"op":"admin","command":"rm","name":"<name>"}
+-> {"op":"admin","command":"grant"|"revoke","name":"<name>","consumer":"<consumer>"}
+-> {"op":"admin","command":"set-totp"|"expose","name":"<name>","state":"on"|"off"}
+-> {"op":"admin","command":"automate","name":"<name>","action":"on"|"off"|"grant"|"revoke","consumer":"<consumer>"?}
+-> {"op":"admin","command":"migrate","name":"<name>","target":"<backend>"}
 <- {"ok":true,"message":"<summary>","changed":["policy:<name>"]}
 <- {"ok":false,"error":"<message>"}
 ```
