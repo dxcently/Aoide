@@ -682,6 +682,35 @@ count.
   whose config read fails. `--json`'s `data.report` shape: `{"sections":
   [{"name", "grant", "sameOperator", "declared", "selfDeclared", "rows":
   [{"peer", "class", …}]}], "undeclared": [...]}`.
+- `mesh pair [<mesh>]`, appended newest, task #135 P5 — the converge: makes
+  a declared mesh true by running the ORDINARY pairing ceremony against the
+  peers it is missing. Runs the same `mesh` comparison above (there is no
+  second one), selects the `missing` and `unverified` rows in declared-name
+  order, and drives each through `pair`'s own request path — same two POSTs,
+  same park, same `--wait` poll, same typed code on both sides — dialing
+  `http://127.0.0.1:<AOIDE_A2A_PORT or 8710>/` through that peer's declared
+  hop. The mesh may be omitted when exactly one is declared; otherwise it is
+  named, and an unknown one lists the declared names. A `via-mismatch` is
+  reported `skipped` and never touched: a converge never modifies an
+  existing verified peer, so a second run over a converged mesh is
+  all-`skipped`. `mesh.<name>.grant` rides the ceremony as the capability
+  set a FIRST verification stamps (absent = `[pairing] defaultGrant`), which
+  is why `--wait 0` beside a declared grant is refused — the same refusal
+  `pair --allow --wait 0` gives, for the same reason. `--wait`/`--yes` spell
+  exactly what they spell on `pair`; `--yes` skips ONE pre-flight confirm
+  covering the whole converge (which peers, in what order, through which
+  hops, at what grant) and never a pairing code.
+  `mesh.<name>.sameOperator` is declared and NOT acted on: a mesh declaring
+  it converges identically to one that does not, and the report carries one
+  note saying so — never a row, a status, or a count. Per-peer outcome, four
+  words: `completed`; `parked` (resumable — its `id` names the entry `aoide
+  pair <id>` finishes); `UNREACHABLE` (nothing committed and nothing parked,
+  so it carries NO id — a request to an unreachable box parks nothing); and
+  `skipped`. Ok whenever the converge ran, whatever it found;
+  `Outcome::error` only for a config that fails to load
+  (`reason: "config-unreadable"`) or for no mesh to name
+  (`reason: "no-mesh-declared"`). `--json`'s `data.report` shape:
+  `{"mesh", "rows": [{"peer", "outcome", …}], "sameOperatorNote"?}`.
 - `lyra schema --json` — the AoideOS-surface contract: onboard/rice/draft/
   mode/cover/livery/quickshell/reload/screen/shellbridge/herald/take/
   element, the painted surface. `crates/lyra/src/registry.rs`'s golden test
@@ -1008,16 +1037,21 @@ sakaki = "ssh://khoa@192.168.1.202"
   that key still compares its other peers normally; `aoide mesh` adds one
   note line saying this box was not found under it (`selfDeclared: false`
   in `--json`), never a drift row.
-  `mesh.<name>.grant` (list of strings, default absent) is declared,
-  validated, stored, and shown back by both `aoide config` and `aoide
-  mesh` today; what, if anything, ever reads it to grant a capability at
-  first-verify is not yet decided (`docs/architecture/PAIRING.md`'s "Mesh
-  declaration" section) — today `resolve_grant` (`aoide_client::commands`)
-  is the only grant-resolution path, and it never reads this field. Absent
-  means only "this mesh declares no override," never "use
-  `pairing.defaultGrant`" — nothing yet makes that substitution.
+  `mesh.<name>.grant` (list of strings, default absent) is the capability
+  set `aoide mesh pair` stamps at a FIRST verification — it rides the
+  ceremony exactly as a typed `aoide pair --allow` would, so a re-pair never
+  re-grants and `peer allow` stays the only way to change a live one.
+  Absent means "this mesh declares no override," and the commit then falls
+  through to `resolve_grant` (`aoide_client::commands`), which reads
+  `pairing.defaultGrant`. An EMPTY list is the distinct "grant nothing"
+  intent, never the same thing as absent.
   `mesh.<name>.sameOperator` (bool, default `false`) declares every peer in
-  the mesh is operated by the same human. This section is validated the
+  the mesh is operated by the same human. It is declared and NOT acted on:
+  `aoide mesh pair` converges a mesh declaring it identically to one that
+  does not — every peer paired with both codes typed — and says so in one
+  note on its report. Whether a converge may ever act on the claim touches
+  the mutual-code pairing invariant (`docs/architecture/PAIRING.md`'s "Mesh
+  declaration" section) and is not decided. This section is validated the
   same as the two above it — an invalid mesh/peer name, an out-of-
   vocabulary `grant` element, an unparseable hop, or a peer declared twice
   is a LOUD error naming the offence — but it is declared, never settable:
@@ -1025,9 +1059,10 @@ sakaki = "ssh://khoa@192.168.1.202"
   set` could walk, so `aoide config set mesh.*` is always
   `SetRefusal::UnknownKey`, the same refusal an unknown key anywhere else
   gets. Writing a mesh is a text edit to this file; `aoide mesh` is the
-  read-only comparison against `state/peers.json` — this file records
-  intent only, `peer_store::Peer` gains no field for it, and nothing here
-  writes the registry.
+  read-only comparison against `state/peers.json` and `aoide mesh pair` is
+  the converge that closes it — this file records intent only,
+  `peer_store::Peer` gains no field for it, and the only writer of the
+  registry stays the pairing ceremony.
 
 The schema lives in code as a walkable TABLE (`aoide_storage::config::SCHEMA`
 — sections, keys, each key's [`ValueKind`] (a closed-vocabulary list, or a

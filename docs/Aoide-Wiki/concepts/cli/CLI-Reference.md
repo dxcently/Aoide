@@ -40,8 +40,8 @@ start at [[aoide-cli]] and the group pages linked below.
   (conducting state) and `song/stage/` (rice staging). `~/Aoide` is the dev
   git checkout, reached via `$AOIDE_FLAKE_ROOT`, not a runtime path.
   Stage/state writes are atomic temp-then-rename.
-- **Two registries, one convention:** `aoide schema --json` holds 80
-  command paths (73 real, 7 stubs), `lyra schema --json` holds 48 (47 real,
+- **Two registries, one convention:** `aoide schema --json` holds 81
+  command paths (74 real, 7 stubs), `lyra schema --json` holds 48 (47 real,
   1 stub) — every group page prefixes
   each heading `aoide `/`lyra ` so the binary a command belongs to is never
   ambiguous.

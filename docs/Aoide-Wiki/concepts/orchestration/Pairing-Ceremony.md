@@ -238,6 +238,31 @@ optional target:
   re-pair confirm — never either side's typed code; both legs are a
   CodeGate, so nothing about `--yes` reaches a code entry.
 
+## The converge drives this same ceremony
+
+`aoide mesh pair [<mesh>]` ([[Doors-and-Peers#aoide mesh pair]], task #135
+P5) is not a second ceremony and adds no wire method, no gate, and no state
+of its own. It reads a `[mesh.<name>]` declaration, selects the declared
+peers this box has no verified record of (`missing`/`unverified`, in
+declared-name order), and runs each one through the SAME
+`run_pair_request` core `pair_via_url`/`pair_via_hostname` call — the same
+two POSTs, the same park, the same `--wait` poll, the same typed code on
+both sides. What it adds sits entirely in front of and around that: the
+selection, ONE pre-flight confirm covering the whole run (`--yes` skips it,
+exactly as it skips the sweep proceed prompt above), the mesh's declared
+`grant` in place of a typed `--allow`, and one report whose per-peer
+outcome is `completed`, `parked`, `UNREACHABLE`, or `skipped`.
+
+Two rules keep it inside this page's contract rather than beside it. A
+verified peer is never modified — a peer whose recorded `via` disagrees
+with the declaration is reported `skipped`, since re-pairing replaces key
+material and `via` is written by a ceremony commit alone — so a second run
+converges nothing. And nothing pairs with nobody watching: every leg keeps
+both typed codes, so a converge is a convenience over typing `aoide pair` N
+times, never a way around the codes. A mesh declaring `sameOperator = true`
+changes none of that: the claim is declared and not acted on, and the
+report says so in one note.
+
 ## The events surface
 
 From the Ok arm of `aoide/pairRequest` and `aoide/pairReveal` — never from
@@ -325,10 +350,10 @@ Real: the three wire methods (`aoide/pairRequest`/`aoide/pairReveal`/
 `aoide/pairPoll`), both parked-state files, the one-verb CLI surface
 (`aoide pair [<name|url|id>]`, `pair reject`/`pair watch`),
 the SAS derivation with its pinned vectors, the typed-code gate with its
-persisted tries and auto-deny, the events feed, and the popup (typed-code
+persisted tries and auto-deny, the events feed, the popup (typed-code
 entry via `lyra
-pair ask` or zenity `--entry`, opt-in behind `aoide.a2a.pairingPopup`) all
-run.
+pair ask` or zenity `--entry`, opt-in behind `aoide.a2a.pairingPopup`), and
+`aoide mesh pair`'s converge over the same ceremony all run.
 
 ## Related
 

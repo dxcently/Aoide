@@ -72,7 +72,7 @@ trail but exit 64 today.
 **Binary note.** The map below draws both binaries as one continuous picture
 of the data flow, labeled `aoide` throughout for readability. Ownership
 (`CONTRACTS.md` §3, [[Package-Layout]]): the AGENT INTERFACE/`aoided`/CONTENT
-PIPELINE/NIX EVAL boxes are `aoide`'s (80 commands: conducting/orchestration
+PIPELINE/NIX EVAL boxes are `aoide`'s (81 commands: conducting/orchestration
 is aoide's identity); the RICE ENGINE, LIVERY, Quickshell, and shellbridge
 boxes below them are `lyra`'s (48 commands, its own schema and dispatch,
 routed through the desktop, not through `aoided`'s CLI trunk).
@@ -85,7 +85,7 @@ routed through the desktop, not through `aoided`'s CLI trunk).
                                         ▼            │
    ┌─────────────────────────────────────────────────────────────┐
    │  AGENT INTERFACE            aoide <cmd>   ·   aoide mcp serve │   [[Agent-Interface]]
-   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   80 commands · exit 0/1/2/64
+   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   81 commands · exit 0/1/2/64
    └───────────────────────────────┬─────────────────────────────┘
                                     ▼
    ┌─────────────────────────────────────────────────────────────┐
@@ -133,7 +133,7 @@ the implemented/stubbed ladder.
 
 | Subsystem            | Inputs                                         | Outputs                                             | Status                                     |
 | -------------------- | ---------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
-| [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 73 real/7 exit 64; lyra 47 real/1 exit 64) |
+| [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 74 real/7 exit 64; lyra 47 real/1 exit 64) |
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`$AOIDE_ROOT/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; stage    | mostly real (`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all commands exit 64)                |
@@ -307,11 +307,15 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   `aoide schema --json` is its machine-readable source of truth; the stdio
   MCP façade (`aoide mcp serve --stdio`) generates its tool list from it, and
   the [[A2A-Door]]'s AgentCard is derived from the same schema — all
-  one-to-one. **80 commands** — real (73): `guide`, `schema`,
+  one-to-one. **81 commands** — real (74): `guide`, `schema`,
   `mcp serve`, `daemon`, `events tail`, `conduct`, `conductor`, `adapter
   melete`, `identity`, `pair`/`pair reject`/`pair watch` (the whole
   pairing ceremony behind one smart verb, bare `pair` the interactive
-  pending listing — [[Pairing-Ceremony]]), the `melete` group
+  pending listing — [[Pairing-Ceremony]]), `mesh`/`mesh pair` (the declared
+  mesh: the read reports where a `[mesh.<name>]` declaration and the live
+  peer registry diverge, the converge closes that divergence by driving the
+  same pairing ceremony over every declared peer with no verified record —
+  [[Doors-and-Peers]]), the `melete` group
   (`status`/`graph`/`call` — the
   Melete MCP client), the
   1-command `a2a` door group (`a2a serve` — the outbound client is the `peer`
@@ -326,14 +330,16 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   (`serve`/`exec`/`add`/`rm`/`grant`/`revoke`/`enroll`/`put`/`set-totp`/
   `automate`/`expose`/`allow-remote-origin`/`migrate`/`pending`/`approve`/`dismiss`/`watch` — the
   socket-only credential broker under its own uid, [[Secrets-Broker]]),
-  `usage`, `hooks install`, `soundcheck`, `who` (live presence over sessions
-  and registered peers), the 3-command `inbox` group (`list`/`read`/`clear`, the
+  `usage`, `hooks install`, `soundcheck`, `config`/`config set` (the portable
+  runtime config file, `$AOIDE_ROOT/config.toml`), the 3-command `inbox` group (`list`/`read`/`clear`, the
   durable per-host message store), the 20-command graph/session/project
   surface (the [[Session-Graph]] DAG viewer + management layer over projects
   and sessions — bare `graph`/`graph link` the read/analysis lens,
   `project add/remove/list`, the `session` family
-  (`start/phase/end/hook/undying/permit/pending list|approve|deny/prune/reap`)
-  plus bare `session` (the undying picker), and bare `send`/`spawn`/
+  (`start/phase/end/hook/grant/permit/pending list|approve|deny/prune/reap` —
+  `session grant` carries both the `undying` picker and the reaper `exempt`)
+  plus bare `session` (the roster listing over this box's sessions and every
+  registered peer, which absorbed `who`), and bare `send`/`spawn`/
   `resurrect` (bare `resurrect` also walks up to a `.aoide/project.json`
   manifest — [[Session-Graph]]), all real — registering a new
   conducted session is `conduct` or `spawn`, and jumping to a

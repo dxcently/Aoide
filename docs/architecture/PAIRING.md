@@ -747,12 +747,63 @@ or one whose recorded `via` no longer matches the declared hop (an absent
 address directly — commonly this box's own loopback, for an already-paired
 peer). It also lists any verified peer that belongs to no declared mesh,
 reported plainly rather than treated as a problem. Every finding is a
-report; nothing about running it pairs, re-pairs, or edits a single record
-— convergence (making a declaration true) is a separate concern this
-command does not undertake. A mesh's optional `grant`/`sameOperator` are
-declared and shown back by both `aoide config` and `aoide mesh` today; they
-describe intent a future converge step would read, not a live gate
-anything checks yet.
+report; nothing about running it pairs, re-pairs, or edits a single record.
+
+### The converge
+
+`aoide mesh pair [<mesh>]` is the write side, and it writes nothing this
+document does not already describe: it runs the ceremony above, unchanged,
+once per peer. It reads the SAME comparison `aoide mesh` renders — there is
+no second one — and selects the declared peers with **no verified record**:
+`missing` and `unverified`, in declared-name order. Each is dialed at
+`http://127.0.0.1:<door port>/` through its declared hop, which is the
+ordinary tunneled dial every cross-box peer action already makes. The
+result is ordinary pairwise records and nothing else — no transitive relay,
+no mesh-level object, nothing new on the wire; the Kill-list below holds
+unchanged.
+
+**A verified peer is never modified.** A `via-mismatch` comes back
+`skipped`, naming `aoide pair <name>` as the fix, for three reasons: a
+re-pair replaces key material and is never silent, the re-pair confirm
+already exists as a human y/N on `aoide pair <name>`, and `via` is written
+by a ceremony commit alone — a converge writing it would be a second writer
+of a field this document reserves to that commit. It also means a converge
+is idempotent: run it twice and the second run touches nothing. The
+direction matters when fixing one: the requester's commit is what records
+`via`, so a wrong hop is repaired by a ceremony started FROM the box holding
+the wrong record.
+
+**Nothing pairs with nobody watching.** A converge is a loop over the
+ceremony, so every leg keeps both typed codes: the far operator reads the
+pairing code and types it, then reads a reply code back. What the converge
+adds in front is ONE pre-flight confirm covering the whole run — which
+peers, in what order, through which hops, at what grant — which `--yes`
+skips exactly as it skips the sweep's proceed-prompt on `aoide pair`. It is
+a convenience over the listing, never a substitute for a code: skipping it
+bypasses no gate, because the codes are the gate.
+
+**`sameOperator` is declared and not acted on.** Whether a converge may
+ever satisfy the far side's typed code on an operator's behalf — a claim of
+one human at both screens — touches the mutual-code invariant directly and
+is not decided. Until it is, a mesh declaring `sameOperator = true`
+converges byte-identically to one that does not, and the report carries a
+single note saying the flag was seen and not acted on. The note is a note:
+it changes no peer's outcome, no count, and refuses nothing.
+
+`mesh.<name>.grant` IS live: it is the capability set a converge stamps at a
+first verification, riding the ceremony exactly as a typed `--allow` does,
+so an already-verified peer's `allows` survives a re-pair untouched and
+`peer allow` remains the only way to change a live grant.
+
+Each peer's result is one of four words — `completed`, `parked` (resumable
+by id), `UNREACHABLE`, `skipped`. `UNREACHABLE` is separate from `parked`
+because a request only parks once both ceremony POSTs succeed: a request to
+a box that is off parks nothing, so there is no id to resume and the report
+must not offer one.
+
+Two boxes converging the same declaration at once needs nothing new: A→B
+and B→A at the same moment is exactly the cross-direction pair R3 above
+already calls a legitimate simultaneous mutual pairing and leaves alone.
 
 ## Kill-list
 

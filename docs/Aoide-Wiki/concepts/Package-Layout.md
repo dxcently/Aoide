@@ -72,7 +72,7 @@ songbook manifest).
 | **test-support** | Shared test rig only — scratch dirs, `EnvSaver`, fixture payloads, the single `env_lock`. A dev-dependency, never a production edge. | both (dev-only) | none |
 | **lyra** | The second app shell: arg parse, dispatcher, registry assembly for the paint bundle. The one binary allowed to shell out to nix. Never registers `a2a serve`, `conductor`, or any core-only group. | lyra | `guide`, `schema`, `mcp.serve`, `onboard`, `secrets.ask`, `pair.ask`, `pair.show` |
 
-Command totals: **aoide 80** (73 real, 7 stub), **lyra 48** (47 real, 1 stub)
+Command totals: **aoide 81** (74 real, 7 stub), **lyra 48** (47 real, 1 stub)
 — see [[Full-Architecture]] for the full per-group breakdown.
 
 ## Two binaries — `aoide`/`aoided` (core) and `lyra` (paint)

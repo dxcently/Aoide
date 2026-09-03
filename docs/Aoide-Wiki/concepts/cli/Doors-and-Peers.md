@@ -701,6 +701,53 @@ aoide mesh [--json]
   `docs/architecture/PAIRING.md`'s "Mesh declaration" section for why this
   stays intent, never a wire-level object.
 
+### aoide mesh pair
+
+```
+aoide mesh pair [<mesh>] [--wait SECS] [--yes] [--json]
+```
+
+- **Reads:** the same two sources `aoide mesh` reads, through the same
+  comparison — there is no second one — plus the parked outbound requests
+  (`aoide_storage::pairing::list_outbound`) to see what each attempt left
+  behind. The mesh may be omitted when exactly one is declared; otherwise
+  it is named, and an unknown name lists the declared ones.
+- **Writes:** `state/peers.json`, and only ever through the pairing
+  ceremony — every selected peer goes through `aoide pair`'s own request
+  path (`commands::run_pair_request`), so the two POSTs, the park, the
+  `--wait` poll, and the typed code on each side are the ordinary ones. No
+  converge-specific ceremony exists.
+- **Selects:** the declared peers with no verified record — `missing` and
+  `unverified` — in declared-name order, each dialed at
+  `http://127.0.0.1:<AOIDE_A2A_PORT or 8710>/` through its declared hop. A
+  `via-mismatch` is `skipped`, naming `aoide pair <name>` as the fix: a
+  converge never modifies an existing verified peer, since re-pairing
+  replaces key material and `via` belongs to a ceremony commit. That is
+  what makes a second run over a converged mesh all-`skipped`.
+- **Confirms once:** one pre-flight listing the whole converge — which
+  peers, in what order, through which hops, at what grant — before anything
+  is sent. `--yes` skips it, exactly as it skips the sweep proceed-prompt
+  on `aoide pair`, and bypasses no pairing code: each peer still needs the
+  code typed on both sides.
+- **Output:** one line per peer, in one of four words — `completed`,
+  `parked` (its id is what `aoide pair <id>` finishes), `UNREACHABLE`
+  (nothing committed and nothing parked, so no id: a request to a box that
+  is off parks nothing), `skipped`. `--json` emits
+  `{"mesh", "rows": [{"peer", "outcome", …}], "sameOperatorNote"?}` under
+  `data.report`.
+- **Notes:** `mesh.<name>.grant` is the capability set a FIRST verification
+  stamps, handed to the ceremony exactly as a typed `aoide pair --allow`
+  would be — so a re-pair never re-grants, and `--wait 0` beside a declared
+  grant is refused for the same reason `pair --allow --wait 0` is (a parked
+  entry never carries a grant). `mesh.<name>.sameOperator` is declared and
+  not acted on: a mesh declaring it converges identically to one that does
+  not, and the report carries one note saying so — never a row, a status,
+  or a count. Off a non-CLI door the command needs no gate of its own:
+  every leg's code gate resolves to unavailable there, so a remote caller
+  can start requests and can never commit one — the same answer bare `pair`
+  already gives. See [[Pairing-Ceremony]] and
+  `docs/architecture/PAIRING.md`'s "The converge".
+
 ## Related
 
 - [[A2A-Door]] — the inbound A2A contract (CONTRACTS.md §6)

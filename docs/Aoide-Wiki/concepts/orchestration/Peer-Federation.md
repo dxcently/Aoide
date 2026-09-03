@@ -99,10 +99,19 @@ touched, never transmitted, never a field on `Peer` above. `aoide mesh`
 a declaration against this registry and reports a peer that's missing,
 unverified, or reachable at a different hop than declared, plus — kept
 separate, never counted as drift — any verified peer belonging to no
-declared mesh. It never writes either side; see [[Doors-and-Peers#aoide
-mesh]] for the command and `docs/architecture/PAIRING.md`'s "Mesh
-declaration" section for why a declared mesh stays intent rather than a
-second identity model.
+declared mesh. It writes neither side.
+
+`aoide mesh pair` (task #135 P5) is what closes that gap, and it closes it
+the only way this registry is ever written — by running the ordinary
+[[Pairing-Ceremony]] against each declared peer this box has no verified
+record of, in declared-name order, through that peer's declared hop. A
+verified peer is never modified: a hop that no longer matches is reported
+and left for a human re-pair, so a second converge over a converged mesh
+does nothing. The declaration is still never transmitted and `Peer` still
+gains no field for it — a converge mints ordinary pairwise records and
+nothing else. See [[Doors-and-Peers#aoide mesh]] for both commands and
+`docs/architecture/PAIRING.md`'s "Mesh declaration" section for why a
+declared mesh stays intent rather than a second identity model.
 
 ## The cache — `state/peer-cache/<name>.json`
 
@@ -199,8 +208,10 @@ own door — see
 [[aoide-cli#The `peer` group — aoide-to-aoide federation]] for the per-command
 behavior. `status --json` carries the full registry row per peer — the
 deep per-peer detail `peer list` never duplicates. `aoide mesh [--json]`
-sits outside the `peer` family proper — it reads `config.toml`'s declared
-`[mesh.<name>]` (above) against this same registry and reports drift; see
+and `aoide mesh pair` sit outside the `peer` family proper — the first
+reads `config.toml`'s declared `[mesh.<name>]` (above) against this same
+registry and reports drift, the second converges it by running the pairing
+ceremony over every declared peer with no verified record; see
 [[Doors-and-Peers#aoide mesh]].
 
 ## Sending across the fold — `send --to peer/<query>`
