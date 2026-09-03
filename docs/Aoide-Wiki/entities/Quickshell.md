@@ -247,17 +247,28 @@ the two happened — painted, or dropped straight back into the lockup its
 own restart was meant to clear — instead of finishing green over a bare
 desktop.
 
-The check requires two independent signals before it acts, scoped to the
-unit's own `ActiveEnterTimestamp` so a recovered occurrence can never
-re-trigger after a restart moves that timestamp forward: the journal
-(`There are no outputs - creating placeholder screen`, Qt's own line)
-confirms the event happened; `hyprctl layers -j` reporting zero
-`aoide-`-namespaced surfaces anywhere confirms it is still true right now. A
-failed or unparsable `hyprctl` call reads as unconfirmed, never as the stuck
-signal. The surface count is summed system-wide, never per-monitor — no
-`PanelWindow` in `modules/facets/quickshell/qml/` binds to a screen, so this
-shell always paints exactly one output, and every other enabled monitor
-legitimately and permanently carries zero layers by design.
+The check asks two independent signals, in order, and they answer different
+questions. `hyprctl layers -j` reporting zero `aoide-`-namespaced surfaces
+anywhere is the blank desktop itself — the user-visible failure, true right
+now — and it decides health on its own. The journal (`There are no outputs -
+creating placeholder screen`, Qt's own line, read since the unit's own
+`ActiveEnterTimestamp` so a recovered occurrence can never re-trigger after
+a restart moves that timestamp forward) names a mechanism, and only one, so
+it decides whether the watchdog may act rather than whether anything is
+wrong. Zero surfaces with that line is the placeholder lockup and is
+restarted; zero surfaces without it is reported as `blank` and left alone,
+since a restart is only known to undo the placeholder screen. Asking the
+journal first would let an unrecognized mechanism report a bare desktop as
+healthy, which is how a pre-QML deadlock in the `QApplication` constructor
+— emitting no QPA line at all — once sat unreported for 22 minutes on two
+hosts.
+
+A failed or unparsable `hyprctl` call reads as unconfirmed, never as a blank
+desktop; that guard is load-bearing, since the surface count is asked first.
+The count is summed system-wide, never per-monitor — no `PanelWindow` in
+`modules/facets/quickshell/qml/` binds to a screen, so this shell always
+paints exactly one output, and every other enabled monitor legitimately and
+permanently carries zero layers by design.
 
 Recovery runs on a retry ladder: minimum gaps of 0s, 15s, 60s, 300s indexed
 by how many restarts already sit in the last hour, settling on a 900s floor

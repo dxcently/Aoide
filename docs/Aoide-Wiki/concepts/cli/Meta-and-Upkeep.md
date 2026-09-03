@@ -257,20 +257,24 @@ lyra quickshell healthcheck [--json]
   lockup — restarts `aoide-quickshell.service` via `systemctl --user
   restart`.
 - **Pipes to / output:** always `status: "ok"`; `--json` data `{status:
-  "healthy" | "restarted" | "deferred"}` with a matching human message (a
-  `deferred` message names the seconds until the next attempt and the
-  restart count in the last hour). Meant to run off
+  "healthy" | "blank" | "restarted" | "deferred"}` with a matching human
+  message (a `deferred` message names the seconds until the next attempt and
+  the restart count in the last hour). Meant to run off
   `aoide-quickshell-healthcheck.timer`, not interactively.
 - **Notes:** not gated; best-effort throughout — a failed
   `systemctl`/`journalctl`/`hyprctl` call reads as `healthy` (nothing
-  confirmed), never as a command failure. Acts only once BOTH the journal's
+  confirmed), never as a command failure. The two signals are asked in
+  order: a live `hyprctl layers -j` reading of zero `aoide-*` surfaces is
+  the blank desktop and decides `healthy` on its own, and the journal's
   placeholder-screen line (scoped to the unit's own `ActiveEnterTimestamp`,
-  so a recovered occurrence can never re-trigger) and a live `hyprctl
-  layers -j` reading of zero `aoide-*`-surfaces confirm the lockup — see
-  [[Quickshell]]'s "Session service & resilience" for the full detection and
-  retry-ladder reasoning. Restarts are throttled on a retry ladder
-  (0s/15s/60s/300s, floor 900s, indexed by restarts in the trailing hour)
-  that never stops trying — the floor repeats indefinitely.
+  so a recovered occurrence can never re-trigger) then decides whether the
+  watchdog may act. Zero surfaces with that line is the lockup and is
+  restarted; zero surfaces without it is `blank` — reported, never
+  restarted, because the placeholder screen is the only mechanism a restart
+  is known to undo. See [[Quickshell]]'s "Session service & resilience" for
+  the full detection and retry-ladder reasoning. Restarts are throttled on a
+  retry ladder (0s/15s/60s/300s, floor 900s, indexed by restarts in the
+  trailing hour) that never stops trying — the floor repeats indefinitely.
 
 ### aoide soundcheck
 
