@@ -425,6 +425,20 @@ in
             # this flake's nixpkgs, so this qtimageformats is the exact Qt ABI.
             Environment = [
               "QT_PLUGIN_PATH=${pkgs.qt6.qtimageformats}/lib/qt-6/plugins"
+              # No Qt platform theme for this unit. quickshell follows this
+              # flake's nixpkgs while the host's Qt style plugins come from the
+              # system's, and a style plugin built against a different qtbase
+              # PATCH release cannot load — Qt tags its private symbols per
+              # patch (`Qt_6_PRIVATE_API`) precisely to forbid that mix. qt6ct
+              # does not fall back when the load fails: QStyleFactory returns
+              # null and the QApplication constructor deadlocks before the QML
+              # engine starts, so the shell registers zero layer surfaces and
+              # logs nothing past its startup banner (chiyo + osaka, blank
+              # desktops, 2026-09-03). shell.qml's `UseQApplication` pragma is
+              # what instantiates a QStyle at all, so this unit is exposed
+              # where a QGuiApplication one is not. Nothing is lost: the livery
+              # comes from song/stage/livery.json, never from Qt.
+              "QT_QPA_PLATFORMTHEME="
               # Runtime root for every stage/state file the QML reads
               # (livery/cover/grimoire/sessions/usage) — the QML falls back to
               # ~/.aoide when unset, but a configured aoide.root must win.
