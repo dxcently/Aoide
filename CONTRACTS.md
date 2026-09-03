@@ -659,6 +659,29 @@ count.
   file to a read-only store path and points `$AOIDE_CONFIG` at it — see
   §4's `config.toml` subsection below for the resolution order, the schema,
   and the intent-vs-state line.
+- `mesh`, appended newest, task #135 P4 — a read-only drift report over the
+  same file's `[mesh.<name>]` declarations (`aoide_client::mesh`, see §4's
+  `config.toml` subsection for the section's own shape): for each declared
+  mesh, compares every named peer against the live registry
+  (`aoide_storage::peer_store::load_peers`) and classifies each divergence
+  as `missing` (no peer record by that name), `unverified` (a record
+  exists, pairing was never confirmed), or `via-mismatch` (verified, but
+  the live `via` does not match the declared hop — a `null`/absent
+  recorded `via` is the severe case, since a call with none dials the
+  peer's bare `url` directly, commonly this box's own loopback). A verified
+  peer named in no mesh is listed separately under `undeclared`, never
+  counted as drift and never given a suggested fix. A section whose file
+  key does not match this box's own `display::local_host_name()` gets one
+  note line saying so (see §4's `mesh.<name>.peers` entry) — a note, not a
+  drift row, and it does not change the section's status or counts. Writes
+  neither the config nor the registry — a comparison only. Drift is never
+  itself a failure: every class above lands in the message and
+  `data.report`, never a non-zero exit by itself. The one exception is the
+  read — a config that fails to load returns `Outcome::error` with
+  `data.reason` naming why and no `data.report`, same as any other command
+  whose config read fails. `--json`'s `data.report` shape: `{"sections":
+  [{"name", "grant", "sameOperator", "declared", "selfDeclared", "rows":
+  [{"peer", "class", …}]}], "undeclared": [...]}`.
 - `lyra schema --json` — the AoideOS-surface contract: onboard/rice/draft/
   mode/cover/livery/quickshell/reload/screen/shellbridge/herald/take/
   element, the painted surface. `crates/lyra/src/registry.rs`'s golden test
@@ -920,8 +943,8 @@ house policy as every other door), and partial management (nix owning one
 section while the CLI owns another) is deliberately not offered: two writers
 on one document is the split-brain the design exists to avoid.
 
-Schema v0 — two sections, and a new section lands with the consumer that
-reads it, never ahead of one:
+Schema v0 — two SETTABLE sections plus one DECLARED family, and a new
+section lands with the consumer that reads it, never ahead of one:
 
 ```toml
 # Comments are the point of the format: this is the one file a human edits.
@@ -930,6 +953,13 @@ defaultGrant = ["read"]
 
 [upkeep]
 verifyCommand = "nix build --no-link .#checks.x86_64-linux.fmt .#checks.x86_64-linux.nix-lint"
+
+[mesh.home]
+grant = ["read", "spawn"]
+sameOperator = true
+
+[mesh.home.peers]
+sakaki = "ssh://khoa@192.168.1.202"
 ```
 
 - `pairing.defaultGrant` (list of strings, default `["read"]`) — the
@@ -960,6 +990,44 @@ verifyCommand = "nix build --no-link .#checks.x86_64-linux.fmt .#checks.x86_64-l
   hook timeout. The command is `nix build`, not `nix flake check`: the latter
   takes no attribute fragment, so scoping is only expressible as a build of
   the check derivations.
+- `mesh.<name>` (task #135 P4, zero or more, keyed by the operator's own
+  mesh name) — a declared roster this instance believes it belongs to,
+  compared against the live peer registry by `aoide mesh`
+  (`aoide_client::mesh`, see §3's CLI ledger). `mesh.<name>.peers` is a
+  `name -> ssh hop` map (`aoide_storage::tunnel::parse_via`'s own
+  `ssh://[user@]host[:port]` shape) — a map, not an array of records, so a
+  duplicate peer name within one mesh is structural, not a second check to
+  write; the same peer name may not appear in two different meshes. One key
+  is expected to name the box the file lives on: `aoide mesh` matches
+  against `display::local_host_name()` by exact string equality, so that
+  key must be exactly what the function returns — an FQDN or mixed-case OS
+  hostname can never be declared here at all, since mesh/peer names share
+  `peer_store::valid_peer_name`'s lowercase-digits-hyphen vocabulary (the
+  same known gap `pair`'s own self-detection carries for a custom
+  `--peer-name`, `docs/architecture/PAIRING.md:599-612`). A mesh missing
+  that key still compares its other peers normally; `aoide mesh` adds one
+  note line saying this box was not found under it (`selfDeclared: false`
+  in `--json`), never a drift row.
+  `mesh.<name>.grant` (list of strings, default absent) is declared,
+  validated, stored, and shown back by both `aoide config` and `aoide
+  mesh` today; what, if anything, ever reads it to grant a capability at
+  first-verify is not yet decided (`docs/architecture/PAIRING.md`'s "Mesh
+  declaration" section) — today `resolve_grant` (`aoide_client::commands`)
+  is the only grant-resolution path, and it never reads this field. Absent
+  means only "this mesh declares no override," never "use
+  `pairing.defaultGrant`" — nothing yet makes that substitution.
+  `mesh.<name>.sameOperator` (bool, default `false`) declares every peer in
+  the mesh is operated by the same human. This section is validated the
+  same as the two above it — an invalid mesh/peer name, an out-of-
+  vocabulary `grant` element, an unparseable hop, or a peer declared twice
+  is a LOUD error naming the offence — but it is declared, never settable:
+  its keys are the operator's own names, not a fixed table `aoide config
+  set` could walk, so `aoide config set mesh.*` is always
+  `SetRefusal::UnknownKey`, the same refusal an unknown key anywhere else
+  gets. Writing a mesh is a text edit to this file; `aoide mesh` is the
+  read-only comparison against `state/peers.json` — this file records
+  intent only, `peer_store::Peer` gains no field for it, and nothing here
+  writes the registry.
 
 The schema lives in code as a walkable TABLE (`aoide_storage::config::SCHEMA`
 — sections, keys, each key's [`ValueKind`] (a closed-vocabulary list, or a
@@ -971,7 +1039,11 @@ to violate), and a config already on disk that does not load — each with a
 taught error and nothing written — then edits the file's own TEXT in place
 (`toml_edit`, so an operator's comments survive a write that a
 serialize-the-struct round trip would erase), re-parses the result through
-the identical gate the next read applies, and commits it atomically.
+the identical gate the next read applies, and commits it atomically. `[mesh.
+<name>]` is typed and fully validated by the same `validate` pass but
+deliberately outside `SCHEMA` — its keys are operator-chosen, not a
+`&'static` table entry — so it is parsed and checked on every load without
+ever becoming reachable through `config set`.
 
 ### `song/stage/livery.json` — **v0**
 

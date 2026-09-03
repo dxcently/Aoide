@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-29
+updated: 2026-09-03
 tags: [aoide, cli, mcp, a2a, peer, daemon]
 ---
 
@@ -654,6 +654,52 @@ aoide peer list [--json]
   or unlistenable sweep annotates the roster, never fails it).
 - **Notes:** the roster, not the registry — `peer status` keeps the deep
   per-peer detail. See [[Peer-Federation]].
+
+### aoide mesh
+
+```
+aoide mesh [--json]
+```
+
+- **Reads:** `config.toml`'s `[mesh.<name>]` declarations (task #135 P4,
+  CONTRACTS.md §4) and `state/peers.json` (`aoide_client::mesh`, its own
+  self-contained module — own handler, own `register`, appended newest
+  into `commands::all()`).
+- **Writes:** nothing — a comparison over two read-only sources, never a
+  third place either could drift from.
+- **Output:** for every declared mesh, one line per peer that diverges from
+  the live registry — `missing` (declared, no peer record by that name),
+  `unverified` (a record exists, pairing was never confirmed), or
+  `via-mismatch` (verified, but the recorded `via` does not match the
+  declared hop; a recorded `via` of none is the severe case — a call then
+  dials the peer's bare address directly, commonly this box's own
+  loopback). A peer that matches gets no line. A separate trailing line
+  lists any verified peer named in no declared mesh — reported, never
+  accused, no drift count, no suggested action. A mesh whose declared keys
+  do not include this box's own name gets one more note line saying so —
+  never a drift row, never counted in `declared`. `--json` emits the same
+  comparison structured under `data.report`:
+  `{"sections": [{"name", "grant", "sameOperator", "declared",
+  "selfDeclared", "rows": [{"peer", "class", …}]}], "undeclared": [...]}`.
+- **Notes:** unlike `peer list`'s roster above, this reads only what a
+  human explicitly named in `[mesh.<name>]` — an unregistered or
+  undeclared peer never appears as a row, only in `undeclared`. Drift is
+  never itself a command failure — every class above is reported in the
+  message and `data.report` regardless of what it finds. The one
+  exception is the read: a config that fails to load returns
+  `Outcome::error` (`data.reason` names why, `data.report` is absent),
+  same as any other command whose config read fails. One declared key in
+  each mesh is expected to name this box: the match against
+  `display::local_host_name()` is exact string equality, so a hostname
+  declared as an FQDN or in mixed case can never match —
+  `peer_store::valid_peer_name` accepts only lowercase letters, digits,
+  and `-`. This is the same known gap `aoide pair`'s own self-detection
+  carries for a custom `--peer-name` ([[Pairing-Ceremony]],
+  `docs/architecture/PAIRING.md:599-612`). Declaring a mesh does not pair,
+  verify, or reach anything — see [[Pairing-Ceremony]] for the ceremony
+  that actually populates `state/peers.json`, and
+  `docs/architecture/PAIRING.md`'s "Mesh declaration" section for why this
+  stays intent, never a wire-level object.
 
 ## Related
 

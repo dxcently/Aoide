@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-15
-updated: 2026-08-29
+updated: 2026-09-03
 tags: [aoide, agent, a2a, orchestration, interop, federation]
 ---
 
@@ -87,6 +87,22 @@ Bearer <value>` on every OUTBOUND call to that peer's A2A door. It is
 resolved fresh on every request, never cached in `peers.json` or anywhere
 else, so revoking the underlying secret takes effect on the very next call.
 Absent by default: an unmarked peer's outbound requests carry no bearer.
+
+## Declared vs. registered — `config.toml`'s `[mesh.<name>]`
+
+This registry is STATE — the product of actually running the
+[[Pairing-Ceremony]]. `config.toml`'s `[mesh.<name>]` (task #135 P4,
+CONTRACTS.md §4) is the other half, INTENT — an operator's own named
+roster of who a box is meant to belong with, written once and rarely
+touched, never transmitted, never a field on `Peer` above. `aoide mesh`
+(`aoide_client::mesh`) is the read-only bridge between the two: it compares
+a declaration against this registry and reports a peer that's missing,
+unverified, or reachable at a different hop than declared, plus — kept
+separate, never counted as drift — any verified peer belonging to no
+declared mesh. It never writes either side; see [[Doors-and-Peers#aoide
+mesh]] for the command and `docs/architecture/PAIRING.md`'s "Mesh
+declaration" section for why a declared mesh stays intent rather than a
+second identity model.
 
 ## The cache — `state/peer-cache/<name>.json`
 
@@ -182,7 +198,10 @@ the `advertise on|off` runtime switch (off by default), `peer list
 own door — see
 [[aoide-cli#The `peer` group — aoide-to-aoide federation]] for the per-command
 behavior. `status --json` carries the full registry row per peer — the
-deep per-peer detail `peer list` never duplicates.
+deep per-peer detail `peer list` never duplicates. `aoide mesh [--json]`
+sits outside the `peer` family proper — it reads `config.toml`'s declared
+`[mesh.<name>]` (above) against this same registry and reports drift; see
+[[Doors-and-Peers#aoide mesh]].
 
 ## Sending across the fold — `send --to peer/<query>`
 

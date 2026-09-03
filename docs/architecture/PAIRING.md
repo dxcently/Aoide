@@ -725,6 +725,35 @@ forward is a pipe, not a party to the protocol.
   the like-for-like an operator's existing grant expects. `via`/`--via` are
   safe to use against a real peer.
 
+## Mesh declaration
+
+A named mesh (`config.toml`'s `[mesh.<name>]`, task #135 P4, CONTRACTS.md
+§4) is intent, not a second identity model. It is an operator's own
+bookkeeping — "these are the boxes I expect to belong to this roster,
+reached at these hops" — recorded once, on one instance, never transmitted:
+nothing in the ceremony, the wire (§"Wire authentication" above), or any
+A2A payload carries a mesh name, and `peer_store::Peer` gains no field for
+it. The roster itself stays exactly what the Kill-list below already
+settled — the closure of pairwise, individually-verified records — and a
+declared mesh only ever describes a NAMED EXPECTATION over that same
+closure, never a new object standing in front of it. Declaring one changes
+nothing about how a peer is paired, verified, or reached.
+
+`aoide mesh` (`aoide_client::mesh`) is the read side: it compares a
+declaration against the live registry and reports where they diverge — a
+declared peer with no record at all, one whose pairing was never confirmed,
+or one whose recorded `via` no longer matches the declared hop (an absent
+`via` there is the severe case, since a call then dials the peer's bare
+address directly — commonly this box's own loopback, for an already-paired
+peer). It also lists any verified peer that belongs to no declared mesh,
+reported plainly rather than treated as a problem. Every finding is a
+report; nothing about running it pairs, re-pairs, or edits a single record
+— convergence (making a declaration true) is a separate concern this
+command does not undertake. A mesh's optional `grant`/`sameOperator` are
+declared and shown back by both `aoide config` and `aoide mesh` today; they
+describe intent a future converge step would read, not a live gate
+anything checks yet.
+
 ## Kill-list
 
 - No hand-rolled cryptography — primitives come from the vetted dep,
