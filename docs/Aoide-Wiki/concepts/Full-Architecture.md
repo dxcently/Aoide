@@ -372,7 +372,7 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   `imports = [ ./aoide.nix ];` line for the user's own flake — it never edits
   that flake; re-running warns and backs up the old file to `<out>.bak`, and
   a file it did not generate is refused, never overwritten), `secrets ask`
-  and the 2-command `pair` group (`ask`/`confirm` — the pairing-ceremony's
+  and the 2-command `pair` group (`ask`/`show` — the pairing-ceremony's
   popup dialogs, sharing `secrets ask`'s six-box QML component), and the
   14-command `screen` group
   (capture, OCR, and synthesized-pointer control — [[Screen-Control]]). Only

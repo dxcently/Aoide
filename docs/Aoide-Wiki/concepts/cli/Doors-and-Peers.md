@@ -518,20 +518,24 @@ outright at task #135 P3', hard cutover, no aliases.
   scripted; a wrong code counts a persisted try, the third cumulative
   mismatch auto-denies, an entry at the try limit is denied on sight, and
   `--yes` never bypasses any of this), an OUTBOUND match polls and then
-  prompts `y`/`N` (`--yes` scripted — this side's own screen printed the
-  code at request time).
+  asks the operator to TYPE a SECOND, different reply code
+  (`derive_reply_sas`, a domain-tagged derivation of the same transcript)
+  read off the approver's own screen — never a bare `y`/`N` — gated by
+  the identical persisted-try/third-mismatch-auto-abort rule and the same
+  `--yes` exemption.
   `watch` blocks until Ctrl-C, narrating each recognized line; `--json`
   emits one event object per line instead, and `--popup` (opt-in, off by
-  default — `aoide.a2a.pairingPopup`) raises a dialog shaped by direction —
-  `lyra pair ask`/`lyra pair confirm` when `lyra` resolves, `zenity
-  --entry`/`zenity --question` otherwise (refused up front only when
-  neither resolves; `--popup`+`--json` is a usage error). An inbound
-  request COLLECTS a typed code through the SAME gate the CLI's own
-  `--code`/tty prompt use, and never shows the code in the dialog (typed
-  blind, like the tty prompt); an outbound one SHOWS this instance's own
-  locally-derived code and asks for a single Approve/Reject, never a
-  retype — the code is already on screen, so retyping it would prove
-  nothing an Approve click doesn't already prove. On a non-CLI door
+  default — `aoide.a2a.pairingPopup`) raises a dialog — the SAME shape in
+  BOTH directions, `lyra pair ask` when `lyra` resolves, `zenity
+  --entry` otherwise (refused up front only when neither resolves;
+  `--popup`+`--json` is a usage error). Either direction COLLECTS a typed
+  code through the SAME gate the CLI's own `--code`/tty prompt use, and
+  never shows the code in the dialog (typed blind, like the tty prompt):
+  inbound against the requester's own code, outbound against the
+  approver's second, different reply code. After an inbound commit
+  succeeds, the approver's own reply code gets a separate display
+  dialog, `lyra pair show` (large, a Copy control, a Done control, no
+  reject — the commit it belongs to already happened). On a non-CLI door
   `watch` returns a "run it from a terminal" outcome, the `events tail`
   posture.
 - **Notes:** not gated. The commit-then-reveal ceremony, the poll, the

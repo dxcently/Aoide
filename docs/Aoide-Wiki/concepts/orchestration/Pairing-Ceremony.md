@@ -77,9 +77,13 @@ A's own aoide pair is STILL RUNNING, re-polling every 5s up to --wait (600s);
     the request/reveal used                                own pubkeyHex_A;
   ◄── {status: approved, pubkeyHex_B} ─────────────────────┘ else the identical
                                                               {status: pending}
-  A re-derives the SAS, its operator confirms y/N, and A's own peer
-  record commits. aoide pair reject <id> aborts either queue at any
-  stage — no wire call, no record on either end.
+  A's outbound entry now sits awaiting-confirm; B derives a SECOND,
+  different reply code from the SAME transcript (domain-tagged) and
+  relays it to A's operator out of band. A's operator TYPES that reply
+  code — never a bare yes/no — against its own persisted-try counter;
+  the 3rd cumulative mismatch auto-aborts the outbound entry. Only on a
+  match does A's own peer record commit. aoide pair reject <id> aborts
+  either queue at any stage — no wire call, no record on either end.
 ```
 
 Nothing ever dials IN to the requester: the poll rides the same forward
@@ -94,8 +98,8 @@ entry `awaiting-confirm`.
 
 ## The commit asymmetry — both humans confirm
 
-The two ends commit their peer records asymmetrically, and the two
-confirmations differ by side. B's record for A exists the moment B's
+The two ends commit their peer records asymmetrically in time, though
+both gates are typed codes. B's record for A exists the moment B's
 operator approves — `aoide pair` on an inbound id is purely local
 (`aoide-client::commands::approve_inbound`): it commits the record and
 marks the parked entry approved, dialing nobody. B's gate is the TYPED
@@ -106,15 +110,18 @@ parked entry across invocations; the third cumulative mismatch
 auto-denies (the same clean removal `reject` performs, audited
 `auto-deny-on-code-mismatch`), and an entry already at the try limit is
 denied on sight. A's record for B exists only once A's own operator
-confirms the code — which A's still-running `aoide pair` asks for as soon
-as the poll comes back released, or which `aoide pair <id>` asks
-for on demand against the OUTBOUND queue. Same poll, same confirm, same
-commit; the SAS is re-derived from values already held locally either way
-(A's own screen printed the code at request time, so the typed-code gate
-is B's side only; `--yes` scripts A's confirm but never bypasses B's).
-A code shown once and accepted once is not a mutual confirmation; a never-confirmed A
-leaves B holding a `verified: true` peer that answers nothing — visible
-on B's own `peer status`, resolved by an ordinary expiring re-pair.
+types a SECOND, DIFFERENT code — B's reply SAS (`derive_reply_sas`, the
+same transcript under the `aoide-pair-reply` domain-separation tag),
+relayed out of band once B's own commit lands and typed against A's
+still-running `aoide pair` as soon as the poll comes back released, or
+against a fresh `aoide pair <id>` on the OUTBOUND queue. A wrong reply
+code counts a try the same way B's leg does; the third cumulative
+mismatch auto-aborts the outbound entry. `--yes` bypasses neither side's
+typed code — only the sweep-proceed prompt and an already-paired re-pair
+confirm. Two different codes, two typed confirmations: a never-confirmed
+A leaves B holding a `verified: true` peer that answers nothing —
+visible on B's own `peer status`, resolved by an ordinary expiring
+re-pair.
 
 ## The SAS
 
@@ -129,6 +136,11 @@ order-sensitive, not a set; `CONTRACTS.md` pins the stability vectors
 (`derive_sas_stability_vectors_never_drift`):
 `derive_sas("a"*64, "b"*64, "c"*16, "d"*16) == "740-729"`, and swapping
 the requester/approver roles on the same four values yields `"847-405"`.
+`derive_reply_sas` runs the identical pipeline over the identical
+transcript, prefixed with the domain-separation tag `aoide-pair-reply` —
+a different digest input, so a different code, never the first SAS
+echoed back. B computes it once its own commit lands and relays it to A
+out of band; A's own confirm gates on this code, never the first.
 
 ## The command surface
 
@@ -188,25 +200,30 @@ optional target:
   `aoide pair`, so watch never surfaces an outbound completion on
   its own — polling and confirming an outbound request is always the
   operator's own invocation.
-  `--popup` swaps the narration for a dialog shaped by DIRECTION — never
-  one bare yes/no for both. `lyra pair ask`/`lyra pair confirm` (sharing
+  `--popup` swaps the narration for a dialog — the SAME shape on BOTH
+  directions, never a bare yes/no and never an Approve/Reject: a
+  six-boxes-plus-dash typed-code entry surface, `lyra pair ask` (sharing
   `lyra secrets ask`'s own quickshell surface via `dialog_qml`) when
-  `lyra` resolves, `zenity --entry`/`zenity --question` otherwise, falling
-  back to zenity on a `lyra` failure for that one attempt (refused up
-  front only when NEITHER binary resolves; `--popup`+`--json` is a usage
-  error). On an inbound (approver) request the dialog COLLECTS a typed
-  code and runs it through `InboundGate::Code` — the identical SAS
-  comparison and three-try auto-deny the CLI's `--code`/tty prompt use,
-  and the dialog NEVER shows the code, matching the tty prompt's own
-  "never echo the SAS" rule. On an outbound (requester) request the dialog
-  SHOWS this instance's own locally-derived code (not a leak — the CLI's
-  own `y`/`N` confirm already prints it) and asks for a single
-  Approve/Reject, never a retype — `approve_outbound` commits
-  unconditionally on Approve, exactly as it always has (a design-review
-  round within this same phase caught an earlier pass collecting a retype
-  on this arm too as copy-the-pixels theater, since the code was already
-  on screen in the same window). Both directions' exit-0 Approve and
-  `"Reject request"` extra button/dismiss control drive the SAME
+  `lyra` resolves, `zenity --entry` otherwise, falling back to zenity on
+  a `lyra` failure for that one attempt (refused up front only when
+  NEITHER binary resolves; `--popup`+`--json` is a usage error). Either
+  direction collects the typed code through the identical gate the CLI's
+  own `--code`/tty prompt use — the same SAS comparison and three-try
+  auto-deny/-abort — and never shows the code: an inbound request gates
+  on `derive_sas` (the requester's code), an outbound one on
+  `derive_reply_sas` (the approver's own DIFFERENT reply code), never the
+  code this instance already generated and showed itself. Both entry
+  dialogs share a `"Reject request"` control, and no pairing dialog
+  closes on a timer — it sits open until the operator answers, the
+  request resolves elsewhere, a live blocking `aoide pair` claims the
+  same id, or Ctrl-C interrupts the watcher. After a popup-driven INBOUND
+  commit succeeds, the approver's own reply code gets a SECOND, separate
+  dialog — `lyra pair show` (`zenity --info --no-markup` otherwise): the
+  code shown large with a Copy control and a Done control, no reject
+  control at all, since the commit it belongs to already succeeded and
+  there is nothing left to approve. A `notify-send` toast carries the
+  same code independently, a glance-backup when both binaries are
+  missing. Both directions' exit-0 answers drive the SAME
   `approve_inbound`/`approve_outbound` paths the CLI runs: the CLI is
   always sufficient, and the popup is a second door over the same
   primitive. A graphical session runs it as the `aoide-pair-watch.service`
@@ -217,9 +234,9 @@ optional target:
 - **`--allow read,spawn`** stamps the grant this commit makes — first
   verification only, a re-pair never re-grants — overriding
   `config.toml`'s `[pairing] defaultGrant`.
-- **`--yes`** skips THIS side's own confirmations (the sweep proceed
-  prompt, an already-paired re-pair confirm, and the final code
-  confirm), never the far side's typed code.
+- **`--yes`** skips the sweep proceed prompt and an already-paired
+  re-pair confirm — never either side's typed code; both legs are a
+  CodeGate, so nothing about `--yes` reaches a code entry.
 
 ## The events surface
 

@@ -58,7 +58,7 @@ own golden-snapshot test in `crates/lyra/src/registry.rs`. 47 are real;
 | `guide`, `schema`, `mcp serve` | 3 | the same commands as their `aoide` spellings, over lyra's own registry |
 | `onboard` | 1 | the nix half of clone onboarding — generates `./aoide.nix` with every `aoide.*` module option's default commented out, never edits the user's flake — [[Clone-and-Run]] |
 | `secrets ask` | 1 | the quickshell code-entry dialog for one parked TOTP ask — six digit boxes, zenity's own output contract on stdout/exit code — [[Secrets-Commands]] |
-| `pair` | 2 | `ask` (inbound: collects a typed SAS code read off the requester's screen) and `confirm` (outbound: shows this instance's own derived SAS, a single Approve/Dismiss) — the pairing-ceremony popups behind `aoide pair watch --popup`, sharing `secrets ask`'s six-box QML component — [[Pairing-Ceremony]] |
+| `pair` | 2 | `ask` (either direction: collects a typed SAS code read off the far side's screen — the requester's code on an inbound leg, the approver's reply code on an outbound one) and `show` (fires after an inbound commit: displays this instance's own reply SAS large, with Copy and Done and no reject) — the pairing-ceremony popups behind `aoide pair watch --popup`, sharing `secrets ask`'s six-box QML component — [[Pairing-Ceremony]] |
 
 ## The nix boundary
 

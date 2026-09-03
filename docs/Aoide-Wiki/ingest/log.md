@@ -2083,3 +2083,60 @@ concepts/cli/Meta-and-Upkeep.md, concepts/cli/Doors-and-Peers.md,
 concepts/Package-Layout.md, concepts/Codebase.md,
 concepts/Full-Architecture.md, ingest/log.md (this entry, plus closing the
 command-count-drift Open Thread and opening the who/session-grant one).
+
+## [2026-09-03] refactor | pairing docs de-staled — mutual two-code ceremony
+
+The pairing ceremony rebuilt at task #21 (`e17f3d1`+4, 2026-09-02) into a
+mutual two-code exchange — both legs a typed CodeGate, never a bare
+yes/no or an Approve/Reject — and the whole `peer pair`/`peer pending`/
+`peer invite` family folded into bare `aoide pair` at task #135 P3. Several
+pages still asserted the old single-code, one-sided-confirm shape as
+current; this pass reconciles them against `aoide schema --json`/`lyra
+schema --json` (2026-09-03) rather than re-deriving from prose.
+
+`README.md` gains a "Pairing" `###` subsection under Features, immediately
+after Conducting (pairing is how conducting reaches another host): the
+five-step ceremony named by seat, and what it buys — a verified peer
+record's `allows` set, the `peer list`/`peer pull`/`peer spawn` roster,
+and the ssh `via` hop for a loopback-only door.
+`docs/architecture/aoide-report.html`'s L2 enrolment block: two SVG
+labels (`peer pair` → `aoide pair`), three prose paragraphs rewritten to
+the two-code shape (the ceremony description, the command surface, the
+popup), and one site beyond the brief's own list — the `lyra schema
+--json` inventory paragraph still named lyra's second pairing dialog
+`pair confirm`, renamed `pair show` at the same rebuild — fixed to
+match. `concepts/orchestration/Pairing-Ceremony.md`: the ceremony
+diagram's outbound-confirm step, the "commit asymmetry" section (was
+describing A's confirm as a skippable self-check against a code it
+already printed — it is now B's second, different reply code, gated the
+same as B's own leg), a new paragraph on `derive_reply_sas` under "The
+SAS", the popup paragraph, and the `--yes` bullet.
+`concepts/cli/Doors-and-Peers.md`'s `aoide pair` Output bullet: the
+CLI-level outbound confirm and the popup paragraph, both still
+describing a bare `y`/`N`/Approve-Reject. `docs/architecture/PAIRING.md`:
+one site, the P-P5 phase bullet's present-tense-readable "`aoide peer
+pair watch`... `--popup` is zenity only, no lyra fallback" —
+historicized and cross-referenced to P-PV3, where that fallback was
+actually built; every other `peer pair` mention on that page narrates a
+phase already marked dead by a later bullet and stays untouched.
+
+Left alone, checked: `CONTRACTS.md:4844`, `pkgs/aoide/crates/lyra/
+README.md:111`, `pkgs/aoide/crates/lyra/AGENTS.md:94` all mention `lyra
+pair confirm`/`pair confirm`, but each is explicit lineage narration
+("P-PV3 ... repurposed and renamed", "this reverses P-PV3's own outbound
+confirm dialog") — correct as written, not touched (CONTRACTS is a
+versioned interface doc regardless of verdict). `aoide-report.html`'s
+paragraph on the live yomi-strix/sakaki/chiyo/osaka mesh, immediately
+after the L2 block, states the registry as verified live the same
+morning and keeps that sentence; only its one mid-paragraph `peer pair
+approve` naming moved to the approver's own `aoide pair <id>`. Three further pages carried the same rename: `entities/lyra.md`'s lyra
+command table, `concepts/Full-Architecture.md`'s 2-command `pair` group,
+and `concepts/Package-Layout.md`'s lyra command-path column all named
+`pair.confirm`, a path the lyra golden (`crates/lyra/src/registry.rs:130`)
+spells `pair.show`; lyra.md additionally described `pair ask` as inbound
+only, where it collects on either leg. All three corrected.
+
+Pages touched: README.md, docs/architecture/aoide-report.html,
+docs/architecture/PAIRING.md, concepts/orchestration/Pairing-Ceremony.md,
+concepts/cli/Doors-and-Peers.md, concepts/Full-Architecture.md,
+concepts/Package-Layout.md, entities/lyra.md, ingest/log.md (this entry).

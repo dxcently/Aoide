@@ -70,7 +70,7 @@ songbook manifest).
 | **song** | The ricing/design engine: the native livery engine (schema · resolve · emit), rice/draft/mode/cover/take, the Pantheon design language. Rices portably — no Stylix/NixOS-module dependency in the crate itself. | lyra | `rice.*` (3), `rice.draft.*` (3), `rice.mode.*` (4), `cover.set`, `livery.*` (3), `rice.declare`, `rice.transpose` (stub), `quickshell.*` (2), `rice.take.*` (6), `element.seed` |
 | **screen** | A read-only view onto the desktop for agents plus pointer synthesis: `info`/`shot`/`ocr`/`diff`/`send`, `point` (native `zwlr_virtual_pointer_v1` synthesis, 9 subverbs). Carved out (P-A1) specifically to isolate wayland/image dependency weight off core. | lyra | `screen.*` (14) |
 | **test-support** | Shared test rig only — scratch dirs, `EnvSaver`, fixture payloads, the single `env_lock`. A dev-dependency, never a production edge. | both (dev-only) | none |
-| **lyra** | The second app shell: arg parse, dispatcher, registry assembly for the paint bundle. The one binary allowed to shell out to nix. Never registers `a2a serve`, `conductor`, or any core-only group. | lyra | `guide`, `schema`, `mcp.serve`, `onboard`, `secrets.ask`, `pair.ask`, `pair.confirm` |
+| **lyra** | The second app shell: arg parse, dispatcher, registry assembly for the paint bundle. The one binary allowed to shell out to nix. Never registers `a2a serve`, `conductor`, or any core-only group. | lyra | `guide`, `schema`, `mcp.serve`, `onboard`, `secrets.ask`, `pair.ask`, `pair.show` |
 
 Command totals: **aoide 80** (73 real, 7 stub), **lyra 48** (47 real, 1 stub)
 — see [[Full-Architecture]] for the full per-group breakdown.

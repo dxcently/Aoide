@@ -416,12 +416,13 @@ the full count-site checklist (git show 9c2d05c).
   task #119 retired its emitter) — the same seam secrets asks already ride
   (`class: "gate"`, `source: "a2a-door"`, by-name payload, no SAS/
   pubkey/nonce/commitment ever on the wire, CONTRACTS §6's "Pairing
-  events feed" subsection). `aoide peer pair watch [--popup] [--json]`
-  tails it and re-derives the actionable set from `aoide-storage::
-  pairing` directly (golden +1); `--popup` is zenity `--question` only
-  — no `lyra` fallback, a QML confirm dialog is a named deferral, not
-  built. Legacy-escape documentation pass lands as CONTRACTS §6's own
-  "Legacy escapes" subsection.
+  events feed" subsection). The phase adds a `watch` subcommand (later
+  folded into bare `aoide pair watch` at task #135 P3') that tails the
+  feed and re-derives the actionable set from `aoide-storage::pairing`
+  directly (golden +1); `--popup` ships zenity `--question` only at this
+  phase — no `lyra` fallback yet, a QML dialog named as a deferral, built
+  out at P-PV3 below. Legacy-escape documentation pass lands as CONTRACTS
+  §6's own "Legacy escapes" subsection.
 - **P-P6 — discovery + invite (M).** The LAN advertisement
   (advertise-off-by-default, emitted by `a2a serve`), `peer discover`
   + `peer invite` (golden +2, full count-site checklist),
