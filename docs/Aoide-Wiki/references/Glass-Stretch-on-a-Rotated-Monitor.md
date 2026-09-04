@@ -1,9 +1,9 @@
 # Glass Stretch on a Rotated Monitor — the hyprglass layer temp-FBO allocation bug
 
 Record of the defect found 2026-08-31 on yomi-strix: the symptom, the four
-accounts that turned out wrong, the mechanism, and the patch. Fixed by
-`52cf066` (`pkgs/hyprglass/layer-temp-fbo-native-alloc.patch`), live-proven on
-generation 181 the same day.
+accounts that turned out wrong, the mechanism, and the fix. The fix lives
+upstream — `pkgs/hyprglass/default.nix` pins a rev that carries it and applies
+no patches.
 
 The rule the whole record reduces to: **allocation frame ≠ write frame.** A
 framebuffer allocated in one coordinate frame and written in another loses
@@ -123,16 +123,24 @@ intersection, and both mask divisors are the same two locals, so all four
 self-correct:
 
 ```diff
+ // sampleAndRedirect — the allocation
 -    int monitorWidth  = static_cast<int>(monitor->m_transformedSize.x);
 -    int monitorHeight = static_cast<int>(monitor->m_transformedSize.y);
-+    int monitorWidth  = static_cast<int>(monitor->m_pixelSize.x);
-+    int monitorHeight = static_cast<int>(monitor->m_pixelSize.y);
++    int monitorWidth  = static_cast<int>(source->m_size.x);
++    int monitorHeight = static_cast<int>(source->m_size.y);
+
+ // compositeAndRestore — the mask divisors
+-    int monitorWidth  = static_cast<int>(monitor->m_transformedSize.x);
+-    int monitorHeight = static_cast<int>(monitor->m_transformedSize.y);
++    int monitorWidth  = static_cast<int>(m_surfaceTempFramebuffer->m_size.x);
++    int monitorHeight = static_cast<int>(m_surfaceTempFramebuffer->m_size.y);
 ```
 
-Applied at `sampleAndRedirect` (`:176-177`) and `compositeAndRestore`
-(`:247-248`). The patch applies on the pinned v0.7.0 rather than a version bump
-or a fork, because a Hyprland plugin is ABI-locked to the compositor it was
-built against.
+Two locals per site, so the alloc (`:192`), its clear-box intersection
+(`:201`) and both mask divisors move together. Naming `m_pixelSize` directly
+reaches the same numbers and is the shorter read; the framebuffer spelling is
+what upstream took, and it is the shape issue #41 settled on at
+`GlassRenderer.cpp:147-151`.
 
 The change is identity wherever the transform is even: `Monitor.cpp:699` sets
 `m_transformedSize = m_pixelSize` for transform 0 and 180 and their flipped
@@ -150,7 +158,7 @@ centred, upright, and at 1:1 scale.
 
 A Hyprland plugin is `dlopen`'d once at compositor startup. A rebuild writes
 the new store path into `hyprland.conf` and leaves the running compositor
-holding the `.so` it mapped at login, so the patched plugin takes effect only
+holding the `.so` it mapped at login, so a new plugin build takes effect only
 after the compositor restarts.
 
 **`switch-to-configuration test` cannot deliver this fix, and its failure looks
@@ -168,7 +176,7 @@ which a rebuild triggers, so it needs reapplying after every switch.
 
 The defect is upstream's, in `hyprnux/hyprglass` — not Hyprland, not the
 compositor facet's configuration, not the QML. Everything below is verified
-against the pinned source.
+against the affected source named next, not against the current pin.
 
 **Affected build.** hyprglass at `c96940a86e6c5c9290dacb9fde204e4172186a96`, one
 commit before the `v0.7.0` tag `5bc835dcc909cef6980291688143048cf16942b5` and
@@ -235,31 +243,44 @@ that windows pass `mask=nullptr`, `CGlassDecoration`'s call
 (`src/GlassDecoration.cpp:230`) omits the trailing mask argument, and the file
 allocates no framebuffer — there is no temp FBO to size wrongly.
 
-**Fix.** Allocate and divide by `m_pixelSize` at both sites, matching the frame
-the content is written in. Four uses collapse to two locals, so the alloc, the
-clear-box bound and both mask divisors correct together. The local patch is
-`pkgs/hyprglass/layer-temp-fbo-native-alloc.patch`, two hunks against
-`src/GlassLayerSurface.cpp`. Identity on transform 0 and 180 and their flipped
-variants, where `Monitor.cpp:699` makes the two sizes equal.
+**Fix.** Allocate and divide by the frame the content is written in at both
+sites. Four uses collapse to two locals, so the alloc, the clear-box bound and
+both mask divisors correct together. Identity on transform 0 and 180 and their
+flipped variants, where `Monitor.cpp:699` makes the two sizes equal.
 
-An alternative that also holds: read `m_surfaceTempFramebuffer->m_size` back at
-the composite site, the shape issue #41 settled on. It fixes the divisors
-without fixing the allocation, so it needs the allocation change anyway.
+Two spellings reach the same numbers. Naming `m_pixelSize` directly is the
+shorter read. Reading the extents off the framebuffers themselves —
+`source->m_size` at the alloc, `m_surfaceTempFramebuffer->m_size` at the
+composite — is the shape issue #41 settled on at `GlassRenderer.cpp:147-151`,
+and it is what upstream took. They are equal because `source` IS a monitor
+framebuffer: `Monitor.cpp:2792` constructs `CMonitorResources` with
+`m_pixelSize`, and every `alloc` in `MonitorResources.cpp` uses that same
+size, so `currentFB->m_size` is `m_pixelSize` whichever monitor buffer is
+bound.
 
-**Upstream already has this fix, unmerged.** PR
+What does NOT work is fixing the divisors alone. That is the second face above
+— the buffer stays undersized, and the smear becomes a hard vertical cliff.
+The allocation is the load-bearing half; the divisors follow it.
+
+**Upstream carries this fix.** PR
 [#66](https://github.com/hyprnux/hyprglass/pull/66), "fix: size layer FBOs from
-the framebuffer, not the monitor transform," opened 2026-08-14 against the same
-two sites — `sampleAndRedirect` reading `source->m_size`, `compositeAndRestore`
-reading `m_surfaceTempFramebuffer->m_size`. Those are the alternative shape
-above, and they are numerically `m_pixelSize`, since `source` is the monitor
-framebuffer. It reports the same symptom from a `1920x1080 @ transform 90`
-panel. So a bug report is a duplicate; what the PR needs is a second confirmed
-reproduction and a review, and this page is that reproduction.
+the framebuffer, not the monitor transform," opened 2026-08-14 and merged
+2026-09-03, touches the same two sites — `sampleAndRedirect` reading
+`source->m_size`, `compositeAndRestore` reading
+`m_surfaceTempFramebuffer->m_size`. It reports the same symptom from a
+`1920x1080 @ transform 90` panel, so this page is a second reproduction of a
+defect upstream had already found.
 
-No release carries it. `v0.7.0` (`5bc835dcc909cef6980291688143048cf16942b5`,
-2026-07-20) is the newest tag and `main` has not moved since — upstream's own
-hyprland-0.56.2 compatibility bump, PR #60, is likewise still open. The local
-patch stays until one of them lands.
+Read its prose carefully and it understates itself: the problem statement names
+only "the mask UVs are divided by the wrong extents," which is the divisors-only
+shape that does not work. The code does more than the prose claims — it moves
+the allocation too (`GlassLayerSurface.cpp:178`, consumed by the `alloc` at
+`:192`, with the clear-box intersection at `:201` following the same locals).
+Both faces move together, which is why it is a complete fix and not the cliff.
+
+Aoide pins `ee6419b`, the squash-merge on `main`, which also carries upstream's
+hyprland-0.56.2 compatibility bump — the version nixpkgs builds the plugin
+against. `pkgs/hyprglass/default.nix` therefore applies no patches.
 
 ## Related
 

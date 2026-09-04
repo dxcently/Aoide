@@ -14,18 +14,22 @@
 # passes because both are built from the same flake input. Bump hyprglass's
 # rev/hash when upstream moves; nixpkgs' hyprland moves independently of it.
 #
-# layer-temp-fbo-native-alloc.patch: Hyprland writes into any mid-pass
-# framebuffer in native window coordinates — the viewport and
-# outputProjection are both m_pixelSize — but the layer-surface temp FBO
-# was allocated at m_transformedSize (the portrait-swapped logical frame).
-# On a 90/270-transformed monitor every write past the swapped width was
-# silently clipped by the buffer edge, in both sampleAndRedirect (the
-# alloc and its clear-box intersection) and compositeAndRestore (the mask
-# UV divisors). Allocating at m_pixelSize instead makes the buffer match
-# the frame its content is actually written in. Window decorations don't
-# hit this path (no mask/temp-FBO redirect), which is why only layer
-# surfaces (dock/launcher/powermenu) showed it. Identity on transform 0 and
-# 180 (and their FLIPPED variants), where m_pixelSize == m_transformedSize.
+# The pin sits above the v0.7.0 tag rather than on it, because the rotated-
+# monitor layer-FBO fix (upstream PR #66) lands after it. Aoide carried that
+# fix as a local patch until upstream merged the same change: the layer temp
+# FBO is sized from the source framebuffer's own extents instead of the
+# monitor's m_transformedSize, so the buffer matches the native frame
+# Hyprland actually writes into. Both faces of the defect move together —
+# the allocation with its clear-box intersection (GlassLayerSurface.cpp:178,
+# :192, :201) and the mask UV divisors (:249) — which is what separates it
+# from the source-rectangle-only shape that turns the smear into a hard
+# vertical cliff. Identity on transform 0 and 180 and their FLIPPED
+# variants, where m_pixelSize == m_transformedSize. The full account, with
+# the four wrong diagnoses it took to get there, is
+# docs/Aoide-Wiki/references/Glass-Stretch-on-a-Rotated-Monitor.md.
+#
+# This rev also carries upstream's own hyprland-0.56.2 compatibility bump,
+# which is the version nixpkgs builds it against here.
 #
 # Discovered by lib/pkgs.nix (the packages walker) → flake package
 # `hyprglass` + host overlay attr `pkgs.hyprglass` (no nixpkgs collision).
@@ -36,16 +40,14 @@
 }:
 hyprlandPlugins.mkHyprlandPlugin {
   pluginName = "hyprglass";
-  version = "0.7.0";
+  version = "0.7.0-unstable-2026-09-03";
 
   src = fetchFromGitHub {
     owner = "hyprnux";
     repo = "hyprglass";
-    rev = "c96940a86e6c5c9290dacb9fde204e4172186a96";
-    hash = "sha256-u+Rk8l7oidgxQsVWOYuQCmnvGqRpuU07k8wIk/0PTyE=";
+    rev = "ee6419bd023529187875db98af4e68b3e93355a8";
+    hash = "sha256-OnPDyehgqwrZWHZ0YBjZ2H5G+CFI0/MDK2I+2DH70ZY=";
   };
-
-  patches = [ ./layer-temp-fbo-native-alloc.patch ];
 
   # Upstream Makefile: pkg-config hyprland/pixman/libdrm (provided by
   # mkHyprlandPlugin's dep set), emits hyprglass.so at the repo root.
