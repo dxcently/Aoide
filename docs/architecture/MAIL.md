@@ -15,8 +15,9 @@ into a live pty. That is a chat box — presence-based, miss-it-lose-it. A
 message to a dead session is a clean error and gone; a report from a
 remote box to a conductor whose harness id exposes no socket bounces "not
 conductable"; the per-host `inbox.json` is a receipt log with two internal
-writers that nothing can address or query. Sessions cannot leave each
-other letters. Every FidoNet node could.
+writers — `inbox list/read/clear` can show it, but nothing can DEPOSIT
+into it by address. Sessions cannot leave each other letters. Every
+FidoNet node could.
 
 ## Settled decisions
 
@@ -50,7 +51,7 @@ other letters. Every FidoNet node could.
    entry.
 8. **One store.** The receipt log is absorbed: today's `inbox.json` rows
    become typed `receipt` entries in the mailbase; its two writer seams
-   repoint; `inbox.json` and `INBOX_CAP` retire.
+   repoint; `inbox.json`, `INBOX_CAP`, and the `inbox` commands retire.
 9. **The full BSO outbox.** A per-node spool at the sender
    (`state/outbox/<node>/`), a transfer-invariant content-hash `msgid` on
    every envelope, flavors `now`/`hold`, per-link backoff/try state.
@@ -74,15 +75,16 @@ other letters. Every FidoNet node could.
 14. **Flood control is Fido-pure: dedup + excommunication.** No quotas,
     no eviction, no auto-expiry. The `msgid` seen-set drops repeats; a
     flooding node is declared `down`. Accepted exposure: between flood
-    start and the User's `down` gesture, disk absorbs it. Audit counters
-    per origin make the flood visible fast.
+    start and the User's `down` gesture, disk absorbs it. The audit log's
+    one line per deposit, with origin, is the detection.
 15. **Declared node status: `hold` and `down`.** In the mesh config,
     per node. `hold` queues at the sender silently; `down` refuses fast
-    and stops routing to/from that node. The UNREACHABLE vocabulary
-    ruling (task #50) lands in the same change.
+    and stops routing to/from that node. The UNREACHABLE-vocabulary
+    ruling lands in the same change.
 16. **Meshes are zones.** Trust is per edge and flat (`peers.json`); the
-    mesh declaration partitions ROUTING, not trust. Two meshes naming the
-    same node with different grants is a loud conflict at drift time.
+    mesh declaration partitions ROUTING, not trust. A node may be declared
+    in several meshes; declaring it with differing `grant`s is a
+    load-time validation error, never a silent first-wins.
 
 ## Vocabulary
 
@@ -91,8 +93,8 @@ other letters. Every FidoNet node could.
 | node | a mesh member: one Aoide instance, one keypair | node |
 | edge / peer | a verified pairing between two nodes; where grants live | link, pkt password |
 | mesh | a named `[mesh.<name>]` declaration; a routing zone | zone |
-| hub | a node declared in a mesh as a transit relay for that mesh | hub / host |
-| zonegate | a node declared as the only transit between two named meshes | zonegate |
+| hub | a node a mesh declares as a transit relay (config key `relays`) | hub / host |
+| zonegate | a node both of two meshes declare as their gate to each other | zonegate |
 | label | free-text recipient name inside a letter | `toUserName` |
 | letter | an envelope of type `letter` | netmail message |
 | envelope | the signed, immutable unit that moves: header + text | packed message |
@@ -103,245 +105,357 @@ other letters. Every FidoNet node could.
 | cursor | a reader's high-water mark over the mailbase | `.newsrc` |
 | receipt | an envelope of type `receipt`: a conduct-delivery record or an ack | ReturnReceipt |
 
+`hub` in this document is the transit role. The older per-peer
+`Peer.hub` flag in `peers.json` (the address-resolution last resort from
+PAIRING's discovery phase) is unrelated and untouched — which is why the
+config key is `relays`, not `hubs`.
+
+## The envelope
+
+The unit that moves. Three parts with strict byte rules, because the
+signature and the id depend on them:
+
+```
+header  = canonical string, NUL-joined fields in this fixed order:
+          version · from.node · from.label · to.node · to.label ·
+          type · mintedAt · originMesh
+text    = the letter body, raw bytes
+sig     = origin's ed25519 over  header ‖ 0x00 ‖ text
+msgid   = hex sha256 over        sig ‖ header ‖ 0x00 ‖ text
+```
+
+- The canonical string uses the `wire_auth::canonical_string` idiom
+  (CONTRACTS §6): no JSON in the signed bytes, so key order and
+  whitespace can never make two hops disagree.
+- **Outside the signature and the hash:** `flavor` (a sender-side spool
+  fact, never on the wire), `mesh` (the routing zone this hop is
+  carrying the letter in — rewritten only by a gate), and `transit` (the
+  hop chain, appended per hop). Anything a hop may legitimately change
+  is outside; anything the destination must trust is inside.
+- Signature-then-hash with `mintedAt` signed gives identical texts
+  distinct ids, and no hop can alter the signed part without changing
+  the id — so a dedup hit is always the same letter.
+- `originMesh` is the zone the origin posted in; `mesh` starts equal to
+  it and changes only when a gate carries the letter into the other
+  mesh it gates.
+- Node names on the wire are the **mesh-declared names**, never a box's
+  local nickname for a peer. Drift reports a nickname that differs from
+  the declared name for the same key.
+
+Wire form is JSON around those bytes: `{ header: {…fields}, text, sig,
+msgid, mesh, transit: [ {node, at, sig} ] }` — the receiver re-derives
+the canonical header from the fields and rejects if `msgid` does not
+recompute.
+
 ## Store
 
-`$AOIDE_ROOT/state/mail/`:
+`$AOIDE_STATE_DIR/mail/` (the ordinary `state_dir()` resolution —
+`AOIDE_STATE_DIR` first, then `AOIDE_ROOT/state` — like every other state
+file):
 
 ```
 base.jsonl      append-only, one entry per line, immutable once written
-cursors.json    { "<label>": <seq>, ... }        reader high-water marks
-seen.json       { "<msgid>": <receivedAt>, ... } dedup memory; outlives pruning
+cursors.json    { "<label>": { "seq": n, "readers": ["<sessionId>", …] } }
+seen.json       { "<msgid>": <receivedAt>, … }   dedup memory; outlives pruning
 ```
 
 An entry is an envelope plus local facts:
 
 ```json
-{
-  "seq": 4127,                       // local arrival order — the cursor axis
-  "receivedAt": "2026-09-06T10:41:00Z",
-  "type": "letter",                  // letter | receipt | transit
-  "envelope": {
-    "msgid": "<hex sha256 of sig‖header‖text>",
-    "from":  { "node": "osaka", "label": "rebuild-osaka" },
-    "to":    { "node": "chiyo", "label": "rebuild-reports" },
-    "mesh":  "home",                 // the zone this letter is routed in
-    "flavor": "now",
-    "mintedAt": "2026-09-06T10:40:58Z",
-    "text": "…",
-    "sig": "<origin ed25519 over header‖text>",
-    "transit": [ { "node": "sakaki", "at": "…", "sig": "…" } ]
-  }
-}
+{ "seq": 4127, "receivedAt": "…", "type": "letter",
+  "via": "sakaki",                   // the hop that deposited it; "self" for local
+  "envelope": { … as above … } }
 ```
 
 - `seq` is local to the node, like an NNTP article number — never crosses
-  a link. Cursors are keyed by label and hold the last `seq` consumed.
-- `msgid` = sha256 over the origin signature concatenated with the signed
-  bytes. Signature-then-hash makes identical texts distinct letters
-  (`mintedAt` is inside the signed header) and makes the id
-  transfer-invariant: no hop can alter the envelope without changing it.
+  a link. It is `last line's seq + 1`, read under the lock.
+- Three processes write this store: the `aoided` timer, the `aoide a2a
+  serve` door (a separate unit, `modules/nucleus/aoided.nix`), and the
+  CLI (`mail send`, `mail read`). **Every mutation of the mailbase or an
+  outbox runs under the stage lock** — the `with_stage_lock` flock in
+  `storage/src/fs.rs`, the precedent every multi-writer state file
+  already follows. No unlocked append, ever; a torn last line is
+  discarded on open.
 - `type=receipt` entries carry what `inbox.json` carried (from, target,
-  text, receivedAt, context) inside the same envelope shape with a local
-  self-signature — the migration is a field mapping, and acks are
-  receipts addressed back to the origin.
+  text, receivedAt, context) inside the envelope shape with a local
+  self-signature — the migration is a field mapping. Acks are receipts
+  addressed back to the origin.
 - `type=transit` entries are letters the node is relaying (§Transit);
   readers hide them unless asked.
-- Reading never mutates an entry. `aoide mail read --for <label>` prints
-  entries above the label's cursor and advances it.
+- Reading never mutates an entry. A reader's cursor advances on read and
+  records the reader's session id, which is what the doorbell uses.
 - Keep-all. `aoide mail rm --older <duration>` is the only pruning; it
   never touches `seen.json`, so a pruned letter re-offered later is still
   a duplicate (the RFC 5537 §3.3 coupling, kept by construction).
 
-The test-debris guard lands with the store: the mail path derives only
-from `AOIDE_ROOT`, and the test-support crate sets a per-test root so no
-fixture can ever write to a real `~/.aoide` again (task: the unguarded
-`cargo test` that wrote 200 rows into the live inbox).
+The test-root guard lands with the store: `test-support` gains a helper
+that points `AOIDE_ROOT` (and so `state_dir()`) at a per-test temp root
+under its existing `env_lock`, and every storage test that touches mail
+uses it — closing the path by which a fixture once wrote fixture rows
+into the live inbox.
 
 ## Addressing and filing
 
 `aoide mail send --to <node>/<label> [--hold] -- <text>`:
 
-- `<node>` is a petname from `peers.json` or `self`. `<label>` is free
-  text, clamped by the existing sanitize rules before any rendering.
-- The sender's `aoided` resolves everything else — `via` from the peer
+- `<node>` is a mesh-declared node name or `self`. `<label>` is free
+  text; it is filed raw and **clamped only when rendered into a pty**.
+- **Address role labels, never session petnames.** Petnames are minted
+  `adjective-noun` per session and change on every respawn; a role label
+  (`rebuild-reports`, `conductor`) outlives the session that reads it.
+  A brief says "report to `yomi-strix/conductor`", not to a petname.
+- The sender's node resolves everything else — `via` from the peer
   record, the route from the mesh declaration. **The agent never sees a
-  transport line.** A letter to `self/<label>` files locally and rings
-  the doorbell; it is how a session leaves a note for a role on its own
-  box.
+  transport line.** `self/<label>` files locally and rings the doorbell;
+  it is how a session leaves a note for a role on its own box.
 - Arrival files under `to.label`, whether or not any session by that
   name exists or ever will. No bounce for unknown labels: the mailbox
-  exists because the letter named it.
-- `from.label` is the sending session's petname (sanitized), `from.node`
-  is asserted by the origin signature — a node cannot claim another
-  node's name, and a remote label is display text only.
+  exists because the letter named it. Bare `aoide mail` therefore always
+  prints the labels that have unread mail — a mis-typed label is visible
+  there, not lost.
+- `from.node` is asserted by the origin signature. `from.label` is the
+  sending session's petname taken from `AOIDE_SESSION_ID`/`--from`,
+  **attribution only** — any same-uid process can claim any label, as
+  conduct's own `--from` already documents.
 
 ## Wire
 
 Both methods enter through the one A2A door and pass the shared checks
-first — tunnel, signature verification, origin classification, audit —
-then dispatch by method name (`server/a2a.rs`, beside
-`aoide/pairRequest`). CONTRACTS §6 gains both at P-M2.
+first — tunnel, per-connection signature verification, origin
+classification, audit — then dispatch by method name (`server/a2a.rs`,
+beside `aoide/pairRequest`). CONTRACTS §6 gains both at P-M2, and the
+door's audit label whitelist gains both names so they never log as bare
+`a2a.rpc`.
 
 - **`aoide/mailDeposit`** `{ envelope }` → `{ msgid, outcome }`, outcome
-  ∈ `accepted | duplicate | refused`. Policy: caller is a verified node
-  holding `message`; caller's node is not `down`; origin signature
-  verifies; `envelope.mesh` is a mesh the receiver declares. Then: dedup
-  by `msgid` (a duplicate is `duplicate`, never an error — hops retry
-  freely), file (`letter` if `to.node` is self, else `transit`), ring
-  the doorbell, and if `to.node` is not self, re-spool (§Transit).
+  ∈ `accepted | duplicate | refused(reason)`. Policy, in order:
+  1. caller is a verified node holding `message`, not `down`;
+  2. `msgid` recomputes from the envelope;
+  3. **zone check:** the receiver declares `envelope.mesh`, and the
+     depositing hop is declared in it (or is the declared gate into it);
+  4. origin signature verifies against the origin's key — from
+     `peers.json` when paired, else from the mesh declaration's key
+     table (§Transit);
+  5. dedup: a seen `msgid` returns `duplicate`, never an error — hops
+     retry freely;
+  6. file (`letter` if `to.node` is self, else `transit`), ring the
+     doorbell, and if `to.node` is not self, re-spool (§Transit).
   Receipts (acks) are envelopes deposited through the same method — one
   routing path for everything, so acks traverse hubs for free.
 - **`aoide/mailPoll`** `{ node }` → `{ envelopes[] }`. The caller asks
-  "anything waiting for me?" and the receiver hands over every outbox
-  entry spooled for the caller's node — all `hold`-flavored ones, and
-  `now`-flavored ones too if the receiver's own attempts have been
-  failing. The caller must BE `node` (signature), hold `message`, and not
-  be `down`. Handed-over entries stay in the outbox until acked like any
-  other. This is BSO Hold's missing half: without it a hold flavor could
-  never drain across an edge that only one side can start.
-- **Acks** are `receipt` envelopes from the destination to the origin,
-  minted on filing a `letter`, routed like any letter, never themselves
-  acked. At the origin an ack retires the outbox entry with the matching
-  `msgid` and files as a receipt.
+  "anything waiting for me?" and receives every outbox entry spooled
+  toward the caller's node — all `hold` ones, and `now` ones whose own
+  attempts have been failing. The caller's verified identity must BE
+  `node` (no polling on another's behalf), hold `message`, and not be
+  `down`. Handed-over entries stay in the outbox until acked like any
+  other; a re-poll before the ack re-hands them and the receiver's dedup
+  makes that harmless.
+- **Acks** are `receipt` envelopes minted by the destination on filing a
+  `letter`: `to` = the origin, `text` = the acked `msgid`, signed by the
+  destination. Routed like any letter, never themselves acked. **An
+  outbox entry retires only when a receipt arrives whose verified signer
+  is the entry's `to.node` and whose text names the entry's `msgid`.**
+  A hub can mint a receipt; it cannot sign as the destination, so it
+  cannot make an origin stop retrying.
 
 ## Outbox
 
-`$AOIDE_ROOT/state/outbox/<node>/`:
+`$AOIDE_STATE_DIR/outbox/<node>/`:
 
 ```
-<msgid>.json    the envelope, with flavor and route target
-link.json       { "tries": n, "lastTry": ts, "holdUntil": ts, "lastError": "…" }
-.bsy            lock while a drain session with this node runs
+<msgid>.json    the envelope + local facts: flavor, route target, tries,
+                lastTry, lastOutcome
+link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
+.bsy            flock'd while a drain session with this node runs
 ```
 
 - `aoide mail send` writes the entry first, then attempts delivery. The
   write is what the command reports; delivery is best-effort at that
   moment and the spool's job afterwards. A dead peer is files that wait.
-- The drain runs on `aoided`'s existing timer cadence and immediately
-  after any successful contact with that node (a deposit, a poll, an
-  ack). `now` entries are attempted on every drain; `hold` entries are
-  never attempted — they leave only through the node's `mailPoll`.
-- `link.json` is `.hld`/`.try`: exponential backoff on failure, cleared
-  on success. A `down` node's directory is left alone entirely.
-- An entry retires only on an ack for its `msgid` (or `aoide mail outbox
-  rm`). `aoide mail outbox [<node>]` answers "did it land" truthfully:
-  waiting, held, tries, last error, acked.
+- The drain runs on `aoided`'s existing timer tick (the reaper cadence)
+  and immediately after any successful contact with that node. Because
+  the door is a separate process, "after contact" means the door
+  process drains under the same locks — the `.bsy` flock is what keeps
+  the two drains from racing one link.
+- `now` entries are attempted on every drain; `hold` entries are never
+  attempted — they leave only through the node's `mailPoll`. A node
+  declared `hold` in the mesh config makes every entry toward it `hold`
+  regardless of the flag.
+- `link.json` is `.hld`: exponential backoff per link on failure,
+  cleared on success. Per-entry `tries`/`lastOutcome` live in the entry.
+  A `refused` outcome stops that entry's retries and records the reason.
+- A `down` node's directory is skipped entirely; entries whose ORIGIN is
+  `down` are dropped at the next drain.
+- An entry retires only on a valid ack (above) or `aoide mail outbox rm
+  <msgid>`. `aoide mail outbox [<node>]` answers "did it land"
+  truthfully per entry: waiting, held, tries, last outcome, acked.
 
 ## Transit
 
 Additive keys in the mesh declaration (deny_unknown_fields — the same
-deploy-order rule as the mesh keys themselves: every box switches before
-any declaration uses them):
+deploy-order rule as the mesh keys themselves: **every box switches
+before any declaration uses them**; the drift report is the dry run):
 
 ```toml
 [mesh.home]
-grant = ["read", "spawn", "message"]
-hubs  = ["sakaki", "yomi-strix"]        # transit relays for THIS mesh
+grant  = ["read", "spawn", "message"]
+relays = ["sakaki", "yomi-strix"]        # transit hubs for THIS mesh
 
 [mesh.home.peers]
 osaka = "ssh://khoa@192.168.1.201"
 # …
 
+[mesh.home.keys]                         # ed25519 pubkeys, hex — the nodelist
+chiyo = "…"                              # carries identity for nodes you do
+                                         # not pair with directly
+
 [mesh.home.status]                       # absent = normal
 chiyo = "hold"
 
-[mesh.home.gates]                        # cross-mesh transit, by mesh name
-work = "osaka"                           # osaka is the only home⇄work path
+[mesh.home.gates]                        # cross-mesh transit, by mesh name;
+work = "osaka"                           # the OTHER mesh must declare it back
 ```
+
+- **A node may be declared in several meshes** (P-M4 relaxes today's
+  cross-mesh uniqueness check in `validate_mesh`); differing `grant`
+  across those meshes is a load-time error.
+- **Keys are declared, not ferried.** Decision 10 needs the destination
+  to hold the origin's public key even with no direct edge. The key
+  table is written by the User (the nodelist carrying identity, as
+  FidoNet's did); a hub never supplies one. For a directly paired node
+  the paired key is authoritative and drift reports a declared key that
+  disagrees with it.
+- A gate is symmetric or it is nothing: `home.gates.work = "osaka"`
+  requires `work.gates.home = "osaka"`, else `validate` refuses.
 
 Routing, at the sender and at every hop, for `to.node`:
 
-1. A direct verified edge to `to.node` → spool to it.
-2. Else, for each mesh declaring both self and `to.node`: the mesh's
-   hubs that are direct edges of self → spool to the first reachable.
-3. Else, `to.node` in a mesh self does not share: the declared gate
-   between self's mesh and that mesh → spool to the gate.
-4. Else refuse: `no route to <node>` — the sender sees it at send time.
+1. If `to.node` is declared in `envelope.mesh` and self holds a direct,
+   verified, not-`down` edge to it → spool to it.
+2. Else, the `relays` of `envelope.mesh` that are direct verified
+   not-`down` edges of self, in declaration order → spool to the first.
+3. Else, if `to.node` is not in `envelope.mesh` but in a mesh M for
+   which `envelope.mesh` declares a gate G (and M declares G back):
+   if self is G, rewrite `envelope.mesh = M` and restart at step 1;
+   otherwise reach G by steps 1–2 with G as the target.
+4. Else refuse: `no-route` — the sender sees it at send time.
 
-At a hub, a deposit whose `to.node` is not self: verify, dedup, file as
-`transit`, append the hub's signature to `envelope.transit`, re-spool by
-the same four steps. Loops die twice over: `msgid` seen, and any
-envelope whose transit record already names self is dropped. A hub only
-relays inside a mesh it declares and only for nodes that mesh declares —
-membership in two meshes never makes a node a bridge; being a gate is a
-declared role.
+Step 1's mesh clause is the zone wall: a node paired into two meshes
+never forwards a letter across them because it happens to know the
+destination — only a declared gate rewrites `mesh`, and every hop's
+door check (Wire, step 3) verifies the depositing hop belongs to the
+zone it claims to carry.
 
-Deposit outcome `refused` with reason `no-route`, `down`, `unknown-mesh`,
-or `unverified-origin` is returned to the depositing hop, which records
-it in `link.json` and stops retrying that entry; the origin learns it
-through `aoide mail outbox`.
+At a hub, a deposit whose `to.node` is not self: verify (all six
+steps), file as `transit`, append the hub's signature to
+`envelope.transit`, re-spool by the four steps. Loops die twice over:
+`msgid` seen, and any envelope whose transit chain already names self is
+dropped. Deposit `refused` reasons — `no-route`, `down`, `unknown-mesh`,
+`zone-violation`, `unverified-origin`, `bad-msgid` — return to the
+depositing hop, which records `lastOutcome` on that entry and stops
+retrying it; the origin learns through `aoide mail outbox`.
+
+Self-membership uses the node's mesh-declared name; the drift report
+flags a box whose local name resolution disagrees with it.
 
 ## Delivery and the doorbell
 
-Filing a `letter` on a node rings the doorbell for every live local
-session whose petname equals `to.label` or which holds a cursor for it.
+Filing a `letter` rings the doorbell for every live local session that
+is a recorded reader of `to.label` (cursors.json `readers`) — and, for a
+label no one has read yet, for any live session whose petname equals it.
 The doorbell is a fixed line injected through the loopback conduct path
-(no gate — it is local `aoided` conducting a local session):
+(no gate — local `aoided` conducting a local session):
 
 ```
-[aoide mail] new mail for <label-clamped> — aoide mail read --for <label-clamped>
+[aoide mail] new mail for <label> — aoide mail read --for <label>
 ```
 
-No byte of the letter rides the nudge; the label is clamped to the
-sanitize alphabet. Sessions without a terminal (headless spawns) still
-get it — injection is the same path conduct uses. Nothing else is ever
-injected on a letter's behalf.
+`<label>` is clamped to the `valid_peer_name` grammar (`[a-z0-9-]`,
+`peer_store.rs`) before injection; conduct's own sanitizer only strips
+CR/LF, which is not a clamp. No byte of the letter rides the nudge.
+Headless spawns get it — injection is the path conduct uses. Nothing
+else is ever injected on a letter's behalf.
+
+## Reading
+
+`aoide mail read` renders remote text as data, per house rule 4: each
+entry is a fixed header line — `msgid`, `from`, `mintedAt`, `mesh`,
+`via` — followed by the text in a fence; `--json` returns the entries
+in `Outcome.data`. The reader never interpolates a letter's fields into
+anything but that frame.
 
 ## Status and the nodelist view
 
 `aoide mesh` is the nodelist command (FTS-5000: "the nodelist defines the
 network"). It grows columns: status (`hold`/`down`/normal), role
-(hub/spoke/gate), liveness. Statuses are declared in config like every
-other mesh fact; the command reports, it does not edit. A later
+(relay/gate/spoke), key source (paired/declared), liveness. Statuses are
+declared in config like every other mesh fact; the command reports, it
+does not edit. `aoide mail route <node>` runs the four steps and prints
+the path without sending — the dry run before a routing change. A later
 `aoide mesh down <node>` that edits the declaration for the User is a
 convenience allowed by this document, not required by it.
 
-`down` is enforced at the door (deposits and polls from that node are
-`refused`), in routing (never a hop, never a destination — `no-route`),
-and in the drain (its outbox directory is skipped). `hold` is
-sender-side only: entries to that node get flavor `hold` regardless of
-the flag, and the drain never attempts them.
+`down` is enforced at the door (the door reads `config.toml` per request,
+as it already does to resolve bearers), in routing (never a hop, never
+a destination — `no-route`), and in the drain (skip the directory, drop
+entries from a `down` origin). `hold` is ergonomics, not a security
+control: it only changes which side initiates.
 
 ## Security model
 
-Threat: code execution as the aoide unix user on one node.
+Threat: code execution as the aoide unix user on one node; also a
+paired node that merely misbehaves.
 
 - **On that node: total.** Keys, roster, ssh, stores, logs. Host
   security's jurisdiction. Mail's duty is to not AMPLIFY it.
 - **Across edges, as that node's identity:** `read` (recon), `message`
   (deposit letters — inert data), `spawn`/conduct (gated as ever),
-  transit (relay letters for its meshes). Origin signatures stop
-  impersonation; zone-scoped routing stops a compromise in one mesh
-  from reaching another except through a declared gate; `down` is the
+  transit (relay letters within its declared zones). Origin signatures
+  stop impersonation; destination-signed acks stop silent-drop-by-
+  forged-ack; the zone check at every hop stops a compromise in one
+  mesh reaching another except through a declared gate; `down` is the
   quarantine gesture and keeps the pairing record for forensics.
 - **Prompt injection is the real attack** and decision 2 is the wall:
-  attacker text lands as a labeled, provenance-stamped entry that a
+  attacker text lands as a labeled, provenance-framed entry that a
   reader pulls on purpose. The doorbell carries none of it.
-- **Floods** are visible (audit counters per origin), bounded only by
-  disk until `down`. Quotas are addable at the door later without any
-  schema change; they are deliberately not in v1.
+- **Floods** are visible (one audit line per deposit, with origin) and
+  bounded only by disk until `down`. A hub amplifies roughly threefold
+  per letter — transit entry, outbox copy, returning ack — and
+  `seen.json` and outbox directories grow unbounded by ruling. Quotas
+  are addable at the door later without any schema change; they are
+  deliberately not in v1.
+- **Same-uid honesty**: nothing here is a secret from a local process —
+  not the mailbase, not the outbox, not `from.label`.
 - **Not a multi-operator design** — filing-not-secrecy and files-at-hub
   are same-operator rulings. The primitives (origin identity, msgid,
-  zones, gates, acks) are inter-operator grade because they were taken
-  from an inter-operator network; end-to-end encryption to the
-  destination key (NNCP's shape) and nodelist distribution are the two
-  additions such a use would need. This document forecloses neither.
+  zones, gates, destination-signed acks) are inter-operator grade
+  because they were taken from an inter-operator network; end-to-end
+  encryption to the destination key (NNCP's shape) and nodelist
+  distribution are the two additions such a use would need. This
+  document forecloses neither.
 
 ## Commands
 
 ```
-aoide mail                          new letters for the caller's petname (above cursor)
+aoide mail                          labels with unread mail, and the caller's own new letters
 aoide mail send --to <node>/<label> [--hold] -- <text>
-aoide mail read [--for <label>] [--all] [--transit]     print + advance cursor
-aoide mail outbox [<node>] [rm <msgid>]                 the spool, truthfully
-aoide mail rm --older <duration>                        prune the base, never seen.json
-aoide mesh                          nodelist view: + status, role, liveness columns
+aoide mail read [--for <label>] [--all-labels] [--reread] [--transit]   print + advance cursor
+aoide mail show <msgid>                                  one entry, framed
+aoide mail mark --for <label>                            advance a cursor without printing
+aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, per entry
+aoide mail route <node>                                  dry-run the four steps
+aoide mail rm --older <duration>                         prune the base, never seen.json
+aoide mesh                          nodelist view: + status, role, key source, liveness
 aoide board …                       reserved; not in this workstream
 ```
 
 `aoide send`, `aoide pair`, `aoide mesh pair` are unrenamed — none of
-them lies under the new model. Golden count changes ride each phase's
-commit with the full count-site checklist.
+them lies under the new model. `inbox list/read/clear` retire with
+their store (golden −3); every new command rides its phase's golden
+delta with the full count-site checklist. Like every existing command,
+the CLI writes state files itself under the stage lock — "through
+aoided" means the policy surface and the audit log, which every mail
+command reports to, not a socket hop.
 
 ## Phases
 
@@ -350,37 +464,51 @@ phase, docs in the same commit (this file, CONTRACTS, the crate
 READMEs), no subagent spawning and no backgrounded cargo in any brief.
 
 - **P-M1 — the mailbase, locally (M).** `storage::mail`: base/cursors/
-  seen, entry + envelope types, local self-signed envelopes, `msgid`.
-  Commands `mail`, `mail send` (to `self/<label>` only), `mail read`,
-  `mail rm`. The two `inbox::receive` seams repoint to
-  `mail::file_receipt`; `inbox.json` migrates on first open; `inbox.rs`
-  and `INBOX_CAP` deleted. Test-root guard in test-support. Tests:
-  append-only invariants, cursor advance, migration mapping, seen-set
-  survives `rm`, no fixture escapes the test root.
+  seen under the stage lock, entry + envelope types, canonical header,
+  local self-signed envelopes, `msgid`. Commands `mail`, `mail send`
+  (to `self/<label>` only), `mail read`, `mail show`, `mail mark`,
+  `mail rm`. The two `inbox::receive` seams (`conduct/graph/send.rs`,
+  `server/a2a.rs`) repoint to `mail::file_receipt`; `inbox.json`
+  migrates on first open; `inbox.rs`, `INBOX_CAP`, `register_inbox` and
+  the three `inbox.*` registry entries deleted; CONTRACTS §4 replaces
+  the `inbox.json` row with `state/mail/*`. Test-root helper in
+  test-support. Tests: append-only invariants, torn-line recovery,
+  cursor advance + reader recording, migration mapping, seen-set
+  survives `rm`, msgid recomputation rejects a tampered field, no
+  fixture escapes the test root.
 - **P-M2 — envelopes on the wire, direct edges (L).** Origin signing
   and verification (the pairing keypair), `message` capability,
-  `aoide/mailDeposit` in the door (CONTRACTS §6), the outbox spool with
-  `now` flavor + `link.json` backoff, the drain on the timer, ack
-  receipts. `mail send --to <node>/…` for direct edges; `mail outbox`.
-  Tests: sign/verify round-trip, duplicate is not an error, dead-peer
-  entry waits and drains on return, ack retires exactly its `msgid`.
+  `aoide/mailDeposit` in the door (CONTRACTS §6, audit label
+  whitelist), the outbox spool with `now` flavor + `link.json` backoff,
+  the drain on the timer and in the door process, destination-signed
+  ack receipts. `mail send --to <node>/…` for direct edges; `mail
+  outbox`. Tests: sign/verify round-trip, duplicate is not an error,
+  dead-peer entry waits and drains on return, an ack retires exactly its
+  `msgid` and only when signed by `to.node`, two drains on one link
+  serialize on `.bsy`.
 - **P-M3 — hold and poll (M).** `aoide/mailPoll`, `--hold`, the drain's
   never-attempt rule for hold, poll-on-contact. Tests: a hold entry
   drains only via poll; a poller receives only its own entries; a
-  non-`message` poller is refused.
-- **P-M4 — zones (L).** `hubs`/`gates`/`status` keys (validate_mesh,
-  drift shows them), the four-step router, transit filing + signature
-  chain + loop guards, `down`/`hold` enforcement at door/route/drain,
-  `aoide mesh` columns, #50 vocabulary. PAIRING's kill-list carve-out
-  is already worded; the code gate that refuses relay must except
-  `mailDeposit` transit explicitly. Tests: the five-edge fixture mesh —
-  osaka→chiyo routes via a hub, an unshared mesh gets `no-route`, a gate
-  bridges two meshes, a looped envelope is dropped once, `down` refuses
-  at all three points.
+  non-`message` or `down` poller is refused; re-poll before ack is
+  idempotent.
+- **P-M4 — zones (L).** `relays`/`keys`/`status`/`gates` keys
+  (validate_mesh: multi-membership allowed, grant divergence and
+  one-sided gates refused; drift shows them), declared-key
+  verification, the four-step router with the zone clause, transit
+  filing + signature chain + loop guards, `down`/`hold` enforcement at
+  door/route/drain, `mail route`, `aoide mesh` columns, the
+  UNREACHABLE vocabulary. Tests on the five-edge fixture mesh:
+  osaka→chiyo routes via a relay; an unshared mesh gets `no-route`; a
+  dual-member non-gate node refuses to bridge (`zone-violation`); a
+  symmetric gate bridges and rewrites `mesh`; a one-sided gate fails
+  validate; a looped envelope is dropped once; `down` refuses at all
+  three points; a declared key disagreeing with a paired key is drift.
 - **P-M5 — doorbell + polish (S).** The fixed-line nudge through
-  loopback conduct, headless-session coverage, `mesh down` convenience
-  if wanted, outbox report wording. Tests: nudge text contains no
-  letter bytes, label clamp holds for adversarial labels.
+  loopback conduct with the `valid_peer_name` clamp, reader-recorded
+  targeting, headless-session coverage, `mesh down` convenience if
+  wanted. Tests: nudge text contains no letter bytes, adversarial
+  labels (ESC, `$(`, `;`, newlines) clamp to the grammar, a label with
+  no reader and no matching petname rings nothing.
 
 Verification gate per phase: the crate's own tests green, `aoide schema
 --json` golden updated in the same commit, and a live two-node run
@@ -402,8 +530,10 @@ order.
   readers never do.
 - No letter content in any doorbell, notification, or log line — fixed
   text plus a clamped label, ever.
-- No transit outside a shared mesh except through a declared gate; no
-  implicit bridging by dual membership.
+- No transit outside a declared zone except through a symmetric
+  declared gate; no implicit bridging by dual membership.
+- No key ferried by a hop — keys come from pairing or the User-written
+  key table, nowhere else.
 - No relay of trust, codes, or pairing state — the PAIRING kill-list
   stands; mail transit is the one named carve-out.
 - No per-mesh identity — one keypair per node.
@@ -411,3 +541,5 @@ order.
   surveyed system.
 - No mail through `message/send` — instruction and data never share a
   wire method.
+- No unlocked write to any mail file — every mutation under the stage
+  lock.
