@@ -811,8 +811,10 @@ already calls a legitimate simultaneous mutual pairing and leaves alone.
   full stop (User ruling).
 - No daemon-door or A2A allowlist tables — the per-command door policy
   and the `allows` set are the only gates (AOIDED L2 discipline).
-- No transitive relay, no mesh-level object — the mesh stays the
-  closure of pairwise records.
+- No transitive relay of trust, codes, or pairing state, no mesh-level
+  object — the mesh stays the closure of pairwise records. Mail
+  TRANSIT through declared hubs is `MAIL.md`'s one named carve-out: a
+  hub relays letters, never trust.
 - No per-capability serde bool scatter — `allows` is one field.
 - The identity private key never crosses any socket, any Outcome,
   any log — including the broker's.
