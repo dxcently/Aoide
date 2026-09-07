@@ -137,6 +137,17 @@ deleted outright — and `peer.*` (5), where the live `peer` group is 15
 paths. None of this was in scope for a count-only pass; a content sweep
 against the actual `session grant`/`peer`/`who` surface is queued here.
 
+### [2026-09-07] open: the mesh speaks two wire vocabularies
+yomi-strix runs 0.0.22, which sends `X-Aoide-Node` and stamps session
+origins `node:<name>`; osaka (0.0.21), sakaki (0.0.13) and chiyo answer the
+old `X-Aoide-Peer`. Cross-box calls out of yomi fail at the header until
+each box switches. Reading a pre-switch session record is already covered —
+`aoide_storage::attest::is_node_origin` accepts both prefixes, and the
+secrets broker's origin gate depends on that — but the request header has
+no such shim by design; a flag day was the ruling. Close when every box has
+switched, and retire the legacy arm then. sakaki's switch is the TOTP-gated
+cross-host path, which is not built; chiyo has been dark since 08-28.
+
 ## [2026-07-25] mint | Aoide-Wiki
 - Standalone wiki minted from the librarian `_template` for the Aoide project.
 
@@ -2140,3 +2151,113 @@ Pages touched: README.md, docs/architecture/aoide-report.html,
 docs/architecture/PAIRING.md, concepts/orchestration/Pairing-Ceremony.md,
 concepts/cli/Doors-and-Peers.md, concepts/Full-Architecture.md,
 concepts/Package-Layout.md, entities/lyra.md, ingest/log.md (this entry).
+
+## [2026-09-07] rename | peer → node, one noun for a mesh member
+
+`peer` and `node` both named a mesh member, split by a distinction nobody
+could state twice the same way — edge endpoint against declared member.
+The User ruled the synonym gone and ordered the rename ahead of the mail
+workstream, so the mail design would be written in the surviving noun
+rather than translated into it later.
+
+Two lanes ran in parallel over disjoint paths. The code lane (`a30d25f`,
+114 files) is a word-boundary rename across Rust identifiers, the ten CLI
+paths `node.add` through `node.status` (net command count unchanged at
+81), the `X-Aoide-Node` request header, `node:<name>` session origins, the
+on-disk `state/nodes.json`, `state/node-cache/` and the node-pairing
+files, the `[mesh.<name>].nodes` config key, and the prose in CONTRACTS.md
+and the crate docs. Five files moved with `git mv`. The wiki lane
+(`622c6b6`, 25 files) took the pages, renaming three of them —
+`Doors-and-Nodes.md`, `Node-Federation.md`, `Node-Transport.md` — with
+every wikilink to them updated in the same commit.
+
+Three things deliberately keep the old word. The kernel and std socket
+sense is untouched: `SO_PEERCRED`, `peer_cred`, `peer_uid`, `peer_addr`,
+and prose meaning the far end of a socket. `pair`/`pairing` is a ceremony,
+not a member. `references/P2P-Board-Protocols.md` surveys FidoNet, Usenet,
+SSB and NNCP in their own vocabulary and stays that way.
+
+`PeerOrigin` became `ConnOrigin` rather than `NodeOrigin`: it classifies a
+connection as loopback, remote or unknown, and calling a loopback caller a
+node would assert mesh membership the type never checks. Graph-vertex
+collisions in `conduct/src/graph/**`, where `node` already meant a DAG
+vertex, resolve as `mesh_node` — the compiler surfaced two beyond the
+predicted one, both same-scope shadowing.
+
+Compatibility is two shims and no more. `aoide_storage::attest::
+is_node_origin` accepts `node:` and legacy `peer:`, and all three readers
+— conduct's resurrect and registration gates, the secrets broker's origin
+gate — go through it, because a pre-switch session record on disk would
+otherwise walk past `allowRemoteOrigin`. `NodeRegistry`'s `nodes` field
+carries `#[serde(alias = "peers")]`. `fs::migrate_root_once` renames the
+four state paths on first open. The mesh config key gained no alias:
+nothing had it deployed.
+
+Review caught a real over-reach. The code lane had renamed the socket
+credential vocabulary as well, so `cross_uid_gate`'s refusals and the
+broker's `SO_PEERCRED` documentation read as claims about mesh members;
+`b86ac1f` reverts that. That revert then over-corrected one line back —
+`allowRemoteOrigin` gates a session a remote *mesh member* created, which
+is the renamed sense — fixed in `91dfcf9`.
+
+Version 0.0.21 → 0.0.22, the wire change being what the version is for.
+yomi-strix switched to it the same day; the state files migrated on first
+open and `aoide node list` reads the registry back. The rest of the mesh
+still answers the old header — see the open thread above.
+
+Pages touched: `concepts/cli/Doors-and-Peers.md` →
+`concepts/cli/Doors-and-Nodes.md`, `concepts/orchestration/
+Peer-Federation.md` → `Node-Federation.md`, `concepts/orchestration/
+Peer-Transport.md` → `Node-Transport.md`, `concepts/orchestration/
+{A2A-Door,Pairing-Ceremony,Session-Graph,Conductor-Channel,Agent-Interface,
+Secrets-Broker}.md`, `concepts/cli/{Graph-and-Conduct,Secrets-Commands,
+Screen-Commands,CLI-Reference,Conductor-TUI}.md`, `concepts/
+{Full-Architecture,Package-Layout,Codebase}.md`, `entities/{aoide-cli,
+aoided,lyra}.md`, `SCHEMA.md`, `references/{fleshing-out-aoide-ricing,
+audit-report,AOIDE-HANDOFF}.md`, `protocol/dev/DEV.md`, `ingest/index.md`,
+`ingest/log.md` (this entry and the open thread above).
+
+## [2026-09-07] update | MAIL's P-M1 forks are ruled
+
+`docs/architecture/MAIL.md` carried the settled store-and-forward design
+but left fourteen points either silent or contradicted by the code. The
+plan tier read the design against the repo and named them; the architect
+ruled all fourteen before any executor saw a brief (`3d9fc21`).
+
+The load-bearing ones. `try_stage_lock` blocks on `LOCK_EX` like its
+fail-open sibling and returns `Err` only when the lock cannot be taken at
+all — `LOCK_NB` would have turned ordinary contention between the timer,
+the door and the CLI into failures, which inverts the guarantee it exists
+for. Only a write truncates a torn tail; readers skip it, as
+`ledger::read_ledger` already does, because truncating on read means
+writing on every open. A local receipt is signed by the box identity,
+minting the keypair if the box has never paired, since an unverifiable
+entry in a store whose premise is verification is worse than a mint. `self`
+resolves to the box's own node name when the envelope is minted, so a
+locally filed letter is byte-identical to the same letter on the wire and
+no `msgid` is ever computed over a literal that means something else
+elsewhere. The retiring per-entry read flag and the reserved `context`
+passthrough are both dropped rather than carried: cursors are a high-water
+mark with no honest seed from scattered read bits, and the canonical header
+is a closed eight fields.
+
+Also fixed: pruning is `--older-than <Nd|Nh>`, the grammar already in the
+repo; every mail mutation writes one audit line naming the command and the
+msgid or count, never the text or the name, and reads write none; bare
+`aoide mail` ships its names half in P-M1 and its caller's-own half moves
+to P-M5 with the doorbell, which is where the reader binding lands.
+
+## [2026-09-07] add | codex dendrite
+
+`modules/dendrites/codex.nix` (`5accea6`) is the fourth agent-CLI
+dendrite beside claude-code, kimi-code and pi-coding-agent, on the same
+per-tool shape rather than bundled into devtools. Apache licensed, so no
+unfree flag, and packaged in nixpkgs, so nothing is vendored. It installs
+the binary and nothing else: codex is the hookless harness, carrying no
+`AgentProfile` row and no hook-settings install, and reaches the session
+graph through `aoide conduct --agent codex` instead. Shipped off; yomi
+enables it (`2d2b528`). The flake inputs advanced in the same commit as
+the dendrite file, independently of it — the previous nixpkgs already
+carried codex.
+
+Pages touched: `ingest/log.md` (this entry).
