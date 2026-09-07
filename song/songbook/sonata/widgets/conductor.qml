@@ -147,7 +147,6 @@ Item {
     // Snapshot the ancestor geometry explicitly: mapToItem() alone does not
     // register those dependencies for a QML binding. The current host's
     // transform list contains Translate; its x/y need their own reads too.
-    // Kept identical in Terminals so both marks sleep behind the same clips.
     function markExposed(mark, win, shifts) {
         if (!mark || !mark.visible || !win || !win.visible) return false
         var positions = []
