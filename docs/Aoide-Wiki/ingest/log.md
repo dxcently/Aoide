@@ -2398,3 +2398,80 @@ door's own error heuristic. An audit that records a refusal as a
 success is worse than a blunt error code.
 
 Pages touched: `ingest/log.md` (both entries).
+
+## [2026-09-07] fix | a fact about the world, written down once
+
+Three defects found in one session share a single shape, and the shape is
+worth a name: a fact about the world captured at write time and never
+re-derived at read time. The mail cursor held one high-water mark per
+mailbox and served it to every reader. `aoide graph` served the
+`conductable` flag it was handed at session registration. The A2A door's
+`has_socket` tested that a stored string was non-empty. Each was true when
+written and none of them re-checked.
+
+The socket pair matter together because they share a cause outside the
+code. `shellbridge.service` owns `/run/user/<uid>/aoide` through systemd's
+`RuntimeDirectory`, whose default `RuntimeDirectoryPreserve=no` deletes the
+directory on every stop — so a rebuild silently unlinks every live session's
+control socket while `sessions.json` still names it. A session keeps its
+open descriptor on the now-unlinked inode and cannot be reached through the
+path; no command rebinds it, and restarting the unit does not repair it.
+
+Both fixes derive the report at read time and repair nothing. `aoide graph`
+gained `is_conductable_now` in `graph/doc.rs`, the single boundary its JSON,
+its Unicode tree and its federation wire response all funnel through, so one
+check covers three renderings. The A2A door's check went into
+`session_ref_lookup`, the one impure boundary `decide_send_action` reads
+through, leaving that decision pure and disk-free — the six tests that
+construct a `SessionRef` directly pass unedited, which is what proves it.
+The stored flag and path are never migrated or cleared: the record says what
+was registered, the report says what is true now, and conflating those is
+the defect itself.
+
+The A2A case was the worse of the two. `graph` merely printed a hopeful
+line; the door told a remote node that delivery was happening down a socket
+nothing could open.
+
+The underlying unit change is not ours to make. `modules/nucleus` moves by
+upstream merge, and whether the answer is `RuntimeDirectoryPreserve=yes` or
+the deeper one — that a paint-side unit should not own core's socket
+directory at all, which inverts the core/paint split — is the user's ruling.
+
+Pages touched: `ingest/log.md`.
+
+## [2026-09-07] find | two trees, one score
+
+`lyra reload` and the rebuild both write `run/qml`, from different sources,
+with nothing arbitrating them.
+
+A switch builds `run/qml` from the repository's `song/songbook/*/widgets/`
+into the store and rsyncs it down with `--delete`, so immediately after a
+switch the deployed tree is the committed score. `lyra reload`'s sync beat
+copies from `songbook_dir(song)/widgets`, and that resolves under
+`$AOIDE_ROOT` — the runtime songbook, seeded once by `rice compose` and
+re-synced from the repository by nothing. A switch therefore moves the
+deployed tree forward and the next reload walks it back to whatever vintage
+the runtime copy happens to be. Found live: the runtime tree was five days
+stale, and an ordinary reload reverted battery percentages and widget
+widths that had shipped in the meantime.
+
+`reload`'s own design notes claim the command removed the tree-direction
+trap. It removed it within the agent loop — edit, reload, look, no separate
+save and no separate sync — and left it standing across the rebuild
+boundary, which the loop never looks at.
+
+Two smaller things fall out of the same place. The reload's snapshot beat
+runs after its sync, deliberately, so that a deterministic re-derivation
+does not register as drift on every call; the consequence is that the first
+reload after a switch snapshots the already-reverted state, and the
+switch-deployed state was never a take at all, so `rice back` cannot reach
+it. And the staging and draft arms report `ok` even when the shell reload
+returns `Failed`, so an agent reading the status believes its edit is on
+screen when the message beside it says the IPC call failed. `NotRunning` is
+right to stay `ok` — no live shell is the ordinary headless case, not an
+error — but a failure is not.
+
+The fix waits on a ruling about which tree is the score. Adding a staleness
+guard would preserve both trees and decide nothing.
+
+Pages touched: `ingest/log.md`.
