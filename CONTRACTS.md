@@ -2092,6 +2092,19 @@ per-entry read flag has no high-water counterpart and is not carried:
 every migrated entry is unread once. `context` (an optional passthrough
 no call site ever set) is dropped, not migrated.
 
+The same first open — under the same lock acquisition as the inbox
+migration above — rewrites a legacy flat `cursors.json`: `{ "<name>": {
+"seq", "readers" } }`. A name's value is old-shape only when its `seq`
+field is a bare JSON number rather than nested inside a per-reader
+object, so a reader literally named `seq` is never confused with the
+flat shape in either direction — a legacy row listing it in `readers`
+migrates into `{"seq":{"seq":n}}`, which already matches the new shape
+and is left untouched by a second pass. Every reader named in `readers`
+inherits the name's old `seq`; a name with no recorded reader keeps its
+mark filed under the name itself. No sentinel file marks the rewrite
+done: the per-name shape check is itself the idempotency guard, so a
+second open is a clean no-op.
+
 ### `state/usage.json` — **v0**
 
 Account/usage runtime — lives in the gitignored root-runtime `state/` dir
