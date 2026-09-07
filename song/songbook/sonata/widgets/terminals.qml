@@ -76,10 +76,8 @@ import "../.."
 // The one laurel-`paletteHot` crown (the traced session) stays a pantheon-wide
 // signal, identical across temples. The music state colours stay shared too —
 // a "working" note reads the same in every house; only the architecture differs.
-// Codex main agents share the Conductor's 24×18 illuminated book: pages turn
-// while working, rest open on a hold, and close at idle/stopped/done.
-// The identity row reserves its width through state changes; bare shells and
-// subagents never acquire an agent badge from a title or foreground command.
+// Nameplates keep the common state lamp and word. The illuminated Codex book
+// belongs to the Conductor; this roster gives that space back to the name.
 Item {
     id: gadget
 
@@ -124,52 +122,6 @@ Item {
     function withA(cstr, a) {                      // alpha on a role string
         var c = Qt.darker(cstr, 1.0);
         return Qt.rgba(c.r, c.g, c.b, a);
-    }
-
-    // Transform LISTS are fixed on this host and are not bindable in Qt.
-    // Discover their objects at attachment; bind to each Translate's x/y below.
-    function markTransforms(mark) {
-        var out = []
-        for (var node = mark; node; node = node.parent)
-            for (var i = 0; i < node.transform.length; i++)
-                out.push(node.transform[i])
-        return out
-    }
-
-    // Item.visible stays true behind a clip or the dock's translated cover.
-    // Snapshot the ancestor geometry explicitly: mapToItem() alone does not
-    // register those dependencies for a QML binding. The current host's
-    // transform list contains Translate; its x/y need their own reads too.
-    // Kept identical in Conductor so both marks sleep behind the same clips.
-    function markExposed(mark, win, shifts) {
-        if (!mark || !mark.visible || !win || !win.visible) return false
-        var positions = []
-        for (var i = 0; i < shifts.length; i++)
-            positions.push([shifts[i].x, shifts[i].y])
-        var chain = []
-        for (var node = mark; node; node = node.parent) {
-            chain.push({ item: node, parent: node.parent,
-                x: node.x, y: node.y, width: node.width, height: node.height,
-                visible: node.visible, opacity: node.opacity, clip: node.clip,
-                scale: node.scale, rotation: node.rotation,
-                transformOrigin: node.transformOrigin })
-        }
-        var rect = Qt.rect(0, 0, mark.width, mark.height)
-        for (var j = 0; j < chain.length; j++) {
-            var g = chain[j]
-            if (!g.visible || g.opacity <= 0) return false
-            if (g.clip) {
-                var left = Math.max(0, rect.x), top = Math.max(0, rect.y)
-                var right = Math.min(g.width, rect.x + rect.width)
-                var bottom = Math.min(g.height, rect.y + rect.height)
-                if (right <= left || bottom <= top) return false
-                rect = Qt.rect(left, top, right - left, bottom - top)
-            }
-            rect = g.item.mapToItem(g.parent, rect)
-        }
-        return rect.width > 0 && rect.height > 0
-            && rect.x < win.width && rect.y < win.height
-            && rect.x + rect.width > 0 && rect.y + rect.height > 0
     }
 
     // ── Special-workspace resolution ─────────────────────────────────────────
@@ -807,10 +759,6 @@ Item {
                         // byline + screen pane + context meter; bare ttys stay
                         // slim ledger lines.
                         readonly property bool agentRow: gadget.isAgentRec(modelData)
-                        readonly property bool codexMain: gadget.recKind(modelData) === "agent"
-                            && ("" + (modelData.agent || "")).toLowerCase() === "codex"
-                        readonly property bool codexLive: row.codexMain && row.working
-                            && !row.rowAwaiting
                         readonly property string activityText: modelData.activity || ""
                         // the tool lane — what the agent last reached for. TWO
                         // sources, and they disagree on purpose: `activity` is
@@ -1033,155 +981,11 @@ Item {
                                     width: parent.width - 21
                                            - (wsTagT.visible ? wsTagT.implicitWidth + 8 : 0)
                                            - (stateWordT.implicitWidth + 8)
-                                           - (row.codexMain ? codexTag.width + 6 : 0)
                                     text: row.agentRow ? (modelData.agent || "agent") : row.procText
                                     font.family: row.agentRow ? gadget.faceSerif : gadget.faceMono
                                     font.pixelSize: row.agentRow ? 14 : 12
                                     font.weight: row.emph ? Font.Bold : Font.Medium
                                     color: gadget.withA(livery.paletteFg, row.agentRow ? 1.0 : 0.85)
-                                }
-                                // Codex's illuminated book — a printed leaf turns while working,
-                                // a still open spread on a hold, and a closed cover at rest.
-                                // Both leaf faces share the settled page's text and geometry;
-                                // the loop joins on the same fully printed spread.
-                                Item {
-                                    id: codexTag
-                                    visible: row.codexMain
-                                    x: procName.x + Math.min(procName.paintedWidth, procName.width) + 6
-                                    y: 1
-                                    width: 24; height: 18
-                                    clip: true
-                                    readonly property color ink: gadget.withA(gadget.stateColor(modelData.state), 0.95)
-                                    readonly property color gold: gadget.livery.paletteAccent
-                                    readonly property color paper: gadget.livery.paletteBg
-                                    readonly property bool openBook: row.working || row.rowAwaiting
-                                    readonly property bool turning: row.codexLive
-                                    readonly property var hostWindow: QsWindow.window
-                                    property var hostTransforms: []
-                                    property bool componentReady: false
-                                    Component.onCompleted: {
-                                        hostTransforms = gadget.markTransforms(codexTag)
-                                        componentReady = true
-                                    }
-                                    Component.onDestruction: componentReady = false
-                                    // Attachment signals fire before the outer root id is available.
-                                    onParentChanged: if (componentReady && gadget) hostTransforms = gadget.markTransforms(codexTag)
-                                    onHostWindowChanged: if (componentReady && gadget) hostTransforms = gadget.markTransforms(codexTag)
-                                    readonly property bool exposed: componentReady && !!gadget
-                                        && gadget.markExposed(codexTag, hostWindow, hostTransforms)
-                                    property real leaf: 0
-
-                                    SequentialAnimation on leaf {
-                                        running: codexTag.turning && codexTag.exposed
-                                        loops: Animation.Infinite
-                                        onStopped: codexTag.leaf = 0
-                                        NumberAnimation { from: 0; to: 1; duration: 1100; easing.type: Easing.InOutCubic }
-                                        PauseAnimation { duration: 450 }
-                                    }
-                                    Canvas {
-                                        anchors.fill: parent
-                                        property color ink: codexTag.ink
-                                        property color gold: codexTag.gold
-                                        property color paper: codexTag.paper
-                                        property bool openBook: codexTag.openBook
-                                        property bool turning: codexTag.turning
-                                        property real leaf: codexTag.leaf
-                                        onInkChanged: requestPaint()
-                                        onGoldChanged: requestPaint()
-                                        onPaperChanged: requestPaint()
-                                        onOpenBookChanged: requestPaint()
-                                        onTurningChanged: requestPaint()
-                                        onLeafChanged: requestPaint()
-                                        onWidthChanged: requestPaint()
-                                        onHeightChanged: requestPaint()
-                                        onPaint: {
-                                            var ctx = getContext("2d")
-                                            ctx.reset()
-                                            ctx.strokeStyle = ink
-                                            ctx.fillStyle = paper
-                                            ctx.lineWidth = 1
-                                            if (!openBook) {
-                                                // The resting volume: hard cover, spine, page block,
-                                                // and one small gilt lozenge, all inside the same slot.
-                                                ctx.globalAlpha = 0.8
-                                                ctx.fillRect(7, 2.5, 11, 13)
-                                                ctx.strokeRect(7, 2.5, 11, 13)
-                                                ctx.beginPath()
-                                                ctx.moveTo(9, 2.5); ctx.lineTo(9, 15.5)
-                                                ctx.moveTo(9, 13.5); ctx.lineTo(18, 13.5)
-                                                ctx.stroke()
-                                                ctx.strokeStyle = gold
-                                                ctx.globalAlpha = 0.55
-                                                ctx.beginPath()
-                                                ctx.moveTo(13.5, 6); ctx.lineTo(15, 8)
-                                                ctx.lineTo(13.5, 10); ctx.lineTo(12, 8)
-                                                ctx.closePath(); ctx.stroke()
-                                                return
-                                            }
-
-                                            // Every face uses this painter: the same outline and printed
-                                            // strokes at rest, on the front of a leaf, and on its back.
-                                            // The gutter is excluded here and stroked once after all pages.
-                                            function page(side, lift, alpha) {
-                                                var edgeX = 12 + 10 * side
-                                                ctx.strokeStyle = ink
-                                                ctx.lineWidth = 1
-                                                ctx.globalAlpha = alpha
-                                                ctx.beginPath()
-                                                ctx.moveTo(12, 5)
-                                                ctx.quadraticCurveTo(12 + 5 * side, 2 - 2 * lift,
-                                                                     edgeX, 3.5 - 1.5 * lift)
-                                                ctx.lineTo(edgeX, 14 - lift)
-                                                ctx.quadraticCurveTo(12 + 5 * side, 12.5 - lift, 12, 15)
-                                                ctx.fill()   // fill closes the gutter; the outline does not
-                                                ctx.globalAlpha = 0.8 * alpha
-                                                ctx.stroke()
-                                                // Identical decorative text on both faces. Foreshortening
-                                                // compresses the lines into the gutter as the page turns.
-                                                ctx.globalAlpha = 0.3 * alpha * Math.abs(side)
-                                                for (var row = 0; row < 3; row++) {
-                                                    var y = 6 + row * 2.5
-                                                    ctx.beginPath()
-                                                    ctx.moveTo(12 + 3 * side, y + 0.7 - 0.6 * lift)
-                                                    ctx.lineTo(12 + 8 * side, y - 1.6 * lift)
-                                                    ctx.stroke()
-                                                }
-                                            }
-                                            page(-1, 0, 1)
-                                            page(1, 0, 1)
-
-                                            if (turning && leaf > 0 && leaf < 1) {
-                                                var angle = Math.PI * leaf
-                                                var lift = Math.sin(angle)
-                                                var side = Math.cos(angle)
-                                                // Vanishing overlay weight at BOTH endpoints prevents a
-                                                // translucent outline being double-painted at landing/reset.
-                                                // Geometry and text also converge to the resting page exactly.
-                                                var alpha = lift * lift
-                                                page(side, lift, alpha)
-                                                ctx.strokeStyle = gold
-                                                ctx.beginPath()
-                                                ctx.moveTo(12 + 10 * side, 3.5 - 1.5 * lift)
-                                                ctx.lineTo(12 + 10 * side, 14 - lift)
-                                                ctx.globalAlpha = 0.13 * lift * alpha
-                                                ctx.lineWidth = 3; ctx.stroke()
-                                                ctx.globalAlpha = 0.55 * lift * alpha
-                                                ctx.lineWidth = 1; ctx.stroke()
-                                            }
-
-                                            // One shared gutter and cover edge, independent of the leaf.
-                                            // The landed spread and the next turn's start are the same image.
-                                            ctx.strokeStyle = ink
-                                            ctx.globalAlpha = 0.8
-                                            ctx.lineWidth = 1
-                                            ctx.beginPath()
-                                            ctx.moveTo(12, 5); ctx.lineTo(12, 15)
-                                            ctx.moveTo(1.5, 15); ctx.lineTo(7, 14.5)
-                                            ctx.lineTo(12, 16); ctx.lineTo(17, 14.5)
-                                            ctx.lineTo(22.5, 15)
-                                            ctx.stroke()
-                                        }
-                                    }
                                 }
                             }
                             // ── the SCREEN PANE — agent rows only ─────────────

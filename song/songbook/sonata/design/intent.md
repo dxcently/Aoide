@@ -155,7 +155,7 @@ file header rather than a shared cross-cutting blueprint:
 | workspace strip | urgent | pulses `glitchPink` (`base08` terracotta `#b0472f`) |
 | window frames | active / inactive | `#a07414` Attic gold hairline / `#3f867e` bronze-verdigris teal (2px, rounding 0) |
 | the one blaze | ✎N live-sessions cell + DAG/TERMINALS trace | `hot` laurel leaf-green `#4e8b45` |
-| Codex agent book | turning leaf and settled spread | shared printed page geometry in a fixed 24×18 box; both faces carry fine text strokes, and the loop meets on the same printed spread |
+| Conductor's Codex agent book | turning leaf and settled spread | printed page geometry in a fixed 24×18 box; both faces carry fine text strokes, and the loop meets on the same printed spread; Terminals uses its common state lamp and nameplate |
 | wallpaper | baked field | deterministic bright-marble solid from `palette.bg` `#f2ebde` (wallpaper note null) |
 
 Every text element sits on a glass backing (bar sheet, frames, chips) — no bare
@@ -312,3 +312,9 @@ text on the wallpaper, so no outline treatment is in use.
   Independent review passed, and the staged dock was inspected across repeated
   turns. Only the two reviewed widget bodies changed; the settled reload
   succeeded and deduped the take.
+- 2026-09-07: **The Codex book belongs to Conductor alone.** At the owner's
+  request, Terminals removes the book, its motion/exposure helpers and its
+  reserved nameplate space. The common terminal state lamp and kaomoji remain,
+  as do the square `┌ ┐ └ ┘` frame corners. Conductor's book is unchanged.
+  Independent review and the live dock confirm the book appears only in
+  Conductor; Terminals keeps its name, state and square frame.
