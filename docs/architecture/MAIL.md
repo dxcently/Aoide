@@ -181,30 +181,37 @@ An entry is an envelope plus local facts:
   outbox runs under the stage lock, and refuses when the lock is not
   held.** Today's `with_stage_lock` (`storage/src/fs.rs`) runs its
   closure even when the flock could not be taken; mail uses a
-  `try_stage_lock` that returns `Err` instead — P-M1 adds it beside the
-  existing helper, which keeps its fail-open shape for the callers that
-  chose it. Three sessions on one box cannot make two append at once.
+  `try_stage_lock` that blocks for the same `LOCK_EX` and returns `Err`
+  when it cannot take it — a writer waits behind another, never runs
+  unlocked. P-M1 adds it beside the existing helper, which keeps its
+  fail-open shape for the callers that chose it. Three sessions on one
+  box cannot make two append at once.
 - Write order is what makes a crash safe: under the lock, truncate a torn
   tail of `base.jsonl` to the last complete line, append the entry,
   fsync, THEN append to `seen.jsonl`. A `seen` line whose `msgid` is
   absent from the base is a crash between those two writes, and that
-  `msgid` is accepted again. The reverse order would lose mail.
+  `msgid` is accepted again. The reverse order would lose mail. Only
+  the write path truncates; a reader skips a torn tail and writes
+  nothing, like every other JSONL reader here.
 - All three files resolve through the same `state_dir()`; the timer, the
   door unit, and the CLI must see one directory. P-M1's live gate checks
   the unit environments agree, not just the code.
 - `type=receipt` entries carry what `inbox.json` carried (from, target,
-  text, receivedAt, context) inside the envelope shape with a local
-  self-signature — the migration is a field mapping, run under the
-  stage lock on first open; `inbox.json` is renamed to
-  `inbox.json.migrated` in the same critical section, so a second
-  process opening concurrently finds either the old file or the
-  finished base, never a half-copied one. Acks are receipts addressed
-  back to the origin.
+  text, receivedAt) inside the envelope shape, signed by the box
+  identity (`identity::load_or_mint` — a box that has never paired
+  mints its key on its first letter). The migration is a field mapping,
+  run under the stage lock on the first store open by any command;
+  `inbox.json` is renamed to `inbox.json.migrated` in the same critical
+  section, so a second process opening concurrently finds either the
+  old file or the finished base, never a half-copied one. The old
+  per-entry read flag has no high-water counterpart and is not carried:
+  every migrated entry is unread once. Acks are receipts addressed back
+  to the origin.
 - `type=transit` entries are letters the node is relaying (§Transit);
   readers hide them unless asked.
 - Reading never mutates an entry. A reader's cursor advances on read and
   records the reader's session id, which is what the doorbell uses.
-- Keep-all. `aoide mail rm --older <duration>` is the only pruning; it
+- Keep-all. `aoide mail rm --older-than <Nd|Nh>` is the only pruning; it
   never touches `seen.jsonl`, so a pruned letter re-offered later is
   still a duplicate (the RFC 5537 §3.3 coupling, kept by construction).
 
@@ -218,8 +225,12 @@ into the live inbox.
 
 `aoide mail send --to <node>/<name> [--hold] -- <text>`:
 
-- `<node>` is a mesh-declared node name or `self`. `<name>` is free
-  text; it is filed raw and **clamped only when rendered into a pty**.
+- `<node>` is a mesh-declared node name or `self`. `self` resolves to
+  this box's own node name (`display::local_host_name()`) when the
+  envelope is minted, so the literal never enters a header — a letter
+  filed locally is the same bytes it would be on the wire. `<name>` is
+  free text; it is filed raw and **clamped only when rendered into a
+  pty**.
 - **Address role names, never session petnames.** Petnames are minted
   `adjective-noun` per session and change on every respawn; a role name
   (`rebuild-reports`, `conductor`) outlives the session that reads it.
@@ -544,7 +555,7 @@ aoide mail show <msgid>                                  one entry, framed
 aoide mail mark --for <name>                            advance a cursor without printing
 aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, per entry
 aoide mail route <node>                                  dry-run the four steps
-aoide mail rm --older <duration>                         prune the base, never seen.jsonl
+aoide mail rm --older-than <Nd|Nh>                       prune the base, never seen.jsonl
 aoide mesh                          nodelist view: + status, role, key source, liveness
 aoide node allow <node> message off                      quarantine this box's door, now (existing command)
 aoide board …                       reserved; not in this workstream
@@ -555,8 +566,10 @@ them lies under the new model. `inbox list/read/clear` retire with
 their store (golden −3); every new command rides its phase's golden
 delta with the full count-site checklist. Like every existing command,
 the CLI writes state files itself under the stage lock — "through
-aoided" means the policy surface and the audit log, which every mail
-command reports to, not a socket hop.
+aoided" means the policy surface and the audit log, not a socket hop.
+Every mutation (`send`, `mark`, `rm`, a filed receipt) writes one audit
+line naming the command and the `msgid` or count, never the text or the
+name; reads write none.
 
 ## Phases
 
@@ -576,12 +589,15 @@ READMEs), no subagent spawning and no backgrounded cargo in any brief.
   `storage::fs`; migration under it with the atomic rename. Test-root
   helper in test-support. Tests: append-only invariants, torn-tail
   truncation, base-before-seen write order (a `seen` line without a
-  base entry is re-accepted), a held lock makes every mail write `Err`,
-  cursor advance + reader recording, migration mapping and a concurrent
-  second opener, seen-set survives `rm`, msgid recomputation rejects a
-  tampered field, canonical header is byte-exact (case and whitespace
-  change the msgid), no fixture escapes the test root. Live gate: the
-  timer, door, and CLI environments resolve one `state_dir()`.
+  base entry is re-accepted), an untakeable lock (an unwritable lock
+  path) makes every mail write `Err` and a held lock serializes a second
+  writer behind the first, cursor advance + reader recording, migration
+  mapping and a concurrent second opener, seen-set survives `rm`, msgid
+  recomputation rejects a tampered field, canonical header is byte-exact
+  (case and whitespace change the msgid), no fixture escapes the test
+  root. Bare `aoide mail` prints the names half only; its "caller's own
+  new letters" half is P-M5's. Live gate: the timer, door, and CLI
+  environments resolve one `state_dir()`.
 - **P-M2 — envelopes on the wire, direct edges (L).** Origin signing
   and verification (the pairing keypair), `message` capability,
   `aoide/mailDeposit` in the door (CONTRACTS §6, audit name
@@ -624,9 +640,11 @@ READMEs), no subagent spawning and no backgrounded cargo in any brief.
 - **P-M5 — doorbell + polish (S).** The fixed-line nudge through
   loopback conduct with the `valid_node_name` clamp, submitted, latched
   per (name, session) until the cursor advances; reader-recorded
-  targeting, headless-session coverage, the reader frame's field clamps
-  and adaptive fence, `mesh down` convenience if wanted. Tests: nudge
-  text contains no letter bytes, adversarial names (ESC, `$(`, `;`,
+  targeting, bare `aoide mail`'s "caller's own new letters" half (it
+  needs the reader binding), headless-session coverage, the reader
+  frame's field clamps and adaptive fence, `mesh down` convenience if
+  wanted. Tests: nudge text contains no letter bytes, adversarial
+  names (ESC, `$(`, `;`,
   newlines) clamp to the grammar, a name with no reader and no matching
   petname rings nothing, a hundred letters ring once until `mail read`,
   a letter containing its own fence cannot escape the frame.
