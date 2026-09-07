@@ -567,15 +567,22 @@ their store (golden −3); every new command rides its phase's golden
 delta with the full count-site checklist. Like every existing command,
 the CLI writes state files itself under the stage lock — "through
 aoided" means the policy surface and the audit log, not a socket hop.
-Each mail command that mutates — `send`, `mark`, `rm` — writes one audit
-line naming the command and the `msgid` or count, never the text and
-never the name. Reads write none.
+Mail writes no audit code of its own. Every CLI dispatch already appends
+one line carrying the command, the door, the status and the outcome
+message, so a mail command is audited by arriving. A receipt filed at
+the two delivery seams adds nothing either: it rides a delivery the log
+already recorded, and a second line for one event would make the log
+count it twice. A remote deposit is the opposite case — it never passes
+the dispatcher and nothing else records it — so `mailDeposit` audits at
+the door when P-M2 builds it, which is what makes a flood visible.
 
-A receipt filed at the two delivery seams writes no line of its own: it
-rides a delivery the audit log already recorded, and a second line for
-one event would make the log count it twice. A remote deposit is the
-opposite case — nothing else records it — so `mailDeposit` audits at the
-door when P-M2 builds it, which is what makes a flood visible.
+**The audit log records that an operation happened, not what it
+printed.** A command's outcome message is both its human output and its
+audit payload, so a command that renders content copies that content
+into the log — for mail, a whole letter on every `mail show`. The log is
+bounded instead: `append_audit` clamps the message it stores. Letters
+live in the mailbase, which `mail rm` prunes; nothing else keeps a
+second copy that pruning cannot reach.
 
 ## Phases
 
