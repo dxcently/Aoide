@@ -49,14 +49,20 @@ there is no "this node may spawn, that one may not."
    ends; the popup is sugar.
 5. **Per-node permissions: a closed `allows` set.** Capabilities
    today: `"spawn"` (create a session via the A2A spawn arm),
-   `"read"` (graph/who summaries over A2A). Commands:
+   `"read"` (graph/who summaries over A2A), and `"message"` (deposit a
+   mail envelope via `aoide/mailDeposit` — data a reader pulls, never
+   an instruction; it grants nothing on the spawn or conduct arms).
+   Commands:
    `aoide node allow <name> <cap> on|off` — idempotent, reports
    exactly what changed. Unknown capability strings are refused.
    `autogate` stays its own field (landed semantics, not churned).
    Default for a PAIRED (verified) node: `config.toml`'s `[pairing]
    defaultGrant`, itself `["read"]` — `spawn` is an explicit widening,
    either standing (`aoide config set pairing.defaultGrant read,spawn`) or
-   for one ceremony (`aoide pair --allow read,spawn`).
+   for one ceremony (`aoide pair --allow read,spawn`). `message` is the
+   same: an explicit widening, never a default, because opening a mail
+   link is the moment a node may fill this box's keep-all mailbase.
+   MAIL.md decision 5 states the same rule from the mail side.
    An unpaired node: empty set. Session-level granularity stays open:
    the identity lane (#63) landed the sealed session credential and
    the broker's origin gate, but per-session capability gates (the

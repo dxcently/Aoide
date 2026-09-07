@@ -39,10 +39,14 @@ FidoNet node could.
    any intra-host lock would be fiction. A name says who a letter is
    *for*, never who may read it. FidoNet netmail was sysop-readable; so
    is this.
-5. **Deposits are ungated for paired nodes.** Pairing is the trust
-   (per-link, FidoNet's pkt password made real). A new `message`
-   capability joins the closed `NODE_CAPABILITIES` vocabulary; a verified
-   node holding it deposits without per-letter approval. Conduct's gate
+5. **Deposits are ungated per letter, not per node.** Pairing is the
+   trust (per-link, FidoNet's pkt password made real), and a new
+   `message` capability joins the closed `NODE_CAPABILITIES` vocabulary:
+   a verified node holding it deposits every letter without further
+   approval, and one that does not hold it deposits nothing. `message`
+   is an explicit widening like `spawn`, never part of `defaultGrant` —
+   opening a mail link is a gesture the User makes, which is also the
+   moment the bearer-token fix below is due. Conduct's gate
    (`pending.json`, autogate) is untouched and mail never queues there.
 6. **Deposit-always, then a doorbell.** Writing to the store IS delivery.
    A live session the letter is for gets a fixed nudge; reading is a pull.
@@ -275,7 +279,15 @@ door's audit name whitelist gains both names so they never log as bare
 `a2a.rpc`.
 
 - **`aoide/mailDeposit`** `{ envelope }` → `{ msgid, outcome }`, outcome
-  ∈ `accepted | duplicate | refused(reason)`. Policy, in order:
+  ∈ `accepted | duplicate | refused(reason)`. Admission and outcome are
+  different answers and travel differently: whether the caller may speak
+  to the method at all is a JSON-RPC **error**, the way every other door
+  arm already refuses, and what became of a well-formed envelope is a
+  **result**. An admission failure returned as a 200 result would audit
+  as `ok` through the door's own error heuristic, and an audit that
+  files a refusal as a success is worse than a blunt error code. Step 1
+  below is therefore an error; steps 2 onward are outcomes. Policy, in
+  order:
   1. caller is a verified node holding `message`, not `down`. "Verified"
      means a connection signature that checked against ONE key; the
      hop's identity for every later step is the node that key belongs
@@ -317,10 +329,17 @@ door's audit name whitelist gains both names so they never log as bare
 - **Acks** are `receipt` envelopes minted by the destination on filing a
   `letter`: `to` = the origin, `text` = the acked `msgid`, signed by the
   destination. Routed like any letter, never themselves acked. **An
-  outbox entry retires only when a receipt arrives whose verified signer
-  is the entry's `to.node` and whose text names the entry's `msgid`.**
-  A hub can mint a receipt; it cannot sign as the destination, so it
-  cannot make an origin stop retrying.
+  outbox entry retires when its delivery is confirmed, and what counts
+  as confirmation depends on what the entry is.** For a `letter`: a
+  receipt arrives whose verified signer is the entry's `to.node` and
+  whose text names the entry's `msgid`. For a `receipt`: the deposit
+  outcome itself, `accepted` or `duplicate` — an ack needs no ack
+  because an ack IS what confirmation looks like, and a lost one is
+  recovered by the origin's next re-offer, which re-spools a fresh
+  receipt. Acks are still spooled like any entry, so an ack survives a
+  dead link instead of vanishing on it. A hub can mint a receipt; it
+  cannot sign as the destination, so it cannot make an origin stop
+  retrying.
 
 ## Outbox
 
@@ -340,7 +359,10 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   and immediately after any successful contact with that node. Because
   the door is a separate process, "after contact" means the door
   process drains under the same locks — the `.bsy` flock is what keeps
-  the two drains from racing one link.
+  the two drains from racing one link. It is taken non-blocking, the way
+  BSO means it: a drain that finds a link busy skips that link and moves
+  to the next. Blocking would queue tick after tick behind one stalled
+  ssh dial and starve every other link.
 - A drain session opens the node's ssh tunnel, deposits, and **tears the
   tunnel down before it exits** — never leaves a forward standing for
   the next tick. A standing `ssh -L` is a loopback path into the far
@@ -641,9 +663,9 @@ READMEs), no subagent spawning and no backgrounded cargo in any brief.
   never filed under the wrong name), duplicate is not an error and a
   duplicate of a filed letter re-spools the receipt, dead-node entry
   waits and drains on return, an ack retires exactly its `msgid` and
-  only when signed by `to.node`, two drains on one link serialize on
-  `.bsy`, an unsigned caller is refused by both mail methods, no
-  forward outlives a drain session.
+  only when signed by `to.node`, a second drain on a busy link skips it
+  and leaves the first untouched, an unsigned caller is refused by both
+  mail methods, no forward outlives a drain session.
 - **P-M3 — hold and poll (M).** `aoide/mailPoll`, `--hold`, the drain's
   never-attempt rule for hold, poll-on-contact. Tests: a hold entry
   drains only via poll; a poller receives only its own entries; a
