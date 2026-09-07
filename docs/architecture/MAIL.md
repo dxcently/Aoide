@@ -567,9 +567,15 @@ their store (golden −3); every new command rides its phase's golden
 delta with the full count-site checklist. Like every existing command,
 the CLI writes state files itself under the stage lock — "through
 aoided" means the policy surface and the audit log, not a socket hop.
-Every mutation (`send`, `mark`, `rm`, a filed receipt) writes one audit
-line naming the command and the `msgid` or count, never the text or the
-name; reads write none.
+Each mail command that mutates — `send`, `mark`, `rm` — writes one audit
+line naming the command and the `msgid` or count, never the text and
+never the name. Reads write none.
+
+A receipt filed at the two delivery seams writes no line of its own: it
+rides a delivery the audit log already recorded, and a second line for
+one event would make the log count it twice. A remote deposit is the
+opposite case — nothing else records it — so `mailDeposit` audits at the
+door when P-M2 builds it, which is what makes a flood visible.
 
 ## Phases
 
