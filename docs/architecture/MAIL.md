@@ -160,7 +160,7 @@ file):
 
 ```
 base.jsonl      append-only, one entry per line, immutable once written
-cursors.json    { "<name>": { "seq": n, "readers": ["<sessionId>", …] } }
+cursors.json    { "<name>": { "<reader>": { "seq": n } } }
 seen.jsonl      one `{"msgid","receivedAt"}` per line, append-only; dedup
                 memory that outlives pruning, loaded once per process
 ```
@@ -209,8 +209,21 @@ An entry is an envelope plus local facts:
   to the origin.
 - `type=transit` entries are letters the node is relaying (§Transit);
   readers hide them unless asked.
-- Reading never mutates an entry. A reader's cursor advances on read and
-  records the reader's session id, which is what the doorbell uses.
+- Reading never mutates an entry. Cursors are per reader: a name maps to
+  a set of readers, each with its own high-water mark, and a read
+  advances only the caller's. Two agents sharing a mailbox never
+  consume each other's mail. A reader is identified by its conducting
+  session id (`AOIDE_SESSION_ID`), and by the mailbox name itself when
+  that is unset — so a stray read from an unconducted terminal advances
+  a pseudo-reader and never a live agent's mark. A respawned session is
+  a new reader and sees the name from the beginning, the way an NNTP
+  client with no `.newsrc` does: re-delivery is the safe direction, and
+  silent loss is not. The reader set is also what the doorbell rings.
+- A `cursors.json` carrying the flat `{ "<name>": { "seq", "readers" } }`
+  shape migrates on first open under the same lock: each recorded reader
+  inherits the name's old `seq`, and a name with no recorded reader
+  keeps its mark under the name itself. Nobody re-reads what they had
+  already read.
 - Keep-all. `aoide mail rm --older-than <Nd|Nh>` is the only pruning; it
   never touches `seen.jsonl`, so a pruned letter re-offered later is
   still a duplicate (the RFC 5537 §3.3 coupling, kept by construction).
@@ -423,8 +436,9 @@ flags a box whose local name resolution disagrees with it.
 ## Delivery and the doorbell
 
 Filing a `letter` rings the doorbell for every live local session that
-is a recorded reader of `to.name` (cursors.json `readers`) — and, for a
-name no one has read yet, for any live session whose petname equals it.
+is a recorded reader of `to.name` (a key in that name's cursor map) —
+and, for a name no one has read yet, for any live session whose petname
+equals it.
 The doorbell is a fixed line injected through the loopback conduct path
 (no gate — local `aoided` conducting a local session):
 
@@ -548,7 +562,7 @@ paired node that merely misbehaves.
 ## Commands
 
 ```
-aoide mail                          names with unread mail, and the caller's own new letters
+aoide mail                    names with mail unread by this reader, and its own new letters
 aoide mail send --to <node>/<name> [--hold] -- <text>
 aoide mail read [--for <name>] [--all-names] [--reread] [--transit]   print + advance cursor
 aoide mail show <msgid>                                  one entry, framed
@@ -604,9 +618,10 @@ READMEs), no subagent spawning and no backgrounded cargo in any brief.
   truncation, base-before-seen write order (a `seen` line without a
   base entry is re-accepted), an untakeable lock (an unwritable lock
   path) makes every mail write `Err` and a held lock serializes a second
-  writer behind the first, cursor advance + reader recording, migration
-  mapping and a concurrent second opener, seen-set survives `rm`, msgid
-  recomputation rejects a tampered field, canonical header is byte-exact
+  writer behind the first, a per-reader cursor advance that leaves a
+  second reader's mark untouched, migration mapping (both `inbox.json`
+  and a flat `cursors.json`) and a concurrent second opener, seen-set
+  survives `rm`, msgid recomputation rejects a tampered field, canonical header is byte-exact
   (case and whitespace change the msgid), no fixture escapes the test
   root. Bare `aoide mail` prints the names half only; its "caller's own
   new letters" half is P-M5's. Live gate: the timer, door, and CLI
