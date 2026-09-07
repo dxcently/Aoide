@@ -159,4 +159,5 @@
   aoide.claude-code.enable = true;
   aoide.kimi-code.enable = true;
   aoide.pi-coding-agent.enable = true;
+  aoide.codex.enable = true;
 }
