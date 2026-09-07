@@ -2322,3 +2322,79 @@ basic here and hardens in P-M5, which is also where bare `aoide mail`
 grows its caller's-own half.
 
 Pages touched: `ingest/log.md` (this entry).
+
+## [2026-09-07] fix | the mailbase's cursors were never per reader
+
+MAIL.md contradicted itself and P-M1 built the wrong half. Principle 7
+rules per-reader cursors in the NNTP `.newsrc` shape, and the doorbell
+latch waits on "that reader's cursor" — but the Store section's file
+listing gave `{ "<name>": { "seq", "readers": [...] } }`: one
+high-water mark per mailbox name, with the readers merely listed
+beside it. The executor built the listing, faithfully, and both the
+orchestrator's read and a full review pass checked the code against the
+same wrong line.
+
+The consequence was silent mail loss, live on this box. Two agents
+reading one name consumed each other's letters, and a read from any
+terminal without a session id advanced the mark for everybody.
+
+Cursors are now `{ "<name>": { "<reader>": { "seq": n } } }`, and the
+page says what a reader is, which it never did. A reader is the
+conducting session id, falling back to the mailbox name itself when
+there is none, so a stray read from an unconducted terminal moves a
+pseudo-reader and never a live agent's mark. Two unconducted terminals
+still share that pseudo-reader — the honest floor, since nothing
+distinguishes them. A respawned session is a new reader and sees the
+name from the beginning, the way an NNTP client with no `.newsrc`
+does: re-delivery is the safe direction where silent loss is not.
+
+The live `cursors.json` already carried the flat shape, so it migrates
+on first open under the same lock the inbox migration uses. Every
+listed reader inherits the name's old seq; a name with no listed reader
+keeps its mark under the name. A name is old-shape only when its `seq`
+is a bare number, which stays true even for a reader named `seq`, so a
+second pass is a clean no-op and needs no sentinel file. Nobody
+re-reads what they had already read.
+
+The defect was found by a Codex session reading the store against the
+doc and reporting it as mail. The finding was verified in the code
+before anything moved; the letter's other content was not acted on,
+because `mail send --from` is attribution and not authentication, and
+mail is inert data by ruling.
+
+## [2026-09-07] update | P-M2's design questions, answered before dispatch
+
+Writing the P-M2 brief surfaced four more places the design read two
+ways. Each is settled in MAIL.md and PAIRING.md rather than left for an
+executor to guess.
+
+`message` is an explicit grant and never a default. Decision 5's
+heading said deposits are ungated for paired nodes while its body
+required the node to hold the capability, so a freshly paired node
+could be read as either able or unable to deposit. It cannot: `message`
+widens the way `spawn` does, because opening a mail link is the moment
+another node may fill this box's keep-all mailbase, and it is also when
+the bearer-token fix falls due. PAIRING.md's closed capability
+vocabulary gains `message` and states the same default rule from the
+pairing side.
+
+`.bsy` is taken non-blocking, the way BSO means it: a drain that finds
+a link busy skips it. The phase's test line said two drains
+"serialize", which on a twelve-second cadence would queue tick after
+tick behind one stalled ssh dial and starve every other link.
+
+An outbox entry retires when its delivery is confirmed, and what
+confirmation means depends on the entry. A letter needs the
+destination-signed ack. A receipt needs only the deposit outcome, since
+an ack is itself what confirmation looks like and acks are never acked
+— read literally, the old rule left every ack in the spool forever.
+Acks stay spooled, so one survives a dead link rather than vanishing on
+it.
+
+Admission is a JSON-RPC error and the envelope's fate is a result. The
+refusal vocabulary never covered a caller that lacks `message`, and
+returning that as a successful result would file it as `ok` through the
+door's own error heuristic. An audit that records a refusal as a
+success is worse than a blunt error code.
+
+Pages touched: `ingest/log.md` (both entries).
