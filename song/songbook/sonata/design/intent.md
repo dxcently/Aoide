@@ -155,6 +155,7 @@ file header rather than a shared cross-cutting blueprint:
 | workspace strip | urgent | pulses `glitchPink` (`base08` terracotta `#b0472f`) |
 | window frames | active / inactive | `#a07414` Attic gold hairline / `#3f867e` bronze-verdigris teal (2px, rounding 0) |
 | the one blaze | ✎N live-sessions cell + DAG/TERMINALS trace | `hot` laurel leaf-green `#4e8b45` |
+| Codex agent book | turning leaf and settled spread | shared printed page geometry in a fixed 24×18 box; both faces carry fine text strokes, and the loop meets on the same printed spread |
 | wallpaper | baked field | deterministic bright-marble solid from `palette.bg` `#f2ebde` (wallpaper note null) |
 
 Every text element sits on a glass backing (bar sheet, frames, chips) — no bare
@@ -298,3 +299,16 @@ text on the wallpaper, so no outline treatment is in use.
   A settled repeat succeeded and deduped the take. Learnings: staging needs
   source-drift detection and a pre-sync recovery snapshot; reload needs one
   acknowledged request and an outcome that reflects its result.
+- 2026-09-07: **Codex's page loop carries its text through the turn.**
+  Both faces of the moving leaf use the settled pages' outline and muted
+  printed strokes. A shared gutter is drawn once, and the moving overlay's
+  weight tends smoothly to zero at lift-off and landing, avoiding doubled
+  translucent outlines. The landed page and loop reset show the same printed
+  spread; repeated leaves keep the same decorative text so no pattern resets.
+  At native 24×18 output, captured phases `0`, `.001`, `.999`, `1`, and the
+  reset to `0` are pixel-identical in both widgets (0/432 changed pixels).
+  Front/back mid-turn captures retain text and differ from those endpoints;
+  dynamic widget creation/recreation and the existing state poses still pass.
+  Independent review passed, and the staged dock was inspected across repeated
+  turns. Only the two reviewed widget bodies changed; the settled reload
+  succeeded and deduped the take.

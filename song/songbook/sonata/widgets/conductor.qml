@@ -1624,8 +1624,10 @@ Item {
                     }
                 }
 
-                // Codex's illuminated book — a turning leaf while working,
+                // Codex's illuminated book — a printed leaf turns while working,
                 // a still open spread on a hold, and a closed cover at rest.
+                // Both leaf faces share the settled page's text and geometry;
+                // the loop joins on the same fully printed spread.
                 Item {
                     id: codexTag
                     visible: card.codexMain
@@ -1701,59 +1703,67 @@ Item {
                                 return
                             }
 
-                            // The spread's dipped gutter makes the tiny silhouette read
-                            // as a book before the animated page lifts off it.
-                            ctx.beginPath()
-                            ctx.moveTo(2, 3.5)
-                            ctx.quadraticCurveTo(7, 2, 12, 5)
-                            ctx.quadraticCurveTo(17, 2, 22, 3.5)
-                            ctx.lineTo(22, 14)
-                            ctx.quadraticCurveTo(17, 12.5, 12, 15)
-                            ctx.quadraticCurveTo(7, 12.5, 2, 14)
-                            ctx.closePath()
-                            ctx.fill()
+                            // Every face uses this painter: the same outline and printed
+                            // strokes at rest, on the front of a leaf, and on its back.
+                            // The gutter is excluded here and stroked once after all pages.
+                            function page(side, lift, alpha) {
+                                var edgeX = 12 + 10 * side
+                                ctx.strokeStyle = ink
+                                ctx.lineWidth = 1
+                                ctx.globalAlpha = alpha
+                                ctx.beginPath()
+                                ctx.moveTo(12, 5)
+                                ctx.quadraticCurveTo(12 + 5 * side, 2 - 2 * lift,
+                                                     edgeX, 3.5 - 1.5 * lift)
+                                ctx.lineTo(edgeX, 14 - lift)
+                                ctx.quadraticCurveTo(12 + 5 * side, 12.5 - lift, 12, 15)
+                                ctx.fill()   // fill closes the gutter; the outline does not
+                                ctx.globalAlpha = 0.8 * alpha
+                                ctx.stroke()
+                                // Identical decorative text on both faces. Foreshortening
+                                // compresses the lines into the gutter as the page turns.
+                                ctx.globalAlpha = 0.3 * alpha * Math.abs(side)
+                                for (var row = 0; row < 3; row++) {
+                                    var y = 6 + row * 2.5
+                                    ctx.beginPath()
+                                    ctx.moveTo(12 + 3 * side, y + 0.7 - 0.6 * lift)
+                                    ctx.lineTo(12 + 8 * side, y - 1.6 * lift)
+                                    ctx.stroke()
+                                }
+                            }
+                            page(-1, 0, 1)
+                            page(1, 0, 1)
+
+                            if (turning && leaf > 0 && leaf < 1) {
+                                var angle = Math.PI * leaf
+                                var lift = Math.sin(angle)
+                                var side = Math.cos(angle)
+                                // Vanishing overlay weight at BOTH endpoints prevents a
+                                // translucent outline being double-painted at landing/reset.
+                                // Geometry and text also converge to the resting page exactly.
+                                var alpha = lift * lift
+                                page(side, lift, alpha)
+                                ctx.strokeStyle = gold
+                                ctx.beginPath()
+                                ctx.moveTo(12 + 10 * side, 3.5 - 1.5 * lift)
+                                ctx.lineTo(12 + 10 * side, 14 - lift)
+                                ctx.globalAlpha = 0.13 * lift * alpha
+                                ctx.lineWidth = 3; ctx.stroke()
+                                ctx.globalAlpha = 0.55 * lift * alpha
+                                ctx.lineWidth = 1; ctx.stroke()
+                            }
+
+                            // One shared gutter and cover edge, independent of the leaf.
+                            // The landed spread and the next turn's start are the same image.
+                            ctx.strokeStyle = ink
                             ctx.globalAlpha = 0.8
-                            ctx.stroke()
+                            ctx.lineWidth = 1
                             ctx.beginPath()
                             ctx.moveTo(12, 5); ctx.lineTo(12, 15)
                             ctx.moveTo(1.5, 15); ctx.lineTo(7, 14.5)
                             ctx.lineTo(12, 16); ctx.lineTo(17, 14.5)
                             ctx.lineTo(22.5, 15)
                             ctx.stroke()
-                            ctx.globalAlpha = 0.3
-                            for (var row = 0; row < 3; row++) {
-                                var y = 6 + row * 2.5
-                                ctx.beginPath()
-                                ctx.moveTo(4, y); ctx.lineTo(9, y + 0.7)
-                                ctx.moveTo(15, y + 0.7); ctx.lineTo(20, y)
-                                ctx.stroke()
-                            }
-                            if (!turning || leaf <= 0 || leaf >= 1) return
-
-                            var angle = Math.PI * leaf
-                            var lift = Math.sin(angle)
-                            var edgeX = 12 + 9 * Math.cos(angle)
-                            var edgeTop = 3.5 - 1.5 * lift
-                            var edgeBottom = 14 - lift
-                            ctx.globalAlpha = 1
-                            ctx.beginPath()
-                            ctx.moveTo(12, 5)
-                            ctx.quadraticCurveTo((12 + edgeX) / 2, 3 - 2 * lift, edgeX, edgeTop)
-                            ctx.lineTo(edgeX, edgeBottom)
-                            ctx.quadraticCurveTo((12 + edgeX) / 2, 12.5 - lift, 12, 15)
-                            ctx.closePath()
-                            ctx.fill()
-                            ctx.globalAlpha = 0.55
-                            ctx.stroke()
-                            // A low, steady gilding follows the lifted edge; no flash
-                            // or whole-book pulse. It disappears as the page settles.
-                            ctx.strokeStyle = gold
-                            ctx.beginPath()
-                            ctx.moveTo(edgeX, edgeTop); ctx.lineTo(edgeX, edgeBottom)
-                            ctx.globalAlpha = 0.13 * lift
-                            ctx.lineWidth = 3; ctx.stroke()
-                            ctx.globalAlpha = 0.55 * lift
-                            ctx.lineWidth = 1; ctx.stroke()
                         }
                     }
                 }
