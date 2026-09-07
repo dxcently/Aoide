@@ -322,7 +322,7 @@ standing orchestrator:
   client crate's node command group, appended last (golden discipline).
 - Consumers: address resolution prefers the hub as the default remote
   target when a `--to` query matches no local session and names no explicit
-  node; the messaging inbox relay uses the hub as the persistent drop
+  node; the mail relay uses the hub as the persistent drop
   point. Both are preference, not protocol — a mesh with no hub behaves
   exactly as today. Flags default off (house rule).
 
@@ -568,7 +568,7 @@ its own crate run). Gate: none beyond tests.
 
 **P-D5 — the hub option.**
 `Node.hub` additive field, `aoide node hub <name> [--clear]` (golden +1),
-hub-preference in addr resolution and the inbox relay default. Document the
+hub-preference in addr resolution and the mail relay default. Document the
 claude.ai → Tier-3 connector → mesh → A2A + bearer route in
 `CONTRACTS.md §6` as the remote-reach statement; confirm no aoided
 listener exists to document.

@@ -457,12 +457,14 @@ count.
 - `aoide schema --json` — the core contract (the `protocol`/`storage`/
   `client`/`conduct`/`server`/`conductor`/`upkeep`/`secrets`/`cli` command
   surface: conducting, the project/session graph, A2A, nodes, presence,
-  the daemon, usage, hooks, the message inbox, the secrets broker, the
+  the daemon, usage, hooks, mail, the secrets broker, the
   Melete MCP client).
   `crates/cli/src/registry.rs`'s golden test pins the authoritative
   command-path set; `aoide schema --json` is the live enumeration. Notes
-  on individual commands, newest first: `inbox list|read|clear`, appended
-  newest, messaging workstream C6; `secrets serve|exec|add|rm|grant|revoke`,
+  on individual commands, newest first: `mail`/`mail send|read|show|mark|rm`,
+  the addressed, signed, append-only mailbase, messaging plan P-M1 (see
+  `docs/architecture/MAIL.md` and this document's own `state/mail/`
+  subsection below); `secrets serve|exec|add|rm|grant|revoke`,
   appended newest, Workstream SECRETS P-V2; `secrets enroll`, appended
   newest, Workstream SECRETS P-V3; spelled `vault ...` until the P-V4b
   rename — paths rename in place, registration order and count unchanged;
@@ -1982,89 +1984,109 @@ chapter/search is about to render.
 }
 ```
 
-### `state/inbox.json` — **v0** (messaging plan P-C6, 2026-08-21)
+### `state/mail/` — **v0** (messaging plan P-M1, 2026-09-07)
 
-The durable per-host message inbox: every message that actually lands in a
-LOCAL session, filed by exactly TWO writers — no third site anywhere in the
-tree:
+The addressed, signed, append-only mailbase — the durable per-host message
+store. Three files, one `state_dir()` (§2's ordinary `AOIDE_STATE_DIR`-
+then-`AOIDE_ROOT/state` resolution): the `aoided` timer, the `aoide a2a
+serve` door unit, and the CLI all resolve the same directory.
 
-1. `aoide_conduct::graph::send::deliver_local`'s success path — covers a
-   direct `send --id`, a `--to` resolving local (re-drives
-   `deliver_local` unchanged), a `session pending approve` re-drive, AND the
-   A2A door's own `message/send` Inject arm
-   (`crates/server/src/a2a.rs::do_inject`), which builds a `send --id`
-   invocation and calls `session_send` too — the SAME "one queue, two
-   writers, no second implementation" shape `pending.json` (above) already
-   set, except this branch alone collapses to one writer, because the a2a
-   door never bypasses `session_send` for an EXISTING session. `do_inject`
-   files no entry of its own — see its doc comment.
-2. `aoide-server`'s `spawn_inject_prompt` (`crates/server/src/a2a.rs`) — the
-   FIRST turn of a brand-new A2A-spawned session (`do_spawn`, which fires
-   whenever an incoming `message/send` carries no `contextId` or asks to
-   spawn). This canNOT go through writer 1: the target `SessionRecord`
-   isn't in `sessions.json` yet at the moment the prompt is typed — it's
-   written by the spawned CHILD process itself once ITS OWN `aoide conduct`
-   starts up, a race `spawn_inject_prompt`'s own connect-and-retry loop
-   already exists to survive (the socket may not even exist yet). Routing
-   through the session registry here would just trade the socket race for
-   a registration race, so this site talks to the raw socket directly and
-   files its own entry right after the write.
+```
+base.jsonl      append-only, one entry per line, immutable once written
+cursors.json    { "<name>": { "seq": n, "readers": ["<sessionId>", …] } }
+seen.jsonl      one {"msgid","receivedAt"} per line, append-only dedup
+                memory that outlives pruning
+```
 
-An OUTBOUND `--to node/<x>` send (`deliver_remote`) never files here: the
-message lands in the REMOTE node's own inbox, via whichever of that node's
-own two writers actually delivers it.
-
-Lives in the gitignored root-runtime `state/` dir (§2), NOT inside either
-stage tree (`state/stage/` or `song/stage/`) — same tier as
-`usage.json`/`nodes.json`, never reset by a stage reseed.
-Read/resolved by `aoide inbox list/read/clear`: `list` shows unread entries
-by default (`--all` includes read ones); `read <n>` marks one entry read by
-its array position (`n`, same as `pending list`'s id scheme) — but unlike a
-pending entry, marking read does NOT remove the entry, so positions stay
-stable across repeated `read` calls; the only thing that can still shift a
-position is the 200-entry cap's oldest-drop when a NEW message arrives
-between your `list` and your `read` (same "re-list if you're racing a
-writer" discipline `pending.json` documents, triggered by the cap instead of
-every resolution); `clear` empties the file unconditionally — no `--yes`, no
-gate, matching `session.prune`'s precedent (the command name is the whole blast
-radius, nothing selective to confirm, unlike `rice draft drop`/`rice take
-prune` which destroy a NAMED or AMBIGUOUS subset). Capped at 200 entries,
-oldest-drop (`herald::LEDGER_CAP`'s fold-and-cap precedent, CONTRACTS.md §4
-above), atomic writes.
-
-`context` is an OPTIONAL, OPAQUE `serde_json::Value` passthrough — reserved
-for a planned Mneme (memory-manager) integration (#14/#16) that does not
-exist yet. v0 round-trips whatever a future producer sets, byte-for-byte,
-and never reads or interprets it; no call site in this tree sets it today
-(every `inbox::receive` call passes `None`), so the key is absent from every
-entry currently written.
+An entry is a signed envelope plus local, never-signed facts:
 
 ```json
 {
-  "schemaVersion": "0",
-  "entries": [
-    {
-      "from": "conduct-1122-1786570000",
-      "target": "conduct-6364-1786576226",
-      "text": "status update on the migration",
-      "receivedAt": "2026-08-21T14:01:10Z",
-      "read": false
-    }
-  ]
+  "seq": 4127,
+  "receivedAt": "2026-09-07T14:01:10Z",
+  "type": "letter",
+  "via": "self",
+  "envelope": {
+    "header": {
+      "version": "1",
+      "from": { "node": "yomi-strix", "name": "conductor" },
+      "to": { "node": "yomi-strix", "name": "rebuild-reports" },
+      "type": "letter",
+      "mintedAt": "2026-09-07T14:01:10Z",
+      "originMesh": ""
+    },
+    "text": "status update on the migration",
+    "sig": "<hex ed25519>",
+    "msgid": "<hex sha256>"
+  }
 }
 ```
 
-`from` is always present (empty string for an anonymous/unattributed
-sender — never omitted, unlike `pending.json`'s optional `from`): writer 1's
-LOCAL branch uses the same `resolve_sender` output the audit line and the
-delivered payload's provenance prefix already compute; neither of the two
-A2A-reached filings (`do_inject`'s share of writer 1, and writer 2 —
-`spawn_inject_prompt`) has a caller identity to offer today (#51 owns real
-cross-host provenance — this never invents any) so both are honestly empty.
-No conductor pane yet (rides a later phase) and no outbox retry for a node
-that was unreachable at send time (the sender already gets a clean error
-from `deliver_remote`; nothing queues a retry) — both deliberately deferred,
-not built.
+The envelope is three strictly-defined byte sequences — `docs/architecture/
+MAIL.md`'s "The envelope" is the source, this is where the shape becomes
+contract:
+
+```
+header = NUL-joined, fixed order: version · from.node · from.name ·
+         to.node · to.name · type · mintedAt · originMesh
+sig    = origin's ed25519 over  header ‖ 0x00 ‖ text
+msgid  = hex sha256 over        sig ‖ header ‖ 0x00 ‖ text
+```
+
+Verbatim bytes: no trim, no case fold, no JSON — key order and whitespace
+can never make two hops disagree, and a receiver re-derives the header
+from the fields and rejects if `msgid` does not recompute. `node` is
+always this box's own name (`display::local_host_name()` — `self`
+resolves to it when the envelope is minted and the literal never enters a
+header); `originMesh` is always `""` — there is no mesh declaration yet to
+post into.
+
+`seq` is local to the node, like an NNTP article number — never crosses a
+link; it is `last line's seq + 1`, read under the lock. `type=letter` is
+`mail send`'s own filing; `type=receipt` carries what a delivered message
+lands with (from, target, text, receivedAt) inside the envelope shape,
+signed by the box identity (`identity::load_or_mint` — a box that has
+never paired mints its key on its first letter) — both
+`aoide_conduct::graph::send::deliver_local`'s success path and the A2A
+door's `spawn_inject_prompt` (`crates/server/src/a2a.rs`, the FIRST turn
+of a brand-new A2A-spawned session, which cannot reach `deliver_local` at
+all) file receipts through the same `mail::file_receipt`, the ONE seam
+covering every route a delivered message takes to land in a local
+session — `do_inject` files no entry of its own, see its doc comment. An
+OUTBOUND `--to node/<x>` send never files here yet: there is no wire to
+another node in this phase.
+
+Every mutation of the mailbase runs under the stage lock and refuses when
+the lock is not held: `try_stage_lock` (`storage/src/fs.rs`) blocks for
+the same `LOCK_EX` `with_stage_lock` already uses, and returns `Err` only
+when the lock file itself cannot be opened or created — a writer waits
+behind another, never runs unlocked. Write order is what makes a crash
+safe: under the lock, truncate a torn tail of `base.jsonl` to its last
+complete line, append the entry, fsync, THEN append to `seen.jsonl`. A
+`seen` line whose `msgid` is absent from the base is a crash between
+those two writes, and that `msgid` is accepted again — the reverse order
+would lose mail.
+
+Read/resolved by `aoide mail`/`mail send`/`mail read`/`mail show`/`mail
+mark`/`mail rm`: bare `mail` prints the names with unread mail; `mail
+send --to self/<name> -- <text>` files a letter (only `self` routes
+anywhere in this phase); `mail read --for <name>`/`--all-names` prints
+new entries and advances that name's cursor (`--reread` reprints
+already-read ones — the cursor still only ever advances forward); `mail
+show <msgid>` prints one entry without touching any cursor; `mail mark
+--for <name>` advances a cursor without printing; `mail rm --older-than
+<Nd|Nh>` is the only pruning, and it never touches `seen.jsonl` — a
+pruned letter re-offered later is still recognised as a duplicate.
+Keep-all otherwise: no cap, no fold.
+
+On first open by any command (read or write), a legacy `inbox.json`
+migrates field-by-field into typed `receipt` entries under the same lock
+the write path uses, then renames to `inbox.json.migrated` in the same
+critical section — so a second process opening concurrently finds either
+the old file or the finished base, never a half-copied one. The old
+per-entry read flag has no high-water counterpart and is not carried:
+every migrated entry is unread once. `context` (an optional passthrough
+no call site ever set) is dropped, not migrated.
 
 ### `state/usage.json` — **v0**
 
