@@ -148,6 +148,18 @@ no such shim by design; a flag day was the ruling. Close when every box has
 switched, and retire the legacy arm then. sakaki's switch is the TOTP-gated
 cross-host path, which is not built; chiyo has been dark since 08-28.
 
+### [2026-09-07] open: an audit record's `untrusted_data` is unbounded
+`append_audit` clamps `AuditRecord.message` to 512 bytes, so a command
+whose printed output is also its outcome message can no longer copy a
+whole letter into `~/.aoide/log`. The sibling field is not clamped: a
+notification record carries its forwarded app title and body into the
+same log verbatim, at whatever length the sending app chose. The house
+rule that forwarded text is data, never a command, is upheld — nothing
+interprets it — but an unbounded second copy of it lands in a log with
+no pruning, which is the same defect the message clamp closed. Whether
+`untrusted_data` takes the same 512-byte clamp, a larger one, or a
+per-field bound set where the record is built is undecided.
+
 ## [2026-07-25] mint | Aoide-Wiki
 - Standalone wiki minted from the librarian `_template` for the Aoide project.
 
@@ -2259,5 +2271,54 @@ graph through `aoide conduct --agent codex` instead. Shipped off; yomi
 enables it (`2d2b528`). The flake inputs advanced in the same commit as
 the dendrite file, independently of it — the previous nixpkgs already
 carried codex.
+
+Pages touched: `ingest/log.md` (this entry).
+
+## [2026-09-07] add | the mailbase replaces the inbox
+
+P-M1 is built (`9d873df`, 21 files). `state/inbox.json` — one rewritten
+JSON array, a per-entry read flag, and a reserved `context` nothing ever
+set — is gone. In its place `storage/src/mail.rs` keeps three files:
+`base.jsonl` append-only and immutable, `cursors.json` holding a
+per-name high-water seq and its readers, and `seen.jsonl`, a dedup
+memory deliberately outliving the entries it remembers so a pruned
+message cannot be re-accepted. Every mutation runs under the stage lock,
+and a writer that cannot take the lock now fails rather than proceeding.
+
+Each entry carries a self-signed envelope: eight canonical header fields
+joined by NUL, an ed25519 signature over the header and the text, and a
+msgid that is the hash of all three. `self` resolves to the box's own
+node name at mint time, so a locally filed letter is byte-identical to
+the same letter arriving over the wire, and no msgid is ever computed
+over a literal that means something else elsewhere. The two writer seams
+that used to file into the inbox — conduct's local delivery and the
+server's A2A inject — now call one three-argument `file_receipt`, with
+the same best-effort tolerance: a filing failure never turns an
+already-delivered message into a reported failure. Six `mail` commands
+replace the three retired `inbox` ones, and the golden command list
+moves 81 to 84. The legacy file migrates on first store open, inside the
+same critical section, and is renamed rather than deleted.
+
+A same-day fix (`facd6c1`) closes two holes the store's own premise
+opened. `append_audit` now clamps the message it writes to 512 bytes on
+a character boundary, because the generic per-dispatch audit call passes
+a command's outcome message through as its payload — and for `mail show`
+and `mail read`, that message *is* the rendered letter. The mailbase
+promises `mail rm --older-than` is the only pruning, which an unbounded
+second copy in `~/.aoide/log` broke. The audit log records that an
+operation happened, not what it printed. The clamp sits inside
+`append_audit`, so every door and every future caller inherits it. The
+migration also reads the seen set once before its loop and skips a row
+already in it: a crash between filing row N and the end-of-loop rename
+left the legacy file in place, and the retry duplicated rows 1..N under
+fresh sequence numbers.
+
+Mail writes no audit code of its own. Every CLI dispatch is already
+audited by the dispatcher, and each mutating command's outcome message
+already names its msgid, seq, or count — an existing convention, not a
+gap. The wire half, the outbox, the `mailDeposit` method and the
+`message` capability are P-M2 and later; `mail show`'s rendering is
+basic here and hardens in P-M5, which is also where bare `aoide mail`
+grows its caller's-own half.
 
 Pages touched: `ingest/log.md` (this entry).
