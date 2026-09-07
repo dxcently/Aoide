@@ -264,3 +264,37 @@ text on the wallpaper, so no outline treatment is in use.
   is. `widget-structure.md` refocused on mechanism + hard contracts and gained
   a free-vs-must-supply table for the five host anchors and a motion-tier
   table. No `.qml` touched.
+- 2026-09-07: **Codex terminal identity motion prepared.** Conductor and
+  Terminals share a 24×18 illuminated book beside a main Codex agent's name.
+  A leaf turns while working (1.1s turn, 450ms rest), with a faint gold edge
+  following the lifted page. Awaiting/sudo holds the book open and still;
+  idle/stopped/done closes its cover. The same box stays reserved in every
+  state. The owner's book direction replaced the initial terminal-prompt mark
+  and the intermediate constellation. Motion follows the existing live state,
+  and stops/resets when its box is hidden, clipped away, or outside the owning
+  window. A geometry binding intersects ancestor clips and the window bounds,
+  observing positions, sizes and the dock's Translate so folder collapse,
+  scrolling and the shut dock pause the loop without a polling timer. Transform
+  discovery waits for component completion: dynamic creation fires parent
+  changes before the outer root id is available.
+  Agent identity and kind come from the session
+  record; Terminals preserves the published kind in its render projection so
+  a shell or subagent cannot inherit the badge. There is no reduced-motion
+  preference in the current widget seam. The book and gilding use native geometry
+  rather than a small-glyph font fallback; independent review and live
+  observation remain the acceptance gates. Terminals' four rounded box-drawing
+  corners were squared to `┌ ┐ └ ┘` at the owner's request, matching the other
+  temples' frame vocabulary while retaining the Ionic capital and frieze.
+- 2026-09-07: **Codex book and edged Terminals frame verified live.**
+  Independent review passed dynamic creation/recreation, the six live states,
+  and 23 visibility/exposure cases. The staged dock shows both books and the
+  square frame; consecutive compositor captures show the lifted page moving.
+  Runtime widget sources were older committed copies than the rendered song,
+  so they were backed up and reconciled to the live baseline before staging.
+  Only Conductor and Terminals changed in the rendered tree; the registry,
+  livery, wallpaper and other widget bodies were preserved. The first reload's
+  internal sync successfully reloaded the shell, but its redundant second IPC
+  request raced loading and reported failure inside an overall `ok` outcome.
+  A settled repeat succeeded and deduped the take. Learnings: staging needs
+  source-drift detection and a pre-sync recovery snapshot; reload needs one
+  acknowledged request and an outcome that reflects its result.

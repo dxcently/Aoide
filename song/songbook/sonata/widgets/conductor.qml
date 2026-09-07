@@ -49,13 +49,16 @@
 // section can't drift out of sync with the component again.
 //
 // ── Reserved space (the anchoring law — text AND animations) ───────────────
-// Two animated elements, two reserved boxes. The LAMP (the §2 contract:
+// Animated elements stay in reserved boxes. The LAMP (the §2 contract:
 // ♪ 𝄐 𝄼 𝄽 𝄂 · state colours — working pulses via a scale animation, awaiting
 // breathes via an opacity animation) lives INSIDE a fixed 16px box at the
 // card's top-left; both animations are confined to the box — nothing floats,
 // no layout shift. The π THINK-TAG (hooked main pi sessions only, visible
 // only while the live state is working) lives in a fixed 13×16 box on the
-// identity row, pen confined to the box. The KAOMOJI
+// identity row, pen confined to the box. A main Codex agent carries a small
+// illuminated book in a 24×18 box: pages turn while working, the open spread
+// rests on a hold, and the cover closes at idle/stopped/done. Its name keeps
+// the same reserved width in every state. The KAOMOJI
 // TROUPE lives inside a fixed clipped box in the
 // ground row (116px main / 90px sub); its frames swap text, never geometry.
 // The thinking slot itself is a fixed-height reserved lane. Every free-
@@ -128,6 +131,52 @@ Item {
     function withA(cstr, a) {
         var c = Qt.darker(cstr, 1.0)
         return Qt.rgba(c.r, c.g, c.b, a)
+    }
+
+    // Transform LISTS are fixed on this host and are not bindable in Qt.
+    // Discover their objects at attachment; bind to each Translate's x/y below.
+    function markTransforms(mark) {
+        var out = []
+        for (var node = mark; node; node = node.parent)
+            for (var i = 0; i < node.transform.length; i++)
+                out.push(node.transform[i])
+        return out
+    }
+
+    // Item.visible stays true behind a clip or the dock's translated cover.
+    // Snapshot the ancestor geometry explicitly: mapToItem() alone does not
+    // register those dependencies for a QML binding. The current host's
+    // transform list contains Translate; its x/y need their own reads too.
+    // Kept identical in Terminals so both marks sleep behind the same clips.
+    function markExposed(mark, win, shifts) {
+        if (!mark || !mark.visible || !win || !win.visible) return false
+        var positions = []
+        for (var i = 0; i < shifts.length; i++)
+            positions.push([shifts[i].x, shifts[i].y])
+        var chain = []
+        for (var node = mark; node; node = node.parent) {
+            chain.push({ item: node, parent: node.parent,
+                x: node.x, y: node.y, width: node.width, height: node.height,
+                visible: node.visible, opacity: node.opacity, clip: node.clip,
+                scale: node.scale, rotation: node.rotation,
+                transformOrigin: node.transformOrigin })
+        }
+        var rect = Qt.rect(0, 0, mark.width, mark.height)
+        for (var j = 0; j < chain.length; j++) {
+            var g = chain[j]
+            if (!g.visible || g.opacity <= 0) return false
+            if (g.clip) {
+                var left = Math.max(0, rect.x), top = Math.max(0, rect.y)
+                var right = Math.min(g.width, rect.x + rect.width)
+                var bottom = Math.min(g.height, rect.y + rect.height)
+                if (right <= left || bottom <= top) return false
+                rect = Qt.rect(left, top, right - left, bottom - top)
+            }
+            rect = g.item.mapToItem(g.parent, rect)
+        }
+        return rect.width > 0 && rect.height > 0
+            && rect.x < win.width && rect.y < win.height
+            && rect.x + rect.width > 0 && rect.y + rect.height > 0
     }
 
     // ── The kaomoji troupe + its beat ───────────────────────────────────────
@@ -1197,6 +1246,11 @@ Item {
         // nothing is reserved at rest (moonTag below).
         readonly property bool kimiMain: !card.child && !!card.s && !!card.s.agent
             && ("" + card.s.agent).toLowerCase() === "kimi"
+        // Paint identity comes from the record, never the window title or model.
+        readonly property bool codexMain: !card.child && card.sKind === "agent"
+            && card.agentName.toLowerCase() === "codex"
+        readonly property bool codexLive: card.codexMain && card.cardWorking
+            && !card.cardAwaiting
 
         // troupe casting — hashed per session id, couriers from the packages
         // pool, everyone else from the general pool; resting states hold the
@@ -1400,6 +1454,7 @@ Item {
                                     - (hookTag.visible ? hookTag.implicitWidth + 6 : 0)
                                     - (piTag.visible ? piTag.width + 6 : 0)
                                     - (moonTag.visible ? moonTag.implicitWidth + 6 : 0)
+                                    - (card.codexMain ? codexTag.width + 6 : 0)
                                     - (wsT.visible ? wsT.implicitWidth + 8 : 0)
                                     - (stateWordT.implicitWidth + 8))
                     font.family: temple.faceSerif
@@ -1423,9 +1478,10 @@ Item {
                 Text {                           // the ϟ hook tag — the pi
                                                  // harness wears the π think-
                                                  // tag instead (piTag below),
-                                                 // a kimi main the moon
+                                                 // a kimi main the moon,
+                                                 // a codex main the book
                     id: hookTag
-                    visible: card.hooked && card.cardWorking && !card.piThinking && !card.kimiMain
+                    visible: card.hooked && card.cardWorking && !card.piThinking && !card.kimiMain && !card.codexMain
                     anchors.left: kindTag.visible ? kindTag.right : nameT.right
                     anchors.leftMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
@@ -1564,6 +1620,140 @@ Item {
                             seg(0.30, 0.62, xR, stemTop, xR, stemBot)  // right stem
                             seg(0.62, 1.00, barL, barY, barR, barY)    // top bar
                             ctx.stroke()
+                        }
+                    }
+                }
+
+                // Codex's illuminated book — a turning leaf while working,
+                // a still open spread on a hold, and a closed cover at rest.
+                Item {
+                    id: codexTag
+                    visible: card.codexMain
+                    anchors.left: nameT.right; anchors.leftMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 24; height: 18
+                    clip: true
+                    readonly property color ink: temple.withA(temple.lampColor(card.cardLiveState), 0.95)
+                    readonly property color gold: temple.livery.paletteAccent
+                    readonly property color paper: temple.livery.paletteBg
+                    readonly property bool openBook: card.cardWorking || card.cardAwaiting
+                    readonly property bool turning: card.codexLive
+                    readonly property var hostWindow: QsWindow.window
+                    property var hostTransforms: []
+                    property bool componentReady: false
+                    Component.onCompleted: {
+                        hostTransforms = temple.markTransforms(codexTag)
+                        componentReady = true
+                    }
+                    Component.onDestruction: componentReady = false
+                    // Attachment signals fire before the outer root id is available.
+                    onParentChanged: if (componentReady && temple) hostTransforms = temple.markTransforms(codexTag)
+                    onHostWindowChanged: if (componentReady && temple) hostTransforms = temple.markTransforms(codexTag)
+                    readonly property bool exposed: componentReady && !!temple
+                        && temple.markExposed(codexTag, hostWindow, hostTransforms)
+                    property real leaf: 0
+
+                    SequentialAnimation on leaf {
+                        running: codexTag.turning && codexTag.exposed
+                        loops: Animation.Infinite
+                        onStopped: codexTag.leaf = 0
+                        NumberAnimation { from: 0; to: 1; duration: 1100; easing.type: Easing.InOutCubic }
+                        PauseAnimation { duration: 450 }
+                    }
+                    Canvas {
+                        anchors.fill: parent
+                        property color ink: codexTag.ink
+                        property color gold: codexTag.gold
+                        property color paper: codexTag.paper
+                        property bool openBook: codexTag.openBook
+                        property bool turning: codexTag.turning
+                        property real leaf: codexTag.leaf
+                        onInkChanged: requestPaint()
+                        onGoldChanged: requestPaint()
+                        onPaperChanged: requestPaint()
+                        onOpenBookChanged: requestPaint()
+                        onTurningChanged: requestPaint()
+                        onLeafChanged: requestPaint()
+                        onWidthChanged: requestPaint()
+                        onHeightChanged: requestPaint()
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.reset()
+                            ctx.strokeStyle = ink
+                            ctx.fillStyle = paper
+                            ctx.lineWidth = 1
+                            if (!openBook) {
+                                // The resting volume: hard cover, spine, page block,
+                                // and one small gilt lozenge, all inside the same slot.
+                                ctx.globalAlpha = 0.8
+                                ctx.fillRect(7, 2.5, 11, 13)
+                                ctx.strokeRect(7, 2.5, 11, 13)
+                                ctx.beginPath()
+                                ctx.moveTo(9, 2.5); ctx.lineTo(9, 15.5)
+                                ctx.moveTo(9, 13.5); ctx.lineTo(18, 13.5)
+                                ctx.stroke()
+                                ctx.strokeStyle = gold
+                                ctx.globalAlpha = 0.55
+                                ctx.beginPath()
+                                ctx.moveTo(13.5, 6); ctx.lineTo(15, 8)
+                                ctx.lineTo(13.5, 10); ctx.lineTo(12, 8)
+                                ctx.closePath(); ctx.stroke()
+                                return
+                            }
+
+                            // The spread's dipped gutter makes the tiny silhouette read
+                            // as a book before the animated page lifts off it.
+                            ctx.beginPath()
+                            ctx.moveTo(2, 3.5)
+                            ctx.quadraticCurveTo(7, 2, 12, 5)
+                            ctx.quadraticCurveTo(17, 2, 22, 3.5)
+                            ctx.lineTo(22, 14)
+                            ctx.quadraticCurveTo(17, 12.5, 12, 15)
+                            ctx.quadraticCurveTo(7, 12.5, 2, 14)
+                            ctx.closePath()
+                            ctx.fill()
+                            ctx.globalAlpha = 0.8
+                            ctx.stroke()
+                            ctx.beginPath()
+                            ctx.moveTo(12, 5); ctx.lineTo(12, 15)
+                            ctx.moveTo(1.5, 15); ctx.lineTo(7, 14.5)
+                            ctx.lineTo(12, 16); ctx.lineTo(17, 14.5)
+                            ctx.lineTo(22.5, 15)
+                            ctx.stroke()
+                            ctx.globalAlpha = 0.3
+                            for (var row = 0; row < 3; row++) {
+                                var y = 6 + row * 2.5
+                                ctx.beginPath()
+                                ctx.moveTo(4, y); ctx.lineTo(9, y + 0.7)
+                                ctx.moveTo(15, y + 0.7); ctx.lineTo(20, y)
+                                ctx.stroke()
+                            }
+                            if (!turning || leaf <= 0 || leaf >= 1) return
+
+                            var angle = Math.PI * leaf
+                            var lift = Math.sin(angle)
+                            var edgeX = 12 + 9 * Math.cos(angle)
+                            var edgeTop = 3.5 - 1.5 * lift
+                            var edgeBottom = 14 - lift
+                            ctx.globalAlpha = 1
+                            ctx.beginPath()
+                            ctx.moveTo(12, 5)
+                            ctx.quadraticCurveTo((12 + edgeX) / 2, 3 - 2 * lift, edgeX, edgeTop)
+                            ctx.lineTo(edgeX, edgeBottom)
+                            ctx.quadraticCurveTo((12 + edgeX) / 2, 12.5 - lift, 12, 15)
+                            ctx.closePath()
+                            ctx.fill()
+                            ctx.globalAlpha = 0.55
+                            ctx.stroke()
+                            // A low, steady gilding follows the lifted edge; no flash
+                            // or whole-book pulse. It disappears as the page settles.
+                            ctx.strokeStyle = gold
+                            ctx.beginPath()
+                            ctx.moveTo(edgeX, edgeTop); ctx.lineTo(edgeX, edgeBottom)
+                            ctx.globalAlpha = 0.13 * lift
+                            ctx.lineWidth = 3; ctx.stroke()
+                            ctx.globalAlpha = 0.55 * lift
+                            ctx.lineWidth = 1; ctx.stroke()
                         }
                     }
                 }
