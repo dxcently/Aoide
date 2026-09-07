@@ -1993,7 +1993,7 @@ serve` door unit, and the CLI all resolve the same directory.
 
 ```
 base.jsonl      append-only, one entry per line, immutable once written
-cursors.json    { "<name>": { "seq": n, "readers": ["<sessionId>", …] } }
+cursors.json    { "<name>": { "<reader>": { "seq": n } } }
 seen.jsonl      one {"msgid","receivedAt"} per line, append-only dedup
                 memory that outlives pruning
 ```
@@ -2068,16 +2068,20 @@ those two writes, and that `msgid` is accepted again — the reverse order
 would lose mail.
 
 Read/resolved by `aoide mail`/`mail send`/`mail read`/`mail show`/`mail
-mark`/`mail rm`: bare `mail` prints the names with unread mail; `mail
-send --to self/<name> -- <text>` files a letter (only `self` routes
-anywhere in this phase); `mail read --for <name>`/`--all-names` prints
-new entries and advances that name's cursor (`--reread` reprints
-already-read ones — the cursor still only ever advances forward); `mail
-show <msgid>` prints one entry without touching any cursor; `mail mark
---for <name>` advances a cursor without printing; `mail rm --older-than
-<Nd|Nh>` is the only pruning, and it never touches `seen.jsonl` — a
-pruned letter re-offered later is still recognised as a duplicate.
-Keep-all otherwise: no cap, no fold.
+mark`/`mail rm`: bare `mail` prints the names with unread mail BY THIS
+READER; `mail send --to self/<name> -- <text>` files a letter (only
+`self` routes anywhere in this phase); `mail read --for
+<name>`/`--all-names` prints new entries and advances ONLY the calling
+reader's mark under that name (`--reread` reprints already-read ones —
+the mark still only ever advances forward). A reader is the conducting
+session id (`AOIDE_SESSION_ID`) when set, and the mailbox name itself
+when it is not — so an unconducted read moves a pseudo-reader and never a
+live agent's mark, and two readers of the same name never consume each
+other's mail. `mail show <msgid>` prints one entry without touching any
+cursor; `mail mark --for <name>` advances the caller's mark the same way,
+without printing; `mail rm --older-than <Nd|Nh>` is the only pruning, and
+it never touches `seen.jsonl` — a pruned letter re-offered later is still
+recognised as a duplicate. Keep-all otherwise: no cap, no fold.
 
 On first open by any command (read or write), a legacy `inbox.json`
 migrates field-by-field into typed `receipt` entries under the same lock
