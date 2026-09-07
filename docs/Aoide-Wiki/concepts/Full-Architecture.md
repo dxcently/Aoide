@@ -313,18 +313,18 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   pairing ceremony behind one smart verb, bare `pair` the interactive
   pending listing — [[Pairing-Ceremony]]), `mesh`/`mesh pair` (the declared
   mesh: the read reports where a `[mesh.<name>]` declaration and the live
-  peer registry diverge, the converge closes that divergence by driving the
-  same pairing ceremony over every declared peer with no verified record —
-  [[Doors-and-Peers]]), the `melete` group
+  node registry diverge, the converge closes that divergence by driving the
+  same pairing ceremony over every declared node with no verified record —
+  [[Doors-and-Nodes]]), the `melete` group
   (`status`/`graph`/`call` — the
   Melete MCP client), the
-  1-command `a2a` door group (`a2a serve` — the outbound client is the `peer`
+  1-command `a2a` door group (`a2a serve` — the outbound client is the `node`
   group below, not a separate `a2a agent` family),
-  the 10-command `peer` group (`peer add/remove/pull/status/hub`,
-  `peer allow`/`spawn`, the LAN `peer discover` listener with its
-  `peer advertise on|off` switch, and `peer list`, the
-  one-glance mesh roster — cross-device peer federation,
-  [[Peer-Federation]]; `peer status --json` keeps the deep per-peer row
+  the 10-command `node` group (`node add/remove/pull/status/hub`,
+  `node allow`/`spawn`, the LAN `node discover` listener with its
+  `node advertise on|off` switch, and `node list`, the
+  one-glance mesh roster — cross-device node federation,
+  [[Node-Federation]]; `node status --json` keeps the deep per-node row
   the roster never duplicates — the pairing ceremony that mints these
   records lives under `pair`, above), the 17-command `secrets` group
   (`serve`/`exec`/`add`/`rm`/`grant`/`revoke`/`enroll`/`put`/`set-totp`/
@@ -339,7 +339,7 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   (`start/phase/end/hook/grant/permit/pending list|approve|deny/prune/reap` —
   `session grant` carries both the `undying` picker and the reaper `exempt`)
   plus bare `session` (the roster listing over this box's sessions and every
-  registered peer, which absorbed `who`), and bare `send`/`spawn`/
+  registered node, which absorbed `who`), and bare `send`/`spawn`/
   `resurrect` (bare `resurrect` also walks up to a `.aoide/project.json`
   manifest — [[Session-Graph]]), all real — registering a new
   conducted session is `conduct` or `spawn`, and jumping to a
@@ -459,7 +459,7 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 ├── docs/BUILD.md    module-authoring conventions
 ├── CONTRACTS.md     §0 design philosophy + the versioned contracts §1–8 (note
 │                    schema · dendrite shape · schema output · stage files ·
-│                    song shape · A2A door · peer federation · screen capture)
+│                    song shape · A2A door · node federation · screen capture)
 └── AGENTS.md        tier-0 agent guide (aoide guide prints the same map)
 ```
 

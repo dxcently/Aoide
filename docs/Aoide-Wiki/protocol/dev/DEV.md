@@ -148,6 +148,6 @@ at the next compaction.
 | conduct a session | `aoide conduct -- <cmd>` |
 | command a session | `aoide send --id <id> [--submit] [--yes] -- <text>` |
 | session roster | `aoide session` |
-| mesh roster | `aoide peer list` |
+| mesh roster | `aoide node list` |
 | capture the screen | `lyra screen shot` |
 | desktop readout | `lyra screen info` |

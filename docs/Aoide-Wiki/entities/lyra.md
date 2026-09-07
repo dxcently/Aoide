@@ -22,7 +22,7 @@ the muse plays.
 
 Owns the self-ricing loop, `screen`, `herald`, `shellbridge`, `quickshell`
 — everything that paints, or that only a desktop needs. Never owns
-conducting, the graph, A2A, peers, or the daemon: those are core `aoide`
+conducting, the graph, A2A, nodes, or the daemon: those are core `aoide`
 identity and ship only in `aoide`/`aoided`. `conductor` stays core for the
 same reason — pure Rust (ratatui), no system-closure weight, and
 conducting orchestration is Aoide's core identity, not a painting tool.
@@ -51,7 +51,7 @@ own golden-snapshot test in `crates/lyra/src/registry.rs`. 47 are real;
 | `cover set` | 1 | wallpaper staging — [[Rice-and-Livery]] |
 | `livery` | 3 | `lint`/`resolve`/`emit`, the native design-token engine — [[livery]] |
 | `element seed` | 1 | renders a song's committed `elements/*/element.json` into `run/elements/` — verbatim copy for `template:false`, livery-rendered for `template:true`, atomic per file — [[Song-Anatomy]] |
-| `shellbridge` | 1 | the desktop state bridge daemon — [[Doors-and-Peers]] |
+| `shellbridge` | 1 | the desktop state bridge daemon — [[Doors-and-Nodes]] |
 | `quickshell` | 2 | `reload` (the Quickshell IPC hot-reload trigger) and `healthcheck` (the placeholder-screen lockup watchdog) — [[Meta-and-Upkeep]] |
 | `herald push` | 1 | dunst's notification-ledger hook — [[Content-and-Hooks]] |
 | `screen` | 14 | capture, OCR, and synthesized-pointer control — [[Screen-Commands]] |

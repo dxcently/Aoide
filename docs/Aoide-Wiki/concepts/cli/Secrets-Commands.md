@@ -249,7 +249,7 @@ aoide secrets allow-remote-origin <name> on|off [--json]
 - **Output:** idempotent, same discipline as `set-totp`.
 - **Notes:** direct-home admin command. The bit is the third policy axis —
   caller provenance, distinct from `remote` (transport) and `automation`
-  (the code). With it off, a caller whose sealed session carries a `peer:*`
+  (the code). With it off, a caller whose sealed session carries a `node:*`
   origin class is refused before the TOTP/park branch; with it on, that
   caller resolves exactly as a local one. The class is resolved from kernel
   facts plus a seal verified against the daemon's live key — never from
@@ -280,7 +280,7 @@ aoide secrets approve <id> [--totp <code>] [--json]
   never into this command's own reply. Re-runs the full authorization gate
   (exists + consumer authorized) against the ask's stored consumer before
   fetching, so a revoke issued mid-park still takes effect. The remote-origin
-  check needs no re-run here: a `peer:*`-origin resolve against a secret
+  check needs no re-run here: a `node:*`-origin resolve against a secret
   whose `allowRemoteOrigin` is off is refused before it can ever park.
 - **Output:** ok → `{"ok":true}` to the approver; the value itself never
   rides this reply. An invalid or expired code leaves the ask parked and
@@ -350,20 +350,20 @@ aoide secrets migrate <name> [--backend <target>] [--json]
 
 ## The A2A seam
 
-`aoide a2a serve --bearer-secret <name>` and `aoide peer add
+`aoide a2a serve --bearer-secret <name>` and `aoide node add
 --bearer-secret <name>` both resolve through this broker on every
 connection/call, self-asserted consumers `a2a-door`/`a2a-client`
 respectively, via `aoide_secrets::client::resolve_bounded` — a short
 bounded read (`wait:false` on the wire, so a misconfigured `requireTotp`
 secret refuses immediately rather than parking the door) with no caching.
 A broker resolve failure fails closed: every bearer check on that
-connection is denied. See [[Doors-and-Peers]] for the two flags'
+connection is denied. See [[Doors-and-Nodes]] for the two flags'
 per-command detail.
 
 ## Related
 
 - [[Secrets-Broker]]
-- [[Doors-and-Peers]]
+- [[Doors-and-Nodes]]
 - [[A2A-Door]]
 - [[Governance]]
 - [[aoide-cli]]

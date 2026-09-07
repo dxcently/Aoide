@@ -2,72 +2,72 @@
 type: concept
 created: 2026-08-27
 updated: 2026-08-29
-tags: [aoide, agent, a2a, orchestration, peer, transport, ssh]
+tags: [aoide, agent, a2a, orchestration, node, transport, ssh]
 ---
 
-# Peer Transport — reaching a loopback door from another box
+# Node Transport — reaching a loopback door from another box
 
-Every [[A2A-Door]] stays loopback-bound, always — a peer's `aoide-a2a`
-listens on `127.0.0.1` and nothing here moves that. What a **paired** peer
+Every [[A2A-Door]] stays loopback-bound, always — a node's `aoide-a2a`
+listens on `127.0.0.1` and nothing here moves that. What a **paired** node
 can do instead is reach that loopback socket through a session-scoped ssh
 tunnel: an internal `-L` forward `aoide-client` opens on demand, dials
 through, and closes with the session that opened it. The tunnel is a
-TRANSPORT hop, not a protocol relay — the signed peer identity crosses it
+TRANSPORT hop, not a protocol relay — the signed node identity crosses it
 end to end: the signature over the canonical string (path included, host
 never) is what the far door verifies, resolving the caller by the key that
-signed, not by the `X-Aoide-Peer` name it carries ([[Peer-Federation]]'s
+signed, not by the `X-Aoide-Node` name it carries ([[Node-Federation]]'s
 Signature rung) — the exact same request it always verified. Spec:
 `docs/architecture/PAIRING.md`'s Transport section; wire shape in
-`CONTRACTS.md` §6 (signature-outranks-loopback) and §7 (`Peer.via`).
+`CONTRACTS.md` §6 (signature-outranks-loopback) and §7 (`Node.via`).
 
 ## Why it exists
 
 A door that only ever answers `127.0.0.1` is unreachable from a second box
-on its own terms. A direct dial requires the peer's address to be
+on its own terms. A direct dial requires the node's address to be
 HTTP-routable — true on a flat LAN, false the moment a router filters
 cross-segment traffic (the gap `docs/architecture/PAIRING.md`'s Discovery
 section documents) or the door is deliberately kept off any routable
 interface. Ssh already crosses that boundary on a trusted
 home network, and aoide already assumes ssh keys are set up between paired
-boxes — so instead of a raw interface, a peer reaches the door through a
+boxes — so instead of a raw interface, a node reaches the door through a
 tunnel aoide opens for the duration of one session, never a standing pipe
 the operator maintains by hand.
 
 ## The `via` marker
 
-`Peer.via` (`ssh://[user@]host[:port]`, `aoide_storage::tunnel::parse_via`)
+`Node.via` (`ssh://[user@]host[:port]`, `aoide_storage::tunnel::parse_via`)
 is the only thing that turns a dial on: absent, every outbound call to that
-peer — every signed POST and `peer add`'s own unsigned AgentCard GET —
+node — every signed POST and `node add`'s own unsigned AgentCard GET —
 dials `url` directly. Present, it
 names the ssh target `aoide-client`'s dial resolution forwards through.
-`set_peer_via` is the sole writer, a sibling to `upsert_paired_peer` rather
+`set_node_via` is the sole writer, a sibling to `upsert_paired_node` rather
 than a parameter on it, and a caller passing no value never clears an
 existing marker — a plain `aoide pair` re-pair leaves an earlier
 `via` untouched.
 
-Four ways a peer picks one up:
+Four ways a node picks one up:
 
-- **`--via` on the command itself** — `peer add`/`aoide pair`/`peer spawn` —
-  always outranks a peer's own recorded `via`.
+- **`--via` on the command itself** — `node add`/`aoide pair`/`node spawn` —
+  always outranks a node's own recorded `via`.
 - **`aoide pair <name>`'s hostname arm derives one automatically** from the
   discovery advertisement's OBSERVED source address plus its claimed ssh
   login — the wire is `{v, name, host, user}`, a rendezvous claim only
   (never a URL, key, or credential), and the observed address is what gets
   dialed. The same derived `via` drives the ceremony's own two POSTs and is
-  recorded on the resulting peer once pairing is approved, so its future
+  recorded on the resulting node once pairing is approved, so its future
   calls have a working transport marker too.
 - **The approver's own commit records one from the requester's `selfVia`
   claim.** A loopback-only requester's `aoide/pairRequest` arrives over its
   own tunnel looking like loopback, so the approver has no observed address
   to derive anything from; the request carries an optional self-asserted
   `ssh://[user@]host` claim (`--self-via` overrides the `$USER`/ outbound-address
-  default), and `aoide pair`'s commit sets the peer's `via` to the
+  default), and `aoide pair`'s commit sets the node's `via` to the
   claim and rewrites its `url` to `http://127.0.0.1:<port>/` — `<port>`
   parsed off the requester's own advertised url — in the same write.
   Self-asserted data, a transport marker only: trust stays in the pubkeys
   and the SAS comparison.
 - **A plain, URL-targeted `aoide pair` with no claim** records nothing — a
-  peer paired without `--via` dials directly.
+  node paired without `--via` dials directly.
 
 ## Dial resolution
 
@@ -79,37 +79,37 @@ url unchanged; `via: Some` opens or reuses the tunnel
 `scheme://host:port` authority to `http://127.0.0.1:<local port>`, the
 forward's own local end. The **path is preserved verbatim** —
 `aoide_storage::tunnel::dial_url` delegates the extraction to
-`peer_store::url_path`, the same function `sign_headers_for_peer`'s
+`node_store::url_path`, the same function `sign_headers_for_node`'s
 canonical string binds to, so the two can never drift apart. The logical url is what a signature signs; the
-rewritten url is only ever what gets dialed. This is also why `peer add`'s
+rewritten url is only ever what gets dialed. This is also why `node add`'s
 AgentCard fetch — its one verification call, a plain GET — dials through
 the same funnel when `--via` is given: the exact scenario `--via` exists
 for is a door reachable only through the tunnel, so the verification GET
 must ride it too.
-Either way `peer add` records the peer under its LOGICAL `url`, never the
+Either way `node add` records the node under its LOGICAL `url`, never the
 rewritten one.
 
 ## Security posture — a tunneled request is remote
 
 Every request that arrives through the forward reaches the far door's
-socket as `PeerOrigin::Loopback` — that is what a forward IS, and the door
+socket as `ConnOrigin::Loopback` — that is what a forward IS, and the door
 extends Loopback's unconditional Inject-delivery free pass to an
 *unsigned* connection, tunnel or not. The narrower rule: a request carrying a verified
 per-request signature (`aoide-server::a2a::verify_signed_request`) is, by
 construction, never a local caller, so `origin_for_inject` strips Loopback's
 free pass from it before the delivery decision runs, regardless of which
-address it arrived from. A signed, non-autogate peer's send lands in the
-far end's pending queue with peer attribution, same as any other signed
-peer reaching the door any other way; `state/peers.json`'s per-peer
+address it arrived from. A signed, non-autogate node's send lands in the
+far end's pending queue with node attribution, same as any other signed
+node reaching the door any other way; `state/nodes.json`'s per-node
 `autogate` flag, not connection origin, is what restores auto-delivery. The
 spawn arm needs no separate carve-out here: it already accepts only the
 Signature rung, tunneled or not, so a spawn refusal reads exactly as taught
 whichever way the request traveled. `via`/`--via` are safe to use against a
-real peer for this reason — the tunnel changes reachability, never trust.
+real node for this reason — the tunnel changes reachability, never trust.
 
 ## Lifecycle — persistent within a session, ephemeral across sessions
 
-A tunnel is opened lazily on first use, keyed by `(session id, peer name)`,
+A tunnel is opened lazily on first use, keyed by `(session id, node name)`,
 and reused by every later action under the same conducted session — no
 second `ssh` spawns while a live one already answers the probe. It is never
 allowed to become a resident daemon:
@@ -156,10 +156,10 @@ allowed to become a resident daemon:
 
 - The pairing ceremony dials through the tunnel and records `via` at
   approve.
-- One `ssh` child is opened and reused per session per peer — a second
+- One `ssh` child is opened and reused per session per node — a second
   action under the same session never spawns a second forward.
-- A signed send from a non-autogate peer lands in the far end's pending
-  queue, carrying peer attribution.
+- A signed send from a non-autogate node lands in the far end's pending
+  queue, carrying node attribution.
 - Spawn is refused with `-32006` the moment `allows` drops `spawn`, with a
   taught error — the same instant either side of a live tunnel.
 - A settled, roster-less tunnel record is collected by the resident
@@ -169,13 +169,13 @@ allowed to become a resident daemon:
 
 - **LAN discovery stays link-local and firewall-gated.** The broadcast
   advertisement (255.255.255.255:8711, heard only while the far end's
-  `peer advertise on` switch or its force-on equivalents are set) never
+  `node advertise on` switch or its force-on equivalents are set) never
   crosses a router by definition, and a default-deny firewall drops the
   inbound datagram before any aoide socket sees it — the diagnosis
   `docs/architecture/PAIRING.md`'s Discovery section traces, confirmed
   independent of any aoide code. This transport is the workaround for a
   door otherwise unreachable across that same boundary, not a fix to
-  discovery itself: `aoide pair <url> --via`/`peer add --via` still need
+  discovery itself: `aoide pair <url> --via`/`node add --via` still need
   the far host named by hand when discovery can't hear it.
 
 ## Related
@@ -183,10 +183,10 @@ allowed to become a resident daemon:
 - [[A2A-Door]] — the loopback-bound door this transport reaches, and the
   signature-outranks-loopback amendment this lane exercises against a real
   proxy hop.
-- [[Peer-Federation]] — the peer registry `Peer.via` lives on, and the
+- [[Node-Federation]] — the node registry `Node.via` lives on, and the
   federation door the tunnel carries requests to.
 - [[Pairing-Ceremony]] — the ceremony that records the `via` marker on the
-  resulting peer at approve (`aoide pair <name>`'s hostname arm derives it,
+  resulting node at approve (`aoide pair <name>`'s hostname arm derives it,
   the requester's `selfVia` claim sets it on the approver's commit; `--via`
   sets it explicitly).
 - [[Conductor-Channel]] — `send`'s remote delivery, gated the same way

@@ -65,7 +65,7 @@ snapshot: 2026-08-25
 
 ### Tags
 
-a2a · agent · aliases · aoide · architecture · auto-discovery · base16 · blueprint · bridge · cli · coding-agent · compositor · computer-use · conductor · content · crate · daemon · dag · declarative · deployment · design · desktop · dxflake · editor · extensibility · features · flake · gadget · git · glyph · governance · graph · harness · hooks · hyprland · integration · ipc · keybinds · knowledge · livery · lyra · mcp · melete · meta · mneme · naming · nix · node · notification · onboarding · orchestration · orchestrator · paint · pantheon · peer · pipeline · plugin · pointer · policy · protocol · pty · qml · quickshell · rebuild · reference · rice · rust · schema · screen · secrets · security · session · shell · song · stylix · terminal · theming · totp · tui · ui · upkeep · vault · vision · wayland · widget · wiki
+a2a · agent · aliases · aoide · architecture · auto-discovery · base16 · blueprint · bridge · cli · coding-agent · compositor · computer-use · conductor · content · crate · daemon · dag · declarative · deployment · design · desktop · dxflake · editor · extensibility · features · flake · gadget · git · glyph · governance · graph · harness · hooks · hyprland · integration · ipc · keybinds · knowledge · livery · lyra · mcp · melete · meta · mneme · naming · nix · node · notification · onboarding · orchestration · orchestrator · paint · pantheon · pipeline · plugin · pointer · policy · protocol · pty · qml · quickshell · rebuild · reference · rice · rust · schema · screen · secrets · security · session · shell · song · stylix · terminal · theming · totp · tui · ui · upkeep · vault · vision · wayland · widget · wiki
 
 ### Notes
 
@@ -81,7 +81,7 @@ concepts/Snowflake-Anatomy.md
 concepts/cli/CLI-Reference.md
 concepts/cli/Conductor-TUI.md
 concepts/cli/Content-and-Hooks.md
-concepts/cli/Doors-and-Peers.md
+concepts/cli/Doors-and-Nodes.md
 concepts/cli/Graph-and-Conduct.md
 concepts/cli/Meta-and-Upkeep.md
 concepts/cli/Rice-and-Livery.md
@@ -105,9 +105,9 @@ concepts/orchestration/Conductor-3D-DAG.md
 concepts/orchestration/Conductor-Channel.md
 concepts/orchestration/Content-Pipeline.md
 concepts/orchestration/Loop-Protocol.md
+concepts/orchestration/Node-Federation.md
+concepts/orchestration/Node-Transport.md
 concepts/orchestration/Pairing-Ceremony.md
-concepts/orchestration/Peer-Federation.md
-concepts/orchestration/Peer-Transport.md
 concepts/orchestration/Screen-Control.md
 concepts/orchestration/Secrets-Broker.md
 concepts/orchestration/Session-Graph.md

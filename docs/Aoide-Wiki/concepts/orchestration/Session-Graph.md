@@ -139,13 +139,13 @@ should follow).
   the name "carry"; the shipped name is undying, and `state/carry.json`
   migrates to `state/undying.json` on first load.
 - **`session` (bare)** — the undying picker: a `tty`+`inquire` multi-select
-  over this host's own sessions plus every registered peer's CACHED
+  over this host's own sessions plus every registered node's CACHED
   sessions, each row pre-checked by its current undying state, confirmed in
   one Enter. A local row's toggle writes `state/undying.json` directly; a
-  peer row's toggle can't touch that store (the id lives on the peer), so it
+  node row's toggle can't touch that store (the id lives on the node), so it
   writes a `{host, dir, agent}` spec into the CURRENT project's
   `.aoide/project.json` manifest instead (walked up from cwd; never
-  auto-created, and a peer cwd that doesn't relativize under the local
+  auto-created, and a node cwd that doesn't relativize under the local
   project root is rejected with a taught reason). Cli+tty only — a non-CLI
   door, no tty, or `--json` always steers to the scripted spelling, `session
   undying on|off --id <id>`. See [[Graph-and-Conduct]] for the manifest
@@ -265,24 +265,24 @@ seeing a stale "haunting" session.
 Two additive record fields carry a session's provenance (LANE IDENTITY,
 task #63); both are consumed internally and get no `graph.json` projection:
 
-- **`origin`** (string, write-once) — `"peer:<name>"` for a session the A2A
-  door spawned on behalf of an identified, paired peer, a local-class value
+- **`origin`** (string, write-once) — `"node:<name>"` for a session the A2A
+  door spawned on behalf of an identified, paired node, a local-class value
   otherwise. `stamp_origin` is the sole stamp function, with two legitimate
-  callers: the door's spawn handler (the only place a `peer:*` value may
+  callers: the door's spawn handler (the only place a `node:*` value may
   originate) and `session_conduct`, stamping a local-class value off its
-  own inherited `AOIDE_SESSION_ORIGIN` env and refusing a `peer:*` shape
+  own inherited `AOIDE_SESSION_ORIGIN` env and refusing a `node:*` shape
   read there — inherited env is exactly what a same-uid process can set on
   itself. `aoide resurrect` carries a local-class `origin` forward off the
-  session's own ledger entry and refuses a `peer:*` shape found there the
+  session's own ledger entry and refuses a `node:*` shape found there the
   same way — the ledger is an unsealed append-only file, so a forged
-  `peer:*` line earns nothing. The raw field is **attribution, never a
+  `node:*` line earns nothing. The raw field is **attribution, never a
   gate**: `sessions.json` and `state/session-ledger.jsonl` stay plain
   same-uid-writable files, so no security decision keys on `origin` as read
   off disk. The authenticated form is the seal.
 - **`seal` + `sealedIssuedAt`** — the sealed session credential, sharing
   one lifecycle (always both or neither). `aoided` mints an ed25519 keypair
   once per process and holds it in memory only, never on disk — a separate
-  key from `state/identity/`'s on-disk peer-wire key, which any same-uid
+  key from `state/identity/`'s on-disk node-wire key, which any same-uid
   reader could sign with. The signature covers a canonical NUL-separated
   string of five fields: `sessionId`, `pid`, `pidStarttime`, `originClass`,
   `issuedAt` — `sessionId`/`originClass` verbatim, no trim or case-folding,
@@ -315,8 +315,8 @@ socket's accept key on kernel facts plus a verified seal, never env
 (P-ID2); shellbridge's verdict socket and `aoided`'s dispatch socket hold a
 cross-uid `SO_PEERCRED` floor (P-ID3, [[shellbridge]], [[aoided]]); the
 secrets broker's `allowRemoteOrigin` gate is the credential's first policy
-consumer (P-ID4); the peer wire resolves identity by verifying key, never
-claimed name (P-ID5, [[Peer-Federation]]). Open, each named rather than
+consumer (P-ID4); the node wire resolves identity by verifying key, never
+claimed name (P-ID5, [[Node-Federation]]). Open, each named rather than
 implied closed: (1) **consumer-name authentication** — the seal
 authenticates the session and its class, never a self-asserted consumer
 string; (2) **OQ1-B, the own-uid daemon** — not taken; a same-uid attacker
@@ -381,6 +381,6 @@ an `aoide shell lock` command absent from the schema (open thread, see
 - [[Widget-Bridge-Contract]]
 - [[Conductor-Channel]]
 - [[Conductor-TUI]]
-- [[Peer-Federation]] — the wire half of key-verified identity (P-ID5)
+- [[Node-Federation]] — the wire half of key-verified identity (P-ID5)
 - [[Secrets-Broker]] — the origin gate, the credential's first policy consumer (P-ID4)
-- [[Peer-Transport]] — the reaper backstop that collects a tunnel a killed session never closed
+- [[Node-Transport]] — the reaper backstop that collects a tunnel a killed session never closed

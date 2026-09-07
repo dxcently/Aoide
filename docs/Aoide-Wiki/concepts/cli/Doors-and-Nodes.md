@@ -2,10 +2,10 @@
 type: concept
 created: 2026-08-19
 updated: 2026-09-03
-tags: [aoide, cli, mcp, a2a, peer, daemon]
+tags: [aoide, cli, mcp, a2a, node, daemon]
 ---
 
-# Doors & Federation Commands — MCP, A2A, Peers, Daemon
+# Doors & Federation Commands — MCP, A2A, Nodes, Daemon
 
 This group covers the doors onto the one command schema and the federation
 surface: the stdio [[Agent-Interface|MCP]] façade (`mcp serve` — `lyra mcp
@@ -13,11 +13,11 @@ serve` is the same façade over lyra's own 48-path registry), the [[aoided]]
 policy skeleton (`daemon`, `events tail`, `adapter melete`), the desktop
 state bridge (`shellbridge`), the interactive session UI (`conductor`,
 detailed at [[Conductor-TUI]]), live presence (`who`), the [[A2A-Door]]
-server (`a2a serve`), and [[Peer-Federation]] (`peer *`) — the peer family is
+server (`a2a serve`), and [[Node-Federation]] (`node *`) — the node family is
 also the outbound A2A client, driving remote instances over the same wire.
 Handlers are spread across
 `pkgs/aoide/crates/server/src/{commands,mcp,daemon,a2a}.rs` (the server
-domain), `pkgs/aoide/crates/client/src/{commands,adapter,peer,wire}.rs`
+domain), `pkgs/aoide/crates/client/src/{commands,adapter,node,wire}.rs`
 (the outbound half), `pkgs/aoide/crates/conductor/src/` (the TUI), and
 `pkgs/aoide/crates/conduct/src/shellbridge.rs`; `mcp serve`'s registration
 stays in `pkgs/aoide/crates/cli/src/commands/infra.rs`. The long-running
@@ -45,10 +45,10 @@ Every command takes `--json`. Without it the CLI prints the human `message`
 line; with it, an envelope `{status, command, message, gated, changed?, data?}`
 (`pkgs/aoide/crates/protocol/src/output.rs`). Exit codes: 0 ok, 1 error,
 2 usage, 64 not-implemented (no command on this page is a stub). Outbound HTTP
-in the `peer` commands is `curl -sS --max-time 15` shelled out with the
-URL/body in argv or on stdin. A paired peer's calls are signed per-request
+in the `node` commands is `curl -sS --max-time 15` shelled out with the
+URL/body in argv or on stdin. A paired node's calls are signed per-request
 with this instance's ed25519 identity key (`state/identity/`); beyond that,
-no local credential past an optional peer bearer secret is involved.
+no local credential past an optional node bearer secret is involved.
 
 ### aoide mcp serve
 
@@ -215,28 +215,28 @@ aoide events tail [--class <c1,c2,…>] [--json]
 aoide who [<filter>] [--all] [--json]
 ```
 
-- **Reads:** every registered peer, probed LIVE on every invocation — one
-  thread per peer, bounded by curl's own `--max-time` inside
-  `aoide_client::commands::pull_peer_live` (~2 s/peer). A projection, never
-  a store: it never writes `state/peer-cache/<name>.json`; the cache
-  (`state/peer-cache/<name>.json`) is consulted only as the fallback for a
-  peer this invocation's live probe fails to reach, so an unreachable peer
+- **Reads:** every registered node, probed LIVE on every invocation — one
+  thread per node, bounded by curl's own `--max-time` inside
+  `aoide_client::commands::pull_node_live` (~2 s/node). A projection, never
+  a store: it never writes `state/node-cache/<name>.json`; the cache
+  (`state/node-cache/<name>.json`) is consulted only as the fallback for a
+  node this invocation's live probe fails to reach, so an unreachable node
   still renders. `<filter>` resolves through `storage::addr::resolve`
   first (a local id/tail4/petname, a host/role/petname line, or
-  `peer/<rest>`), falling back to a substring match.
+  `node/<rest>`), falling back to a substring match.
 - **Writes:** nothing.
 - **Output:** a Unicode roster; `--json` emits the structured presence
   document. Node presence: `online` / `unreachable` / `never-pulled`.
   Session presence: `online` / `stale` / `done` (`done` omitted without
   `--all`).
 - **Notes:** not gated. `<filter>` narrows what is DISPLAYED only — every
-  registered peer is probed regardless. See [[Peer-Federation]].
+  registered node is probed regardless. See [[Node-Federation]].
 
 ### aoide a2a serve
 
 ```
 aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
-                [--peer-name <name>] [--token-file <path>]
+                [--node-name <name>] [--token-file <path>]
                 [--bearer-secret <name>] [--json]
 ```
 
@@ -244,7 +244,7 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
   (`--bind` → `$AOIDE_A2A_BIND` → `127.0.0.1`), port (`--port` →
   `$AOIDE_A2A_PORT` → `8710`), spawn agent (`--spawn-agent` →
   `$AOIDE_A2A_SPAWN_AGENT` → empty = spawning disabled), instance name
-  (`--peer-name` → `$AOIDE_A2A_PEER_NAME` → OS hostname → `"aoide"`), token
+  (`--node-name` → `$AOIDE_A2A_NODE_NAME` → OS hostname → `"aoide"`), token
   (`--token-file` → `$AOIDE_A2A_TOKEN_FILE` → empty = no token required; the
   secret is read off the file once at launch, trimmed, never logged),
   bearer secret (`--bearer-secret` → `$AOIDE_A2A_BEARER_SECRET` → empty —
@@ -254,14 +254,14 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
   failure — unreachable, denied, or a bounded ~2 s timeout — fails that
   connection's bearer check closed rather than falling back to the file or
   the pre-token-open behavior). Per request: `state/stage/sessions.json`
-  (task/session state), `state/peers.json` (signed-request verification —
-  the signature tried against every `verified` peer's stored pubkey — and
-  the autogate match: by caller address, by an autogate-marked peer's own
-  `tokenFile`, or by the resolved signed peer's `autogate` flag; read fresh
+  (task/session state), `state/nodes.json` (signed-request verification —
+  the signature tried against every `verified` node's stored pubkey — and
+  the autogate match: by caller address, by an autogate-marked node's own
+  `tokenFile`, or by the resolved signed node's `autogate` flag; read fresh
   off disk per request). The `aoide-a2a` systemd unit
   (`modules/nucleus/aoided.nix`) sets
   `AOIDE_A2A_BIND`/`PORT`/`SPAWN_AGENT`/`TOKEN_FILE` from the nix options;
-  `AOIDE_A2A_PEER_NAME`/`AOIDE_A2A_BEARER_SECRET` are flag/env-only.
+  `AOIDE_A2A_NODE_NAME`/`AOIDE_A2A_BEARER_SECRET` are flag/env-only.
 - **Writes:** an audit record (door `a2a`) for every handled request, spawn,
   and SSE open/close in the audit log; the `message/send` inject path reuses
   `send`'s `session_send`, so a held send writes the session's
@@ -284,14 +284,14 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     `$AOIDE_AUDIT_LOG` passed down), then types the prompt as its first turn
     over the conduct socket with a connect-retry budget. A loopback caller's
     inject auto-delivers; non-loopback queues pending unless it matches an
-    `autogate` peer (address, per-peer token, or the resolved signed peer's
+    `autogate` node (address, per-node token, or the resolved signed node's
     own flag). Once a token is configured, loopback stops being a trust
     signal (unauthenticated → never auto-delivers). Spawn answers to
     pairing alone: the caller must resolve on the Signature rung — a
-    verified per-request signature against some `verified` peer's stored
+    verified per-request signature against some `verified` node's stored
     pubkey — with `spawn` in that record's `allows`; every refusal is
     `-32006` with a shape-specific taught message (pair first / sign the
-    request / `peer allow <name> spawn on`), and the door-wide bearer
+    request / `node allow <name> spawn on`), and the door-wide bearer
     never reaches the spawn arm. Signed-request failures carry their own
     codes — `-32007` (malformed or unverifiable signature, partial header
     set), `-32008` (timestamp skew), `-32009` (nonce replay). Spawn unconfigured →
@@ -318,108 +318,108 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
   otherwise — a systemd user unit's default PATH carries none of the system
   profile). Localhost, user-only, off by default. See [[A2A-Door]].
 
-### aoide peer add
+### aoide node add
 
 ```
-aoide peer add <name> <url> [--autogate] [--no-verify]
+aoide node add <name> <url> [--autogate] [--no-verify]
                [--via ssh://[user@]host[:port]]
                [--token-file <path>] [--bearer-secret <name>] [--json]
 ```
 
-- **Reads:** `state/peers.json`; verifies the peer by fetching its AgentCard
-  (`curl` GET on the resolved card URL) before registering anything — a peer
+- **Reads:** `state/nodes.json`; verifies the node by fetching its AgentCard
+  (`curl` GET on the resolved card URL) before registering anything — a node
   that fails the fetch is never added; `--no-verify` skips the fetch for a
-  peer that serves no card (reachability, never identity — the record lands
+  node that serves no card (reachability, never identity — the record lands
   `verified: false` either way). `--via ssh://[user@]host[:port]` records an
   ssh-transport marker: every later call dials through a lazily opened ssh
-  forward instead of `url` directly ([[Peer-Transport]]). Name must match
-  `^[a-z0-9][a-z0-9-]*$` (it is joined into `state/peer-cache/<name>.json`;
+  forward instead of `url` directly ([[Node-Transport]]). Name must match
+  `^[a-z0-9][a-z0-9-]*$` (it is joined into `state/node-cache/<name>.json`;
   the shape check is the path-traversal guard) — else exit 1, `reason:
   invalid-name`.
-- **Writes:** inserts into `state/peers.json` (v0, atomic write). A duplicate
+- **Writes:** inserts into `state/nodes.json` (v0, atomic write). A duplicate
   name is rejected cleanly (`reason: duplicate-name`, exit 1) — a nickname is
   never silently repointed.
-- **Output:** `"registered peer \`<name>\` → <url>[ (autogate)] (<n> total)"`,
-  data `{peer: {name, url, autogate, tokenFile?, bearerSecret?, addedAt}, count}`.
-- **Notes:** `--autogate` marks the peer trusted: its inbound `message/send`
+- **Output:** `"registered node \`<name>\` → <url>[ (autogate)] (<n> total)"`,
+  data `{node: {name, url, autogate, tokenFile?, bearerSecret?, addedAt}, count}`.
+- **Notes:** `--autogate` marks the node trusted: its inbound `message/send`
   on this instance's A2A door auto-delivers instead of queueing pending,
-  matched by caller address or by the per-peer `--token-file` secret (the form
+  matched by caller address or by the per-node `--token-file` secret (the form
   that survives a reverse proxy/tunnel, where every caller's address is the
-  proxy's) — that is what THIS peer must present TO us. `--bearer-secret
+  proxy's) — that is what THIS node must present TO us. `--bearer-secret
   <name>` is the mirror direction: a secret this instance resolves through
   the [[Secrets-Broker|secrets broker]] (consumer `a2a-client`, fresh on
   every request, never cached) and presents as `Authorization: Bearer
-  <value>` on every outbound call to that peer's own A2A door (`peer pull`,
+  <value>` on every outbound call to that node's own A2A door (`node pull`,
   `send --to`, `who`'s live probe). Absent by default — an unmarked
-  peer's outbound calls carry no bearer header, unchanged. A resolve
+  node's outbound calls carry no bearer header, unchanged. A resolve
   failure fails that outbound call outright rather than sending it
-  unauthenticated. See [[Peer-Federation]].
+  unauthenticated. See [[Node-Federation]].
 
-### aoide peer remove
+### aoide node remove
 
 ```
-aoide peer remove <name> [--json]
+aoide node remove <name> [--json]
 ```
 
-- **Reads:** `state/peers.json`; name shape validated as in `peer add`.
-- **Writes:** the registry (atomic); also deletes the peer's cache file
-  `state/peer-cache/<name>.json` if present (best-effort), so a peer re-added
+- **Reads:** `state/nodes.json`; name shape validated as in `node add`.
+- **Writes:** the registry (atomic); also deletes the node's cache file
+  `state/node-cache/<name>.json` if present (best-effort), so a node re-added
   under the same name never starts from a stale leftover.
 - **Output:** data `{removed: true, name, count}`. A missing name is an
-  error (`reason: unknown-peer`, exit 1) — deliberately not idempotent-silent
+  error (`reason: unknown-node`, exit 1) — deliberately not idempotent-silent
   (CONTRACTS.md §7).
 - **Notes:** not gated.
 
-### aoide peer pull
+### aoide node pull
 
 ```
-aoide peer pull [<name>] [--json]
+aoide node pull [<name>] [--json]
 ```
 
-- **Reads:** `state/peers.json`; an existing `state/peer-cache/<name>.json`
+- **Reads:** `state/nodes.json`; an existing `state/node-cache/<name>.json`
   when a pull fails (to preserve the last-good data). Unknown name → exit 1,
-  `reason: unknown-peer`.
-- **Writes:** `state/peer-cache/<name>.json` (v0, atomic). Success stores
+  `reason: unknown-node`.
+- **Writes:** `state/node-cache/<name>.json` (v0, atomic). Success stores
   `{schemaVersion, name, instance?, graph?, fetchedAt, stale: false}` parsed
-  from the peer's reply (requires `result.schemaVersion == "0"` and a
+  from the node's reply (requires `result.schemaVersion == "0"` and a
   `result.graph` object, else the pull counts as failed). Any failure —
   unreachable, timeout, non-200, malformed — flips `stale: true` and
   `lastError` on the existing entry instead of deleting it; the last-good
   `instance`/`graph` survive.
 - **Output:** POSTs `{"method": "aoide/graphSummary", "params": {}}` to each
-  selected peer's URL via curl. No `<name>` pulls every registered peer; one
-  peer being down never breaks the others. `"pulled <ok>/<n> peer(s)
-  successfully"`, data `{results: [{name, ok, fetchedAt?|error?}]}`; no peers
+  selected node's URL via curl. No `<name>` pulls every registered node; one
+  node being down never breaks the others. `"pulled <ok>/<n> node(s)
+  successfully"`, data `{results: [{name, ok, fetchedAt?|error?}]}`; no nodes
   registered → ok with `results: []`.
-- **Notes:** fresh caches fold into the session DAG as `peer:<name>` root
+- **Notes:** fresh caches fold into the session DAG as `node:<name>` root
   nodes (`aoide-conduct`'s `build_graph`).
 
-### aoide peer status
+### aoide node status
 
 ```
-aoide peer status [--json]
+aoide node status [--json]
 ```
 
-- **Reads:** `state/peers.json` plus each peer's `state/peer-cache/<name>.json`.
-- **Output:** the human line stays a terse `"<n> peer(s) registered"`; `--json`
-  carries the full row per peer — `{peers: [{name, url, autogate, tokenFile?,
+- **Reads:** `state/nodes.json` plus each node's `state/node-cache/<name>.json`.
+- **Output:** the human line stays a terse `"<n> node(s) registered"`; `--json`
+  carries the full row per node — `{nodes: [{name, url, autogate, tokenFile?,
   bearerSecret?, hub, pubkey?, verified, allows, addedAt, state, fetchedAt,
   error}]}`. `state` is `fresh` (pulled within the 300 s TTL and not marked
   stale), `stale`, or `never-pulled` — the same three-way classification the
   graph fold uses, so this and the DAG never disagree. This is the deep
-  per-peer registry view; `peer list` (below) is the one-glance roster and
+  per-node registry view; `node list` (below) is the one-glance roster and
   never duplicates it.
-- **Notes:** read-only. TTL constant: `PEER_CACHE_TTL_SECS` in
-  `pkgs/aoide/crates/storage/src/peer_store.rs`.
+- **Notes:** read-only. TTL constant: `NODE_CACHE_TTL_SECS` in
+  `pkgs/aoide/crates/storage/src/node_store.rs`.
 
-### aoide peer hub
+### aoide node hub
 
 ```
-aoide peer hub <name> [--clear]
+aoide node hub <name> [--clear]
 ```
 
-- **Reads:** `state/peers.json`.
-- **Writes:** designates `name` as THE hub — at most one peer holds the
+- **Reads:** `state/nodes.json`.
+- **Writes:** designates `name` as THE hub — at most one node holds the
   designation; setting a new hub moves it, clearing the previous holder in
   the same write (P-D5, `docs/architecture/AOIDED.md`'s "The hub option").
   `--clear` removes the designation from `name` instead, if it currently
@@ -430,7 +430,7 @@ aoide peer hub <name> [--clear]
 - **Notes:** the hub is a last-resort address-resolution preference, not a
   trust or autogate grant — resolution reaches for it only when nothing
   else matches, never shadowing a real registered name. See
-  [[Peer-Federation]].
+  [[Node-Federation]].
 
 ### aoide pair
 
@@ -443,11 +443,11 @@ aoide pair watch [--popup] [--json]
 ```
 
 One smart verb (`handle_pair`) for the whole ceremony — the old
-`peer pair`/`peer pending`/`peer pair approve|reject|watch` family died
+`node pair`/`node pending`/`node pair approve|reject|watch` family died
 outright at task #135 P3', hard cutover, no aliases.
 
-- **Reads:** the parked pairing state `state/peer-pairing-inbound.json` /
-  `state/peer-pairing-outbound.json` (`aoide_storage::pairing`,
+- **Reads:** the parked pairing state `state/node-pairing-inbound.json` /
+  `state/node-pairing-outbound.json` (`aoide_storage::pairing`,
   tolerate-missing, expired entries swept lazily on read) and this
   instance's ed25519 identity (`state/identity/`, minted lazily on first
   need — `ed25519.key` at 0600 inside the 0700 directory, never appearing
@@ -473,7 +473,7 @@ outright at task #135 P3', hard cutover, no aliases.
   taught error listing what WAS heard. Both arms drive the same
   `run_pair_request` core, and the hostname arm refuses to pair with this
   instance itself (heard name matching its own, or the datagram from
-  loopback). A target resolving to an already-`verified: true` peer
+  loopback). A target resolving to an already-`verified: true` node
   confirms (`confirm_repair_if_verified`) before re-running the ceremony
   and replacing its key material — `--yes` scripted, the explicit URL arm
   stays ungated. Approving an inbound request is purely local: it commits
@@ -494,16 +494,16 @@ outright at task #135 P3', hard cutover, no aliases.
   actionable set is inbound-only: an outbound entry completes inside the
   operator's own `aoide pair`, so watch never surfaces one.
 - **Writes:** starting or resuming a request parks/re-polls the outbound
-  half; approving commits a `pubkey`/`verified` peer record into
-  `state/peers.json` (`peer_store::upsert_paired_peer`, stamping
+  half; approving commits a `pubkey`/`verified` node record into
+  `state/nodes.json` (`node_store::upsert_paired_node`, stamping
   `config.toml`'s `[pairing] defaultGrant` or the commit's own
   `--allow`), dispatching by direction — inbound queue first, then
   outbound — so the requester's own confirm is a SECOND `aoide pair`
   against the outbound queue, the one that polls. When the parked
   request carries the requester's `selfVia` claim, the inbound commit
-  also sets the peer's `url` to `http://127.0.0.1:<port>/` (port parsed
+  also sets the node's `url` to `http://127.0.0.1:<port>/` (port parsed
   off the requester's advertised url) and `via` to the claim in the same
-  write ([[Peer-Transport]]); `aoide pair reject <id|name>` removes the
+  write ([[Node-Transport]]); `aoide pair reject <id|name>` removes the
   parked entry locally on either queue, no wire call, no record — by
   name it matches exactly one pending request or refuses as ambiguous.
 - **Output:** starting a new request prints the derived SAS (the
@@ -543,17 +543,17 @@ outright at task #135 P3', hard cutover, no aliases.
   and the 4-hour expiry (`DEFAULT_PAIRING_TIMEOUT_SECS`):
   [[Pairing-Ceremony]].
 
-### aoide peer allow
+### aoide node allow
 
 ```
-aoide peer allow <name> <cap> on|off
+aoide node allow <name> <cap> on|off
 ```
 
-- **Reads/Writes:** `state/peers.json` — flips one capability in the
-  peer's closed `allows` set (`PEER_CAPABILITIES`: `"read"` / `"spawn"`).
+- **Reads/Writes:** `state/nodes.json` — flips one capability in the
+  node's closed `allows` set (`NODE_CAPABILITIES`: `"read"` / `"spawn"`).
 - **Output:** idempotent — `on` an already-granted or `off` an
   already-revoked capability reports a no-op, never an error. An unknown
-  capability string is refused before the peer lookup; an unknown peer
+  capability string is refused before the node lookup; an unknown node
   name is refused after it — a distinct taught error for each.
 - **Notes:** the only writer of `allows` besides the pairing ceremony's
   own first-verification stamp; re-pairing never re-runs it, so a revoked
@@ -564,31 +564,31 @@ aoide peer allow <name> <cap> on|off
   The A2A door's Spawn arm reads the
   set ([[A2A-Door]], [[Pairing-Ceremony#What approval commits]]).
 
-### aoide peer spawn
+### aoide node spawn
 
 ```
-aoide peer spawn <name> [--yes] [--via ssh://[user@]host[:port]] -- <text…>
+aoide node spawn <name> [--yes] [--via ssh://[user@]host[:port]] -- <text…>
 ```
 
-- **Reads:** `state/peers.json`; this instance's identity (the POST is
-  signed — four headers: the claimed self name `X-Aoide-Peer`, timestamp,
+- **Reads:** `state/nodes.json`; this instance's identity (the POST is
+  signed — four headers: the claimed self name `X-Aoide-Node`, timestamp,
   nonce, and the ed25519 signature over the canonical string). Refuses an
   unknown or unpaired (`verified:
   false`) name LOCALLY with a taught error naming `aoide pair`.
 - **Output:** POSTs a spawn-shaped `message/send` (no `contextId`) to the
-  peer's A2A door; `<text…>` becomes the spawned session's first turn.
-  What actually runs is the PEER's configured `aoide.a2a.spawnAgent`,
+  node's A2A door; `<text…>` becomes the spawned session's first turn.
+  What actually runs is the NODE's configured `aoide.a2a.spawnAgent`,
   never a remote-chosen executable. Every other refusal — `allows`
   lacking `spawn`, an unsigned-but-paired caller, clock skew — is the
   remote door's own call, surfaced verbatim.
 - **Notes:** `--yes` skips only the local `y`/`N`; the remote gate
-  (paired peer, signature rung, `allows` contains `"spawn"`) is the sole
-  security authority. See [[Peer-Federation]].
+  (paired node, signature rung, `allows` contains `"spawn"`) is the sole
+  security authority. See [[Node-Federation]].
 
-### aoide peer discover
+### aoide node discover
 
 ```
-aoide peer discover [--secs N] [--json]
+aoide node discover [--secs N] [--json]
 ```
 
 - **Reads:** one bounded on-demand sweep of the LAN advertisement wire —
@@ -599,7 +599,7 @@ aoide peer discover [--secs N] [--json]
   (name, source address) into a bounded in-memory fold (64 entries; a
   flood past the cap is counted dropped).
 - **Writes:** nothing — an advertisement never reaches
-  `state/peers.json`; discovery is rendezvous, not authentication.
+  `state/nodes.json`; discovery is rendezvous, not authentication.
 - **Output:** the heard table: name, claimed ssh hop `user@host`, the
   OBSERVED source address `srcAddr`, first/last heard, count. The claimed
   hop is whatever the advertiser typed; `srcAddr` is measured by the
@@ -607,12 +607,12 @@ aoide peer discover [--secs N] [--json]
 - **Notes:** no resident listener exists anywhere — hearing is always a
   sweep. The receiving host's firewall must admit inbound UDP 8711 (the
   nix module opens it alongside `aoide.a2a.discoveryAdvertise`). See
-  [[Peer-Transport]].
+  [[Node-Transport]].
 
-### aoide peer advertise
+### aoide node advertise
 
 ```
-aoide peer advertise on|off
+aoide node advertise on|off
 ```
 
 - **Writes:** `state/advertise.json` — idempotent, reports what changed;
@@ -625,25 +625,25 @@ aoide peer advertise on|off
   lifetime, OR'd with the switch — the nix-declarative path. Advertising
   is off by default; the advertisement itself is a broadcast rendezvous
   claim (`{v, name, host, user}` — never a credential, key, or URL). See
-  [[Peer-Transport]].
+  [[Node-Transport]].
 
-### aoide peer list
+### aoide node list
 
 ```
-aoide peer list [--json]
+aoide node list [--json]
 ```
 
-- **Reads:** `state/peers.json`, the pull caches, and the LAN — presence
+- **Reads:** `state/nodes.json`, the pull caches, and the LAN — presence
   and sessions from `who`'s own live-probe-with-cache-fallback core (one
-  bounded ~2 s probe per peer, in parallel) plus ONE bounded ~2 s
+  bounded ~2 s probe per node, in parallel) plus ONE bounded ~2 s
   discovery sweep run concurrently with the probes
-  (`aoide-conduct::graph::peer_list`; lives in `aoide-conduct` because the
+  (`aoide-conduct::graph::node_list`; lives in `aoide-conduct` because the
   roster folds `who`'s probe core, which `aoide-client` cannot depend on).
-- **Writes:** nothing — not `state/peers.json`, not `state/peer-cache/`.
+- **Writes:** nothing — not `state/nodes.json`, not `state/node-cache/`.
 - **Output:** the one-glance mesh roster — one row per known node (this
-  host first, then every registered peer, then every advertising instance
+  host first, then every registered node, then every advertising instance
   heard), each node's running sessions (agent, state, petname/short-id)
-  indented beneath it; an offline peer's last-known sessions render
+  indented beneath it; an offline node's last-known sessions render
   labeled `as of <fetchedAt>`. Marks: `●` paired/local and online, `○`
   paired but offline (`last seen <fetchedAt>` or `never pulled`), `◆`
   advertising — appended to a paired row (`●◆`/`○◆`) when a sweep hears
@@ -652,8 +652,8 @@ aoide peer list [--json]
   isLocal, paired, verified, advertising, presence, addr, lastSeen,
   sessions[]}`) plus `sweep` (`{heard, dropped}` or `{error}` — an empty
   or unlistenable sweep annotates the roster, never fails it).
-- **Notes:** the roster, not the registry — `peer status` keeps the deep
-  per-peer detail. See [[Peer-Federation]].
+- **Notes:** the roster, not the registry — `node status` keeps the deep
+  per-node detail. See [[Node-Federation]].
 
 ### aoide mesh
 
@@ -662,28 +662,28 @@ aoide mesh [--json]
 ```
 
 - **Reads:** `config.toml`'s `[mesh.<name>]` declarations (task #135 P4,
-  CONTRACTS.md §4) and `state/peers.json` (`aoide_client::mesh`, its own
+  CONTRACTS.md §4) and `state/nodes.json` (`aoide_client::mesh`, its own
   self-contained module — own handler, own `register`, appended newest
   into `commands::all()`).
 - **Writes:** nothing — a comparison over two read-only sources, never a
   third place either could drift from.
-- **Output:** for every declared mesh, one line per peer that diverges from
-  the live registry — `missing` (declared, no peer record by that name),
+- **Output:** for every declared mesh, one line per node that diverges from
+  the live registry — `missing` (declared, no node record by that name),
   `unverified` (a record exists, pairing was never confirmed), or
   `via-mismatch` (verified, but the recorded `via` does not match the
   declared hop; a recorded `via` of none is the severe case — a call then
-  dials the peer's bare address directly, commonly this box's own
-  loopback). A peer that matches gets no line. A separate trailing line
-  lists any verified peer named in no declared mesh — reported, never
+  dials the node's bare address directly, commonly this box's own
+  loopback). A node that matches gets no line. A separate trailing line
+  lists any verified node named in no declared mesh — reported, never
   accused, no drift count, no suggested action. A mesh whose declared keys
   do not include this box's own name gets one more note line saying so —
   never a drift row, never counted in `declared`. `--json` emits the same
   comparison structured under `data.report`:
   `{"sections": [{"name", "grant", "sameOperator", "declared",
-  "selfDeclared", "rows": [{"peer", "class", …}]}], "undeclared": [...]}`.
-- **Notes:** unlike `peer list`'s roster above, this reads only what a
+  "selfDeclared", "rows": [{"node", "class", …}]}], "undeclared": [...]}`.
+- **Notes:** unlike `node list`'s roster above, this reads only what a
   human explicitly named in `[mesh.<name>]` — an unregistered or
-  undeclared peer never appears as a row, only in `undeclared`. Drift is
+  undeclared node never appears as a row, only in `undeclared`. Drift is
   never itself a command failure — every class above is reported in the
   message and `data.report` regardless of what it finds. The one
   exception is the read: a config that fails to load returns
@@ -692,12 +692,12 @@ aoide mesh [--json]
   each mesh is expected to name this box: the match against
   `display::local_host_name()` is exact string equality, so a hostname
   declared as an FQDN or in mixed case can never match —
-  `peer_store::valid_peer_name` accepts only lowercase letters, digits,
+  `node_store::valid_node_name` accepts only lowercase letters, digits,
   and `-`. This is the same known gap `aoide pair`'s own self-detection
-  carries for a custom `--peer-name` ([[Pairing-Ceremony]],
+  carries for a custom `--node-name` ([[Pairing-Ceremony]],
   `docs/architecture/PAIRING.md:599-612`). Declaring a mesh does not pair,
   verify, or reach anything — see [[Pairing-Ceremony]] for the ceremony
-  that actually populates `state/peers.json`, and
+  that actually populates `state/nodes.json`, and
   `docs/architecture/PAIRING.md`'s "Mesh declaration" section for why this
   stays intent, never a wire-level object.
 
@@ -712,28 +712,28 @@ aoide mesh pair [<mesh>] [--wait SECS] [--yes] [--json]
   (`aoide_storage::pairing::list_outbound`) to see what each attempt left
   behind. The mesh may be omitted when exactly one is declared; otherwise
   it is named, and an unknown name lists the declared ones.
-- **Writes:** `state/peers.json`, and only ever through the pairing
-  ceremony — every selected peer goes through `aoide pair`'s own request
+- **Writes:** `state/nodes.json`, and only ever through the pairing
+  ceremony — every selected node goes through `aoide pair`'s own request
   path (`commands::run_pair_request`), so the two POSTs, the park, the
   `--wait` poll, and the typed code on each side are the ordinary ones. No
   converge-specific ceremony exists.
-- **Selects:** the declared peers with no verified record — `missing` and
+- **Selects:** the declared nodes with no verified record — `missing` and
   `unverified` — in declared-name order, each dialed at
   `http://127.0.0.1:<AOIDE_A2A_PORT or 8710>/` through its declared hop. A
   `via-mismatch` is `skipped`, naming `aoide pair <name>` as the fix: a
-  converge never modifies an existing verified peer, since re-pairing
+  converge never modifies an existing verified node, since re-pairing
   replaces key material and `via` belongs to a ceremony commit. That is
   what makes a second run over a converged mesh all-`skipped`.
 - **Confirms once:** one pre-flight listing the whole converge — which
-  peers, in what order, through which hops, at what grant — before anything
+  nodes, in what order, through which hops, at what grant — before anything
   is sent. `--yes` skips it, exactly as it skips the sweep proceed-prompt
-  on `aoide pair`, and bypasses no pairing code: each peer still needs the
+  on `aoide pair`, and bypasses no pairing code: each node still needs the
   code typed on both sides.
-- **Output:** one line per peer, in one of four words — `completed`,
+- **Output:** one line per node, in one of four words — `completed`,
   `parked` (its id is what `aoide pair <id>` finishes), `UNREACHABLE`
   (nothing committed and nothing parked, so no id: a request to a box that
   is off parks nothing), `skipped`. `--json` emits
-  `{"mesh", "rows": [{"peer", "outcome", …}], "sameOperatorNote"?}` under
+  `{"mesh", "rows": [{"node", "outcome", …}], "sameOperatorNote"?}` under
   `data.report`.
 - **Notes:** `mesh.<name>.grant` is the capability set a FIRST verification
   stamps, handed to the ceremony exactly as a typed `aoide pair --allow`
@@ -751,7 +751,7 @@ aoide mesh pair [<mesh>] [--wait SECS] [--yes] [--json]
 ## Related
 
 - [[A2A-Door]] — the inbound A2A contract (CONTRACTS.md §6)
-- [[Peer-Federation]] — same-network aoide-to-aoide federation (§7)
+- [[Node-Federation]] — same-network aoide-to-aoide federation (§7)
 - [[Pairing-Ceremony]] — the commit-then-reveal handshake `aoide pair`
   drives
 - [[Agent-Interface]] — the one-schema, two-doors MCP contract

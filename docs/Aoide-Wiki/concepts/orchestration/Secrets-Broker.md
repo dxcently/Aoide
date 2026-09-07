@@ -11,7 +11,7 @@ The secrets broker is aoide's credential door: a socket-only daemon, running
 under its own system uid, that resolves a named secret to a value for an
 authorized consumer and never lets that value touch a log, an audit line, or
 a cached copy. It is a fifth door onto aoide alongside the CLI trunk, MCP,
-[[A2A-Door]], and [[Peer-Federation]] — reachable only from the local
+[[A2A-Door]], and [[Node-Federation]] — reachable only from the local
 machine, never the network. Implementation: `pkgs/aoide/crates/secrets/`.
 Wire contract: `CONTRACTS.md`'s "Secrets wire" subsection.
 
@@ -109,7 +109,7 @@ the sealed session credential's first policy consumer ([[Session-Graph]]).
 The three axes answer three different questions and are never conflated:
 `remote` is transport — may this secret be SERVED through a non-local entry
 point; `automation` is the code — may a listed consumer skip TOTP;
-`allowRemoteOrigin` is caller provenance — may a session a REMOTE PEER
+`allowRemoteOrigin` is caller provenance — may a session a REMOTE NODE
 created resolve this secret LOCALLY. Gate order is exists → consumer
 authorized → remote-origin → TOTP → fetch. The broker resolves each
 connection's caller from kernel facts alone — the connection's
@@ -117,7 +117,7 @@ connection's caller from kernel facts alone — the connection's
 record, and the seal verified against the daemon's live `ping`-fetched
 public key (`aoide_storage::attest::attested_caller`, the same walk and
 verify the send gate uses; nothing the wire asserts enters it) — and
-refuses a caller whose sealed `originClass` is `peer:*` before the
+refuses a caller whose sealed `originClass` is `node:*` before the
 TOTP/park branch unless the bit is on. The refusal names the flag, the
 session, and its origin, and audits name-only. The boundary is exact: the
 gate narrows positively-attested remote-origin sessions; it does not

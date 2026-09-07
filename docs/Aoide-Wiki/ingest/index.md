@@ -23,10 +23,10 @@ updated: 2026-08-31
 - [[Song-Vocabulary]] — what each song term maps to in the performed half, and how replay makes a committed song host-agnostic
 - [[Song-Anatomy]] — what every `song/` subfolder is for, committed score vs gitignored runtime, who writes each, and the six stage files
 - [[Agent-Interface]] — the `aoide` command surface, MCP as a generated façade, the guide tiers, and per-command ergonomics
-- [[A2A-Door]] — the bidirectional Agent2Agent door: `a2a serve` agent, the `peer` group as the outbound client, concept mapping, rebuild-time admission, pairing-gated spawn with signed requests
-- [[Peer-Federation]] — folding another instance's session graph in as a subtree: `state/peers.json`, the peer-cache TTL, the `peer` CLI group; direct dial by default
+- [[A2A-Door]] — the bidirectional Agent2Agent door: `a2a serve` agent, the `node` group as the outbound client, concept mapping, rebuild-time admission, pairing-gated spawn with signed requests
+- [[Node-Federation]] — folding another instance's session graph in as a subtree: `state/nodes.json`, the node-cache TTL, the `node` CLI group; direct dial by default
 - [[Pairing-Ceremony|Pairing Ceremony]] — the one verification between two instances: commit-then-reveal over the A2A door, a locally-derived SAS both humans confirm, the three-command `aoide pair` family, the gate-classed events feed
-- [[Peer-Transport|Peer Transport]] — reaching a loopback-bound door from another box: the `Peer.via` marker, dial resolution through a session-scoped ssh tunnel, signature-outranks-loopback for Inject
+- [[Node-Transport|Node Transport]] — reaching a loopback-bound door from another box: the `Node.via` marker, dial resolution through a session-scoped ssh tunnel, signature-outranks-loopback for Inject
 - [[Secrets-Broker]] — the `aoide secrets` door: socket-only broker, TOTP-gated parked resolves, `secrets watch`/`--popup`, age default backend
 - [[Desktop-Architecture]] — how aoided, shellbridge, Quickshell, and the compositor compose into the live desktop; each component's responsibility
 - [[Content-Pipeline]] — the pipeline stages (discover → propose → approve → ingest → lint → query), the approve gate, Mneme integration

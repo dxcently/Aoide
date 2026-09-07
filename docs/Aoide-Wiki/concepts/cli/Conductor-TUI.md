@@ -89,10 +89,10 @@ the panel/family name normalizes.
 - **STATUS (`5`)** — read-only: stage status, both trees (`App::stage` for
   `state/stage/`, `App::rice_stage` for `song/stage/`).
 - **ROSTER (`6`)** — presence over this box's own sessions plus every
-  registered peer. Rows are `who --json`'s `Outcome.data`, dispatched
+  registered node. Rows are `who --json`'s `Outcome.data`, dispatched
   through the same injected `DispatchFn` and parsed into a flattened row
   list — never re-derived. `who` performs a LIVE network probe of every
-  registered peer (~2 s/peer, parallel) on every invocation, so this pane
+  registered node (~2 s/node, parallel) on every invocation, so this pane
   throttles: it re-dispatches at most every ~15 s (`ROSTER_THROTTLE`) while
   visible, never on every ~500 ms tick; `r` forces one fetch regardless of
   the throttle window (a no-op while a fetch is already in flight). The
@@ -172,5 +172,5 @@ clean quit, `q`, a panic inside a view — restores the tty.
 - [[Session-Graph]]
 - [[Conductor-3D-DAG]]
 - [[Graph-and-Conduct]]
-- [[Doors-and-Peers]]
+- [[Doors-and-Nodes]]
 - [[aoide-cli]]

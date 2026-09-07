@@ -41,7 +41,7 @@ agent, so the daemon can never auto-admit a rebuild.
 The daemon is the session-identity authority (identity lane #63,
 [[Session-Graph]]). It mints an ephemeral ed25519 keypair once per process,
 held in memory only — deliberately separate from `state/identity/`'s
-on-disk peer-wire key, which any same-uid reader could sign with — and
+on-disk node-wire key, which any same-uid reader could sign with — and
 seals every live, pid-carrying session record with it: at `session start`
 dispatch, and within one ~1s tick for records registered directly (the
 `seal_unsealed_live_sessions` sweep). Verification asks the daemon itself:

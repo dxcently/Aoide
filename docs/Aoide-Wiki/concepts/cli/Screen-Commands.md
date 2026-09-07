@@ -365,8 +365,8 @@ lyra screen send <capture> --session <id> [--comment "text"] [--yes] [--json]
   sender is the target's parent session — delivery writes into the target
   session's control socket `$XDG_RUNTIME_DIR/aoide/session-<id>.sock`,
   injecting the text into the conducted PTY's stdin. `--session` is
-  required; there is no other target — a remote peer's session is reached
-  through `send --to peer/<query>` instead ([[Peer-Federation]]), not
+  required; there is no other target — a remote node's session is reached
+  through `send --to node/<query>` instead ([[Node-Federation]]), not
   through `screen send`. The global `--audit-log` flag is honoured and
   forwarded to the session gate.
 - **Notes:** `gated: false` in the schema — the gating lives inside the
@@ -379,6 +379,6 @@ lyra screen send <capture> --session <id> [--comment "text"] [--yes] [--json]
 
 - [[Screen-Control]] — the concept page this contract backs
 - [[Session-Graph]] — `send`, the session gate `screen send --session` reuses
-- [[Peer-Federation]] — reaching a remote peer's session (`send --to peer/<query>`)
+- [[Node-Federation]] — reaching a remote node's session (`send --to node/<query>`)
 - [[Terminal-Commander]] — conducted sessions and their control sockets
 - [[aoide-cli]] — the CLI envelope, exit codes, and `--json` convention

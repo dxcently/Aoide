@@ -277,7 +277,7 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
 
 - **`CONTRACTS.md`** — §0 design philosophy plus the versioned contracts §1–8:
   note schema, dendrite shape, `aoide schema --json` output, stage-file
-  formats, song shape, A2A door, peer federation, screen capture + pointer
+  formats, song shape, A2A door, node federation, screen capture + pointer
   synthesis. The `checks` fail a merge that breaks one; bumping a version
   needs a playbook migration.
 - **`AGENTS.md`** — the tier-0 agent entry: the core-vs-paint boundary, the

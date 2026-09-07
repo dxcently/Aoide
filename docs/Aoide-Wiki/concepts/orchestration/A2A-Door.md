@@ -54,19 +54,19 @@ The server serves:
 
 ## Client — aoide driving external agents
 
-The outbound half lives in the `peer` family ([[Peer-Federation]]), not on the
-A2A door itself. `peer add <name> <url>` verifies a remote aoide instance by
+The outbound half lives in the `node` family ([[Node-Federation]]), not on the
+A2A door itself. `node add <name> <url>` verifies a remote aoide instance by
 fetching its AgentCard (a bare origin has the well-known path appended) before
-registering it into `state/peers.json`. `peer pull` refreshes its cached
-graph over `aoide/graphSummary`. `peer spawn <name> -- <text>` starts a new
-session on a PAIRED peer's own configured agent: it POSTs a signed,
-spawn-shaped `message/send` to the peer's A2A door, and the peer's own
+registering it into `state/nodes.json`. `node pull` refreshes its cached
+graph over `aoide/graphSummary`. `node spawn <name> -- <text>` starts a new
+session on a PAIRED node's own configured agent: it POSTs a signed,
+spawn-shaped `message/send` to the node's A2A door, and the node's own
 paired+signature+allows gate is the sole authority. `send --to
-peer/<name>` (or `--to <name>/<session>`) drives an EXISTING remote session:
-it resolves the target against the peer's cached graph and delivers over the
+node/<name>` (or `--to <name>/<session>`) drives an EXISTING remote session:
+it resolves the target against the node's cached graph and delivers over the
 same `message/send` RPC — mutually exclusive with `--id`, and a remote send
-always attempts delivery since the receiving peer gates its own inject. Each
-registered peer folds into the [[Session-Graph]] as a root node, so a remote
+always attempts delivery since the receiving node gates its own inject. Each
+registered node folds into the [[Session-Graph]] as a root node, so a remote
 instance appears in the DAG beside aoide's own sessions. The message text is
 untrusted data, never executed.
 
@@ -111,7 +111,7 @@ to **rebuild time** instead.
   is minimal and carries none of the system profile, so a bare-word
   `spawnAgent` (e.g. `claude`) can fail to resolve even though an
   interactive shell finds it fine — found live when a door-summoned spawn on
-  a headless peer failed with `failed to conduct \`claude\`: No such file or
+  a headless node failed with `failed to conduct \`claude\`: No such file or
   directory`. `aoide.a2a.spawnPath` (list of packages, default empty) rides
   the `aoide-a2a` unit's PATH so `spawnAgent` resolves; a host enabling spawn
   names the agent AND the package(s) that provide it, the same
@@ -126,33 +126,33 @@ to **rebuild time** instead.
   executed — the A2A door adds no new trust tier.
 - **Non-loopback callers are gated at request time.** `message/send`
   classifies the caller's address first (`a2a::classify_origin` →
-  `PeerOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`). A `Remote`
+  `ConnOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`). A `Remote`
   caller falls back to the same interactive pending-approval queue
   `send` uses — auto-delivering on an autogate match: the OR of the
-  address check, the per-peer `tokenFile` check, and the signature-rung
-  `autogate` flag on the resolved peer's own record
-  ([[Peer-Federation]]); an `Unknown` origin (the address couldn't be read
+  address check, the per-node `tokenFile` check, and the signature-rung
+  `autogate` flag on the resolved node's own record
+  ([[Node-Federation]]); an `Unknown` origin (the address couldn't be read
   at all) is never auto-delivered, failing safe like an unmatched `Remote`.
   A verified signature outranks loopback for this question: a request
   `verify_signed_request` already verified is remote by construction (an
   ssh `-L` forward terminates at loopback on this end), so
-  `origin_for_inject` strips `Loopback`'s free pass from it and the peer's
+  `origin_for_inject` strips `Loopback`'s free pass from it and the node's
   own `autogate` flag — not the arrival address — decides delivery
-  ([[Peer-Transport]]).
+  ([[Node-Transport]]).
   This is the one interactive per-request gate the wire otherwise lacks —
-  added for [[Peer-Federation|peer federation]]'s non-loopback case, which
+  added for [[Node-Federation|node federation]]'s non-loopback case, which
   the original loopback-only design didn't need to cover.
 - **Pairing gates Spawn; the door-wide bearer gates only the read arms.**
-  A spawn runs only for an identified, paired peer: `spawn_admitted`
+  A spawn runs only for an identified, paired node: `spawn_admitted`
   requires a request resolved on the Signature rung (a verified per-request
-  ed25519 signature against some `verified` peer's stored pubkey —
-  [[Peer-Federation]]'s Signature rung) whose record's `allows` contains
+  ed25519 signature against some `verified` node's stored pubkey —
+  [[Node-Federation]]'s Signature rung) whose record's `allows` contains
   `"spawn"`. Every refusal is `-32006` with a shape-specific taught message
   — a paired-but-unsigned caller is told to sign, a signed caller lacking
-  the grant is told the exact `peer allow` fix, everyone else is told to
+  the grant is told the exact `node allow` fix, everyone else is told to
   pair and sign. `aoide.a2a.tokenFile` (read once at `a2a serve` launch,
   compared with a length-independent byte scan
-  `peer_store::token_bytes_eq`) is a legacy escape for unpaired callers:
+  `node_store::token_bytes_eq`) is a legacy escape for unpaired callers:
   it authenticates the read arms (`tasks/get`, the AgentCard GET,
   `aoide/graphSummary`), still `-32005`-gating them, and answers Inject's
   autogate question — it never reaches Spawn. Empty (the default) leaves
@@ -171,28 +171,28 @@ to **rebuild time** instead.
 - **Loopback is trusted unconditionally only while no token is configured.**
   `effective_origin(origin, token_configured, token_state)`
   coerces any caller — loopback included — that did not present the valid
-  token to `PeerOrigin::Unknown` before `should_deliver_now` ever sees it,
+  token to `ConnOrigin::Unknown` before `should_deliver_now` ever sees it,
   which never auto-delivers. There is no separate "trust loopback" toggle: behind a
   reverse proxy or tunnel (`ssh -R`, a tailscale funnel, cloudflared, nginx)
   the server sees the proxy's own loopback address for every caller, so an
   unconditional loopback trust hands a remote attacker the same standing as
   the operator. A caller that presents the valid token keeps
   loopback's original standing exactly.
-- **Per-peer tokens identify WHICH peer, not just whether one is trusted.**
-  `Peer.tokenFile` (`state/peers.json`, set via `peer add --token-file
-  <path>`) is a separate, per-peer secret from the server-wide `tokenFile`
+- **Per-node tokens identify WHICH node, not just whether one is trusted.**
+  `Node.tokenFile` (`state/nodes.json`, set via `node add --token-file
+  <path>`) is a separate, per-node secret from the server-wide `tokenFile`
   above — a legacy escape for unpaired callers, like it.
-  `peer_store::is_autogated_peer_token` folds a presented token
-  against every registered peer's own token file, and Inject's autogate
+  `node_store::is_autogated_node_token` folds a presented token
+  against every registered node's own token file, and Inject's autogate
   match is the OR of the address check, this token check, and the
   signature-rung `autogate` flag — a shared
-  secret could never tell two peers apart, so identifying which peer called
-  needs one file per peer, not one flag for the whole door.
-- **The outbound direction has its own bearer.** `peer add --bearer-secret
+  secret could never tell two nodes apart, so identifying which node called
+  needs one file per node, not one flag for the whole door.
+- **The outbound direction has its own bearer.** `node add --bearer-secret
   <name>` records a secret THIS instance resolves through the local secrets
-  broker, as consumer `a2a-client`, on every outbound call to that peer —
-  the opposite direction from `Peer.tokenFile` above (what the peer presents
-  to us). See [[Peer-Federation]] for the registry shape.
+  broker, as consumer `a2a-client`, on every outbound call to that node —
+  the opposite direction from `Node.tokenFile` above (what the node presents
+  to us). See [[Node-Federation]] for the registry shape.
 - **Audited.** Every inject, spawn, and error — including Spawn's `-32006`
   pairing-gate refusals and the signed-request `-32007`/`-32008`/`-32009`
   failures — writes to the single audit log as `Door::A2a`, the
@@ -201,9 +201,9 @@ to **rebuild time** instead.
 ## Related
 
 - [[Agent-Interface]]
-- [[Peer-Federation]] — the aoide-to-aoide door built on top of this one
+- [[Node-Federation]] — the aoide-to-aoide door built on top of this one
 - [[Pairing-Ceremony]] — the commit-then-reveal handshake whose wire methods (`aoide/pairRequest`/`aoide/pairReveal`/`aoide/pairPoll`) ride this door
-- [[Peer-Transport]] — reaching this door through a tunnel when a paired peer isn't directly HTTP-reachable
+- [[Node-Transport]] — reaching this door through a tunnel when a paired node isn't directly HTTP-reachable
 - [[Governance]]
 - [[Session-Graph]]
 - [[Conductor-Channel]]

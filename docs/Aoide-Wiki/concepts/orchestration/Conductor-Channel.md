@@ -72,7 +72,7 @@ central registry, no single point of failure):
    conductable: true
    socket:      "…/session-<id>.sock"
    title:       "<chat title / current task>"
-   origin:      "local"-class | "peer:<name>"  (write-once; peer:* only from the A2A door)
+   origin:      "local"-class | "node:<name>"  (write-once; node:* only from the A2A door)
    seal + sealedIssuedAt:  the daemon-sealed session credential (see [[Session-Graph]])
 ```
 
@@ -98,9 +98,9 @@ threads `AOIDE_SESSION_ID`, already blocks on `wait()`.
   audit log (below); a delivered send sets the target's `title` to the task
   (auto-rename) and, since aoide owns the PTY, may push an OSC-2 title
   sequence to the real terminal so the window title tracks the flow. `--to
-  <name>` resolves a local id/tail4/petname or a `peer/<query>` instead of a
-  raw `--id`; a peer-resolved send always attempts delivery over A2A rather
-  than queuing locally — see [[Peer-Federation]].
+  <name>` resolves a local id/tail4/petname or a `node/<query>` instead of a
+  raw `--id`; a node-resolved send always attempts delivery over A2A rather
+  than queuing locally — see [[Node-Federation]].
 - **Title discovery** — a small hyprctl step (`hyprctl clients -j`, match the
   session's process to a client) populates `windowAddress` and reads the
   live chat title claude already writes to its terminal window, so
@@ -323,6 +323,6 @@ the shipped terminal).
 - [[Conductor-3D-DAG]]
 - [[Agent-Hooking]]
 - [[aoided]]
-- [[Peer-Federation]]
-- [[Peer-Transport]]
+- [[Node-Federation]]
+- [[Node-Transport]]
 - [[Lexicon]] (conductor-class)

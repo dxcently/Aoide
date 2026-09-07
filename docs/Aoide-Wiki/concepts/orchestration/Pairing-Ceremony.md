@@ -2,13 +2,13 @@
 type: concept
 created: 2026-08-28
 updated: 2026-08-29
-tags: [aoide, agent, a2a, orchestration, peer, security]
+tags: [aoide, agent, a2a, orchestration, node, security]
 ---
 
 # Pairing Ceremony — one identity per instance, confirmed by both humans
 
 Pairing is THE setup for connecting two aoide instances and the ONLY
-verification between them: one ceremony commits a `pubkey`/`verified` peer
+verification between them: one ceremony commits a `pubkey`/`verified` node
 record on both ends and stamps the default permissions off the pair. Each
 instance holds one ed25519 identity keypair (`aoide_storage::identity`,
 minted lazily on first use through `load_or_mint`): two files under
@@ -29,7 +29,7 @@ commands.rs` (`register_pair`). The ceremony rides three methods on
 the EXISTING [[A2A-Door]] — no new transport, no new port — and the
 request/reveal pair is deliberately unauthenticated: the ceremony
 establishes a credential where none exists yet, so gating it on one is
-circular. The poll authenticates without a peer record — none exists on
+circular. The poll authenticates without a node record — none exists on
 the approver's side until the very id being polled is approved — so the
 requester signs each poll with the same identity key whose pubkey rode
 its request, and the approver verifies against the parked entry's own
@@ -68,7 +68,7 @@ operator B: bare aoide pair → aoide pair [<id>]
   --code NNN-NNN scripted), compared against B's OWN derived SAS,
   never echoed in the prompt; a wrong code counts a persisted try,
   the 3rd cumulative mismatch auto-denies (nothing committed)
-  On a match, B's own peer record commits HERE — purely     (nothing
+  On a match, B's own node record commits HERE — purely     (nothing
   local, and the parked entry is marked approved, left PARKED  dials A)
 A's own aoide pair is STILL RUNNING, re-polling every 5s up to --wait (600s);
   aoide pair <id> is the same poll on demand, after --wait 0 or a timeout
@@ -82,7 +82,7 @@ A's own aoide pair is STILL RUNNING, re-polling every 5s up to --wait (600s);
   relays it to A's operator out of band. A's operator TYPES that reply
   code — never a bare yes/no — against its own persisted-try counter;
   the 3rd cumulative mismatch auto-aborts the outbound entry. Only on a
-  match does A's own peer record commit. aoide pair reject <id> aborts
+  match does A's own node record commit. aoide pair reject <id> aborts
   either queue at any stage — no wire call, no record on either end.
 ```
 
@@ -98,7 +98,7 @@ entry `awaiting-confirm`.
 
 ## The commit asymmetry — both humans confirm
 
-The two ends commit their peer records asymmetrically in time, though
+The two ends commit their node records asymmetrically in time, though
 both gates are typed codes. B's record for A exists the moment B's
 operator approves — `aoide pair` on an inbound id is purely local
 (`aoide-client::commands::approve_inbound`): it commits the record and
@@ -119,8 +119,8 @@ code counts a try the same way B's leg does; the third cumulative
 mismatch auto-aborts the outbound entry. `--yes` bypasses neither side's
 typed code — only the sweep-proceed prompt and an already-paired re-pair
 confirm. Two different codes, two typed confirmations: a never-confirmed
-A leaves B holding a `verified: true` peer that answers nothing —
-visible on B's own `peer status`, resolved by an ordinary expiring
+A leaves B holding a `verified: true` node that answers nothing —
+visible on B's own `node status`, resolved by an ordinary expiring
 re-pair.
 
 ## The SAS
@@ -169,7 +169,7 @@ optional target:
   call — a URL-shaped target (`"://"`) dials directly; anything else is
   a hostname resolved by the command's own ~45s discovery sweep
   (ambiguous or absent name = taught error listing what WAS heard). A
-  target resolving to an already-`verified: true` peer confirms
+  target resolving to an already-`verified: true` node confirms
   (`confirm_repair_if_verified`) before re-running the ceremony and
   replacing its key material — `--yes` scripted, the explicit URL arm
   stays ungated. A second positional is refused outright, before any
@@ -178,7 +178,7 @@ optional target:
   spelling, so a box actually named `reject` or `watch` pairs only by
   the explicit URL form. Starting a new request sends the commitment
   and the reveal as two sequential POSTs inside one invocation, parks
-  the outbound half (`state/peer-pairing-outbound.json`), and prints
+  the outbound half (`state/node-pairing-outbound.json`), and prints
   the derived SAS plus the request's short id, then BLOCKS
   (`wait_and_commit`) up to `--wait` seconds (default 600) polling
   every 5s to complete the pair in the one command — `--wait 0` parks
@@ -186,7 +186,7 @@ optional target:
   since a grant is never persisted on a parked entry); on a resume,
   `--wait 0` polls exactly once (`poll_outbound_once`).
 - **`aoide pair reject <id|name>`** (`handle_pair_reject`) is a clean
-  local refusal on either queue — no wire call, no peer record; by name
+  local refusal on either queue — no wire call, no node record; by name
   it matches exactly one pending request or refuses as ambiguous; on an
   outbound entry it doubles as the ceremony's abort command, usable at
   any stage.
@@ -240,21 +240,21 @@ optional target:
 
 ## The converge drives this same ceremony
 
-`aoide mesh pair [<mesh>]` ([[Doors-and-Peers#aoide mesh pair]], task #135
+`aoide mesh pair [<mesh>]` ([[Doors-and-Nodes#aoide mesh pair]], task #135
 P5) is not a second ceremony and adds no wire method, no gate, and no state
 of its own. It reads a `[mesh.<name>]` declaration, selects the declared
-peers this box has no verified record of (`missing`/`unverified`, in
+nodes this box has no verified record of (`missing`/`unverified`, in
 declared-name order), and runs each one through the SAME
 `run_pair_request` core `pair_via_url`/`pair_via_hostname` call — the same
 two POSTs, the same park, the same `--wait` poll, the same typed code on
 both sides. What it adds sits entirely in front of and around that: the
 selection, ONE pre-flight confirm covering the whole run (`--yes` skips it,
 exactly as it skips the sweep proceed prompt above), the mesh's declared
-`grant` in place of a typed `--allow`, and one report whose per-peer
+`grant` in place of a typed `--allow`, and one report whose per-node
 outcome is `completed`, `parked`, `UNREACHABLE`, or `skipped`.
 
 Two rules keep it inside this page's contract rather than beside it. A
-verified peer is never modified — a peer whose recorded `via` disagrees
+verified node is never modified — a node whose recorded `via` disagrees
 with the declaration is reported `skipped`, since re-pairing replaces key
 material and `via` is written by a ceremony commit alone — so a second run
 converges nothing. And nothing pairs with nobody watching: every leg keeps
@@ -298,50 +298,50 @@ invocation, never wire-driven) and carry no cap. Parked entries expire
 after `AOIDE_PAIRING_TIMEOUT` seconds, else the 4-hour default
 (`DEFAULT_PAIRING_TIMEOUT_SECS`) — the wait is for a human, twice; expired
 entries are swept lazily on the next `list`/`take` call, never by a
-background timer. Nothing about parking ever reaches `state/peers.json`
+background timer. Nothing about parking ever reaches `state/nodes.json`
 until an explicit approve.
 
 ## What approval commits
 
 A fully approved request is the ceremony's entire grant:
-`peer_store::upsert_paired_peer` commits a peer record carrying
+`node_store::upsert_paired_node` commits a node record carrying
 `pubkey`, `verified: true`, and an `allows` set drawn from the closed
-capability vocabulary `PEER_CAPABILITIES` — `config.toml`'s `[pairing]
+capability vocabulary `NODE_CAPABILITIES` — `config.toml`'s `[pairing]
 defaultGrant` (`["read"]` by default), or the `--allow` typed on that one
 `aoide pair`. When the parked
 request carries the requester's optional `selfVia` claim (its
 self-asserted `ssh://[user@]host` reach-back hop — self-asserted data, a
 transport marker only, never a source of trust), the approver's commit
-also sets the resulting peer's `url` to `http://127.0.0.1:<port>/` —
+also sets the resulting node's `url` to `http://127.0.0.1:<port>/` —
 loopback-as-seen-from-the-far-side, `<port>` parsed off the REQUESTER's
 own advertised url — and `via` to the claim, in the same write; absent
 the claim, `url` is the advertised door verbatim and `via` stays unset
-([[Peer-Transport]]). Narrowing or
-widening that grant afterward is `peer allow <name> <cap> on|off`'s job —
+([[Node-Transport]]). Narrowing or
+widening that grant afterward is `node allow <name> <cap> on|off`'s job —
 idempotent, refusing unknown capability strings — never re-run by
 re-pairing. The upsert matches by NAME, so one remote instance paired
 under two names yields two records sharing one key — harmless, because
 identity IS the key: inbound signed requests resolve by whichever verified
 record's stored pubkey verifies the signature, the claimed name demoted to
 attribution plus an exact-name tiebreak among same-key records
-([[Peer-Federation]]'s Signature rung). The record is what the [[A2A-Door]]'s gates read: Spawn
+([[Node-Federation]]'s Signature rung). The record is what the [[A2A-Door]]'s gates read: Spawn
 admits only a caller resolved through the Signature rung whose `allows`
-contains `"spawn"` (`a2a.rs::spawn_admitted`), and a signed peer's
+contains `"spawn"` (`a2a.rs::spawn_admitted`), and a signed node's
 per-request ed25519 signature is the wire authentication the ceremony's
 verified key anchors. See
-[[Peer-Federation#Security — pairing is the verification path]].
+[[Node-Federation#Security — pairing is the verification path]].
 
 ## Legacy escapes
 
 The door-wide bearer (`aoide.a2a.tokenFile`/`aoide.a2a.bearerSecret`) and
-a peer's own `tokenFile` are legacy escapes for an UNPAIRED caller: they
+a node's own `tokenFile` are legacy escapes for an UNPAIRED caller: they
 authenticate the read arms (`tasks/get`, the AgentCard GET,
 `aoide/graphSummary`) and answer Inject's autogate question, and nothing
-else — the door-wide bearer alone never resolves a peer identity, and
-neither rung reaches Spawn. A bare address match (`PeerRung::Addr`)
-resolves a peer identity for attribution only — Inject's `from` field,
+else — the door-wide bearer alone never resolves a node identity, and
+neither rung reaches Spawn. A bare address match (`NodeRung::Addr`)
+resolves a node identity for attribution only — Inject's `from` field,
 the autogate question — since it carries no possession proof. `aoide pair`
-authenticates a peer without any pre-shared secret. Spec:
+authenticates a node without any pre-shared secret. Spec:
 `CONTRACTS.md` §6 "Legacy escapes".
 
 ## Status
@@ -359,8 +359,8 @@ pair ask` or zenity `--entry`, opt-in behind `aoide.a2a.pairingPopup`), and
 
 - [[A2A-Door]] — the door the ceremony's three methods ride, and the
   gates that read the record it commits
-- [[Peer-Federation]] — the registry the verified peer lands in
-- [[Peer-Transport]] — `--via` on `aoide pair` dials through a
+- [[Node-Federation]] — the registry the verified node lands in
+- [[Node-Transport]] — `--via` on `aoide pair` dials through a
   tunnel and records the marker at approve
 - [[aoide-cli]] — the registry the pairing commands register into
 - `docs/architecture/PAIRING.md` — the design authority for the ceremony

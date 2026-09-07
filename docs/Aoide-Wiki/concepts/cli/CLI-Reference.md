@@ -66,11 +66,11 @@ start at [[aoide-cli]] and the group pages linked below.
 - [[Screen-Commands|Screen-Commands]] — computer use: `screen info/
   shot/ocr/diff/send` and the nine `screen point` commands. Captures and sidecars
   in `state/captures/`; pointer position in `state/pointer-pos.json`.
-- [[Doors-and-Peers|Doors-and-Peers]] — the other doors:
+- [[Doors-and-Nodes|Doors-and-Nodes]] — the other doors:
   `mcp serve`, `daemon`, `events tail`, `shellbridge`, `adapter melete`,
   `conductor` (signature + pointer to [[Conductor-TUI]]), `who`, `a2a serve`,
-  and the `peer` federation group (the outbound A2A client). Registries:
-  `state/peers.json`, `state/peer-cache/<name>.json`.
+  and the `node` federation group (the outbound A2A client). Registries:
+  `state/nodes.json`, `state/node-cache/<name>.json`.
 - [[Conductor-TUI|Conductor-TUI]] — the `aoide conductor` interactive
   terminal frontend: seven panels, keys, what each dispatches. State:
   `state/stage/{projects,sessions,hooks}.json`, `song/stage/livery.json`,

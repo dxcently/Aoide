@@ -9,7 +9,7 @@ tags: [aoide, cli, agent, mcp, rust]
 # aoide (the CLI binary)
 
 `aoide` is Aoide's core orchestration surface: conducting, the project/
-session graph, A2A, peer federation, the daemon, usage, and hooks. It is the
+session graph, A2A, node federation, the daemon, usage, and hooks. It is the
 CLI trunk of [[Agent-Interface]]. The crate ships two binaries, `aoide` (CLI)
 and `aoided` (daemon), from a pi-style workspace of single-charter crates
 (`protocol`, `storage`, `client`, `conduct`, `server`, `conductor`, `upkeep`,
@@ -63,7 +63,7 @@ The command surface holds **60 leaves across the groups this page tracks**;
 commands exist that are not yet covered here: the `inbox` group, `who`,
 `events tail`, `identity` (the keypair read surface — [[Pairing-Ceremony]]),
 the `melete` group (`status`/`graph`/`call`),
-and the `peer` group's `hub`/`allow`/`spawn`,
+and the `node` group's `hub`/`allow`/`spawn`,
 `discover`/`advertise`/`list`, and the pairing ceremony — `pair <target>`
 with its `approve`/`reject`/`watch` subcommands plus `pending`
 ([[Pairing-Ceremony]]). `lyra schema --json`
@@ -90,7 +90,7 @@ the groups it documents.
 | `adapter melete` | 1 | real |
 | `conductor` | 1 | real |
 | `a2a serve` | 1 | real |
-| `peer add/remove/pull/status` | 4 | real (same-network federation — `CONTRACTS.md` §7) |
+| `node add/remove/pull/status` | 4 | real (same-network federation — `CONTRACTS.md` §7) |
 | `secrets serve/exec/add/rm/grant/revoke/enroll/put/set-totp/automate/expose/allow-remote-origin/migrate/pending/approve/dismiss/watch` | 17 | real ([[Secrets-Broker]] — TOTP-gated resolves, socket-only, own uid) |
 | `usage` | 1 | real |
 | `hooks install` | 1 | real |
@@ -102,8 +102,8 @@ serve` raises the A2A JSON-RPC/HTTP server (AgentCard, `message/send`,
 `--bearer-secret <name>` names a secret this door requires as the inbound
 `Authorization: Bearer` token, resolved fresh per request through
 [[Secrets-Broker]] and failing closed on a resolve error. Driving an
-external aoide instance over this wire is the **`peer`** group's job (below)
-— `peer add`/`peer spawn`/`send --to` — not a separate `a2a` client
+external aoide instance over this wire is the **`node`** group's job (below)
+— `node add`/`node spawn`/`send --to` — not a separate `a2a` client
 command.
 
 **`usage`** computes the local token/cost rollup behind the opt-in claude.ai
@@ -164,7 +164,7 @@ everything that acts or manages lifecycle to its own top-level family:
 `--agent <name>`, default `claude`; the payload maps through that harness's
 agent profile, [[Agent-Hooking]]), `session undying` (Lane U; renamed from
 its prototype name "carry"), bare `session` (Lane U, the undying picker —
-inquire multi-select over local and peer-cached sessions), `session permit`,
+inquire multi-select over local and node-cached sessions), `session permit`,
 `session pending list`/`approve`/`deny`, `session prune`, and bare
 `send`/`spawn`/`resurrect`. `session start`/`phase`/`end`/`hook` carry
 `internal: true` in the schema — hook plumbing a harness's own lifecycle
@@ -197,38 +197,38 @@ to a session's window is a library call (`focus_session`,
 [[Session-Graph]]) the conductor and `shellbridge`'s `focussession` socket
 verb reach directly, not something shelled out to.
 
-### The `peer` group — aoide-to-aoide federation
+### The `node` group — aoide-to-aoide federation
 
 `add <name> <url> [--autogate] [--no-verify] [--via ssh://…] [--token-file
 <path>] [--bearer-secret <name>]` / `remove <name>` / `pull [<name>]` /
 `status` register
-OTHER aoide instances as **peers** and fold their resolved session graphs
+OTHER aoide instances as **nodes** and fold their resolved session graphs
 into this instance's own — built entirely on top of the existing
 [[A2A-Door]] rather than a new transport (`aoide/graphSummary`, one new
-JSON-RPC method on the same server). See [[Peer-Federation]] for the full
+JSON-RPC method on the same server). See [[Node-Federation]] for the full
 mechanism. Same-network only today — real, integration-tested
-(`pkgs/aoide/crates/cli/tests/peer_connectivity.rs` proves two live
-`a2a::serve()` instances talking peer-to-peer end to end); WAN/NAT-traversal
+(`pkgs/aoide/crates/cli/tests/node_connectivity.rs` proves two live
+`a2a::serve()` instances talking node-to-node end to end); WAN/NAT-traversal
 reachability is out of scope for this v0.
 
-- **`peer add`** — verifies the peer FIRST (fetches its AgentCard) and only
+- **`node add`** — verifies the node FIRST (fetches its AgentCard) and only
   registers on success; a duplicate `name` is rejected rather than
-  repointed. `--token-file` records a per-peer bearer secret this instance
-  expects that peer to present, identifying WHICH peer is calling once
+  repointed. `--token-file` records a per-node bearer secret this instance
+  expects that node to present, identifying WHICH node is calling once
   address alone can't (a proxy or tunnel makes every caller's address look
   loopback). `--bearer-secret` is the outbound counterpart: it names a
   secret, resolved fresh through [[Secrets-Broker]], this instance presents
-  as its own `Authorization: Bearer` header when calling that peer.
-- **`peer remove`** — a missing name is an error, not idempotent-silent
-  (`rice draft drop`'s precedent); also drops that peer's cache file.
-- **`peer pull`** — with no name, pulls EVERY registered peer; one peer
+  as its own `Authorization: Bearer` header when calling that node.
+- **`node remove`** — a missing name is an error, not idempotent-silent
+  (`rice draft drop`'s precedent); also drops that node's cache file.
+- **`node pull`** — with no name, pulls EVERY registered node; one node
   being unreachable never aborts the others, and a failed pull marks the
   cache `stale` with a reason rather than deleting it.
-- **`peer status`** — the human line stays a terse count; `--json` carries
-  the full registry row per peer (name/url/autogate/tokenFile/bearerSecret/
+- **`node status`** — the human line stays a terse count; `--json` carries
+  the full registry row per node (name/url/autogate/tokenFile/bearerSecret/
   hub/pubkey/verified/allows/addedAt) plus its `fresh`/`stale`/`never-pulled`
   classification (the same one the graph fold itself uses) and
-  `fetchedAt`/`lastError` — the deep per-peer detail view.
+  `fetchedAt`/`lastError` — the deep per-node detail view.
 - **`aoide pair [<name|url|id>]` / `pair reject` / `pair watch`** — the
   pairing ceremony's ENTIRE CLI face, one smart verb; bare `pair` is the
   pending listing, a target dials a URL directly or resolves a bare
@@ -237,19 +237,19 @@ reachability is out of scope for this v0.
   gate is the TYPED confirmation code (three cumulative misses
   auto-deny), its approval purely local; the requester's own resume
   polls `aoide/pairPoll` over the same forward dial and confirms `y`/`N`.
-  Full mechanism: [[Pairing-Ceremony]], signatures: [[Doors-and-Peers]].
-- **`peer allow <name> <cap> on|off`** — flips one capability in a peer's
+  Full mechanism: [[Pairing-Ceremony]], signatures: [[Doors-and-Nodes]].
+- **`node allow <name> <cap> on|off`** — flips one capability in a node's
   closed `allows` set (`"read"`/`"spawn"`); idempotent, refuses an unknown
-  peer or capability. `peer spawn <name> -- <text…>` POSTs a signed spawn
-  to a paired peer's door; the remote gate is the sole authority.
-- **`peer discover [--secs N]` / `peer advertise
+  node or capability. `node spawn <name> -- <text…>` POSTs a signed spawn
+  to a paired node's door; the remote gate is the sole authority.
+- **`node discover [--secs N]` / `node advertise
   on|off`** — the LAN discovery surface: a UDP broadcast advertisement
   (255.255.255.255:8711, `{v, name, host, user}`, rendezvous only), off by
   default; `discover` is the on-demand sweep, `aoide pair <name>` resolves a
   heard name into the pairing ceremony, `advertise` is the runtime switch.
-  Wire and validation: [[Peer-Transport]], [[Doors-and-Peers]].
-- **`peer list [--json]`** — the one-glance mesh roster: every known node
-  (this host, registered peers, advertising instances) with its running
+  Wire and validation: [[Node-Transport]], [[Doors-and-Nodes]].
+- **`node list [--json]`** — the one-glance mesh roster: every known node
+  (this host, registered nodes, advertising instances) with its running
   sessions beneath, marked `●`/`○`/`◆`; one bounded ~2 s sweep plus
   `who`'s live probes; read-only.
 
@@ -316,7 +316,7 @@ applies.
 
 - [[Agent-Interface]]
 - [[A2A-Door]]
-- [[Peer-Federation]]
+- [[Node-Federation]]
 - [[Secrets-Broker]]
 - [[Screen-Control]]
 - [[Session-Graph]]

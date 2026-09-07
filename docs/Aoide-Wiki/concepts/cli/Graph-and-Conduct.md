@@ -65,8 +65,8 @@ aoide graph [--focus <node>] [--json]
 ```
 
 - **Reads:** `state/stage/{projects,sessions,hooks}.json` (missing files read
-  as empty); also folds in `state/peers.json` + `state/peer-cache/<name>.json`
-  (`peer:*` root nodes, `children` nested verbatim when the cache is fresh)
+  as empty); also folds in `state/nodes.json` + `state/node-cache/<name>.json`
+  (`node:*` root nodes, `children` nested verbatim when the cache is fresh)
   via `build_graph` (`doc.rs`).
 - **Output:** text — `"<n> node(s), <e> edge(s)\n"` followed by a Unicode
   box-drawing tree: `◆` project roots, `●` sessions (spawned children nest
@@ -134,7 +134,7 @@ aoide graph link <child> <parent> [--json]
   edge with `data.warning: "parent session not (yet) registered; edge recorded
   anyway"`.
 - **Notes:** errors (exit 1): `reason: "self-link"`, `"child-not-found"`, or
-  `"cycle"` (the walk in `doc.rs::would_cycle`). Ignores `peer:*`/`a2a:*` ids
+  `"cycle"` (the walk in `doc.rs::would_cycle`). Ignores `node:*`/`a2a:*` ids
   like any unknown local id.
 
 ### aoide session start
@@ -239,24 +239,24 @@ aoide session [--json]
 ```
 
 - **Reads:** `state/undying.json` and this host's own `state/stage/
-  sessions.json` for the local roster; every registered peer's CACHED
-  `state/peer-cache/<name>.json` (no live pulls) for peer rows, via `who.rs`'s
+  sessions.json` for the local roster; every registered node's CACHED
+  `state/node-cache/<name>.json` (no live pulls) for node rows, via `who.rs`'s
   `sessions_from_graph` (widened `pub(super)` for this second consumer).
 - **Writes:** a `tty`+`inquire` multi-select (`aoide_protocol::pick::
-  choose_many`) opens over the combined local+peer roster, each row
+  choose_many`) opens over the combined local+node roster, each row
   pre-checked by its current undying state. Confirming toggles land in one
   batch: a local row's mark goes through one `load_undying`, N
   `set_undying` mutations, one `save_undying` — the same discipline
-  `session undying`'s own single-id write already holds. A peer row's mark
-  can't touch `undying.json` (the id lives on the peer) — it writes a
+  `session undying`'s own single-id write already holds. A node row's mark
+  can't touch `undying.json` (the id lives on the node) — it writes a
   `{host, dir, agent}` spec into the CURRENT project's `.aoide/project.json`
   manifest instead, resolved via the same `walk_up` bare `resurrect` uses
-  below; no manifest above cwd reports every peer mark/unmark as `skipped`
+  below; no manifest above cwd reports every node mark/unmark as `skipped`
   with a taught reason while local marks in the same confirm still land. A
-  peer cwd that cannot relativize under the local project root is rejected
+  node cwd that cannot relativize under the local project root is rejected
   the same way, never saved with a raw absolute `dir` (`save_manifest`
-  refuses the whole batch on an absolute `dir`, so a single bad peer spec
-  never poisons the local+valid-peer rows landing beside it).
+  refuses the whole batch on an absolute `dir`, so a single bad node spec
+  never poisons the local+valid-node rows landing beside it).
 - **Output:** `data: {changed: [...], skipped: [...]}` naming each row's
   disposition; a clean cancel out of the picker changes nothing.
 - **Notes:** registered as a parent command alongside `session.*`, the same
@@ -423,24 +423,24 @@ spec is itself the durable declaration, so a later resurrect finds it
 without re-walking the manifest.
 
 **Remote summon (Lane U4).** A spec whose `host` names a DIFFERENT box is
-SUMMONED through the existing peer door, never skipped: `spec.host` resolves
-against `state/peers.json` as a peer NICKNAME, the same way the undying
+SUMMONED through the existing node door, never skipped: `spec.host` resolves
+against `state/nodes.json` as a node NICKNAME, the same way the undying
 picker writes it. Three local refusals land in `failed[]` (tried and
-refused, not given up on) before the wire is touched: no peer registered
-under that name, a registered but UNVERIFIED peer, or neither a `command`
+refused, not given up on) before the wire is touched: no node registered
+under that name, a registered but UNVERIFIED node, or neither a `command`
 nor a registered default launch to summon with. Past those,
 `graph::resurrect::summon_remote` calls the identical signed spawn-shaped
-`message/send` `aoide peer spawn` drives (`client::commands::spawn_on_peer`,
-extracted from `handle_peer_spawn` so both consumers share one
+`message/send` `aoide node spawn` drives (`client::commands::spawn_on_node`,
+extracted from `handle_node_spawn` so both consumers share one
 implementation) — no re-implementation of the wire, no shell-out to the
 `aoide` CLI, no confirm prompt (a manifest spec is the operator's own
-standing declaration). Which agent runs is the PEER's own configured
+standing declaration). Which agent runs is the NODE's own configured
 `aoide.a2a.spawnAgent`, never chosen here — the spec's `command` (or the
 agent's default launch) only ever becomes that agent's first typed turn. The
 wire carries no working-directory field at all, so a spec's `dir` is never
 pushed across; a spec wanting a specific remote directory says so inside its
 own `command` (`git -C <path> ...`). A summoned row is never marked undying
-on this host — the resurrected id lives on the peer.
+on this host — the resurrected id lives on the node.
 
 **Boot auto-resume.** The same command core also backs the daemon's own
 boot-time auto-resume trigger — a project's `autoResume` flag (`project add
@@ -531,9 +531,9 @@ aoide send (--id <id> | --to <name>) [--submit] [--yes] [--from <sender>] -- <te
   `--yes` and the entry's own `from`, in-process. `session permit`'s verdict
   and the A2A door both re-enter this same function in-process rather than
   reimplementing it. `--to` resolves a name (local id, tail4, or petname;
-  `peer/<query>` targets a remote session over A2A) in place of a raw `--id`,
+  `node/<query>` targets a remote session over A2A) in place of a raw `--id`,
   and the two are mutually exclusive. A remote send is always attempted and
-  never queues locally; the receiving peer gates its own delivery.
+  never queues locally; the receiving node gates its own delivery.
 
 ### aoide session pending list
 
@@ -727,8 +727,8 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
   stale); registers the session in `state/stage/sessions.json` with
   `conductable: true`, `socket`, the discovered `windowAddress`, and
   `pid` = the conduct process itself; stamps a write-once `origin` off its
-  own inherited `AOIDE_SESSION_ORIGIN` env, refusing a `peer:*` shape read
-  there (a `peer:*` value originates only at the A2A door's spawn —
+  own inherited `AOIDE_SESSION_ORIGIN` env, refusing a `node:*` shape read
+  there (a `node:*` value originates only at the A2A door's spawn —
   [[Session-Graph]]); the daemon's tick sweep seals the record
   (`seal`/`sealedIssuedAt`) within ~1s of registration, since this direct
   write never passes through the dispatch handler. Shell ticks push live

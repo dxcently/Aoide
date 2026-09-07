@@ -69,17 +69,17 @@ conductor, not the reason for it.
 ## 2. Doors — who grips whom (clarified, mostly EXISTS)
 
 The conductor's hold on local agents is mechanical and token-free; A2A is
-for agents aoide can only reach as a *peer* (usually remote):
+for agents aoide can only reach as a *node* (usually remote):
 
 | agent on this box | door onto the conductor | cost |
 |---|---|---|
 | claude, kimi (hook systems) | hook door — `aoide session hook` | free |
 | codex, gemini, aider, any CLI | `conduct` (PTY) / `spawn` (detached) | free |
 | anything scriptable | explicit commands — `session start/phase/end` | free |
-| an A2A-speaking peer (remote, usually) | peer door — `peer add` / `peer spawn` / `send --to` | model turns |
+| an A2A-speaking node (remote, usually) | node door — `node add` / `node spawn` / `send --to` | model turns |
 
 All four converge on the same `sessions/hooks/graph.json` records; a
-registered peer folds in as a `kind: "peer"` root node beside the hooked
+registered node folds in as a `kind: "node"` root node beside the hooked
 and conducted ones. The wiki sentence, once locked: *the conductor hooks every
 local agent mechanically (hooks, PTY, commands — zero tokens) and speaks A2A
 outward to whatever it can't touch.* Agent-agnosticism lives in the
@@ -1108,5 +1108,5 @@ Open / uncertain:
 - [[Ricing-Protocol]] — creation/application split + the mandatory vision-check
 - [[Agent-Hooking]] — the doors and the AgentProfile seam
 - [[Agent-Interface]] — CLI trunk, MCP façade, guidance tiers
-- [[A2A-Door]] — the wire this handout scopes to remote/peer command
+- [[A2A-Door]] — the wire this handout scopes to remote/node command
 - [[Session-Graph]] · [[Conductor-Channel]] · [[Terminal-Commander]]
