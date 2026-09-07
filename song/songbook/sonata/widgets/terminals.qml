@@ -26,7 +26,7 @@ import "../.."
 // on the stage. A SIBLING of the Conductor in the same pantheon — but a
 // different god's house. Where the Conductor is a Doric marble stele leaning
 // gold, this is an IONIC temple leaning aegean (holoBlue): scroll-volute
-// capital, a dentil cornice, an egg-and-dart rule, and scroll-cornered box
+// capital, a dentil cornice, an egg-and-dart rule, and square-cornered box
 // framing — the ARCHITECTURE differs; the plaques inside it do not.
 //
 // SHARED across the pantheon (the family resemblance):
@@ -41,13 +41,13 @@ import "../.."
 //   · the FUNCTION: agent · state · cwd · elapsed, click → focusSession,
 //     an empty state, and hot-reload of the stage file.
 //
-// DIFFERENT from the Conductor (the same plaques, another god's house):
+// ORDER and FRAME (the same plaques, another god's house):
 //   · ORDER   — Ionic, not Doric: a volute (scroll) capital + dentil course
 //               instead of the entablature band + baton course.
 //   · RULE    — egg-and-dart, not the solid baton course.
 //   · SIGNATURE HUE — aegean holoBlue carries the architecture (the Conductor's
 //               gold recedes to a small family nod on the tag).
-//   · FRAME   — scroll-cornered box (╭ ╮ ╰ ╯), echoing the volutes.
+//   · FRAME   — square box corners (┌ ┐ └ ┘), shared with the other temples.
 //
 // The ROWS wear the Conductor's card silhouette — the owner's round-2
 // directive ("terminals should look like the conductor") retires the old
@@ -76,6 +76,10 @@ import "../.."
 // The one laurel-`paletteHot` crown (the traced session) stays a pantheon-wide
 // signal, identical across temples. The music state colours stay shared too —
 // a "working" note reads the same in every house; only the architecture differs.
+// Codex main agents share the Conductor's 24×18 illuminated book: pages turn
+// while working, rest open on a hold, and close at idle/stopped/done.
+// The identity row reserves its width through state changes; bare shells and
+// subagents never acquire an agent badge from a title or foreground command.
 Item {
     id: gadget
 
@@ -120,6 +124,52 @@ Item {
     function withA(cstr, a) {                      // alpha on a role string
         var c = Qt.darker(cstr, 1.0);
         return Qt.rgba(c.r, c.g, c.b, a);
+    }
+
+    // Transform LISTS are fixed on this host and are not bindable in Qt.
+    // Discover their objects at attachment; bind to each Translate's x/y below.
+    function markTransforms(mark) {
+        var out = []
+        for (var node = mark; node; node = node.parent)
+            for (var i = 0; i < node.transform.length; i++)
+                out.push(node.transform[i])
+        return out
+    }
+
+    // Item.visible stays true behind a clip or the dock's translated cover.
+    // Snapshot the ancestor geometry explicitly: mapToItem() alone does not
+    // register those dependencies for a QML binding. The current host's
+    // transform list contains Translate; its x/y need their own reads too.
+    // Kept identical in Conductor so both marks sleep behind the same clips.
+    function markExposed(mark, win, shifts) {
+        if (!mark || !mark.visible || !win || !win.visible) return false
+        var positions = []
+        for (var i = 0; i < shifts.length; i++)
+            positions.push([shifts[i].x, shifts[i].y])
+        var chain = []
+        for (var node = mark; node; node = node.parent) {
+            chain.push({ item: node, parent: node.parent,
+                x: node.x, y: node.y, width: node.width, height: node.height,
+                visible: node.visible, opacity: node.opacity, clip: node.clip,
+                scale: node.scale, rotation: node.rotation,
+                transformOrigin: node.transformOrigin })
+        }
+        var rect = Qt.rect(0, 0, mark.width, mark.height)
+        for (var j = 0; j < chain.length; j++) {
+            var g = chain[j]
+            if (!g.visible || g.opacity <= 0) return false
+            if (g.clip) {
+                var left = Math.max(0, rect.x), top = Math.max(0, rect.y)
+                var right = Math.min(g.width, rect.x + rect.width)
+                var bottom = Math.min(g.height, rect.y + rect.height)
+                if (right <= left || bottom <= top) return false
+                rect = Qt.rect(left, top, right - left, bottom - top)
+            }
+            rect = g.item.mapToItem(g.parent, rect)
+        }
+        return rect.width > 0 && rect.height > 0
+            && rect.x < win.width && rect.y < win.height
+            && rect.x + rect.width > 0 && rect.y + rect.height > 0
     }
 
     // ── Special-workspace resolution ─────────────────────────────────────────
@@ -270,6 +320,7 @@ Item {
             out.push({
                 sessionId:     rec.sessionId || "",
                 agent:         rec.agent || "shell",
+                kind:          recKind(rec),          // preserve the published kind for paint predicates
                 state:         rec.state || "idle",
                 cwd:           rec.cwd || "",
                 startedAt:     rec.startedAt || "",
@@ -304,7 +355,7 @@ Item {
         var parts = [];
         for (var i = 0; i < list.length; i++) {
             var r = list[i];
-            parts.push([r.sessionId, r.agent, r.state, r.cwd, r.startedAt,
+            parts.push([r.sessionId, r.agent, r.kind, r.state, r.cwd, r.startedAt,
                         r.workspace, r.windowAddress, r.title,
                         r.activity, r.tool, r.say, r.model, r.contextTokens,
                         r.contextCeiling, r.needsSudo].join(""));
@@ -588,7 +639,7 @@ Item {
                 }
             }
 
-            // ── scroll-cornered top frame: ╭─┤ label ├────╮ ───────────────────
+            // ── square-cornered top frame: ┌─┤ label ├────┐ ───────────────────
             Item {
                 id: topFrame
                 anchors.top: eggdart.bottom; anchors.topMargin: 8
@@ -597,14 +648,14 @@ Item {
                 Text {
                     id: tfL
                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                    text: "╭─┤ ♪ open ttys ├"
+                    text: "┌─┤ ♪ open ttys ├"
                     font.family: gadget.faceMono; font.pixelSize: 11
                     color: gadget.withA(gadget.sig, 0.95)
                 }
                 Text {
                     id: tfR
                     anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                    text: "╮"
+                    text: "┐"
                     font.family: gadget.faceMono; font.pixelSize: 11
                     color: gadget.withA(gadget.sig, 0.95)
                 }
@@ -617,7 +668,7 @@ Item {
                 }
             }
 
-            // ── scroll-cornered bottom frame: ╰─ tally ─── 𝄂 ╯ ───────────────
+            // ── square-cornered bottom frame: └─ tally ─── 𝄂 ┘ ───────────────
             Item {
                 id: footer
                 anchors.bottom: parent.bottom
@@ -626,7 +677,7 @@ Item {
                 Text {
                     id: ffL
                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                    text: "╰─┤ " + gadget.rows.length + " terminal" + (gadget.rows.length === 1 ? "" : "s")
+                    text: "└─┤ " + gadget.rows.length + " terminal" + (gadget.rows.length === 1 ? "" : "s")
                           + " · " + gadget.projectCount + " cwd" + (gadget.projectCount === 1 ? "" : "s") + " ├"
                     font.family: gadget.faceMono; font.pixelSize: 11
                     color: gadget.withA(livery.paletteFg, 0.8)
@@ -634,7 +685,7 @@ Item {
                 Text {
                     id: ffCorner
                     anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                    text: "╯"
+                    text: "┘"
                     font.family: gadget.faceMono; font.pixelSize: 11
                     color: gadget.withA(gadget.sig, 0.95)
                 }
@@ -756,6 +807,10 @@ Item {
                         // byline + screen pane + context meter; bare ttys stay
                         // slim ledger lines.
                         readonly property bool agentRow: gadget.isAgentRec(modelData)
+                        readonly property bool codexMain: gadget.recKind(modelData) === "agent"
+                            && ("" + (modelData.agent || "")).toLowerCase() === "codex"
+                        readonly property bool codexLive: row.codexMain && row.working
+                            && !row.rowAwaiting
                         readonly property string activityText: modelData.activity || ""
                         // the tool lane — what the agent last reached for. TWO
                         // sources, and they disagree on purpose: `activity` is
@@ -978,11 +1033,145 @@ Item {
                                     width: parent.width - 21
                                            - (wsTagT.visible ? wsTagT.implicitWidth + 8 : 0)
                                            - (stateWordT.implicitWidth + 8)
+                                           - (row.codexMain ? codexTag.width + 6 : 0)
                                     text: row.agentRow ? (modelData.agent || "agent") : row.procText
                                     font.family: row.agentRow ? gadget.faceSerif : gadget.faceMono
                                     font.pixelSize: row.agentRow ? 14 : 12
                                     font.weight: row.emph ? Font.Bold : Font.Medium
                                     color: gadget.withA(livery.paletteFg, row.agentRow ? 1.0 : 0.85)
+                                }
+                                // Codex's illuminated book — a turning leaf while working,
+                                // a still open spread on a hold, and a closed cover at rest.
+                                Item {
+                                    id: codexTag
+                                    visible: row.codexMain
+                                    x: procName.x + Math.min(procName.paintedWidth, procName.width) + 6
+                                    y: 1
+                                    width: 24; height: 18
+                                    clip: true
+                                    readonly property color ink: gadget.withA(gadget.stateColor(modelData.state), 0.95)
+                                    readonly property color gold: gadget.livery.paletteAccent
+                                    readonly property color paper: gadget.livery.paletteBg
+                                    readonly property bool openBook: row.working || row.rowAwaiting
+                                    readonly property bool turning: row.codexLive
+                                    readonly property var hostWindow: QsWindow.window
+                                    property var hostTransforms: []
+                                    property bool componentReady: false
+                                    Component.onCompleted: {
+                                        hostTransforms = gadget.markTransforms(codexTag)
+                                        componentReady = true
+                                    }
+                                    Component.onDestruction: componentReady = false
+                                    // Attachment signals fire before the outer root id is available.
+                                    onParentChanged: if (componentReady && gadget) hostTransforms = gadget.markTransforms(codexTag)
+                                    onHostWindowChanged: if (componentReady && gadget) hostTransforms = gadget.markTransforms(codexTag)
+                                    readonly property bool exposed: componentReady && !!gadget
+                                        && gadget.markExposed(codexTag, hostWindow, hostTransforms)
+                                    property real leaf: 0
+
+                                    SequentialAnimation on leaf {
+                                        running: codexTag.turning && codexTag.exposed
+                                        loops: Animation.Infinite
+                                        onStopped: codexTag.leaf = 0
+                                        NumberAnimation { from: 0; to: 1; duration: 1100; easing.type: Easing.InOutCubic }
+                                        PauseAnimation { duration: 450 }
+                                    }
+                                    Canvas {
+                                        anchors.fill: parent
+                                        property color ink: codexTag.ink
+                                        property color gold: codexTag.gold
+                                        property color paper: codexTag.paper
+                                        property bool openBook: codexTag.openBook
+                                        property bool turning: codexTag.turning
+                                        property real leaf: codexTag.leaf
+                                        onInkChanged: requestPaint()
+                                        onGoldChanged: requestPaint()
+                                        onPaperChanged: requestPaint()
+                                        onOpenBookChanged: requestPaint()
+                                        onTurningChanged: requestPaint()
+                                        onLeafChanged: requestPaint()
+                                        onWidthChanged: requestPaint()
+                                        onHeightChanged: requestPaint()
+                                        onPaint: {
+                                            var ctx = getContext("2d")
+                                            ctx.reset()
+                                            ctx.strokeStyle = ink
+                                            ctx.fillStyle = paper
+                                            ctx.lineWidth = 1
+                                            if (!openBook) {
+                                                // The resting volume: hard cover, spine, page block,
+                                                // and one small gilt lozenge, all inside the same slot.
+                                                ctx.globalAlpha = 0.8
+                                                ctx.fillRect(7, 2.5, 11, 13)
+                                                ctx.strokeRect(7, 2.5, 11, 13)
+                                                ctx.beginPath()
+                                                ctx.moveTo(9, 2.5); ctx.lineTo(9, 15.5)
+                                                ctx.moveTo(9, 13.5); ctx.lineTo(18, 13.5)
+                                                ctx.stroke()
+                                                ctx.strokeStyle = gold
+                                                ctx.globalAlpha = 0.55
+                                                ctx.beginPath()
+                                                ctx.moveTo(13.5, 6); ctx.lineTo(15, 8)
+                                                ctx.lineTo(13.5, 10); ctx.lineTo(12, 8)
+                                                ctx.closePath(); ctx.stroke()
+                                                return
+                                            }
+
+                                            // The spread's dipped gutter makes the tiny silhouette read
+                                            // as a book before the animated page lifts off it.
+                                            ctx.beginPath()
+                                            ctx.moveTo(2, 3.5)
+                                            ctx.quadraticCurveTo(7, 2, 12, 5)
+                                            ctx.quadraticCurveTo(17, 2, 22, 3.5)
+                                            ctx.lineTo(22, 14)
+                                            ctx.quadraticCurveTo(17, 12.5, 12, 15)
+                                            ctx.quadraticCurveTo(7, 12.5, 2, 14)
+                                            ctx.closePath()
+                                            ctx.fill()
+                                            ctx.globalAlpha = 0.8
+                                            ctx.stroke()
+                                            ctx.beginPath()
+                                            ctx.moveTo(12, 5); ctx.lineTo(12, 15)
+                                            ctx.moveTo(1.5, 15); ctx.lineTo(7, 14.5)
+                                            ctx.lineTo(12, 16); ctx.lineTo(17, 14.5)
+                                            ctx.lineTo(22.5, 15)
+                                            ctx.stroke()
+                                            ctx.globalAlpha = 0.3
+                                            for (var row = 0; row < 3; row++) {
+                                                var y = 6 + row * 2.5
+                                                ctx.beginPath()
+                                                ctx.moveTo(4, y); ctx.lineTo(9, y + 0.7)
+                                                ctx.moveTo(15, y + 0.7); ctx.lineTo(20, y)
+                                                ctx.stroke()
+                                            }
+                                            if (!turning || leaf <= 0 || leaf >= 1) return
+
+                                            var angle = Math.PI * leaf
+                                            var lift = Math.sin(angle)
+                                            var edgeX = 12 + 9 * Math.cos(angle)
+                                            var edgeTop = 3.5 - 1.5 * lift
+                                            var edgeBottom = 14 - lift
+                                            ctx.globalAlpha = 1
+                                            ctx.beginPath()
+                                            ctx.moveTo(12, 5)
+                                            ctx.quadraticCurveTo((12 + edgeX) / 2, 3 - 2 * lift, edgeX, edgeTop)
+                                            ctx.lineTo(edgeX, edgeBottom)
+                                            ctx.quadraticCurveTo((12 + edgeX) / 2, 12.5 - lift, 12, 15)
+                                            ctx.closePath()
+                                            ctx.fill()
+                                            ctx.globalAlpha = 0.55
+                                            ctx.stroke()
+                                            // A low, steady gilding follows the lifted edge; no flash
+                                            // or whole-book pulse. It disappears as the page settles.
+                                            ctx.strokeStyle = gold
+                                            ctx.beginPath()
+                                            ctx.moveTo(edgeX, edgeTop); ctx.lineTo(edgeX, edgeBottom)
+                                            ctx.globalAlpha = 0.13 * lift
+                                            ctx.lineWidth = 3; ctx.stroke()
+                                            ctx.globalAlpha = 0.55 * lift
+                                            ctx.lineWidth = 1; ctx.stroke()
+                                        }
+                                    }
                                 }
                             }
                             // ── the SCREEN PANE — agent rows only ─────────────
