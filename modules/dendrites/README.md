@@ -4,7 +4,7 @@ Optional, additive host capabilities — every dendrite self-gates on its own
 `aoide.<name>.enable` and is discovered by `lib/walk.nix`'s recursive walk,
 never an import list. Today's set spans desktop apps (firefox, obsidian,
 kitty), CLI tooling (git, yazi, starship, mcfly, nh), agent CLIs
-(claude-code, kimi-code, pi-coding-agent), and system services (dunst,
+(claude-code, kimi-code, pi-coding-agent, codex), and system services (dunst,
 networkmanager, audio).
 
 ## Named seams (what it exposes)
