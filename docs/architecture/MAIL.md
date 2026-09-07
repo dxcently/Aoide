@@ -646,9 +646,9 @@ READMEs), no subagent spawning and no backgrounded cargo in any brief.
   writer behind the first, a per-reader cursor advance that leaves a
   second reader's mark untouched, migration mapping (both `inbox.json`
   and a flat `cursors.json`) and a concurrent second opener, seen-set
-  survives `rm`, msgid recomputation rejects a tampered field, canonical header is byte-exact
-  (case and whitespace change the msgid), no fixture escapes the test
-  root. Bare `aoide mail` prints the names half only; its "caller's own
+  survives `rm`, msgid recomputation rejects a tampered field,
+  canonical header is byte-exact (case and whitespace change the
+  msgid), no fixture escapes the test root. Bare `aoide mail` prints the names half only; its "caller's own
   new letters" half is P-M5's. Live gate: the timer, door, and CLI
   environments resolve one `state_dir()`.
 - **P-M2 — envelopes on the wire, direct edges (L).** Origin signing
