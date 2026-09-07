@@ -209,14 +209,14 @@ lib.mkIf config.aoide.enable {
   # discoveryAdvertise` (P-P6 + task #120, docs/architecture/PAIRING.md's
   # "Discovery (advertise-but-locked)" section) FORCES advertising on for
   # this process: the advertise thread always runs inside `a2a serve` and
-  # decides per tick — this flag OR the runtime `aoide peer advertise on`
+  # decides per tick — this flag OR the runtime `aoide node advertise on`
   # switch (state/advertise.json) makes it send a one-line UDP BROADCAST
   # advertisement to 255.255.255.255:8711 (wire v2: name + ssh hop claim
   # {host, user}, never a URL, key, or credential) every ~30s so `aoide
-  # peer discover`/`aoide pair`'s hostname arm on other boxes can hear this
+  # node discover`/`aoide pair`'s hostname arm on other boxes can hear this
   # instance —
   # discovery grants nothing by itself, the pairing ceremony above is
-  # still the only thing that ever writes a peer record.
+  # still the only thing that ever writes a node record.
   systemd.user.services.aoide-a2a = lib.mkIf config.aoide.a2a.enable {
     description = "Aoide A2A (Agent2Agent) door (loopback by default, user-only)";
 
@@ -363,11 +363,11 @@ lib.mkIf config.aoide.enable {
   # found on the LAN, so flipping it also opens the one port that opt-in
   # requires, the same "one option changes two things together" shape
   # `tokenFile`/`bearerSecret` already hold in options.nix.
-  # KNOWN ASYMMETRY: the runtime switch (`aoide peer advertise on`,
+  # KNOWN ASYMMETRY: the runtime switch (`aoide node advertise on`,
   # state/advertise.json) turns SENDING on without nix — but this firewall
   # carve hangs only off the nix flag, so a box advertising via the runtime
-  # switch alone still has its own `peer discover` sweeps firewalled (and
-  # never hears itself). A box that only RECEIVES (`peer discover`/`peer
+  # switch alone still has its own `node discover` sweeps firewalled (and
+  # never hears itself). A box that only RECEIVES (`node discover`/`node
   # invite`, both toggles off) likewise opens this port by hand — there is
   # no persistent "this box discovers" state to hang a firewall rule off.
   networking.firewall.allowedUDPPorts = lib.mkIf config.aoide.a2a.discoveryAdvertise [ 8711 ];

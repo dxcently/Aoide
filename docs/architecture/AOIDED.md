@@ -28,7 +28,7 @@ The shape, end state:
                               `aoide events tail`    (readers untouched)
 
    remote: claude.ai ──▶ Tier-3 MCP connector (user-enabled) ──▶ any mesh
-   host's doors ──▶ A2A message/send + bearer ──▶ peer boxes.
+   host's doors ──▶ A2A message/send + bearer ──▶ node boxes.
    aoided itself NEVER listens on a network.
 ```
 
@@ -294,18 +294,18 @@ Remote reach composes what already exists:
 - **Ingress**: the Tier-3 Aoide MCP connector, user-enabled only, never by
   an agent (root `AGENTS.md`, Tier 3). A claude.ai session lands on some
   mesh host's door.
-- **Enumerate**: `aoide session --hosts` / the peer registry
-  (`storage/src/peer_store.rs:35` `Peer`, `:61` `PeerRegistry`) name the
-  mesh; each peer's capability card is its A2A AgentCard, derived from that
+- **Enumerate**: `aoide session --hosts` / the node registry
+  (`storage/src/node_store.rs:35` `Node`, `:61` `NodeRegistry`) name the
+  mesh; each node's capability card is its A2A AgentCard, derived from that
   binary's own `schema --json` with `implemented`-only skills
   (`CONTRACTS.md §6`, "AgentCard"). No second inventory.
-- **Route**: `send --to peer/<query>` already delivers over A2A
+- **Route**: `send --to node/<query>` already delivers over A2A
   `message/send` (`conduct/src/graph/send.rs:8-16`, `deliver_remote`), and
-  the receiving peer's own gate governs (`a2a.rs:566` `decide_send_action`,
+  the receiving node's own gate governs (`a2a.rs:566` `decide_send_action`,
   `:724` `do_inject`, `:790` `spawn_inject_prompt`). Bearer auth is the
   landing-in-parallel bearer lane on the existing token surface
-  (`a2a.rs:348` `token_authorized`, `peer_store.rs:196` `token_bytes_eq`,
-  `:216` `is_autogated_peer_token`); this workstream consumes it, never
+  (`a2a.rs:348` `token_authorized`, `node_store.rs:196` `token_bytes_eq`,
+  `:216` `is_autogated_node_token`); this workstream consumes it, never
   reimplements it.
 
 ### The hub option
@@ -314,15 +314,15 @@ Any machine can conduct — the conductor is whichever session drives. One
 additive, default-off marker names an always-on host (e.g. sakaki) as the
 standing orchestrator:
 
-- `Peer` gains `hub: bool` (`#[serde(default)]`, additive/v0-safe — the
+- `Node` gains `hub: bool` (`#[serde(default)]`, additive/v0-safe — the
   same discipline every `SessionRecord` addition follows,
   `CONTRACTS.md §4`).
-- New command `aoide peer hub <name> [--clear]` — sets the flag on exactly one
-  peer (setting it moves it; `--clear` removes it). Registered in the
-  client crate's peer command group, appended last (golden discipline).
+- New command `aoide node hub <name> [--clear]` — sets the flag on exactly one
+  node (setting it moves it; `--clear` removes it). Registered in the
+  client crate's node command group, appended last (golden discipline).
 - Consumers: address resolution prefers the hub as the default remote
   target when a `--to` query matches no local session and names no explicit
-  peer; the messaging inbox relay uses the hub as the persistent drop
+  node; the messaging inbox relay uses the hub as the persistent drop
   point. Both are preference, not protocol — a mesh with no hub behaves
   exactly as today. Flags default off (house rule).
 
@@ -567,13 +567,13 @@ Blast: `aoide-server`, `aoide-cli` (+ `aoide-secrets` tests exercised via
 its own crate run). Gate: none beyond tests.
 
 **P-D5 — the hub option.**
-`Peer.hub` additive field, `aoide peer hub <name> [--clear]` (golden +1),
+`Node.hub` additive field, `aoide node hub <name> [--clear]` (golden +1),
 hub-preference in addr resolution and the inbox relay default. Document the
 claude.ai → Tier-3 connector → mesh → A2A + bearer route in
 `CONTRACTS.md §6` as the remote-reach statement; confirm no aoided
 listener exists to document.
 Depends on: the bearer lane having landed (consumes `token_authorized` +
-peer tokens as-is).
+node tokens as-is).
 Tests: hub set/move/clear idempotent + round-trip; resolution prefers the
 hub only when nothing else matches; `hub` absent deserializes false.
 Blast: `aoide-storage`, `aoide-client`, `aoide-cli`. Gate: none (flag

@@ -629,14 +629,14 @@ in
           `{v, name, host, user}` UDP broadcast advertisement (name plus
           its ssh hop claim — never a door URL, never a key or
           fingerprint: rendezvous, not authentication) on a fixed port,
-          ~30s jittered cadence, for `aoide peer discover`/`aoide
+          ~30s jittered cadence, for `aoide node discover`/`aoide
           pair`'s hostname arm (and bare `aoide pair`) on the same LAN to
           hear. Off by default, same house policy as every other A2A
           knob above; the runtime switch beside this declarative force is
-          `aoide peer advertise on|off`. Discovery only ever feeds `peer
+          `aoide node advertise on|off`. Discovery only ever feeds `node
           discover`'s table and `pair`'s hostname-target resolution;
           the pairing ceremony above remains the ONLY thing that ever
-          writes a peer record.
+          writes a node record.
         '';
       };
 

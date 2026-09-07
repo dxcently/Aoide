@@ -1,7 +1,7 @@
 # PAIRING — one identity per instance, one ceremony, permissions off the pair
 
 The design authority for the pairing workstream (absorbs task #47's
-remainder: per-peer spawn permission + audit identity). Everything in
+remainder: per-node spawn permission + audit identity). Everything in
 "Settled decisions" was User-decided through the 2026-08-25 design
 grill; executors do not relitigate it. Where this document and a brief
 conflict, this document wins.
@@ -10,11 +10,11 @@ conflict, this document wins.
 
 Connecting two Aoide instances correctly today means hand-wiring up to
 three shared-secret credentials per direction per pair, in two
-different homes (a token file, the broker), plus `peer add` on both
+different homes (a token file, the broker), plus `node add` on both
 ends — four verification mechanisms, no keys, no single ceremony. And
 the A2A door's spawn arm is origin-blind: any caller presenting the
 door-wide bearer may spawn if `aoide.a2a.spawnAgent` is configured;
-there is no "this peer may spawn, that one may not."
+there is no "this node may spawn, that one may not."
 
 ## Settled decisions
 
@@ -27,9 +27,9 @@ there is no "this peer may spawn, that one may not."
    cryptography specifically, 2026-08-25.
 2. **One ceremony: `aoide pair`.** Pairing is THE setup for
    connecting instances, and the ONLY verification. It exchanges
-   public keys, marks the peer verified on both ends, and stamps the
+   public keys, marks the node verified on both ends, and stamps the
    default permissions. The old mechanisms (`token_file`, hand-set
-   bearer flags, door-wide bearer for peers) become legacy escapes
+   bearer flags, door-wide bearer for nodes) become legacy escapes
    for unpaired callers, documented as such.
 3. **Pairing requests ride the wire.** An instance can SEND a pairing
    request to another's door; it parks pending (the same
@@ -47,31 +47,31 @@ there is no "this peer may spawn, that one may not."
    its own side. Two humans, two out-of-band comparisons, one ceremony.
    CLI-first: every step must be drivable from a plain terminal on both
    ends; the popup is sugar.
-5. **Per-peer permissions: a closed `allows` set.** Capabilities
+5. **Per-node permissions: a closed `allows` set.** Capabilities
    today: `"spawn"` (create a session via the A2A spawn arm),
    `"read"` (graph/who summaries over A2A). Commands:
-   `aoide peer allow <name> <cap> on|off` — idempotent, reports
+   `aoide node allow <name> <cap> on|off` — idempotent, reports
    exactly what changed. Unknown capability strings are refused.
    `autogate` stays its own field (landed semantics, not churned).
-   Default for a PAIRED (verified) peer: `config.toml`'s `[pairing]
+   Default for a PAIRED (verified) node: `config.toml`'s `[pairing]
    defaultGrant`, itself `["read"]` — `spawn` is an explicit widening,
    either standing (`aoide config set pairing.defaultGrant read,spawn`) or
    for one ceremony (`aoide pair --allow read,spawn`).
-   An unpaired peer: empty set. Session-level granularity stays open:
+   An unpaired node: empty set. Session-level granularity stays open:
    the identity lane (#63) landed the sealed session credential and
    the broker's origin gate, but per-session capability gates (the
    per-surface dispatch-door gates riding the attested-caller lookup)
    are a named, unbuilt remainder — CONTRACTS.md's identity-lane
    accounting.
 6. **The spawn gate flips hard.** Spawning requires an identified
-   (paired) peer whose `allows` contains `"spawn"`. The door-wide
+   (paired) node whose `allows` contains `"spawn"`. The door-wide
    bearer alone no longer reaches the spawn arm; the refusal is a
    taught error naming the pairing ceremony. (Inject keeps its
    existing gate — the pending queue + autogate; one gate per
    question.)
-7. **Audit identity everywhere the call touches.** The resolved peer
+7. **Audit identity everywhere the call touches.** The resolved node
    name is stamped on audit lines, pending-queue entries, and the
-   spawned session's record (`origin: "peer:<name>"`, additive),
+   spawned session's record (`origin: "node:<name>"`, additive),
    surviving into the session ledger.
 8. **Mesh law: strictly pairwise.** Cross-mesh reach is a direct
    pair between the two specific boxes. No relay. BINDING CONSTRAINT
@@ -133,7 +133,7 @@ B's operator TYPES the code as read off A's screen (out-of-band — a
   its OWN derived SAS, never echoing that SAS in the prompt. A wrong code
   counts a persisted try; the 3rd cumulative mismatch AUTO-DENIES (same
   clean removal as reject, nothing committed).
-  On a match, B's own peer record commits HERE — pubkey, verified=true,
+  On a match, B's own node record commits HERE — pubkey, verified=true,
   allows=the resolved grant (defaultGrant, or this commit's --allow),
   A's name bound, and (task #131) url/via set
   from A's parked selfVia claim if one rode the request — see below;
@@ -156,7 +156,7 @@ that just polled — or in A's still-running `aoide pair`, which reaches
 the same confirm-and-commit — never a bare yes/no acknowledgment of the
 code A's own screen already showed. A wrong reply code counts a
 persisted try the same way B's leg does; the 3rd cumulative mismatch
-AUTO-ABORTS the outbound entry. ONLY on a match does A's own peer record
+AUTO-ABORTS the outbound entry. ONLY on a match does A's own node record
 commit. A timeout leaves the request parked, so the two paths are
 interchangeable.
 `aoide pair reject <id>` on A's outbound entry aborts at any point
@@ -216,7 +216,7 @@ even when A's door accepts no routable connection at all.
   id — two surfaces never race one commit; a marker naming a dead pid is
   stale, cleaned up, and suppresses nothing.
 - **`aoide pair` takes exactly ONE positional, and its two subcommands win
-  over a same-named hostname target.** A second positional — old `peer
+  over a same-named hostname target.** A second positional — old `node
   pair request <url>` muscle memory is the one that bites — is refused
   outright, before either the URL or hostname arm ever runs, naming the
   fold in the refusal itself; `pair reject`/`pair watch` are
@@ -255,18 +255,18 @@ even when A's door accepts no routable connection at all.
   with one exception (R3, below): a fresh request from the SAME
   requester pubkey supersedes it early, on the theory that the
   keyholder retrying IS the requester abandoning its own ceremony.
-- **The two ends commit asymmetrically, on purpose.** B's peer record
-  for A exists the moment B's own operator approves; A's peer record
+- **The two ends commit asymmetrically, on purpose.** B's node record
+  for A exists the moment B's own operator approves; A's node record
   for B exists only once A's own operator polls-and-confirms afterward,
   over a SECOND, DIFFERENT code (R1) — B's own reply code, never the
   first code shown twice. A never-confirmed A simply leaves B holding a
-  verified peer that answers nothing — visible on B's own `peer status`,
+  verified node that answers nothing — visible on B's own `node status`,
   resolved by an ordinary expiring re-pair, never a silent one-sided
   pairing. This is decision 4's mutual confirmation carried all the way
   through: a code shown once and accepted once was never actually a
   MUTUAL confirmation, only a promise that the other side would
   eventually agree.
-- **B's commit records a peer A can actually be reached at, even through
+- **B's commit records a node A can actually be reached at, even through
   a tunnel (task #131).** A door reachable only through ssh (the
   loopback-only case Transport's own section below covers) means every
   `aoide/pairRequest` B ever sees from A arrives over A's own tunnel — B
@@ -282,16 +282,16 @@ even when A's door accepts no routable connection at all.
   you reach me back," the same trust class as the `url` field beside it
   (self-asserted data, a transport marker only — trust stays in pubkeys +
   SAS, never either field). When B's parked entry carries that claim,
-  `aoide pair`'s commit sets the resulting peer's `url` to
+  `aoide pair`'s commit sets the resulting node's `url` to
   `http://127.0.0.1:<port>/` (loopback-as-seen-from-the-far-side — the
-  sakaki/chiyo/osaka rows in a live `peers.json` are this exact shape),
+  sakaki/chiyo/osaka rows in a live `nodes.json` are this exact shape),
   where `<port>` is A's OWN door port, parsed off A's `url` on the parked
   entry (never B's own `AOIDE_A2A_PORT`, which names nothing about A —
   only a fallback when that parse itself fails), and `via` to the claim
   itself, in the same write as the pairing commit. No claim — an old A, or
   one with nothing to claim — commits exactly the shape B's commit always
   produced: `url` is A's advertised door verbatim, `via` stays unset.
-- Re-pairing an existing peer replaces the key material only after
+- Re-pairing an existing node replaces the key material only after
   the same confirmation — never silently.
 - The inbound park queue is capped (`AOIDE_PAIRING_PARK_CAP`, default
   32) — an unauthenticated door refusing to park indefinitely, the same
@@ -322,21 +322,21 @@ even when A's door accepts no routable connection at all.
   routably instead, that condition no longer holds and refuse-the-second
   becomes the safer default (CONTRACTS.md §6's own park-cap paragraph
   carries the full statement).
-- **The poll authenticates without a peer record.** `aoide/pairPoll`
-  cannot use the paired-peer signed-header scheme below — no verified
-  peer record exists yet for the id being polled — so A signs a
+- **The poll authenticates without a node record.** `aoide/pairPoll`
+  cannot use the paired-node signed-header scheme below — no verified
+  node record exists yet for the id being polled — so A signs a
   self-contained message (the SAME canonical-string primitive, a
   different method label) directly against the pubkey B already
   captured at request time. An unauthenticated or wrongly-signed poll
   gets the identical answer a not-yet-approved one gets — never a
   distinct signal an outsider could use to learn whether an id exists.
 
-## Wire authentication (paired peers)
+## Wire authentication (paired nodes)
 
 Per-request detached signature replaces bearer comparison for paired
-peers:
+nodes:
 
-- Headers: peer name (attribution only — see below), timestamp, nonce,
+- Headers: node name (attribution only — see below), timestamp, nonce,
   signature. Signature is
   ed25519 over a canonical string binding method, path, timestamp,
   nonce, and the body digest (`sha2`). The executor writes the exact
@@ -350,33 +350,33 @@ peers:
   secrets are still compared).
 - **A verified signature outranks loopback for the Inject delivery
   gate.** A loopback-terminating transport hop — an ssh `-L` forward
-  is the case that motivates this — delivers a remote peer's request
+  is the case that motivates this — delivers a remote node's request
   from ITS OWN end's loopback, so the connection's observed origin
   classifies as loopback exactly like a genuinely local caller. A
   request whose signature this door already verified is, by
   construction, never a local caller, so it is treated as remote for
   the auto-deliver-vs-pending question regardless of which address it
-  arrived from: `state/peers.json`'s per-peer `autogate` flag, not
-  connection origin, decides whether a signed peer's send still
+  arrived from: `state/nodes.json`'s per-node `autogate` flag, not
+  connection origin, decides whether a signed node's send still
   auto-delivers. An unsigned request's loopback trust is unaffected —
   this narrowing only ever removes a free pass a signature was never
   entitled to in the first place.
 - **Identity IS the key; the name is a label (#63 P-ID5).**
-  `X-Aoide-Peer` carries the caller's own self name
+  `X-Aoide-Node` carries the caller's own self name
   (`aoide_storage::display::local_host_name()`), the same value the
   pairing wire's `pairRequest.name` sends — never the caller's local
   nickname for the counterpart — but it does no identity work: the far
   end resolves the caller BY THE KEY THAT SIGNED, trying the signature
-  against every verified peer's stored pubkey and taking the record
+  against every verified node's stored pubkey and taking the record
   whose key verifies. The name is display/attribution — a
   claimed-vs-resolved mismatch is audited as attribution drift and the
-  resolved name wins everywhere downstream — so renaming a peer
+  resolved name wins everywhere downstream — so renaming a node
   locally never breaks inbound signed requests from it. Nothing
   name-trusted remains on the signed path; the name's one residual
   role is the exact-name tiebreak when multiple verified records share
   the verifying pubkey (equal proven key, possibly different grants —
   no exact-name match refuses as ambiguous rather than guessing).
-  A signature matching no verified peer's key refuses identically to a
+  A signature matching no verified node's key refuses identically to a
   bad signature — never an existence oracle over the registry.
   CONTRACTS §6's "Inbound verification" carries the pinned check
   order, collision semantics, and the pubkey-keyed nonce cache.
@@ -395,19 +395,19 @@ the full count-site checklist (git show 9c2d05c).
   round-trip, no private material in any Serialize type (grep gate).
 - **P-P2 — pairing wire + CLI ceremony (L).** Request/park/approve
   over the A2A door (new method, CONTRACTS §6), SAS derivation +
-  display, `peer pair request|pending|approve|reject` commands (golden
-  +N), peer record gains `pubkey`/`verified` (additive serde),
+  display, `node pair request|pending|approve|reject` commands (golden
+  +N), node record gains `pubkey`/`verified` (additive serde),
   legacy fields untouched. Tests: full ceremony against a test door,
   SAS stability vectors, expiry, re-pair confirmation, unapproved =
   no record change.
 - **P-P3 — allows + the spawn gate flip + audit identity (M).**
-  `allows` set + `peer allow` commands (golden +1), spawn arm requires
+  `allows` set + `node allow` commands (golden +1), spawn arm requires
   paired+spawn (taught error otherwise), audit/pending/session-record
-  stamping (`origin: peer:<name>`, projected into the ledger).
+  stamping (`origin: node:<name>`, projected into the ledger).
   Tests: gate table (paired+allowed / paired+denied / unpaired /
   legacy-bearer), stamp presence end-to-end, defaults per decision 5.
 - **P-P4 — signed requests (L).** The wire-auth scheme above for
-  paired peers; unpaired callers unchanged. Tests: signature
+  paired nodes; unpaired callers unchanged. Tests: signature
   round-trip, replay rejection, skew taught error, canonical-string
   vectors pinned.
 - **P-P5 — pairing events feed + the popup watcher (S).** `a2a serve`
@@ -424,8 +424,8 @@ the full count-site checklist (git show 9c2d05c).
   out at P-PV3 below. Legacy-escape documentation pass lands as CONTRACTS
   §6's own "Legacy escapes" subsection.
 - **P-P6 — discovery + invite (M).** The LAN advertisement
-  (advertise-off-by-default, emitted by `a2a serve`), `peer discover`
-  + `peer invite` (golden +2, full count-site checklist),
+  (advertise-off-by-default, emitted by `a2a serve`), `node discover`
+  + `node invite` (golden +2, full count-site checklist),
   advertisement validation as untrusted input, CONTRACTS §6
   advertisement format + constants. Tests: advertisement round-trip
   over a real loopback socket, malformed advertisement dropped,
@@ -443,36 +443,36 @@ the full count-site checklist (git show 9c2d05c).
   requester rides on `aoide/pairRequest` (login defaults to `$USER`/
   `$LOGNAME`, host defaults to the LOCAL OUTBOUND ADDRESS routed toward
   the approver, `--self-via` overrides both). Present on the parked
-  entry, `peer pair approve`'s commit rewrites the resulting peer's `url`
+  entry, `node pair approve`'s commit rewrites the resulting node's `url`
   to `http://127.0.0.1:<port>/` — loopback-as-seen-from-the-far-side,
   `<port>` parsed off the REQUESTER's own advertised door port, never
   this box's own `AOIDE_A2A_PORT` — and sets `via` to the claim itself, in
   the SAME write as the pairing commit; absent, the commit is exactly the
   pre-P-PV1 shape (`url` verbatim, `via` unset). The ceremony's own dial
-  (both `peer pair` arms) also starts riding the SAME derived `via` a
-  discovered peer already gets, not only the record. Tests: loopback
+  (both `node pair` arms) also starts riding the SAME derived `via` a
+  discovered node already gets, not only the record. Tests: loopback
   record correctness with and without a claim, the requester's own port
   parsed off the right field, the ceremony's dial itself using the
   derived `via`.
 - **P-PV2 — the collapsed command surface (M, the User's locked spec,
-  three grill rounds).** `peer pair request`/`peer invite` DIE outright
-  (hard cutover, no aliases) and fold into ONE smart-target `aoide peer
+  three grill rounds).** `node pair request`/`node invite` DIE outright
+  (hard cutover, no aliases) and fold into ONE smart-target `aoide node
   pair <target>`: a URL-shaped target (`"://"`) dials directly; anything
   else resolves by discovery sweep (default 45s, not the 4s
-  `peer discover`/`peer invite` used to share — task #129's known miss).
+  `node discover`/`node invite` used to share — task #129's known miss).
   Both arms reuse the SAME `run_pair_request` core the pre-P-PV2 commands
-  called (golden −1: two dead paths, one new). `peer pair pending`
-  RENAMES to `peer pending` (golden net 0) and its rows drop the SAS —
+  called (golden −1: two dead paths, one new). `node pair pending`
+  RENAMES to `node pending` (golden net 0) and its rows drop the SAS —
   the code stays purely out-of-band, read off the requester's screen and
-  typed on the approver's. `peer pair approve`'s `<id>` becomes optional
+  typed on the approver's. `node pair approve`'s `<id>` becomes optional
   when exactly one request is pending. Review follow-up in the same lane:
-  `peer pair` refuses a SECOND positional outright rather than silently
-  reading only the first — old `peer pair request <url>` muscle memory
-  would otherwise land `request`/`<url>` as `peer pair`'s own two args,
+  `node pair` refuses a SECOND positional outright rather than silently
+  reading only the first — old `node pair request <url>` muscle memory
+  would otherwise land `request`/`<url>` as `node pair`'s own two args,
   past its single declared target, burning a full sweep window hunting a
   host literally named "request" while discarding the url unremarked.
 - **P-PV3 — the popup's typed-code upgrade, opt-in (M, task #132).**
-  `peer pair watch --popup`'s INBOUND (approver) dialog stops being a bare
+  `node pair watch --popup`'s INBOUND (approver) dialog stops being a bare
   Approve/Reject: it collects the typed code through the SAME
   six-boxes-plus-dash surface the secrets TOTP dialog already has
   (`lyra pair ask`, sharing that command's own QML component via the new
@@ -499,9 +499,9 @@ the full count-site checklist (git show 9c2d05c).
   the unit's desktop-facet gate is unchanged, this flag is the deliberate
   opt-in on top of it, modules' own "flags default off" house rule.
 - **Task #135 P3' — the one-command collapse (M, "the command set can just
-  be `aoide pair`").** `peer.pair`, `peer.pair.approve`, `peer.pair.
-  reject`, `peer.pair.watch`, and `peer.pending` DIE outright — hard
-  cutover, no aliases, same as `peer.invite` before them. Bare `pair`
+  be `aoide pair`").** `node.pair`, `node.pair.approve`, `node.pair.
+  reject`, `node.pair.watch`, and `node.pending` DIE outright — hard
+  cutover, no aliases, same as `node.invite` before them. Bare `pair`
   (already registered) becomes the ONE command: with no target it is the
   pending listing (interactive menu over pending requests plus heard
   advertisers on a real CLI tty, the JSON-friendly listing off a tty /
@@ -510,14 +510,14 @@ the full count-site checklist (git show 9c2d05c).
   request from the target is approved, a pending outbound one is
   resumed, and anything else starts a new request. `pair.reject` and
   `pair.watch` register as the two remaining subcommands of `pair`. The
-  `peer` family keeps the roster (add/list/allow/hub/spawn/pull/status/
+  `node` family keeps the roster (add/list/allow/hub/spawn/pull/status/
   discover/advertise); `pair` mints the verified records those operate
   on. Golden count 82 → 79.
 
 Live gates at the end of the lane: a real pair between yomi and
 sakaki via the ceremony (codes compared on real terminals), a spawn
-refused for a peer with spawn revoked, a spawn admitted and its
-ledger entry carrying `origin: peer:<name>`.
+refused for a node with spawn revoked, a spawn admitted and its
+ledger entry carrying `origin: node:<name>`.
 
 ## Discovery (advertise-but-locked)
 
@@ -543,7 +543,7 @@ ceremony; discovery only tells you who is there to invite.
   capability probing.
 - **Advertising is OFF by default.** The advertisement is emitted by
   the `a2a serve` process, and a box advertises only when told to:
-  `aoide peer advertise on|off` flips `state/advertise.json`
+  `aoide node advertise on|off` flips `state/advertise.json`
   (idempotent, reports what changed), which the advertise thread
   reads every tick — a toggle lands within one ~30s jittered cadence,
   no restart; `AOIDE_DISCOVERY_ADVERTISE`/`aoide.a2a.
@@ -559,28 +559,28 @@ ceremony; discovery only tells you who is there to invite.
   path at all. The nix module opens the port automatically whenever
   `aoide.a2a.discoveryAdvertise` is on, since that flag is already
   the operator's deliberate opt-in to being found on the LAN; a box
-  that only ever wants to receive (advertising off, running `peer
+  that only ever wants to receive (advertising off, running `node
   discover`/`aoide pair` against others) must open that port itself.
-- **`aoide peer discover [--secs N]`** listens briefly (default a few
+- **`aoide node discover [--secs N]`** listens briefly (default a few
   seconds), dedupes by (name, source address) into a BOUNDED
   in-memory fold (a hostile flood of fabricated names is counted
   dropped past the cap, never grown), and prints the table: name, the
   claimed ssh hop `user`@`host`, the observed source address,
-  first/last heard. The same heard-set is what `aoide peer list`
+  first/last heard. The same heard-set is what `aoide node list`
   (CONTRACTS §7's CLI surface) merges into its mesh roster — a heard
-  name matching a registered peer marks that row advertising (`●◆`/
+  name matching a registered node marks that row advertising (`●◆`/
   `○◆`), an unknown name becomes a `◆` pair-candidate row, and a
   self-heard advertisement only marks this host's own row.
   An advertisement is UNTRUSTED NETWORK DATA (house
   rule 4's discipline): every field is validated (name shape, bounded
   metacharacter-free host, POSIX login shape, line-size cap) before
   display, a malformed advertisement is dropped and counted, and
-  nothing is ever written to the peer registry by discovery alone.
+  nothing is ever written to the node registry by discovery alone.
 - **The claimed hop is a claim; the observed source address is a
   fact.** `host`/`user` are whatever the advertiser typed onto the
   wire. The UDP packet's own source IP, by contrast, is measured
   directly by the socket that heard it and cannot be spoofed the way
-  a self-reported field can. `peer discover` shows both, side by
+  a self-reported field can. `node discover` shows both, side by
   side, precisely so the two can be seen disagreeing; anything that
   dials uses the OBSERVED address, never the claimed one.
 - **`aoide pair <name>`'s hostname arm** is sugar over the ceremony,
@@ -594,7 +594,7 @@ ceremony; discovery only tells you who is there to invite.
   the observed address, and then runs the SAME `run_pair_request` flow
   the URL arm runs against the composed target — recording a `via`
   derived from the observed address plus the claimed login for the
-  resulting peer's future calls. One ceremony stays the only
+  resulting node's future calls. One ceremony stays the only
   verification.
 - **`pair`'s hostname arm refuses to pair with yourself.** A
   broadcast always loops back to its own sender, so a box that advertises
@@ -603,7 +603,7 @@ ceremony; discovery only tells you who is there to invite.
   name matching this instance's own, or the datagram having come from
   loopback. Either one is a taught refusal, never a ceremony run
   against yourself. KNOWN GAP: a serve advertising under a custom
-  `--peer-name` (flag only — the env/hostname tiers agree on both
+  `--node-name` (flag only — the env/hostname tiers agree on both
   sides) escapes the name arm, and the self-heard broadcast arrives on
   the physical interface so the loopback arm misses too — `aoide pair
   <own-custom-name>` will dial this box's own door and park a
@@ -624,18 +624,18 @@ ceremony; discovery only tells you who is there to invite.
 Every A2A door stays loopback-bound, always — that invariant does not move.
 What moves is HOW a request reaches it from another box: an internal ssh
 forward, opened lazily by `aoide-client` and dialed through instead of the
-peer's own host directly. The tunnel is a TRANSPORT hop, not a protocol
-relay — the signed peer identity (Wire authentication, above: the key that
+node's own host directly. The tunnel is a TRANSPORT hop, not a protocol
+relay — the signed node identity (Wire authentication, above: the key that
 signed) still crosses it end to end, and the far door verifies the exact same
 request it always did. Nothing about §"Settled decisions"'s "strictly
 pairwise, no relay, every hop carries the true origin" changes; an ssh `-L`
 forward is a pipe, not a party to the protocol.
 
-- **A peer dials directly unless a `via` marker says otherwise.** `Peer.via`
+- **A node dials directly unless a `via` marker says otherwise.** `Node.via`
   (`ssh://[user@]host[:port]`, CONTRACTS.md §7) is absent by default — every
-  peer registered today, and every peer this ceremony creates without an
+  node registered today, and every node this ceremony creates without an
   explicit `--via`, dials `url` exactly as before. Explicit beats implicit:
-  a `--via` flag on the command itself always outranks a peer's own
+  a `--via` flag on the command itself always outranks a node's own
   recorded `via`.
 - **The dial's authority changes; its path never does.** When a `via` IS in
   play, the client rewrites the dial url's `scheme://host:port` to
@@ -644,7 +644,7 @@ forward is a pipe, not a party to the protocol.
   signature is computed over the path, never the host, so this rewrite
   changes no byte of what gets signed or what the far end verifies.
   `aoide_storage::tunnel::dial_url` is the one place this cut happens,
-  deliberately sharing `peer_store::url_path` with the signer rather than
+  deliberately sharing `node_store::url_path` with the signer rather than
   re-deriving it, so the two can never drift apart.
 - **`pair`'s hostname arm/bare `pair` derive a `via` automatically, and
   (task #131) the ceremony's OWN dial rides it too.** Discovery's own
@@ -655,8 +655,8 @@ forward is a pipe, not a party to the protocol.
   all. So `pair`'s hostname arm/bare `pair` derive a `via` from the
   observed address plus the advertisement's claimed ssh login, and that
   SAME default now drives BOTH halves: the ceremony's own two POSTs dial
-  through it, and it is recorded on the resulting peer once pairing is
-  approved, so that peer's FUTURE calls (pull, spawn, send) have a working
+  through it, and it is recorded on the resulting node once pairing is
+  approved, so that node's FUTURE calls (pull, spawn, send) have a working
   transport marker too. The one exception is an advertisement with no ssh
   claim at all (empty login) — nothing to tunnel through, so the dial
   stays direct, the same shape it held before task #131. An explicit
@@ -673,7 +673,7 @@ forward is a pipe, not a party to the protocol.
   for exactly this: the requester's own self-asserted `ssh://[user@]host`
   claim of its own reach-back hop — the LOGIN half defaults to
   `$USER`/`$LOGNAME`, and the HOST half defaults to the LOCAL OUTBOUND
-  ADDRESS routed toward the peer being dialed (`UdpSocket::connect` picks
+  ADDRESS routed toward the node being dialed (`UdpSocket::connect` picks
   a route with no packet sent; a claimed OS hostname was tried first and
   found to resolve only through the router's DHCP-DNS on this LAN —
   resolution by luck, not something a transport marker can lean on),
@@ -683,7 +683,7 @@ forward is a pipe, not a party to the protocol.
   self-asserted data, a transport marker only, never itself a source of
   trust (trust stays in pubkeys + the SAS comparison, "The ceremony"
   section above). `aoide pair`'s commit reads it: present, the
-  resulting peer gets `via` set to the claim and `url` rewritten to
+  resulting node gets `via` set to the claim and `url` rewritten to
   `http://127.0.0.1:<port>/`, where `<port>` is parsed off the
   REQUESTER's own `url` (their real door port — never this box's own
   `AOIDE_A2A_PORT`, which names nothing about the requester), falling back
@@ -699,7 +699,7 @@ forward is a pipe, not a party to the protocol.
   this lane, not something this code decides on his behalf.
 - **A tunnel is reused within a session, never held open forever.** Opened
   lazily on first use (`aoide_client::tunnel::open_or_reuse`), keyed by
-  `(session id, peer name)`, reused by every later action under the same
+  `(session id, node name)`, reused by every later action under the same
   conducted session. A clean `session end` closes every tunnel it opened as
   its own fast path (`aoide_client::tunnel::close_all_for_session`,
   `aoide-conduct::graph::session_store::do_session_end`); `aoide-conduct::
@@ -718,12 +718,12 @@ forward is a pipe, not a party to the protocol.
   sound stance behind a bind that only a genuinely local caller could ever
   reach); a tunnel is a way to reach that same socket from somewhere else,
   so a request carrying a verified per-request signature never rides that
-  trust — it is a remote peer by construction, and `a2a.rs::origin_for_
+  trust — it is a remote node by construction, and `a2a.rs::origin_for_
   inject` strips loopback's free pass from it before the delivery decision
   runs (CONTRACTS.md §6). A signature-rung `autogate` flag restores
-  auto-delivery for a peer the operator already marked that way, exactly
+  auto-delivery for a node the operator already marked that way, exactly
   the like-for-like an operator's existing grant expects. `via`/`--via` are
-  safe to use against a real peer.
+  safe to use against a real node.
 
 ## Mesh declaration
 
@@ -732,20 +732,20 @@ A named mesh (`config.toml`'s `[mesh.<name>]`, task #135 P4, CONTRACTS.md
 bookkeeping — "these are the boxes I expect to belong to this roster,
 reached at these hops" — recorded once, on one instance, never transmitted:
 nothing in the ceremony, the wire (§"Wire authentication" above), or any
-A2A payload carries a mesh name, and `peer_store::Peer` gains no field for
+A2A payload carries a mesh name, and `node_store::Node` gains no field for
 it. The roster itself stays exactly what the Kill-list below already
 settled — the closure of pairwise, individually-verified records — and a
 declared mesh only ever describes a NAMED EXPECTATION over that same
 closure, never a new object standing in front of it. Declaring one changes
-nothing about how a peer is paired, verified, or reached.
+nothing about how a node is paired, verified, or reached.
 
 `aoide mesh` (`aoide_client::mesh`) is the read side: it compares a
 declaration against the live registry and reports where they diverge — a
-declared peer with no record at all, one whose pairing was never confirmed,
+declared node with no record at all, one whose pairing was never confirmed,
 or one whose recorded `via` no longer matches the declared hop (an absent
-`via` there is the severe case, since a call then dials the peer's bare
+`via` there is the severe case, since a call then dials the node's bare
 address directly — commonly this box's own loopback, for an already-paired
-peer). It also lists any verified peer that belongs to no declared mesh,
+node). It also lists any verified node that belongs to no declared mesh,
 reported plainly rather than treated as a problem. Every finding is a
 report; nothing about running it pairs, re-pairs, or edits a single record.
 
@@ -753,16 +753,16 @@ report; nothing about running it pairs, re-pairs, or edits a single record.
 
 `aoide mesh pair [<mesh>]` is the write side, and it writes nothing this
 document does not already describe: it runs the ceremony above, unchanged,
-once per peer. It reads the SAME comparison `aoide mesh` renders — there is
-no second one — and selects the declared peers with **no verified record**:
+once per node. It reads the SAME comparison `aoide mesh` renders — there is
+no second one — and selects the declared nodes with **no verified record**:
 `missing` and `unverified`, in declared-name order. Each is dialed at
 `http://127.0.0.1:<door port>/` through its declared hop, which is the
-ordinary tunneled dial every cross-box peer action already makes. The
+ordinary tunneled dial every cross-box node action already makes. The
 result is ordinary pairwise records and nothing else — no transitive relay,
 no mesh-level object, nothing new on the wire; the Kill-list below holds
 unchanged.
 
-**A verified peer is never modified.** A `via-mismatch` comes back
+**A verified node is never modified.** A `via-mismatch` comes back
 `skipped`, naming `aoide pair <name>` as the fix, for three reasons: a
 re-pair replaces key material and is never silent, the re-pair confirm
 already exists as a human y/N on `aoide pair <name>`, and `via` is written
@@ -777,7 +777,7 @@ the wrong record.
 ceremony, so every leg keeps both typed codes: the far operator reads the
 pairing code and types it, then reads a reply code back. What the converge
 adds in front is ONE pre-flight confirm covering the whole run — which
-peers, in what order, through which hops, at what grant — which `--yes`
+nodes, in what order, through which hops, at what grant — which `--yes`
 skips exactly as it skips the sweep's proceed-prompt on `aoide pair`. It is
 a convenience over the listing, never a substitute for a code: skipping it
 bypasses no gate, because the codes are the gate.
@@ -788,14 +788,14 @@ one human at both screens — touches the mutual-code invariant directly and
 is not decided. Until it is, a mesh declaring `sameOperator = true`
 converges byte-identically to one that does not, and the report carries a
 single note saying the flag was seen and not acted on. The note is a note:
-it changes no peer's outcome, no count, and refuses nothing.
+it changes no node's outcome, no count, and refuses nothing.
 
 `mesh.<name>.grant` IS live: it is the capability set a converge stamps at a
 first verification, riding the ceremony exactly as a typed `--allow` does,
-so an already-verified peer's `allows` survives a re-pair untouched and
-`peer allow` remains the only way to change a live grant.
+so an already-verified node's `allows` survives a re-pair untouched and
+`node allow` remains the only way to change a live grant.
 
-Each peer's result is one of four words — `completed`, `parked` (resumable
+Each node's result is one of four words — `completed`, `parked` (resumable
 by id), `UNREACHABLE`, `skipped`. `UNREACHABLE` is separate from `parked`
 because a request only parks once both ceremony POSTs succeed: a request to
 a box that is off parks nothing, so there is no id to resume and the report

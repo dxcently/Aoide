@@ -88,22 +88,22 @@ FidoNet node could.
 
 ## Vocabulary
 
-| word        | meaning                                                            | FidoNet ancestor            |
-| ----------- | ------------------------------------------------------------------ | --------------------------- |
-| node        | a mesh member: one Aoide instance, one keypair                     | node                        |
-| edge        | a verified pairing between two nodes; where grants live            | link, pkt password          |
-| mesh        | a named `[mesh.<name>]` declaration; a routing zone                | zone                        |
-| hub         | a node a mesh declares as a transit relay (config key `relays`)    | hub / host                  |
-| zonegate    | a node both of two meshes declare as their gate to each other      | zonegate                    |
-| name       | free-text recipient name inside a letter                           | `toUserName`                |
-| letter      | an envelope of type `letter`                                       | netmail message             |
-| envelope    | the signed, immutable unit that moves: header + text               | packed message              |
-| msgid       | hash of the signed envelope; global, transfer-invariant            | `^AMSGID` (as NNCP MsgHash) |
-| mailbase    | a node's append-only store of entries                              | message base                |
-| outbox      | the sender-side per-node spool                                     | BSO flow files              |
-| flavor      | `now` (deliver or queue+retry) / `hold` (wait to be polled)        | `?ut` flavors               |
-| cursor      | a reader's high-water mark over the mailbase                       | `.newsrc`                   |
-| receipt     | an envelope of type `receipt`: a conduct-delivery record or an ack | ReturnReceipt               |
+| word     | meaning                                                            | FidoNet ancestor            |
+| -------- | ------------------------------------------------------------------ | --------------------------- |
+| node     | a mesh member: one Aoide instance, one keypair                     | node                        |
+| edge     | a verified pairing between two nodes; where grants live            | link, pkt password          |
+| mesh     | a named `[mesh.<name>]` declaration; a routing zone                | zone                        |
+| hub      | a node a mesh declares as a transit relay (config key `relays`)    | hub / host                  |
+| zonegate | a node both of two meshes declare as their gate to each other      | zonegate                    |
+| name     | free-text recipient name inside a letter                           | `toUserName`                |
+| letter   | an envelope of type `letter`                                       | netmail message             |
+| envelope | the signed, immutable unit that moves: header + text               | packed message              |
+| msgid    | hash of the signed envelope; global, transfer-invariant            | `^AMSGID` (as NNCP MsgHash) |
+| mailbase | a node's append-only store of entries                              | message base                |
+| outbox   | the sender-side per-node spool                                     | BSO flow files              |
+| flavor   | `now` (deliver or queue+retry) / `hold` (wait to be polled)        | `?ut` flavors               |
+| cursor   | a reader's high-water mark over the mailbase                       | `.newsrc`                   |
+| receipt  | an envelope of type `receipt`: a conduct-delivery record or an ack | ReturnReceipt               |
 
 `hub` in this document is the transit role. The older per-node
 `Node.hub` flag in `nodes.json` (the address-resolution last resort from
@@ -421,7 +421,7 @@ The doorbell is a fixed line injected through the loopback conduct path
 [aoide mail] new mail for <name> — aoide mail read --for <name>
 ```
 
-`<name>` is clamped to the `valid_peer_name` grammar (`[a-z0-9-]`,
+`<name>` is clamped to the `valid_node_name` grammar (`[a-z0-9-]`,
 `node_store.rs`) before injection; conduct's own sanitizer only strips
 CR/LF, which is not a clamp. No byte of the letter rides the nudge.
 Headless spawns get it — injection is the path conduct uses. Nothing
@@ -442,7 +442,7 @@ entry is a fixed header line — `msgid`, `from`, `mintedAt`, `mesh`,
 `via` — followed by the text in a fence; `--json` returns the entries
 in `Outcome.data`. The reader never interpolates a letter's fields into
 anything but that frame, and the frame is built to hold hostile bytes:
-header-line fields are clamped to their grammars (`valid_peer_name` for
+header-line fields are clamped to their grammars (`valid_node_name` for
 node and name, RFC 3339 for `mintedAt`, hex for `msgid`) with CR, LF and
 ESC stripped from anything free-form; the fence is one backtick longer
 than the longest backtick run in the text, so no letter can close its
@@ -622,7 +622,7 @@ READMEs), no subagent spawning and no backgrounded cargo in any brief.
   nothing else; a renamed `nodes.json` nickname changes no policy
   outcome; a declared key disagreeing with a paired key is drift.
 - **P-M5 — doorbell + polish (S).** The fixed-line nudge through
-  loopback conduct with the `valid_peer_name` clamp, submitted, latched
+  loopback conduct with the `valid_node_name` clamp, submitted, latched
   per (name, session) until the cursor advances; reader-recorded
   targeting, headless-session coverage, the reader frame's field clamps
   and adaptive fence, `mesh down` convenience if wanted. Tests: nudge

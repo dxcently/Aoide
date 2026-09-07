@@ -154,7 +154,7 @@ in the same commit as the change they witness.
 
 ## Deferred
 
-More install-script concerns (systemd enablement checks, peer-mesh
+More install-script concerns (systemd enablement checks, node-mesh
 bootstrap, secrets-broker setup) — the vars file is where their knobs
 will surface. Onboard re-run sophistication beyond warn+backup.
 Shipping the skill dir in the package (the from-a-checkout contract
