@@ -215,10 +215,13 @@ An entry is an envelope plus local facts:
   consume each other's mail. A reader is identified by its conducting
   session id (`AOIDE_SESSION_ID`), and by the mailbox name itself when
   that is unset — so a stray read from an unconducted terminal advances
-  a pseudo-reader and never a live agent's mark. A respawned session is
-  a new reader and sees the name from the beginning, the way an NNTP
-  client with no `.newsrc` does: re-delivery is the safe direction, and
-  silent loss is not. The reader set is also what the doorbell rings.
+  a pseudo-reader and never a live agent's mark. Two unconducted
+  terminals share that pseudo-reader and so still consume each other,
+  which is the honest floor: nothing distinguishes them. A respawned
+  session is a new reader and sees the name from the beginning, the way
+  an NNTP client with no `.newsrc` does: re-delivery is the safe
+  direction, and silent loss is not. The reader set is also what the
+  doorbell rings.
 - A `cursors.json` carrying the flat `{ "<name>": { "seq", "readers" } }`
   shape migrates on first open under the same lock: each recorded reader
   inherits the name's old `seq`, and a name with no recorded reader
