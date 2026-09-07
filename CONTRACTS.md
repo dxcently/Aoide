@@ -1645,9 +1645,9 @@ identity::peer_cred`, widened `pub(crate)` from `pub(in crate::graph)` so
 rather than a second reimplementation; `aoide-server` reuses
 `aoide_secrets::peercred` instead, already `pub`, already a dependency, so
 no widening needed there) and refuse a connection outright — never
-forwarded — whose node uid does not match the process's own euid,
+forwarded — whose peer uid does not match the process's own euid,
 fail-closed exactly like the secrets broker's `admin_gate` on an
-unidentified node (`cross_uid_gate`, restated identically in both files,
+unidentified peer (`cross_uid_gate`, restated identically in both files,
 pure and unit-tested without a real different-uid connection). **This is a
 CROSS-uid floor, not a same-uid guarantee** — under OQ1-A every legitimate
 connector named above already runs as the SAME uid a prompt-injected agent
@@ -1690,7 +1690,7 @@ resolves a live sealed session, so a proxied `send` with no `--yes`/
 autogate already fails closed to `pending` by construction today — not
 because either fix re-derives the connecting caller's real identity (it
 doesn't), but because the door process's own ancestry is architecturally
-incapable of impersonating one. Threading the connecting node's real pid
+incapable of impersonating one. Threading the connecting peer's real pid
 into the gate itself — so a proxied `send` resolves the ACTUAL caller
 rather than merely failing closed — would touch `graph/send.rs`'s gate,
 out of this phase's scope fence; deferred, not forgotten.
@@ -2979,7 +2979,7 @@ a read of in-memory state only, same precedent `session pending list` already
 sets. `peerUid` (task #73) is ADDITIVE over the pre-#73 shape — the
 kernel-truth `SO_PEERCRED` uid of the connection that parked this ask
 (`null` when it could not be read), alongside the pre-existing
-self-asserted `consumer` name; see "Node identity" below. `reason`/`origin`
+self-asserted `consumer` name; see "Peer identity" below. `reason`/`origin`
 (P3) are additive again — `reason` mirrors whatever the parking `resolve`
 sent (above); `origin` is best-effort "who/where," captured ONCE at park
 time from the SAME `SO_PEERCRED` stamp `peerUid` reads (username/pid/comm)
@@ -3021,12 +3021,12 @@ error; the ask is removed from the registry either way, never left
 dangling.
 
 **`dismiss`** — refuse a parked ask outright, no code needed, and
-**node-uid-gated (task #73)**:
+**peer-uid-gated (task #73)**:
 ```text
 -> {"op":"dismiss","id":"<id>"}
 <- {"ok":true}
 <- {"ok":false,"error":"unknown pending id `<id>`"}
-<- {"ok":false,"error":"<node-uid-mismatch refusal, names both uids>"}
+<- {"ok":false,"error":"<peer-uid-mismatch refusal, names both uids>"}
 ```
 The parked connection gets `{"ok":false,"error":"the pending TOTP ask was
 dismissed before a code was provided"}` on its own `resolve` reply (P-N2c:
@@ -3034,13 +3034,13 @@ no "by an operator" claim — any member of the consumers group that can
 reach the socket can dismiss, not only an operator, so the message no
 longer asserts who); the dismisser's own reply only confirms the dismissal
 happened. **Task #73 narrows who "any member... that can reach the socket"
-actually means**: the dismissing connection's own kernel-truth node uid
-(`SO_PEERCRED`, "Node identity" below) must match the ask's OWN stamped
-node uid (recorded at park time), or the broker's own effective uid — an
+actually means**: the dismissing connection's own kernel-truth peer uid
+(`SO_PEERCRED`, "Peer identity" below) must match the ask's OWN stamped
+peer uid (recorded at park time), or the broker's own effective uid — an
 unmatched dismiss is refused with a taught error naming both uids, and the
 ask is left exactly where it was (never consumed by a failed unauthorized
-attempt). An unidentified dismissing connection (node cred unreadable) is
-NEVER authorized, even against an ask whose own node uid is also
+attempt). An unidentified dismissing connection (peer cred unreadable) is
+NEVER authorized, even against an ask whose own peer uid is also
 unidentified — fail closed, never open, on a missing kernel fact. `approve`
 is UNCHANGED by this — it stays open to any local caller reaching the
 socket; the TOTP code is its gate, not identity.
@@ -3186,10 +3186,10 @@ authenticated consumer identity is a separate, not-yet-planned scope
 `crates/secrets/AGENTS.md` already carries for the identical reason). A
 policy's `consumers[]` list is a courtesy label on top of the real
 boundary (socket group membership), not a cryptographic one, until that
-lands. **Task #73 does not change this** — see "Node identity" immediately
+lands. **Task #73 does not change this** — see "Peer identity" immediately
 below for the separate, orthogonal fact it DOES add.
 
-**Node identity (`SO_PEERCRED`, task #73).** Every accepted connection's
+**Peer identity (`SO_PEERCRED`, task #73).** Every accepted connection's
 kernel-truth `uid`/`gid`/`pid` is read once, at connection start, via
 `SO_PEERCRED` (`crates/secrets/src/peercred.rs`) — the connecting
 process's REAL uid, verified by the kernel, independent of anything the
@@ -3197,13 +3197,13 @@ wire request itself claims. A read failure is an UNIDENTIFIED connection
 (`None`), never a panic, never a fabricated uid; every decision keyed on it
 fails CLOSED, never open. This is recorded ALONGSIDE the self-asserted
 `consumer` name above, never in place of it — `consumer` is still
-unauthenticated; the node uid is a separate fact. Two places this fact is
+unauthenticated; the peer uid is a separate fact. Two places this fact is
 used: `pending`'s reply carries each ask's stamped `peerUid`
 (additive field, above), and `dismiss` is gated on it (above) — every
 resolve/park/approve/dismiss/put audit line also carries the acting
-connection's node uid now, alongside the pre-existing self-asserted name.
+connection's peer uid now, alongside the pre-existing self-asserted name.
 
-**Admin mutations (task #79) — a new op family, built on Node identity
+**Admin mutations (task #79) — a new op family, built on Peer identity
 above.** Every admin CRUD command (`add`/`rm`/`grant`/`revoke`/`set-totp`/
 `automate`/`expose`/`migrate`) is now reachable over this SAME socket, as
 the daemon's SINGLE-WRITER path — the live broker becomes the one process
@@ -3225,12 +3225,12 @@ direct-home write:
 
 **Gate: ONLY the broker's own effective uid, full stop — stricter than
 `dismiss`'s.** Where `dismiss` (above) admits either the ask's own stamped
-node uid or the broker's own uid, `{"op":"admin"}` admits ONLY the
+peer uid or the broker's own uid, `{"op":"admin"}` admits ONLY the
 broker's own effective uid — reusing the SAME wording the direct-write
 path's admin-identity guard already gives (root explicitly refused, not a
 bypass — "plain `sudo` runs as root, and root CAN write here regardless of
 file ownership"), so a refusal here teaches the identical fix. An
-unidentified connection (node cred unreadable) is refused outright, the
+unidentified connection (peer cred unreadable) is refused outright, the
 same fail-closed default `dismiss` holds.
 
 **The CLI tries this socket FIRST; a direct write is the no-daemon
