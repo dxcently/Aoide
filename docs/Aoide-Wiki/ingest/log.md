@@ -160,6 +160,26 @@ no pruning, which is the same defect the message clamp closed. Whether
 `untrusted_data` takes the same 512-byte clamp, a larger one, or a
 per-field bound set where the record is built is undecided.
 
+### [2026-09-07] open: the door's audit calls a refusal a success
+MAIL.md §Wire rules that admission is a JSON-RPC error and everything
+after it an outcome, and justifies the split this way: an admission
+failure returned as a 200 result "would audit as `ok` through the door's
+own error heuristic, and an audit that files a refusal as a success is
+worse than a blunt error code." Steps 2 onward are ruled into results,
+and two of them — `bad-msgid` and `unverified-origin` — are refusals.
+The principle therefore condemns the shape the same section prescribes.
+The A2A door's generic per-request heuristic keys on a JSON-RPC `error`
+member, so a refused deposit, now a 200 carrying
+`{"result":{"status":"refused"}}`, logs `ok` — against the heuristic's
+own stated intent of recording the logical outcome rather than the HTTP
+line. `mail_deposit` writes its own audit line above the match,
+labelling both outcomes `invalid`, so nothing is unrecorded; the log
+instead holds two lines for one event under one command string,
+disagreeing. Undecided: whether the generic heuristic learns the refused
+shape, whether a handler reports its logical verdict out of band so the
+door labels from the method rather than the payload, or whether MAIL.md
+is the thing that changes and these two outcomes return to being errors.
+
 ## [2026-07-25] mint | Aoide-Wiki
 - Standalone wiki minted from the librarian `_template` for the Aoide project.
 
@@ -2473,5 +2493,74 @@ error — but a failure is not.
 
 The fix waits on a ruling about which tree is the score. Adding a staleness
 guard would preserve both trees and decide nothing.
+
+Pages touched: `ingest/log.md`.
+
+## [2026-09-07] refactor | Mneme shared-memory proposal
+
+Moved the proposal from the repository-root `references/` directory into
+`references/mneme-shared-memory-and-aoide.md` in this wiki, and registered it in
+the catalog and notes manifest. The source remains a proposal; its system
+comparison identifies the reviewed local revisions rather than claiming the
+same features are deployed or present on upstream main.
+
+The draft defines separate persistent agent identities, versioned profiles,
+selected skills, scoped memories, and task-specific context. Shared project
+knowledge stays canonical; cross-agent sharing uses explicit grants or
+publication into shared collections. Runtime tool permissions remain with
+Aoide and the harness. The first milestone includes isolation and handoff
+acceptance checks. The initial proposal was drafted on 2026-09-07; its change
+record is maintained here.
+
+Pages touched: references/mneme-shared-memory-and-aoide.md, SCHEMA.md,
+ingest/index.md, ingest/log.md. The misplaced repository-root copy was removed.
+
+## [2026-09-07] build | mail reaches another box
+
+`aoide mail send` now crosses to a directly paired node. Four things had
+to arrive together and none of them works alone: a `message` capability
+joining the closed pairing vocabulary, an `aoide/mailDeposit` method on
+the one A2A door, a `state/outbox/<node>/` spool with per-link backoff,
+and the commands that drive them. A deposit is admitted or refused by
+policy, and a well-formed envelope's fate is reported separately from
+whether its sender was allowed to speak at all.
+
+The spool is BSO's, deliberately. A link's `.bsy` is taken
+non-blocking, so a drain that finds a link busy skips it rather than
+queueing behind a stalled dial and starving every other link. An entry
+retires when its delivery is confirmed, and what confirmation means
+depends on the entry: a letter waits for the destination's signed ack, a
+receipt needs only its own deposit outcome, because an ack is what
+confirmation looks like and acks are never acked.
+
+Two defects followed, and both were the specification's rather than the
+code's. The first: the door returned `bad-msgid` and `unverified-origin`
+as JSON-RPC errors, where MAIL.md rules that only admission is an error
+and everything after it an outcome. CONTRACTS.md documented the error
+shape too, so code and contract agreed with each other and both
+disagreed with the design authority. Correcting the door alone would
+have been half a fix — the drain classified only a JSON-RPC `error`
+member as a refusal, so a peer answering the specified refusal *result*
+read as delivered, and a letter's entry then sat spooled forever waiting
+on an ack that was never coming. This box could not have talked to a box
+that implemented the specification faithfully, including a later version
+of itself.
+
+The second was smaller and the same shape. The corrected drain matches a
+response's status carefully — accepted and duplicate mean delivered,
+refused and anything unrecognised mean the entry did not land — and then
+resolved a missing status field to the literal "accepted", walking past
+the match entirely. For a receipt, whose delivered arm removes the
+outbox record outright, a malformed reply with no status at all
+destroyed the local record on a response that confirmed nothing. A
+missing field is weaker evidence than an unrecognised one, and the
+unrecognised one already parked.
+
+The pattern across all three of this phase's defects is that a
+specification can be wrong in a way no review tier catches, because
+every tier is checking the code against the spec. The refusal shape was
+found only because a reviewer read MAIL.md and the code as two
+independent claims about the same thing rather than as source and
+implementation.
 
 Pages touched: `ingest/log.md`.
