@@ -5331,14 +5331,18 @@ anything else at all (told to pair, then allow).
 
 Past admission, the envelope's own content is entirely
 `aoide_storage::mail::deposit`'s policy chain (spec item 4's order):
-recompute `msgid` from `(header, text, sig)` and refuse `-32602` on a
-mismatch (tampered or corrupt in transit); verify the ORIGIN signature —
-the two-lookup identity model, hop via the already-KEY-RESOLVED caller,
-origin via the one key on record for `header.from.node` — and refuse
-`-32602` if no key on record verifies it; dedup against `state/mail/
-seen.jsonl`; file. The zone check MAIL.md's step 3 describes is P-M4's,
-skipped here entirely, not stubbed — `header.originMesh` stays `""` (§4).
-A successful deposit answers:
+recompute `msgid` from `(header, text, sig)`; verify the ORIGIN
+signature — the two-lookup identity model, hop via the already-
+KEY-RESOLVED caller, origin via the one key on record for
+`header.from.node`; dedup against `state/mail/seen.jsonl`; file. A
+mismatched `msgid` or an unverified origin answers a REFUSED RESULT,
+never a JSON-RPC error: MAIL.md §Wire's admission/outcome split makes
+step 1 above (admission, `-32010`) the only error this method ever
+returns, because whether the caller may speak to the method at all is a
+different question from what became of a well-formed envelope. The zone
+check MAIL.md's step 3 describes is P-M4's, skipped here entirely, not
+stubbed — `header.originMesh` stays `""` (§4). A successful deposit
+answers:
 
 ```json
 { "result": { "status": "accepted", "msgid": "<hex sha256>" } }
@@ -5349,7 +5353,20 @@ A successful deposit answers:
 own ack never arrived, so a duplicate whose original filing was a
 **letter** re-sends the ack (never a duplicate **receipt** — that would
 ack an ack, and the `letter`/`receipt` vocabulary has no third shape to
-stop that ping-ponging forever).
+stop that ping-ponging forever). A rejected envelope answers instead:
+
+```json
+{ "result": { "status": "refused", "reason": "bad-msgid",
+              "detail": "envelope msgid does not match the recomputed value" } }
+```
+
+— `"unverified-origin"` replacing `"bad-msgid"` when no key on record
+verifies the origin signature. `reason` is exactly the token MAIL.md
+§Transit names for each of these two among its `refused` reasons (the
+other four in that list are later phases': the zone check and routing);
+`detail` carries what the code used to raise as the `-32602` message's
+own text — which field mismatched, which node's key was missing — for a
+human reading `mail outbox`, never for a caller to match on.
 
 **This method self-audits UNCONDITIONALLY, under its own
 `a2a.aoide/mailDeposit` label, at both the admission refusal and the
