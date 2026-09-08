@@ -3,9 +3,9 @@
 Optional, additive host capabilities — every dendrite self-gates on its own
 `aoide.<name>.enable` and is discovered by `lib/walk.nix`'s recursive walk,
 never an import list. Today's set spans desktop apps (firefox, obsidian,
-kitty), CLI tooling (git, yazi, starship, mcfly, nh), agent CLIs
-(claude-code, kimi-code, pi-coding-agent, codex), and system services (dunst,
-networkmanager, audio).
+kitty), CLI tooling (git, yazi, starship, mcfly, nh), agent and desktop AI
+tooling (claude-code, kimi-code, pi-coding-agent, OpenAI Codex + ChatGPT), and
+system services (dunst, networkmanager, audio).
 
 ## Named seams (what it exposes)
 
@@ -20,6 +20,12 @@ networkmanager, audio).
   `state/stage/herald.json`, which the Quickshell herald widget reads.
 
 ## What it consumes
+
+`openai.nix` installs Codex and imports the `chatgpt-desktop-linux` flake's
+NixOS module for ChatGPT Desktop. `aoide.openai.enable` enables both tools;
+the desktop launcher receives the installed Codex CLI path.
+The dendrite overrides the pinned flake's stale DMG download hash; packaging
+and launcher behavior remain owned by the upstream Linux flake.
 
 `config.aoide.*` options it declares itself, plus stock NixOS/Home-Manager
 options. A dendrite reads no other module's internals — not even another
