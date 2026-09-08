@@ -153,5 +153,6 @@ references/AOIDE-VS-LANGCHAIN-HANDOFF.md
 references/Glass-Stretch-on-a-Rotated-Monitor.md
 references/audit-report.md
 references/fleshing-out-aoide-ricing.md
+references/mneme-shared-memory-and-aoide.md
 references/pantheon/pantheon-grammar.md
 ```

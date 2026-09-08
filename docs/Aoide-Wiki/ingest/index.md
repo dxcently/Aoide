@@ -1,6 +1,6 @@
 ---
 type: index
-updated: 2026-08-31
+updated: 2026-09-07
 ---
 
 # Aoide — Index
@@ -60,6 +60,7 @@ updated: 2026-08-31
 
 ## References
 
+- [[references/mneme-shared-memory-and-aoide|Shared Mneme memory and Aoide integration]] — proposal for an authoritative knowledge store, replica vaults, distinct agent profiles and memories, selected skills, and task-specific context
 - [[references/AOIDE-HANDOFF|AOIDE-HANDOFF]] — the original design contract: what Aoide is (the primary source for this wiki)
 - [[references/Glass-Stretch-on-a-Rotated-Monitor|Glass-Stretch-on-a-Rotated-Monitor]] — why three layer surfaces smeared on the portrait monitor: the hyprglass layer-mask frame mismatch, the two wrong diagnoses, and why a rebuild alone does not load the fix
 - [[DEV]] — the development agent’s operating manual, a self-contained set under `protocol/dev/`: preferences and prime loop, then what to build ([[PRINCIPLES]]), tiers and routing ([[ORCHESTRATION]]), repo and commits ([[CRAFT]]), gates and proofs ([[VERIFICATION]])
