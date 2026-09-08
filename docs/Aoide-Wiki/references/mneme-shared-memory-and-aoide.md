@@ -11,6 +11,10 @@ truth.
 
 **Current operation versus proposed operation**
 
+The current-operation column describes the reviewed source snapshots: Mneme
+`5512299` and the local Aoide development revision `90e87ea`. It is not a claim
+about the deployed services or the contents of upstream Aoide `main`.
+
 | Concern | Mneme / Aoide today, checked in source | Proposed system |
 |---|---|---|
 | Knowledge storage | Mneme reads and writes text files under configured vault roots. There is no central document database. | One authoritative Mneme store contains note bodies, memory records, revisions, and a durable change journal. |
@@ -56,7 +60,7 @@ Aoide -- mail --> Local signed letters
 | Concept | What it is | Example | Management rule |
 |---|---|---|---|
 | Agent memory management | A lifecycle and retrieval service over records. | A session handoff, a verified constraint, a learned preference. | Capture with provenance; distinguish observations from maintained facts; supersede outdated records; exclude expired records from normal retrieval. |
-| Agent vault | A logical collection or view for an enduring agent role or team. | Rook's handoffs and working observations across different harnesses and machines. | Scope by role, project, and access. A new session or agent provider does not create a new knowledge database. |
+| Agent vault | A logical collection for a persistent agent identity, or an explicitly shared team collection. | Rook's handoffs and working observations across different harnesses and machines. | Scope by agent, project, and access. Two agents with the same role keep separate memories unless they explicitly share them. |
 | Regular notes vault | Human-facing documents and project knowledge. | Personal notes, project wikis, architecture decisions, research. | Edit, organize, link, search, version, and sync. No automatic memory expiry applies to ordinary notes. |
 
 These are different axes: a vault is a container; memory management is behavior.
@@ -71,7 +75,7 @@ One Mneme knowledge store
 │   ├── mneme                 maintained project wiki
 │   └── aoide                 maintained project wiki
 └── agents
-    ├── rook                  role memory and handoffs
+    ├── rook                  Rook's memory and handoffs
     └── shared                team observations and reusable context
 
 Machine and harness views --> references/subsets of these same records
@@ -102,6 +106,83 @@ New evidence --> supersede old memory --> future retrieval uses current state
 Mneme enforces storage and lifecycle rules. The agent performs semantic work;
 this proposal does not add an LLM provider inside the server. Existing conventions
 and skills remain the shared instructions that agents explicitly load.
+
+**Different agents, different knowledge and capabilities**
+
+The store holds multiple agent identities. Each has an explicit profile naming
+its purpose, selected skills, and knowledge collections; each session gets a
+task-specific selection from those records. Central storage does not make every
+agent's memories visible to every other agent.
+
+| Part | Durable representation in Mneme | Runtime owner and selection |
+|---|---|---|
+| Identity | A stable `agent_id` with a versioned profile. | Aoide or the client binds a session to an authorized identity; a mailbox name or a supplied string alone does not grant that identity. |
+| Function / role | Purpose, responsibilities, and references to maintained role instructions. | Aoide assigns the task; the harness executes it. Several agents can use the same role while keeping distinct identities. |
+| Callable tools | Profile references to required capabilities. | The harness and Aoide resolve available tools and enforce actual grants. Storing a tool name in Mneme cannot confer permission or install its implementation. |
+| Skills | Canonical versioned skill documents, referenced by each profile. | The adapter loads only the selected, compatible skills; executable dependencies and credentials stay with the runtime. |
+| Knowledge | Shared project documents, agent-authored observations, and maintained domain collections. | Retrieval follows explicit collection grants, project scope, and the current task. |
+| Personal memory | Agent-owned lessons, preferences, unresolved hypotheses, and handoffs with sources and lifecycle state. | The identity owns its default write scope; sharing with another agent is deliberate. |
+| Session context | Checkpoints and selected references that need to survive the session. | Live conversation and tool state belong to the harness. A new session reconstructs useful context; it does not inherit every transcript. |
+
+```text
+One Mneme store
+├── projects/aoide              shared facts and decisions
+├── skills                     canonical skill registry
+│   ├── rust-development
+│   └── architecture-review
+├── agents/builder-01
+│   ├── profile                implement tasks; select rust-development
+│   └── memory                 builder's own lessons and handoffs
+└── agents/reviewer-01
+    ├── profile                review changes; select architecture-review
+    └── memory                 reviewer's own observations and handoffs
+
+builder-01 session  --> builder profile + builder memory + relevant project facts
+reviewer-01 session --> reviewer profile + reviewer memory + relevant project facts
+```
+
+These are logical collections in one store. A session ID identifies one run;
+an agent ID identifies the continuing agent; a role describes its job; a harness
+describes how it runs. Reusing a role or changing the model does not merge agent
+identities. An explicit binding lets the same agent resume on another machine or
+harness, while a separately created agent starts with its own memory collection.
+
+A builder can record an implementation hypothesis while the reviewer records a
+contradicting observation. Both retain author and source provenance. Neither
+private record overwrites the maintained project decision. A validated finding
+updates that decision through the normal revision-checked write; each agent can
+then reference the same resulting record. Derived summaries retain source
+revisions so later edits can invalidate them.
+
+For each task, context is assembled in this order:
+
+```text
+Authenticated session bound to agent identity
+  --> permitted collections
+  --> chosen agent profile and compatible skill revisions
+  --> project/task filters and current memory state
+  --> relevant excerpts within the harness's context budget
+  --> context package with source IDs, revisions, and record types
+```
+
+Access checks happen before search and ranking. Retrieved observations stay
+labelled as data; they cannot replace the profile or activate a skill. Profile
+and skill changes require the corresponding write permission. A session records
+which profile and skill revisions it loaded; later changes take effect at an
+explicit refresh or the next session, avoiding silent changes mid-task.
+
+Sharing consists of granting access to an existing record or publishing a
+validated result into an agreed shared collection. A handoff names the task,
+selected references, and unresolved work; it does not copy the sender's entire
+memory into the recipient's vault. Independent review starts from the assigned
+brief and approved evidence, without automatically inheriting the builder's
+private session context.
+
+Replication follows the collections authorized for a machine. It does not
+automatically load every replicated record into every local agent's context.
+Mneme's API grants enforce this separation for clients; mutually untrusted
+processes also need separate OS identities, since direct access to the same
+database or credential files bypasses an API boundary.
 
 **Authority, database, and replicas**
 
@@ -181,9 +262,10 @@ serving several existing roots gives one API, but does not yet give one database
 **Chaining memory to Aoide**
 
 ```text
-Session starts
-  --> Aoide exposes session / role / project context
-  --> adapter requests permitted, relevant context from Mneme
+Session starts or the agent explicitly resumes a task
+  --> Aoide exposes the authorized agent identity and session / role / project
+  --> adapter makes the context retrieval operation available
+  --> agent requests permitted, relevant context from Mneme
   --> harness presents that context to its agent
 
 Agent records a finding through MCP
@@ -195,8 +277,10 @@ Agent records a finding through MCP
 ```
 
 The session-to-context adapter is new work. Existing hook installation tracks
-session events; it does not already hydrate Mneme memory. Explicit checkpoints
-save important handoffs during work, since a session-end hook can be missed.
+session events; it does not already hydrate Mneme memory. Startup exposes a
+retrieval entry point; it does not inject a complete memory archive into a fresh
+conversation. Explicit checkpoints save important handoffs during work, since a
+session-end hook can be missed.
 
 Aoide letters carry references and change cursors, for example
 `{kind: "mneme.changed", vault_id: "projects", through_seq: 1842}`.
@@ -226,7 +310,7 @@ Existing source admission policy in Aoide applies when connecting new content.
 
 | Step | Concrete deliverable | Evidence that it works |
 |---|---|---|
-| 1. Shared context | Existing Mneme endpoint shared by two different agent clients; project/role organization; a small Aoide adapter retrieves context and saves explicit handoffs through MCP. | Agent B can retrieve Agent A's sourced handoff without maintaining a second wiki; regular note operations still work. |
+| 1. Scoped agent context | Existing Mneme endpoint shared by two agent clients; explicit identity bindings, separate profiles and memory collections, selected skills, and a small Aoide adapter for context retrieval and handoffs. | Two agents retrieve different context for the same project; an explicitly shared handoff is readable by its recipient, ungranted memory stays inaccessible, and a tool reference cannot widen runtime permissions. |
 | 2. Managed authority | Stable IDs, revision-checked transactions, managed database, durable change journal, import/export and editor adapter for one pilot vault. | Two edits from the same base cannot silently overwrite each other; a crash after commit cannot lose the change notice; notes/links/Canvas survive import and export. |
 | 3. Replica vaults | Authorized snapshot and cursor catch-up on a second machine; local read API; write forwarding; deletion and rename propagation. | Disconnect/reconnect converges to the same committed state; repeated changes do not duplicate content; unauthorized vaults are absent. |
 | 4. Aoide remote notices | Adapter publishes references using Aoide's implemented remote mail transport and routing rules. | Dropped or repeated notices do not affect convergence; receiving a letter does not execute its contents. |
@@ -244,7 +328,3 @@ replica catch-up can use a reachable Mneme API before that work lands.
 - Scope: the first pilot covers Mneme's current text and Canvas surface; general attachment storage is not specified here.
 - Verification: source review of Mneme `5512299` and Aoide `90e87ea`, performed 2026-09-07. No running service, cross-machine sync, or executable tests were exercised.
 - Documentation drift: older README counts and parts of the roadmaps lag the source; Aoide's mail design describes more than its current implementation.
-
-**Proposal log**
-
-- 2026-09-07: Drafted the current/proposed comparison, responsibility split, managed-store target, Aoide adapter boundaries, and staged acceptance criteria. No runtime implementation changed.

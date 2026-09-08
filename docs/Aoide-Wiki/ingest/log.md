@@ -2140,3 +2140,22 @@ Pages touched: README.md, docs/architecture/aoide-report.html,
 docs/architecture/PAIRING.md, concepts/orchestration/Pairing-Ceremony.md,
 concepts/cli/Doors-and-Peers.md, concepts/Full-Architecture.md,
 concepts/Package-Layout.md, entities/lyra.md, ingest/log.md (this entry).
+
+## [2026-09-07] refactor | Mneme shared-memory proposal
+
+Moved the proposal from the repository-root `references/` directory into
+`references/mneme-shared-memory-and-aoide.md` in this wiki, and registered it in
+the catalog and notes manifest. The source remains a proposal; its system
+comparison identifies the reviewed local revisions rather than claiming the
+same features are deployed or present on upstream main.
+
+The draft defines separate persistent agent identities, versioned profiles,
+selected skills, scoped memories, and task-specific context. Shared project
+knowledge stays canonical; cross-agent sharing uses explicit grants or
+publication into shared collections. Runtime tool permissions remain with
+Aoide and the harness. The first milestone includes isolation and handoff
+acceptance checks. The initial proposal was drafted on 2026-09-07; its change
+record is maintained here.
+
+Pages touched: references/mneme-shared-memory-and-aoide.md, SCHEMA.md,
+ingest/index.md, ingest/log.md. The misplaced repository-root copy was removed.
