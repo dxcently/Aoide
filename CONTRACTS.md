@@ -592,8 +592,8 @@ count.
   commitment/reveal construction, and SAS derivation. `node allow <name>
   <cap> on|off`, appended newest, P-P3 (`docs/architecture/PAIRING.md`
   decision 5) — flips one capability in a node's own closed `allows`
-  set (`"read"`/`"spawn"`, `aoide_storage::node_store::NODE_CAPABILITIES`
-  — never a per-capability serde bool scatter); idempotent (`on` on an
+  set (`"read"`/`"spawn"`/`"message"` (P-M2), `aoide_storage::node_store::
+  NODE_CAPABILITIES` — never a per-capability serde bool scatter); idempotent (`on` on an
   already-on capability, or `off` on an already-off one, both report a
   no-op), refuses an unknown node or an unknown capability string with
   a distinct taught error for each (the capability check runs before
@@ -996,8 +996,8 @@ sakaki = "ssh://khoa@192.168.1.202"
 - `pairing.defaultGrant` (list of strings, default `["read"]`) — the
   capability set a node is granted when it FIRST becomes verified. The
   vocabulary IS §7's own closed node-capability set
-  (`aoide_storage::node_store::NODE_CAPABILITIES`, `"read"`/`"spawn"` — the
-  same one `node allow` enforces), never a second list; an unknown
+  (`aoide_storage::node_store::NODE_CAPABILITIES`, `"read"`/`"spawn"`/
+  `"message"` (P-M2) — the same one `node allow` enforces), never a second list; an unknown
   capability is refused by name, exactly as an unknown key is. Read by both
   ceremony commit sites (`approve_inbound`/`approve_outbound`, through
   `resolve_grant`) unless that invocation named `--allow`; a config that does
@@ -2038,8 +2038,11 @@ can never make two hops disagree, and a receiver re-derives the header
 from the fields and rejects if `msgid` does not recompute. `node` is
 always this box's own name (`display::local_host_name()` — `self`
 resolves to it when the envelope is minted and the literal never enters a
-header); `originMesh` is always `""` — there is no mesh declaration yet to
-post into.
+header); `originMesh` is always `""` — mail does not yet consult a
+declared mesh when addressing, sending, or filing (P-M4's zone check,
+`docs/architecture/MAIL.md` step 3, still skipped entirely rather than
+stubbed, even though task #135 gave `[mesh.<name>]` a real declaration to
+post into).
 
 `seq` is local to the node, like an NNTP article number — never crosses a
 link; it is `last line's seq + 1`, read under the lock. `type=letter` is
@@ -2053,8 +2056,14 @@ of a brand-new A2A-spawned session, which cannot reach `deliver_local` at
 all) file receipts through the same `mail::file_receipt`, the ONE seam
 covering every route a delivered message takes to land in a local
 session — `do_inject` files no entry of its own, see its doc comment. An
-OUTBOUND `--to node/<x>` send never files here yet: there is no wire to
-another node in this phase.
+OUTBOUND `--to node/<x>` send (P-M2) files nothing into THIS box's own
+`base.jsonl` at send time — it mints a sealed envelope and spools it into
+`state/outbox/` instead (below), delivered over `aoide/mailDeposit` by a
+best-effort drain right after the write, the daemon's own periodic sweep,
+or a door's post-heard drain of that node. The letter lands in a
+`base.jsonl` only on the FAR box, once ITS OWN `mail_deposit` files it;
+this box's own base gains an entry only when that far box's ack (a
+`receipt`) is deposited back here in turn.
 
 Every mutation of the mailbase runs under the stage lock and refuses when
 the lock is not held: `try_stage_lock` (`storage/src/fs.rs`) blocks for
@@ -2068,9 +2077,13 @@ those two writes, and that `msgid` is accepted again — the reverse order
 would lose mail.
 
 Read/resolved by `aoide mail`/`mail send`/`mail read`/`mail show`/`mail
-mark`/`mail rm`: bare `mail` prints the names with unread mail BY THIS
-READER; `mail send --to self/<name> -- <text>` files a letter (only
-`self` routes anywhere in this phase); `mail read --for
+mark`/`mail rm` (the outbox's own `mail outbox`/`mail outbox rm` are a
+separate surface over `state/outbox/`, below): bare `mail` prints the
+names with unread mail BY THIS READER; `mail send --to self/<name> --
+<text>` files a letter directly; `mail send --to <node>/<name> -- <text>`
+(P-M2, `node` any other registered, VERIFIED node) mints and spools
+instead of filing directly here — see `state/outbox/` below for that
+path in full; `mail read --for
 <name>`/`--all-names` prints new entries and advances ONLY the calling
 reader's mark under that name (`--reread` reprints already-read ones —
 the mark still only ever advances forward). A reader is the conducting
@@ -2104,6 +2117,94 @@ inherits the name's old `seq`; a name with no recorded reader keeps its
 mark filed under the name itself. No sentinel file marks the rewrite
 done: the per-name shape check is itself the idempotency guard, so a
 second open is a clean no-op.
+
+### `state/outbox/` — **v0** (messaging plan P-M2, 2026-09-07)
+
+The per-node BSO-style spool (MAIL.md "Outbox") — where a `mail send --to
+<node>/<name>` envelope waits between minting and confirmed delivery. One
+directory per node, three kinds of file, one `outbox_dir()` (the ordinary
+`state_dir()` resolution, `$AOIDE_STATE_DIR/outbox/`):
+
+```
+state/outbox/<node>/<msgid>.json   one OutboxEntry per pending envelope
+state/outbox/<node>/link.json      that LINK's own backoff state (absent
+                                    = not held off)
+state/outbox/<node>/.bsy           a drain's lock file — never data
+```
+
+```json
+{
+  "envelope": { "...": "the sealed Envelope, byte-identical to mint time" },
+  "tries": 2,
+  "lastTryAt": "2026-09-07T14:03:10Z",
+  "lastOutcome": "accepted",
+  "refused": false
+}
+```
+
+The envelope is stored VERBATIM — a retry resends the exact signed bytes,
+never re-mints (a re-mint would also mint a fresh, different `msgid`,
+defeating the far end's dedup in `state/mail/seen.jsonl`). `refused` is
+set ONLY when a deposit attempt comes back a JSON-RPC REFUSAL (a transport
+failure backs the LINK off instead — the entry itself is untouched, see
+below): a refused entry stays in the spool forever — no auto-eviction, no
+quota, no expiry, the kill-list — but a drain skips it on sight; only
+`mail outbox rm <msgid>` retires it.
+
+**Two locks, two different jobs, never conflated.** Every entry/link-state
+read or write goes through this module's own copy of `mail`'s stage-lock
+wrapper (a tiny per-module copy, not a reach into `mail`'s own — that one
+also runs `mail`'s migrations, unrelated here) — file I/O only, held for
+microseconds, released before a caller ever dials anywhere. `.bsy`
+(`try_take_link_lock`, `LOCK_EX|LOCK_NB`, ruling 3) is a SEPARATE,
+per-node, NON-BLOCKING lock a drain holds ACROSS the whole dial+POST+record
+cycle for that one link, so a second, concurrent drain of the SAME link
+skips rather than double-driving it — never the reverse: holding the
+global stage lock across a network dial would wedge every other `aoide`
+command on the box, which is exactly why `.bsy` exists as a second,
+cheaper mechanism rather than widening the first one's scope.
+
+**Backoff is per-LINK, never per-entry.** A TRANSPORT failure (no
+JSON-RPC response at all — dial/tunnel/HTTP/parse) backs the link off via
+`aoide_protocol::dialog::next_spawn_backoff` (ruling 7): the FIRST failure
+backs off by `DRAIN_BACKOFF_FLOOR_SECS` (12s, matching `aoide-server::
+daemon`'s own ~12s drain cadence — backing off faster than the sweep
+itself fires would never actually skip a dial), and only a SECOND
+consecutive failure doubles it, mirroring `client::pair_watch`'s own
+`SPAWN_BACKOFF_INITIAL`-then-`next_spawn_backoff` sequencing. Success —
+or a REFUSAL, which is the entry's problem, not the link's — clears the
+backoff outright (`link.json` removed, never merely reset), the ordinary
+"not held off" state a drain reads as `None`.
+
+A **letter** entry that comes back delivered (`"accepted"` or
+`"duplicate"` — either way the far end has it) is NOT removed: it waits
+for a REAL ack (spec item 7), only its `tries`/`lastTryAt`/`lastOutcome`
+bookkeeping advancing. A **receipt** entry's own successful deposit IS its
+confirmation (ruling 4: no separate ack-of-an-ack), so it is removed
+outright on delivery. `retire_by_ack` is the other half of that same
+ruling — the local outbox entry a genuine ack confirms is retired when a
+receipt deposits back in (`aoide/mailDeposit` on the ORIGIN's own door):
+its two checks ("verified signer is that entry's `to.node`" and "names
+that entry's `msgid`") collapse into ONE path lookup, since an entry is
+always spooled under the exact node its own `envelope.header.to.node`
+names — indexing by the receipt's already-origin-verified `from.node`
+(`mail::deposit` refuses a forged signer before `retire_by_ack` is ever
+reached) IS the first check, and keying the file by `msgid` makes the
+second a plain hit-or-miss, never a partial match. `Ok(None)` — never an
+error — covers every way an ack fails to match: not a receipt at all, no
+entry ever spooled under that node, or a `msgid` that node's spool
+doesn't hold.
+
+Read/resolved by `aoide mail outbox [node]`/`mail outbox rm <msgid>` —
+a separate CLI surface from the mailbase's own `mail` family above,
+touching `state/outbox/` only. `mail outbox` (no `node`) lists every
+node with a non-empty outbox; `mail outbox <node>` narrows to one; each
+row is `msgid`/`to`/`tries`/`lastTryAt`/`lastOutcome`/`refused`. `mail
+outbox rm <msgid>` is an exact-msgid removal — it walks every node with an
+outbox and removes the first match, erroring `not-found` if none held it;
+NOT the mailbase `mail rm`'s age-based prune, and neither command ever
+touches `state/mail/`. See §6's `aoide/mailDeposit` for the wire method
+that actually drains this spool.
 
 ### `state/usage.json` — **v0**
 
@@ -4115,8 +4216,8 @@ the server-wide bearer (`aoide.a2a.tokenFile`/`bearerSecret`) could launch
 operator had ever actually paired with (`node pair request`/`approve`,
 P-P2, decisions above). `docs/architecture/PAIRING.md` decisions 5–7 close
 that gap: `allows` (a closed capability set, `aoide_storage::node_store::
-NODE_CAPABILITIES` = `"read"`/`"spawn"`, never a per-capability serde bool
-scatter) lives on `Node`, stamped by `upsert_paired_node` from the grant its
+NODE_CAPABILITIES` = `"read"`/`"spawn"`/`"message"` (P-M2), never a
+per-capability serde bool scatter) lives on `Node`, stamped by `upsert_paired_node` from the grant its
 caller resolved (`config.toml`'s `[pairing] defaultGrant`, or `--allow`) the
 moment a node FIRST becomes verified and left untouched on a later key
 rotation (so a revoked capability survives re-pairing); `node allow <name>
@@ -5200,6 +5301,77 @@ the instant a sweep's deadline passes; its one piece of state is the
 advertise switch file above, additive and tolerate-missing. Carries no
 version bump to §1–§6 and needs no playbook migration entry.
 
+### `aoide/mailDeposit` (P-M2, `docs/architecture/MAIL.md`)
+
+One new method on the SAME existing A2A JSON-RPC/HTTP door (§6) — no new
+transport, no new server, no new port; the SECOND capability-gated method
+after Spawn (`message/send`'s Spawn arm, above), and the first not gated
+on `spawn`. A registered node's own outbox drain (`state/outbox/`, §4)
+POSTs this to deposit one sealed letter or receipt into the target's
+mailbase:
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "method": "aoide/mailDeposit",
+  "params": { "envelope": { "header": { "...": "the Envelope, exactly
+              as aoide_storage::mail::Envelope serializes" },
+              "text": "...", "sig": "<hex ed25519>",
+              "msgid": "<hex sha256>" } } }
+```
+
+**Admission is signature-only, from the start — no Addr/Token fallback
+rung to migrate off the way Spawn once had.** The caller must resolve via
+`verify_signed_request`'s KEY-RESOLVED `signed_node_name` (the identical
+per-request signature scheme the Spawn arm's gate uses, security posture
+above) to a node that is both `verified` and carries `"message"` in
+`allows`. A refusal is `-32010` — a NEW code: never `-32006` (Spawn's own)
+and never `-32007` (`verify_signed_request`'s own incomplete-headers/
+signature-mismatch refusal) — in one of two shapes: paired but missing
+`message` (told the exact `node allow <name> message on` fix), or
+anything else at all (told to pair, then allow).
+
+Past admission, the envelope's own content is entirely
+`aoide_storage::mail::deposit`'s policy chain (spec item 4's order):
+recompute `msgid` from `(header, text, sig)` and refuse `-32602` on a
+mismatch (tampered or corrupt in transit); verify the ORIGIN signature —
+the two-lookup identity model, hop via the already-KEY-RESOLVED caller,
+origin via the one key on record for `header.from.node` — and refuse
+`-32602` if no key on record verifies it; dedup against `state/mail/
+seen.jsonl`; file. The zone check MAIL.md's step 3 describes is P-M4's,
+skipped here entirely, not stubbed — `header.originMesh` stays `""` (§4).
+A successful deposit answers:
+
+```json
+{ "result": { "status": "accepted", "msgid": "<hex sha256>" } }
+```
+
+`"duplicate"` replaces `"accepted"` when `msgid` was already in
+`seen.jsonl` — the far end's earlier attempt evidently landed even if ITS
+own ack never arrived, so a duplicate whose original filing was a
+**letter** re-sends the ack (never a duplicate **receipt** — that would
+ack an ack, and the `letter`/`receipt` vocabulary has no third shape to
+stop that ping-ponging forever).
+
+**This method self-audits UNCONDITIONALLY, under its own
+`a2a.aoide/mailDeposit` label, at both the admission refusal and the
+deposit outcome** — mirroring `aoide/pairRequest`'s "audit every call"
+shape above, deliberately not `message/send`'s narrower "only the notable
+branches" one: a deposit never passes through `cli/src/dispatch.rs`'s own
+per-command audit, so this is the only place a flood becomes visible, and
+volume must show whether every one of those deposits landed accepted,
+refused, or malformed.
+
+A filed **letter** mints an ack (a `receipt`) addressed back to the
+origin, spools it into that origin's own `state/outbox/`, and best-effort
+drains that node once, synchronously, reusing the SAME drain
+`aoide-server`'s own periodic sweep uses (`aoide_conduct::mail_bridge::
+drain_node` — one drain implementation, never a second dial built at the
+door). A filed **receipt** instead retires the LOCAL outbox entry it
+confirms (§4's `retire_by_ack`, spec item 7) — a forged or stale ack
+simply matches nothing and retires nothing; every `state/outbox/` call
+here runs strictly AFTER `mail::deposit` has already released its own
+lock, never nested inside it (`mail`'s and `outbox`'s stage locks are the
+identical non-reentrant primitive).
+
 ---
 
 ## 7. Node federation door — **v0** (2026-08-14)
@@ -5270,7 +5442,8 @@ it never reads or writes this file directly, only
 `allows` (array of strings, additive per P-P3, `docs/architecture/
 PAIRING.md` decision 5; omitted from the wire when empty) is a CLOSED
 capability set — `aoide_storage::node_store::NODE_CAPABILITIES` = `"read"`,
-`"spawn"`, never a per-capability serde bool scatter. `upsert_paired_node`
+`"spawn"`, `"message"` (P-M2), never a per-capability serde bool scatter.
+`upsert_paired_node`
 stamps it the moment a node FIRST becomes `verified` (both ceremony commit
 sites — `approve_inbound` and `approve_outbound`) from the grant its caller
 resolved: `config.toml`'s `[pairing] defaultGrant` (`["read"]` by default),
@@ -5278,11 +5451,13 @@ or the `--allow` typed on that commit,
 and leaves it untouched on a LATER re-pairing of an already-verified
 name — a revoked capability survives key rotation. An unpaired (`node add`)
 node and a legacy record predating this field both load `allows: []`. The
-A2A door's Spawn arm (§6's P-P3/P-P4 amendments above) is the one thing
-gating on it today: Spawn requires that node to be `verified` with
-`"spawn"` in `allows` **AND** the caller to have resolved via the
-SIGNATURE rung specifically (§6's P-P4 amendment) — neither the address
-rung nor the (now-insufficient) token rung, regardless of `allows`. `node
+A2A door's Spawn arm (§6's P-P3/P-P4 amendments above) was the first
+thing gating on it, and its Message arm (`aoide/mailDeposit`, P-M2, §6
+above) now gates on it identically one capability over: each requires
+that node to be `verified` with its own capability string in `allows`
+**AND** the caller to have resolved via the SIGNATURE rung specifically
+(§6's P-P4 amendment) — neither the address rung nor the (now-
+insufficient) token rung, regardless of `allows`. `node
 allow <name> <cap> on|off` (§3's command list, §7's CLI surface below) is
 the ONLY other writer — idempotent, refuses an unknown node or an unknown
 capability.
