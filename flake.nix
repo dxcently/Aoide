@@ -25,6 +25,11 @@
 
     hyprland.url = "github:hyprwm/Hyprland";
 
+    chatgpt-desktop-linux = {
+      url = "github:EricKrouss/chatgpt-desktop-linux";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # nvf (Neovim-Flake) — the neovim dendrite's config framework (dxflake
     # form, verbatim). Inputs can only live here; the dendrite reaches it via
     # specialArgs (lib/mkHost.nix threads `inputs` into home-manager too).
