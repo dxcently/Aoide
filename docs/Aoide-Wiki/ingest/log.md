@@ -180,6 +180,19 @@ shape, whether a handler reports its logical verdict out of band so the
 door labels from the method rather than the payload, or whether MAIL.md
 is the thing that changes and these two outcomes return to being errors.
 
+### [2026-09-08] open: the ChatGPT payload is fetched from a mutable URL
+`modules/dendrites/openai.nix` overrides the `chatgpt-desktop-linux`
+flake's pinned source because the hash upstream records no longer
+matches what the URL serves. The dendrite fetches the current DMG and
+rewrites the install phase's reference to the stale derivation,
+discarding and reattaching string context so the old path does not
+follow the substitution into the closure. This works as long as the URL
+serves exactly one payload; the next silent replacement breaks the build
+again, with a hash mismatch that names upstream's fetch rather than
+ours. Close when upstream re-pins, or when the payload is mirrored to
+something content-addressed. Evaluated, not built — the substitution is
+unproven against a real fetch.
+
 ## [2026-07-25] mint | Aoide-Wiki
 - Standalone wiki minted from the librarian `_template` for the Aoide project.
 
@@ -2564,3 +2577,70 @@ independent claims about the same thing rather than as source and
 implementation.
 
 Pages touched: `ingest/log.md`.
+
+## [2026-09-08] rename | the codex dendrite becomes openai
+
+`modules/dendrites/codex.nix` installed `pkgs.codex` and stopped there.
+The tool it named grew a second half — a desktop app — and a toggle
+called `codex` could not honestly gate both, so `openai.nix` replaces it
+and `aoide.openai.enable` gates the pair (`6551c1c`). The CLI installs
+as before; ChatGPT Desktop arrives through the `chatgpt-desktop-linux`
+flake, whose NixOS module the dendrite imports and whose launcher
+receives the same `pkgs.codex` path. yomi's enable line follows the
+rename. Nothing is lost: `pkgs.codex` installs either way.
+
+The lock carries the new input and its `flake-utils`/`systems`
+transitives, and moves nixpkgs to `dc5d91f` — which is the revision
+generation 193 was already built from. The lock is catching up to the
+running system rather than advancing past it.
+
+Two things the old file carried and the new one does not: the dendrite
+shape v0 header (CONTRACTS.md §2) and the note that codex is the
+hookless harness, reaching the session graph through `aoide conduct
+--agent codex` rather than a profile row. The second fact survives in
+`concepts/orchestration/Agent-Hooking.md` §3, which the old comment
+cited; the first is a convention the sibling dendrites still keep.
+
+Verified by evaluation only. `nix eval` of the host toplevel resolves
+with no warning from this module; the ChatGPT payload has not been
+built, and its fetch override is an open thread above.
+
+Pages touched: `modules/dendrites/README.md`,
+`docs/architecture/CODEX-INTEGRATION.md`, `ingest/log.md` (this entry).
+
+## [2026-09-08] refactor | the mneme proposal stops asserting its own design
+
+The draft logged on 2026-09-07 read as settled architecture: one
+authoritative store, a directory tree, a division of labour in the
+present tense — while being a proposal nobody had accepted. A reader
+could not separate the sentences reporting code from the sentences
+reporting a wish, and the diagrams decided questions the prose left
+open. `183200a` fixes the posture rather than the content.
+
+Four labels now run through the page. CURRENT is behavior found in a
+named source snapshot; REQUIRED is a constraint the integration must
+hold; PROPOSED is the design being put forward; OPEN is a choice the
+document does not make. Every table column and both mermaid charts
+carry one, and the directory tree — the worst offender — becomes a
+chart of logical references that states in as many words that it
+implies no directory move.
+
+Scope narrows to match: shared personas and memory, with the managed
+database and replica work split out as an extension the initial
+integration does not require. Melete independence becomes a stated
+requirement rather than an assumption — shared personas and memory must
+work with Melete absent, it being an optional client with a prior
+implementation and not a daemon anything else depends on.
+
+That prior implementation is documented from source instead of guessed
+at: `wiki/personalities/<name>{.md,/index.md}`, memory at
+`<melete_home>/memory/personas/<slug>.md`, `memory_op`'s conditional
+writes and process-local append lock, and the lossy slug that lets a
+rename select a different file and two distinct names collide on one.
+Those are the facts a migration has to survive, so they belong on the
+page before the migration is designed.
+
+Snapshots cited: Mneme `5512299`, Melete `7619d40`, Aoide `8df8e60`.
+
+Pages touched: `references/mneme-shared-memory-and-aoide.md`,
+`ingest/log.md` (this entry).
