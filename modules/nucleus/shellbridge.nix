@@ -194,6 +194,8 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
         # Create the socket directory under XDG_RUNTIME_DIR.
         RuntimeDirectory = "aoide";
         RuntimeDirectoryMode = "0700";
+        # Independently running conductors own sockets in this shared directory.
+        RuntimeDirectoryPreserve = "yes";
 
         NoNewPrivileges = true;
         StandardOutput = "journal";

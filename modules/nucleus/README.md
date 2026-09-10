@@ -46,7 +46,10 @@ module builds against what nucleus declares.
 - `shellbridge.nix` — the bidirectional bridge service: atomic JSON state
   out to `state/stage/*.json` (CONDUCTING files — sessions.json, hooks.json;
   CONTRACTS.md §4), unix-socket commands in, Hyprland IPC consumed here
-  only. It also carries the polkit grant its power actions need: a systemd
+  only. Its shared `$XDG_RUNTIME_DIR/aoide` directory survives bridge stops
+  and restarts (`RuntimeDirectoryPreserve=yes`): independently running
+  conductors own the session sockets inside it. It also carries the polkit
+  grant its power actions need: a systemd
   user unit has no logind session, so `allow_active` never applies to the
   `login1` actions and the powermenu's `systemctl reboot` would otherwise be
   refused for want of interactive auth.
