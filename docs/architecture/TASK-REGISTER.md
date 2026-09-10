@@ -130,8 +130,9 @@ Fields per entry: status · owner · depends on · evidence · next.
   `onboard`.
 - aoided has no safe no-op for unknown arguments or `--version`: any such
   invocation runs the daemon against the ambient root (incident 2026-09-10:
-  a new-build `aoided --version` replaced the live socket path). Bug, backlog;
-  until fixed every test brief sets the isolated env on EVERY invocation and
-  never calls bare `aoided`.
+  a new-build `aoided --version` replaced the live socket path; repaired by
+  `systemctl --user restart aoided.service` on the User's word the same day,
+  roster intact). Bug, backlog; until fixed every test brief sets the
+  isolated env on EVERY invocation and never calls bare `aoided`.
 - Deployed runtime on yomi-strix: aoided 0.0.22 (store `vvvwpzkq…`), predates
   everything above. Staged ≠ proved ≠ deployed until activation.
