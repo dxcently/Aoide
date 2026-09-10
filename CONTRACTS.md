@@ -2064,7 +2064,13 @@ seen.jsonl      one {"msgid","receivedAt"} per line, append-only dedup
 .ring.lock      the doorbell's own lock file (P-M5a-2) — `flock`ed for
                 the whole select-inject-stamp ring, never the mailbase
                 writers' `.stage.lock` (a DIFFERENT file, in `stage_dir()`,
-                held only ever briefly and never across socket I/O)
+                held only ever briefly and never across socket I/O). It
+                serializes the resident daemon's own concurrent rings
+                (and a restart overlap) — the daemon process itself, not
+                this file, is the policy and audit boundary: a ring
+                executes only inside `aoided`, and `mail ring` from any
+                other door forwards there instead of taking this lock
+                itself.
 ```
 
 `rung` is additive in v0 (omitted while zero): the doorbell latch — the

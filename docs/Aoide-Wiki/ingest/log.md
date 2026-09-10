@@ -2728,3 +2728,50 @@ Pages touched: `docs/architecture/MAIL.md`, `CONTRACTS.md`,
 `pkgs/aoide/crates/client/README.md`,
 `pkgs/aoide/crates/storage/README.md`,
 `pkgs/aoide/crates/storage/AGENTS.md`, `ingest/log.md` (this entry).
+
+## [2026-09-10] fix | every ring executes inside aoided
+
+`P-M5a-2c`, correcting `P-M5a-2` (the previous entry): the architecture
+owner rejected the idea that any process linking `aoide-conduct` may
+ring in-process under `.ring.lock` alone. The ruling is narrower and
+harder: **the resident daemon is the policy and audit boundary for
+every ring**, not the lock file, and a lock only ever serializes, it
+never authorizes.
+
+A ring now executes only inside `aoided` — an invocation whose door is
+`Door::Daemon`. `mail ring` reached from any other door (the CLI, MCP)
+forwards the request through `aoide_client::daemon::daemon_dispatch`
+instead of ringing locally; a name is still validated before that
+forward, so a bad name is refused with no daemon round trip and no name
+bytes in the message. With no daemon reachable, nothing is written to
+any socket and the caller sees `Outcome::error(cmd, "no daemon
+reachable — nothing rung")` with `data.ring == "no-daemon"`. A reader's
+own Stop hook replays a deferred ring only when that hook is itself
+being handled under `Door::Daemon`; the hook's local no-daemon fallback
+replays nothing; the latch stays armed for the next daemon-handled
+trigger, and the hook's own outcome is unchanged either way. The A2A
+deposit arm (`aoide-server`) no longer rings at all — a remotely
+deposited letter still arms its readers exactly like a locally-filed
+one, but is rung only by the next daemon-side trigger for that name,
+until a later slice (`P-M5b-2`) gives that door its own forward path to
+the daemon.
+
+`.ring.lock` itself is untouched: it still wraps the whole
+select-inject-stamp sequence, still never the ordinary stage lock. Only
+its documentation changes — it is the daemon's own serializer for
+concurrent rings (and a restart's brief process overlap), never a
+second policy boundary standing in for the daemon.
+
+Verified: the crate-local test suites (`aoide-conduct`, `aoide-server`,
+`aoide-client`, `aoide-cli`) and `cargo check --workspace
+--all-targets`, all in an isolated environment. Not verified here: a
+live headless agent actually being woken by a real ring through this
+corrected path — that run belongs to whoever operates a live headless
+session, not to this slice's own isolated test environment.
+
+Pages touched: `docs/architecture/MAIL.md`, `CONTRACTS.md`,
+`pkgs/aoide/crates/conduct/README.md`,
+`pkgs/aoide/crates/conduct/AGENTS.md`,
+`pkgs/aoide/crates/server/README.md`,
+`pkgs/aoide/crates/server/AGENTS.md`,
+`pkgs/aoide/crates/storage/AGENTS.md`, `ingest/log.md` (this entry).

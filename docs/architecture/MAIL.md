@@ -548,22 +548,29 @@ rang it. A thousand letters to one name are one line in the reader's
 pty, then a count on `aoide mail`; a flood cannot become a thousand
 interruptions, and the pty is never the place a flood is felt.
 
-Any process that links `aoide-conduct` may ring in-process, under the
-identical lock: the CLI on `mail ring --for <name>` by hand, the A2A
-door on a remotely deposited letter (never on a receipt — a receipt
-does not arm), and a reader's own Stop hook, which replays every name
-still armed for the session that just stopped (`armed_names_for_reader`)
-— the mechanism that turns a deferred ring, mid-turn, into a delivered
-one the moment that turn ends. The corollary is worth stating: a
-remotely deposited letter rings whether or not `aoided` is up, since
-only the A2A door's own process has to be running, while a local
-`mail send` cannot ring without the daemon. `aoide-client` sits below
-`aoide-conduct` in the crate graph and cannot call the ringer directly,
-so its one caller — `mail send --to self/<name>`'s own filing path —
-forwards `mail ring` through the resident daemon instead
-(`daemon_dispatch`); no daemon reachable degrades to a reported
-`"no-daemon"`, not an error, since filing itself already succeeded and
-the letter stays armed for the next trigger either way.
+A ring executes only inside the resident daemon: the daemon is the
+policy and audit boundary for every ring, not merely a lock holder, so
+nothing outside it ever writes to a target's socket. `mail ring --for
+<name>` typed at the CLI, or reached through MCP, forwards the request
+to the daemon instead of ringing in-process; with no daemon reachable,
+nothing rings and the caller sees a reported `"no-daemon"`, not an
+error, since the check that matters — is this name valid — still runs
+locally first. A reader's own Stop hook replays every name still armed
+for the session that just stopped (`armed_names_for_reader`) — the
+mechanism that turns a deferred ring, mid-turn, into a delivered one the
+moment that turn ends — but only when the daemon is the one handling
+that hook; a hook handled locally, with no daemon behind it, replays
+nothing and leaves the latch armed for the next daemon-handled trigger.
+A remotely deposited letter (the A2A door) arms its readers exactly like
+a locally filed one, but does not itself ring anyone: the next
+daemon-side trigger for that name — a reader's Stop hook, a local
+`mail send`, `mail ring` run by hand — is what rings it, until a later
+slice (P-M5b-2) gives the A2A door its own forward path to the daemon.
+`aoide-client` sits below `aoide-conduct` in the crate graph and cannot
+call the ringer directly, so every one of its callers — `mail send --to
+self/<name>`'s own filing path, and `mail ring` itself when reached from
+any non-daemon door — forwards through the resident daemon instead
+(`daemon_dispatch`).
 
 ## Reading
 
@@ -783,11 +790,14 @@ READMEs), no subagent spawning and no backgrounded cargo in any brief.
   the actual select → inject → stamp, headless-wrap-plus-hook-fed-child
   targeting, the petname enrol-first fallback, raw injection with the
   child's own submit key, the `.ring.lock` critical section, the
-  delivery receipt, and the three replay triggers — a local self-send
-  (forwarded through the daemon from `aoide-client`), a remote deposit
-  (in-process from `aoide-server`'s A2A door), and a reader's own Stop
-  hook replaying whatever is still armed. `mail ring --for <name>
-  [--from <id>]` by hand. Tests: nudge text contains no letter bytes,
+  delivery receipt, and the replay triggers. A ring executes only
+  inside the resident daemon: a local self-send and a hand-run `mail
+  ring --for <name> [--from <id>]` both forward there from whatever
+  door reached them, and a reader's own Stop hook replays whatever is
+  still armed only when the daemon is the one handling that hook. A
+  remote deposit through `aoide-server`'s A2A door arms its readers the
+  same way but does not itself trigger a ring — that door's own forward
+  path is P-M5b-2's. Tests: nudge text contains no letter bytes,
   an invalid name is refused and never rewritten, a name with no reader
   and no matching petname rings nothing, the petname fallback enrols
   and rings the conducted ancestor, a latched reader blocks the
