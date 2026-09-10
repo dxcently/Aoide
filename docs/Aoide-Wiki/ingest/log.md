@@ -2932,3 +2932,65 @@ Pages touched: `pkgs/aoide/crates/conduct/README.md`,
 `modules/facets/quickshell/qml/ShellBridge.qml`,
 `docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md`, `ingest/log.md` (this
 entry).
+
+## [2026-09-10] fix | roots are complete and mutations are daemon-owned
+
+Two review fixes to "a project spans several roots" (f7eeb87), landed as
+18e5dd5 with this docs pass following.
+
+**Roots serialized complete.** `Project.roots` (`storage/src/records.rs`)
+was extras-only on the wire (`skip_serializing_if`, holding the second
+root onward), so every writer had to reconstruct `path` + `roots` together
+and a reader trusting the raw field saw part of the set. `roots` is now
+the FULL ordered root list, `path` mirrored at `roots[0]`, always written
+by `project add`/`project edit`/`project remove` — even a one-root project
+carries `"roots":["/path"]`. `Project::roots()` is unchanged
+(path-first-then-roots, deduplicated) and still tolerates a legacy record
+with no `roots` field or a hand-edited one whose `roots[0]` disagrees with
+`path`, which is what makes the wire change additive for records on disk.
+
+**Daemon-owned atomic mutations.** `project add`/`project edit`/`project
+remove` (`conduct/src/graph/manage.rs`) ran their whole mutation locally
+whichever door the invocation came through — the one command family in
+`graph/` that never forwarded to `aoided`, unlike `session.project`/
+`session.kill`'s `local_daemon` precedent (`graph/actions.rs`). All three
+now route through that shape: a `Door::Cli` caller forwards through
+`aoide_client::daemon::daemon_dispatch` and gets a real error when no
+daemon answers; a `Door::Daemon` caller takes the local path (the
+reentrancy guard `daemon_dispatch` already provides). The local mutation
+moved into three inner helpers (`add_roots`, `remove_roots`, `edit_roots`),
+each run inside ONE `aoide_storage::fs::with_stage_lock` hold end to end,
+closing the lost-update race where two concurrent `project add --new`
+calls for one name could both observe an empty registry and both win
+(`add_roots_new_races_two_threads_for_one_name_exactly_one_wins`). Names
+with spaces were already legal and stay so.
+
+Two surfaces now need a live `aoided` for project registration: `aoide
+onboard`'s `register_clone` step (`cli/src/commands/onboard.rs`) forwards
+the top-level door, so a first-run onboard with no daemon records a
+failure note on its project step and still exits 0 — OPEN, ruling
+requested, not worked around; and the conductor TUI's `App::dispatch`
+always stamps `Door::Cli`, so a project keystroke needs the daemon —
+`cli/tests/conductor_integration.rs` proves that path with a fake daemon
+thread answering through the real `dispatch` under `Door::Daemon`.
+
+Independent review (FIX-THEN-LAND) also found: CONTRACTS.md's
+`projects.json` example still lacked `roots` (fixed here); the
+`conduct/AGENTS.md` project bullet still said "rest → roots" and carried
+no daemon-ownership invariant (fixed here); `resurrect_one` discards
+`assign_project`'s result, so a revived session whose ledger project was
+since removed silently falls back to cwd anchoring (LOW, open).
+
+Verified on 18e5dd5: `aoide-storage` 400, `aoide-conduct` 572 (the two
+socket-binding tests need `env TMPDIR=/tmp` under `nix develop`),
+`aoide-conductor` 77, `aoide-cli` 41 lib + integration suites, `cargo
+check --workspace --all-targets` clean. The reviewer re-ran storage (400)
+and could not build conduct because the concurrent slice-C executor held
+`send.rs`/`identity.rs` mid-edit.
+
+Pages touched: `CONTRACTS.md`,
+`docs/Aoide-Wiki/concepts/cli/Graph-and-Conduct.md`,
+`docs/Aoide-Wiki/concepts/orchestration/Session-Graph.md`,
+`pkgs/aoide/crates/storage/README.md`,
+`pkgs/aoide/crates/storage/AGENTS.md`,
+`pkgs/aoide/crates/conduct/AGENTS.md`, `ingest/log.md` (this entry).

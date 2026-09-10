@@ -1879,9 +1879,12 @@ collapses.
 Registered project anchor roots for the graph. Written by
 `aoide project add/edit/remove` (atomic, idempotent); read by bare
 `aoide graph` and by `restage_graph` at every mutation site.
+The mutation runs inside `aoided` under the stage lock — a terminal's own
+invocation forwards to the live daemon and errors (`aoided must be running
+for project management`) when none answers.
 
 ```json
-{ "schemaVersion": "0", "projects": [ { "name": "aoide", "path": "/home/khoa/Aoide" } ] }
+{ "schemaVersion": "0", "projects": [ { "name": "aoide", "path": "/home/khoa/Aoide", "roots": ["/home/khoa/Aoide"] } ] }
 ```
 
 **A project spans several roots.** A project entry MAY also carry an
