@@ -3055,3 +3055,54 @@ stale about its writers independent of this slice — flagged, not fixed.
 
 Pages touched: `pkgs/aoide/crates/conduct/README.md`,
 `pkgs/aoide/crates/conduct/AGENTS.md`, `ingest/log.md` (this entry).
+
+## [2026-09-10] fix | the attested walk runs on per-turn hooks only
+
+Two review findings on 57154ba's `hook_ensure_session`, both fixed in
+`send.rs` alone (8bfdd24).
+
+**The walk ran on every hook, including the two hottest.**
+`hook_ensure_session` ran the attested-wrap walk (a daemon ping for the
+seal pubkey, a full sessions.json load, up to a 64-hop `/proc` walk)
+unconditionally on all six hook arms, PreToolUse/PostToolUse included. A
+terminal's wrap only ever changes across a process restart or a `--resume`
+onto a new wrap, never mid-tool-call, and the next per-turn hook catches
+it. `hook_ensure_session` now takes `attest: Option<i32>`; `None` skips
+the walk before the resolver is called. The `Phase` arm's registration
+self-heal and `PhaseIfRunning` (once per turn) pass `Some(hook_pid)`;
+`ToolStart`/`ToolEnd`/`SubRekey`/`SubEnsure` pass `None` and keep the pid
+refresh / fresh registration unmodified. Inside aoided the seal-key fetch
+dials aoided's own socket; the accept loop is thread-per-connection, so
+that self-ping completes rather than deadlocking.
+
+**`HOOK_PID_FLAG`'s doc read as if the carried pid were trustworthy by
+construction.** It is trusted verbatim from the dispatch socket; a
+same-uid process can name any pid. Its doc now carries the same honest
+accounting `cross_uid_gate` (`server/src/daemon.rs`) and
+`daemon_seal_pubkey_hex` (`client/src/daemon.rs`) already give this
+socket: not a channel a same-uid attacker is locked out of, and not a
+privilege escalation — `terminate_verified` re-verifies the resolved kill
+target's own seal, and same-uid can already signal any process — but a
+lied-about pid can still misdirect the re-parenting walk. The flag is
+reachable only over the local socket: MCP maps registry-declared flags
+only and A2A builds a fixed flag map.
+
+**Injection seam.** `hook_ensure_session_with` is the parameterized body,
+the `deliver_local`/`deliver_local_with` seam restated for
+`real_attested_wrap`. Tests inject a fixed resolver and prove the composed
+positive path (Start-shaped and per-turn hooks re-stamp a stale parent,
+a tool hook never calls the resolver, the fresh branch prefers the
+attested wrap over the env parent) that 57154ba could only prove
+fail-closed.
+
+Open after this entry: the `SessionStart` arm itself registers through
+`do_session_start` with the env-derived parent and never runs the walk,
+so a resumed record stays stale-parented until its first per-turn hook —
+a kill clicked inside that window resolves through the old wrap.
+
+Verified: `cargo test -p aoide-conduct` test result: ok. 587 passed; 0
+failed; 0 ignored; 0 measured; 0 filtered out; finished in 45.32s. `cargo
+check --workspace --all-targets` Finished `dev` profile.
+
+Pages touched: `pkgs/aoide/crates/conduct/README.md`,
+`pkgs/aoide/crates/conduct/AGENTS.md`, `ingest/log.md` (this entry).
