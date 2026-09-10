@@ -7,14 +7,17 @@ through which agents are freely orchestrated for any task. Any agent with a
 shell is fully capable, no MCP required, and **every terminal is a
 conductable, tracked session by default** (see Conducting below). It
 runs anywhere there is a shell — portable, headless-capable, agent-first, and
-nix-independent (cargo build, no nix shell-outs, no NixOS assumption). Painting
-is a second binary's job: **`lyra`** owns the Quickshell widget-making toolkit
-(bar, dock, gadgets, the DAG/conductor surfaces) and the specialized ricer
-(song/notes theming) that together make up *AoideOS*, the distribution built
-on the core. Aoide is the engine; AoideOS is the desktop around it, painted by
-lyra. A capability that works with only a shell and touches no paint is
-"Aoide", spoken as `aoide <cmd>`; one that is desktop/Quickshell/rice-shaped is
-"AoideOS", spoken as `lyra <cmd>`.
+nix-independent (cargo build, no nix shell-outs, no NixOS assumption). A
+portable capability is written against a POSIX process table and unix file
+locks; a `cfg(target_os)` branch is a tie-break or a taught refusal, never a
+second discovery path. Painting is a second binary's job: **`lyra`** owns the
+Quickshell widget-making toolkit (bar, dock, gadgets, the DAG/conductor
+surfaces) and the specialized ricer (song/notes theming) that together make
+up *AoideOS*, the distribution built on the core. Aoide is the engine;
+AoideOS is the desktop around it, painted by lyra. A capability that works
+with only a shell and touches no paint is "Aoide", spoken as `aoide <cmd>`;
+one that is desktop/Quickshell/rice-shaped is "AoideOS", spoken as
+`lyra <cmd>`.
 
 The boundary has a binary form (`docs/architecture/PACKAGE-LAYOUT.md`, "Two
 binaries"): core ships as `aoide`/`aoided`, and everything desktop/Quickshell/

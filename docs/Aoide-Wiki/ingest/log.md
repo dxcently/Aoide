@@ -3342,3 +3342,71 @@ landed here in the same commit → LAND.
 Pages touched: `pkgs/aoide/crates/conduct/README.md`,
 `pkgs/aoide/crates/conduct/AGENTS.md`, `CONTRACTS.md` (§4 `kind` gains
 `app`), `ingest/log.md` (this entry).
+
+## [2026-09-10] feat | desktop Codex threads are found by one portable process
+
+P-CX-2, the discovery slice of the desktop Codex/ChatGPT association
+(scratchpad brief `p-codex-desktop-brief.md` §4, Opus; Sonnet executor,
+independent Sonnet review). `conduct::graph::codex_app` gains the I/O
+that feeds P-CX-1's pure reconciler, written to the User's rule that
+detection be one repeatable process across operating systems:
+
+- Liveness is a non-blocking `flock` probe on Codex's own
+  `~/.codex/thread-writer-locks/<thread_id>.lock` (`lock_is_held`): a
+  held lock is a live thread, an unheld one is not, a missing file is
+  never created, and a probe that wins the lock releases it before the
+  descriptor closes. `/proc` is never consulted for liveness.
+- Ownership is one parsed `ps -axo pid=,ppid=,command=` table
+  (`process_table` / `parse_process_table`, the same flags on Linux, BSD
+  and macOS), read only when at least one lock is held. An app-server is
+  an entry whose argv0 basename is `codex` with a bare `app-server`
+  token (`codex_app_servers`); a `codex` TUI, an Electron zygote/GPU
+  child and a space-containing argument all parse and none match.
+- `lock_holder`: one app-server owns every live lock; none leaves the
+  pid unset; two or more fall to `holder_via_proc_fd`, a Linux-only
+  `/proc/<pid>/fd` tie-break, and elsewhere the thread enrols with no
+  pid and no window under one audit line, "codex app-server owner
+  ambiguous (<n> servers)". `CodexThread.pid` is `Option<u32>` for
+  that case. `cfg(not(unix))` compiles to taught-unsupported
+  (`UNSUPPORTED_PLATFORM`), never a second discovery path.
+- The thread cwd comes from the rollout header
+  (`sessions/**/rollout-*-<thread_id>.jsonl`, first line,
+  `payload.cwd`), read once per newly seen thread id, never per tick.
+- `codex_home` (CODEX_HOME, else `$HOME/.codex`) is lifted here and
+  reused by `reap::refresh_codex_titles` through one `pub(crate) use`
+  in `graph.rs`, the `hyprctl_clients` precedent.
+- `sync_codex_app_threads` mirrors `sync_untracked_terminal_windows`:
+  gather outside the stage lock, reconcile under it, restage on change.
+  Still no call site: P-CX-3 wires the daemon tick and the Hyprland
+  listener and the `codex-app-unsupported` refusals.
+
+Tests (14 new beside P-CX-1's 6):
+`an_ambiguous_owner_enrols_the_thread_with_no_pid_and_no_window`,
+`an_electron_table_yields_exactly_one_app_server`,
+`a_zygote_or_gpu_child_is_never_an_app_server`,
+`a_codex_tui_argv_is_never_an_app_server`,
+`a_macos_table_yields_the_same_one_app_server`,
+`a_command_argument_containing_a_space_still_parses_its_pid_and_ppid`,
+`two_app_servers_leave_the_holder_unresolved_without_the_linux_tiebreak`,
+`a_lock_another_fd_holds_reads_as_live`,
+`an_unheld_lock_is_not_a_live_thread`,
+`a_probe_never_creates_a_missing_lock_file`,
+`codex_home_prefers_the_configured_root`,
+`a_rollout_header_yields_the_thread_cwd`,
+`no_codex_home_does_no_work_and_writes_nothing`,
+`the_unsupported_platform_string_names_flock_and_the_process_table`,
+plus, from review,
+`a_known_thread_keeps_its_cwd_without_a_walk_while_a_new_one_still_walks`.
+Verified: `cargo test -p aoide-conduct` test result: ok. 618 passed; 0 failed
+(the `codex_app` filter alone: 21 passed; 0 failed); `cargo check
+--workspace --all-targets` clean apart from the expected dead_code
+warnings for the not-yet-called sync. Reviewed FIX (the rollout walk
+ran every tick for known threads; a stale `graph.rs` comment; the audit
+tag) → fixed → LAND. Review flag carried to the register: with one
+app-server running, every held lock is attributed to it without a
+per-lock check, which is the brief's §3 rule but differs from its open
+question §6.1; the User decides.
+
+Pages touched: `pkgs/aoide/crates/conduct/README.md`,
+`pkgs/aoide/crates/conduct/AGENTS.md`, `AGENTS.md` (root: the portable
+capability clause), `ingest/log.md` (this entry).
