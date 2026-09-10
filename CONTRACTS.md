@@ -1885,16 +1885,18 @@ Registered project anchor roots for the graph. Written by
 ```
 
 **A project spans several roots.** A project entry MAY also carry an
-optional `roots` array — its SECOND and later anchor roots; `path` is
-always the first and is never repeated inside `roots`, so a one-root
-project stays byte-identical on the wire to a record predating `roots`
-(`skip_serializing_if` keeps an empty array off the wire — the same
-additive discipline `autoResume` below and `SessionRecord.headless` set the
-precedent for). `project add NAME PATH…` appends one or more roots to an
-existing project (or registers a new one), never replacing what is already
-there; `project edit NAME PATH…` is the one command that REPLACES a
-project's whole root list outright, first path becoming `path`, the rest
-becoming `roots` — the name stays immutable and `autoResume` is untouched.
+optional `roots` array — the FULL ordered root list, `path` mirrored at
+`roots[0]` (ROOTS SERIALIZED COMPLETE): a project touched by `project
+add`/`project edit`/`project remove` always has `roots` written out in
+full, never omitted and never "just the extras" (`#[serde(default)]`,
+no `skip_serializing_if`, so a one-root project still carries
+`"roots":["/path"]` on the wire). A record predating this field still
+reads as one root, via `Project::roots()` (below). `project add NAME
+PATH…` appends one or more roots to an existing project (or registers a
+new one), never replacing what is already there; `project edit NAME
+PATH…` is the one command that REPLACES a project's whole root list
+outright, first path becoming `path`, the rest folded into the same
+`roots` list — the name stays immutable and `autoResume` is untouched.
 `project remove NAME [PATH]` drops one root (promoting the next into
 `path` when `path` itself was removed) or, with no `PATH`, the whole
 project. Every reader enumerates roots through `Project::roots()`

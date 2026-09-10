@@ -340,8 +340,10 @@ registration path** — the closer for the sweep-relaunder shape; (5)
 ## Contracts (CONTRACTS.md §4, still v0)
 
 - `projects.json` v0: `{schemaVersion, projects: [{name, path, roots?}]}` —
-  `roots` is the project's second and later anchor roots (optional,
-  additive); `path` is always the first.
+  `roots` is the project's FULL ordered anchor-root list (optional only for
+  a record predating the field; always written in full by `project
+  add`/`edit`/`remove`, never extras-only); `path` is always the first and
+  mirrored at `roots[0]`.
 - `graph.json` v0: `{schemaVersion, nodes: […], edges: [{from, to, kind}]}` —
   fully resolved, so Quickshell never recomputes anchoring.
 - `sessions.json` records carry several **additive** optional fields (no

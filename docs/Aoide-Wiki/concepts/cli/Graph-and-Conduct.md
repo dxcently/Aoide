@@ -103,7 +103,8 @@ set — it never replaces it (`project edit` does that).
   FIRST root (post-write, never reconstructed from locals), `roots` the full
   ordered list. Idempotent per root: a root already registered is a
   no-change ok; a new root on an existing name appends it; a brand-new name
-  registers it with `path` = the first path given and `roots` the rest.
+  registers it with `path` = the first path given and `roots` the full
+  list given (deduplicated).
 - **Notes:** a session anchors under the longest-prefix matching root of any
   project (`model.rs::anchor_for`), not just its first.
 
@@ -126,8 +127,8 @@ disappears — `edit` never creates, renames, or deletes one.
 - **Writes:** `state/stage/projects.json` + re-staged `graph.json`, only
   when the resulting root list actually differs from the current one.
 - **Output:** `data: {name, path, roots, autoResume, file}` — `path` is the
-  first path given, `roots` the rest. `autoResume` is read back untouched;
-  `edit` never sets or clears it.
+  first path given, `roots` the full ordered replacement list. `autoResume`
+  is read back untouched; `edit` never sets or clears it.
 
 ### aoide project remove
 
