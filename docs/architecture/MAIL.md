@@ -471,31 +471,96 @@ flags a box whose local name resolution disagrees with it.
 
 ## Delivery and the doorbell
 
-Filing a `letter` rings the doorbell for every live local session that
-is a recorded reader of `to.name` (a key in that name's cursor map) —
-and, for a name no one has read yet, for any live session whose petname
-equals it.
-The doorbell is a fixed line injected through the loopback conduct path
-(no gate — local `aoided` conducting a local session):
+Filing a `letter` to `to.name` rings every **armed** reader of that
+name: a session already recorded as a reader (a key in `to.name`'s
+cursor map, `enrolled` in the ring's own count) whose latch has not
+already caught this letter (`rung <= seq`, `storage::mail`'s own
+`ring_targets`). A name no one has read yet enrolls before it rings:
+every live session whose petname equals `to.name` has its conducted
+wrap `enrol_reader`-ed first — a real recorded reader is never
+second-guessed by a display-name coincidence, so the fallback runs only
+when nothing is enrolled at all.
+
+Ringing a wrap means more than finding it armed. A ring targets the
+**wrap**, a conducted, headless session with a live control socket
+(`is_conductable_now`), but only actually writes once the wrap's
+**hook-fed agent child** — the session whose `parentSessionId` is the
+wrap and whose `agent` names a registered harness profile, the same
+"hooked at all" signal `agent_profile` answers `None` for on an
+unrecognized one — is sitting at the prompt (`stopped` or `idle`,
+`aoide_protocol::state::canonical_state`). Three ways a target is
+never written to, in order: no session record at all for the recorded
+reader id; recorded but not conductable right now (including a control
+socket file that has since vanished); conductable but **not
+headless** — an interactive composer, someone's own terminal, is never
+auto-submitted into, full stop, until a control-layer guard for that
+case exists (a residual this document leaves open). A conductable,
+headless wrap with no hook-fed child at all has no readiness signal and
+is skipped the same way. A hook-fed child that IS there but mid-turn
+(`working`, `awaiting`, or its own `done` not yet settled) **defers**:
+the latch stays armed, untouched, and the next trigger — another
+letter, or this same reader's own Stop hook firing once its turn ends —
+tries again. The filing session's own wrap is never a candidate for its
+own letter, not even as a skip or a defer: it is excluded before the
+selection ever runs.
+
+A write, once a target clears every check, is **raw injection** — the
+same low-level delivery `aoide send` itself uses
+(`write_delivery`), but with no gate, no pending queue, no provenance
+prefix, and no title rename; the fixed line is the only thing that ever
+reaches the socket:
 
 ```
 [aoide mail] new mail for <name> — aoide mail read --for <name>
 ```
 
-An invalid `<name>` never rings — names are validated at filing and
-again by the ringer, never rewritten; conduct's own sanitizer
-separately strips CR/LF from the injected line. No byte of the letter
-rides the nudge. Headless spawns get it — injection is the path
-conduct uses. Nothing else is ever injected on a letter's behalf.
+then, after the short keystroke delay every conducted delivery already
+uses, one submit keystroke — **the child's own harness key, never the
+wrap's** (a `kimi` child under a `claude` wrap submits with `\r`, not
+`\n`). A nudge that sits unsent in a prompt is a nudge no one saw, so
+every ring is submitted, never left typed. An invalid `<name>` never
+rings at all — checked again at the ring, on top of the check filing
+already made, before the ring's own lock is even taken; conduct's own
+sanitizer separately strips CR/LF from the line regardless. No byte of
+the letter itself ever rides the nudge — the ring's only input is the
+mailbox name.
 
-The nudge is **latched**: it rings once per (name, session) and not
-again until that reader's cursor for the name advances — the latch
-itself is `rung`, a field on the reader's own mark in `cursors.json`.
-A thousand letters to one name are one line in the reader's pty, then
-a count on `aoide mail`; a flood cannot become a thousand
-interruptions, and the pty is never the place a flood is felt. The
-line is injected and submitted, the way a conducted `--submit` is — a
-nudge that sits unsent in a prompt is a nudge no one saw.
+A successful write is followed, in order, by a **delivery receipt**
+(`file_receipt`, filed from `<name>` to the target wrap's session id —
+proof the nudge bytes were written to the wrap's socket, never that
+anyone read them) and the **latch stamp** (`stamp_rung`, raising the
+reader's `rung` to the arming letter's `seq`). The stamp follows the
+write, never precedes it: a socket write that fails leaves the reader
+armed, so a target that was merely unreachable for a moment is not
+silently skipped forever. The whole select → inject → stamp sequence
+for one name runs under one cross-process critical section — a
+dedicated `.ring.lock` file, held across the real socket I/O and the
+submit delay, **never** the ordinary stage lock (`try_stage_lock`),
+which is only ever held briefly and must never be asked to wait on a
+socket. Two concurrent rings for the same name simply serialize on that
+file: the second always selects after the first has already stamped,
+so a burst of filers rings each armed target exactly once, not once per
+filer.
+
+The nudge is **latched**: once rung, a reader does not ring again for
+the same name until its own cursor read advances past the point that
+rang it. A thousand letters to one name are one line in the reader's
+pty, then a count on `aoide mail`; a flood cannot become a thousand
+interruptions, and the pty is never the place a flood is felt.
+
+Any process that links `aoide-conduct` may ring in-process, under the
+identical lock: the CLI on `mail ring --for <name>` by hand, the A2A
+door on a remotely deposited letter (never on a receipt — a receipt
+does not arm), and a reader's own Stop hook, which replays every name
+still armed for the session that just stopped (`armed_names_for_reader`)
+— the mechanism that turns a deferred ring, mid-turn, into a delivered
+one the moment that turn ends. `aoide-client` sits below
+`aoide-conduct` in the crate graph and cannot call the ringer directly,
+so its one caller — `mail send --to self/<name>`'s own filing path —
+forwards `mail ring` through the resident daemon instead
+(`daemon_dispatch`); no daemon reachable degrades to a reported
+`"no-daemon"`, not an error, since filing itself already succeeded and
+the letter stays armed for the next trigger either way.
 
 ## Reading
 
@@ -607,6 +672,7 @@ aoide mail mark --for <name>                            advance a cursor without
 aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, per entry
 aoide mail route <node>                                  dry-run the four steps
 aoide mail rm --older-than <Nd|Nh>                       prune the base, never seen.jsonl
+aoide mail ring --for <name> [--from <session-id>]       the doorbell, by hand; --from excludes that reader
 aoide mesh                          nodelist view: + status, role, key source, liveness
 aoide node allow <node> message off                      quarantine this box's door, now (existing command)
 aoide board …                       reserved; not in this workstream
@@ -661,7 +727,7 @@ READMEs), no subagent spawning and no backgrounded cargo in any brief.
   survives `rm`, msgid recomputation rejects a tampered field,
   canonical header is byte-exact (case and whitespace change the
   msgid), no fixture escapes the test root. Bare `aoide mail` prints the names half only; its "caller's own
-  new letters" half is P-M5's. Live gate: the timer, door, and CLI
+  new letters" half is P-M5c's. Live gate: the timer, door, and CLI
   environments resolve one `state_dir()`.
 - **P-M2 — envelopes on the wire, direct edges (L).** Origin signing
   and verification (the pairing keypair), `message` capability,
@@ -702,17 +768,46 @@ READMEs), no subagent spawning and no backgrounded cargo in any brief.
   no reload; an unloadable declaration refuses both mail methods and
   nothing else; a renamed `nodes.json` nickname changes no policy
   outcome; a declared key disagreeing with a paired key is drift.
-- **P-M5 — doorbell + polish (S).** The fixed-line nudge through
-  loopback conduct with the `valid_node_name` clamp, submitted, latched
-  per (name, session) until the cursor advances; reader-recorded
-  targeting, bare `aoide mail`'s "caller's own new letters" half (it
-  needs the reader binding), headless-session coverage, the reader
-  frame's field clamps and adaptive fence, `mesh down` convenience if
-  wanted. Tests: nudge text contains no letter bytes, adversarial
-  names (ESC, `$(`, `;`,
-  newlines) clamp to the grammar, a name with no reader and no matching
-  petname rings nothing, a hundred letters ring once until `mail read`,
-  a letter containing its own fence cannot escape the frame.
+- **P-M5a-1 — the doorbell's latch and readiness floor (S, landed).**
+  `storage::mail` gains the latch ahead of the ring itself: `rung` on
+  each reader's cursor mark, the `arms(kind)` predicate (a receipt
+  never arms), and `ring_targets`/`stamp_rung`/`armed_names_for_reader`/
+  `enrol_reader` for a future ringer to call. Mailbox names are
+  validated against the node-name grammar at filing, refused rather
+  than clamped. No line is injected anywhere in this slice and no `mail
+  ring` command exists yet.
+- **P-M5a-2 — the ring (S, this phase).** `conduct::graph::doorbell`:
+  the actual select → inject → stamp, headless-wrap-plus-hook-fed-child
+  targeting, the petname enrol-first fallback, raw injection with the
+  child's own submit key, the `.ring.lock` critical section, the
+  delivery receipt, and the three replay triggers — a local self-send
+  (forwarded through the daemon from `aoide-client`), a remote deposit
+  (in-process from `aoide-server`'s A2A door), and a reader's own Stop
+  hook replaying whatever is still armed. `mail ring --for <name>
+  [--from <id>]` by hand. Tests: nudge text contains no letter bytes,
+  an invalid name is refused and never rewritten, a name with no reader
+  and no matching petname rings nothing, the petname fallback enrols
+  and rings the conducted ancestor, a latched reader blocks the
+  fallback, every skip/defer reason (not-conductable, an interactive
+  composer, no readiness signal, mid-turn), the child's own submit key,
+  the filer never rung, one receipt per rung target and never a letter,
+  a concurrent burst of filers rings each target once, a failed write
+  leaves the latch armed, the Stop hook replays a deferred ring, a
+  hundred letters ring once until `mail read`.
+- **P-M5a-3 — the interactive composer guard (S, design first).** The
+  labeled residual P-M5a-2 leaves open: an interactive composer (a
+  conductable, non-headless session — someone's own terminal) is never
+  auto-submitted into today, by design, because no control-layer guard
+  yet exists to make that safe. This phase designs and lands that guard
+  before lifting the restriction.
+- **P-M5b — fetched receipts.** Whatever this document's "Kill-list" and
+  transit design still leave for a delivery-receipt read path once a
+  remote reader wants to confirm a letter actually arrived, beyond the
+  destination-signed ack P-M2 already provides at the wire layer.
+- **P-M5c — polish.** Bare `aoide mail`'s "caller's own new letters"
+  half (it needs the reader binding), the reader frame's field clamps
+  and adaptive fence, `mesh down` convenience if wanted. Tests: a letter
+  containing its own fence cannot escape the frame.
 
 Verification gate per phase: the crate's own tests green, `aoide schema
 --json` golden updated in the same commit, and a live two-node run

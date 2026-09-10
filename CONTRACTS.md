@@ -461,10 +461,10 @@ count.
   Melete MCP client).
   `crates/cli/src/registry.rs`'s golden test pins the authoritative
   command-path set; `aoide schema --json` is the live enumeration. Notes
-  on individual commands, newest first: `mail`/`mail send|read|show|mark|rm`,
-  the addressed, signed, append-only mailbase, messaging plan P-M1 (see
-  `docs/architecture/MAIL.md` and this document's own `state/mail/`
-  subsection below); `secrets serve|exec|add|rm|grant|revoke`,
+  on individual commands, newest first: `mail`/`mail send|read|show|mark|rm|
+  ring`, the addressed, signed, append-only mailbase and its doorbell,
+  messaging plan P-M1/P-M5a (see `docs/architecture/MAIL.md` and this
+  document's own `state/mail/` subsection below); `secrets serve|exec|add|rm|grant|revoke`,
   appended newest, Workstream SECRETS P-V2; `secrets enroll`, appended
   newest, Workstream SECRETS P-V3; spelled `vault ...` until the P-V4b
   rename — paths rename in place, registration order and count unchanged;
@@ -2061,6 +2061,10 @@ base.jsonl      append-only, one entry per line, immutable once written
 cursors.json    { "<name>": { "<reader>": { "seq": n, "rung": n } } }
 seen.jsonl      one {"msgid","receivedAt"} per line, append-only dedup
                 memory that outlives pruning
+.ring.lock      the doorbell's own lock file (P-M5a-2) — `flock`ed for
+                the whole select-inject-stamp ring, never the mailbase
+                writers' `.stage.lock` (a DIFFERENT file, in `stage_dir()`,
+                held only ever briefly and never across socket I/O)
 ```
 
 `rung` is additive in v0 (omitted while zero): the doorbell latch — the
@@ -2154,7 +2158,13 @@ names with unread mail BY THIS READER; `mail send --to self/<name> --
 instead of filing directly here — see `state/outbox/` below for that
 path in full; either form refuses before writing anything when `<name>`
 falls outside `^[a-z0-9][a-z0-9-]*$` (`storage::node_store::
-valid_node_name`) — never clamped. `mail read --for
+valid_node_name`) — never clamped. A self-filed letter's data also
+carries a `ring` field (P-M5a-2): the doorbell report forwarded through
+`daemon_dispatch` (`{"name","rung","deferred","skipped"}`, `mail
+ring`'s own shape) when a resident daemon answered, or the literal
+string `"no-daemon"` when none did — filing itself always still
+succeeds either way, so `ring` never turns an accepted send into a
+reported failure. `mail read --for
 <name>`/`--all-names` prints new entries and advances ONLY the calling
 reader's mark under that name (`--reread` reprints already-read ones —
 the mark still only ever advances forward). A reader is the conducting

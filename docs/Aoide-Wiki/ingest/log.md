@@ -2678,3 +2678,53 @@ Pages touched: `docs/architecture/MAIL.md`, `CONTRACTS.md`,
 `pkgs/aoide/crates/storage/README.md`,
 `pkgs/aoide/crates/storage/AGENTS.md`,
 `pkgs/aoide/crates/conduct/AGENTS.md`, `ingest/log.md` (this entry).
+
+## [2026-09-10] feat | the doorbell rings
+
+`P-M5a-2`, the other half of the split `P-M5a-1` opened: `conduct::
+graph::doorbell` is the actual ringer. Filing an arming letter now
+writes a fixed nudge line into the socket of every armed reader whose
+wrap is headless and whose hook-fed agent child is sitting at the
+prompt — raw injection, no gate, no prefix, no rename, submitted with
+the CHILD's own harness key rather than the wrap's, then latched until
+that reader's own read catches up. A name no one has read yet enrols
+every conducted session whose petname matches before it rings, but only
+when nothing is enrolled already — a real recorded reader is never
+second-guessed by a coincidence. The whole select-inject-stamp sequence
+for one name runs under one dedicated `.ring.lock` file, held across the
+real socket write and the submit-keystroke delay — never the ordinary
+mailbase stage lock, which stays scoped to brief in-memory writes as it
+always has.
+
+Three triggers reach the same ringer: `mail ring --for <name>` by hand,
+a remote letter landing over `aoide/mailDeposit` (rung in-process by the
+door itself, a receipt never rings), and a reader's own Stop hook
+replaying whatever is still armed the moment its turn ends — turning a
+deferred ring, mid-turn, into a delivered one without a second trigger
+ever needing to arrive. `aoide-client` sits below `aoide-conduct` in the
+crate graph and cannot call the ringer directly, so a self-filed
+letter's own `mail send` forwards `mail ring` through the resident
+daemon instead; no daemon reachable is a reported `"no-daemon"`, never
+an error, since the filing itself already succeeded.
+
+One residual is labeled, not solved: an interactive composer —
+someone's own terminal, conductable but not headless — is never
+auto-submitted into, by design, until a control-layer guard for that
+case exists. That guard is `P-M5a-3`, deliberately not this slice.
+
+Verified: the crate-local test suites (`aoide-storage`, `aoide-conduct`,
+`aoide-server`, `aoide-client`, `aoide-cli`) and `aoide schema --json`
+listing `mail ring`, all in an isolated environment. **Not verified
+here: a live headless agent actually being woken by a real ring** — that
+run belongs to whoever operates a live headless session, not to this
+slice's own isolated test environment, and is called out as undone
+rather than assumed.
+
+Pages touched: `docs/architecture/MAIL.md`, `CONTRACTS.md`,
+`pkgs/aoide/crates/conduct/README.md`,
+`pkgs/aoide/crates/conduct/AGENTS.md`,
+`pkgs/aoide/crates/server/README.md`,
+`pkgs/aoide/crates/server/AGENTS.md`,
+`pkgs/aoide/crates/client/README.md`,
+`pkgs/aoide/crates/storage/README.md`,
+`pkgs/aoide/crates/storage/AGENTS.md`, `ingest/log.md` (this entry).
