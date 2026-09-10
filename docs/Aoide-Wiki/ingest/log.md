@@ -3300,3 +3300,45 @@ links to this file instead of holding the register.
 Pages touched: `docs/architecture/TASK-REGISTER.md` (new),
 `docs/architecture/PAIRING-WINDOW-PROPOSAL.md` (root's, committed as
 written), `ingest/log.md` (this entry).
+
+## [2026-09-10] feat | desktop Codex threads get a record shape and a pure reconciler
+
+P-CX-1, the first slice of the desktop Codex/ChatGPT association
+(scratchpad brief `p-codex-desktop-brief.md`, Opus). New
+`conduct::graph::codex_app` carries `CodexThread { id, cwd, pid }` and
+`reconcile_codex_app_threads`, a pure core mirroring
+`window::reconcile_untracked_terminals` rule for rule: upsert in place,
+remove what is no longer desired, change-only writes. It is keyed by the
+Codex thread's own native id, writes a fixed `agent:"codex"` /
+`kind:"app"` / `state:"idle"` identity on every upsert, never overwrites
+a record another kind already owns, and leaves `windowAddress` /
+`workspace` for the existing window sweep. `kind:"app"` is a new value
+meaning "a task inside an app aoide does not conduct": `is_agent_kind` is
+false for it, so N threads sharing one app window never count as agent
+duplicates and a shared app-server pid never stands as proof one thread
+is alive. No I/O and no call site yet (two dead-code warnings until
+P-CX-2 wires discovery, accepted by review; no `allow` added, the crate
+has no such precedent).
+
+Discovery (P-CX-2) was redesigned on the User's requirement that
+detection be one repeatable process across operating systems: thread
+liveness by a non-blocking `flock` on Codex's lock file (verified held on
+this box, the file is empty), ownership by one parsed
+`ps -axo pid=,ppid=,command=` table keyed on the app-server argv, `/proc`
+only as a Linux tie-break when several app-servers run, other unix enrol
+without pid or window as owner-ambiguous, Windows taught-unsupported.
+
+Tests: `a_live_thread_becomes_one_record_keyed_by_its_native_id`,
+`two_threads_of_one_app_are_two_records`,
+`a_thread_whose_lock_is_gone_loses_its_record`,
+`a_record_a_tracked_session_already_owns_is_never_overwritten`,
+`an_app_record_is_never_agent_kind_so_dedup_and_staleness_skip_it`,
+`an_app_record_never_publishes_a_state_other_than_idle`. Verified:
+`cargo test -p aoide-conduct` test result: ok. 603 passed; 0 failed
+(executor and independent reviewer); `cargo check --workspace
+--all-targets` clean. Reviewed FIX (docs missing from the commit) → docs
+landed here in the same commit → LAND.
+
+Pages touched: `pkgs/aoide/crates/conduct/README.md`,
+`pkgs/aoide/crates/conduct/AGENTS.md`, `CONTRACTS.md` (§4 `kind` gains
+`app`), `ingest/log.md` (this entry).

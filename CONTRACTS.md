@@ -1381,14 +1381,21 @@ infers it from the `agent` string: `agent` (a Claude/agent session), `shell`
 (a conducted terminal), `subagent` (a Task the agent spawned — a leaf of the
 conductor tree, its own child record with its own harness-native-subagent
 classifier, parented to the harness session from the hook payload, closed on
-its own stop event and swept if its parent ends), or `a2a` (§6 — an external
-A2A agent folded into the session DAG). Absent means "unclassified" (a
+its own stop event and swept if its parent ends), `a2a` (§6 — an external
+A2A agent folded into the session DAG), or `app` (a task inside an app aoide
+does not conduct — e.g. a desktop Codex/ChatGPT thread, keyed by the app's
+own native thread id, `agent:"codex"`, `state:"idle"` always; no `agent`
+profile, hook, `conductable`, or `socket` exists for it). `app` is explicitly
+EXCLUDED from `is_agent_kind` and from the reaper's staleness/dedup arms —
+a shared app-server pid backs every thread it holds a lock for, so it must
+never stand as proof any one of them is alive. Absent means "unclassified" (a
 legacy record); `upsert_session` backfills it once, at the next touch, from
 `agent != "shell"`. `conductable` (bool) marks a session spawned under `aoide
 conduct` (it owns a PTY + control socket) — the same-window eviction and the
 reaper's own dedup pass both treat a `conductable` record as the control-
 socket owner, never a foreground-agent duplicate, regardless of its
 published `kind`.
+
 
 **Additive in v0 (task #89):** a session record MAY also carry an optional
 `hookAncestry` (array of integer pids, at most 8, self-first) — the
