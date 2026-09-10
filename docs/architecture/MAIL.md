@@ -164,7 +164,7 @@ file):
 
 ```
 base.jsonl      append-only, one entry per line, immutable once written
-cursors.json    { "<name>": { "<reader>": { "seq": n } } }
+cursors.json    { "<name>": { "<reader>": { "seq": n, "rung": n } } }
 seen.jsonl      one `{"msgid","receivedAt"}` per line, append-only; dedup
                 memory that outlives pruning, loaded once per process
 ```
@@ -219,13 +219,22 @@ An entry is an envelope plus local facts:
   consume each other's mail. A reader is identified by its conducting
   session id (`AOIDE_SESSION_ID`), and by the mailbox name itself when
   that is unset — so a stray read from an unconducted terminal advances
-  a pseudo-reader and never a live agent's mark. Two unconducted
-  terminals share that pseudo-reader and so still consume each other,
-  which is the honest floor: nothing distinguishes them. A respawned
-  session is a new reader and sees the name from the beginning, the way
-  an NNTP client with no `.newsrc` does: re-delivery is the safe
-  direction, and silent loss is not. The reader set is also what the
-  doorbell rings.
+  a pseudo-reader and never a live agent's mark. Every process under one
+  wrap — sequential harness conversations in the same terminal, a native
+  subagent inheriting the variable — shares that one cursor: delivery
+  resolves the wrap, and read tracking will key on the bound agent
+  identity (`enduringAgentId`) instead once session binding lands. Two
+  unconducted terminals share that pseudo-reader and so still consume
+  each other, which is the honest floor: nothing distinguishes them. A
+  respawned session is a new reader and sees the name from the
+  beginning, the way an NNTP client with no `.newsrc` does: re-delivery
+  is the safe direction, and silent loss is not. The reader set is also
+  what the doorbell rings.
+- Each mark also carries `rung`: the doorbell latch, the highest arming
+  `seq` this reader has already been rung for. A reader arms again only
+  once its own read catches up to `rung`; omitted from `cursors.json`
+  while zero, so a never-rung mark reads byte-identical to before the
+  field existed.
 - A `cursors.json` carrying the flat `{ "<name>": { "seq", "readers" } }`
   shape migrates on first open under the same lock: each recorded reader
   inherits the name's old `seq`, and a name with no recorded reader
@@ -248,9 +257,10 @@ into the live inbox.
 - `<node>` is a mesh-declared node name or `self`. `self` resolves to
   this box's own node name (`display::local_host_name()`) when the
   envelope is minted, so the literal never enters a header — a letter
-  filed locally is the same bytes it would be on the wire. `<name>` is
-  free text; it is filed raw and **clamped only when rendered into a
-  pty**.
+  filed locally is the same bytes it would be on the wire. `<name>`
+  satisfies the node-name grammar (`^[a-z0-9][a-z0-9-]*$`,
+  `valid_node_name`) or the filing is refused before anything is
+  written — never clamped, never rewritten.
 - **Address role names, never session petnames.** Petnames are minted
   `adjective-noun` per session and change on every respawn; a role name
   (`rebuild-reports`, `conductor`) outlives the session that reads it.
@@ -471,19 +481,20 @@ The doorbell is a fixed line injected through the loopback conduct path
 [aoide mail] new mail for <name> — aoide mail read --for <name>
 ```
 
-`<name>` is clamped to the `valid_node_name` grammar (`[a-z0-9-]`,
-`node_store.rs`) before injection; conduct's own sanitizer only strips
-CR/LF, which is not a clamp. No byte of the letter rides the nudge.
-Headless spawns get it — injection is the path conduct uses. Nothing
-else is ever injected on a letter's behalf.
+An invalid `<name>` never rings — names are validated at filing and
+again by the ringer, never rewritten; conduct's own sanitizer
+separately strips CR/LF from the injected line. No byte of the letter
+rides the nudge. Headless spawns get it — injection is the path
+conduct uses. Nothing else is ever injected on a letter's behalf.
 
 The nudge is **latched**: it rings once per (name, session) and not
-again until that reader's cursor for the name advances. A thousand
-letters to one name are one line in the reader's pty, then a count on
-`aoide mail`; a flood cannot become a thousand interruptions, and the
-pty is never the place a flood is felt. The line is injected and
-submitted, the way a conducted `--submit` is — a nudge that sits unsent
-in a prompt is a nudge no one saw.
+again until that reader's cursor for the name advances — the latch
+itself is `rung`, a field on the reader's own mark in `cursors.json`.
+A thousand letters to one name are one line in the reader's pty, then
+a count on `aoide mail`; a flood cannot become a thousand
+interruptions, and the pty is never the place a flood is felt. The
+line is injected and submitted, the way a conducted `--submit` is — a
+nudge that sits unsent in a prompt is a nudge no one saw.
 
 ## Reading
 

@@ -2644,3 +2644,37 @@ Snapshots cited: Mneme `5512299`, Melete `7619d40`, Aoide `8df8e60`.
 
 Pages touched: `references/mneme-shared-memory-and-aoide.md`,
 `ingest/log.md` (this entry).
+
+## [2026-09-10] feat | the doorbell's latch lands before the doorbell
+
+P-M5a splits in two, one executor each, never concurrent. This is
+`P-M5a-1`: the durable state and the safety floor a later ring can be
+built on with nothing left to design mid-implementation. `storage::mail`
+gains the doorbell's own latch — `rung` on each reader's cursor mark —
+and the functions a ringer will call to read and move it:
+`ring_targets`, `stamp_rung`, `armed_names_for_reader`, `enrol_reader`,
+plus `arms(kind)`, the one place that decides which entry kinds ring. No
+line is injected anywhere in this slice and no new command exists yet —
+`mail ring` and the socket write it drives are `P-M5a-2`'s.
+
+Two refusals land alongside the latch. A mailbox name is now validated
+against the node-name grammar at filing (`file_letter`,
+`mint_outbound_letter`) — refused before anything is written, never
+clamped; a letter already on disk under an older, off-grammar name
+stays filed and readable exactly as before. And `aoide send` stops
+trusting a stored socket path whose file is gone: the same
+`is_conductable_now` check the session graph already used to REPORT
+reachability now gates the SEND path too, so a runtime-directory rebuild
+that silently orphans a socket path is refused with a message that says
+so, rather than attempted and left to time out.
+
+The concurrency and readiness rulings behind the eventual ring — one
+critical section, the readiness signal a target must show, which entry
+kinds arm a reader — are answered in the architecture brief this slice
+descends from, not repeated here: they constrain code this slice does
+not yet contain.
+
+Pages touched: `docs/architecture/MAIL.md`, `CONTRACTS.md`,
+`pkgs/aoide/crates/storage/README.md`,
+`pkgs/aoide/crates/storage/AGENTS.md`,
+`pkgs/aoide/crates/conduct/AGENTS.md`, `ingest/log.md` (this entry).

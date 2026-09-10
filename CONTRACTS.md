@@ -1993,10 +1993,14 @@ serve` door unit, and the CLI all resolve the same directory.
 
 ```
 base.jsonl      append-only, one entry per line, immutable once written
-cursors.json    { "<name>": { "<reader>": { "seq": n } } }
+cursors.json    { "<name>": { "<reader>": { "seq": n, "rung": n } } }
 seen.jsonl      one {"msgid","receivedAt"} per line, append-only dedup
                 memory that outlives pruning
 ```
+
+`rung` is additive in v0 (omitted while zero): the doorbell latch — the
+highest arming `seq` this reader has been rung for (MAIL.md "Delivery
+and the doorbell").
 
 An entry is a signed envelope plus local, never-signed facts:
 
@@ -2083,7 +2087,9 @@ names with unread mail BY THIS READER; `mail send --to self/<name> --
 <text>` files a letter directly; `mail send --to <node>/<name> -- <text>`
 (P-M2, `node` any other registered, VERIFIED node) mints and spools
 instead of filing directly here — see `state/outbox/` below for that
-path in full; `mail read --for
+path in full; either form refuses before writing anything when `<name>`
+falls outside `^[a-z0-9][a-z0-9-]*$` (`storage::node_store::
+valid_node_name`) — never clamped. `mail read --for
 <name>`/`--all-names` prints new entries and advances ONLY the calling
 reader's mark under that name (`--reread` reprints already-read ones —
 the mark still only ever advances forward). A reader is the conducting
