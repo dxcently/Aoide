@@ -125,7 +125,15 @@ Item {
     function openSessionMenu(record, sourceItem, x, y) {
         if (!sessionMenu.item) return
         var point = sourceItem.mapToItem(temple, x, y)
-        sessionMenu.item.open(record, point.x, point.y)
+        var host = null
+        var parentId = record && record.parentSessionId
+        if (parentId) {
+            var all = temple._sessions || []
+            for (var i = 0; i < all.length; i++) {
+                if (all[i] && all[i].sessionId === parentId) { host = all[i]; break }
+            }
+        }
+        sessionMenu.item.open(record, point.x, point.y, host)
     }
 
     implicitWidth: 360

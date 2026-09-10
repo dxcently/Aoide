@@ -198,6 +198,14 @@ failure text from the response. Termination reports a request, not confirmed
 exit. Shared app process refusals stay visible. The menu adds no persistent row
 to the cards and scrolls within the temple when its editor exceeds the viewport.
 
+The kill action's label names its scope before the click rather than always
+reading "Kill process": a subagent record shows a disabled "Kill (subagent)"
+with a hint pointing at its executor session; a record that already owns a
+dedicated process reads "Kill process"; a record hosted by another terminal
+(the conductor roster's immediate parent, passed to the menu as `host`, and
+not yet ended) names that terminal, "Kill terminal <name>"; anything else reads "Kill…" and defers
+to aoide's own hosting-terminal resolution on click.
+
 ## Iteration Log
 
 - 2026-07-26: initial commit as the replay fixture; palette-only, no cover.

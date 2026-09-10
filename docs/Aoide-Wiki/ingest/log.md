@@ -3255,3 +3255,28 @@ failed (executor and independent reviewer both). `cargo check
 
 Pages touched: `pkgs/aoide/crates/conduct/AGENTS.md`,
 `pkgs/aoide/crates/conduct/README.md`, `ingest/log.md` (this entry).
+
+## [2026-09-10] feat | the kill item names its scope before the click
+
+The session menu (`song/songbook/sonata/widgets/SessionMenu.qml`) no
+longer reads "Kill process" for every card. `conductor.qml`'s
+`openSessionMenu` resolves the card's immediate `parentSessionId` in the
+roster it already holds and passes it to `open(rec, x, y, host)`. The
+label follows `conduct::kill_target`'s own order and claims no scope it
+cannot know: a `sub:` record shows a disabled "Kill (subagent)"; a card
+that is itself a conductable wrap with a pid reads "Kill process"; a card
+whose immediate parent is a conductable wrap with a pid and not `done`
+reads "Kill terminal ‹petname|title|id›"; anything deeper or unknown
+reads "Kill…" with the hint that aoide resolves the host on click and
+refuses if there is none. Each case carries a one-line hint in the
+Undying hint's style. The post-click message is unchanged: the backend
+names the target. No bridge or backend change (house rule 7: the data
+the label needs was already on the bridge).
+
+Verified: `qmllint` is not in the devshell; brace balance checked on both
+files and the three label functions exercised under node against seven
+fixtures covering the four cases. The ended-host clause was added by the
+orchestrator on review. Staged, not deployed.
+
+Pages touched: `song/songbook/sonata/design/intent.md`, `ingest/log.md`
+(this entry).

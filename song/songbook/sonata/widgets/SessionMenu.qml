@@ -17,6 +17,7 @@ Item {
     property var livery
     property var bridge
     property var record: ({})
+    property var host: null
     property string page: "actions"
     property bool editing: false
     property string message: ""
@@ -42,9 +43,10 @@ Item {
         + "\nState: " + (record.state || "unavailable")
         + "\nProject: " + effectiveProject()
         + "\nPrompt: " + (record.prompt || "unavailable")
-    function open(rec, x, y) {
+    function open(rec, x, y, host) {
         if (busy) return
         record = JSON.parse(JSON.stringify(rec || {}))
+        menu.host = host || null
         undyingFile.reload()
         record.undying = undyingIds.indexOf(record.sessionId) >= 0
         pointX = x; pointY = y; page = "actions"; editing = false; message = ""; failed = false
@@ -54,6 +56,33 @@ Item {
     function clearUndying() {
         undyingIds = []
         var rec = JSON.parse(JSON.stringify(record)); rec.undying = false; record = rec
+    }
+    // The kill Action names its scope before the click (P-QOL-UI1): a
+    // subagent shares its executor's process and never resolves on its own,
+    // a record that already owns a dedicated process kills itself, a hosted
+    // record names the immediate parent conductor.qml resolved as `host`,
+    // and anything else defers to aoide's own ancestor walk
+    // (`conduct::kill_target`) rather than guess.
+    function killLabel() {
+        var rec = menu.record || {}
+        if (("" + (rec.sessionId || "")).indexOf("sub:") === 0) return "Kill (subagent)"
+        if (rec.conductable === true && rec.pid) return "Kill process"
+        if (menu.host && menu.host.conductable === true && menu.host.pid && menu.host.state !== "done")
+            return "Kill terminal " + (menu.host.petname || menu.host.title || menu.host.sessionId)
+        return "Kill…"
+    }
+    function killHint() {
+        var rec = menu.record || {}
+        if (("" + (rec.sessionId || "")).indexOf("sub:") === 0)
+            return "A subagent shares its executor's process; kill the executor instead."
+        if (rec.conductable === true && rec.pid) return "Stops this terminal's own process."
+        if (menu.host && menu.host.conductable === true && menu.host.pid && menu.host.state !== "done")
+            return "Stops the whole terminal that hosts this session."
+        return "aoide resolves the hosting terminal on click and refuses if there is none."
+    }
+    function killEnabled() {
+        var rec = menu.record || {}
+        return ("" + (rec.sessionId || "")).indexOf("sub:") !== 0
     }
     function effectiveProject() {
         if (record.project) return record.project
@@ -162,7 +191,8 @@ Item {
                     Action { label: (menu.record.undying === true ? "[x]" : "[ ]") + " Undying"; onChosen: menu.run("undying", {state: menu.record.undying === true ? "off" : "on"}) }
                     Text { width: parent.width; text: "Keep for manual resurrection."; font.family: menu.face; font.pixelSize: 9; wrapMode: Text.WordWrap; color: menu.livery ? menu.livery.paletteFg : "transparent"; opacity: 0.55 }
                     Action { label: "Project…"; onChosen: menu.page = "projects" }
-                    Action { label: "Kill process"; danger: true; onChosen: menu.run("kill", {}) }
+                    Action { label: menu.killLabel(); danger: true; enabled: !menu.busy && menu.killEnabled(); onChosen: menu.run("kill", {}) }
+                    Text { width: parent.width; text: menu.killHint(); font.family: menu.face; font.pixelSize: 9; wrapMode: Text.WordWrap; color: menu.livery ? menu.livery.paletteFg : "transparent"; opacity: 0.55 }
                 }
                 TextEdit {
                     id: recoveryText
