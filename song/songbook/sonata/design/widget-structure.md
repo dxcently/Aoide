@@ -294,8 +294,8 @@ Recurring sizing patterns worth copying:
 ## 8. Helper components: nested, not sibling files
 
 `slots.md` documents a sibling-file mechanism (an UPPERCASE filename carried
-by the build, never resolvable as a slot). **No widget uses it.** Every helper
-today is a `component Name: BaseType { … }` block nested inside the file:
+by the build, never resolvable as a slot). `SessionMenu.qml` is shared through
+an explicit relative-URL `Loader` by Conductor and Terminals. Other helpers use a `component Name: BaseType { … }` block nested inside the file:
 `bar.qml`'s `WorkspaceRow` and `Barline`, `calendar.qml`'s `Roller`,
 `powermenu.qml`'s `EndingStele`, `launcher.qml`'s `ManuscriptRow`, `BookPage`,
 `GlassPage`, `PageStack`, `BoardSegment`.

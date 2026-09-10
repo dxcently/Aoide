@@ -115,6 +115,19 @@ Item {
     required property var bridge
     property var shared: null
 
+    Loader {
+        id: sessionMenu
+        anchors.fill: parent
+        z: 100
+        source: Qt.resolvedUrl("SessionMenu.qml")
+        onLoaded: { item.livery = temple.livery; item.bridge = temple.bridge }
+    }
+    function openSessionMenu(record, sourceItem, x, y) {
+        if (!sessionMenu.item) return
+        var point = sourceItem.mapToItem(temple, x, y)
+        sessionMenu.item.open(record, point.x, point.y)
+    }
+
     implicitWidth: 360
     implicitHeight: 520
 
@@ -431,10 +444,13 @@ Item {
         var best = -1, bestLen = -1
         var ps = _projects || []
         for (var i = 0; i < ps.length; i++) {
-            var p = ps[i] && ps[i].path
-            if (!p) continue
-            if ((cwd === p || cwd.indexOf(p + "/") === 0) && p.length > bestLen) {
-                best = i; bestLen = p.length
+            var roots = ps[i].roots && ps[i].roots.length ? ps[i].roots : [ps[i].path]
+            for (var j = 0; j < roots.length; j++) {
+                var p = roots[j]
+                if (!p) continue
+                if ((cwd === p || cwd.indexOf(p === "/" ? "/" : p + "/") === 0) && p.length > bestLen) {
+                    best = i; bestLen = p.length
+                }
             }
         }
         return best
@@ -491,6 +507,10 @@ Item {
         for (i = 0; i < tops.length; i++) {
             var t = tops[i]
             var pi = projectOf(t.cwd)
+            if (t.project) {
+                pi = -1
+                for (var p = 0; p < ps.length; p++) if (ps[p].name === t.project) { pi = p; break }
+            }
             var ch = kids[t.sessionId] || []
             var target = (pi >= 0) ? buckets[pi] : adrift
             t.no = ++seq
@@ -1150,7 +1170,7 @@ Item {
     // main, #NN.k sub — rendered here, never assigned), wsN inside it
     // (mains only).
     //
-    // 2 · PROVENANCE — harness/model, then petname and real ID suffix.
+    // 2 · PROVENANCE — harness/model beside petname and real ID suffix.
     // Expandable details preserve the complete ID and copyable recovery data.
     //
     // 3 · DIRECTIVE — explicit prompt content, independent of the title.
@@ -1186,7 +1206,7 @@ Item {
 
         property var s: ({})
         property bool child: false
-        property bool detailsOpen: false
+
         property color hue: temple.signature
 
         width: parent ? parent.width : 0
@@ -1442,21 +1462,15 @@ Item {
 
                 Text {                           // agent name — the card's name
                     id: nameT
-                    anchors.left: codexTag.visible ? codexTag.right
-                                : (piTag.visible ? piTag.right
-                                : (moonTag.visible ? moonTag.right
-                                : (hookTag.visible ? hookTag.right : lampBox.right)))
-                    anchors.leftMargin: 5
+                    // Every harness keeps the same reserved animation lane at rest.
+                    anchors.left: lampBox.right
+                    anchors.leftMargin: 35
                     anchors.verticalCenter: parent.verticalCenter
                     text: card.displayName
                     elide: Text.ElideRight
                     width: Math.min(implicitWidth,
-                                    parent.width - 21 - badgeT.implicitWidth - 10
+                                    parent.width - 51 - badgeT.implicitWidth - 10
                                     - (kindTag.visible ? kindTag.implicitWidth + 6 : 0)
-                                    - (hookTag.visible ? hookTag.implicitWidth + 6 : 0)
-                                    - (piTag.visible ? piTag.width + 6 : 0)
-                                    - (moonTag.visible ? moonTag.implicitWidth + 6 : 0)
-                                    - (card.codexMain ? codexTag.width + 6 : 0)
                                     - (wsT.visible ? wsT.implicitWidth + 8 : 0)
                                     - (stateWordT.implicitWidth + 8))
                     font.family: temple.faceSerif
@@ -1801,71 +1815,35 @@ Item {
                 }
             }
 
-            Text {
-                width: parent.width
-                text: card.agentName + ((card.s && card.s.model) ? " / " + card.s.model : "")
-                elide: Text.ElideMiddle
-                font.family: temple.faceMono; font.pixelSize: 10
-                color: temple.withA(temple.livery.paletteFg, 0.65)
-            }
-            Text {
-                width: parent.width
-                text: card.idCallout
-                elide: Text.ElideMiddle
-                font.family: temple.faceMono; font.pixelSize: 10
-                color: temple.withA(temple.livery.paletteFg, 0.65)
-            }
-
             Item {
+                id: identityRow
                 width: parent.width
-                height: 14
+                readonly property bool split: width < 300 && harnessIdentity.visible
+                height: split ? 28 : 14
+                readonly property real availableWidth: width
                 Text {
-                    id: copyIdentity
-                    anchors.right: detailsToggle.left
-                    anchors.rightMargin: 8
-                    text: "[copy]"
+                    id: harnessIdentity
+                    anchors.left: parent.left
+                    visible: !!(card.s && card.s.model) || card.displayName !== card.agentName
+                    width: !visible ? 0 : (identityRow.split ? parent.width
+                        : Math.max(0, identityRow.availableWidth - Math.max(96, identityRow.availableWidth * 0.55) - 8))
+                    text: card.agentName + ((card.s && card.s.model) ? " / " + card.s.model : "")
+                    elide: Text.ElideMiddle
                     font.family: temple.faceMono; font.pixelSize: 10
-                    color: temple.livery.paletteAccent
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            identityDetails.selectAll()
-                            identityDetails.copy()
-                            identityDetails.deselect()
-                        }
-                    }
+                    color: temple.withA(temple.livery.paletteFg, 0.65)
                 }
                 Text {
-                    id: detailsToggle
+                    anchors.left: harnessIdentity.visible && !identityRow.split ? harnessIdentity.right : parent.left
+                    anchors.leftMargin: harnessIdentity.visible && !identityRow.split ? 8 : 0
+                    y: identityRow.split ? 14 : 0
                     anchors.right: parent.right
-                    text: card.detailsOpen ? "[hide details]" : "[details]"
+                    anchors.rightMargin: 0
+                    horizontalAlignment: Text.AlignRight
+                    text: card.idCallout
+                    elide: Text.ElideMiddle
                     font.family: temple.faceMono; font.pixelSize: 10
-                    color: temple.livery.paletteAccent
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: card.detailsOpen = !card.detailsOpen
-                    }
+                    color: temple.withA(temple.livery.paletteFg, 0.65)
                 }
-            }
-            TextEdit {
-                id: identityDetails
-                width: parent.width
-                height: visible ? contentHeight : 0
-                visible: card.detailsOpen
-                readOnly: true
-                selectByMouse: true
-                textFormat: TextEdit.PlainText
-                wrapMode: TextEdit.WrapAnywhere
-                font.family: temple.faceMono; font.pixelSize: 10
-                color: temple.livery.paletteFg
-                text: "Session: " + ((card.s || {}).sessionId || "unavailable")
-                    + "\nHarness: " + ((card.s || {}).agent || "unavailable")
-                    + "\nPetname: " + ((card.s || {}).petname || "unavailable")
-                    + "\nHost: " + ((card.s || {}).host || "unavailable")
-                    + "\nTitle: " + ((card.s || {}).title || "unavailable")
-                    + "\nDirectory: " + ((card.s || {}).cwd || "unavailable")
 
             }
 
@@ -2193,6 +2171,7 @@ Item {
         // hover-preview + trace + click-to-focus (a courier focuses its parent)
         MouseArea {
             id: cardMouse
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
@@ -2210,7 +2189,8 @@ Item {
                     temple.shared.tracedSessionId = ""
                 }
             }
-            onClicked: {
+            onClicked: function(mouse) {
+                if (mouse.button === Qt.RightButton) { temple.openSessionMenu(card.s, cardMouse, mouse.x, mouse.y); return }
                 if (!temple.bridge || !card.s) return
                 var id = (card.child && card.s.parentSessionId)
                          ? card.s.parentSessionId : card.s.sessionId

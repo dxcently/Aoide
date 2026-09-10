@@ -165,19 +165,38 @@ text on the wallpaper, so no outline treatment is in use.
 
 Conductor and Terminals show the published title as their main heading, falling
 back to the harness when absent. Harness and reported model share a secondary
-line; missing models remain absent. Conductor keeps harness animation left of
-the heading; Terminals adds no identity animation. A separate line carries the
+line; missing models remain absent. Conductor puts its recovery handle on that
+same line and suppresses a redundant harness when it already serves as the
+heading without a model. Narrow cards retain two secondary lines; each continues to carry identity,
+not a dedicated action bar. Conductor reserves a fixed animation lane left of
+the heading in every state; Terminals adds no identity animation. A separate line carries the
 petname and the real session ID's final four characters. These
 are screenshot hints, not unique routing keys. Missing titles or petnames stay
 absent; the widgets never mint substitutes.
 
-Every card, including children and terminal rows, exposes a details toggle and a
-copy action. Terminals reveals those controls beside the recovery handle on
-hover, keeping them visible while details are open; no separate action row is
-reserved. Details retain the full session ID, published title, harness, petname, and working directory. Copy uses Qt's text clipboard without a shell
-command. Host is shown only when published; missing host data remains unavailable. Session IDs
-remain unchanged for focus, tracing, permissions, and row matching. Prompt content is displayed only from the explicit prompt field, never inferred
-from the title.
+Every card, including children and terminal rows, keeps recovery copy and details
+inside the context menu. Hover never changes the identity labels’ available
+width. Details retain the full session ID, published title, harness, model,
+state, petname, working directory, prompt, native harness ID, PID/window, and
+effective project name. Copy uses
+Qt’s text clipboard without a shell command. Host is shown only when published;
+missing host data remains unavailable. Session IDs remain unchanged for focus,
+tracing, permissions, and row matching. Prompt content is displayed only from
+the explicit prompt field, never inferred from the title.
+
+Right-clicking a card opens the shared square `SessionMenu.qml` sheet; ordinary
+left-click keeps focusing the session. The menu carries recovery copy/details,
+the undying mark, project assignment, project creation and directory editing,
+and process termination. Undying means retention for manual resurrection, not
+automatic restart. Project roots accumulate through a native single-directory
+picker or absolute path entry, with each root removable before saving. Existing
+project names stay fixed while their directory roots are edited. Explicit
+session project assignment wins over longest-directory-prefix grouping.
+
+Actions cross `bridge.sessionAction`; the menu retains pending, success, or
+failure text from the response. Termination reports a request, not confirmed
+exit. Shared app process refusals stay visible. The menu adds no persistent row
+to the cards and scrolls within the temple when its editor exceeds the viewport.
 
 ## Iteration Log
 
@@ -342,3 +361,7 @@ from the title.
 - 2026-09-10: Main headings use session titles, with harness/model and recovery identity on separate lines; Conductor animations move left of the title. Prompt content stays independent.
 
 - 2026-09-10: Terminals recovery controls share the petname line on hover; closed rows recover the dedicated action-row height.
+
+- 2026-09-10: Conductor combines harness/model and recovery identity into one secondary line, reveals controls on hover, and omits duplicate harness-only labels.
+
+- 2026-09-10: Session cards gain shared right-click actions, multi-directory project editing, and visible bridge outcomes.

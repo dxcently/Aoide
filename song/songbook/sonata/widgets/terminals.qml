@@ -88,6 +88,19 @@ Item {
     // not song/stage/.
     property string stagePath: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/sessions.json"
 
+    Loader {
+        id: sessionMenu
+        anchors.fill: parent
+        z: 100
+        source: Qt.resolvedUrl("SessionMenu.qml")
+        onLoaded: { item.livery = gadget.livery; item.bridge = gadget.bridge }
+    }
+    function openSessionMenu(record, sourceItem, x, y) {
+        if (!sessionMenu.item) return
+        var point = sourceItem.mapToItem(gadget, x, y)
+        sessionMenu.item.open(record, point.x, point.y)
+    }
+
     implicitWidth: 360
     implicitHeight: 520
 
@@ -271,6 +284,9 @@ Item {
             var wsId = (rec.workspace !== undefined && rec.workspace !== null) ? rec.workspace : -1;
             out.push({
                 sessionId:     rec.sessionId || "",
+                harnessSessionId: rec.harnessSessionId || "",
+                pid: rec.pid || 0,
+                project:       rec.project || "",
                 agent:         rec.agent || "shell",
                 petname:       rec.petname || "",
                 host:          rec.host || "",
@@ -310,7 +326,7 @@ Item {
         var parts = [];
         for (var i = 0; i < list.length; i++) {
             var r = list[i];
-            parts.push([r.sessionId, r.petname, r.host, r.prompt, r.agent, r.kind, r.state, r.cwd, r.startedAt,
+            parts.push([r.sessionId, r.harnessSessionId, r.pid, r.project, r.petname, r.host, r.prompt, r.agent, r.kind, r.state, r.cwd, r.startedAt,
                         r.workspace, r.windowAddress, r.title,
                         r.activity, r.tool, r.say, r.model, r.contextTokens,
                         r.contextCeiling, r.needsSudo].join(""));
@@ -763,8 +779,7 @@ Item {
                         // slim ledger lines.
                         readonly property bool agentRow: gadget.isAgentRec(modelData)
                         readonly property string activityText: modelData.activity || ""
-                        property bool detailsOpen: false
-                        HoverHandler { id: identityHover }
+
                         readonly property string displayName: {
                             var name = modelData.agent || "agent";
                             var title = (modelData.title || "").replace(/\s+/g, " ").trim();
@@ -1016,61 +1031,13 @@ Item {
                                 height: 14
                                 Text {
                                     anchors.left: parent.left
-                                    anchors.right: recoveryActions.visible ? recoveryActions.left : parent.right
-                                    anchors.rightMargin: recoveryActions.visible ? 8 : 0
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 0
                                     text: row.identityLabel
                                     elide: Text.ElideMiddle
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: gadget.withA(gadget.livery.paletteFg, 0.65)
                                 }
-                                Row {
-                                    id: recoveryActions
-                                    anchors.right: parent.right
-                                    spacing: 8
-                                    visible: identityHover.hovered || row.detailsOpen
-                                    Text {
-                                        text: "[copy]"
-                                        font.family: gadget.faceMono; font.pixelSize: 10
-                                        color: gadget.livery.paletteAccent
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: {
-                                                identityDetails.selectAll()
-                                                identityDetails.copy()
-                                                identityDetails.deselect()
-                                            }
-                                        }
-                                    }
-                                    Text {
-                                        text: row.detailsOpen ? "[hide]" : "[details]"
-                                        font.family: gadget.faceMono; font.pixelSize: 10
-                                        color: gadget.livery.paletteAccent
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: row.detailsOpen = !row.detailsOpen
-                                        }
-                                    }
-                                }
-                            }
-                            TextEdit {
-                                id: identityDetails
-                                width: parent.width
-                                height: visible ? contentHeight : 0
-                                visible: row.detailsOpen
-                                readOnly: true
-                                selectByMouse: true
-                                textFormat: TextEdit.PlainText
-                                wrapMode: TextEdit.WrapAnywhere
-                                font.family: gadget.faceMono; font.pixelSize: 10
-                                color: gadget.livery.paletteFg
-                                text: "Session: " + (modelData.sessionId || "unavailable")
-                                    + "\nHarness: " + (modelData.agent || "unavailable")
-                                    + "\nPetname: " + (modelData.petname || "unavailable")
-                                    + "\nHost: " + (modelData.host || "unavailable")
-                                    + "\nTitle: " + (modelData.title || "unavailable")
-                                    + "\nDirectory: " + (modelData.cwd || "unavailable")
 
                             }
 
@@ -1276,6 +1243,7 @@ Item {
 
                         MouseArea {
                             id: hover
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
@@ -1287,7 +1255,8 @@ Item {
                             onEntered: gadget.setHover(gadget.rowKey(modelData),
                                                        modelData.workspace !== undefined ? modelData.workspace : -1)
                             onExited:  gadget.requestHoverClear(gadget.rowKey(modelData))
-                            onClicked: {
+                            onClicked: function(mouse) {
+                                if (mouse.button === Qt.RightButton) { gadget.openSessionMenu(modelData, hover, mouse.x, mouse.y); return }
                                 // Every row now carries a sessionId — a tracked
                                 // agent/shell, or the daemon's synthetic `win:<addr>`
                                 // for a bare tty. The bridge resolves it to a window
