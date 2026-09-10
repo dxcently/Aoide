@@ -30,8 +30,10 @@ Fields per entry: status · owner · depends on · evidence · next.
 
 - Status: architecture brief DONE (scratchpad p-codex-desktop-brief.md, Opus,
   read-only); P-CX-1 (pure reconcile core + record shape, kind "app",
-  native-id keying) IN PROGRESS; P-CX-2 discovery and P-CX-3 call site +
-  taught refusals queued.
+  native-id keying) LANDED, conduct 603 green, reviewed; P-CX-2 portable
+  discovery IN PROGRESS (User rule: one repeatable process across OSes —
+  flock liveness + one parsed `ps` table, /proc only as a Linux tie-break);
+  P-CX-3 call site + taught refusals queued.
 - Owner: Fable (one Sonnet executor per slice, independent review).
 - Depends on: nothing; cargo serialized with other work.
 - Evidence: standing verdict "current adapter unsupported; ownership of the
