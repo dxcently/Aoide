@@ -923,6 +923,71 @@ correctly with S1 in either order: whichever migration a given process's
 via `stage_dir()`/`state_dir()`, so it finds files wherever L-C2 most
 recently left them.
 
+### Enduring agent binding and explicit context retrieval
+
+`aoide session bind --id <session> --agent-id <key>` binds an existing local
+executor to an explicit enduring key. Keys use lowercase letters, digits,
+and hyphens, starting with a letter or digit; an opaque lowercase UUID is
+suitable. The key is independent of session names, harness IDs, personas,
+and optional knowledge-service configuration. The same binding is
+idempotent. Invalid keys, unknown sessions, and conflicting bindings fail
+without mutation. Binding grants no authority and changes no mail reader.
+
+`SessionRecord.enduringAgentId` and its graph node field are additive
+optional strings, omitted when unset. Ordinary session UPSERT preserves
+them. `LedgerEntry.enduringAgentId` captures the field on exit, serializes
+null when unbound, and defaults to null on old ledger lines. No automatic
+resurrection binding or handoff is implied.
+
+`aoide context --id <session>` fetches that executor's configured persona
+and memory. Both commands accept local CLI/Daemon doors only, require
+aoided, and have no direct fallback. The fetch resolves credentials in
+**aoided's environment**, never from caller-forwarded secret values. The
+context CLI waits at most 120 seconds for the daemon reply, covering the
+sequential 15-second upstream requests and cleanup. A timeout reports
+incomplete context without retrying; existing daemon callers retain their
+two-second bound. The optional configuration is:
+
+```toml
+[context.agents."7e3f5976-98b2-44a4-827c-c687a0d9526e"]
+vault = "knowledge"
+personaNote = "personas/rook.md"
+memoryNote = "memory/rook.md"
+
+[context.vaults.knowledge]
+endpoint = "https://mneme.example/mcp"
+vault = "Personal"
+tokenEnv = "MNEME_TOKEN"
+```
+
+These dynamic maps follow the validated, non-`config set` mesh convention.
+A mapping must reference a declared vault and explicit vault-relative `.md`
+paths, without traversal. Endpoint user info/query credentials are refused;
+`tokenEnv` stores a variable name, never a token value. Binding needs none
+of these maps; fetching requires them.
+
+The client initializes an MCP session, sends `notifications/initialized`,
+preserves the optional `Mcp-Session-Id`, and calls Mneme's `RPC` tool with
+explicit server-local vault names. JSON/SSE replies are matched by ID;
+HTTP denial, protocol errors, and `isError` results fail explicitly.
+Before each read, the requested path must appear exactly in `list_notes`.
+This prevents an already-missing canonical reference from silently selecting
+an alias. Listing and reading remain separate operations: a concurrent path
+change can still cause Mneme's `read_note` alias fallback. Coordinated
+writers must keep referenced paths stable while a fetch runs.
+
+The result carries executor/enduring identity, logical vault, endpoint,
+server vault, and per-note `role`, `requestedNote`, `content`, `sha256`,
+`retrievedAt`, and `pathListedBeforeRead`. `consistency` is
+`sequential-not-atomic`; `sourceRevision` is null because no revision is
+coupled to these reads. A failure returns a nonzero outcome,
+`complete=false`, explicit errors, and any earlier notes separately. It
+never reports a fabricated resolved path or a complete atomic snapshot.
+Assigned MCP sessions receive a bounded DELETE on completion. `sessionCleanup`
+reports `closed`, `unsupported` (HTTP 405), `failed`, or `not-applicable`;
+cleanup never replaces the primary fetch result. There is no cache, vault
+write, prompt insertion, or access grant.
+
 ### `$AOIDE_ROOT/config.toml` — **v0** (task #135 P-C, the portable runtime config)
 
 The one file in this section that carries INTENT rather than state. Every
@@ -2309,7 +2374,7 @@ state — a reader wanting "is this session still running" still asks
 `sessions.json`, never this file.
 
 ```json
-{"v":0,"sessionId":"s1","agent":"claude","harnessSessionId":"claude-uuid-123","cwd":"/home/khoa/Aoide","title":"fix the thing","petname":"brave-otter","startedAt":"2026-08-20T10:00:00Z","endedAt":"2026-08-20T12:00:00Z","resumedFrom":null,"origin":null,"restore":null}
+{"v":0,"sessionId":"s1","enduringAgentId":null,"agent":"claude","harnessSessionId":"claude-uuid-123","cwd":"/home/khoa/Aoide","title":"fix the thing","petname":"brave-otter","startedAt":"2026-08-20T10:00:00Z","endedAt":"2026-08-20T12:00:00Z","resumedFrom":null,"origin":null,"restore":null}
 ```
 
 Every field serializes unconditionally (no `skip_serializing_if`,
