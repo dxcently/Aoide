@@ -9,20 +9,20 @@ One active implementation worker per task. Both coordinators may dispatch subage
 | Task | Coordinator | Worker | State / scope |
 |---|---|---|---|
 | Work register and integration decisions | Codex | Codex | This document |
-| P-M5, fetched receipts, control readiness | Fable | One executor for P-M5a-1 | Latch/storage and stale-socket slice dispatched; Fable owns Cargo; actual injection awaits readiness ruling |
+| P-M5, fetched receipts, control readiness | Fable | a-1 executor/reviewer complete | 971cad8 + d4fc369; a-2 waits for K1 release |
 | Runtime directory preservation | Codex | Executor and independent reviewer complete | Commit `ff01b77`; selected Nix evaluation and formatting passed; no activation |
 | Enduring identity/context architecture | Codex | `triad_architecture` | Read-only brief complete; worker idle |
-| Identity/context implementation | Codex | `context_integration` | K1a binding and K1b retrieval preparation; command wiring/docs wait for shared-path release; no Cargo |
+| Identity/context implementation | Codex | context_integration complete | d5415f4, scoped tests + isolated daemon proof + independent review passed; actual Mneme deployment untested |
 | Independent review | Owning coordinator | None | Assigned after a diff exists |
 | Melete backend, replicas, audit | Joint | None | Later slices and upstream contracts |
 
-Fable reserves storage `mail.rs`; conduct `graph/doorbell.rs`, `graph/send.rs`, `graph/doc.rs`, `graph.rs`, `commands/graph.rs`; server `a2a.rs` deposit arm; client `commands.rs` mail-send handler; CLI registration/golden; the mail contract and owning crate docs. Exact scope is in the P-M5a brief. Codex holds conflicting K1 writes until those paths are released.
+K1 has returned shared paths and local Cargo. Fable owns the next P-M5 mail/doorbell slice and its shared-file window after the explicit handback letter.
 
-The K1 executor owns only storage `config.rs`, `records.rs`, `session.rs`, `ledger.rs`; conduct `graph/session_store.rs`; client `context.rs`, `mcp_client.rs`, `lib.rs`, and the client manifest's existing-workspace hash dependency. Changes requiring reserved callsites wait. This is preparation within one coherent implementation; command wiring and matching documentation must land before it is considered complete.
+K1 is committed and its worker is idle. The binding/retrieval slice includes matching docs and additive fixtures, with production resurrection unchanged. Actual deployment against Mneme remains a separate proof.
 
 Coordination addresses are `self/codex-integration` and `self/claude-mail`. Fable uses executor `e7fce841-5c0e-4d6b-b9e5-f86d4f8c6f0d`. This is a routing fact, not an enduring identity. Neither coordinator reads the other's mailbox to infer acknowledgment. The idle user shell attributed beneath Fable is not a worker.
 
-Existing flake, OpenAI dendrite, and ChatGPT packaging changes remain outside this work's ownership. Nix composition and Lyra migration retain their [separate plan](aoide-composable-system-and-muse-triad.md); neither blocks shell-only interoperability. That architecture is implemented in AoideOS within this Aoide repository first. `dxflake` is the reference and later migration target, not a current write target.
+Existing flake, OpenAI dendrite, and ChatGPT packaging changes remain outside this work's ownership. Nix composition and Lyra migration retain their [separate plan](aoide-composable-system-and-muse-triad.md); neither blocks shell-only interoperability. That architecture is implemented in AoideOS within this Aoide repository. `dxflake` is the first external test consumer of the exported Aoide and Lyra cores; its wider configuration migration follows the consumer test. Consumer edits receive a distinct ownership assignment before implementation.
 
 ## Accepted behavior
 
@@ -87,7 +87,7 @@ Fable and Codex settle implementation boundaries in writing before dispatching a
 - Names: an invalid name cannot be transformed into another mailbox identity by a lossy clamp.
 - Reader identity: existing wrap-keyed cursors do not distinguish every successive harness conversation. Executor read identity and ancestor socket resolution remain separate integration contracts.
 - Fetched receipts: observable retrieval boundary, idempotence, cursor/receipt crash ordering, return wakeup. Server-side retrieval cannot claim model ingestion.
-- Identity/context: smallest useful binding/retrieval slice, compatibility, explicit persona reference pending Noah's ID convention.
+- Identity/context: explicit opaque-key binding needs no knowledge-service configuration; retrieval separately requires the declared mapping. The key uses mailbox-compatible text with lowercase UUID examples, without derivation from display/session names. Upstream persona-reference mapping remains separate.
 - Shared paths: storage records/config/session/ledger, command registry/goldens, Cargo manifests have one writer at a time.
 
 The proposed first context slice binds existing sessions to an operator-declared opaque key and retrieves explicit persona/memory references through Mneme. It does not yet automate prompt insertion or ownership transfer. Existing executor cursors and `--reread` are reused. Mneme's public MCP `RPC` wrapper and initialize/session exchange must be supported; Aoide's stateless Melete request assumption is insufficient. Content hashes describe fetched bytes, not a server revision or atomic multi-note snapshot.
@@ -113,3 +113,8 @@ Append-only evidence:
 - 2026-09-10: Fable sequence 43 dispatches P-M5a-1 to one executor and claims Cargo. Sequence 44 accepts daemon-owned serialized ringing, distinct enrolled/armed readers, nonrecursive fetched ring-back, and explicit replay triggers. Automatic submission into an unknown interactive composer remains unaccepted; dedicated headless sessions or an input-readiness contract are required. The shared field remains `enduringAgentId` rather than a second `agentKey` name. A temporary wiring transfer between P-M5 slices is requested for K1a.
 - 2026-09-10: User clarifies that the earlier Nix/Lyra architecture targets AoideOS first; dxflake follows later. The composition plan and ownership scope reflect this order. K1's sole executor pauses after preparing unshared binding/config and retrieval code; no Cargo or duplicate worker is started while waiting for shared paths.
 - 2026-09-10: Sequences 46 and 48 ask Fable to separate identity binding from optional knowledge-service configuration and distinguish executor identity from a reusable terminal wrapper. The CLI JSON mail response repeats letter text in its human message and structured entries; coordinator reads now select structured entries to avoid duplicate context and truncation.
+- 2026-09-10: Fable sequence 50 accepts independent binding and limits automatic injection to headless sessions. After P-M5a-1, Fable transfers shared wiring/HTTP helper files and Cargo to K1, then reclaims them for P-M5a-2. The enduring key is an address/identity; cursor readers remain executor-specific. A future interactive composer guard is not implemented by assuming every Enter means submission.
+- 2026-09-09 (America/New_York): User names dxflake the first external Aoide/Lyra core consumer and asks for an Aoide-controlled build on Osaka. The [live proof](osaka-core-consumer-proof.md) records signed-request incompatibility, successful SSH-to-Aoide spawn/send, the failed private-module evaluation, and the separate public-package build.
+- 2026-09-09 (America/New_York): Fable seq53–54 reports independently reviewed P-M5a-1 in 971cad8 and reader-identity docs fix d4fc369, with all-targets compile clean. Shared paths and local Cargo transfer to the same K1 executor; P-M5a-2 waits for their return.
+- 2026-09-09 (America/New_York): K1 lands as d5415f4 after independent source review, scoped suites, all-targets compilation and a real CLI/isolated-daemon/stateful-MCP fixture proof. Shared paths and Cargo return to Fable. Actual Mneme service credentials/vault access were not exercised.
+- 2026-09-09 (America/New_York): Osaka public-package build initially fails a secrets timeout fixture. Two missing environment-lock guards are independently diagnosed, fixed and reviewed, then the corrected Aoide-controlled Nix build passes all package checks and standalone Lyra lint. Fix committed as e0c6a89; no activation. Native A2A and full-host module composition failures remain recorded in the proof.

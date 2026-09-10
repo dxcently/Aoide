@@ -2,7 +2,7 @@
 
 This is the consolidated architecture and implementation plan. It distinguishes agreed requirements, verified source behavior, and proposed contracts. It does not declare the migration implemented or authorize a rebuild. The detailed [question register](mneme-aoide-open-questions.md) and [Mneme proposal](mneme-shared-memory-and-aoide.md) remain companion documents; their unresolved questions are not silently closed here.
 
-The implementation target is **AoideOS in the Aoide repository first**. The Nix composition tree, aggregates, platform lanes, users, package selection, and Lyra rice model below describe that target. `dxflake` supplies comparison examples and follows in a later migration; it is not the first implementation repository. Aoide core's portable mail, identity, and context work remains independent of the AoideOS deployment migration.
+The implementation target is **AoideOS in the Aoide repository**, with **dxflake as the first external test consumer of the exported Aoide and Lyra cores**. The Nix composition tree, aggregates, platform lanes, users, package selection, and Lyra rice model below describe the AoideOS target. Implementation belongs here; dxflake validates consumption through public packages and modules without importing private module trees. Its wider configuration migration follows that consumer test. Aoide core's portable mail, identity, and context work remains independent of the AoideOS deployment migration.
 
 ## Agreed direction
 
