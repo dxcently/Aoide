@@ -107,9 +107,10 @@ QtObject {
     //   bridge.sessionAction(id, "editproject",   { name, paths: [] },  cb)
     //
     // `cb` is called EXACTLY ONCE with { ok, message } (the reply also echoes
-    // `action` and `sessionId` so a caller can correlate, and carries
+    // `action` and `sessionId` so a caller can correlate, carries
     // `partial: true` when a multi-step action changed something and then
-    // failed). Each call gets its
+    // failed, and carries the CLI outcome's `data` verbatim when there is
+    // one — a kill names the terminal and pid it stops there). Each call gets its
     // own throwaway socket, never the shared queue above: that queue replays
     // on the next reconnect, and a replayed kill is not a thing this bridge
     // will ever do. There is NO queue and NO replay here — a reply that does

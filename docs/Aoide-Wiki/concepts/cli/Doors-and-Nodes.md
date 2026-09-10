@@ -146,7 +146,8 @@ lyra shellbridge [--run] [--json]
   session …` / `aoide project …` subcommand through aoided with `--json` and
   writes exactly one JSON reply line back on the same connection before it
   closes; `createproject` is two invocations in order and reports a partial
-  honestly if the second fails; a line the whitelist refuses is dropped with
+  honestly if the second fails; the reply carries the CLI outcome's `data`
+  verbatim when there is one; a line the whitelist refuses is dropped with
   no reply at all). Also
   spawns the Hyprland window→session listener thread at startup
   (`graph::run_hypr_window_listener`). A malformed or unknown line is

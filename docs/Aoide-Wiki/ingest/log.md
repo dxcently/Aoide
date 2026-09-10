@@ -2901,3 +2901,34 @@ Pages touched: `pkgs/aoide/crates/conduct/src/shellbridge.rs`,
 carry this slice's doc paragraphs, but landed already committed under
 `f7eeb87` (a same-file race in a documented shared-file arrangement, not a
 change made by this commit) rather than here.
+
+## [2026-09-10] fix | review fixes for acknowledged session actions
+
+Root's live review of the shellbridge `sessionaction` command (`b62988f`)
+found four points; `5f00da9` (`fix(shellbridge): review fixes for
+acknowledged actions`, shellbridge.rs only) fixes them and this docs pass
+brings the crate docs, the QML protocol comment, and the wiki to the same
+fact. The `project` field must be a JSON string: `""` is the clear
+request, and a missing key, `null`, or a non-string value is refused by
+the whitelist outright, never read as an implicit clear. Session ids and
+names are two different checks now — `safe_session_id` (no whitespace)
+and `safe_action_value` (ordinary spaces allowed, so "My Project" is a
+legal name; empty, `-`-prefixed, and control-charactered values still
+refused). The reply forwards the CLI outcome's `data` verbatim under
+`"data"` when the envelope has one, so a kill can name the terminal and
+pid it stops. The `MAX_ACTION_PATHS` cap on `createproject`/`editproject`
+is gone with no replacement; the wire line's own length is the only bound.
+
+Verified: independent review of `b62988f`+`5f00da9` graded the code LAND
+(whitelist closed, no generic exec, audit lines carry no argument values,
+herald lock off every re-exec path, threaded accept sound) and the docs
+FIX-THEN-LAND — this entry is that fix. `cargo test -p aoide-conduct`
+572 passed under `TMPDIR=/tmp`; the two socket-binding tests need that
+short temp path (a `sockaddr_un` limit under nix develop's long
+`TMPDIR`), the same gotcha the server suite already carries.
+
+Pages touched: `pkgs/aoide/crates/conduct/README.md`,
+`pkgs/aoide/crates/conduct/AGENTS.md`,
+`modules/facets/quickshell/qml/ShellBridge.qml`,
+`docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md`, `ingest/log.md` (this
+entry).
