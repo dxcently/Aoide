@@ -356,3 +356,13 @@ resetting to zero.
   not UI state. Shoot without `--cursor` (the default) for any capture that
   will later feed `screen diff`; reserve `--cursor` for a shot meant to show
   a human where the pointer is.
+
+## 8. Application lifetime across shell restarts
+
+`DesktopEntry.command` is wrapped in a dedicated systemd user scope at launch
+time. The main window may move itself to a new cgroup (for example,
+`app-org.chromium.Chromium-<pid>.scope`), while GPU/zygote/utility children
+can remain in the launcher/parent cgroup and die when that parent is stopped or
+restarted. This split can trigger `SIGTRAP` in the app main on desktop reloads.
+Parent/self scope migration is not isolation by itself; children inherit the
+parent until the process creation chain is born in an independent scope.

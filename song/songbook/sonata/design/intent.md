@@ -161,6 +161,24 @@ file header rather than a shared cross-cutting blueprint:
 Every text element sits on a glass backing (bar sheet, frames, chips) — no bare
 text on the wallpaper, so no outline treatment is in use.
 
+## Session identity semantics in sonata widgets
+
+Conductor and Terminals show the published title as their main heading, falling
+back to the harness when absent. Harness and reported model share a secondary
+line; missing models remain absent. Conductor keeps harness animation left of
+the heading; Terminals adds no identity animation. A separate line carries the
+petname and the real session ID's final four characters. These
+are screenshot hints, not unique routing keys. Missing titles or petnames stay
+absent; the widgets never mint substitutes.
+
+Every card, including children and terminal rows, exposes a details toggle and a
+copy action. Terminals reveals those controls beside the recovery handle on
+hover, keeping them visible while details are open; no separate action row is
+reserved. Details retain the full session ID, published title, harness, petname, and working directory. Copy uses Qt's text clipboard without a shell
+command. Host is shown only when published; missing host data remains unavailable. Session IDs
+remain unchanged for focus, tracing, permissions, and row matching. Prompt content is displayed only from the explicit prompt field, never inferred
+from the title.
+
 ## Iteration Log
 
 - 2026-07-26: initial commit as the replay fixture; palette-only, no cover.
@@ -318,3 +336,9 @@ text on the wallpaper, so no outline treatment is in use.
   as do the square `┌ ┐ └ ┘` frame corners. Conductor's book is unchanged.
   Independent review and the live dock confirm the book appears only in
   Conductor; Terminals keeps its name, state and square frame.
+
+- 2026-09-10: Session nameplates retain harness and title beside petname/ID suffix; expandable, copyable recovery details include child rows. No routing identity changed.
+
+- 2026-09-10: Main headings use session titles, with harness/model and recovery identity on separate lines; Conductor animations move left of the title. Prompt content stays independent.
+
+- 2026-09-10: Terminals recovery controls share the petname line on hover; closed rows recover the dedicated action-row height.

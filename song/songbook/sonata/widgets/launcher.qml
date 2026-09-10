@@ -25,10 +25,10 @@
 // receives the keypress IN-PROCESS — the cleanest inbound trigger for a surface
 // that lives in the shell. No new aoided command, no SocketServer.
 //
-// ── Enumerate + launch (exec discipline) ────────────────────────────────────
+// ── Enumerate + launch (scope-before-exec discipline) ──────────────────────
 // Apps come from Quickshell's built-in DesktopEntries (parsed XDG .desktop
-// files); launching calls DesktopEntry.execute() directly — the same
-// Quickshell-native-service idiom the rest of the shell uses for side effects.
+// files); desktop entries are launched via a systemd scope wrapper created before
+// app exec so children are born in that scope, not inherited from Quickshell.
 // The Grimoire's ledger write follows the same idiom: QML writes its stage
 // file directly, no new aoided command.
 //
@@ -488,8 +488,15 @@ PanelWindow {
             if (e && root.clipboard.copyById(e.id)) root.hide()
             return
         }
-        if (e && e.execute) {
-            e.execute()
+
+        if (e && e.command && e.command.length > 0) {
+            var argv = ["systemd-run", "--user", "--scope", "--quiet", "--collect"]
+            if (e.workingDirectory) argv.push("--working-directory=" + e.workingDirectory)
+            argv.push("--")
+            for (var i = 0; i < e.command.length; i++) {
+                argv.push(e.command[i])
+            }
+            Quickshell.execDetached(argv)
             ledger.record(e.id)
         }
         root.hide()

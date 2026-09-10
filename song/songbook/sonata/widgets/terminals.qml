@@ -272,6 +272,9 @@ Item {
             out.push({
                 sessionId:     rec.sessionId || "",
                 agent:         rec.agent || "shell",
+                petname:       rec.petname || "",
+                host:          rec.host || "",
+                prompt:        rec.prompt || "",
                 kind:          recKind(rec),          // preserve the published kind for paint predicates
                 state:         rec.state || "idle",
                 cwd:           rec.cwd || "",
@@ -307,7 +310,7 @@ Item {
         var parts = [];
         for (var i = 0; i < list.length; i++) {
             var r = list[i];
-            parts.push([r.sessionId, r.agent, r.kind, r.state, r.cwd, r.startedAt,
+            parts.push([r.sessionId, r.petname, r.host, r.prompt, r.agent, r.kind, r.state, r.cwd, r.startedAt,
                         r.workspace, r.windowAddress, r.title,
                         r.activity, r.tool, r.say, r.model, r.contextTokens,
                         r.contextCeiling, r.needsSudo].join(""));
@@ -760,6 +763,18 @@ Item {
                         // slim ledger lines.
                         readonly property bool agentRow: gadget.isAgentRec(modelData)
                         readonly property string activityText: modelData.activity || ""
+                        property bool detailsOpen: false
+                        HoverHandler { id: identityHover }
+                        readonly property string displayName: {
+                            var name = modelData.agent || "agent";
+                            var title = (modelData.title || "").replace(/\s+/g, " ").trim();
+                            return title || name;
+                        }
+                        readonly property string identityLabel: {
+                            var id = modelData.sessionId || "";
+                            var suffix = id.length > 4 ? "…" + id.slice(-4) : id;
+                            return [modelData.petname || "", suffix].filter(function(v) { return v !== ""; }).join(" · ");
+                        }
                         // the tool lane — what the agent last reached for. TWO
                         // sources, and they disagree on purpose: `activity` is
                         // hook-set the instant a tool starts but is only ever
@@ -865,6 +880,7 @@ Item {
 
                         Column {
                             id: body
+                            z: 1
                             anchors.left: parent.left; anchors.leftMargin: 9
                             anchors.right: parent.right; anchors.rightMargin: 6
                             anchors.top: parent.top; anchors.topMargin: 5
@@ -981,13 +997,94 @@ Item {
                                     width: parent.width - 21
                                            - (wsTagT.visible ? wsTagT.implicitWidth + 8 : 0)
                                            - (stateWordT.implicitWidth + 8)
-                                    text: row.agentRow ? (modelData.agent || "agent") : row.procText
+                                    text: row.agentRow ? row.displayName : row.procText
                                     font.family: row.agentRow ? gadget.faceSerif : gadget.faceMono
                                     font.pixelSize: row.agentRow ? 14 : 12
                                     font.weight: row.emph ? Font.Bold : Font.Medium
                                     color: gadget.withA(livery.paletteFg, row.agentRow ? 1.0 : 0.85)
                                 }
                             }
+                            Text {
+                                width: parent.width
+                                text: (modelData.agent || "shell") + (modelData.model ? " / " + modelData.model : "")
+                                elide: Text.ElideMiddle
+                                font.family: gadget.faceMono; font.pixelSize: 10
+                                color: gadget.withA(gadget.livery.paletteFg, 0.65)
+                            }
+                            Item {
+                                width: parent.width
+                                height: 14
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.right: recoveryActions.visible ? recoveryActions.left : parent.right
+                                    anchors.rightMargin: recoveryActions.visible ? 8 : 0
+                                    text: row.identityLabel
+                                    elide: Text.ElideMiddle
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: gadget.withA(gadget.livery.paletteFg, 0.65)
+                                }
+                                Row {
+                                    id: recoveryActions
+                                    anchors.right: parent.right
+                                    spacing: 8
+                                    visible: identityHover.hovered || row.detailsOpen
+                                    Text {
+                                        text: "[copy]"
+                                        font.family: gadget.faceMono; font.pixelSize: 10
+                                        color: gadget.livery.paletteAccent
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                identityDetails.selectAll()
+                                                identityDetails.copy()
+                                                identityDetails.deselect()
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        text: row.detailsOpen ? "[hide]" : "[details]"
+                                        font.family: gadget.faceMono; font.pixelSize: 10
+                                        color: gadget.livery.paletteAccent
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: row.detailsOpen = !row.detailsOpen
+                                        }
+                                    }
+                                }
+                            }
+                            TextEdit {
+                                id: identityDetails
+                                width: parent.width
+                                height: visible ? contentHeight : 0
+                                visible: row.detailsOpen
+                                readOnly: true
+                                selectByMouse: true
+                                textFormat: TextEdit.PlainText
+                                wrapMode: TextEdit.WrapAnywhere
+                                font.family: gadget.faceMono; font.pixelSize: 10
+                                color: gadget.livery.paletteFg
+                                text: "Session: " + (modelData.sessionId || "unavailable")
+                                    + "\nHarness: " + (modelData.agent || "unavailable")
+                                    + "\nPetname: " + (modelData.petname || "unavailable")
+                                    + "\nHost: " + (modelData.host || "unavailable")
+                                    + "\nTitle: " + (modelData.title || "unavailable")
+                                    + "\nDirectory: " + (modelData.cwd || "unavailable")
+
+                            }
+
+                            Text {
+                                width: parent.width
+                                visible: (modelData.prompt || "") !== ""
+                                text: (modelData.prompt || "").replace(/\s+/g, " ")
+                                wrapMode: Text.Wrap
+                                maximumLineCount: 3
+                                elide: Text.ElideRight
+                                font.family: gadget.faceMono; font.pixelSize: 10
+                                color: gadget.withA(gadget.livery.paletteFg, 0.65)
+                            }
+
                             // ── the SCREEN PANE — agent rows only ─────────────
                             // The DELIBERATE carve-out from "terminals should
                             // look like the conductor" (the owner's own): the
@@ -1032,7 +1129,7 @@ Item {
                                                             // The pane's height rides this.
                                     id: paneCmd
                                     anchors.left: promptSigil.right; anchors.leftMargin: 5
-                                    anchors.right: modelCell.visible ? modelCell.left : parent.right
+                                    anchors.right: parent.right
                                     anchors.rightMargin: 6
                                     anchors.top: parent.top; anchors.topMargin: 3
                                     wrapMode: Text.Wrap
@@ -1040,26 +1137,10 @@ Item {
                                     elide: Text.ElideRight
                                     text: row.toolText.length > 0
                                           ? row.toolText
-                                          : (modelData.agent || "agent")
+                                          : "—"
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: gadget.withA(livery.paletteFg,
                                                         row.toolText.length > 0 ? 0.85 : 0.45)
-                                }
-                                Text {                     // the MODEL — a fixed right cell
-                                                            // on the prompt line, baseline-
-                                                            // matched to the $ sigil; middle-
-                                                            // elided view of the REAL model
-                                                            // id (pantheon §4).
-                                    id: modelCell
-                                    visible: row.agentRow && (modelData.model || "").length > 0
-                                    anchors.right: parent.right; anchors.rightMargin: 6
-                                    anchors.baseline: promptSigil.baseline
-                                    width: 100
-                                    horizontalAlignment: Text.AlignRight
-                                    elide: Text.ElideMiddle
-                                    text: modelData.model || ""
-                                    font.family: gadget.faceMono; font.pixelSize: 9
-                                    color: gadget.withA(livery.paletteFg, 0.55)   // Conductor's model dim
                                 }
                                 Text {                     // the WORDS — 3 reserved lines
                                     anchors.left: parent.left; anchors.leftMargin: 6

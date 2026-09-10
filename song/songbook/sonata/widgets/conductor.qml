@@ -1150,21 +1150,10 @@ Item {
     // main, #NN.k sub — rendered here, never assigned), wsN inside it
     // (mains only).
     //
-    // 2 · PROVENANCE — model + real sessionId SHARE one line: model left-
-    // anchored (BOTH kinds by directive — a sub's engine shows too), the
-    // sessionId (dim, middle-elided, never invented-short — pantheon §4) in
-    // a fixed-width cell at the right on mains. The pairing idiom — a
-    // flexible left field elide-truncating against a fixed-width right
-    // cell, one gap, no divider glyph — is the SAME one the ground row uses
-    // below; it's the one device this card repeats instead of a bespoke
-    // layout per row. Subs hide the sessionId cell and the model field
-    // widens to the full row (their identity IS the #NN.k badge, same
-    // width-recovery technique row 1's name already uses when its own
-    // neighbour tags are hidden).
+    // 2 · PROVENANCE — harness/model, then petname and real ID suffix.
+    // Expandable details preserve the complete ID and copyable recovery data.
     //
-    // 3 · VOICE: directive — the » opening command/prompt (set-once title,
-    // never "last"), its own full line — a free-length string with nothing
-    // short enough to pair it with.
+    // 3 · DIRECTIVE — explicit prompt content, independent of the title.
     //
     // 4 · VOICE: thinking — a FIXED box (4 lines main / 2 sub, full width):
     // text wraps, the LAST line elides, tool text popping in never shifts
@@ -1174,8 +1163,7 @@ Item {
     // 4½ · SUMMONS — a 20px lane that EXISTS only while a permission summons
     // for this session stands in the herald ledger: the ask (the summons
     // summary) left, approve / deny chips right. The one place the card's
-    // silhouette moves, and it moves for the one thing that is blocking a
-    // human. Same wire line and same daemon guards as the herald's card.
+    // silhouette moves automatically; details expand only on request. Same wire line and same daemon guards as the herald's card.
     //
     // 5 · PULSE — ctx (this session's OWN context window, NUMBERS ONLY —
     // no percentage text, no bar glyph; ctxColor severity rides the colour
@@ -1188,7 +1176,7 @@ Item {
     // the clipped troupe box — the pairing idiom rows 2 and 5 both copy;
     // subs close with the troupe alone. Unmoved.
     //
-    // Fixed slot heights throughout = one stable silhouette per kind, no
+    // Closed details and fixed activity lanes keep a stable silhouette, no
     // jitter as live data streams in; the animated elements ride reserved
     // boxes (lamp 16px, troupe 116px main / 90px sub) so nothing floats.
     // No zone-break spacers, no card-level dividers — one Column rhythm,
@@ -1198,6 +1186,7 @@ Item {
 
         property var s: ({})
         property bool child: false
+        property bool detailsOpen: false
         property color hue: temple.signature
 
         width: parent ? parent.width : 0
@@ -1303,18 +1292,28 @@ Item {
         // the agent's OWN name, verbatim — no lookup, no special-casing, so an
         // agent nobody has registered yet still renders correctly (autohook).
         readonly property string agentName: (s && s.agent) ? ("" + s.agent) : "agent"
-        // the real sessionId as a dim lowercase callout (`:` → `.`); its Text
-        // middle-elides, so the render is a truncated view of the REAL id, never
-        // an invented short one (pantheon §4).
+        // Petname and real ID suffix are display hints; routing keeps the full ID.
         readonly property string idCallout: {
+            if (s && s.petname && s.petname !== "") {
+                var sid = (s.sessionId || "")
+                if (sid && sid.length > 0) {
+                    var suffix = sid.length > 4 ? ("…" + sid.slice(-4)) : sid
+                    return ("" + s.petname) + " · " + suffix
+                }
+                return ("" + s.petname)
+            }
             var v = (s && s.sessionId) ? ("" + s.sessionId) : ""
-            return v.toLowerCase().replace(/:/g, ".")
+            return v.length > 4 ? "…" + v.slice(-4) : v
         }
-        // the opening prompt/command — title is set-once on the first
-        // PromptSubmit, so this is the FIRST directive, not necessarily the
-        // latest; labelled with a neutral » caret, never the word "last".
-        readonly property string promptText: (s && s.title)
-            ? ("" + s.title).replace(/\s+/g, " ") : ""
+        // A session title and an actual prompt are separate published fields.
+        readonly property string promptText: (s && s.prompt)
+            ? ("" + s.prompt).replace(/\s+/g, " ") : ""
+        // Missing titles fall back to the harness, never the petname.
+        readonly property string displayName: {
+            if (s && s.title && ("" + s.title).trim() !== "")
+                return ("" + s.title).replace(/\s+/g, " ").trim()
+            return card.agentName
+        }
 
         // the plaque ground + hairline (terracotta while awaiting)
         Rectangle {
@@ -1443,9 +1442,13 @@ Item {
 
                 Text {                           // agent name — the card's name
                     id: nameT
-                    anchors.left: lampBox.right; anchors.leftMargin: 5
+                    anchors.left: codexTag.visible ? codexTag.right
+                                : (piTag.visible ? piTag.right
+                                : (moonTag.visible ? moonTag.right
+                                : (hookTag.visible ? hookTag.right : lampBox.right)))
+                    anchors.leftMargin: 5
                     anchors.verticalCenter: parent.verticalCenter
-                    text: card.agentName
+                    text: card.displayName
                     elide: Text.ElideRight
                     width: Math.min(implicitWidth,
                                     parent.width - 21 - badgeT.implicitWidth - 10
@@ -1481,7 +1484,7 @@ Item {
                                                  // a codex main the book
                     id: hookTag
                     visible: card.hooked && card.cardWorking && !card.piThinking && !card.kimiMain && !card.codexMain
-                    anchors.left: kindTag.visible ? kindTag.right : nameT.right
+                    anchors.left: lampBox.right
                     anchors.leftMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.verticalCenterOffset: 2
@@ -1559,7 +1562,7 @@ Item {
                 Item {
                     id: piTag
                     visible: card.piLive
-                    anchors.left: kindTag.visible ? kindTag.right : nameT.right
+                    anchors.left: lampBox.right
                     anchors.leftMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.verticalCenterOffset: 1   // rests a tick below the name's optical centre
@@ -1630,7 +1633,7 @@ Item {
                 Item {
                     id: codexTag
                     visible: card.codexMain
-                    anchors.left: nameT.right; anchors.leftMargin: 6
+                    anchors.left: lampBox.right; anchors.leftMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
                     width: 24; height: 18
                     clip: true
@@ -1772,9 +1775,7 @@ Item {
                                                  // spinner while working
                     id: moonTag
                     visible: card.kimiMain && card.cardWorking
-                    anchors.left: hookTag.visible ? hookTag.right
-                                : (piTag.visible ? piTag.right
-                                : (kindTag.visible ? kindTag.right : nameT.right))
+                    anchors.left: lampBox.right
                     anchors.leftMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
                     // frames + 120ms cadence lifted verbatim from kimi-code's
@@ -1800,57 +1801,79 @@ Item {
                 }
             }
 
-            // ── 2 · PROVENANCE — model · sessionId, SHARING one line ─────────
-            // BOTH kinds show the model (a sub's engine shows too) —
-            // left-anchored, middle-elided against its own edge. Mains pair
-            // it with the real sessionId (dim, middle-elided, never
-            // invented-short — pantheon §4) in a fixed-width cell at the
-            // right; subs hide that cell and the model widens to the full
-            // row (their identity IS the #NN.k badge, so no id callout).
-            // Same flexible-field + fixed-cell idiom the ground row uses.
-            Item {
+            Text {
                 width: parent.width
-                height: 11
-
-                Item {                           // sessionId — fixed cell, mains only
-                    id: idCell
-                    visible: !card.child
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 130; height: parent.height
-
-                    Text {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        horizontalAlignment: Text.AlignRight
-                        text: card.idCallout !== "" ? card.idCallout : "—"
-                        elide: Text.ElideMiddle
-                        font.family: temple.faceMono; font.pixelSize: 9
-                        color: temple.withA(temple.livery.paletteFg,
-                                            card.idCallout !== "" ? 0.4 : 0.28)
-                    }
-                }
-                Text {                           // model — flexible left field
-                    anchors.left: parent.left; anchors.leftMargin: 21
-                    anchors.right: idCell.visible ? idCell.left : parent.right
-                    anchors.rightMargin: idCell.visible ? 8 : 0
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: (card.s && card.s.model) ? card.s.model : "—"
-                    elide: Text.ElideMiddle
-                    font.family: temple.faceMono; font.pixelSize: 9
-                    color: temple.withA(temple.livery.paletteFg,
-                                        (card.s && card.s.model) ? 0.55 : 0.28)
-                }
+                text: card.agentName + ((card.s && card.s.model) ? " / " + card.s.model : "")
+                elide: Text.ElideMiddle
+                font.family: temple.faceMono; font.pixelSize: 10
+                color: temple.withA(temple.livery.paletteFg, 0.65)
+            }
+            Text {
+                width: parent.width
+                text: card.idCallout
+                elide: Text.ElideMiddle
+                font.family: temple.faceMono; font.pixelSize: 10
+                color: temple.withA(temple.livery.paletteFg, 0.65)
             }
 
-            // ── 3 · VOICE: directive — the opening command/prompt, » caret ───
-            // s.title is set-once (first PromptSubmit), so on a long session
-            // this is the OPENING directive, never "last"; its own full line
-            // (free-length string), a dim "—" holds the slot before any turn.
             Item {
                 width: parent.width
                 height: 14
+                Text {
+                    id: copyIdentity
+                    anchors.right: detailsToggle.left
+                    anchors.rightMargin: 8
+                    text: "[copy]"
+                    font.family: temple.faceMono; font.pixelSize: 10
+                    color: temple.livery.paletteAccent
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            identityDetails.selectAll()
+                            identityDetails.copy()
+                            identityDetails.deselect()
+                        }
+                    }
+                }
+                Text {
+                    id: detailsToggle
+                    anchors.right: parent.right
+                    text: card.detailsOpen ? "[hide details]" : "[details]"
+                    font.family: temple.faceMono; font.pixelSize: 10
+                    color: temple.livery.paletteAccent
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: card.detailsOpen = !card.detailsOpen
+                    }
+                }
+            }
+            TextEdit {
+                id: identityDetails
+                width: parent.width
+                height: visible ? contentHeight : 0
+                visible: card.detailsOpen
+                readOnly: true
+                selectByMouse: true
+                textFormat: TextEdit.PlainText
+                wrapMode: TextEdit.WrapAnywhere
+                font.family: temple.faceMono; font.pixelSize: 10
+                color: temple.livery.paletteFg
+                text: "Session: " + ((card.s || {}).sessionId || "unavailable")
+                    + "\nHarness: " + ((card.s || {}).agent || "unavailable")
+                    + "\nPetname: " + ((card.s || {}).petname || "unavailable")
+                    + "\nHost: " + ((card.s || {}).host || "unavailable")
+                    + "\nTitle: " + ((card.s || {}).title || "unavailable")
+                    + "\nDirectory: " + ((card.s || {}).cwd || "unavailable")
+
+            }
+
+            // Prompt content has its own field; a title never substitutes for it.
+            Item {
+                width: parent.width
+                visible: card.promptText !== ""
+                height: visible ? 14 : 0
 
                 Text {
                     id: promptCaret
