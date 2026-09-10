@@ -2645,7 +2645,7 @@ Snapshots cited: Mneme `5512299`, Melete `7619d40`, Aoide `8df8e60`.
 Pages touched: `references/mneme-shared-memory-and-aoide.md`,
 `ingest/log.md` (this entry).
 
-## [2026-09-10] feat | the doorbell's latch lands before the doorbell
+## [2026-09-09] feat | the doorbell's latch lands before the doorbell
 
 P-M5a splits in two, one executor each, never concurrent. This is
 `P-M5a-1`: the durable state and the safety floor a later ring can be

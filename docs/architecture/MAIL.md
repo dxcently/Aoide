@@ -221,9 +221,10 @@ An entry is an envelope plus local facts:
   that is unset — so a stray read from an unconducted terminal advances
   a pseudo-reader and never a live agent's mark. Every process under one
   wrap — sequential harness conversations in the same terminal, a native
-  subagent inheriting the variable — shares that one cursor: delivery
-  resolves the wrap, and read tracking will key on the bound agent
-  identity (`enduringAgentId`) instead once session binding lands. Two
+  subagent inheriting the variable — shares that one cursor. The reader key is always an executor — a
+  session — and never the enduring agent identity (`enduringAgentId`)
+  that several executors may share: that identity can name a mailbox
+  and resolve a ring target, never a cursor. Two
   unconducted terminals share that pseudo-reader and so still consume
   each other, which is the honest floor: nothing distinguishes them. A
   respawned session is a new reader and sees the name from the
