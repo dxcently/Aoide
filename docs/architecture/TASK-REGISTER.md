@@ -30,10 +30,15 @@ Fields per entry: status · owner · depends on · evidence · next.
 
 - Status: architecture brief DONE (scratchpad p-codex-desktop-brief.md, Opus,
   read-only); P-CX-1 (pure reconcile core + record shape, kind "app",
-  native-id keying) LANDED, conduct 603 green, reviewed; P-CX-2 portable
-  discovery IN PROGRESS (User rule: one repeatable process across OSes —
-  flock liveness + one parsed `ps` table, /proc only as a Linux tie-break);
-  P-CX-3 call site + taught refusals queued.
+  native-id keying) LANDED; P-CX-2 portable discovery LANDED (fcc7514:
+  flock liveness + one parsed `ps` table, /proc only as a Linux tie-break,
+  ambiguous owner enrols with no pid, non-unix taught-unsupported; conduct
+  618 green, reviewed FIX→fixed); P-CX-3 call site (daemon tick primary,
+  Hyprland listener promptness) + `codex-app-unsupported` refusals NEXT.
+- Review flag for the User: with ONE app-server running every held lock is
+  attributed to it without a per-lock check (brief §3 rule); the brief's open
+  question §6.1 leaned the other way (enrol only locks an app-server holds).
+  Decide before P-CX-3 wires the call site or accept the §3 rule.
 - Owner: Fable (one Sonnet executor per slice, independent review).
 - Depends on: nothing; cargo serialized with other work.
 - Evidence: standing verdict "current adapter unsupported; ownership of the
@@ -45,7 +50,7 @@ Fields per entry: status · owner · depends on · evidence · next.
   app-server is a child of the Electron main, `~/.codex/ipc/ipc.sock` has no
   holder, thread→window bindings are opaque, so exact-task navigation is
   never claimed and no codex profile is registered.
-- Next: land P-CX-1 → P-CX-2 → P-CX-3; live check with the app open on two
+- Next: P-CX-3; live check with the app open on two
   threads is the User's gate.
 
 ## 3. Interactive doorbell (native Claude channel idle wake)
