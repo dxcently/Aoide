@@ -2842,3 +2842,62 @@ Pages touched: `CONTRACTS.md`, `docs/BUILD.md`,
 `pkgs/aoide/crates/conduct/AGENTS.md`,
 `pkgs/aoide/crates/conductor/README.md`,
 `pkgs/aoide/crates/conductor/AGENTS.md`, `ingest/log.md` (this entry).
+
+## [2026-09-10] feat | acknowledged session actions over the shellbridge socket
+
+Every other shellbridge socket command is fire-and-forget: Quickshell writes
+a line and never learns whether it landed. `sessionaction` is the one
+exception — a closed, five-action whitelist (`undying`, `project`, `kill`,
+`createproject`, `editproject`) that re-execs the matching `aoide session
+project|kill|grant undying` or `aoide project add|edit` through aoided with
+`--json`, and writes exactly one JSON reply line back on the same
+connection before closing it, so a click on the song-side session menu gets
+a real yes/no.
+
+The whitelist is closed, not a translator: `session_action_args` is the ONE
+place that turns a wire action into an argv, and every element of every
+argv is validated before it exists — `safe_action_value` (session ids,
+project/create/edit names) refuses empty, `-`-prefixed, whitespaced, or
+control-charactered strings; `safe_action_path` is a separate, looser rule
+for path arguments, since a real path can legitimately contain spaces and
+an argv element is passed to `Command::arg` whole, never through a shell.
+No generic exec, no value the bridge did not itself validate, ever. The
+bridge never pre-checks what the CLI already refuses — `project add --new`
+owns "this name exists," not this file — so `createproject` (two
+invocations, add-then-assign) stops at the first failure and reports the
+partial state honestly rather than rolling back; a half-created project is
+a real project, not something to silently unwind.
+
+A confirmed live blocker forced a second change: the accept loop used to
+handle connections serially, so ANY idle, persistent client — exactly the
+shape of Quickshell's own shared fire-and-forget socket — blocked every
+later connection forever. `serve` now spawns one thread per connection
+(peercred admission still runs before the spawn); the shared QML socket
+stops holding its own link open after each flush, since an idle client is
+what caused the wedge, not a virtue. No read timeout was added — idling
+between human gestures is legitimate. The one existing read-modify-write
+this surfaced, `herald.json`'s ledger edit, previously relied on serial
+accept for its safety; it is now wrapped in the crate's existing
+stage-lock convention instead, kept deliberately off every CLI re-exec
+path to avoid a lock-across-a-child-process-wait deadlock.
+
+Not run here: a live desktop click through an actual Quickshell process —
+the QML side (`ShellBridge.qml`'s `sessionAction`/`actionFactory`) is
+written from the documented Socket/SplitParser types, not from working
+precedent elsewhere in this repo, and is not cargo-checked. Also not run:
+`project add --new` / `project edit` end-to-end through this bridge — both
+landed in the tree (`feat(project): a project spans several roots`,
+`f7eeb87`) during this same session, after this slice's argv shapes were
+already written against their registered flag/positional signatures
+(verified by reading `commands/graph.rs`'s registration, not by executing
+a freshly built binary against live state); a live run is the only thing
+that confirms the two agree in practice.
+
+Pages touched: `pkgs/aoide/crates/conduct/src/shellbridge.rs`,
+`modules/facets/quickshell/qml/ShellBridge.qml`,
+`docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md`,
+`docs/Aoide-Wiki/concepts/desktop/Widget-Bridge-Contract.md`, `ingest/log.md`
+(this entry). `pkgs/aoide/crates/conduct/README.md` and `AGENTS.md` also
+carry this slice's doc paragraphs, but landed already committed under
+`f7eeb87` (a same-file race in a documented shared-file arrangement, not a
+change made by this commit) rather than here.

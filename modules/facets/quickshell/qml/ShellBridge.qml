@@ -8,6 +8,8 @@
 // Protocol: newline-delimited JSON. Each command is a JSON object with a
 // "cmd" field and payload fields. The socket path is the shellbridge default:
 // $XDG_RUNTIME_DIR/aoide/shellbridge.sock (falls back to /run/user/<uid>/aoide/shellbridge.sock).
+// Every command is fire-and-forget except "sessionaction", which is answered
+// with one JSON line on the same connection, which then closes.
 //
 // Communication discipline: this is the ONLY outbound channel from QML.
 // No MCP, no HTTP, no shell exec from QML — shellbridge is the gate.
@@ -92,16 +94,127 @@ QtObject {
         })
     }
 
+    // ── Acknowledged session actions ───────────────────────────────────────
+    // The ONE command that answers. The daemon re-execs the matching
+    // `aoide session …` through aoided and writes one JSON line back on the
+    // same connection, which it then closes.
+    //
+    //   bridge.sessionAction(id, "project",       { project: "aoide" }, cb)
+    //   bridge.sessionAction(id, "project",       { project: "" },      cb)  // clear
+    //   bridge.sessionAction(id, "kill",          {},                   cb)
+    //   bridge.sessionAction(id, "undying",       { state: "on" },      cb)
+    //   bridge.sessionAction(id, "createproject", { name, paths: [] },  cb)
+    //   bridge.sessionAction(id, "editproject",   { name, paths: [] },  cb)
+    //
+    // `cb` is called EXACTLY ONCE with { ok, message } (the reply also echoes
+    // `action` and `sessionId` so a caller can correlate, and carries
+    // `partial: true` when a multi-step action changed something and then
+    // failed). Each call gets its
+    // own throwaway socket, never the shared queue above: that queue replays
+    // on the next reconnect, and a replayed kill is not a thing this bridge
+    // will ever do. There is NO queue and NO replay here — a reply that does
+    // not arrive within replyTimeoutMs fires cb({ ok: false, … }) once and the
+    // socket is destroyed. A timed-out action may still have executed; the
+    // caller re-reads the roster, it never re-sends.
+    readonly property int replyTimeoutMs: 5000
+
+    function sessionAction(sessionId, action, fields, callback) {
+        var conn = actionFactory.createObject(root, {
+            path: root.socketPath,
+            cb: callback || null,
+            wanted: {
+                cmd: "sessionaction",
+                sessionId: "" + sessionId,
+                action: "" + action,
+                fields: fields || ({})
+            }
+        })
+        if (!conn) {
+            if (callback)
+                callback({ ok: false, message: "shellbridge client unavailable" })
+            return
+        }
+        conn.start()
+    }
+
+    // Factory for one-shot action connections — each instance carries exactly
+    // one action and self-destructs, the same shape AoideClipboard.qml's
+    // previewFactory uses for its one-shot Process.
+    property Component actionFactory: Component {
+        Socket {
+            id: conn
+            property var cb: null
+            property var wanted: ({})
+            property bool done: false
+
+            function finish(reply) {
+                if (done)
+                    return
+                done = true
+                deadline.running = false
+                connected = false
+                if (cb)
+                    cb(reply)
+                destroy()
+            }
+
+            function start() {
+                deadline.running = true
+                connected = true
+            }
+
+            // The guarantee, not the fast path: a peer-close does not reliably
+            // flip `connected` (Quickshell 0.3.0, see sendCommand's comment),
+            // so nothing here waits on a disconnect to decide it heard nothing.
+            property Timer deadline: Timer {
+                interval: root.replyTimeoutMs
+                repeat: false
+                onTriggered: conn.finish({ ok: false, message: "no reply from shellbridge" })
+            }
+
+            parser: SplitParser {
+                splitMarker: "\n"
+                onRead: function (line) {
+                    var reply = null
+                    try {
+                        reply = JSON.parse(line)
+                    } catch (e) {
+                        reply = null
+                    }
+                    if (!reply || typeof reply !== "object")
+                        reply = { ok: false, message: "unreadable reply from shellbridge" }
+                    conn.finish(reply)
+                }
+            }
+
+            onError: function (err) {
+                conn.finish({ ok: false, message: "shellbridge unreachable" })
+            }
+
+            onConnectedChanged: {
+                if (connected) {
+                    write(JSON.stringify(wanted) + "\n")
+                    flush()
+                }
+            }
+        }
+    }
+
     // ── Generic command sender ─────────────────────────────────────────────
     // Writes one newline-delimited JSON line to the shellbridge socket. EVERY
-    // command takes the same queue → fresh-connect → flush path: the line is
-    // queued, any stale link is dropped, a new connection is opened, and the
-    // queue drains in onConnectedChanged. A persistent link was the original
-    // posture, but a peer-closed socket does not reliably flip `connected`
-    // back to false (Quickshell 0.3.0) — a zombie connection then eats clicks
-    // silently (observed live: four reap clicks flushed in one burst, minutes
-    // late). A unix-socket connect is cheap and every command here is a human
-    // gesture, so a fresh link per command costs nothing and can never wedge.
+    // fire-and-forget command takes the same queue → fresh-connect → flush
+    // path: the line is queued, any stale link is dropped, a new connection
+    // is opened, and the queue drains in onConnectedChanged. sessionAction
+    // deliberately does not use this path — it wants a reply, so it opens its
+    // own connection (see actionFactory above). A persistent link was the
+    // original posture, but a peer-closed socket does not reliably flip
+    // `connected` back to false (Quickshell 0.3.0) — a zombie connection then
+    // eats clicks silently (observed live: four reap clicks flushed in one
+    // burst, minutes late). A unix-socket connect is cheap and every command
+    // here is a human gesture, so a fresh link per command costs nothing and
+    // can never wedge — and the link is also CLOSED after the flush (see
+    // onConnectedChanged below), because the daemon handles one connection
+    // per thread and an idle client held the accept loop before it did.
     // This is the ONLY outbound path from QML (no hyprctl / MCP / shell exec).
     function sendCommand(obj) {
         socket._queue.push(JSON.stringify(obj) + "\n")
@@ -129,6 +242,7 @@ QtObject {
                 while (_queue.length > 0)
                     write(_queue.shift())
                 flush()
+                connected = false
             }
         }
     }

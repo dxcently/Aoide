@@ -119,7 +119,8 @@ lyra shellbridge [--run] [--json]
   (`seed_if_absent` — a populated roster survives a restart); binds
   `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` (a stale socket file is removed
   first); maintains `state/stage/herald.json` (notification ledger, v0,
-  capped at 20 cards, atomic read-modify-write on the accept loop);
+  capped at 20 cards, atomic read-modify-write serialised by a stage lock —
+  not by the accept loop, which is thread-per-connection);
   appends audit records (door `daemon`) to the default audit log for every
   dispatched command. All six of these are the CONDUCTING stage files
   (`CONTRACTS.md §4`) — shellbridge writes them into `state/stage/` even
@@ -139,10 +140,18 @@ lyra shellbridge [--run] [--json]
   `usage --json`; the gadget picks up the `state/usage.json` write itself),
   `rechecksessions` (detached re-exec `session reap --announce --json`),
   `heraldpush` / `heraldverdict` / `heralddismiss` (the ledger; a verdict
-  types the answer into the waiting session through `send`). Also
+  types the answer into the waiting session through `send`), `sessionaction`
+  (a closed five-action whitelist — `undying`, `project`, `kill`,
+  `createproject`, `editproject` — that re-execs the matching `aoide
+  session …` / `aoide project …` subcommand through aoided with `--json` and
+  writes exactly one JSON reply line back on the same connection before it
+  closes; `createproject` is two invocations in order and reports a partial
+  honestly if the second fails; a line the whitelist refuses is dropped with
+  no reply at all). Also
   spawns the Hyprland window→session listener thread at startup
-  (`graph::run_hypr_window_listener`). Malformed/unknown lines are logged to
-  stderr and skipped — nothing kills the accept loop.
+  (`graph::run_hypr_window_listener`). A malformed or unknown line is
+  audited (action `unparseable`, a byte count only, never the payload) and
+  dropped — nothing kills the accept loop.
 - **Notes:** not gated. The `--run` flag is registered in the schema but the
   handler (`conduct/src/commands/shellbridge.rs::handle_shellbridge`) never
   consults it — bare `lyra shellbridge` runs the blocking loop either way. The
@@ -150,7 +159,9 @@ lyra shellbridge [--run] [--json]
   peer uid differs from the process's own euid — a cross-uid floor,
   fail-closed like the secrets broker's admin gate (identity lane P-ID3);
   a same-uid caller passes, so the floor is no defense against the
-  operator's own uid. Client half:
+  operator's own uid. Each accepted connection is served on its own thread,
+  so one client idling between commands (the bar's own shared socket) never
+  blocks another's. Client half:
   `shellbridge::send_line` is how `lyra herald push` and `session permit` reach
   the daemon, which stays the single ledger writer. See [[shellbridge]].
 

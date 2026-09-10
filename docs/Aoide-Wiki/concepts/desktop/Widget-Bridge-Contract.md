@@ -210,8 +210,10 @@ for Quickshell: render surfaces only]]) applied to the roster widgets:
    it — extend the schema, not the widget.
 3. **One canonical file.** Watch `sessions.json`; treat `hooks.json`/`graph.json`
    as audit/derived.
-4. **Outbound is a narrow socket.** `focussession`/`focuswindow` jumps and
-   `send` injection — nothing else leaves QML.
+4. **Outbound is a narrow socket.** `focussession`/`focuswindow` jumps,
+   `send` injection, and acknowledged session actions (the session-menu's
+   `undying`/`project`/`kill`/`createproject`/`editproject` calls) — nothing
+   else leaves QML.
 5. **Colour only from [[livery]]**; hard corners; the music-glyph state contract
    (♪ working · 𝄐 awaiting · 𝄁 stopped · 𝄽 idle · 𝄂 done) is a hard contract.
 6. **Degrade.** An empty/missing stage file is an empty roster; off-Hyprland the
