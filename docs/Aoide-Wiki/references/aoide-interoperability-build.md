@@ -9,10 +9,10 @@ One active implementation worker per task. Both coordinators may dispatch subage
 | Task | Coordinator | Worker | State / scope |
 |---|---|---|---|
 | Work register and integration decisions | Codex | Codex | This document |
-| P-M5, fetched receipts, control readiness | Fable | Fable for architecture | Split accepted; P-M5a brief under peer discussion |
+| P-M5, fetched receipts, control readiness | Fable | One executor for P-M5a-1 | Latch/storage and stale-socket slice dispatched; Fable owns Cargo; actual injection awaits readiness ruling |
 | Runtime directory preservation | Codex | Executor and independent reviewer complete | Commit `ff01b77`; selected Nix evaluation and formatting passed; no activation |
 | Enduring identity/context architecture | Codex | `triad_architecture` | Read-only brief complete; worker idle |
-| Identity/context implementation | Codex | `context_integration` | Unshared storage binding/config and client context implementation; command wiring/docs wait for shared-path release; Cargo not granted |
+| Identity/context implementation | Codex | `context_integration` | K1a binding and K1b retrieval preparation; command wiring/docs wait for shared-path release; no Cargo |
 | Independent review | Owning coordinator | None | Assigned after a diff exists |
 | Melete backend, replicas, audit | Joint | None | Later slices and upstream contracts |
 
@@ -22,7 +22,7 @@ The K1 executor owns only storage `config.rs`, `records.rs`, `session.rs`, `ledg
 
 Coordination addresses are `self/codex-integration` and `self/claude-mail`. Fable uses executor `e7fce841-5c0e-4d6b-b9e5-f86d4f8c6f0d`. This is a routing fact, not an enduring identity. Neither coordinator reads the other's mailbox to infer acknowledgment. The idle user shell attributed beneath Fable is not a worker.
 
-Existing flake, OpenAI dendrite, and ChatGPT packaging changes remain outside this work's ownership. Nix composition and Lyra migration retain their [separate plan](aoide-composable-system-and-muse-triad.md); neither blocks shell-only interoperability.
+Existing flake, OpenAI dendrite, and ChatGPT packaging changes remain outside this work's ownership. Nix composition and Lyra migration retain their [separate plan](aoide-composable-system-and-muse-triad.md); neither blocks shell-only interoperability. That architecture is implemented in AoideOS within this Aoide repository first. `dxflake` is the reference and later migration target, not a current write target.
 
 ## Accepted behavior
 
@@ -85,11 +85,16 @@ Fable and Codex settle implementation boundaries in writing before dispatching a
 - Target selection: no armed reader is different from no enrolled reader. Petname fallback cannot bypass existing latches.
 - Concurrency: selecting then injecting then stamping in separate critical sections must not allow concurrent filers to flood a reader. The global stage lock cannot cover blocking terminal I/O.
 - Names: an invalid name cannot be transformed into another mailbox identity by a lossy clamp.
+- Reader identity: existing wrap-keyed cursors do not distinguish every successive harness conversation. Executor read identity and ancestor socket resolution remain separate integration contracts.
 - Fetched receipts: observable retrieval boundary, idempotence, cursor/receipt crash ordering, return wakeup. Server-side retrieval cannot claim model ingestion.
 - Identity/context: smallest useful binding/retrieval slice, compatibility, explicit persona reference pending Noah's ID convention.
 - Shared paths: storage records/config/session/ledger, command registry/goldens, Cargo manifests have one writer at a time.
 
 The proposed first context slice binds existing sessions to an operator-declared opaque key and retrieves explicit persona/memory references through Mneme. It does not yet automate prompt insertion or ownership transfer. Existing executor cursors and `--reread` are reused. Mneme's public MCP `RPC` wrapper and initialize/session exchange must be supported; Aoide's stateless Melete request assumption is insufficient. Content hashes describe fetched bytes, not a server revision or atomic multi-note snapshot.
+
+The native Codex app session is not a conducted terminal. Running a child under `aoide conduct` does not retroactively wrap its conversation. PTY doorbell acceptance therefore uses actual conducted harness sessions; native-app prompting and tracking require an appropriate adapter. A roster entry alone proves neither capability.
+
+The context pilot resolves credentials in the local daemon environment, without forwarding bearer values through command arguments or audit records. Mneme's current `read_note` can fall back to a title/alias; an exact-path listing preflight catches an already-missing configured note, but concurrent path changes remain a non-atomic read limitation. Returned provenance names the requested reference and fetched bytes, not an unverified resolved path.
 
 Upstream decisions remain the persona reference convention, Melete memory-backend seam, authority/read-only/freshness facilities, authenticated attribution/audit query, and Mneme service interface. Existing reads and revisions can support the first pilot without a complete upstream audit service.
 
@@ -105,3 +110,6 @@ Append-only evidence:
 - 2026-09-10: User clarifies that Fable should orchestrate subagents. Sequence 39 distinguishes one implementation worker per task from a restriction on total workers. Runtime-directory diff is complete and assigned to an independent reviewer; no live service changed.
 - 2026-09-10: Sequence 40 announces non-overlapping K1 preparation. One executor receives only unreserved files and no Cargo token; shared command wiring and docs wait for P-M5a path release.
 - 2026-09-10: Runtime preservation lands as `ff01b77` after independent review. Loaded shellbridge still reports `RuntimeDirectoryPreserve=no`; first activation must account for stopping under the old unit definition. Existing unlinked sockets remain unavailable. Sequence 41 requests a temporary transfer of the HTTP helper file for Mneme session headers; no concurrent edit is authorized.
+- 2026-09-10: Fable sequence 43 dispatches P-M5a-1 to one executor and claims Cargo. Sequence 44 accepts daemon-owned serialized ringing, distinct enrolled/armed readers, nonrecursive fetched ring-back, and explicit replay triggers. Automatic submission into an unknown interactive composer remains unaccepted; dedicated headless sessions or an input-readiness contract are required. The shared field remains `enduringAgentId` rather than a second `agentKey` name. A temporary wiring transfer between P-M5 slices is requested for K1a.
+- 2026-09-10: User clarifies that the earlier Nix/Lyra architecture targets AoideOS first; dxflake follows later. The composition plan and ownership scope reflect this order. K1's sole executor pauses after preparing unshared binding/config and retrieval code; no Cargo or duplicate worker is started while waiting for shared paths.
+- 2026-09-10: Sequences 46 and 48 ask Fable to separate identity binding from optional knowledge-service configuration and distinguish executor identity from a reusable terminal wrapper. The CLI JSON mail response repeats letter text in its human message and structured entries; coordinator reads now select structured entries to avoid duplicate context and truncation.
