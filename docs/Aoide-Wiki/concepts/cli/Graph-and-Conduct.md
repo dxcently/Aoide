@@ -82,33 +82,68 @@ aoide graph [--focus <node>] [--json]
 ### aoide project add
 
 ```
-aoide project add <name> [<path>] [--json]
+aoide project add <name> [<path>…] [--new] [--auto-resume] [--json]
 ```
 
+A project is a set of anchor roots, not one directory. `add` grows that
+set — it never replaces it (`project edit` does that).
+
 - **Reads:** `state/stage/projects.json`. `<path>` defaults to the current
-  working directory; a relative or nonexistent path is refused as usage (exit
-  2, `data.reason: "invalid-path"`) because anchoring is absolute-path prefix
-  matching.
+  working directory when omitted; give one or more — each is appended as a
+  root. Every path is validated (absolute, an existing directory) BEFORE
+  anything is written; one bad path in the list refuses the whole call
+  (exit 2, `data.reason: "invalid-path"`) because anchoring is absolute-path
+  prefix matching. `--new` refuses a name that already exists instead of
+  adding roots to it (`data.reason: "exists"`), checked before validation or
+  any write.
 - **Writes:** `state/stage/projects.json` (atomic; sorted by name,
   `schemaVersion` stamped) then re-stages `state/stage/graph.json` — only when
   something changed.
-- **Output:** `data: {name, path, file}`. Idempotent: re-adding the same
-  name+path is an ok no-change ("already registered"); a new path for an
-  existing name updates it in place.
-- **Notes:** a session anchors under the longest-prefix matching project root
-  (`model.rs::anchor_for`).
+- **Output:** `data: {name, path, roots, autoResume, file}` — `path` is the
+  FIRST root (post-write, never reconstructed from locals), `roots` the full
+  ordered list. Idempotent per root: a root already registered is a
+  no-change ok; a new root on an existing name appends it; a brand-new name
+  registers it with `path` = the first path given and `roots` the rest.
+- **Notes:** a session anchors under the longest-prefix matching root of any
+  project (`model.rs::anchor_for`), not just its first.
+
+### aoide project edit
+
+```
+aoide project edit <name> <path>… [--json]
+```
+
+The exact-replacement editor: swaps a project's whole root list for the one
+given, atomically. `add`/`remove` are the only ways a project appears or
+disappears — `edit` never creates, renames, or deletes one.
+
+- **Reads:** `state/stage/projects.json`. The name must already be
+  registered (`Status::Error`, `data.reason: "unknown"` otherwise); at least
+  one `<path>` is required (bare `project edit <name>` is a usage error,
+  nothing written). Every path is validated the same way `add` validates
+  them, before any mutation. Duplicates in the list collapse, first-seen
+  order preserved.
+- **Writes:** `state/stage/projects.json` + re-staged `graph.json`, only
+  when the resulting root list actually differs from the current one.
+- **Output:** `data: {name, path, roots, autoResume, file}` — `path` is the
+  first path given, `roots` the rest. `autoResume` is read back untouched;
+  `edit` never sets or clears it.
 
 ### aoide project remove
 
 ```
-aoide project remove <name> [--json]
+aoide project remove <name> [<path>] [--json]
 ```
 
 - **Reads:** `state/stage/projects.json`.
-- **Writes:** `state/stage/projects.json` + re-staged `graph.json`, only on an
-  actual removal.
-- **Output:** `data: {name, file}`; an absent name is an ok no-op (`{name}`
-  only, no `changed`).
+- **Writes:** `state/stage/projects.json` + re-staged `graph.json`, only on
+  an actual removal.
+- **Output:** `data: {name, path, roots, file}`. With no `<path>`: drops the
+  whole project (today's original behaviour, byte-for-byte) — an absent name
+  is an ok no-op. With `<path>`: drops that one root — if it was the
+  project's `path`, the next remaining root is promoted into `path`; if it
+  was the last root, the whole project is dropped; a `<path>` that is not
+  one of the project's roots is an ok no-op.
 
 ### aoide project list
 
@@ -118,7 +153,8 @@ aoide project list [--json]
 
 - **Reads:** `state/stage/projects.json`.
 - **Output:** text — `"N project(s) registered"` plus one `◆ <name>  <path>`
-  line each (name-sorted); `data: {projects: [...]}`.
+  line each (name-sorted), followed by one indented line per extra root;
+  `data: {projects: [...]}`.
 - **Notes:** read-only.
 
 ### aoide graph link

@@ -244,9 +244,10 @@ atomic writes only); missing stage files read as empty registries.
 | Command                            | Does |
 | ---------------------------------- | ---- |
 | `aoide graph [--focus <id>]`       | Unicode tree render (`◆` projects, `●` sessions, `▶` marks the focused node); `--json` emits the graph document |
-| `aoide project add <name> [<path>]` | register/update an anchor root in `song/stage/projects.json` (idempotent); `path` defaults to the cwd, so a session started there anchors to it |
-| `aoide project remove <name>`      | unregister (ok + no-op if absent) |
-| `aoide project list`               | list the registered anchor roots |
+| `aoide project add <name> [<path>…]` | register a project, or ADD one or more anchor roots to an existing one, in `song/stage/projects.json` (idempotent per root); `path` defaults to the cwd, so a session started there anchors to it; `--new` refuses an existing name instead of adding to it |
+| `aoide project edit <name> <path>…` | REPLACE a project's whole root list outright (first path becomes its primary root); the name stays immutable and `autoResume` is untouched |
+| `aoide project remove <name> [<path>]` | unregister one root (promoting the next into the primary root), or the whole project with no `<path>` (ok + no-op if absent) |
+| `aoide project list`               | list the registered anchor roots, with every root |
 | `aoide graph link <child> <parent>`| set the spawned-by edge on the child session (rejects self-links and cycles; a not-yet-registered parent is recorded with a warning) |
 | `aoide session prune`              | drop `done` sessions + their hook records (orphaned children keep running with their `parentSessionId` cleared); the blessed manual resync — restages `song/stage/graph.json` for Quickshell hot-reload the same as every other mutating graph command |
 

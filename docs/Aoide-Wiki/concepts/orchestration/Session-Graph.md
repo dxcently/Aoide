@@ -87,9 +87,16 @@ should follow).
 
 ## The management layer
 
-- **`project add|remove|list`** — keep the project registry
-  `state/stage/projects.json`. Idempotent: `add` re-registers an existing
-  name, `remove` of an absent project succeeds.
+- **`project add|edit|remove|list`** — keep the project registry
+  `state/stage/projects.json`, where a project is a set of anchor roots, not
+  one directory. `add` appends one or more roots to a name (registering it
+  first if new); `--new` refuses a name that already exists instead of
+  adding to it. `edit` is the exact-replacement editor — it swaps a
+  project's whole root list for the one given, atomically, and never
+  touches the name or `autoResume`. `remove` drops one root (or, given no
+  root, the whole project); idempotent throughout — `add` of an
+  already-present root and `remove` of an absent project or root both
+  succeed as no-ops.
 - **`graph link <child> <parent>`** — record a spawned-by edge by setting
   `parentSessionId` on the child's session record. Self-links and cycles are
   rejected (the handler walks the parent chain), exit 1.
@@ -332,7 +339,9 @@ registration path** — the closer for the sweep-relaunder shape; (5)
 
 ## Contracts (CONTRACTS.md §4, still v0)
 
-- `projects.json` v0: `{schemaVersion, projects: [{name, path}]}`.
+- `projects.json` v0: `{schemaVersion, projects: [{name, path, roots?}]}` —
+  `roots` is the project's second and later anchor roots (optional,
+  additive); `path` is always the first.
 - `graph.json` v0: `{schemaVersion, nodes: […], edges: [{from, to, kind}]}` —
   fully resolved, so Quickshell never recomputes anchoring.
 - `sessions.json` records carry several **additive** optional fields (no

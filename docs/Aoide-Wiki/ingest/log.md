@@ -2775,3 +2775,70 @@ Pages touched: `docs/architecture/MAIL.md`, `CONTRACTS.md`,
 `pkgs/aoide/crates/server/README.md`,
 `pkgs/aoide/crates/server/AGENTS.md`,
 `pkgs/aoide/crates/storage/AGENTS.md`, `ingest/log.md` (this entry).
+
+## [2026-09-10] feat | a project spans several roots
+
+A project stops being one directory and becomes a set of anchor roots.
+`Project.path` stays the first root, always; a new additive `roots` field
+(`storage/src/records.rs`) carries the rest, off the wire when empty, so
+every pre-existing one-root project round-trips byte-identical. Every
+reader enumerates through `Project::roots()` (path first, then `roots`,
+deduplicated) rather than the raw fields — a hand-edited record whose
+`path` disagrees with `roots[0]` is read as given, never silently
+rewritten.
+
+`project add NAME PATH…` grows that set (or registers a new name); it
+never replaces what is already there. `--new` refuses a name that already
+exists instead of silently adding a root to it — the guard against a
+typo'd name joining the wrong project. `project edit NAME PATH…` is a NEW
+command, the exact-replacement editor: it swaps a project's whole root
+list for the one given, atomically, and never touches the name or
+`autoResume` — `add`/`remove` stay the only ways a project appears or
+disappears. `project remove NAME [PATH]` now takes an optional root:
+dropping one root promotes the next remaining one into `path`; dropping
+the last root (or calling with no `PATH`) drops the whole project,
+unchanged from before. `project add`/`project edit` validate EVERY given
+path before mutating anything — one bad path in a multi-path call writes
+nothing.
+
+`anchor_for` (`conduct/src/graph/model.rs`) now matches the longest root
+across EVERY root of EVERY project, not just each project's first — so a
+project's own second root anchors sessions exactly like its first, and
+nested projects still resolve to the deepest match. `graph.json`'s project
+node gains an always-present `roots` array (`CONTRACTS.md` §4 — the
+resolved document, no reader ever falls back to `path`); the Unicode tree
+and the conductor's PROJECTS panel both grow one indented/dim line per
+extra root, one selectable row per project regardless of root count. The
+SESSION panel's DAG group header deliberately keeps showing only a
+project's first root — extra roots stay the PROJECTS panel's job alone.
+
+Rejected: repeating `path` inside `roots` (would have doubled the primary
+root on every read); a `--replace`/`--set` mode bolted onto `add` instead
+of its own `edit` command (the exact-replace and grow-by-appending
+semantics are different enough to earn separate names); a variadic marker
+on the registry's `Arg` schema (the existing leftover-positional handling
+already passes extra args through untouched, so nothing there needed to
+change); adding extra-root rows to the SESSION panel's DAG header
+(duplicating them there would add rows `dag_sel` does not index).
+
+Verified: `aoide-storage` (400 tests), `aoide-conductor` (77 tests),
+`aoide-cli` (41 lib tests + integration suites), all green, plus `cargo
+check --workspace --all-targets`. Not verified here: `aoide-conduct`'s own
+test suite — a concurrent, unrelated, uncommitted hunk elsewhere in this
+crate (`who::SessionView` gained a `project` field whose two test-only
+call sites, `graph/node_list.rs` and `graph/grant.rs`, were not yet
+updated to match) keeps that one crate's test target from compiling,
+independent of anything in this entry; also not verified: a live `aoided`/
+Quickshell run against the new `roots` key (additive, so a reader that
+ignores unknown keys is unaffected, but unproven live).
+
+Pages touched: `CONTRACTS.md`, `docs/BUILD.md`,
+`docs/Aoide-Wiki/concepts/orchestration/Session-Graph.md`,
+`docs/Aoide-Wiki/concepts/cli/Graph-and-Conduct.md`,
+`docs/Aoide-Wiki/concepts/cli/Conductor-TUI.md`,
+`pkgs/aoide/crates/storage/README.md`,
+`pkgs/aoide/crates/storage/AGENTS.md`,
+`pkgs/aoide/crates/conduct/README.md`,
+`pkgs/aoide/crates/conduct/AGENTS.md`,
+`pkgs/aoide/crates/conductor/README.md`,
+`pkgs/aoide/crates/conductor/AGENTS.md`, `ingest/log.md` (this entry).

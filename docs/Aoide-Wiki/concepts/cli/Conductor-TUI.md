@@ -77,14 +77,21 @@ the panel/family name normalizes.
   headers interleaved with their session subtrees, one flattened selection
   index over the lot (`App::dag_rows`). `Enter` on a session cues it; on a
   group header it toggles the fold. `h`/`-` folds the group under the
-  cursor, `l`/`+` unfolds it. `a` opens the inline project-add prompt; `d`
-  on a group header removes that project (`project remove` — the
-  unanchored pseudo-group has nothing to remove). `L` on a session opens a
-  prompt collecting a parent session id and dispatches `graph link`. `p`
-  dispatches `session prune` here too.
-- **PROJECTS (`3`)** — the flat project registry, sorted by name. `a` opens
-  the same project-add prompt SESSION uses; `d` removes the selected
-  project (`project remove`).
+  cursor, `l`/`+` unfolds it. `a` opens the inline project-add prompt —
+  naming an existing project adds a root to it rather than creating a
+  second one; `d` on a group header removes that project (`project remove`
+  — the unanchored pseudo-group has nothing to remove). `L` on a session
+  opens a prompt collecting a parent session id and dispatches `graph
+  link`. `p` dispatches `session prune` here too. A project's group header
+  shows only its FIRST root — the rest are the PROJECTS panel's job, so a
+  second root never adds a row to `dag_rows`.
+- **PROJECTS (`3`)** — the flat project registry, sorted by name, one
+  multi-line row per project: the head line as before, then one dim line
+  per EXTRA root, so `proj_sel` still indexes projects, not roots. `a`
+  opens the same project-add-a-root prompt SESSION uses; `d` removes the
+  selected project (`project remove`). `project edit` — the
+  whole-root-list replacement — has no key binding here this slice; reach
+  it from the CLI.
 - **LOG (`4`)** — read-only: tails the audit log.
 - **STATUS (`5`)** — read-only: stage status, both trees (`App::stage` for
   `state/stage/`, `App::rice_stage` for `song/stage/`).

@@ -939,6 +939,15 @@ them. `LedgerEntry.enduringAgentId` captures the field on exit, serializes
 null when unbound, and defaults to null on old ledger lines. No automatic
 resurrection binding or handoff is implied.
 
+`SessionRecord.project` and the graph node's `project` are optional explicit
+project names, omitted when automatic cwd anchoring applies. `session project
+--id ID --project NAME` assigns a registered project; `--clear` restores
+automatic anchoring without changing cwd. The exit ledger retains the value
+as `project` (null when absent), and resurrection restores it when registered.
+`session kill --id ID` is a local daemon-only SIGTERM request for an exclusively
+owned, conducted process verified against the daemon seal and pinned by Linux
+pidfd. Its successful response confirms signaling, never process exit.
+
 `aoide context --id <session>` fetches that executor's configured persona
 and memory. Both commands accept local CLI/Daemon doors only, require
 aoided, and have no direct fallback. The fetch resolves credentials in
@@ -1868,20 +1877,38 @@ collapses.
 ### `state/stage/projects.json` — **v0**
 
 Registered project anchor roots for the graph. Written by
-`aoide project add/remove` (atomic, idempotent); read by bare
+`aoide project add/edit/remove` (atomic, idempotent); read by bare
 `aoide graph` and by `restage_graph` at every mutation site.
 
 ```json
 { "schemaVersion": "0", "projects": [ { "name": "aoide", "path": "/home/khoa/Aoide" } ] }
 ```
 
+**A project spans several roots.** A project entry MAY also carry an
+optional `roots` array — its SECOND and later anchor roots; `path` is
+always the first and is never repeated inside `roots`, so a one-root
+project stays byte-identical on the wire to a record predating `roots`
+(`skip_serializing_if` keeps an empty array off the wire — the same
+additive discipline `autoResume` below and `SessionRecord.headless` set the
+precedent for). `project add NAME PATH…` appends one or more roots to an
+existing project (or registers a new one), never replacing what is already
+there; `project edit NAME PATH…` is the one command that REPLACES a
+project's whole root list outright, first path becoming `path`, the rest
+becoming `roots` — the name stays immutable and `autoResume` is untouched.
+`project remove NAME [PATH]` drops one root (promoting the next into
+`path` when `path` itself was removed) or, with no `PATH`, the whole
+project. Every reader enumerates roots through `Project::roots()`
+(`path` first, then `roots`, deduplicated) rather than the raw fields —
+a hand-edited record whose `path` does not match `roots[0]` is read, not
+silently rewritten.
+
 **Additive in v0 (P-D8, `docs/architecture/AOIDED.md`'s "L5"/"Open
 knobs"):** a project entry MAY also carry an optional `autoResume` (bool,
 default/absent means `false`, `skip_serializing_if` keeps a `false` value
 off the wire — the same additive-bool discipline `SessionRecord.headless`
 set the precedent for). Set via `project add --auto-resume`
-(idempotent-upsert; no `project set`/`edit` command exists yet to flip
-it back off — hand-edit `projects.json` in the meantime). Consumed by the
+(idempotent-upsert; `project edit` never touches it, and there is still no
+way to flip it back off other than hand-editing `projects.json`). Consumed by the
 daemon's own boot-time auto-resume trigger (`aoide-server`'s `daemon.rs`,
 the decided answer to this design's one open knob): once per BOOT — never
 on a same-boot `Restart=on-failure` restart, guarded by a marker recording
@@ -1906,7 +1933,8 @@ The **fully resolved** project/session DAG, written (atomic) automatically by
 every project/session mutation and by `aoide session prune`'s manual resync,
 for Quickshell to hot-reload — like stage notes, QML reads concrete
 values and computes nothing. Project nodes anchor session nodes by cwd
-(longest path-prefix wins, so nested projects anchor correctly); `spawned`
+(longest path-prefix wins across EVERY root of EVERY project, so nested
+projects and a project's own second root both anchor correctly); `spawned`
 edges come from `parentSessionId`. A session with a resolved parent carries
 only its `spawned` edge; root sessions carry an `anchors` edge (or none when
 unanchored).
@@ -1925,7 +1953,7 @@ ledger is exactly the memory that survives that prune; a `resumed` edge's
 {
   "schemaVersion": "0",
   "nodes": [
-    { "id": "project:aoide", "kind": "project", "name": "aoide", "path": "/home/khoa/Aoide" },
+    { "id": "project:aoide", "kind": "project", "name": "aoide", "path": "/home/khoa/Aoide", "roots": ["/home/khoa/Aoide"] },
     { "id": "session:abc123", "kind": "session", "agent": "claude", "cwd": "/home/khoa/Aoide", "state": "running", "windowAddress": "0x…", "startedAt": "…" }
   ],
   "edges": [
@@ -2390,7 +2418,7 @@ state — a reader wanting "is this session still running" still asks
 `sessions.json`, never this file.
 
 ```json
-{"v":0,"sessionId":"s1","enduringAgentId":null,"agent":"claude","harnessSessionId":"claude-uuid-123","cwd":"/home/khoa/Aoide","title":"fix the thing","petname":"brave-otter","startedAt":"2026-08-20T10:00:00Z","endedAt":"2026-08-20T12:00:00Z","resumedFrom":null,"origin":null,"restore":null}
+{"v":0,"sessionId":"s1","enduringAgentId":null,"project":null,"agent":"claude","harnessSessionId":"claude-uuid-123","cwd":"/home/khoa/Aoide","title":"fix the thing","petname":"brave-otter","startedAt":"2026-08-20T10:00:00Z","endedAt":"2026-08-20T12:00:00Z","resumedFrom":null,"origin":null,"restore":null}
 ```
 
 Every field serializes unconditionally (no `skip_serializing_if`,
