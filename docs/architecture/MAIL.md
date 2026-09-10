@@ -473,13 +473,18 @@ flags a box whose local name resolution disagrees with it.
 
 Filing a `letter` to `to.name` rings every **armed** reader of that
 name: a session already recorded as a reader (a key in `to.name`'s
-cursor map, `enrolled` in the ring's own count) whose latch has not
-already caught this letter (`rung <= seq`, `storage::mail`'s own
-`ring_targets`). A name no one has read yet enrolls before it rings:
-every live session whose petname equals `to.name` has its conducted
-wrap `enrol_reader`-ed first — a real recorded reader is never
-second-guessed by a display-name coincidence, so the fallback runs only
-when nothing is enrolled at all.
+cursor map, one of the reader keys `ring_targets` hands back as
+`enrolled`) whose latch has not already caught this letter (`rung <=
+seq`, `storage::mail`'s own `ring_targets`). A name enrolls before it
+rings whenever no enrolled reader is still alive: every live session
+whose petname equals `to.name` has its conducted wrap `enrol_reader`-ed
+first. A real recorded reader that is still conductable right now is
+never second-guessed by a display-name coincidence, so the fallback
+never runs out from under a live reader — but a stale enrolment left by
+a wrap that read the mailbox once and has since died (no session record
+at all, or one whose control socket is gone) never blocks the fallback
+either; liveness, not a raw count, is what the ringer checks before
+enrolling on a petname match.
 
 Ringing a wrap means more than finding it armed. A ring targets the
 **wrap**, a conducted, headless session with a live control socket
