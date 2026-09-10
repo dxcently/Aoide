@@ -21,11 +21,9 @@ system services (dunst, networkmanager, audio).
 
 ## What it consumes
 
-`openai.nix` installs Codex and imports the `chatgpt-desktop-linux` flake's
-NixOS module for ChatGPT Desktop. `aoide.openai.enable` enables both tools;
-the desktop launcher receives the installed Codex CLI path.
-The dendrite overrides the pinned flake's stale DMG download hash; packaging
-and launcher behavior remain owned by the upstream Linux flake.
+`openai.nix` installs Codex and the local `pkgs/chatgpt-linux` package.
+`aoide.openai.enable` enables both tools. ChatGPT uses the official Linux
+release pinned by version and hash, with its bundled desktop runtime.
 
 `config.aoide.*` options it declares itself, plus stock NixOS/Home-Manager
 options. A dendrite reads no other module's internals — not even another
