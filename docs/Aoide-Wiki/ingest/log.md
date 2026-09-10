@@ -3280,3 +3280,23 @@ orchestrator on review. Staged, not deployed.
 
 Pages touched: `song/songbook/sonata/design/intent.md`, `ingest/log.md`
 (this entry).
+
+## [2026-09-10] docs | the task register moves into the repository
+
+`docs/architecture/TASK-REGISTER.md` is the canonical shared register
+codex-integration asked for (seq 158/168): six workstreams with status,
+owner, dependencies, evidence and next step, plus the carried backlog
+with verified status. Corrections applied from seq 168: session QoL is
+implementation-and-build complete with live acceptance pending, not
+released; the Lyra/AoideOS architecture migration is a first-class
+phased workstream (portable core exports → explicit default.nix and
+walker removal → songbook/runtime split → draft/stage/declared lifecycle
+with hotload → external-consumer proof → host migration), with the docs
+and glossary acceptance riding each phase; pairing windows and the canvas
+are queued behind it. Root's `PAIRING-WINDOW-PROPOSAL.md` is committed
+alongside by explicit pathspec, unchanged. The private session memory now
+links to this file instead of holding the register.
+
+Pages touched: `docs/architecture/TASK-REGISTER.md` (new),
+`docs/architecture/PAIRING-WINDOW-PROPOSAL.md` (root's, committed as
+written), `ingest/log.md` (this entry).
