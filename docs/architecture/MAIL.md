@@ -554,7 +554,10 @@ door on a remotely deposited letter (never on a receipt — a receipt
 does not arm), and a reader's own Stop hook, which replays every name
 still armed for the session that just stopped (`armed_names_for_reader`)
 — the mechanism that turns a deferred ring, mid-turn, into a delivered
-one the moment that turn ends. `aoide-client` sits below
+one the moment that turn ends. The corollary is worth stating: a
+remotely deposited letter rings whether or not `aoided` is up, since
+only the A2A door's own process has to be running, while a local
+`mail send` cannot ring without the daemon. `aoide-client` sits below
 `aoide-conduct` in the crate graph and cannot call the ringer directly,
 so its one caller — `mail send --to self/<name>`'s own filing path —
 forwards `mail ring` through the resident daemon instead
