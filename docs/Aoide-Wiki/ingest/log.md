@@ -2994,3 +2994,64 @@ Pages touched: `CONTRACTS.md`,
 `pkgs/aoide/crates/storage/README.md`,
 `pkgs/aoide/crates/storage/AGENTS.md`,
 `pkgs/aoide/crates/conduct/AGENTS.md`, `ingest/log.md` (this entry).
+
+## [2026-09-10] fix | kill resolves a card to its attested terminal
+
+`session kill --id ID` (`conduct/src/graph/actions.rs`) worked only on a
+record that already WAS a conducted wrap (`conductable == Some(true)` +
+a dedicated pid) — but the desktop menu passes the NATIVE harness record's
+id (`SessionMenu.qml`'s `bridge.sessionAction(record.sessionId, …)`), never
+a conductable one, so every "Kill process" click refused. Fixed at two
+seams (slice C of the session-QoL assignment, 57154ba).
+
+**Hook-time attested lineage.** `send.rs`'s `session_hook` now carries the
+hook process's own real pid across the daemon hop (`HOOK_PID_FLAG`, beside
+the existing `STDIN_PAYLOAD_FLAG` — `aoided`'s own pid, read daemon-side,
+is useless ancestry evidence; its parent is `systemd --user`). A new
+`identity::attested_wrap` (the conducted-ancestor-only sibling of
+`attested_sender`) walks that pid's real `/proc` ancestry for a sealed,
+`conductable` ancestor, and `session_store::stamp_attested_parent`
+re-stamps `parentSessionId` from it — change-only on difference (never
+write-once like `hookAncestry`), cycle-guarded, re-staging `graph.json`
+since (unlike `hookAncestry`) this field is rendered. `hook_ensure_session`
+runs this UNCONDITIONALLY, before its exists/fresh split, so an
+ALREADY-registered record gets re-parented too — the actual bug: the old
+exists-branch only ever refreshed `pid` and returned. A fresh record's
+parent becomes `attested.or(env_parent)` — kernel truth over the ordinary
+`AOIDE_SESSION_ID` env fallback, one resolution, no double write.
+
+**Kill-time resolution.** `kill_target` now walks `parentSessionId` from
+the requested id (itself the first candidate), up to 32 hops,
+cycle-guarded, to the nearest record that is a dedicated conducted
+process — the target. The seal is checked exactly once, by
+`terminate_verified` against the resolved target, never inside the walk
+(a stale seal surfaces its own refusal, never a misleading ancestry
+message). The shared-pid refusal now excludes the whole walked chain
+(a wrap and its own hook-fed descendants sharing one pid is expected, not
+a collision). `session_kill`'s data carries `target`/`pid` alongside the
+requested `sessionId`; its message names the terminal being terminated
+when it differs from the requested id. One resolution serves both doors —
+the shellbridge `sessionaction` kill action re-execs `aoide session kill
+--id ID` unchanged.
+
+No new stage field, no new command/flag, no golden change.
+
+Verified: `cargo test -p aoide-conduct` 585 passed, `cargo test -p
+aoide-storage` 400 passed, `cargo check --workspace --all-targets` clean.
+Not provable in-crate: the composed positive path (hook → attested wrap →
+re-stamp) needs a live daemon — this crate's fixtures guarantee a dead
+`AOIDE_DAEMON_SOCKET` by design (`isolated_mail_root`), so only the two
+seams are proven directly (`identity::attested_wrap`'s walk from a real
+spawned child; `session_store::stamp_attested_parent`'s change-only/cycle/
+restage semantics against a stage fixture) plus the fail-closed no-daemon
+path end to end through two real hooks. The live acceptance still owed:
+register a claude session under a conducted wrap, `--resume` it under a
+DIFFERENT wrap (or nest a hook-fed child under a wrap), then `aoide
+session kill --id <the native card's id>` and confirm the reply's
+`target`/`pid` name the current wrap's terminal, that terminal's process
+actually receives SIGTERM, and no unrelated live session sharing that pid
+gets refused as shared. `CONTRACTS.md`'s `parentSessionId` clause is
+stale about its writers independent of this slice — flagged, not fixed.
+
+Pages touched: `pkgs/aoide/crates/conduct/README.md`,
+`pkgs/aoide/crates/conduct/AGENTS.md`, `ingest/log.md` (this entry).
