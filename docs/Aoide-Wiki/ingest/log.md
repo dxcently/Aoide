@@ -3106,3 +3106,33 @@ check --workspace --all-targets` Finished `dev` profile.
 
 Pages touched: `pkgs/aoide/crates/conduct/README.md`,
 `pkgs/aoide/crates/conduct/AGENTS.md`, `ingest/log.md` (this entry).
+
+## [2026-09-10] fix | SessionStart re-parents a resumed record from attested evidence
+
+Closes the gap the previous entry left open (2bd596b): `HookAction::Start`
+in `send.rs`'s `hook_for_profile_gated` registered a resumed session
+through `do_session_start` with only the env-derived parent (empty on the
+daemon-routed path), never the attested one — a `--resume` under a new
+wrap left the record stale-parented until its first per-turn hook, and a
+`session kill` clicked inside that window resolved through the OLD wrap.
+
+The Start arm now resolves `real_attested_wrap(hook_pid)` the same way the
+per-turn hooks do, through the pure helper `start_parent(attested,
+env_parent)` (`attested.or(env_parent)`). The resolved parent feeds both
+`windowless_by_lineage_from_parent` and `do_session_start`, otherwise
+unchanged. The re-parent runs through `do_session_start`'s own upsert
+(`aoide_storage::session::upsert_session`), not `stamp_attested_parent`;
+`do_session_start_inner`'s existing `would_cycle` guard covers it.
+
+Two tests: `start_parent_prefers_attested_over_env_and_falls_back` pins
+the resolution order; `do_session_start_reparents_an_existing_record_
+with_a_stale_parent` drives `do_session_start` on a stale-parented
+existing record and confirms the upsert re-stamps it.
+
+Verified: `cargo test -p aoide-conduct` test result: ok. 589 passed; 0
+failed; 0 ignored; 0 measured; 0 filtered out; finished in 45.34s. `cargo
+check --workspace --all-targets` Finished `dev` profile. A final
+independent review of 57154ba + 8bfdd24 + 2bd596b together follows.
+
+Pages touched: `pkgs/aoide/crates/conduct/README.md`,
+`pkgs/aoide/crates/conduct/AGENTS.md`, `ingest/log.md` (this entry).
