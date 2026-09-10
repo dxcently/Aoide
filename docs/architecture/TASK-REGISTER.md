@@ -28,14 +28,23 @@ Fields per entry: status · owner · depends on · evidence · next.
 
 ## 2. Desktop Codex / ChatGPT window association
 
-- Status: architecture and evidence pass IN PROGRESS (read-only).
-- Owner: Fable (Opus brief, then one executor).
+- Status: architecture brief DONE (scratchpad p-codex-desktop-brief.md, Opus,
+  read-only); P-CX-1 (pure reconcile core + record shape, kind "app",
+  native-id keying) IN PROGRESS; P-CX-2 discovery and P-CX-3 call site +
+  taught refusals queued.
+- Owner: Fable (one Sonnet executor per slice, independent review).
 - Depends on: nothing; cargo serialized with other work.
 - Evidence: standing verdict "current adapter unsupported; ownership of the
   actual app server is the unresolved distinction". Requirements: native task
   ids preserved, multiple task records, CLI vs desktop distinct, workspace and
   actual owning-window focus, no false exact-task navigation.
-- Next: brief → first slice.
+- Finding: the one live codex thread record is being written by the desktop
+  app right now yet sits 67h into the 72h stale band and has no window; the
+  app-server is a child of the Electron main, `~/.codex/ipc/ipc.sock` has no
+  holder, thread→window bindings are opaque, so exact-task navigation is
+  never claimed and no codex profile is registered.
+- Next: land P-CX-1 → P-CX-2 → P-CX-3; live check with the app open on two
+  threads is the User's gate.
 
 ## 3. Interactive doorbell (native Claude channel idle wake)
 
@@ -45,8 +54,13 @@ Fields per entry: status · owner · depends on · evidence · next.
   real terminal (an agent may not launch `claude`); channel bridge and ring
   order (P-M5c-2/3) after proof.
 - Depends on: proof.
-- Evidence: p-m5c-brief.md §2 recipe; prerequisite to be stated exactly
-  (flag name, `claude --version`, idle vs busy behaviour).
+- Evidence: proof kit built and verified offline (node stdio channel server,
+  unix socket, RUN.md); claude 2.1.260 carries the hidden flag
+  `--dangerously-load-development-channels <servers...>` ("shows a
+  confirmation dialog at startup"), `notifications/claude/channel`, and two
+  gates that can skip it (managed `allowedChannelPlugins` allowlist, a remote
+  "channel gate"). Prerequisite: a human at a real terminal accepts the
+  startup dialog for the throwaway project.
 - Next: kit ready → User runs → PROVES/FAILS recorded → M5c-2, M5c-3,
   onboarding; P-M5b after.
 
@@ -107,5 +121,10 @@ Fields per entry: status · owner · depends on · evidence · next.
   register its project before any daemon exists;
   `register_bootstrap_project` is the single non-daemon writer, sole caller
   `onboard`.
+- aoided has no safe no-op for unknown arguments or `--version`: any such
+  invocation runs the daemon against the ambient root (incident 2026-09-10:
+  a new-build `aoided --version` replaced the live socket path). Bug, backlog;
+  until fixed every test brief sets the isolated env on EVERY invocation and
+  never calls bare `aoided`.
 - Deployed runtime on yomi-strix: aoided 0.0.22 (store `vvvwpzkq…`), predates
   everything above. Staged ≠ proved ≠ deployed until activation.
