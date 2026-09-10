@@ -203,8 +203,8 @@ reading "Kill process": a subagent record shows a disabled "Kill (subagent)"
 with a hint pointing at its executor session; a record that already owns a
 dedicated process reads "Kill process"; a record hosted by another terminal
 (the conductor roster's immediate parent, passed to the menu as `host`, and
-not yet ended) names that terminal, "Kill terminal <name>"; anything else reads "Kill…" and defers
-to aoide's own hosting-terminal resolution on click.
+not yet ended) names that terminal, "Kill terminal <name>"; anything else reads
+"Kill…" and defers to aoide's own hosting-terminal resolution on click.
 
 ## Iteration Log
 
