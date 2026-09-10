@@ -3214,3 +3214,44 @@ deployed aoided runs this code.
 Pages touched: `pkgs/aoide/crates/storage/README.md`,
 `docs/architecture/MAIL.md`, `pkgs/aoide/crates/conduct/AGENTS.md`,
 `ingest/log.md` (this entry).
+
+## [2026-09-10] fix | kill refuses subagents and ended hosts; a resume outside any wrap drops its stale parent
+
+Three kill-safety cases codex-integration asked to see tested (P-QOL-C4).
+`conduct::graph::actions::kill_target` now checks every hop, the requested
+record first, before testing it for wrap-ness: a `sub:`-prefixed record
+never resolves and the walk never climbs through one (a subagent shares
+its executor's process; refusal `SUBAGENT_SHARES_EXECUTOR`), and an
+ancestor hop already `done` refuses with `HOST_HAS_ENDED` while the
+requested record keeps its own "session has already ended". The 32-hop
+cap, the cycle guard and the chain-excluding shared-pid check are
+unchanged. `session_store::clear_stale_parent` (sibling of
+`stamp_attested_parent`, change-only, restage on write) is called by the
+`HookAction::Start` arm the moment neither the attested wrap nor
+`AOIDE_SESSION_ID` resolves: outside any wrap there is no host, so a
+resumed record stops pointing at the terminal of its previous run and a
+later kill refuses (`NO_DEDICATED_PROCESS`) instead of reaching it.
+`kill_target` and `NO_DEDICATED_PROCESS` widened to `pub(super)` so the
+hook-path tests can assert the kill outcome directly.
+
+Kill-scope-before-click needs no backend change: the record already
+carries `parentSessionId` and `conductable`, so the desktop menu can label
+the item "Kill terminal ‹host›" from data it has. That is a song widget
+edit, not made here.
+
+New tests: actions `kill_target_refuses_a_subagent_id`,
+`kill_target_never_walks_through_a_subagent`,
+`kill_target_refuses_an_ended_host`; send
+`a_resume_outside_any_wrap_clears_the_stale_parent_so_kill_refuses`,
+`a_resume_inside_a_wrap_keeps_the_env_parent` (both drive the real
+`SessionStart` hook path through `hook_from_str`). Reviewer flag,
+accepted as doctrine: an explicit `session start --parent` on a hook-fed
+id is also cleared by a later resume with no evidence of a host.
+
+Verified: `cargo test -p aoide-conduct` test result: ok. 597 passed; 0
+failed (executor and independent reviewer both). `cargo check
+--workspace --all-targets` clean. Staged only; the deployed aoided
+(0.0.22) predates this branch.
+
+Pages touched: `pkgs/aoide/crates/conduct/AGENTS.md`,
+`pkgs/aoide/crates/conduct/README.md`, `ingest/log.md` (this entry).
