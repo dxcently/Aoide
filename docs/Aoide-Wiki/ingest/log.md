@@ -3173,3 +3173,44 @@ failed. `cargo test -p aoide-cli` test result: ok. 42 passed; 0 failed
 Pages touched: `CONTRACTS.md`,
 `docs/Aoide-Wiki/concepts/cli/Graph-and-Conduct.md`,
 `pkgs/aoide/crates/conduct/AGENTS.md`, `ingest/log.md` (this entry).
+
+## [2026-09-10] fix | a dead enrolment never blocks the petname fallback
+
+P-M5c-1, the first slice of the interactive doorbell (brief
+`p-m5c-brief.md`, adapter-independent), landed as 979eb9d. Live failure
+it fixes: a mailbox whose enrolled readers were conducted wraps that have
+since died never rang anyone, because the petname fallback ran only when
+`enrolled == 0` and the dead enrolments kept the count above zero
+(`claude-mail` on this host had exactly that shape).
+
+`storage::mail::RingTargets.enrolled` changed from a `usize` count to
+`Vec<String>` of reader keys (the count is `.len()`); `ring_targets` stays
+a pure read with no liveness argument, the pseudo-reader exclusion
+unchanged. `conduct::graph::doorbell::ring_locked` loads the session
+roster once and gates the petname fallback on whether ANY enrolled key
+resolves to a record that `is_conductable_now`; a latched but live reader
+still blocks it, a dead one (no record, or a record whose control socket
+is gone) no longer does. The target walk is unchanged: a dead armed
+reader still walks and still reports `unknown`/`not-conductable`.
+
+One existing test moved by fixture, not assertion:
+`a_latched_reader_blocks_the_petname_fallback` enrolled `wrap-1` with no
+session record, which the new gate correctly reads as dead; the fixture
+now binds `headless_wrap("wrap-1")` and the test is renamed
+`a_live_latched_reader_still_blocks_the_petname_fallback`. New tests:
+storage `ring_targets_names_every_enrolled_reader_not_just_a_count`,
+`the_pseudo_reader_is_absent_from_the_enrolled_names`; conduct
+`a_stale_enrolment_with_no_session_record_does_not_block_the_petname_fallback`,
+`a_stale_enrolment_whose_socket_is_gone_does_not_block_the_petname_fallback`.
+`a_recorded_reader_whose_socket_file_is_gone_is_skipped_and_stays_armed`
+stays green untouched.
+
+Verified: `cargo test -p aoide-storage` test result: ok. 402 passed; 0
+failed. `cargo test -p aoide-conduct` test result: ok. 592 passed; 0
+failed. `cargo check --workspace --all-targets` clean. Staged only;
+nothing deployed — the live `claude-mail` mailbox stays wedged until a
+deployed aoided runs this code.
+
+Pages touched: `pkgs/aoide/crates/storage/README.md`,
+`docs/architecture/MAIL.md`, `pkgs/aoide/crates/conduct/AGENTS.md`,
+`ingest/log.md` (this entry).
