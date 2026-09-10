@@ -805,8 +805,8 @@ READMEs), no subagent spawning and no backgrounded cargo in any brief.
   path is P-M5b-2's. Tests: nudge text contains no letter bytes,
   an invalid name is refused and never rewritten, a name with no reader
   and no matching petname rings nothing, the petname fallback enrols
-  and rings the conducted ancestor, a latched reader blocks the
-  fallback, every skip/defer reason (not-conductable, an interactive
+  and rings the conducted ancestor, a live latched reader still blocks the
+  petname fallback, every skip/defer reason (not-conductable, an interactive
   composer, no readiness signal, mid-turn), the child's own submit key,
   the filer never rung, one receipt per rung target and never a letter,
   a concurrent burst of filers rings each target once, a failed write
