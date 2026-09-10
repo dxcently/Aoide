@@ -89,7 +89,9 @@ A project is a set of anchor roots, not one directory. `add` grows that
 set — it never replaces it (`project edit` does that).
 `add`, `edit` and `remove` all run inside `aoided` under the stage lock:
 from a terminal the call forwards to the live daemon and fails with
-`aoided must be running for project management` when none answers.
+`aoided must be running for project management` when none answers —
+except `aoide onboard`'s own clone registration, which runs the same
+locked mutation locally before any daemon exists.
 
 - **Reads:** `state/stage/projects.json`. `<path>` defaults to the current
   working directory when omitted; give one or more — each is appended as a

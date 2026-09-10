@@ -3136,3 +3136,40 @@ independent review of 57154ba + 8bfdd24 + 2bd596b together follows.
 
 Pages touched: `pkgs/aoide/crates/conduct/README.md`,
 `pkgs/aoide/crates/conduct/AGENTS.md`, `ingest/log.md` (this entry).
+
+## [2026-09-10] fix | the clone registers its project before any daemon exists
+
+`project add/edit/remove` went daemon-owned in 18e5dd5 (`local_daemon` in
+`conduct/src/graph/manage.rs`), which silently broke `aoide onboard`'s
+clone registration on the documented first-run path (clone, `cd`, `aoide
+onboard` — no daemon running yet): `register_clone` called `project_add`,
+got `aoided must be running for project management` back as an ordinary
+error, and only pushed the message into a notes vec — onboard printed it
+and still exited 0 with the project never registered. Fixed in 13ed07e.
+
+`register_bootstrap_project` in `manage.rs` is the onboarding-only entry
+that calls the locked `add_roots` mutation directly, bypassing
+`local_daemon`; re-exported through `conduct/src/graph.rs`'s existing
+`pub use` list; `register_clone` calls it instead of `project_add` and
+drops its unused door parameter. A bootstrap failure is no longer
+swallowed: the note carries the prefix `project registration failed: `
+and `handle_onboard` returns an error (`data.projectRegistered: false`)
+instead of an unconditional ok, while the rest of onboarding (songbook
+seeding, hook wiring, lyra delegation) still runs since each is useful on
+its own. No new command or flag; golden unchanged. Ruling requested from
+the orchestrating session across six letters with no answer; the default
+was taken and flagged.
+
+Tests: `register_bootstrap_project_writes_under_the_lock_with_cli_equivalent_validation`
+(`manage.rs`) and `register_clone_registers_the_project_with_no_daemon_reachable`
+(`cli/src/commands/onboard.rs`, `AOIDE_DAEMON_SOCKET` pinned to a dead
+path under a unique stage — the exact regression scenario).
+
+Verified: `cargo test -p aoide-conduct` test result: ok. 590 passed; 0
+failed. `cargo test -p aoide-cli` test result: ok. 42 passed; 0 failed
+(unit) plus the four integration binaries all ok. `cargo check
+--workspace --all-targets` clean.
+
+Pages touched: `CONTRACTS.md`,
+`docs/Aoide-Wiki/concepts/cli/Graph-and-Conduct.md`,
+`pkgs/aoide/crates/conduct/AGENTS.md`, `ingest/log.md` (this entry).
