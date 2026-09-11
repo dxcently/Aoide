@@ -76,8 +76,32 @@ Fields per entry: status · owner · depends on · evidence · next.
 
 ## 4. Lyra / AoideOS architecture migration (phased workstream)
 
-- Status: NOT STARTED as a workstream; parts exist (13-crate split, facet/song
-  split P0–P2).
+- Status: phase (a) DESIGNED (scratchpad `p-lyra-migration-a-brief.md`, Opus,
+  850 lines, read-only), nothing dispatched. Decided export surface, all from
+  `pkgs/aoide/flake.nix`: `packages.{default,aoide,aoide-static}` unchanged;
+  NEW `packages.lyra` (= `aoide.rice`, retires the `aoide^out,rice` selector),
+  NEW `overlays.default` (one attribute, one build), NEW `nixosModules.default`
+  (core `aoide.*` options + aoided unit/tmpfiles/session vars, applies the
+  overlay itself) backed by a new plugin dir `pkgs/aoide/module/` with explicit
+  imports; one new option `aoide.sessionTarget` so core stops reading
+  `aoide.facets.quickshell.enable`. NOT exported: homeModules, per-unit
+  modules, `aoide.package`, door/secrets/usage units, songbook manifests, any
+  paint, walker removal (phase b). Five slices: (1) overlay, deletes two
+  hand-copied lambdas (`lib/mkHost.nix:68`, `tests/vm-boot.nix:76`); (2)
+  `packages.lyra` + contract in PACKAGE-LAYOUT; (3) `nixosModules.default` +
+  options out of `modules/nucleus/options.nix`; (4) aoided unit out of
+  `modules/nucleus/aoided.nix` behind `aoide.sessionTarget`; (5) scratchpad
+  consumer flake importing only `path:./pkgs/aoide` as the acceptance. Every
+  slice gates on `nix eval` of the yomi-strix toplevel, 3–5 on `nix build`.
+- Findings: neither flake exports overlays/nixosModules/homeModules today;
+  three nucleus files reach `inputs.quickshell` (`shellbridge.nix:46`,
+  `aoided.nix:318`, `secrets.nix:290`) so a core-only consumer walking
+  `modules/` still needs that input; `lyra onboard`/widget regen shell out to
+  the ROOT flake (`onboard.rs:137`, `widgets.rs:213`), parked for (c)/(f);
+  `docs/BUILD.md:3-5` Wave-0 rule is stale under this workstream.
+- GATE: slices 1–2 edit `flake.nix`/`lib/`/`tests/` (BUILD.md Wave-0 rule),
+  slices 3–5 edit `modules/nucleus/` (house rule 1, upstream-merge only).
+  No dispatch until the User sanctions each explicitly.
 - Owner: Fable (Opus design per phase).
 - Depends on: 1 for the runtime seams; docs/glossary/Mneme-optional changes
   accompany each phase, never trail it.
@@ -97,7 +121,8 @@ Fields per entry: status · owner · depends on · evidence · next.
   or walker; Mneme optional. Test: one host edit finds imports and the right
   check in short hops without rice/protocol docs; a widget edit finds song
   contracts without the Nix lanes; a plain checkout works without Mneme.
-- Next: phase (a)/(b) design brief after 2's first slice is dispatched.
+- Next: the User sanctions slice 1 (or not); then one Sonnet executor per
+  slice with independent review; phase (b) brief after (a) lands.
 
 ## 5. Pairing windows (enrollment windows replace the old ceremony)
 
