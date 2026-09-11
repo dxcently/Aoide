@@ -3549,3 +3549,14 @@ line citation corrected).
 Pages touched: `docs/architecture/PACKAGE-LAYOUT.md` (the `lyra` row, the
 `packages.<sys>.lyra` contract line, the "deliberately not exported"
 list), `ingest/log.md` (this entry).
+
+## [2026-09-10] fix | a discovery sweep survives a signal
+
+`client/src/discover.rs::run_sweep` treats `ErrorKind::Interrupted` like
+`WouldBlock`/`TimedOut` and keeps listening until its deadline, instead of
+reporting `sweep-failed` with "Interrupted system call". Found by the
+sandboxed package build of the yomi-strix toplevel (migration slice 3's
+G4), where `node_discover_never_writes_nodes_json_even_on_an_empty_sweep`
+hit EINTR once; client 273 green.
+
+Pages touched: `ingest/log.md` (this entry).
