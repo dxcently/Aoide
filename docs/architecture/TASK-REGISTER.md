@@ -120,6 +120,43 @@ Fields per entry: status · owner · depends on · evidence · next.
   provided FolderDialog only.
 - Next: proposal after 4(c).
 
+## 7. Mail attachments (`mail send --attach`, also the handoff carrier)
+
+- Status: QUEUED (root, seq 176, 2026-09-10). Queue addition only; it does
+  not disrupt the QoL, Codex or doorbell owners.
+- Owner: Fable (brief: Opus) once a slot opens; proposed slot after the
+  doorbell lane (3) lands and before migration phase (a).
+- Scope ruled by root: `aoide mail send --to node/mailbox --attach PATH
+  [--attach PATH…] -- TEXT`; NO `aoide sync`, no standalone attach/sync
+  command (rsync already copies files); reuse existing rsync/SSH transport,
+  never assume pairing provides SSH credentials; files + integrity manifest
+  + receiver-local references in the existing letter; transfer complete ≠
+  mail fetched ≠ work acted on; attachment inbox only by default, never
+  overwrite an active project, never execute or load received content;
+  plain mail stays lightweight and works without rsync when no attachment
+  rides; handoffs are ordinary letters with attached notes, no new handoff
+  protocol, no automatic executor switching.
+- Proposed minimal shape (awaiting root's placement reply): the manifest
+  is SIGNED — envelope version "2" adds `attachments: [{name, sha256,
+  bytes}]` to the sealed bytes (`header ‖ 0 ‖ text ‖ 0 ‖ manifest`), version
+  "1" letters are byte-identical to today; receiver-local state lives in
+  the unsigned store `Entry` (`attachments: [{name, ref, state}]`, state
+  pending|complete|failed|unavailable), never in the envelope; inbox is
+  `<state>/mail/attachments/<msgid>/<name>`; transport is rsync over the
+  tunnel module's ONE ssh builder (`client/src/tunnel.rs`) for a node with
+  an ssh route, a plain copy for `self/` and same-node mailboxes, taught
+  `transport-unavailable` otherwise (letter still delivers, attachment
+  stays pending on the sender). Slices: ATT-1 schema + manifest + local
+  copy + `mail read`/`show` display of refs and state (no network);
+  ATT-2 remote transfer + interrupted-transfer cleanup + retry on the
+  next drain; ATT-3 docs (MAIL.md, CONTRACTS.md) + limits.
+- Brief must settle: authorization (same gates as `mail send`, paired
+  nodes only), path/symlink containment (relative names only, no `..`, no
+  symlink following on either side), size limit (default and override),
+  cleanup of a partial inbox dir, transport-unavailable behaviour, and that
+  `mail read` never reports an attachment fetched from the letter alone.
+- Next: root places it; then an Opus brief; nothing dispatched before.
+
 ## Carried backlog (verified status, never implicitly done)
 
 - AoideOS/Lyra portability: unverified; folds into 4(e).
