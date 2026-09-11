@@ -6,15 +6,21 @@ module builds against what nucleus declares.
 
 ## Named seams (what it exposes)
 
-- `options.nix` — THE option contract: `aoide.livery`, `aoide.arrangement`,
-  `aoide.surfaces` — the enumerated, closed set facets are allowed to read
-  (root `AGENTS.md` house rule 5). Versioned in CONTRACTS.md (livery schema
-  v0). Also carries the non-facet-read option namespaces (`aoide.mcp`,
-  `aoide.a2a`, `aoide.usage`, `aoide.lyra`, `aoide.secrets`, `aoide.pairing`
-  — deployment/door toggles, not part of the facet whitelist).
-  `aoide.config` is the one namespace declared elsewhere, in `config.nix`
-  beside the rendering it exists for: its `settings` type comes from
-  `pkgs.formats.toml`, so the option and the generator are one unit.
+- `options.nix` — the paint half of the option contract, plus the core door
+  toggles whose units still live here: `aoide.livery`,
+  `aoide.arrangement`, `aoide.surfaces` — the enumerated, closed set facets
+  are allowed to read (root `AGENTS.md` house rule 5). Versioned in
+  CONTRACTS.md (livery schema v0). Also carries the non-facet-read option
+  namespaces (`aoide.mcp`, `aoide.a2a`, `aoide.usage`, `aoide.lyra`,
+  `aoide.secrets`, `aoide.pairing` — deployment/door toggles, not part of
+  the facet whitelist). The CORE half (`enable`, `root`, `checkout`,
+  `auditLog`, `terminal`, `user`) arrives by import: one `imports = [
+  inputs.aoide.nixosModules.default ]` line pulls it in from
+  `pkgs/aoide/module/options.nix` — the core flake's own option contract,
+  nixpkgs-only and portable to any consumer. `aoide.config` is the one
+  namespace declared elsewhere, in `config.nix` beside the rendering it
+  exists for: its `settings` type comes from `pkgs.formats.toml`, so the
+  option and the generator are one unit.
 - `aoided.nix` — the orchestrator daemon service: the neutral event stream,
   default-deny-per-class subscriptions, the user-gated rebuild pipeline, the
   single audit log. Also opens the LAN discovery advertisement's inbound

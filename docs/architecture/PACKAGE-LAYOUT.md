@@ -419,6 +419,7 @@ pkgs/aoide/flake.nix
 │   └── lyra             = aoide.rice
 ├── apps.<sys>.{aoide,aoided}
 ├── overlays.default      final: _prev: { aoide = …; }
+├── nixosModules.default  core `aoide.*` option contract + the overlay
 ├── checks.<sys>.default    = the package build
 └── devShells.<sys>.default
 ```
@@ -433,9 +434,13 @@ The stability contract — what a consumer may rely on staying true:
 - `packages.<sys>.lyra` is the `rice` output of `packages.<sys>.aoide`
   — same derivation, never a second build.
 - `overlays.default` sets exactly one attribute, `aoide`, to the same
-  derivation `packages.<sys>.aoide` names. One build, never two — both
-  `lib/mkHost.nix` and `tests/vm-boot.nix` apply it instead of each
-  carrying their own copy of the injection lambda.
+  derivation `packages.<sys>.aoide` names. One build, never two.
+- `nixosModules.default` declares the core `aoide.*` option contract
+  (`enable`, `root`, `checkout`, `auditLog`, `terminal`, `user`) and
+  applies `overlays.default` — one import carries both.
+  `modules/nucleus/options.nix` is this repo's own consumer: both
+  `lib/mkHost.nix` and `tests/vm-boot.nix` read the overlay through it
+  instead of each carrying their own copy of the injection lambda.
 - `checks`, `devShells` and `apps` are development surfaces, not a
   consumer contract.
 

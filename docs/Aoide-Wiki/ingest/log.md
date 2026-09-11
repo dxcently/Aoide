@@ -3560,3 +3560,26 @@ G4), where `node_discover_never_writes_nodes_json_even_on_an_empty_sweep`
 hit EINTR once; client 273 green.
 
 Pages touched: `ingest/log.md` (this entry).
+
+## [2026-09-10] feat | the core flake exports `nixosModules.default`
+
+Task 4 phase (a) slice 3 (`p-lyra-migration-a-brief.md` §2.5-2.6). New
+plugin directory `pkgs/aoide/module/` (`default.nix`, `options.nix`,
+README/AGENTS pair): the six core `aoide.*` options (`enable`, `root`,
+`checkout`, `auditLog`, `terminal`, `user`) move out of
+`modules/nucleus/options.nix` verbatim, and the module carries
+`overlays.default` itself, so `lib/mkHost.nix` and `tests/vm-boot.nix`
+drop their overlay entries; nucleus gains one
+`imports = [ inputs.aoide.nixosModules.default ];` line. `aoide.user`
+still defaults to `"khoa"`. Proof: `config.aoide.{root,checkout,user,
+auditLog}` and the 152-entry `aoideOptions` unchanged before/after; the
+two `aoide` outPaths identical; G1-G4 green (toplevel
+`/nix/store/djyi5bikiyk8qas6ym2b0f3xkbjnmz05-…`, not activated). Nix sees a
+new directory under a `path:` input only once it is tracked, so the
+executor's evals were blocked until the orchestrator staged the files.
+Reviewed FIX→fixed (a door toggle was called paint in nucleus AGENTS).
+
+Pages touched: `pkgs/aoide/module/{README,AGENTS}.md` (new),
+`modules/nucleus/{README,AGENTS}.md`, `docs/architecture/PACKAGE-LAYOUT.md`
+(the `nixosModules.default` row and contract line), `ingest/log.md`
+(this entry).

@@ -59,13 +59,13 @@ inputs.nixpkgs.lib.nixosSystem {
       # lib/pkgs.nix from the SAME pkgs/<name> dirs the flake's `packages`
       # output uses, so there is one source. The overlay form also guards each
       # name against shadowing a stock nixpkgs attribute. `aoide` itself is
-      # self-flaked (pkgs/aoide/flake.nix) and skipped by the walker — it is
-      # injected from the `aoide` input instead: the same derivation the
-      # flake's `packages.aoide` and `pkg-aoide` use.
+      # self-flaked (pkgs/aoide/flake.nix) and skipped by the walker — it
+      # arrives via `inputs.aoide.nixosModules.default`, imported by
+      # `modules/nucleus/options.nix` and carrying `overlays.default` with it,
+      # the same derivation the flake's `packages.aoide` and `pkg-aoide` use.
       (_: {
         nixpkgs.overlays = [
           (import ./pkgs.nix { inherit lib; }).overlay
-          inputs.aoide.overlays.default
         ];
       })
       # home-manager house defaults, applied only when the module is present.

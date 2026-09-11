@@ -70,11 +70,13 @@ let
   # source as mkHost: both import lib/pkgs.nix's overlay, which auto-discovers
   # pkgs/<name> and guards each name against shadowing a nixpkgs attribute.
   # `aoide` itself is self-flaked (pkgs/aoide/flake.nix) and skipped by the
-  # walker — injected from the `aoide` input, exactly as mkHost does.
+  # walker — it arrives via `inputs.aoide.nixosModules.default`, imported by
+  # `modules/nucleus/options.nix` and carrying `overlays.default` with it, the
+  # same way mkHost's own node picks it up (this VM's `discovered` walks the
+  # same nucleus).
   overlayModule = _: {
     nixpkgs.overlays = [
       (import ../lib/pkgs.nix { inherit lib; }).overlay
-      inputs.aoide.overlays.default
     ];
   };
 

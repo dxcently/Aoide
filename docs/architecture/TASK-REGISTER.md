@@ -124,8 +124,10 @@ Fields per entry: status · owner · depends on · evidence · next.
   `docs/BUILD.md:3-5` Wave-0 rule is stale under this workstream.
 - Authorization: the User authorized the flake/lib/tests/nucleus edits for
   this workstream under bounded owners (root ruling seq 180); runtime
-  activation stays the User's separate gate. Slice 1 LANDED 0448974
-  (`overlays.default`), slice 2 LANDED (`packages.lyra`); slices 3-5 next.
+  activation stays the User's separate gate. Slices 1-3 LANDED
+  (`overlays.default` 0448974, `packages.lyra` 4415f62, `nixosModules.default`
+  with the six core options and the new `pkgs/aoide/module/` plugin dir);
+  slice 4 (aoided unit behind `aoide.sessionTarget`) next, then 5.
 - Owner: Fable (Opus design per phase).
 - Depends on: 1 for the runtime seams; docs/glossary/Mneme-optional changes
   accompany each phase, never trail it.

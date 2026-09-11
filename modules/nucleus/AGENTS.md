@@ -13,6 +13,15 @@ covers only what's specific to nucleus.
   Widening the read whitelist (`aoide.livery`/`aoide.arrangement`/
   `aoide.surfaces`) is a decision that touches root `AGENTS.md` house rule 5
   too — don't add a fourth namespace without updating both.
+- **Core options live in the core flake; nucleus declares only the paint
+  half.** `enable`/`root`/`checkout`/`auditLog`/`terminal`/`user` are
+  `pkgs/aoide/module/options.nix`'s contract now, pulled in by nucleus's
+  own `imports = [ inputs.aoide.nixosModules.default ]` line. A new CORE
+  option (portable, cargo-buildable, no `modules/`/`song/` reach) is added
+  there, never here; a new PAINT option (livery, arrangement, surfaces, a
+  facet toggle) is added here, never there. A core door toggle whose unit
+  has not migrated yet (`mcp`, `a2a`, `usage`, `secrets`, `pairing`) stays
+  here beside its unit — core, not paint, just not yet relocated.
 - **Nix authors runtime config; it never owns it (`config.nix`, task #135
   P-C).** A CORE command's configuration lives in the portable runtime file
   (`$AOIDE_ROOT/config.toml`, CONTRACTS.md §4) because core is
