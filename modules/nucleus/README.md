@@ -21,10 +21,17 @@ module builds against what nucleus declares.
   namespace declared elsewhere, in `config.nix` beside the rendering it
   exists for: its `settings` type comes from `pkgs.formats.toml`, so the
   option and the generator are one unit.
-- `aoided.nix` — the orchestrator daemon service: the neutral event stream,
-  default-deny-per-class subscriptions, the user-gated rebuild pipeline, the
-  single audit log. Also opens the LAN discovery advertisement's inbound
-  UDP port (`networking.firewall.allowedUDPPorts`) whenever `aoide.a2a.
+- `aoided.nix` — now carries only the AoideOS deltas for the `aoided` unit
+  (`pkgs/aoide/module/aoided.nix` owns the unit itself, its tmpfiles
+  rules, and the core session variables): `aoide.sessionTarget` set to
+  `graphical-session.target` when the quickshell facet is on, and the
+  lyra-gated `AOIDE_SONG_TEMPLATES` session variable. Below that, still
+  here: every door (mcp, a2a, pair-watch) the daemon's event stream
+  serves, the discovery-advertisement firewall carve, and the usage
+  poller — core *binaries* in a still-AoideOS *deployment*, migrating
+  them is a later slice's work, not this one's. Also opens the LAN
+  discovery advertisement's inbound UDP port
+  (`networking.firewall.allowedUDPPorts`) whenever `aoide.a2a.
   discoveryAdvertise` is on — the stock firewall trusts only `lo`, and an
   advertisement never reaches a listening socket on a real interface
   without it (task #98). Declares a graphical-session USER unit,

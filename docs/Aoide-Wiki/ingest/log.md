@@ -3583,3 +3583,26 @@ Pages touched: `pkgs/aoide/module/{README,AGENTS}.md` (new),
 `modules/nucleus/{README,AGENTS}.md`, `docs/architecture/PACKAGE-LAYOUT.md`
 (the `nixosModules.default` row and contract line), `ingest/log.md`
 (this entry).
+
+## [2026-09-10] feat | aoided's unit ships in the core module behind `aoide.sessionTarget`
+
+Task 4 phase (a) slice 4 (`p-lyra-migration-a-brief.md` "Slice 4"). New
+`pkgs/aoide/module/aoided.nix` carries the tmpfiles rules, the core
+session variables (`AOIDE_TERMINAL`, `AOIDE_ROOT`, `AOIDE_FLAKE_ROOT`)
+and `systemd.user.services.aoided`, moved verbatim out of
+`modules/nucleus/aoided.nix`; the one rewrite is the anchoring, which
+reads the new core option `aoide.sessionTarget` (default
+`default.target`) instead of the quickshell facet the core module may
+not read. Nucleus keeps only the AoideOS deltas: it sets
+`sessionTarget` to `graphical-session.target` when the facet is on, and
+the lyra-gated `AOIDE_SONG_TEMPLATES`. Proof: `wantedBy`/`after`/`partOf`,
+`serviceConfig` (bar the package hash), tmpfiles (same multiset) and the
+session variables identical before/after on yomi-strix; the vm-boot
+node (facet off) anchors to `default.target` with empty `after`/`partOf`;
+G1-G4 green (toplevel `/nix/store/ilj7blyp8y69y97maxp2m2rx1nfxchj3-…`,
+not activated). Flag: the package `src` still includes `module/`, so an
+edit there rebuilds the binaries — slice 5 filters it out. Reviewed LAND.
+
+Pages touched: `pkgs/aoide/module/{README,AGENTS}.md`,
+`modules/nucleus/README.md`, `docs/architecture/PACKAGE-LAYOUT.md`,
+`ingest/log.md` (this entry).

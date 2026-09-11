@@ -126,8 +126,9 @@ Fields per entry: status · owner · depends on · evidence · next.
   this workstream under bounded owners (root ruling seq 180); runtime
   activation stays the User's separate gate. Slices 1-3 LANDED
   (`overlays.default` 0448974, `packages.lyra` 4415f62, `nixosModules.default`
-  with the six core options and the new `pkgs/aoide/module/` plugin dir);
-  slice 4 (aoided unit behind `aoide.sessionTarget`) next, then 5.
+  with the six core options and the new `pkgs/aoide/module/` plugin dir,
+  the aoided unit + tmpfiles + core session vars behind `aoide.sessionTarget`);
+  slice 5 (stranger consumer proof + `module/` out of the package src) next.
 - Owner: Fable (Opus design per phase).
 - Depends on: 1 for the runtime seams; docs/glossary/Mneme-optional changes
   accompany each phase, never trail it.

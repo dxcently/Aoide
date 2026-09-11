@@ -419,7 +419,7 @@ pkgs/aoide/flake.nix
 │   └── lyra             = aoide.rice
 ├── apps.<sys>.{aoide,aoided}
 ├── overlays.default      final: _prev: { aoide = …; }
-├── nixosModules.default  core `aoide.*` option contract + the overlay
+├── nixosModules.default  core option contract + `aoided.service` + overlay
 ├── checks.<sys>.default    = the package build
 └── devShells.<sys>.default
 ```
@@ -436,11 +436,18 @@ The stability contract — what a consumer may rely on staying true:
 - `overlays.default` sets exactly one attribute, `aoide`, to the same
   derivation `packages.<sys>.aoide` names. One build, never two.
 - `nixosModules.default` declares the core `aoide.*` option contract
-  (`enable`, `root`, `checkout`, `auditLog`, `terminal`, `user`) and
-  applies `overlays.default` — one import carries both.
+  (`enable`, `root`, `checkout`, `auditLog`, `terminal`, `user`,
+  `sessionTarget`), applies `overlays.default`, and owns the
+  `aoided.service` unit itself: its tmpfiles rules and its core session
+  variables (`AOIDE_TERMINAL`, `AOIDE_ROOT`, `AOIDE_FLAKE_ROOT`) — one
+  import carries all three. `sessionTarget` (default `default.target`)
+  is the seam a paint-dependent anchor enters through: the unit's own
+  `wantedBy`/`after`/`partOf` read it, never a facet option directly.
   `modules/nucleus/options.nix` is this repo's own consumer: both
   `lib/mkHost.nix` and `tests/vm-boot.nix` read the overlay through it
-  instead of each carrying their own copy of the injection lambda.
+  instead of each carrying their own copy of the injection lambda, and
+  `modules/nucleus/aoided.nix` sets `aoide.sessionTarget` to
+  `graphical-session.target` when the quickshell facet is on.
 - `checks`, `devShells` and `apps` are development surfaces, not a
   consumer contract.
 
