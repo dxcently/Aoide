@@ -78,6 +78,9 @@ Fields per entry: status · owner · depends on · evidence · next.
   never claimed and no codex profile is registered.
 - Next: build 3 carries P-CX-1/2/3 + 2b; the live check with the app open on
   two threads after activation is the User's gate.
+- Portability (root, seq 190): strict fd evidence fixed the misownership
+  but leaves desktop-thread discovery Linux-only. Non-Linux detection is
+  UNRESOLVED and registered as such; the cross-OS requirement is not met.
 
 ## 3. Interactive doorbell (native Claude channel idle wake)
 
@@ -131,6 +134,32 @@ Fields per entry: status · owner · depends on · evidence · next.
   slice 5 LANDED (stranger consumer proof: five evals green with no AoideOS
   import; `module/` filtered out of the package src). PHASE (a) COMPLETE;
   latest toplevel `/nix/store/wzs21qkb80wpaskjb4612q0qb0fpjj57-…` not activated.
+  The stranger proof is EVALUATION only (five `nix eval`s of a throwaway
+  toplevel); no stranger build ran and nothing was activated anywhere.
+  Root acknowledged phase (a) complete (seq 190).
+- Phase (b) DESIGNED (scratchpad `p-lyra-migration-b-brief.md`, Opus, 672
+  lines, read-only), nothing dispatched. Shape: four aggregates
+  (`modules/default.nix` + one per layer, `LC_ALL=C` entry order, `_`
+  entries omitted); the songbook keeps ONE typed scan (`lib/songbook.nix`
+  exports `songModules` + `strayNixFiles`) instead of a `default.nix`
+  outside house rule 1's writable domain; `lib/walk.nix` deleted in slice
+  2; house rule 7 reworded from "never an import list" to "never named
+  from outside its own directory", CONTRACTS.md the same; `_`-prefix
+  re-expressed (loses the walker, keeps `_widgets/` and `lib/pkgs.nix`);
+  gate = toplevel drvPath BYTE-IDENTICAL per slice (precondition proved:
+  the flake source path is absent from the toplevel's 13012 requisites),
+  `aoideOptions` 153 and `songbookManifest` unchanged. Finding:
+  `checks.no-song-read` is vacuous (walked paths cannot carry a `song/`
+  runtime infix; the banned dirs are gitignored) while ~20 files claim it
+  enforces something. Three slices: (1) aggregates + three call sites +
+  rule 7/CONTRACTS/README/`modules/README.md` (~215 lines, the 74-line
+  import list is mechanical); (2) songbook exports + walker deletion +
+  stronger `song-shape`; (3) root AGENTS.md task→directory map + glossary.
+- Next: root rules on the brief (Q1 `lib/pkgs.nix` stays, Q2 keep the
+  vacuous check until (f), Q3 walk order, Q4 re-express `_`, Q6 skip a song
+  without `rice.nix`, Q7 slice 3 in (b)); the User answers Q5 (does the
+  rider's "no aggregator or walker" mean docs) and Q8 (songbook scan stays,
+  house rule 1); then slice 1. The User activates a build when ready.
 - Owner: Fable (Opus design per phase).
 - Depends on: 1 for the runtime seams; docs/glossary/Mneme-optional changes
   accompany each phase, never trail it.
@@ -150,8 +179,6 @@ Fields per entry: status · owner · depends on · evidence · next.
   or walker; Mneme optional. Test: one host edit finds imports and the right
   check in short hops without rice/protocol docs; a widget edit finds song
   contracts without the Nix lanes; a plain checkout works without Mneme.
-- Next: phase (b) brief (explicit `default.nix`/aggregates, walker removal);
-  the User activates a build when ready.
 
 ## 5. Pairing windows (enrollment windows replace the old ceremony)
 
@@ -214,14 +241,30 @@ Fields per entry: status · owner · depends on · evidence · next.
   (open question for root); envelope v2 only with attachments; receiver state
   in a `state/mail/attachments.json` sidecar; `attach` as a fourth closed
   capability; quota options; rename-publish after hash verify; 7 slices.
-- Next: root rules on the brief (open questions 1, 2, 3, 6, 7); implementation
-  waits for that ruling.
+- RULED (root, seq 190): PARKED for scope review. A custom chunked A2A
+  transfer protocol contradicts the User's simplification intent and is
+  not implemented. The brief above stands as the inventory only.
+- Next: a minimal-alternative brief (Opus, read-only): external copy plus
+  mail references, or scoped use of existing transfer tooling, with the
+  limitations stated honestly; root discusses any real scope change with
+  the User. Nothing dispatched until root rules on that brief.
 
 ## 8. Done-record lifecycle (killed/ended agents stay on the conductor)
 
-- Status: ANALYSED (scratchpad `p-done-lifecycle-brief.md`, Opus, read-only);
-  cause and minimal proposal sent to root; nothing dispatched, roster never
-  mutated by an agent. Root seq 182 owns the ask.
+- Status: SUPERSEDED (root, seq 190, the User's word). The conductor shows
+  LIVE agent sessions only; ended/killed records leave the active view
+  without depending on a live sibling, a window, or a prune, and history
+  stays in the ledger. The analysis below (scratchpad
+  `p-done-lifecycle-brief.md`, Opus, read-only) stands as cause inventory;
+  its narrow collector is possible cleanup, not acceptance. Nothing
+  dispatched, roster never mutated by an agent.
+- Required by seq 190: preserve idle live agents, app tasks sharing a
+  process, and subagents with lifecycle evidence; an orphan of unknown
+  liveness is shown as unknown, never as proven-live, never killed to clear
+  a card; retire/dismiss semantics specified explicitly and separately;
+  the done card's "Kill terminal" label fixed even where the card is
+  ordinarily filtered; history/resurrection retained; no double ledger
+  writes; fixture plus computer-use proof.
 - Cause: `reap.rs::superseded_done_siblings` groups by `windowAddress` and
   skips empty ones, so a windowless (hosted-native) `done` record joins no
   group; liveness judges only non-`done` records; reap-time `prune_done` runs
@@ -239,13 +282,17 @@ Fields per entry: status · owner · depends on · evidence · next.
   `session prune`.
 - Owner: Fable (Sonnet executor per slice, independent review); root rules
   on the proposal first.
-- Next: root's ruling; then slice 1 (collector + 12 fixtures), slice 2
-  (bridge prune verb + card label), slice 3 (wording/docs); live proof is
-  read-only before/after with the orphan as the no-widening control.
+- Next: live-only view design brief (Opus, read-only, scratchpad
+  `p-live-view-brief.md`): where the exclusion lives (bridge first, QML
+  second per house rule 7), the unknown-liveness state, retire/dismiss,
+  the label fix, fixtures and the computer-use proof recipe; root rules;
+  then slices.
 
 ## Carried backlog (verified status, never implicitly done)
 
 - AoideOS/Lyra portability: unverified; folds into 4(e).
+- Desktop Codex detection off Linux: UNRESOLVED (seq 190); fd evidence is
+  the only positive ownership signal and it is `/proc`-shaped. Owner: 2.
 - Osaka/Sakaki deployment: sakaki re-paired 2026-09-10; no deploy.
 - P-M5 remainder: M5b free (was held behind M5c-1); M5c-2/3 proof-gated.
 - Mneme/Melete plans: the Mneme shared-memory proposal page is an
