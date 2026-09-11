@@ -33,8 +33,11 @@ Fields per entry: status · owner · depends on · evidence · next.
   native-id keying) LANDED; P-CX-2 portable discovery LANDED (fcc7514:
   flock liveness + one parsed `ps` table, /proc only as a Linux tie-break,
   ambiguous owner enrols with no pid, non-unix taught-unsupported; conduct
-  618 green, reviewed FIX→fixed); P-CX-3 call site (daemon tick primary,
-  Hyprland listener promptness) + `codex-app-unsupported` refusals NEXT.
+  618 green, reviewed FIX→fixed); P-CX-3 LANDED 30ee7c6 (reaper tick primary
+  call site + Hyprland listener promptness, `codex-app-unsupported` send
+  refusal, kill refuses "the desktop app owns this thread's process", CODEX_HOME
+  test floor; conduct 621 green, reviewed LAND). In-crate work COMPLETE; the
+  live two-thread desktop check after activation is the User's gate.
 - Review flag for the User: with ONE app-server running every held lock is
   attributed to it without a per-lock check (brief §3 rule); the brief's open
   question §6.1 leaned the other way (enrol only locks an app-server holds).
@@ -50,7 +53,7 @@ Fields per entry: status · owner · depends on · evidence · next.
   app-server is a child of the Electron main, `~/.codex/ipc/ipc.sock` has no
   holder, thread→window bindings are opaque, so exact-task navigation is
   never claimed and no codex profile is registered.
-- Next: P-CX-3; live check with the app open on two
+- Next: live check with the app open on two
   threads is the User's gate.
 
 ## 3. Interactive doorbell (native Claude channel idle wake)

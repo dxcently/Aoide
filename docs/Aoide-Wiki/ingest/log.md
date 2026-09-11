@@ -3443,7 +3443,8 @@ refuse:
   the lock, the process table and the rollout header, never writes, but a
   test must never see the real desktop.
 
-Tests: `a_codex_app_record_refuses_a_send_as_unsupported_not_not_conductable`,
+Tests:
+`a_codex_app_record_refuses_a_send_as_unsupported_not_not_conductable`,
 `the_unsupported_refusal_names_the_app_as_the_server_owner`,
 `killing_a_codex_app_record_refuses_without_touching_the_app`. Verified:
 `cargo test -p aoide-conduct` test result: ok. 621 passed; 0 failed
