@@ -753,6 +753,43 @@ assembled — core's card advertises only core's registry, and only its
 implemented commands (the card's `implemented` filter drops stubs, §6),
 since `a2a serve` is core-only and lyra never registers it.
 
+### MCP door — `initialize` (Tier 2, `concepts/Agent-Interface`)
+
+The stdio MCP server's handshake result (`aoide-server`'s `mcp.rs`, wire
+shapes in `aoide-protocol`'s `wire::mcp`):
+
+```json
+{
+  "protocolVersion": "2024-11-05",
+  "capabilities": {
+    "tools": {},
+    "experimental": { "claude/channel": {} }
+  },
+  "serverInfo": { "name": "aoide", "version": "0.0.22" },
+  "instructions": "…"
+}
+```
+
+`capabilities.tools` stays the empty placeholder it always was (no
+`listChanged` yet); `capabilities.experimental["claude/channel"]` and
+`instructions` both serialize unconditionally — a client that has never
+heard of either simply ignores them. `experimental["claude/channel"]` (an
+empty object; the Claude Code channel capability key, proven in
+`docs/architecture/CLAUDE-CHANNEL-PROOF.md`) tells a Claude Code client this
+server can push one-way events onto a per-session Unix socket
+(`$XDG_RUNTIME_DIR/aoide/channel-<AOIDE_SESSION_ID>.sock`, `aoide-conduct`'s
+`channel_socket_path`, bound only when `AOIDE_SESSION_ID` is set and
+non-empty — the socket's own presence is the whole registration, no record,
+no command, house rule 7); `instructions` spells out that events arrive
+wrapped as `<channel source="aoide">…</channel>` and are one-way. Each line
+written to that socket becomes one `notifications/claude/channel` JSON-RPC
+notification, `{"content": <the line>, "meta": {"mailbox": <name>}}` when
+the line names a mailbox (`meta` stays `{}` otherwise) — meta keys are bare
+identifiers throughout, since a hyphenated key is silently dropped by the
+harness. The listener thread and the request loop share one `Arc<Mutex<_>>`
+around stdout so a pushed notification and a `tools/call` reply never
+interleave on the wire.
+
 ### Daemon wire — the fourth door (`docs/architecture/AOIDED.md`, P-D2/P-D4)
 
 `aoided`'s own control socket (`$AOIDE_DAEMON_SOCKET`, else
