@@ -1,6 +1,6 @@
 # AGENTS.md — modules/facets
 
-Points up to `modules/AGENTS.md` for cross-module invariants (walk
+Points up to `modules/AGENTS.md` for cross-module invariants (aggregate
 discipline, `_`-prefix shelving, the closed read whitelist) — this file
 covers only what's specific to facets.
 
@@ -41,8 +41,8 @@ covers only what's specific to facets.
 ## Extension points
 
 - **A new facet** is a new directory under `modules/facets/` with its own
-  `default.nix`, reading only the closed whitelist above — discovered by
-  `lib/walk.nix` automatically, no import-list edit.
+  `default.nix`, reading only the closed whitelist above, plus one line in
+  `modules/facets/default.nix`.
 - **A new surface inside `quickshell/`** runs the paint test before
   landing; if it fails, it belongs in a song's `widgets/` instead.
 

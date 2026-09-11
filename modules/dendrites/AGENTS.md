@@ -1,6 +1,6 @@
 # AGENTS.md — modules/dendrites
 
-Points up to `modules/AGENTS.md` for cross-module invariants (walk
+Points up to `modules/AGENTS.md` for cross-module invariants (aggregate
 discipline, `_`-prefix shelving, flags-default-off) — this file covers only
 what's specific to dendrites.
 
@@ -22,8 +22,8 @@ what's specific to dendrites.
 ## Extension points
 
 - **A new dendrite**: a new `.nix` file here (or `_name.nix` while
-  work-in-progress — see `_example.nix`), following the template's shape;
-  no import-list edit anywhere, `lib/walk.nix` finds it.
+  work-in-progress — see `_example.nix`), following the template's shape,
+  plus one line in `default.nix`.
 - **Splitting a tool out of a bundled dendrite** (e.g. `devtools.nix`) is
   warranted the moment a host needs to toggle it independently — see
   `claude-code.nix`'s header for the precedent.
@@ -32,5 +32,5 @@ what's specific to dendrites.
 
 - This `README.md` when the set of dendrites shifts materially (a new
   category of capability, not every single addition).
-- `modules/AGENTS.md` is the layer above for the walk/shelving mechanics
-  themselves — not restated here.
+- `modules/AGENTS.md` is the layer above for the aggregate/shelving
+  mechanics themselves — not restated here.

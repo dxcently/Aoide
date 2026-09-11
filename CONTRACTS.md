@@ -16,12 +16,15 @@ recorded here because every contract in this file is downstream of it.
 
 **Everything is a plugin.** A capability enters Aoide by *existing* at a
 conventional path, declaring what it needs by *name*, and being removable
-without a trace. Nothing enters by being added to a list.
+without a trace. Nothing enters by being named from outside its own
+directory.
 
-The repo already runs this way and did before it had a name for it: `lib/walk.nix`
-discovers `modules/dendrites/*`, `modules/facets/*`, `pkgs/*` and
-`song/songbook/*/rice.nix` by walking the tree, so **adding a capability is a new
-folder, never an edit to an import list** (§2, §5). Each of those modules
+The repo already runs this way and did before it had a name for it: every
+module directory carries a `default.nix` naming its own files, so **adding a
+capability is a new file and one line in the directory that holds it**
+(`modules/dendrites/`, `modules/facets/`, `modules/nucleus/`); `lib/walk.nix`
+still discovers `pkgs/*` and `song/songbook/*/rice.nix` the same way (§2,
+§5). Each of those modules
 self-gates on its own `enable`/`aoide.song` rather than being switched on from
 outside. A widget resolves through `StagingEngine.resolveSong(song, slot)` — by
 slot *name*, falling back to sonata — so no surface ever imports a concrete

@@ -4,7 +4,7 @@
 # Lives in tests/, not lib/: lib/ holds build/eval machinery (checks.nix,
 # mkHost.nix, pkgs.nix, walk.nix); this is test content. See tests/README.md.
 #
-# Exercises the walked module tree (same assembly as mkHost), the aoide
+# Exercises the module tree (same assembly as mkHost), the aoide
 # package, greeter wiring, the aoided user service, and the graph commands —
 # without real hardware or external network access.  shellbridge is NOT
 # exercised: its module gates on the quickshell facet (it exists to feed the
@@ -55,9 +55,6 @@
 let
   walk = import ../lib/walk.nix { inherit lib; };
 
-  # Walked module tree — identical to mkHost's discovery pass.
-  discovered = walk ../modules;
-
   # Committed songs (same as mkHost).
   songbook = walk ../song/songbook;
 
@@ -69,11 +66,11 @@ let
   # The pkgs overlay injecting the discovered packages — now literally the SAME
   # source as mkHost: both import lib/pkgs.nix's overlay, which auto-discovers
   # pkgs/<name> and guards each name against shadowing a nixpkgs attribute.
-  # `aoide` itself is self-flaked (pkgs/aoide/flake.nix) and skipped by the
-  # walker — it arrives via `inputs.aoide.nixosModules.default`, imported by
-  # `modules/nucleus/options.nix` and carrying `overlays.default` with it, the
-  # same way mkHost's own node picks it up (this VM's `discovered` walks the
-  # same nucleus).
+  # `aoide` itself is self-flaked (pkgs/aoide/flake.nix) and named by neither
+  # aggregate — it arrives via `inputs.aoide.nixosModules.default`, imported
+  # by `modules/nucleus/options.nix` and carrying `overlays.default` with it,
+  # the same way mkHost's own node picks it up (this VM imports the same
+  # `../modules` tree).
   overlayModule = _: {
     nixpkgs.overlays = [
       (import ../lib/pkgs.nix { inherit lib; }).overlay
@@ -107,7 +104,7 @@ pkgs.testers.runNixOSTest {
   node.specialArgs = testSpecialArgs;
 
   # Allow setting nixpkgs.overlays inside the test node — required so
-  # overlayModule (and any other walked module) can inject packages.
+  # overlayModule (and any other module) can inject packages.
   node.pkgsReadOnly = false;
 
   nodes.machine =
@@ -118,68 +115,69 @@ pkgs.testers.runNixOSTest {
       ...
     }:
     {
-      imports =
-        discovered
-        ++ songbook
-        ++ hmModule
-        ++ stylixModule
-        ++ [
-          overlayModule
-          hmDefaultsModule
-          # ── Aoide VM configuration ──────────────────────────────────────
-          # Mirrors yomi-strix but without real hardware + trimmed facet set.
-          (
-            { lib, ... }:
-            {
-              # ── Aoide flags ─────────────────────────────────────────────
-              aoide.enable = true;
-              aoide.user = "khoa";
-              aoide.song = "sonata";
+      imports = [
+        ../modules
+      ]
+      ++ songbook
+      ++ hmModule
+      ++ stylixModule
+      ++ [
+        overlayModule
+        hmDefaultsModule
+        # ── Aoide VM configuration ──────────────────────────────────────
+        # Mirrors yomi-strix but without real hardware + trimmed facet set.
+        (
+          { lib, ... }:
+          {
+            # ── Aoide flags ─────────────────────────────────────────────
+            aoide.enable = true;
+            aoide.user = "khoa";
+            aoide.song = "sonata";
 
-              # Compositor kept: wires the ly greeter so the unit exists + is enabled.
-              aoide.facets.compositor.enable = true;
-              # Quickshell omitted: heavy closure + cannot render headless.
-              aoide.facets.quickshell.enable = false;
-              # Stylix omitted: ImageMagick wallpaper + large target set.
-              aoide.facets.stylix.enable = false;
-              # Obsidian off (same as yomi-strix).
-              aoide.obsidian.enable = false;
+            # Compositor kept: wires the ly greeter so the unit exists + is enabled.
+            aoide.facets.compositor.enable = true;
+            # Quickshell omitted: heavy closure + cannot render headless.
+            aoide.facets.quickshell.enable = false;
+            # Stylix omitted: ImageMagick wallpaper + large target set.
+            aoide.facets.stylix.enable = false;
+            # Obsidian off (same as yomi-strix).
+            aoide.obsidian.enable = false;
 
-              # ── Baseline ────────────────────────────────────────────────
-              networking.hostName = "vm-test";
-              system.stateVersion = lib.mkDefault "25.11";
-              nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
+            # ── Baseline ────────────────────────────────────────────────
+            networking.hostName = "vm-test";
+            system.stateVersion = lib.mkDefault "25.11";
+            nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
 
-              # ── User account ─────────────────────────────────────────────
-              users.users.khoa = {
-                isNormalUser = lib.mkDefault true;
-                extraGroups = lib.mkDefault [
-                  "wheel"
-                  "video"
-                  "audio"
-                  "networkmanager"
-                ];
-                # Passwordless-friendly for test invocations.
-                initialPassword = "test";
-              };
-
-              home-manager.users.khoa.home.stateVersion = lib.mkDefault "25.11";
-
-              # ── System packages on PATH ───────────────────────────────────
-              # jq only (JSON validation). aoide comes from the
-              # nucleus (modules/nucleus/packages.nix) — the test must exercise
-              # the REAL install path, not mask its absence (which it did until
-              # the first live switch surfaced the gap).
-              environment.systemPackages = [
-                pkgs.jq
+            # ── User account ─────────────────────────────────────────────
+            users.users.khoa = {
+              isNormalUser = lib.mkDefault true;
+              extraGroups = lib.mkDefault [
+                "wheel"
+                "video"
+                "audio"
+                "networkmanager"
               ];
+              # Passwordless-friendly for test invocations.
+              initialPassword = "test";
+            };
 
-              # ── VM resources ─────────────────────────────────────────────
-              virtualisation.memorySize = 4096;
-              virtualisation.cores = 4;
-            }
-          )
-        ];
+            home-manager.users.khoa.home.stateVersion = lib.mkDefault "25.11";
+
+            # ── System packages on PATH ───────────────────────────────────
+            # jq only (JSON validation). aoide comes from the
+            # nucleus (modules/nucleus/packages.nix) — the test must exercise
+            # the REAL install path, not mask its absence (which it did until
+            # the first live switch surfaced the gap).
+            environment.systemPackages = [
+              pkgs.jq
+            ];
+
+            # ── VM resources ─────────────────────────────────────────────
+            virtualisation.memorySize = 4096;
+            virtualisation.cores = 4;
+          }
+        )
+      ];
     };
 
   testScript = ''

@@ -1,8 +1,8 @@
 # modules/dendrites
 
 Optional, additive host capabilities — every dendrite self-gates on its own
-`aoide.<name>.enable` and is discovered by `lib/walk.nix`'s recursive walk,
-never an import list. Today's set spans desktop apps (firefox, obsidian,
+`aoide.<name>.enable` and is named once, in `default.nix`, by the directory
+that holds it. Today's set spans desktop apps (firefox, obsidian,
 kitty), CLI tooling (git, yazi, starship, mcfly, nh), agent and desktop AI
 tooling (claude-code, kimi-code, pi-coding-agent, OpenAI Codex + ChatGPT), and
 system services (dunst, networkmanager, audio).
@@ -12,7 +12,7 @@ system services (dunst, networkmanager, audio).
 - One file per capability, each declaring `aoide.<name>.enable` (default
   `false`) and carrying its own package/service dependencies.
 - `_example.nix` — the checked-in template: shelved by its `_` prefix
-  (invisible to the walker), documents the v0 dendrite shape and the
+  (never listed in `default.nix`), documents the v0 dendrite shape and the
   enable-with-one-line-in-`hosts/`convention.
 - A dendrite that draws (e.g. `dunst.nix`'s notification popups) hands off
   to a facet-owned surface via a bridge (a CLI command, a stage file) rather

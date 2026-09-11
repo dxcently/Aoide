@@ -1,6 +1,6 @@
 # AGENTS.md — modules/nucleus
 
-Points up to `modules/AGENTS.md` for the cross-module invariants (walk
+Points up to `modules/AGENTS.md` for the cross-module invariants (aggregate
 discipline, `_`-prefix shelving, the closed read whitelist) — this file
 covers only what's specific to nucleus.
 
@@ -51,7 +51,7 @@ covers only what's specific to nucleus.
 - **A new piece of core plumbing** (a new always-on service, a new option
   namespace) is a new file here, following the existing pattern: a header
   comment stating scope and what it reads, `mkOption`/`mkEnableOption` as
-  needed.
+  needed, plus one line in `default.nix`.
 
 ## Docs update required in the same commit
 

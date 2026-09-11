@@ -22,20 +22,24 @@ identical to nix; the flat form greps and diffs cleanly, and enabling a
 capability stays one copyable line. `statix.toml` disables `repeated_keys`
 for this reason, so the linter does not fight the style.
 
-## Walk discipline
+## Aggregate discipline
 
-`lib/walk.nix` discovers every `.nix` file under `modules/dendrites/` and
-`modules/facets/*` by recursive filesystem walk — **adding a capability is a
-new file, never an edit to an import list**. A module self-gates on its own
+Each of `modules/dendrites/`, `modules/facets/`, `modules/nucleus/` carries
+its own `default.nix`, naming every file in that directory one line per
+file, in `LC_ALL=C` order — **adding a capability is a new file plus one
+line in that directory's own `default.nix`, never an edit to a list
+anywhere else**. `modules/default.nix` imports the three directory
+aggregates and nothing else; no file is ever named from outside the
+directory that holds it. A module self-gates on its own
 `aoide.<name>.enable`; nothing outside the module switches it on.
 
 ## `_`-prefix shelving
 
-A path containing `/_` (a filename or a directory) is skipped by the
-walker's filter (`lib/walk.nix`) — the opt-out for work-in-progress or
-scratch dendrites: `modules/dendrites/_example.nix` is the checked-in
-template. Drop the leading `_` to activate; add it to shelve without
-deleting.
+A `_`-prefixed file or directory is not a module: nothing imports it and no
+`default.nix` lists it — the opt-out for work-in-progress or scratch
+dendrites: `modules/dendrites/_example.nix` is the checked-in template. Drop
+the leading `_` and add one line to that directory's `default.nix` to
+activate; drop the line and add the `_` back to shelve without deleting.
 
 ## The closed read whitelist
 

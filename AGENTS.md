@@ -73,10 +73,16 @@ and the staging/declarative/draft modes:
 6. **Every operation flows through `aoided`:** one policy surface, one gate,
    one audit log (`$AOIDE_ROOT/log`, default `~/.aoide/log`). Both doors
    inherit it.
-7. **Everything is a plugin.** A capability enters by *existing* at a
-   conventional path, declares what it needs by *name*, and is removable
-   without a trace — never by an edit to an import list, never by reaching into
-   another module, never as an effect with no inverse. **Corollary: Quickshell
+7. **Everything is a plugin.** A capability enters as ONE file at a
+   conventional path, named once in that directory's own `default.nix` or
+   found by that directory's one typed scan (`song/songbook/<song>/
+   rice.nix`), declares what it needs by *name*, and is removable without a
+   trace — delete the file and its line and nothing else in the tree knows
+   it existed. Never by reaching into another module, never by an edit
+   outside its own directory, never as an effect with no inverse. The
+   aggregate is a directory's statement of its own contents, never a
+   registry above it: no file is ever named from outside the directory
+   that holds it. **Corollary: Quickshell
    is a render surface, never an API.** QML paints and picks up an agnostic
    bridge by name; state, policy, IPC and system access live behind a bridge
    reachable with only a shell. A new API lands as a bridge FIRST and the QML
@@ -113,8 +119,8 @@ pkgs/aoide/crates/AGENTS.md        (cross-crate: registry order, golden
                                      discipline, no cross-crate copying,
                                      per-crate tests only)
   pkgs/aoide/crates/<crate>/{README,AGENTS}.md   (this crate only)
-modules/AGENTS.md                  (cross-module: flags default off, walk
-                                     discipline, "_"-prefix shelving)
+modules/AGENTS.md                  (cross-module: flags default off,
+                                     aggregate discipline, "_"-prefix shelving)
   modules/{nucleus,facets,dendrites}/{README,AGENTS}.md  (this dir only)
 ```
 

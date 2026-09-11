@@ -12,8 +12,8 @@
 # downstream consumes one; a future consumer adds it then, not speculatively.
 #
 # Ladder rung (a) HELD (docs/architecture/ONBOARD.md "The vars-file
-# generator" / P-I3 brief): a bare `lib.evalModules` over the walked module
-# tree evaluates cleanly with no fight from `pkgs`/`config`-referencing
+# generator" / P-I3 brief): a bare `lib.evalModules` over the module tree
+# evaluates cleanly with no fight from `pkgs`/`config`-referencing
 # option constructions (`aoide.lyra.enable`'s `config.aoide.facets.
 # quickshell.enable` default, `aoide.auditLog`'s `"/home/${config.aoide.
 # user}/…"` default, three `melete`/`mneme` dendrite path defaults — nine
@@ -39,11 +39,11 @@
   inputs,
 }:
 let
-  walk = import ./walk.nix { inherit lib; };
-  discovered = walk ../modules;
-
   evaled = lib.evalModules {
-    modules = discovered ++ [ { config._module.check = false; } ];
+    modules = [
+      ../modules
+      { config._module.check = false; }
+    ];
     specialArgs = {
       inherit inputs pkgs;
       inherit (pkgs) system;

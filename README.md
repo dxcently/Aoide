@@ -21,7 +21,7 @@ This README explains what Aoide/AoideOS *is* — architecture, features, the Mel
 
 ## 1. Architecture
 
-The repo is a **snowflake**: everything lives under `modules/`, walked and self-registered by an in-house dendritic walker (`lib/walk.nix` + `lib/mkHost.nix`). No import lists — drop a `.nix` file in the right directory and it registers itself. A `/_`-prefixed path (`_wip.nix`, `_scratch/`) is **hidden** from the walker.
+The repo is a **snowflake**: everything lives under `modules/`, and each layer (`nucleus/`, `dendrites/`, `facets/`) names its own files in one `default.nix` (`modules/default.nix` + `lib/mkHost.nix` assemble the tree). No import list above the directory that holds the file — drop a `.nix` file in the right directory and add its one line to that directory's `default.nix`. A `/_`-prefixed path (`_wip.nix`, `_scratch/`) is simply never listed there.
 
 ```
 ~/Aoide/
@@ -33,7 +33,7 @@ The repo is a **snowflake**: everything lives under `modules/`, walked and self-
 │   ├── common/     cross-machine baseline (which dendrites default ON)
 │   └── <host>/     machine-specific picks (hardware, enabled facets, song)
 ├── pkgs/           the aoide CLI + daemon (Rust, its own flake, consumed as a path input)
-├── lib/            the walker + mkHost + checks
+├── lib/            mkHost + checks + the walker (song/songbook, pkgs discovery)
 ├── song/           the performed half (rices, songbook, runtime stage/)
 └── flake.nix       inputs + outputs (never edited to add a module)
 ```

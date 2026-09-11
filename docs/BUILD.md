@@ -17,17 +17,22 @@ nix eval .#nixosConfigurations.yomi-strix.config.system.build.toplevel.drvPath
 
 ---
 
-## The walker (how discovery works)
+## The module aggregates (how discovery works)
 
-`lib/walk.nix` hands every `.nix` file under `modules/` to every host. There is
-no import list. To add a module, drop a file in the right layer:
+Every layer under `modules/` carries a `default.nix` naming its own files,
+one line per file, in `LC_ALL=C` order; `modules/default.nix` imports the
+three layers and nothing else. There is no import list above the directory
+that holds the file. To add a module, drop a file in the right layer and add
+its one line to that layer's `default.nix`:
 
 - `modules/nucleus/` — core, applies unconditionally (no `mkIf`).
 - `modules/dendrites/` — opt-in features, guarded on a flag.
 - `modules/facets/` — render surfaces, read `aoide.livery` only.
 
-**Shelving opt-out:** any path containing `/_` is skipped. Prefix a
-work-in-progress file (`_wip.nix`) or dir (`_scratch/`) with `_` to hide it.
+**Shelving opt-out:** a `_`-prefixed file or directory is never listed in a
+`default.nix`. Prefix a work-in-progress file (`_wip.nix`) or dir
+(`_scratch/`) with `_` to shelve it; `modules/dendrites/_example.nix` is the
+checked-in template.
 
 ---
 
