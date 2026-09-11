@@ -3743,3 +3743,23 @@ AGENTS.md`, `pkgs/aoide/crates/server/src/mcp.rs`,
 review follow-up), `pkgs/aoide/crates/server/README.md`,
 `pkgs/aoide/crates/server/AGENTS.md`, `CONTRACTS.md` (§3, new "MCP door"
 subsection), `ingest/log.md` (this entry).
+
+## [2026-09-11] proposal | Harnox-backed Aoide secrets, review draft
+
+Root compared Harnox master bb68a3a (the private Rust core shared by Mneme
+and Melete; its `secrets` feature is an embedded encrypted-custody library
+with issued tokens, not a broker or policy service) against the Aoide
+secrets crate at 3f39628 and drafted `docs/architecture/
+HARNOX-SECRETS-PROPOSAL.md`: Aoide keeps authentication, authorization,
+approval, delivery and audit; Harnox becomes the custody implementation
+behind a typed native adapter; no running Mneme or Melete required; no
+shared encrypted files across processes. The draft names the mismatches
+that must be settled first (Harnox sanctions no tool/script read path
+while `secrets exec` releases a value to a child; error collapse to absent;
+private-dependency distribution) and restates the Aoide gaps a storage
+swap does not fix. Review-only workstream, register §9; nothing
+implemented, no secret read or migrated. A read-only critique of the seam
+and the existing consumer requirements follows.
+
+Pages touched: `docs/architecture/HARNOX-SECRETS-PROPOSAL.md` (new),
+`docs/architecture/TASK-REGISTER.md` (§9), `ingest/log.md` (this entry).

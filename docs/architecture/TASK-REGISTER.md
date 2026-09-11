@@ -369,6 +369,38 @@ Fields per entry: status · owner · depends on · evidence · next.
   secrets) and Q2 whether a fresh hook self-report upgrades unknown to
   proven (default no: a self-report is not proof). Then S1.
 
+## 9. Harnox-backed secrets custody (review-only workstream)
+
+- Status: REVIEW DRAFT (root, seq 201/202, 2026-09-11):
+  `docs/architecture/HARNOX-SECRETS-PROPOSAL.md`, root-authored, committed
+  here for register inclusion. Not an implementation or migration
+  authorization; no secret value read or migrated; no public PR or comment
+  to the Harnox maintainer.
+- The User's ask: Aoide works with Harnox (the private Rust core shared by
+  Mneme and Melete, master bb68a3a) with minimal upstream changes, Aoide
+  consuming its seams.
+- Root's conclusion: Harnox `secrets` is a feature-gated embedded custody
+  library (XChaCha20-Poly1305 file + keyfile, issued tokens,
+  `external_value` returning a zeroizing string), NOT a broker daemon or
+  policy service; Aoide stays the authority for callers, TOTP, approval,
+  audit and the shell-facing interface; secrets-only dependency plus a
+  typed native store adapter; no dependency on a running Mneme/Melete; no
+  shared multi-process encrypted files (Harnox assumes one writer).
+- Open by the draft: Harnox documents no tool/script read path while Aoide
+  `secrets exec`/socket delivery intentionally releases a credential to a
+  child, so an explicit delivery contract is needed or that use case keeps
+  its backend; an additive fallible accessor upstream (absent vs damaged);
+  private-dependency distribution for external Nix consumers. Existing
+  Aoide gaps restated (self-asserted consumer labels, packaged cross-uid
+  origin attestation, `put_gate` without caller auth, best-effort audit)
+  are NOT fixed by changing storage.
+- Owner: root (draft, Harnox research, one read-only broker audit); Fable
+  (critique of the minimal seam and the existing consumer requirements,
+  Opus read-only, scratchpad `p-harnox-critique.md`). No duplicate
+  research, no implementation.
+- Next: critique relayed to root; root discusses the delivery-contract
+  decision with the User and the maintainer; only then a phased plan.
+
 ## Carried backlog (verified status, never implicitly done)
 
 - AoideOS/Lyra portability: unverified; folds into 4(e).
