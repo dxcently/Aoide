@@ -3678,3 +3678,24 @@ points + the cross-module-invariants pointer line), `modules/dendrites/
 README.md`, `docs/BUILD.md` (the `modules/` half of "The walker" + the
 package-handoffs section's stray `modules/` comparisons), `ingest/log.md`
 (this entry).
+
+## [2026-09-11] proof | the native Claude channel wakes an idle session
+
+Root ran the doorbell proof kit (`scratchpad/doorbell-proof/`, the
+zero-dependency stdio MCP server declaring `experimental["claude/channel"]`)
+against Claude Code 2.1.260 in a disposable interactive PTY, launched with
+`--dangerously-load-development-channels server:probe`. Three observations,
+all passed: a socket-only event started a new response from an idle session
+with no terminal keystroke; an unsent composer draft survived an event and
+the response it produced; an event fired during a text-generation turn was
+answered after that turn finished, not by interrupting it. Evidence and the
+remaining acceptance (Aoide channel registration and routing, latch and
+duplicate suppression, reconnect, unavailable-channel behaviour, tool-busy,
+graphical terminal) are in `docs/architecture/CLAUDE-CHANNEL-PROOF.md`,
+root-authored, committed by the orchestrator after review. The proof covers
+the native mechanism only; a production mail doorbell is not yet proven.
+Unblocked: P-M5c-2 (channel bridge) then P-M5c-3 (doorbell prefers the
+channel).
+
+Pages touched: `docs/architecture/CLAUDE-CHANNEL-PROOF.md` (new),
+`docs/architecture/TASK-REGISTER.md` (§3), `ingest/log.md` (this entry).

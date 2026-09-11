@@ -84,12 +84,19 @@ Fields per entry: status · owner · depends on · evidence · next.
 
 ## 3. Interactive doorbell (native Claude channel idle wake)
 
-- Status: adapter-independent slice landed (979eb9d); wake proof PENDING and
-  not claimed (a fetch receipt is not a wake).
-- Owner: proof kit Fable (executor); the proof run itself is human-run in a
-  real terminal (an agent may not launch `claude`); channel bridge and ring
-  order (P-M5c-2/3) after proof.
-- Depends on: proof.
+- Status: NATIVE WAKE PROVEN (root, 2026-09-11, Claude Code 2.1.260,
+  disposable PTY, the Fable kit): idle wake with no keystroke, unsent draft
+  survived, a text-generation turn finished before the event was answered;
+  evidence `docs/architecture/CLAUDE-CHANNEL-PROOF.md` (root-authored). This
+  proves the native mechanism only; the Aoide mail doorbell over it is NOT
+  proven. Limitations recorded there: text-generation busy case only;
+  tool-busy, GUI terminal and end-to-end mail acceptance remain.
+  P-M5c-2 (channel bridge in aoide's MCP server) DISPATCHED under the
+  existing authorization, one owner; P-M5c-3 (doorbell prefers the channel)
+  follows; then onboarding, P-M5b.
+- Owner: Fable (Sonnet executor per slice, independent review); the proof
+  was root's.
+- Depends on: nothing; P-M5c-3 on P-M5c-2.
 - Evidence: proof kit built and verified offline (node stdio channel server,
   unix socket, RUN.md); claude 2.1.260 carries the hidden flag
   `--dangerously-load-development-channels <servers...>` ("shows a
@@ -97,16 +104,13 @@ Fields per entry: status · owner · depends on · evidence · next.
   gates that can skip it (managed `allowedChannelPlugins` allowlist, a remote
   "channel gate"). Prerequisite: a human at a real terminal accepts the
   startup dialog for the throwaway project.
-- Next (exact remaining step, root seq 191): the User, at a real terminal,
-  runs the kit (scratchpad `doorbell-proof/RUN.md`: `cd …/doorbell-proof/
-  project`, `claude --dangerously-load-development-channels server:probe`,
-  accept the dialog, one normal turn, go idle, then from a second terminal
-  `printf 'doorbell probe' | socat - UNIX-CONNECT:/tmp/doorbell-probe.sock`).
-  PROOF = a new turn starts with no keystroke showing the `<channel
-  source="probe">` tag; FAIL = nothing until the human types; no banner or
-  "blocked by org policy" = inconclusive, re-run. Record draft survival,
-  mid-turn non-interruption and `claude --version`. Then M5c-2, M5c-3,
-  onboarding; P-M5b after. A fetch receipt or an enrolment is never a wake.
+- Next: P-M5c-2 lands (wire shape, `channel_socket_path`, listener thread,
+  shared stdout; no command delta) → P-M5c-3 (transport choice between the
+  state gate and delivery; `interactive-composer` comes to mean interactive
+  AND no channel) → the end-to-end wake: one real interactive session
+  launched by a human with the development-channels flag, woken by a `mail
+  send` from another terminal, draft intact, recorded with session id and
+  banner. A fetch receipt or an enrolment is never a wake.
 
 ## 4. Lyra / AoideOS architecture migration (phased workstream)
 
