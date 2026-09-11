@@ -3699,3 +3699,47 @@ channel).
 
 Pages touched: `docs/architecture/CLAUDE-CHANNEL-PROOF.md` (new),
 `docs/architecture/TASK-REGISTER.md` (§3), `ingest/log.md` (this entry).
+
+## [2026-09-11] feat | the stdio MCP server bridges the native Claude channel
+
+`aoide-server`'s stdio MCP server (`mcp.rs`) now declares the Claude Code
+channel capability proven in `docs/architecture/CLAUDE-CHANNEL-PROOF.md`:
+`initialize` answers with `capabilities.experimental["claude/channel"]`
+(an empty object, serde-renamed since `/` isn't a Rust identifier) and an
+`instructions` string, both unconditional
+(`aoide-protocol`'s `wire::mcp::{ExperimentalCapabilities,
+ClaudeChannelCapability}`, `InitializeResult.instructions`). When
+`AOIDE_SESSION_ID` is set and non-empty, `serve_stdio` unlink-then-binds
+`aoide_conduct::graph::channel_socket_path(<that id>)` — a new path
+function beside `conduct_socket_path`, same `$XDG_RUNTIME_DIR/aoide/`
+convention, `channel-<id>.sock` — spawns one listener thread for the
+subprocess's lifetime, and unlinks on return. Each line received becomes
+one `notifications/claude/channel` push, `{"content": <the line>, "meta":
+{"mailbox": <name>}}` when the line names a mailbox (`{}` otherwise; meta
+keys stay bare identifiers). Stdout moved behind one `Arc<Mutex<_>>` so
+the listener thread and the request loop can never interleave a
+notification with a `tools/call` reply. Review follow-up (same day):
+channel-socket lines are read via the daemon socket's own
+`read_capped_line`/`MAX_REQUEST_LINE_BYTES` (1 MiB, widened to
+`pub(crate)`, no second cap invented) instead of an unbounded
+`BufRead::lines()`, and the socket is chmod'd `0600` right after bind,
+matching `daemon::bind_socket`'s own posture. No doorbell.rs edit and no
+command-surface change: golden snapshot unchanged. Tests: aoide-protocol
+137 passed, aoide-conduct 624 passed, aoide-server 212 passed (five new:
+one-line-becomes-one-notification, no-session-id-means-no-socket,
+notification-and-reply-never-interleave, over-the-cap-is-dropped-and-
+the-listener-survives, the-channel-socket-is-owner-only), aoide-cli
+golden unchanged.
+Landed as 3f39628 plus the review fix a3c540a (line cap, socket mode,
+head-of-line note). Reviewed FIX→fixed.
+
+Pages touched: `pkgs/aoide/crates/protocol/src/wire/mcp.rs`,
+`pkgs/aoide/crates/protocol/README.md`, `pkgs/aoide/crates/conduct/src/
+graph/conduct.rs`, `pkgs/aoide/crates/conduct/src/graph.rs`,
+`pkgs/aoide/crates/conduct/README.md`, `pkgs/aoide/crates/conduct/
+AGENTS.md`, `pkgs/aoide/crates/server/src/mcp.rs`,
+`pkgs/aoide/crates/server/src/daemon.rs` (`read_capped_line`/
+`LineReadError`/`MAX_REQUEST_LINE_BYTES` widened to `pub(crate)` for reuse,
+review follow-up), `pkgs/aoide/crates/server/README.md`,
+`pkgs/aoide/crates/server/AGENTS.md`, `CONTRACTS.md` (§3, new "MCP door"
+subsection), `ingest/log.md` (this entry).

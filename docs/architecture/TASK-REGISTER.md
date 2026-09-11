@@ -91,9 +91,16 @@ Fields per entry: status · owner · depends on · evidence · next.
   proves the native mechanism only; the Aoide mail doorbell over it is NOT
   proven. Limitations recorded there: text-generation busy case only;
   tool-busy, GUI terminal and end-to-end mail acceptance remain.
-  P-M5c-2 (channel bridge in aoide's MCP server) DISPATCHED under the
-  existing authorization, one owner; P-M5c-3 (doorbell prefers the channel)
-  follows; then onboarding, P-M5b.
+  P-M5c-2 LANDED (3f39628 + review fix a3c540a): `initialize` declares
+  `experimental["claude/channel"]` and carries `instructions`; the stdio
+  MCP server binds `$XDG_RUNTIME_DIR/aoide/channel-<AOIDE_SESSION_ID>.sock`
+  (0600, one path authority `channel_socket_path` beside
+  `conduct_socket_path`), one listener thread, each line one
+  `notifications/claude/channel` push under the daemon's 1 MiB line cap,
+  stdout behind one mutex; no doorbell change, golden unchanged; protocol
+  137, conduct 624, server 212, cli 42 green. Staged, not deployed.
+  P-M5c-3 (doorbell prefers the channel) DISPATCHED; then onboarding,
+  P-M5b.
 - Owner: Fable (Sonnet executor per slice, independent review); the proof
   was root's.
 - Depends on: nothing; P-M5c-3 on P-M5c-2.
@@ -104,8 +111,10 @@ Fields per entry: status · owner · depends on · evidence · next.
   gates that can skip it (managed `allowedChannelPlugins` allowlist, a remote
   "channel gate"). Prerequisite: a human at a real terminal accepts the
   startup dialog for the throwaway project.
-- Next: P-M5c-2 lands (wire shape, `channel_socket_path`, listener thread,
-  shared stdout; no command delta) → P-M5c-3 (transport choice between the
+- Backlog from review: `reap.rs::sweep_orphan_sockets` sweeps only
+  `session-*.sock`; a SIGKILLed MCP subprocess leaves `channel-<id>.sock`
+  behind (harmless: connect refuses, unlink-then-bind on restart).
+- Next: P-M5c-3 (transport choice between the
   state gate and delivery; `interactive-composer` comes to mean interactive
   AND no channel) → the end-to-end wake: one real interactive session
   launched by a human with the development-channels flag, woken by a `mail
