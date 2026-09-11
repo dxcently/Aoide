@@ -97,8 +97,16 @@ Fields per entry: status · owner · depends on · evidence · next.
   gates that can skip it (managed `allowedChannelPlugins` allowlist, a remote
   "channel gate"). Prerequisite: a human at a real terminal accepts the
   startup dialog for the throwaway project.
-- Next: kit ready → User runs → PROVES/FAILS recorded → M5c-2, M5c-3,
-  onboarding; P-M5b after.
+- Next (exact remaining step, root seq 191): the User, at a real terminal,
+  runs the kit (scratchpad `doorbell-proof/RUN.md`: `cd …/doorbell-proof/
+  project`, `claude --dangerously-load-development-channels server:probe`,
+  accept the dialog, one normal turn, go idle, then from a second terminal
+  `printf 'doorbell probe' | socat - UNIX-CONNECT:/tmp/doorbell-probe.sock`).
+  PROOF = a new turn starts with no keystroke showing the `<channel
+  source="probe">` tag; FAIL = nothing until the human types; no banner or
+  "blocked by org policy" = inconclusive, re-run. Record draft survival,
+  mid-turn non-interruption and `claude --version`. Then M5c-2, M5c-3,
+  onboarding; P-M5b after. A fetch receipt or an enrolment is never a wake.
 
 ## 4. Lyra / AoideOS architecture migration (phased workstream)
 
@@ -155,6 +163,8 @@ Fields per entry: status · owner · depends on · evidence · next.
   rule 7/CONTRACTS/README/`modules/README.md` (~215 lines, the 74-line
   import list is mechanical); (2) songbook exports + walker deletion +
   stronger `song-shape`; (3) root AGENTS.md task→directory map + glossary.
+- Slice 1 DISPATCHED 2026-09-11 under root seq 191 (no fresh authorization
+  blocker); evaluated only, nothing built or activated.
 - Next: root rules on the brief (Q1 `lib/pkgs.nix` stays, Q2 keep the
   vacuous check until (f), Q3 walk order, Q4 re-express `_`, Q6 skip a song
   without `rice.nix`, Q7 slice 3 in (b)); the User answers Q5 (does the
