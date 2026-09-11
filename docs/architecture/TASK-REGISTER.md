@@ -315,11 +315,37 @@ Fields per entry: status · owner · depends on · evidence · next.
   `session prune`.
 - Owner: Fable (Sonnet executor per slice, independent review); root rules
   on the proposal first.
-- Next: live-only view design brief (Opus, read-only, scratchpad
-  `p-live-view-brief.md`): where the exclusion lives (bridge first, QML
-  second per house rule 7), the unknown-liveness state, retire/dismiss,
-  the label fix, fixtures and the computer-use proof recipe; root rules;
-  then slices.
+- DESIGNED (scratchpad `p-live-view-brief.md`, Opus, 743 lines, read-only;
+  citations re-audited against 1bd160c). Decision: the roster IS the
+  active view. `state:"done"` becomes a write-through marker: every path
+  that sets it drops the record in the SAME locked write through the
+  existing `drop_sessions`; the ledger keeps history; `aoide session`
+  already excludes done and `storage/ledger.rs` already charters
+  `sessions.json` as live-only. Deletes `superseded_done_siblings` and its
+  three tests, `prune_done`'s reaped gate, the narrow second drop and
+  `data.supersededDone`. Byte-identical: one ledger line per exit via
+  `ledger_session_exit`, `session end` idempotence, resurrection (ledger
+  anchored), `session prune`, the codex reconcile, `is_session_dead` (no
+  band moves, nothing new condemns). Liveness = one pure `liveness_of`
+  reading STRUCTURE never activity: E1 own live pid (app excluded), E2 live
+  window (compositor absent = conservative), E3 kind app (re-proved each
+  pass by the lock sync), E4 inherited through a live conducted ancestor
+  (≤32 hops, never through a done hop); else Unknown, published as an
+  additive-v0 `liveness:"unknown"` field stamped change-only, never a
+  death signal. `aoide session retire --id` = the explicit close: gated,
+  ledger exit once then drop, refuses proven-live, subagent, app thread
+  and absent id, ok-noop on done; bridge verb first, card second. Card
+  ladder: done/unknown records never say "Kill terminal"; Retire row.
+  Seven slices (pure fn · stamp · ended leaves roster · `session end` drops
+  · retire + bridge + golden · QML ladder · Session-Graph page), 27
+  fixtures incl. the unknown-orphan control and the tracked-CLI reconcile
+  byte-identity; computer-use recipe read-only before/after with
+  a4dc11e8 as subject and b7ceaf45 as control (stays, reads unknown).
+- Next: root rules (Q3 retire gated, Q4 no new unknown glyph, Q5 keep
+  `session --all`, Q6 delete only the inverted assertion line); the User
+  answers Q1 the command word (default `retire`; `dismiss` is taken by
+  secrets) and Q2 whether a fresh hook self-report upgrades unknown to
+  proven (default no: a self-report is not proof). Then S1.
 
 ## Carried backlog (verified status, never implicitly done)
 
