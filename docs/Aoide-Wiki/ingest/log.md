@@ -3448,7 +3448,8 @@ Tests:
 `the_unsupported_refusal_names_the_app_as_the_server_owner`,
 `killing_a_codex_app_record_refuses_without_touching_the_app`. Verified:
 `cargo test -p aoide-conduct` test result: ok. 621 passed; 0 failed
-(executor and independent reviewer); `cargo check --workspace --all-targets` clean, the dead_code
+(executor and independent reviewer); `cargo check --workspace --all-targets`
+clean, the dead_code
 warnings for the sync are gone (one remains, `UNSUPPORTED_PLATFORM`, whose
 value no non-unix arm cites yet). Reviewed LAND.
 
