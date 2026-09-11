@@ -244,10 +244,33 @@ Fields per entry: status · owner · depends on · evidence · next.
 - RULED (root, seq 190): PARKED for scope review. A custom chunked A2A
   transfer protocol contradicts the User's simplification intent and is
   not implemented. The brief above stands as the inventory only.
-- Next: a minimal-alternative brief (Opus, read-only): external copy plus
-  mail references, or scoped use of existing transfer tooling, with the
-  limitations stated honestly; root discusses any real scope change with
-  the User. Nothing dispatched until root rules on that brief.
+- Minimal brief DONE (scratchpad `p-mail-attach-min-brief.md`, Opus, 498
+  lines, read-only). No existing end-to-end transfer to scope (no rsync/scp
+  string in `pkgs/aoide`; the one ssh is a `-L` forward; the door's methods
+  move no file). Shape: the letter carries a SIGNED manifest (envelope v2,
+  the parked layout reused, v1 letters byte-identical, v2 only with one or
+  more attachments); bytes move by `scp -B` over the operator's own ssh
+  route, one foreground attempt inside `mail send` when the destination
+  node itself accepted the deposit, otherwise a paste-ready command is
+  printed; the daemon never moves bytes; the receiver opens
+  `state/mail/attachments/<msgid>/` 0700 on filing and answers
+  `mailDeposit` with that `inbox` path (one new wire field); `mail
+  read`/`show` derive available|missing|corrupt at read time by
+  symlink_metadata, size, hash (no sidecar, no stored state, never
+  "fetched"); 64 MiB per file and 16 files as constants, no config key,
+  no quota; direct-edge only, never via a hub; `rm_older_than` prunes the
+  dir. Limitations stated: one attempt, no retry/resume/progress, ssh
+  credentials are the operator's not pairing's, the inbox is a convention
+  not a wall, a pre-v2 peer refuses the whole letter. Five slices: ATT-0
+  list flag kind in the shared parser (`--attach a --attach b` last-wins
+  fix), ATT-1 envelope v2, ATT-2 inbox + verify + prune, ATT-3 `--attach`
+  and honest reading, ATT-4 the `inbox` field and the scp spawn (the only
+  slice that spawns anything; ATT-0..3 is a coherent stop).
+- Next: root rules (Q1 land ATT-0..3 or stay parked, Q2 the `inbox` field,
+  Q4 v2 refusal on old peers, Q6 ATT-0 first); the User answers Q3
+  (constants, no config key), Q5 (aoide spawns scp once vs only prints it),
+  Q7 (the slot; the register's "before migration (a)" is already past).
+  Nothing dispatched until then.
 
 ## 8. Done-record lifecycle (killed/ended agents stay on the conductor)
 
