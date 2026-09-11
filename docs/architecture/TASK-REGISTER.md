@@ -124,7 +124,8 @@ Fields per entry: status · owner · depends on · evidence · next.
   `docs/BUILD.md:3-5` Wave-0 rule is stale under this workstream.
 - Authorization: the User authorized the flake/lib/tests/nucleus edits for
   this workstream under bounded owners (root ruling seq 180); runtime
-  activation stays the User's separate gate. Slice 1 IN PROGRESS.
+  activation stays the User's separate gate. Slice 1 LANDED 0448974
+  (`overlays.default`), slice 2 LANDED (`packages.lyra`); slices 3-5 next.
 - Owner: Fable (Opus design per phase).
 - Depends on: 1 for the runtime seams; docs/glossary/Mneme-optional changes
   accompany each phase, never trail it.

@@ -99,10 +99,11 @@
           # `aoide`, never as `default` — see pkgs/aoide/default.nix's
           # `paint` argument and flake.nix's `aoide-static` package.
           aoide-static = inputs.aoide.packages.${system}.aoide-static;
+          lyra = inputs.aoide.packages.${system}.lyra;
         in
         discovered
         // {
-          inherit aoide aoide-static;
+          inherit aoide aoide-static lyra;
           default = aoide;
         }
       );

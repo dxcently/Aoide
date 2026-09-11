@@ -3530,3 +3530,22 @@ Pages touched: `pkgs/aoide/crates/conduct/AGENTS.md` (invariant "a desktop
 thread enrols only on positive ownership evidence"),
 `pkgs/aoide/crates/conduct/README.md` (`graph/codex_app.rs` bullet),
 `docs/architecture/TASK-REGISTER.md` (§2), `ingest/log.md` (this entry).
+
+## [2026-09-10] feat | `packages.lyra` names the paint binary
+
+Task 4 phase (a) slice 2 (`p-lyra-migration-a-brief.md` §2.2-2.4), on
+slice 1's `overlays.default`. `pkgs/aoide/flake.nix` gains
+`packages.<sys>.lyra = aoide.rice`, and the root flake re-exports it so
+`.#lyra` resolves — a consumer names `lyra` instead of writing the
+`aoide^out,rice` selector. Proof: `.#packages.x86_64-linux.lyra.outPath`
+and `.#packages.x86_64-linux.aoide.rice.outPath` are byte-identical;
+`nix build .#lyra` installs `bin/lyra`; `nix flake check --no-build` on
+the core flake passes; the fmt and nix-lint checks pass; the yomi-strix
+toplevel still evaluates. Flag: the standalone
+`./pkgs/aoide#packages.x86_64-linux.lyra` resolves elsewhere — the same
+nixpkgs lock drift the slice 1 entry records. Reviewed LAND (one comment
+line citation corrected).
+
+Pages touched: `docs/architecture/PACKAGE-LAYOUT.md` (the `lyra` row, the
+`packages.<sys>.lyra` contract line, the "deliberately not exported"
+list), `ingest/log.md` (this entry).

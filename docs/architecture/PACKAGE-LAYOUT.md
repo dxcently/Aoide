@@ -415,7 +415,8 @@ pkgs/aoide/flake.nix
 │   ├── aoide            multi-output derivation
 │   │     .out  -> bin/aoide, bin/aoided
 │   │     .rice -> bin/lyra
-│   └── aoide-static     musl core pair
+│   ├── aoide-static     musl core pair
+│   └── lyra             = aoide.rice
 ├── apps.<sys>.{aoide,aoided}
 ├── overlays.default      final: _prev: { aoide = …; }
 ├── checks.<sys>.default    = the package build
@@ -429,12 +430,30 @@ The stability contract — what a consumer may rely on staying true:
   names are the contract; the count is not.
 - `packages.<sys>.aoide-static` is the core pair only: no `rice`
   output, no test phase.
+- `packages.<sys>.lyra` is the `rice` output of `packages.<sys>.aoide`
+  — same derivation, never a second build.
 - `overlays.default` sets exactly one attribute, `aoide`, to the same
   derivation `packages.<sys>.aoide` names. One build, never two — both
   `lib/mkHost.nix` and `tests/vm-boot.nix` apply it instead of each
   carrying their own copy of the injection lambda.
 - `checks`, `devShells` and `apps` are development surfaces, not a
   consumer contract.
+
+Deliberately not exported here, so none of these get added on
+assumption:
+
+- `homeModules.*` — no consumer exists; the one named consumer beyond
+  this repo (Osaka, dxflake) is NixOS.
+- `nixosModules.<per-unit>` — one name suffices while every unit
+  self-gates; splitting stays reversible.
+- an `aoide.package` option — nothing overrides the package, and
+  `overlays.default` already answers that.
+- the door/secrets/usage/pair-watch units — still AoideOS-side.
+- `songbookManifest` / `aoideOptions` from the core flake — both need
+  `song/` and `modules/`, which this flake never walks.
+- a `lyra` flake, or any Quickshell/rice export — `lyra` is paint, per
+  root `AGENTS.md`.
+- removal of `lib/walk.nix` — the walker stays.
 
 ## Open questions (each tagged with when it must be settled)
 
