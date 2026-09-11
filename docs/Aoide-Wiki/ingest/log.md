@@ -3606,3 +3606,32 @@ edit there rebuilds the binaries — slice 5 filters it out. Reviewed LAND.
 Pages touched: `pkgs/aoide/module/{README,AGENTS}.md`,
 `modules/nucleus/README.md`, `docs/architecture/PACKAGE-LAYOUT.md`,
 `ingest/log.md` (this entry).
+
+## [2026-09-11] proof | a stranger's flake runs aoided from the core exports alone
+
+Task 4 phase (a) slice 5, the acceptance of the whole phase. A throwaway
+consumer flake outside the repo (scratchpad `consumer/flake.nix`: a
+`path:` input on `pkgs/aoide`, `aoide.nixosModules.default`,
+`aoide.enable`, `aoide.user = "stranger"`, dummy boot/fs lines) evaluates
+with no `modules/` import and no quickshell/hyprland/nvf input:
+`system.build.toplevel.drvPath` =
+`/nix/store/hrn6j9ni0jdr7yibj4zz176273fsdq0c-nixos-system-nixos-26.11.20260910.8ce4ef6.drv`;
+`aoide.root` = `/home/stranger/.aoide`; `aoided.wantedBy` =
+`["default.target"]`; `aoide.sessionTarget` = `default.target`;
+`pkgs.aoide.outPath` =
+`/nix/store/lf6xk41qzbwwgrbx8gs72gnq6d6f7l6w-aoide-0.0.22`; tmpfiles = the
+four `~/.aoide` rules under `/home/stranger`. The design brief's dummy
+root filesystem lacked `fsType`, which nixpkgs' zfs module demands; the
+fixture got `fsType = "ext4"`, the exports needed nothing. Same commit:
+`pkgs/aoide/default.nix` filters the top-level `module/` out of the
+package `src`, so a doc edit there leaves the `aoide` store path
+unchanged (proved by an edit-and-revert). G1-G4 green (toplevel
+`/nix/store/wzs21qkb80wpaskjb4612q0qb0fpjj57-…`, not activated; the first
+G4 attempt failed on a sandbox-only flake in
+`cli/tests/graph_residency_p_d6.rs`, "graph.json: No such file", green on
+retry — backlog). Reviewed FIX→fixed (stale evidence claim, duplicated
+snippet).
+
+Pages touched: `docs/architecture/PACKAGE-LAYOUT.md` ("Consumer proof",
+the src-filter clause), `pkgs/aoide/module/{README,AGENTS}.md`,
+`ingest/log.md` (this entry).

@@ -128,7 +128,9 @@ Fields per entry: status · owner · depends on · evidence · next.
   (`overlays.default` 0448974, `packages.lyra` 4415f62, `nixosModules.default`
   with the six core options and the new `pkgs/aoide/module/` plugin dir,
   the aoided unit + tmpfiles + core session vars behind `aoide.sessionTarget`);
-  slice 5 (stranger consumer proof + `module/` out of the package src) next.
+  slice 5 LANDED (stranger consumer proof: five evals green with no AoideOS
+  import; `module/` filtered out of the package src). PHASE (a) COMPLETE;
+  latest toplevel `/nix/store/wzs21qkb80wpaskjb4612q0qb0fpjj57-…` not activated.
 - Owner: Fable (Opus design per phase).
 - Depends on: 1 for the runtime seams; docs/glossary/Mneme-optional changes
   accompany each phase, never trail it.
@@ -148,8 +150,8 @@ Fields per entry: status · owner · depends on · evidence · next.
   or walker; Mneme optional. Test: one host edit finds imports and the right
   check in short hops without rice/protocol docs; a widget edit finds song
   contracts without the Nix lanes; a plain checkout works without Mneme.
-- Next: slice 1 review and landing, then slices 2–5 one Sonnet executor each
-  with independent review; phase (b) brief after (a) lands.
+- Next: phase (b) brief (explicit `default.nix`/aggregates, walker removal);
+  the User activates a build when ready.
 
 ## 5. Pairing windows (enrollment windows replace the old ceremony)
 

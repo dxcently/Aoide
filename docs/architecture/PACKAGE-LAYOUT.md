@@ -447,9 +447,20 @@ The stability contract — what a consumer may rely on staying true:
   `lib/mkHost.nix` and `tests/vm-boot.nix` read the overlay through it
   instead of each carrying their own copy of the injection lambda, and
   `modules/nucleus/aoided.nix` sets `aoide.sessionTarget` to
-  `graphical-session.target` when the quickshell facet is on.
+  `graphical-session.target` when the quickshell facet is on. Editing
+  `module/` never rebuilds the binaries: `pkgs/aoide/default.nix`'s
+  `src` filter drops the top-level `module/` directory, so the
+  package's store path moves only on a crate-tree change.
 - `checks`, `devShells` and `apps` are development surfaces, not a
   consumer contract.
+
+**Consumer proof.** A stranger's flake runs `aoided` with no AoideOS
+import — no `modules/` import, no `inputs.quickshell`/`hyprland`/`nvf`
+in specialArgs; the five-line shape lives in `pkgs/aoide/module/README.md`.
+Acceptance evidence (`system.build.toplevel.drvPath`, `aoide.root`,
+`systemd.user.services.aoided.wantedBy`, `pkgs.aoide.outPath`,
+`systemd.user.tmpfiles.rules`) is recorded in
+`docs/Aoide-Wiki/ingest/log.md`.
 
 Deliberately not exported here, so none of these get added on
 assumption:
