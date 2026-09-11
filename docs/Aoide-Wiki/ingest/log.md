@@ -3505,3 +3505,28 @@ in `docs/BUILD.md`), landed.
 Pages touched: `docs/architecture/PACKAGE-LAYOUT.md` (new "Flake outputs"
 section), `docs/BUILD.md` (the Wave-0 rule corrected in two places),
 `ingest/log.md` (this entry).
+
+## [2026-09-10] feat | a desktop Codex thread enrols only on positive ownership evidence
+
+P-CX-2b, root ruling seq 180: the "one app-server owns every held lock"
+rule is gone. `lock_holder` returns the app-server whose own
+`/proc/<pid>/fd` table holds the lock, or nothing — one server or many —
+and `codex_app_threads` skips a held lock with no proven owner, so a
+terminal `codex` thread never becomes a `kind:"app"` record and never
+focuses the desktop window; `CodexThread.pid` is `u32` (a thread without
+an owner is not a thread), the lock path is canonicalized before the fd
+compare, the "owner ambiguous" audit line is deleted, and `resolved_cwd`
+carries the once-per-new-id walk. Tests: one server with no fd owns
+nothing; the fd holder is the owner (through a symlinked parent too); the
+mixed CLI+desktop held-lock proof drives `lock_holder` and the reconcile
+with two throwaway locks, leaving the tracked CLI record byte-identical.
+Live evidence (read-only): the one held lock is open in exactly one
+process, the `codex … app-server` child of the Electron main. conduct 623
+green; reviewed LAND. Flag: `cargo clippy -D warnings` fails crate-wide
+under the dev shell's clippy 0.1.97 on pre-existing lints (none in
+`codex_app.rs`); a clippy-clean pass is backlog.
+
+Pages touched: `pkgs/aoide/crates/conduct/AGENTS.md` (invariant "a desktop
+thread enrols only on positive ownership evidence"),
+`pkgs/aoide/crates/conduct/README.md` (`graph/codex_app.rs` bullet),
+`docs/architecture/TASK-REGISTER.md` (§2), `ingest/log.md` (this entry).

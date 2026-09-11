@@ -50,10 +50,16 @@ Fields per entry: status · owner · depends on · evidence · next.
   refusal, kill refuses "the desktop app owns this thread's process", CODEX_HOME
   test floor; conduct 621 green, reviewed LAND). In-crate work COMPLETE; the
   live two-thread desktop check after activation is the User's gate.
-- Review flag for the User: with ONE app-server running every held lock is
-  attributed to it without a per-lock check (brief §3 rule); the brief's open
-  question §6.1 leaned the other way (enrol only locks an app-server holds).
-  Decide before P-CX-3 wires the call site or accept the §3 rule.
+- RULED (root, seq 180): the brief §3 "one app-server owns every held lock"
+  rule is rejected; a desktop thread enrols only on positive ownership
+  evidence (an app-server fd holding the lock), a tracked CLI record on the
+  same id is never touched, a lock with no proven owner gets no app record.
+  P-CX-2b LANDED: `lock_holder` is the fd match or nothing, `CodexThread.pid`
+  is `u32` so an unowned lock enrols nothing, the lock path is canonicalized,
+  plus the mixed CLI+desktop held-lock test (conduct 623 green, reviewed LAND).
+  Live evidence (read-only, 2026-09-10): the one held lock is open in exactly
+  one process, the `codex … app-server` child of the Electron main. Build 3
+  follows the fix, no activation.
 - Owner: Fable (one Sonnet executor per slice, independent review).
 - Depends on: nothing; cargo serialized with other work.
 - Evidence: standing verdict "current adapter unsupported; ownership of the
@@ -111,9 +117,9 @@ Fields per entry: status · owner · depends on · evidence · next.
   `modules/` still needs that input; `lyra onboard`/widget regen shell out to
   the ROOT flake (`onboard.rs:137`, `widgets.rs:213`), parked for (c)/(f);
   `docs/BUILD.md:3-5` Wave-0 rule is stale under this workstream.
-- GATE: slices 1–2 edit `flake.nix`/`lib/`/`tests/` (BUILD.md Wave-0 rule),
-  slices 3–5 edit `modules/nucleus/` (house rule 1, upstream-merge only).
-  No dispatch until the User sanctions each explicitly.
+- Authorization: the User authorized the flake/lib/tests/nucleus edits for
+  this workstream under bounded owners (root ruling seq 180); runtime
+  activation stays the User's separate gate. Slice 1 IN PROGRESS.
 - Owner: Fable (Opus design per phase).
 - Depends on: 1 for the runtime seams; docs/glossary/Mneme-optional changes
   accompany each phase, never trail it.
@@ -133,8 +139,8 @@ Fields per entry: status · owner · depends on · evidence · next.
   or walker; Mneme optional. Test: one host edit finds imports and the right
   check in short hops without rice/protocol docs; a widget edit finds song
   contracts without the Nix lanes; a plain checkout works without Mneme.
-- Next: the User sanctions slice 1 (or not); then one Sonnet executor per
-  slice with independent review; phase (b) brief after (a) lands.
+- Next: slice 1 review and landing, then slices 2–5 one Sonnet executor each
+  with independent review; phase (b) brief after (a) lands.
 
 ## 5. Pairing windows (enrollment windows replace the old ceremony)
 
