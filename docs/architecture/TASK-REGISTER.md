@@ -35,8 +35,13 @@ Fields per entry: status · owner · depends on · evidence · next.
   wording — cosmetic, not blocking; (2) `setsid CMD &` yields the launcher
   pid, not the daemon's — brief fixture note; (3) build 2 predates P-CX-2/3
   (fcc7514, 30ee7c6), so the desktop lane's live check needs a build 3.
-- Next: the User activates build 2 (QoL) or asks for build 3 (QoL + desktop
-  Codex); then desktop acceptance on the real roster.
+- Build 3 (2ccb9bc: QoL + P-CX-1/2/3 + P-CX-2b + migration slice 1):
+  `/nix/store/vnsjq6yhfdp3q2a81xi1lc8jd0zkvbx9-nixos-system-yomi-strix-26.11.20260907.dc5d91f`
+  exit 0, not activated; its `sw/bin/aoide` carries the P-CX code (the
+  `codex-app-unsupported` string present, the deleted "owner ambiguous"
+  line absent). Live runtime unchanged.
+- Next: the User activates build 3 (build 2 = QoL only; build 3 = QoL +
+  desktop Codex); then desktop acceptance on the real roster.
 
 ## 2. Desktop Codex / ChatGPT window association
 
@@ -71,8 +76,8 @@ Fields per entry: status · owner · depends on · evidence · next.
   app-server is a child of the Electron main, `~/.codex/ipc/ipc.sock` has no
   holder, thread→window bindings are opaque, so exact-task navigation is
   never claimed and no codex profile is registered.
-- Next: live check with the app open on two
-  threads is the User's gate.
+- Next: build 3 carries P-CX-1/2/3 + 2b; the live check with the app open on
+  two threads after activation is the User's gate.
 
 ## 3. Interactive doorbell (native Claude channel idle wake)
 
