@@ -204,7 +204,39 @@ Fields per entry: status · owner · depends on · evidence · next.
   symlink following on either side), size limit (default and override),
   cleanup of a partial inbox dir, transport-unavailable behaviour, and that
   `mail read` never reports an attachment fetched from the letter alone.
-- Next: root places it; then an Opus brief; nothing dispatched before.
+- Brief: DONE (scratchpad `p-mail-attach-brief.md`, Opus, 482 lines, read-only).
+  No rsync exists in the repo, so bytes ride the A2A door in 512 KiB chunks
+  (open question for root); envelope v2 only with attachments; receiver state
+  in a `state/mail/attachments.json` sidecar; `attach` as a fourth closed
+  capability; quota options; rename-publish after hash verify; 7 slices.
+- Next: root rules on the brief (open questions 1, 2, 3, 6, 7); implementation
+  waits for that ruling.
+
+## 8. Done-record lifecycle (killed/ended agents stay on the conductor)
+
+- Status: ANALYSED (scratchpad `p-done-lifecycle-brief.md`, Opus, read-only);
+  cause and minimal proposal sent to root; nothing dispatched, roster never
+  mutated by an agent. Root seq 182 owns the ask.
+- Cause: `reap.rs::superseded_done_siblings` groups by `windowAddress` and
+  skips empty ones, so a windowless (hosted-native) `done` record joins no
+  group; liveness judges only non-`done` records; reap-time `prune_done` runs
+  only when something was reaped. `aoide session prune` already clears the
+  `done` record; no desktop surface exposes prune (bridge verbs: kill,
+  undying, project, createproject, editproject). A done card's kill label
+  reads "Kill terminal <host>" for an action `kill_target` refuses.
+- Proposal (no retention widening): one pure collector for windowless
+  `done` agent records under a verified live controller (parent in the
+  roster, conductable, not done, live pid, at least one not-done agent
+  child), folded into the existing superseded-done drop; app threads and
+  subagents excluded by `is_agent_kind`; roster-only, ledger untouched;
+  bridge gains a `prune` verb and the done card says "Prune". A parentless
+  idle orphan gets nothing automatic; the manual path is `session end` then
+  `session prune`.
+- Owner: Fable (Sonnet executor per slice, independent review); root rules
+  on the proposal first.
+- Next: root's ruling; then slice 1 (collector + 12 fixtures), slice 2
+  (bridge prune verb + card label), slice 3 (wording/docs); live proof is
+  read-only before/after with the orphan as the no-widening control.
 
 ## Carried backlog (verified status, never implicitly done)
 
