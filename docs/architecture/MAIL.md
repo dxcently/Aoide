@@ -487,57 +487,84 @@ either; liveness, not a raw count, is what the ringer checks before
 enrolling on a petname match.
 
 Ringing a wrap means more than finding it armed. A ring targets the
-**wrap**, a conducted, headless session with a live control socket
-(`is_conductable_now`), but only actually writes once the wrap's
-**hook-fed agent child** — the session whose `parentSessionId` is the
-wrap and whose `agent` names a registered harness profile, the same
-"hooked at all" signal `agent_profile` answers `None` for on an
-unrecognized one — is sitting at the prompt (`stopped` or `idle`,
-`aoide_protocol::state::canonical_state`). Three ways a target is
-never written to, in order: no session record at all for the recorded
-reader id; recorded but not conductable right now (including a control
-socket file that has since vanished); conductable but **not
-headless** — an interactive composer, someone's own terminal, is never
-auto-submitted into, full stop, until a control-layer guard for that
-case exists (a residual this document leaves open). A conductable,
-headless wrap with no hook-fed child at all has no readiness signal and
-is skipped the same way. A hook-fed child that IS there but mid-turn
-(`working`, `awaiting`, or its own `done` not yet settled) **defers**:
-the latch stays armed, untouched, and the next trigger — another
-letter, or this same reader's own Stop hook firing once its turn ends —
-tries again. The filing session's own wrap is never a candidate for its
-own letter, not even as a skip or a defer: it is excluded before the
-selection ever runs.
+**wrap**, a conducted session with a live control socket
+(`is_conductable_now`; headless and interactive wraps alike carry one),
+but only actually writes once the wrap's **hook-fed agent child** — the
+session whose `parentSessionId` is the wrap and whose `agent` names a
+registered harness profile, the same "hooked at all" signal
+`agent_profile` answers `None` for on an unrecognized one — is sitting
+at the prompt (`stopped` or `idle`, `aoide_protocol::state::
+canonical_state`). Three ways a target is never written to, in order:
+no session record at all for the recorded reader id; recorded but not
+conductable right now (including a control socket file that has since
+vanished); conductable but with no hook-fed child at all, so there is
+no readiness signal to read (`no-readiness-signal`). A hook-fed child
+that IS there but mid-turn (`working`, `awaiting`, or its own `done`
+not yet settled) **defers**: the latch stays armed, untouched, and the
+next trigger — another letter, or this same reader's own Stop hook
+firing once its turn ends — tries again. The filing session's own wrap
+is never a candidate for its own letter, not even as a skip or a
+defer: it is excluded before the selection ever runs.
 
-A write, once a target clears every check, is **raw injection** — the
-same low-level delivery `aoide send` itself uses
-(`write_delivery`), but with no gate, no pending queue, no provenance
-prefix, and no title rename; the fixed line is the only thing that ever
-reaches the socket:
+Only once a target clears every gate above does transport selection
+run. A live Claude Code channel socket (`channel_socket_path`, the
+per-session MCP push a stdio session binds for itself) outranks the
+wrap's own PTY control socket for **any** wrap that has one,
+interactive or headless alike: the channel is a one-way push into the
+wrap's own MCP subprocess, never a keystroke, so there is no half-typed
+composer line it could ever clobber. The connect is the only test that
+matters — a stale socket *file* left behind by an MCP subprocess that
+died without unlinking it refuses the connect and falls straight
+through, never a stat-only check that would wrongly trust a dead file.
+Only once the channel is absent does headlessness matter at all: a
+headless wrap with no channel falls back to the PTY exactly as before
+P-M5c-3; an interactive wrap with no channel has no transport left and
+is **skipped** `interactive-composer` — the same string as before, now
+meaning "interactive and no live channel" rather than simply
+"interactive". A raw keystroke still auto-submitted into someone's own
+terminal remains refused, full stop, with no control-layer guard for
+that case (a residual this document still leaves open); what P-M5c-3
+adds is a second transport that never types a keystroke at all, so an
+interactive wrap running a channel is no longer forced through that
+guard to be reached.
+
+A write, once a target clears every check and wins a transport, is
+never `session_send` and never gated a second time. Over the
+**channel**, it is a single write of the fixed line plus a trailing
+newline, flushed, and nothing else — no submit key, ever: the MCP
+subprocess on the far end treats the push itself as the delivered
+turn, so a keystroke would be a duplicate, not a completion. Over the
+**PTY**, it is the same **raw injection** `aoide send` itself uses
+(`write_delivery`) — no gate, no pending queue, no provenance prefix,
+no title rename — followed, after the short keystroke delay every
+conducted delivery already uses, by one submit keystroke, **the
+child's own harness key, never the wrap's** (a `kimi` child under a
+`claude` wrap submits with `\r`, not `\n`). Either transport, the fixed
+line is the only thing that ever reaches the socket:
 
 ```
 [aoide mail] new mail for <name> — aoide mail read --for <name>
 ```
 
-then, after the short keystroke delay every conducted delivery already
-uses, one submit keystroke — **the child's own harness key, never the
-wrap's** (a `kimi` child under a `claude` wrap submits with `\r`, not
-`\n`). A nudge that sits unsent in a prompt is a nudge no one saw, so
-every ring is submitted, never left typed. An invalid `<name>` never
-rings at all — checked again at the ring, on top of the check filing
-already made, before the ring's own lock is even taken; conduct's own
-sanitizer separately strips CR/LF from the line regardless. No byte of
-the letter itself ever rides the nudge — the ring's only input is the
-mailbox name.
+A nudge that sits unsent in a prompt is a nudge no one saw, so every
+PTY ring is submitted, never left typed; a channel ring needs no submit
+at all, since the push itself already stands as delivered. An invalid
+`<name>` never rings at all — checked again at the ring, on top of the
+check filing already made, before the ring's own lock is even taken;
+conduct's own sanitizer separately strips CR/LF from the line
+regardless. No byte of the letter itself ever rides the nudge — the
+ring's only input is the mailbox name.
 
 A successful write is followed, in order, by a **delivery receipt**
 (`file_receipt`, filed from `<name>` to the target wrap's session id —
 proof the nudge bytes were written to the wrap's socket, never that
 anyone read them) and the **latch stamp** (`stamp_rung`, raising the
 reader's `rung` to the arming letter's `seq`). The stamp follows the
-write, never precedes it: a socket write that fails leaves the reader
-armed, so a target that was merely unreachable for a moment is not
-silently skipped forever. The whole select → inject → stamp sequence
+write, never precedes it: a write that fails — connect or write
+itself, channel or PTY alike, reported `write-failed` either way —
+leaves the reader armed, so a target that was merely unreachable for a
+moment is not silently skipped forever. The whole select → inject →
+stamp sequence
 for one name runs under one cross-process critical section — a
 dedicated `.ring.lock` file, held across the real socket I/O and the
 submit delay, **never** the ordinary stage lock (`try_stage_lock`),
