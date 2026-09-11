@@ -11,8 +11,10 @@ Fields per entry: status · owner · depends on · evidence · next.
 
 ## 1. Session QoL (menu actions, multi-root projects, kill resolution)
 
-- Status: implementation and combined build COMPLETE; live acceptance
-  PENDING. Not released; the interactive doorbell is not fixed.
+- Status: implementation and combined build COMPLETE; isolated pre-activation
+  acceptance of build 2 PASSED (2026-09-10, third run; runs 1–2 failed on the
+  brief's own shell wrapper, not the build). Live desktop acceptance PENDING
+  the User's activation. Not released; the interactive doorbell is not fixed.
 - Owner: Fable (integration); root reviews.
 - Depends on: the User activating the built system.
 - Evidence: commits through 61afea2 on `main` (pushed); `cargo test` conduct
@@ -20,11 +22,21 @@ Fields per entry: status · owner · depends on · evidence · next.
   `/nix/store/8qbyy7xynz3i9hpa7jlm8xh1j4b8ci2z-nixos-system-yomi-strix-26.11.20260907.dc5d91f`
   exit 0, not activated. Kill-scope label (db862b2) matches
   `conduct::graph::actions::kill_target`.
-- Next: pre-activation acceptance against the built artifact under an
-  isolated `AOIDE_ROOT`/`XDG_RUNTIME_DIR` with throwaway process fixtures
-  (kill from a hosted record, sessionAction reply/timeout/error, project
-  create/edit); then the User activates; then desktop acceptance on the real
-  roster.
+- Acceptance evidence (build-2 binaries, throwaway root, live socket inodes
+  identical before/after): both daemons bind; two `conduct` wraps enrol;
+  `project add/list/edit/remove` per schema (`edit` REPLACES roots; bad path
+  → `invalid-path` usage); `session project --id X --project NAME` assigns;
+  shellbridge `sessionaction`: project reply ok:true, kill on an unknown id
+  ok:false "session is not registered locally", malformed undying → no reply
+  (the QML timeout case), kill on a wrap ok:true → SIGTERM, sleep dead, record
+  gone after reap; CLI `session kill` on a wrap → SIGTERM, dead; a second
+  kill and an unknown id both say "session is not registered locally".
+- Findings: (1) a reaped session and a never-existing id share one refusal
+  wording — cosmetic, not blocking; (2) `setsid CMD &` yields the launcher
+  pid, not the daemon's — brief fixture note; (3) build 2 predates P-CX-2/3
+  (fcc7514, 30ee7c6), so the desktop lane's live check needs a build 3.
+- Next: the User activates build 2 (QoL) or asks for build 3 (QoL + desktop
+  Codex); then desktop acceptance on the real roster.
 
 ## 2. Desktop Codex / ChatGPT window association
 

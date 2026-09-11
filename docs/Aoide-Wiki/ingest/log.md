@@ -3463,3 +3463,26 @@ sites), `pkgs/aoide/crates/conduct/AGENTS.md` (the refuse-by-name
 invariant), `docs/architecture/CODEX-INTEGRATION.md` (phase 1: association
 and identity met in code, lifecycle/hooks/transport explicitly not),
 `ingest/log.md` (this entry).
+
+## [2026-09-10] proof | build 2 passes the isolated session-QoL acceptance
+
+The pre-activation acceptance of the combined build
+(`/nix/store/8qbyy7xynz3i9hpa7jlm8xh1j4b8ci2z-nixos-system-yomi-strix-…`)
+ran against its `aoide`/`aoided`/`lyra` store binaries in a throwaway root
+(`AOIDE_ROOT`, `AOIDE_STATE_DIR`, `AOIDE_STAGE_DIR`, `AOIDE_AUDIT_LOG`,
+`XDG_RUNTIME_DIR`, `AOIDE_DAEMON_SOCKET` all under `/tmp/aoide-accept-iso`),
+with the live socket inodes recorded before and after and found identical.
+Two `conduct`-wrapped `sleep` fixtures enrolled; `project add`/`list`/
+`edit`/`remove` and `session project --id … --project …` behaved per
+`schema --json`; the shellbridge `sessionaction` wire answered a project
+change with `ok:true`, an unknown session with `ok:false`, a malformed
+action with silence (the menu's timeout case) and a kill with SIGTERM
+that left the sleep dead and the record gone after reap; the CLI
+`session kill` did the same and refuses a reaped or unknown id with
+"session is not registered locally". Two earlier runs failed at daemon
+start through the brief's own shell wrapper (an exported function under
+`setsid` sees an empty root variable), not through the build. Not
+activated, not released: the live roster check waits on the User.
+
+Pages touched: `docs/architecture/TASK-REGISTER.md`, `ingest/log.md`
+(this entry).
