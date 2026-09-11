@@ -3635,3 +3635,46 @@ snippet).
 Pages touched: `docs/architecture/PACKAGE-LAYOUT.md` ("Consumer proof",
 the src-filter clause), `pkgs/aoide/module/{README,AGENTS}.md`,
 `ingest/log.md` (this entry).
+
+## [2026-09-11] feat | `modules/` becomes an explicit aggregate
+
+Task 4 phase (b) slice 1 (`p-lyra-migration-b-brief.md` "Slice 1"). Four new
+`default.nix` files (`modules/default.nix`, `modules/{dendrites,facets,
+nucleus}/default.nix`) name every file in their own directory, one line
+each, in `LC_ALL=C` order — the same order `lib.filesystem.
+listFilesRecursive` produced, so the module system merges the 39 leaves in
+exactly the prior sequence. `lib/mkHost.nix`, `lib/options.nix`, `tests/
+vm-boot.nix` hand `[ ../modules ]` to the module system instead of a walked
+list; `lib/walk.nix` stays — it still discovers `song/songbook/*/rice.nix`
+(sites 2/5/6/7), which slice 2 retires. House rule 7 is reworded (root
+`AGENTS.md`, `CONTRACTS.md §0`): a capability enters as one file named once
+in its own directory's `default.nix`, or found by the songbook's one typed
+scan — never a registry above the directory that holds it. New
+`modules/README.md` states the tree/aggregate/order contract once for all
+three layers. Proof: toplevel drvPath byte-identical
+(`/nix/store/xqwp1mydgxzp4wdjl167f9ync755m9hg-nixos-system-yomi-strix-
+26.11.20260907.dc5d91f.drv`), `aoideOptions` unchanged at 153 entries
+(sha256 `6efd316591249720d1120a5ce2e579e34c2df21bbe9ce1c4657b1c908503c347`),
+the `vm-boot` drvPath MOVED (`q9bl91wh…` → `y2809m8a…`, never built — needs
+KVM): same 98-derivation package set both times, ordering only — nixpkgs
+collects imports breadth-first, so the tree now merges as one unit three
+levels deep instead of flat at depth one, and the VM's own inline
+`environment.systemPackages = [ pkgs.jq ]` interleaves with the tree's
+contributions after them instead of before. Accepted as the contract, not
+re-flattened. G2 (fmt) and G3 (nix-lint) green after the commit.
+
+Landed as ef8cc1c plus the review fix 4d46d5e (stale walker claims for
+`modules/` in `CONTRACTS.md` and `docs/BUILD.md`; the order boundary stated in
+`modules/README.md`). Reviewed FIX→fixed.
+
+Pages touched: `AGENTS.md` (house rule 7, the layering block's
+`modules/AGENTS.md` line), `CONTRACTS.md` (§0, §2's dendrite-shape and
+package-shape sections, the songbook self-registration line), `README.md`
+(§1 architecture prose + the `lib/` tree line), `modules/README.md` (new,
+plus the breadth-first order-boundary paragraph added on review), `modules/
+AGENTS.md` ("Walk discipline" → "Aggregate discipline", `_`-prefix
+re-expressed), `modules/{dendrites,facets,nucleus}/AGENTS.md` (extension
+points + the cross-module-invariants pointer line), `modules/dendrites/
+README.md`, `docs/BUILD.md` (the `modules/` half of "The walker" + the
+package-handoffs section's stray `modules/` comparisons), `ingest/log.md`
+(this entry).

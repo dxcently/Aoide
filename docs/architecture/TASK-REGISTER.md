@@ -163,8 +163,17 @@ Fields per entry: status · owner · depends on · evidence · next.
   rule 7/CONTRACTS/README/`modules/README.md` (~215 lines, the 74-line
   import list is mechanical); (2) songbook exports + walker deletion +
   stronger `song-shape`; (3) root AGENTS.md task→directory map + glossary.
-- Slice 1 DISPATCHED 2026-09-11 under root seq 191 (no fresh authorization
-  blocker); evaluated only, nothing built or activated.
+- Slice 1 LANDED (ef8cc1c + review fix 4d46d5e, root seq 191): four
+  aggregates, three call sites, rule 7 reworded with the songbook carve-out,
+  `modules/README.md` new; yomi-strix toplevel drvPath byte-identical,
+  `aoideOptions` 153 unchanged, fmt + nix-lint green. Finding, accepted as
+  the contract: nixpkgs collects imports breadth-first (`filterModules` is
+  a `genericClosure`), so the tree's leaves keep their relative order but
+  merge as one unit at their import depth after every depth-1/2 module;
+  the VM node drvPath moved on ordering alone (its inline `jq` now precedes
+  the tree's packages), yomi-strix holds because its host modules define no
+  order-sensitive list. `lib/walk.nix` survives for the songbook until
+  slice 2. Evaluated only; nothing built or activated.
 - Next: root rules on the brief (Q1 `lib/pkgs.nix` stays, Q2 keep the
   vacuous check until (f), Q3 walk order, Q4 re-express `_`, Q6 skip a song
   without `rice.nix`, Q7 slice 3 in (b)); the User answers Q5 (does the
