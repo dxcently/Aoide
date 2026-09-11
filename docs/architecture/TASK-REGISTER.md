@@ -398,8 +398,34 @@ Fields per entry: status · owner · depends on · evidence · next.
   (critique of the minimal seam and the existing consumer requirements,
   Opus read-only, scratchpad `p-harnox-critique.md`). No duplicate
   research, no implementation.
-- Next: critique relayed to root; root discusses the delivery-contract
-  decision with the User and the maintainer; only then a phased plan.
+- Critique DONE (scratchpad `p-harnox-critique.md`, Opus, 349 lines,
+  read-only; no Harnox checkout on this box, Harnox facts taken as given).
+  Verdict: accept with 12 amendments. Seam is real and small:
+  `backend::resolve_backend` is the one funnel for fetch/has/store, so a
+  two-variant enum there costs zero lines in `broker.rs` (~250 lines, one
+  crate). BLOCKER the draft misses: today's `has` templates are `test -f`
+  (existence only); a Harnox `has` that answers by decrypting turns an
+  unreadable secret into absent, `put_gate` skips its exists-refusal and
+  `store_value` overwrites the only ciphertext. Mismatch 6 overstates
+  today (absent and corrupt are already one non-zero `get` exit; what is
+  at stake is the taught error strings). Mismatch 4's fallback is every
+  secret Aoide has (plaintext crosses the socket for `exec`, `a2a-door`,
+  `a2a-client` alike), so a custody-only answer voids the recommendation.
+  Mismatches 1/2 already ruled, 9 pre-existing, 8 PART-NEW: `handle_put`
+  applies no `admin_gate` on a declared first-class wire, so a
+  socket-group member can substitute a policied secret's value (own task).
+  Deletion is smaller: the template mechanism survives with the doc-only
+  presets; six constants, the age machinery and `pkgs.age` die.
+  Distribution is the hardest item: the flake is nixpkgs-only by charter,
+  `Cargo.lock` has no git source, and a default-off feature does not keep
+  a private dep out of the lock. Authority drifts twice (`issue`/`verify`,
+  rotation); both to be excluded from the slice.
+- Next: root applies the amendments; Maintainer questions (delivery
+  sanctioned, existence-only `has`, fallible accessor, single writer,
+  distribution); the User decides keep-vs-retire generic delivery, whether
+  core may take a private input, retiring built-in `file`/`age` and the
+  doc-only presets, and any migration; root files the `put`-over-socket
+  gap as its own task. No slice before those.
 
 ## Carried backlog (verified status, never implicitly done)
 
