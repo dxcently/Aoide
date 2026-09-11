@@ -65,7 +65,7 @@ inputs.nixpkgs.lib.nixosSystem {
       (_: {
         nixpkgs.overlays = [
           (import ./pkgs.nix { inherit lib; }).overlay
-          (_final: _prev: { aoide = inputs.aoide.packages.${system}.default; })
+          inputs.aoide.overlays.default
         ];
       })
       # home-manager house defaults, applied only when the module is present.

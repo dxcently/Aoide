@@ -403,6 +403,39 @@ surface: everything that paints, or that only a desktop needs.
   as `packages.default` — NixOS hosts keep the dynamic multi-output build
   `aoide.lyra.enable` depends on.
 
+## Flake outputs — the export surface
+
+`pkgs/aoide/flake.nix` is the seam a consumer builds against — this
+repo's root flake, and any stranger's flake alike:
+
+```
+pkgs/aoide/flake.nix
+├── packages.<sys>
+│   ├── default        = aoide
+│   ├── aoide            multi-output derivation
+│   │     .out  -> bin/aoide, bin/aoided
+│   │     .rice -> bin/lyra
+│   └── aoide-static     musl core pair
+├── apps.<sys>.{aoide,aoided}
+├── overlays.default      final: _prev: { aoide = …; }
+├── checks.<sys>.default    = the package build
+└── devShells.<sys>.default
+```
+
+The stability contract — what a consumer may rely on staying true:
+
+- `packages.<sys>.default` is `aoide`, never `aoide-static`.
+- `packages.<sys>.aoide` keeps output NAMES `out` and `rice`. The
+  names are the contract; the count is not.
+- `packages.<sys>.aoide-static` is the core pair only: no `rice`
+  output, no test phase.
+- `overlays.default` sets exactly one attribute, `aoide`, to the same
+  derivation `packages.<sys>.aoide` names. One build, never two — both
+  `lib/mkHost.nix` and `tests/vm-boot.nix` apply it instead of each
+  carrying their own copy of the injection lambda.
+- `checks`, `devShells` and `apps` are development surfaces, not a
+  consumer contract.
+
 ## Open questions (each tagged with when it must be settled)
 
 - **Naming — DECIDED (hybrid).** Plain names where the concept is universal

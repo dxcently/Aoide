@@ -1,9 +1,11 @@
 # docs/BUILD.md — building on the Wave-0 foundation
 
 Wave 0 established the flake, the walker, the option contract, the hosts, and
-the packaging placeholders. **Only Wave 0 edits `flake.nix` and `lib/`.** Every
-later wave ADDS files in its own directory; nothing below requires touching
-`flake.nix` or `lib/` again.
+the packaging placeholders. **The core flake's exports
+(`pkgs/aoide/flake.nix`) are the seam consumers build against; `lib/` and
+`tests/` follow them.** Every later wave ADDS files in its own directory; a
+change to what the core exports is the one case that also touches `lib/`
+and `tests/`.
 
 Verify at any point:
 
@@ -170,9 +172,9 @@ songbook path is a `rice.nix`.
 `pkgs/<name>/default.nix` (a `callPackage`-able derivation, standard nixpkgs
 args) and `lib/pkgs.nix` self-registers it into the flake `packages` output, the
 host + vm overlays, and a `pkg-<name>` check — all from one source. **Adding a
-package is one file; the "only Wave 0 edits `flake.nix` and `lib/`" promise now
-HOLDS for packages too** (it did not before — the four packages used to be
-hand-listed in `flake.nix` and duplicated in both `lib/` overlays).
+package is one file; it never touches `flake.nix` or `lib/`** (it did not
+before — the four packages used to be hand-listed in `flake.nix` and
+duplicated in both `lib/` overlays).
 
 `_`-prefix a package dir to shelve it (same as the module walker); a name must
 not shadow a nixpkgs attribute (the overlay guard `throw`s on an accidental

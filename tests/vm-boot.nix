@@ -74,7 +74,7 @@ let
   overlayModule = _: {
     nixpkgs.overlays = [
       (import ../lib/pkgs.nix { inherit lib; }).overlay
-      (_final: _prev: { aoide = inputs.aoide.packages.${system}.default; })
+      inputs.aoide.overlays.default
     ];
   };
 

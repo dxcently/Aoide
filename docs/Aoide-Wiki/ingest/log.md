@@ -3486,3 +3486,22 @@ activated, not released: the live roster check waits on the User.
 
 Pages touched: `docs/architecture/TASK-REGISTER.md`, `ingest/log.md`
 (this entry).
+
+## [2026-09-10] feat | the core flake exports `overlays.default`
+
+Task 4 phase (a) slice 1 (`p-lyra-migration-a-brief.md` §2.1-2.3).
+`pkgs/aoide/flake.nix` gains `overlays.default` beside `packages`;
+`lib/mkHost.nix` and `tests/vm-boot.nix` read it instead of each carrying
+a hand-copied injection lambda. Proof: through the root flake,
+`.#nixosConfigurations.yomi-strix.pkgs.aoide.outPath` and
+`.#packages.x86_64-linux.aoide.outPath` are byte-identical, and
+`nix flake check --no-build ./pkgs/aoide` passes. Flag: the standalone
+`./pkgs/aoide#packages.x86_64-linux.aoide` resolves to a different store
+path because `pkgs/aoide/flake.lock` pins a nixpkgs the root's `follows`
+overrides — pre-existing drift, not this change. The KVM vm-boot check
+was not run. Reviewed FIX→fixed (a stale quotation of the old Wave-0 rule
+in `docs/BUILD.md`), landed.
+
+Pages touched: `docs/architecture/PACKAGE-LAYOUT.md` (new "Flake outputs"
+section), `docs/BUILD.md` (the Wave-0 rule corrected in two places),
+`ingest/log.md` (this entry).
