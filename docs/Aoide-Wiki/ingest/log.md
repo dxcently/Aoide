@@ -3410,3 +3410,54 @@ question §6.1; the User decides.
 Pages touched: `pkgs/aoide/crates/conduct/README.md`,
 `pkgs/aoide/crates/conduct/AGENTS.md`, `AGENTS.md` (root: the portable
 capability clause), `ingest/log.md` (this entry).
+
+## [2026-09-10] feat | desktop Codex threads reach the roster and refuse by name
+
+P-CX-3, the last in-crate slice of the desktop Codex/ChatGPT association
+(scratchpad brief `p-codex-desktop-brief.md` §4; Sonnet executor,
+independent Sonnet review). `sync_codex_app_threads` gains its call sites
+and the two reaches that need a transport or a lifecycle are taught to
+refuse:
+
+- The reaper's tick calls it immediately before the live-agent title
+  refresh, outside every stage lock (it takes its own), so a thread
+  enrolled this pass is titled in the same pass; a true return adds one
+  line, "reconciled desktop codex threads", to the sweep's change ledger
+  because an enrolment or a dropped thread is a roster change. This is
+  the PRIMARY call site: it runs wherever `aoided` runs.
+- `run_hypr_window_listener` calls it beside every untracked-terminal
+  sync (startup, reconnect, the timeout tick, Appeared, Closed), ahead of
+  `resolve_pending_session_windows` so the new record is stamped with its
+  window in the same pass. Promptness only, on a host with a listener.
+- `send` (and through the same `deliver_local_with` gate `--to` and A2A
+  inject) refuses a `kind:"app"` record before the conductability check
+  with reason `codex-app-unsupported` — the desktop app owns the thread's
+  server and aoide has no channel to it — never `not-conductable`, which
+  implies a retry. `kill_target` refuses an app hop at the top of its walk
+  beside the subagent check with "the desktop app owns this thread's
+  process; close the thread in the app instead". Resurrect skips such a
+  record structurally: no codex profile, no restore, so no resume argv.
+- A third test floor in `lib.rs` pins `CODEX_HOME` for the whole crate:
+  the first run of the wired reaper test picked up this box's real live
+  thread through the ambient `$HOME/.codex`. Discovery still reads only
+  the lock, the process table and the rollout header, never writes, but a
+  test must never see the real desktop.
+
+Tests: `a_codex_app_record_refuses_a_send_as_unsupported_not_not_conductable`,
+`the_unsupported_refusal_names_the_app_as_the_server_owner`,
+`killing_a_codex_app_record_refuses_without_touching_the_app`. Verified:
+`cargo test -p aoide-conduct` test result: ok. 621 passed; 0 failed
+(executor and independent reviewer); `cargo check --workspace --all-targets` clean, the dead_code
+warnings for the sync are gone (one remains, `UNSUPPORTED_PLATFORM`, whose
+value no non-unix arm cites yet). Reviewed LAND.
+
+Live acceptance is the User's gate and is not claimed: with the desktop app
+open on two threads, `aoide session` should show two codex cards under
+their own projects, focusing either raises the app window, closing a
+thread drops its card within a tick, quitting the app drops all of them.
+
+Pages touched: `pkgs/aoide/crates/conduct/README.md` (the two call
+sites), `pkgs/aoide/crates/conduct/AGENTS.md` (the refuse-by-name
+invariant), `docs/architecture/CODEX-INTEGRATION.md` (phase 1: association
+and identity met in code, lifecycle/hooks/transport explicitly not),
+`ingest/log.md` (this entry).
