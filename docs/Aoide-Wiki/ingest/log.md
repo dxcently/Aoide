@@ -3763,3 +3763,34 @@ and the existing consumer requirements follows.
 
 Pages touched: `docs/architecture/HARNOX-SECRETS-PROPOSAL.md` (new),
 `docs/architecture/TASK-REGISTER.md` (§9), `ingest/log.md` (this entry).
+
+## [2026-09-11] feat | The doorbell prefers the channel
+
+ring_locked (P-M5c-3) now picks a transport after the readiness/state
+gates, uniformly for interactive and headless wraps: connecting to
+channel_socket_path(wrap_id) and winning beats the PTY control socket
+for ANY wrap — a one-way MCP push, no submit key, so there is no
+half-typed composer line to clobber. A stale channel socket file with
+nothing listening refuses the connect and falls through, never a
+stat-only check. Only once the channel is absent does headlessness
+matter: a headless wrap with no channel still rings over the PTY
+exactly as before; an interactive wrap with no channel is still
+skipped "interactive-composer" (same string, now meaning interactive
+AND no channel). A channel write failure reports "write-failed", same
+as a failed PTY write, and leaves the latch armed either way. New
+write_channel() helper (payload + flush, no submit key), generic over
+Write so its own failure path is proven against a fake writer rather
+than an unreproducible post-connect socket race (0/300 induced
+failures measured empirically before choosing this approach). 8 new
+doorbell.rs tests, all 28 pre-existing ones unchanged verbatim. No
+command-surface change: golden snapshot unchanged. Tests: aoide-conduct
+632 passed, aoide-cli golden + 42 unit + all integration suites passed.
+Landed as 953fb02; reviewed LAND with two comment/doc trims applied at
+landing (the write-failure trial diary reduced to one line; MAIL.md's
+roadmap entry scoped to the raw-keystroke case).
+
+Pages touched: `pkgs/aoide/crates/conduct/src/graph/doorbell.rs`,
+`docs/architecture/MAIL.md` (this commit); `pkgs/aoide/crates/conduct/
+README.md`, `pkgs/aoide/crates/conduct/AGENTS.md`,
+`docs/architecture/TASK-REGISTER.md`, `ingest/log.md` (this entry —
+proposed by the executor, applied by the orchestrator).

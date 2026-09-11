@@ -99,7 +99,14 @@ Fields per entry: status · owner · depends on · evidence · next.
   `notifications/claude/channel` push under the daemon's 1 MiB line cap,
   stdout behind one mutex; no doorbell change, golden unchanged; protocol
   137, conduct 624, server 212, cli 42 green. Staged, not deployed.
-  P-M5c-3 (doorbell prefers the channel) DISPATCHED; then onboarding,
+  P-M5c-3 LANDED (953fb02): `ring_locked` picks the transport after the
+  state gate — a connect to `channel_socket_path(wrap_id)` that succeeds
+  wins for any wrap (one-way push, no submit key), else a headless wrap
+  rings over the PTY byte-identically, else `interactive-composer` (now
+  meaning interactive AND no channel); a stale socket file refuses the
+  connect and falls through; same receipt, same latch, a failed write
+  reports `write-failed` and leaves the latch armed; conduct 632 green,
+  golden unchanged; reviewed LAND. Staged, not deployed. Then onboarding,
   P-M5b.
 - Owner: Fable (Sonnet executor per slice, independent review); the proof
   was root's.
@@ -114,9 +121,7 @@ Fields per entry: status · owner · depends on · evidence · next.
 - Backlog from review: `reap.rs::sweep_orphan_sockets` sweeps only
   `session-*.sock`; a SIGKILLed MCP subprocess leaves `channel-<id>.sock`
   behind (harmless: connect refuses, unlink-then-bind on restart).
-- Next: P-M5c-3 (transport choice between the
-  state gate and delivery; `interactive-composer` comes to mean interactive
-  AND no channel) → the end-to-end wake: one real interactive session
+- Next: the end-to-end wake: one real interactive session
   launched by a human with the development-channels flag, woken by a `mail
   send` from another terminal, draft intact, recorded with session id and
   banner. A fetch receipt or an enrolment is never a wake.

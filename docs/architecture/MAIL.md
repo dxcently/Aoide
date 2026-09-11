@@ -839,12 +839,14 @@ READMEs), no subagent spawning and no backgrounded cargo in any brief.
   a concurrent burst of filers rings each target once, a failed write
   leaves the latch armed, the Stop hook replays a deferred ring, a
   hundred letters ring once until `mail read`.
-- **P-M5a-3 — the interactive composer guard (S, design first).** The
-  labeled residual P-M5a-2 leaves open: an interactive composer (a
-  conductable, non-headless session — someone's own terminal) is never
-  auto-submitted into today, by design, because no control-layer guard
-  yet exists to make that safe. This phase designs and lands that guard
-  before lifting the restriction.
+- **P-M5a-3 — the interactive composer's PTY guard (S, design first).**
+  P-M5c-3 closed the channel-present case: an interactive session with a
+  live Claude Code channel socket is rung over that one-way push, never a
+  keystroke. What stays open is the raw-keystroke case — an interactive
+  composer with no channel is still skipped `interactive-composer`, by
+  design, because no control-layer guard exists that makes auto-submitting
+  into someone's own terminal safe. This phase designs and lands that
+  guard before lifting the PTY-side restriction, if it is ever lifted.
 - **P-M5b — fetched receipts.** Whatever this document's "Kill-list" and
   transit design still leave for a delivery-receipt read path once a
   remote reader wants to confirm a letter actually arrived, beyond the
