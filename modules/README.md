@@ -27,6 +27,13 @@ inside each directory. A new file is a new line in its own directory's
 `default.nix`; deleting both removes the capability without a trace
 elsewhere in the tree.
 
+That guarantee is scoped to the leaves relative to each other: the tree
+merges into a host's module list as ONE unit, at `modules/default.nix`'s
+own import depth (nixpkgs collects imports breadth-first), so a host,
+home-manager, or stylix module that also defines an order-sensitive list
+option (`environment.systemPackages`, a `systemd.*` ordering list)
+interleaves with the tree's contributions after it, not before.
+
 `song/songbook/` is not a fourth layer here and carries no `default.nix` of
 its own — a committed song is found by `lib/songbook.nix`'s own typed scan
 (`song/songbook/<song>/rice.nix`), the one exception house rule 1 already

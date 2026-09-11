@@ -238,7 +238,7 @@ and `livery.json` from v0 to v1 when the design-system workstream lands v1.
 
 ## 2. Dendrite shape — **v0**
 
-A dendrite is a walker-discovered module under `modules/dendrites/` that guards
+A dendrite is a module named in `modules/dendrites/default.nix` that guards
 its `config` on a per-feature or role flag. Discovery imports the file; gating
 decides activation (dxflake pattern, verbatim).
 
@@ -260,10 +260,11 @@ Rules:
   declares itself, plus stock NixOS options.
 - **Growth is additive**: new dendrites are new files; upstream merges stay
   conflict-free by construction.
-- **Shelving opt-out**: prefix a filename with `_` (`_wip.nix`) to hide it from
-  the walker without deleting it. Any path containing `/_` is skipped.
-- Subfolders under `modules/dendrites/` are grouping only; the walker registers
-  every file regardless.
+- **Shelving opt-out**: prefix a filename with `_` (`_wip.nix`) — a
+  `_`-prefixed file is not listed in `default.nix` and so is not a module,
+  shelved without being deleted. Any path containing `/_` is skipped.
+- Subfolders under `modules/dendrites/` are grouping only; a file inside one
+  still needs its own line in `modules/dendrites/default.nix` to be a module.
 
 Facets (`modules/facets/`) are the same shape but MAY read `aoide.livery` and
 MAY declare `aoide.surfaces.<name>.owner` — they read no other module.
@@ -338,7 +339,9 @@ untracked both).
 
 ### Package shape (`pkgs/` is walked too)
 
-`pkgs/` self-registers exactly like `modules/` and `song/songbook/`. Drop
+`pkgs/` self-registers by the same walk `song/songbook/` still uses
+(`modules/` self-registers through its own `default.nix` aggregates
+instead). Drop
 `pkgs/<name>/default.nix` — a `callPackage`-able derivation taking standard
 nixpkgs args — and `lib/pkgs.nix` (the packages walker) discovers it into **all
 four** consumers from one source:
@@ -3564,7 +3567,7 @@ bump: every "shipped baseline" reference in this section simply names
 ### Self-registration (dendrite discipline)
 
 Committed songs live under `song/songbook/<name>/rice.nix`. `lib/mkHost.nix`
-walks `song/songbook` (via `lib/walk.nix`, same as `modules/`) into every
+walks `song/songbook` (via `lib/walk.nix`) into every
 host, so **adding a song is a new folder — never an edit to an import list**.
 The empty songbook (just `.gitkeep`) walks to `[]` and is tolerated.
 

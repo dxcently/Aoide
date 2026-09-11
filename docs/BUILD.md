@@ -173,7 +173,8 @@ songbook path is a `rice.nix`.
 
 ## Package handoffs — exactly what each agent drops in
 
-`pkgs/` is walked, exactly like `modules/` and `song/songbook/`. Drop
+`pkgs/` is walked, exactly like `song/songbook/` still is (`modules/` no
+longer is). Drop
 `pkgs/<name>/default.nix` (a `callPackage`-able derivation, standard nixpkgs
 args) and `lib/pkgs.nix` self-registers it into the flake `packages` output, the
 host + vm overlays, and a `pkg-<name>` check — all from one source. **Adding a
@@ -181,7 +182,8 @@ package is one file; it never touches `flake.nix` or `lib/`** (it did not
 before — the four packages used to be hand-listed in `flake.nix` and
 duplicated in both `lib/` overlays).
 
-`_`-prefix a package dir to shelve it (same as the module walker); a name must
+`_`-prefix a package dir to shelve it (the same convention `song/songbook/`'s
+walk still uses); a name must
 not shadow a nixpkgs attribute (the overlay guard `throw`s on an accidental
 clash — a deliberate shadow is an `intentionalShadows` exemption in
 `lib/pkgs.nix`); a non-standard build arg goes through `lib/pkgs.nix`'s
