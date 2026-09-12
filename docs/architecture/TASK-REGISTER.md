@@ -139,9 +139,9 @@ Fields per entry: status · owner · depends on · evidence · next.
   merge never writes state/lineage/title) + 537a3b3 (CONTRACTS §4 entry) +
   92c7e9a (per-thread (len,mtime) memo and cached rollout path); each
   reviewed PASS by an independent reviewer; conduct 679, storage 403.
-  In flight: S2b (cap-boundary tests + per-tick memo eviction; first cut
-  56d535a FAILED review on a reproduced parallel-test race, fix-up
-  pending). Next: S3 `state` under R2, then S4. Staged and proved, not
+  S2b LANDED 56d535a+b6f3525 (cap-boundary tests, per-tick memo
+  eviction; the first cut failed review on a reproduced parallel-test
+  race, fixed by a pure `retain_memo_in`; conduct 682). Next: S3 `state` under R2, then S4. Staged and proved, not
   deployed (build 4 predates S1).
 - Build 4 = LIVE, CHURN FIX VERIFIED (2026-09-12): the clean HEAD build
   (pristine worktree at 2432e06) is

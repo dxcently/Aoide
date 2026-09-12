@@ -3961,3 +3961,27 @@ pkgs/aoide/crates/conduct/src/graph/testutil.rs,
 pkgs/aoide/crates/storage/README.md, pkgs/aoide/crates/storage/AGENTS.md,
 pkgs/aoide/crates/storage/src/records.rs,
 pkgs/aoide/crates/storage/src/session.rs
+
+## [2026-09-12] test | capture_for's slack-cap boundary is pinned and stale memos are evicted
+
+Follow-up to the S2 memo (92c7e9a) from its review: the one branch that
+protects against a stale tail start (growth past `MEMO_MAX_WINDOW_BYTES`)
+had no test, and `CAPTURE_MEMO` kept an entry for every thread the daemon
+had ever observed. Now: byte-exact tests pin growth of exactly the cap to a
+reuse and one byte more to a re-anchor with true ordinals;
+`retain_capture_memo(live)` runs once per `sync_codex_app_threads` tick,
+after captures are gathered and before the stage lock, over the ids the
+scan actually observed (a live thread whose capture failed this tick is
+kept). The memo key stays the thread id alone: one `aoided` observes one
+desktop-Codex home, and the docs say so. The first cut's eviction test called
+the real function on the shared static and evicted other tests' entries
+under parallel execution (one reviewer run failed, the next passed); the
+retain now lives in a pure `retain_memo_in(map, live)` the test drives on
+its own map, and the executor's "stable across four runs" claim is the
+lesson: repetition proves nothing about a shared-global race. `aoide-conduct`
+679 → 682. Commits 56d535a, b6f3525 (the race fix).
+
+Pages touched: pkgs/aoide/crates/conduct/README.md,
+pkgs/aoide/crates/conduct/AGENTS.md,
+pkgs/aoide/crates/conduct/src/graph/codex_capture.rs,
+pkgs/aoide/crates/conduct/src/graph/codex_app.rs
