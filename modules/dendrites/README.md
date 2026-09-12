@@ -4,7 +4,7 @@ Optional, additive host capabilities — every dendrite self-gates on its own
 `aoide.<name>.enable` and is named once, in `default.nix`, by the directory
 that holds it. Today's set spans desktop apps (firefox, obsidian,
 kitty), CLI tooling (git, yazi, starship, mcfly, nh), agent and desktop AI
-tooling (claude-code, kimi-code, pi-coding-agent, OpenAI Codex + ChatGPT), and
+tooling (claude-code, eidolon, kimi-code, pi-coding-agent, OpenAI Codex + ChatGPT), and
 system services (dunst, networkmanager, audio).
 
 ## Named seams (what it exposes)

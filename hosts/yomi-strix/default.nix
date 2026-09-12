@@ -160,4 +160,5 @@
   aoide.kimi-code.enable = true;
   aoide.pi-coding-agent.enable = true;
   aoide.openai.enable = true;
+  aoide.eidolon.enable = true; # replaces pi for daily interactive use — see its dendrite header
 }

@@ -393,8 +393,11 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
 - A `down` node's directory is skipped entirely; entries whose ORIGIN is
   `down` are dropped at the next drain.
 - An entry retires only on a valid ack (above) or `aoide mail outbox rm
-  <msgid>`. `aoide mail outbox [<node>]` answers "did it land"
-  truthfully per entry: waiting, held, tries, last outcome, acked.
+  <msgid>`. `aoide mail outbox [<node>]` answers "did it land" truthfully
+  per entry via `data.delivery` — the same projection `aoide mail send`
+  reports right after its own best-effort drain attempt, so neither
+  command can drift from the other on what "queued"/"retrying"/etc. mean
+  (vocabulary and precedence: "Status and the nodelist view" below).
 
 ## Transit
 
@@ -657,6 +660,42 @@ that fails to load refuses both mail methods with `config-invalid` and
 keeps serving everything else: a broken zone table means no zone
 checks can run, and no zone checks means no mail, never "mail with the
 walls down".
+
+The nodelist view above answers "is this NODE reachable"; `data.delivery`
+(both `aoide mail send`'s own post-spool report and `aoide mail outbox`)
+answers the narrower, per-entry question "did this LETTER move" — one
+shared, read-only join of the outbox entry with its node's own link
+state, computed fresh on every call, never cached. Its vocabulary, most
+authoritative first:
+
+- `refused` — the entry's own `refused` flag is set (a policy refusal
+  the far end sent back, never a transport failure — "Outbox" above).
+  Automatic retries have already stopped for this ONE entry, and no
+  link state changes that.
+- `delivered` — a real, destination-signed ack already sits in this
+  box's own mailbase for this exact `msgid` (the ack mechanics: "Wire"
+  and "Delivery and the doorbell" above). Never inferred from the
+  entry's own absence — an entry can vanish for other reasons too
+  (`aoide mail outbox rm`), so absence alone is never read as delivery.
+- `accepted` — the peer's own deposit response said accepted or
+  duplicate, but no ack has landed yet (`ackPending: true`). A LATER,
+  unrelated link failure rides beside it — reason and `nextAttemptAt`
+  from the link — without ever downgrading the status: this letter
+  already reached the peer, and the link's later trouble is some other
+  entry's problem.
+- `retrying` — the node's own link state still records an unresolved
+  failure; its reason and `nextAttemptAt` (the earliest allowed retry,
+  never a promised schedule) ride beside the status.
+- `queued` — none of the above: nothing has gone wrong, or nothing has
+  been attempted yet.
+- `failed` — reserved for a genuine local I/O failure inside `mail
+  send`'s OWN drain attempt (never "the remote node was unreachable,"
+  which is an ordinary `retrying` outcome). A status READ that fails
+  outright instead — a corrupt `link.json`, a concurrently removed
+  entry — degrades to `queued` with an explicit "status unavailable"
+  reason rather than either an error or a normal-looking queue: the
+  spool write already succeeded, or the entry is only being listed, so
+  the failure is about REPORTING, never about the mail itself.
 
 ## Security model
 

@@ -13,6 +13,7 @@
     ./clipboard.nix
     ./devtools.nix
     ./dunst.nix
+    ./eidolon.nix
     ./fastfetch
     ./firefox.nix
     ./fonts.nix
