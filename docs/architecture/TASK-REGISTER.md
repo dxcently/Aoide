@@ -131,21 +131,25 @@ Fields per entry: status · owner · depends on · evidence · next.
   R1 guardian_review threads on the roster, R2 `working` on an app record,
   R3 `sources` general vs codex-only; User D1 prompt text on the roster,
   D2 the live check. Nothing dispatched.
-- Build 4 CONTAMINATED, DO NOT ACTIVATE (2026-09-12): the toplevel
-  /nix/store/l2pahyr05ky1r90vdgjq7wnfzhfmf8wv-nixos-system-yomi-strix-26.11.20260907.dc5d91f
-  was built from the dirty shared checkout and carries another session's
-  STAGED, uncommitted eidolon dendrite (eidolon-0.1.0 + hm config, enabled
-  on yomi-strix). Its aoide package 0mg1rj1m… is correct (P-CX-4 audit
-  string, channel string, procps on both units) but the system closure is
-  not HEAD. Clean rebuild IN PROGRESS from a pristine worktree at HEAD
-  2432e06 (scratchpad `build5/`), no activation. Live system stays
-  cbbnif0i…. Live check after activation: petnames stable across ticks, a
-  genuine close still removes the card, no "ps not on PATH" audit line.
+- Build 4 = LIVE, CHURN FIX VERIFIED (2026-09-12): the clean HEAD build
+  (pristine worktree at 2432e06) is
+  /nix/store/cbbnif0ij38zm8y0sb7v6jfxir4k8yrl-nixos-system-yomi-strix-26.11.20260907.dc5d91f
+  = system generation 204, activated by the User at 09:06:22Z. Running
+  `aoided` (pid 3460303, started 09:06:12Z) is the new package 0mg1rj1m…
+  with `ps` on its PATH; both the aoided and graph-reap units carry
+  procps-4.0.7. Live roster sampled at 0.3s for 30s: both app cards kept
+  their petnames, zero changes (before the fix: a drop-and-re-mint every
+  few seconds). No "ps not on PATH" audit line, as expected. Still the
+  User's to confirm: a genuine thread close removes its card. A second
+  toplevel l2pahyr05ky… exists in the store from the dirty shared checkout
+  (another session's staged eidolon dendrite); it was never activated and
+  is not a build of HEAD.
 
 ## 3. Interactive doorbell (native Claude channel idle wake)
 
 - PAUSED BY THE USER (seq 220, 2026-09-12): automatic mail-triggered wake
-  work and disposable automatic-wake tests are paused. Mail stays the
+  work and disposable automatic-wake tests are paused. M5c-2/3 are in the
+  live daemon since generation 204 (09:06:22Z) but unproven end to end. Mail stays the
   durable assignment/handoff carrier; sessions check it on explicit
   conductor nudges, after an idle composer is confirmed. The channel code
   (M5c-2/3) stays in the tree, nothing deleted. The end-to-end runbook
