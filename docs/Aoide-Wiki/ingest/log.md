@@ -3919,3 +3919,45 @@ synthetic fixture id).
 Pages touched: pkgs/aoide/crates/conduct/README.md,
 pkgs/aoide/crates/conduct/src/graph.rs,
 pkgs/aoide/crates/conduct/src/graph/codex_capture.rs
+
+## [2026-09-12] feat | a bounded Codex rollout tail feeds desktop-Codex records with provenance
+
+S2 of the native Codex capture lane (P-CX-5) on S1's pure fold. New in
+`codex_capture.rs`: `fold_rollout_from(path, start_ordinal, lines)` (S1's
+`fold_rollout` is the `start_ordinal: 0` wrapper), `TAIL_BYTES` (1 MiB),
+`tail_alignment`, and the bounded reader `capture_for(codex_home,
+thread_id)`: finds the rollout through the existing `codex_app::find_rollout`
+(no second discovery path), reads at most the last 1 MiB, drops a leading
+partial line whole, folds the rest at the records' true ordinals; any
+failure (missing or unreadable file, a tail holding one oversized record)
+yields an all-`None` capture that never signals idle or completion and never
+touches a thread's roster. `SessionRecord` (`storage/src/records.rs`) gains
+`sources: Option<BTreeMap<String, String>>` (wire `sources`, absent when
+`None`, goldens unchanged; schema in `CONTRACTS.md §4`). The one call site,
+`codex_app::sync_codex_app_threads`, gathers one capture per observed thread
+outside the stage lock and merges `say`/`tool`/`activity`/`model`/
+`contextTokens`/`contextCeiling`/`sources` onto the thread's app record
+inside it — set only when captured and different, never cleared by a quiet
+tick, `sources` extended never replaced, keys remapped from the fold's
+snake_case to the wire's camelCase at this boundary. `state`,
+`parentSessionId`, `title` and `nickname` are untouched (S3 owns `state`
+under ruling R2; S4 the subagent edge). Review fix-up: `capture_for`
+memoises per thread (process-static `CAPTURE_MEMO`: path, `(len, mtime)`,
+tail start, start ordinal, the last capture) — an unchanged rollout is not
+read again, append-only growth within `MEMO_MAX_WINDOW_BYTES` (2 MiB)
+reuses the alignment instead of recounting the prefix, a shrunk or
+rewritten file or a growth past the cap recomputes from scratch, a cached
+path that no longer exists falls back to `find_rollout`. Tests:
+`aoide-conduct` 663 → 679, `aoide-storage` 402 → 403. Commits fdb6682
+(slice), 537a3b3 (the `CONTRACTS.md §4` entry, a separate commit in the
+same push: the code commit sat under a register commit and history is not
+rewritten with other writers' staged files in the tree), 92c7e9a (memo).
+
+Pages touched: CONTRACTS.md, pkgs/aoide/crates/conduct/README.md,
+pkgs/aoide/crates/conduct/AGENTS.md,
+pkgs/aoide/crates/conduct/src/graph/codex_capture.rs,
+pkgs/aoide/crates/conduct/src/graph/codex_app.rs,
+pkgs/aoide/crates/conduct/src/graph/testutil.rs,
+pkgs/aoide/crates/storage/README.md, pkgs/aoide/crates/storage/AGENTS.md,
+pkgs/aoide/crates/storage/src/records.rs,
+pkgs/aoide/crates/storage/src/session.rs
