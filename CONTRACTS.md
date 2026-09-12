@@ -1924,6 +1924,25 @@ upstream ever lets one acquire a window anyway, the dedup pass still will
 not retire its own lineage — only a genuine no-lineage same-window twin
 collapses.
 
+**Additive in v0 (P-CX-5):** a session record MAY also carry an optional
+`sources` (object, string → string): a provenance map from a captured
+field's own wire name to `"<absolute rollout path>#<record ordinal>"`, the
+exact on-disk record the value was read from rather than one of aoide's own
+hooks. The ordinal is the record's true line number in that file minus one,
+as the file exists at the moment of the read — never a position inside a
+bounded tail window. One producer today: the desktop-Codex capture
+(`aoide-conduct::graph::codex_app::sync_codex_app_threads` over
+`graph/codex_capture.rs::capture_for`) sets an entry only for a `kind:"app"`
+field it actually captured — `say`, `tool`, `activity`, `model`,
+`contextTokens`, `contextCeiling`. A field with no entry was not captured
+from a pointed source; a reader treats that as a fact, never a gap to fill.
+Entries merge across ticks and are never replaced, so a field that is still
+shown keeps its pointer after a tick whose window no longer covers the
+record that set it. Absent on every record no capture reader has touched.
+The field is general, not Codex-only, but carries one producer at a time by
+design: a second reader pointing at its own native source earns its own
+schema review here, never a second field beside this one.
+
 ### `state/stage/projects.json` — **v0**
 
 Registered project anchor roots for the graph. Written by
