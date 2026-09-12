@@ -4242,3 +4242,28 @@ x=35 width 13, only the working child spins, no QML warnings. Commit
 
 Pages touched: song/songbook/sonata/widgets/conductor.qml,
 song/songbook/sonata/design/widget-structure.md
+
+## [2026-09-12] fix | session phase/end refuse an app record
+
+S3b of the desktop-Codex capture lane, a review finding on S3. The two
+state writers `aoide session phase` and `aoide session end`
+(`session_store.rs` `do_session_phase_inner`/`do_session_end_inner`)
+stamped any record's `state` with no kind check; before S3 the per-tick
+reset re-stamped `idle` on an app record within a tick, after S3 nothing
+healed a stray write until a later successful capture. Both writers now
+refuse a `kind:"app"` record with the structured error `send` already
+uses (`reason:"codex-app-unsupported"`), before any file is touched;
+every other kind keeps its path unchanged. The "an app record never
+publishes awaiting" claim in the conduct README/AGENTS is tightened to
+what the tests prove: the fold's vocabulary excludes it, and every state
+writer refuses an app record. Two capture-lane leftovers the workspace
+build warned on are gone: `UNSUPPORTED_PLATFORM` (text inlined into the
+`cfg` doc comments) and `fold_rollout` (tests call `fold_rollout_from`
+with ordinal 0, as production already does). `aoide-conduct` 706 → 708,
+`--workspace --no-run` warning-free. Commit badfc7a.
+
+Pages touched: pkgs/aoide/crates/conduct/README.md,
+pkgs/aoide/crates/conduct/AGENTS.md,
+pkgs/aoide/crates/conduct/src/graph/session_store.rs,
+pkgs/aoide/crates/conduct/src/graph/codex_app.rs,
+pkgs/aoide/crates/conduct/src/graph/codex_capture.rs
