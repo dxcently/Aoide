@@ -747,8 +747,9 @@ Fields per entry: status · owner · depends on · evidence · next.
 - Slice order and writers: E1a protocol profile LANDED bc1b05f (reviewed
   PASS, protocol 143; `--wake` verified real; broke two conduct goldens
   listing the known agents, repaired by E1b's first commit) → E1b conduct
-  presence
-  reconciler + child record + readiness (after S3 frees conduct) → E3
+  presence reconciler + child record + readiness LANDED df0530e+637666b
+  (conduct 706; review FAIL on hermeticity/logPath doc/real fixture ids,
+  fix-up commit in flight; enrolment PROVED live, below) → E3
   native send arm → E0 a2a.rs → E4 resume mapping → E5/E6. Brief rev 3
   DONE (Opus, read-only, scratch `p-eidolon-adapter-brief-r3.md`, 752
   lines): E1a gains a `native_send` argv field shaped like `resume_args`
@@ -786,6 +787,27 @@ Fields per entry: status · owner · depends on · evidence · next.
   id, pid, model, title, logPath, parent = the wrap), live daemon
   untouched (socket inodes, MainPID before/after), no injection, no
   restart. Deployment stays the User's gate.
+- E1b PROOF RESULT 2026-09-12 22:14Z (store `yrq21pj7…-aoide-0.0.22` from
+  pristine worktree 533d89e, isolated aoided under `/tmp/aoide-eid`, its
+  `$XDG_RUNTIME_DIR/eidolon` a symlink to the real tree, the live wrap
+  record seeded read-only): the isolated daemon's own reap tick enrolled
+  `khoa-253b` — `agent:eidolon kind:agent state:idle pid:3514983
+  model:claude-cli:opus title:"ng" cwd:/home/khoa logPath:…/sessions/
+  1789234755480.eid parentSessionId:conduct-3513862-1789234665`, petname
+  minted; the wrap record and `plucky-comet` untouched. Live guard
+  identical before/after: aoided.sock/shellbridge.sock inodes 76468/76466,
+  MainPID 3460303, presence dir (inbox empty, meta.json sha, sock inode,
+  pid start time) unchanged — no injection, no restart. The reconcile's
+  ping answers in ~5 ms against the 250 ms budget. Isolated daemon stopped
+  by its own pid. Proof is of the production path; the fix-up touches
+  tests/docs only, re-run if `resolve_parent` changes. Rig: scratch
+  `rig-e1b.sh`. STAGED + PROVED, not deployed.
+- BUILD BREAK found by this proof: S2 fdb6682 added `sources` to
+  `SessionRecord` and four conductor test fixtures never got it, so the nix
+  checkPhase (`cargo test --workspace`) failed for every commit
+  fdb6682..fdbea59 while per-crate runs stayed green; fixed 533d89e. Any
+  dxflake pin must be ≥ 533d89e. Every conduct/storage brief now adds
+  `cargo test --workspace --no-run` (compile only).
 
 ## Carried backlog (verified status, never implicitly done)
 

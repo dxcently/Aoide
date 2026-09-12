@@ -4075,3 +4075,42 @@ Pages touched: pkgs/aoide/crates/conductor/src/app.rs,
 pkgs/aoide/crates/conductor/src/graphview.rs,
 pkgs/aoide/crates/conductor/src/ui.rs,
 pkgs/aoide/crates/conductor/src/lib.rs
+
+## [2026-09-12] feat | eidolon presence sessions are reconciled onto the roster
+
+E1b of the Aoide × Eidolon adapter lane (E2 readiness folded in). New
+`conduct/src/graph/eidolon.rs` mirrors `codex_app.rs` rule for rule: one
+record per live presence dir under `$XDG_RUNTIME_DIR/eidolon/`, keyed on
+the native id verbatim, `agent:"eidolon"`, `kind:"agent"`, pid/cwd/model/
+title/logPath from `meta.json`; liveness is the presence socket answering
+eidolon's own `{"op":"ping"}` within its 250 ms, never a stat or `/proc`;
+Aoide never sweeps the producer's tree; the TUI decision reads the crate's
+one parsed process table (no subcommand or `tui` is a TUI); state is
+`working`/`idle` from `busy` for a TUI owner and the literal `unknown` for
+a non-TUI one, with a test pinning that `canonical_state("unknown")` is
+`"idle"` so the trap is recorded (readiness evidence is the producer
+observation, never the display state); `parentSessionId` is the first
+conducted ancestor from the pid ancestry, the wrap's own record and
+petname untouched; window/workspace are left to the existing sweep;
+`Unknown` changes nothing, a dead socket drops the record on the next
+`Observed` pass only, a tracked id is left alone; petname minted on insert
+only. Call site beside the codex one in the reaper tick. A reap test that
+did not isolate `XDG_RUNTIME_DIR` could see this box's real live eidolon
+and was fixed to bind its own. The two conduct goldens listing the known
+agents gained `eidolon` (df0530e). `aoide-conduct` 689 → 706. Commit
+637666b. Review FAIL (seven reap tests inherit the ambient
+`XDG_RUNTIME_DIR` and ping the real presence socket; the `logPath` doc
+still names only the conduct pty; fixtures carry real identifiers), fix-up
+follows as its own commit; `CONTRACTS.md §4` gains the eidolon `logPath`
+referent here. Enrolment of the running session PROVED on an isolated
+aoided built from 533d89e (register §12, proof result), never claimed
+from fixtures.
+
+Pages touched: CONTRACTS.md, pkgs/aoide/crates/conduct/README.md,
+pkgs/aoide/crates/conduct/AGENTS.md,
+pkgs/aoide/crates/conduct/src/graph/eidolon.rs,
+pkgs/aoide/crates/conduct/src/graph.rs,
+pkgs/aoide/crates/conduct/src/reap.rs,
+pkgs/aoide/crates/conduct/src/commands/hooks.rs,
+pkgs/aoide/crates/conduct/src/graph/send.rs,
+pkgs/aoide/crates/cli/src/commands/onboard.rs

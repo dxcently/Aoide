@@ -1407,6 +1407,12 @@ headless and interactive alike (task #15, "everything tees"); a hook-only
 agent session (no pty at all) never sets it. Absent means "no conduct-owned
 pty for this session" (the hook-only case); readers must tolerate both
 forms and round-trip fields they do not know.
+An `agent:"eidolon"` record — enrolled from the producer's presence tree by
+the reconcile in `conduct/src/graph/eidolon.rs`, never by `aoide conduct` —
+carries `logPath` too, with a different referent: the producer's own session
+journal exactly as its `meta.json` `log` names it, re-read on every pass,
+never a conduct-owned pty. It is the path a resume of that session hands
+back to the producer; nothing in Aoide reads or writes the file.
 
 **Additive in v0:** a session record MAY also carry an optional `petname`
 (string, `<word>-<word>`) — a human-readable display handle minted once, at
