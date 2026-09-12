@@ -4114,3 +4114,50 @@ pkgs/aoide/crates/conduct/src/reap.rs,
 pkgs/aoide/crates/conduct/src/commands/hooks.rs,
 pkgs/aoide/crates/conduct/src/graph/send.rs,
 pkgs/aoide/crates/cli/src/commands/onboard.rs
+
+## [2026-09-12] fix | claude's submit keystroke is CR
+
+`aoide send --submit` against a Claude Code target appended the claude
+profile's `submit_key`, `"\n"`. A terminal's Enter sends CR; Claude Code
+binds LF to insert-newline, so on 2.1.263 the turn sat in the composer
+unsubmitted — observed independently by root's Osaka fixture (explicit CR
+submitted) and by the yomi doorbell rig (a pasted turn needed a second bare
+CR). The profile byte is now `"\r"`, as kimi's and eidolon's already were;
+pi keeps `"\n"` with its comment saying the byte is unverified against a
+live pi. The send path already writes the submit byte as its own separate
+write, so nothing else moves. Fourteen conduct goldens whose target is
+claude, or an unregistered agent that `profile_for_agent` defaults to
+claude, now expect a trailing `\r`; the `--from`-smuggling test asserts no
+embedded `\n`/`\r` and exactly one trailing `\r`. Commits f171164
+(protocol), ea760d5 (conduct), d4d607e (comments).
+
+Pages touched: pkgs/aoide/crates/protocol/src/agents.rs,
+pkgs/aoide/crates/conduct/src/graph/send.rs,
+pkgs/aoide/crates/conduct/src/graph/pending.rs,
+pkgs/aoide/crates/conduct/src/graph/doorbell.rs
+
+## [2026-09-12] fix | eidolon reconcile tests are hermetic; logPath doc names the eidolon referent
+
+E1b review fix-up (637666b). Ten tests that reach `reap()` (seven in `reap.rs`, three in
+`session_store.rs`) inherited the ambient `XDG_RUNTIME_DIR` and, on a box running eidolon, pinged the real
+presence socket from the test suite; every such test now binds an empty
+tempdir through one `testutil::isolated_xdg_runtime` helper, proved by an
+strace of the test binary showing no connect under `/run/user`. The
+`logPath` doc comment on `SessionRecord` states the eidolon referent (the
+producer's own session journal from `meta.json`, stamped by the reconcile,
+never a conduct-owned pty), matching `CONTRACTS.md §4`. Fixture ids, pids
+and log paths are synthetic throughout; `resolve_parent` names
+`attest::attested_record` as the sibling predicate it cannot delegate to.
+Commits 13b1738, 4a9f3b4, d4d607e; the storage doc comment also
+stopped claiming interactive conduct sessions never carry `logPath`
+(conduct stamps it for every session, e445827). Known pre-existing failure outside this change:
+`shellbridge::n_concurrent_herald_pushes_all_land_in_the_ledger` overruns
+the unix socket path limit under any `TMPDIR` longer than bare `/tmp`
+because `test-support::unique_tmp` names its dir
+`aoide-dispatch-<tag>-<pid>-<nanos>` (backlog).
+
+Pages touched: pkgs/aoide/crates/conduct/src/graph/testutil.rs,
+pkgs/aoide/crates/conduct/src/graph/eidolon.rs,
+pkgs/aoide/crates/conduct/src/reap.rs,
+pkgs/aoide/crates/conduct/src/graph/session_store.rs,
+pkgs/aoide/crates/storage/src/records.rs

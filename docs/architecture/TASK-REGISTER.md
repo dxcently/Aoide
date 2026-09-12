@@ -855,6 +855,15 @@ Fields per entry: status · owner · depends on · evidence · next.
   existing outbox (a2a spawn on absent contextId is N-retries = N agents);
   the extension seam is one `native_send` consumer (E3) + the existing
   dendrite. No implementation until the proposal settles.
+- Test tempdir names overrun the unix socket path limit:
+  `test-support::unique_tmp` builds `aoide-dispatch-<tag>-<pid>-<nanos>`
+  under `TMPDIR`, so socket-binding tests (`shellbridge::
+  n_concurrent_herald_pushes_all_land_in_the_ledger`, and ~71 more under a
+  session-scratchpad `TMPDIR`) fail under any `TMPDIR` longer than bare
+  `/tmp`; the nix check phase passes only because its `/build` is short.
+  Fix = a short unique name (or a ``-style socket dir
+  separate from the data tempdir). Until then briefs use
+  `/tmp/aoide-t-<lane>` and accept that one failure by name.
 - MAIL DELIVERY STATE (User requirement via root, seq 274/275; owner:
   Fable, after root's read-only brief; files coordinated against E3):
   a filed letter must report queued / retrying / refused /
