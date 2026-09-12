@@ -609,6 +609,16 @@ Fields per entry: status · owner · depends on · evidence · next.
 - Capability lacking a scoped mechanism: a per-node conductor autogate
   (nothing in `aoide node` or the schema flips one; only the send gate
   exists). Reported, not invented.
+- Consumer side (root, seq 237-242): the three hosts are dxflake consumers
+  and the User pulls and rebuilds; Spark is the SOLE dxflake editor
+  (Aoide pinned at 1d93184, Osaka default Sonata, one import of upstream
+  `modules/default.nix`, nested core subflake bound; pushed dxflake
+  29481a9). Root confirmed both aoided user-service paths carry
+  procps+openssh and the Osaka toplevel evaluates. Sakaki's full eval is
+  blocked at `modules/dendrites/melete.nix` (`meleteSeed`: git object
+  `b3c6bcb5…` unavailable) — the Melete owner's pin, not changed here.
+  Runtime grants remain NOT applied (classifier denial, seq 241); no
+  all-host acceptance is claimed.
 - Flagged, unexamined: routable door urls are recorded (yomi's record of
   sakaki `http://192.168.1.202:8710/`, osaka's record of yomi
   `http://192.168.1.175:8710/`) against the loopback-only rule.
@@ -635,11 +645,32 @@ Fields per entry: status · owner · depends on · evidence · next.
 - Slices: S1 profile entry → S2 meta.json as `TranscriptSpec` → S3
   `compose_prefix` → S4 Nix (eidolon worker) → S5 resume (needs a live
   two-session proof) → S6 native send (parked). Nothing dispatched.
-- BLOCKING (User): what "default harness" means; no such option exists:
-  (a) what the terminal launches, (b) what bare `aoide spawn` picks (a new
-  core option), (c) installed, profiled and preselected by `onboard`.
-  Root rulings: widen `TranscriptSpec.locate` with the record pid;
-  meta.json-as-transcript acceptable; `resume_args` fed a path.
+- RULED (User via root, seq 241/245/247/248): Eidolon is installed and
+  first-class onboarded/profiled on Yomi and SELECTED for Yomi remote A2A
+  worker spawning through the existing spawnAgent/spawnPath mechanism;
+  not a replacement of every terminal shell; no new generic spawn-default
+  option; Osaka/Sakaki stay Claude. Native `eidolon send --from aoide` is
+  preferred over any keystroke path (`compose_prefix` dropped). Capture
+  is unsupported until a producer export exists: `eidolon log` goes
+  through the writable `Session::open` path (can repair/truncate a live
+  journal), `busy` is TUI-only (headless drive never sets it), TUI
+  adoption does not refresh presence, no child-parentage contract.
+  Owners: Fable = the Aoide adapter (profile, readiness, send arm, resume
+  mapping, capture consumer); the existing eidolon worker = packaging
+  (dendrite, package, host line) and its `~/eidolon` edits; a root
+  executor = producer export + headless busy + adoption refresh in
+  `~/eidolon`, after the worker confirms its files (contract relayed to
+  `self/eidolon-worker`, unanswered). Root's required slices replace the
+  ones above: E1 profile + bounded metadata (pid, deterministic native
+  id, stable petname, log path on the record, same-cwd disambiguation,
+  moved-wrap resumption) → E2 lifecycle readiness with a real registered
+  child record → E3 native send behind the one gated door (draft
+  unchanged, deferred→idle wake once, failed write stays armed) → E4
+  explicit native-id ↔ log-path resume mapping → E5 capture from the
+  producer export, missing facts explicit → E6 parent graph from explicit
+  native child evidence only. Brief revision (Opus) in progress; no
+  writer dispatched; open ruling: widening `TranscriptSpec.locate` with
+  the record pid.
 
 ## Carried backlog (verified status, never implicitly done)
 
