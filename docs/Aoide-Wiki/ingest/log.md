@@ -3985,3 +3985,58 @@ Pages touched: pkgs/aoide/crates/conduct/README.md,
 pkgs/aoide/crates/conduct/AGENTS.md,
 pkgs/aoide/crates/conduct/src/graph/codex_capture.rs,
 pkgs/aoide/crates/conduct/src/graph/codex_app.rs
+
+## [2026-09-12] feat | a desktop-Codex app record's state follows its own rollout
+
+S3 of the native Codex capture lane (P-CX-5), under ruling R2. The upsert in
+`codex_app.rs` no longer re-stamps `state:"idle"` on an existing `kind:"app"`
+record; `apply_codex_capture` is the one writer and sets `state` from the
+fold's `working`/`idle` (the `task_started`/`task_complete`/`turn_aborted`
+bracket, never a clock) only when captured and different, so an unreadable
+rollout leaves the last state alone; a freshly enrolled record still starts
+`idle`; `awaiting` can never appear on an app record (asserted). R2's
+enumeration — every reader of `state` on an app record, with file:line — sits
+in the commit body: the reaper's staleness arms never reach an app record
+(`stale_eligible` is false: a pid is always present and the kind is never
+agent), the doorbell never consults it (never conductable), permit's
+`awaiting` check is unreachable, grant/who/node_list and the QML roster now
+show the real state, and the `kill` (`actions.rs`) and `send` (`send.rs`,
+`codex-app-unsupported`) refusals are keyed on `kind` and asserted by new
+tests with the record in `working`. `state` deliberately carries no `sources`
+pointer (it is not a display field). Review finding carried as S3b: the
+`session phase` and `session end` writers (`session_store.rs`) set any
+record's `state` with no kind gate, and S3 removed the per-tick reset that
+used to self-heal a stray write on an app record; the fix is the same
+kind-keyed refusal `kill` and `send` already hold. Tests: `aoide-conduct`
+682 → 689. Commit aadc67b; the `CONTRACTS.md §4` "`state:"idle"` always"
+statement for app records is corrected in 63b2b86.
+
+Pages touched: CONTRACTS.md, docs/architecture/CODEX-INTEGRATION.md,
+pkgs/aoide/crates/conduct/README.md, pkgs/aoide/crates/conduct/AGENTS.md,
+pkgs/aoide/crates/conduct/src/graph/codex_app.rs,
+pkgs/aoide/crates/conduct/src/graph/send.rs,
+pkgs/aoide/crates/conduct/src/graph/actions.rs
+
+## [2026-09-12] feat | the eidolon harness profile enters the protocol crate
+
+E1a of the Aoide × Eidolon adapter lane (register §12). `protocol/src/agents.rs`
+gains `EIDOLON_PROFILE` in `PROFILES` and `known_agents()` (`launch:
+["eidolon"]`): `locate` resolves `$XDG_RUNTIME_DIR/eidolon/<session_id>/
+meta.json` directly (the record key is the native presence id, so two
+sessions in one cwd are never ambiguous; `temp_dir()` fallback as eidolon's
+own `Presence::root()`), `tail` reads the pretty-printed `meta.json` (4 KiB
+cap) and re-emits it as one compact line from which `title`/`model` are
+read; `say`/`tool`/`contextTokens`/sub-agents are absent until the producer
+export (E5); `permission_keys`/`skills_dir` absent by name; `resume_args:
+None` (the log-path mapping is E4's); hooks are `Declarative`, so
+`hooks install eidolon` takes the existing refusal. New profile field
+`native_send: Option<fn(&str) -> Vec<String>>`, shaped like `resume_args`,
+`None` for claude/kimi/pi, `["send","--from","aoide","--wake",<id>,"-"]` for
+eidolon with the contract in its doc: payload on the child's stdin, exit 0
+means accepted, not consumed. `aoide-protocol` 137 → 143. Commit bc1b05f;
+the two conduct goldens that list the known agents follow in the E1b
+executor's first commit.
+
+Pages touched: pkgs/aoide/crates/protocol/README.md,
+pkgs/aoide/crates/protocol/AGENTS.md,
+pkgs/aoide/crates/protocol/src/agents.rs
