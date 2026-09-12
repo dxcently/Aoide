@@ -81,6 +81,29 @@ Fields per entry: status · owner · depends on · evidence · next.
 - Portability (root, seq 190): strict fd evidence fixed the misownership
   but leaves desktop-thread discovery Linux-only. Non-Linux detection is
   UNRESOLVED and registered as such; the cross-OS requirement is not met.
+- REGRESSION (User via root, seq 211, 2026-09-12): the two desktop Codex
+  cards appear and disappear on the conductor every few seconds. Cause
+  found and reproduced live, read-only (Fable, 0.3s roster sampling: both
+  `kind:"app"` records dropped and re-minted, `[]` at 08:23:27.187Z, a new
+  pair at :27.802, `[]` again at :28.722, while app-server pid 2598256 held
+  both locks throughout). Three writers run `sync_codex_app_threads`:
+  `lyra shellbridge --run` (unit path carries `pkgs.procps`) observes both
+  threads and INSERTS; `aoided.service` and `aoide-graph-reap.service`
+  have NO `ps` on their unit PATH, so `process_table()` fails ENOENT,
+  `unwrap_or_default` yields zero servers, `lock_holder` proves no owner,
+  the thread set reads empty and the reconcile DROPS every app record.
+  Root's class diagnosis (failed scan conflated with confirmed exit) is
+  confirmed; the gather-outside-lock race is NOT evidenced and is not
+  being changed. P-CX-4 DISPATCHED (scratchpad `p-cx-4-brief.md`, one
+  Sonnet executor, independent review): a scan is `Observed(set)` or
+  `Unknown`; only an observed set removes or inserts, Unknown changes no
+  record and takes no lock; `lock_is_held` distinguishes released from
+  unreadable; a genuine close still disappears; one audit line the first
+  time `ps` is missing; tests for failed process scan, unreadable lock and
+  fd dirs, mixed CLI+desktop, alternating writers, genuine close. Second
+  commit puts `pkgs.procps` on the aoided and graph-reap unit PATHs
+  (deployment cure, no activation; the live churn stops after the User
+  rebuilds).
 
 ## 3. Interactive doorbell (native Claude channel idle wake)
 
@@ -381,6 +404,19 @@ Fields per entry: status · owner · depends on · evidence · next.
   here for register inclusion. Not an implementation or migration
   authorization; no secret value read or migrated; no public PR or comment
   to the Harnox maintainer.
+- Issue FILED (User-authorized, root, seq 207): Harnox issue #1,
+  https://github.com/noah427/harnox/issues/1 — Aoide integration with
+  machine-local Harnox secret stores; delivery semantics are NOT approved
+  until the maintainer answers. No credential accessed or migrated.
+- Scope (User via root, seq 210, supersedes seq 209): Harnox is NOT a
+  dependency of Aoide core. It is REQUIRED for the optional
+  secrets-management capability and FIRST-CLASS through normal Aoide
+  commands, configuration and deployment. A secrets-enabled build consumes
+  pinned upstream Harnox directly (initially the `secrets` feature only);
+  a build without it operates normally and reports secret operations as
+  unavailable; NO hidden alternative storage fallback when disabled. Both
+  build configurations are verified. Every implementation brief carries
+  this paragraph.
 - The User's ask: Aoide works with Harnox (the private Rust core shared by
   Mneme and Melete, master bb68a3a) with minimal upstream changes, Aoide
   consuming its seams.
@@ -425,7 +461,8 @@ Fields per entry: status · owner · depends on · evidence · next.
   `Cargo.lock` has no git source, and a default-off feature does not keep
   a private dep out of the lock. Authority drifts twice (`issue`/`verify`,
   rotation); both to be excluded from the slice.
-- Next: root applies the amendments; Maintainer questions (delivery
+- Next: maintainer response on issue #1 before delivery semantics count as
+  approved; root applies the amendments; Maintainer questions (delivery
   sanctioned, existence-only `has`, fallible accessor, single writer,
   distribution); the User decides keep-vs-retire generic delivery, whether
   core may take a private input, retiring built-in `file`/`age` and the
