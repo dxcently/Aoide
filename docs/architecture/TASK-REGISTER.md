@@ -117,18 +117,30 @@ Fields per entry: status · owner · depends on · evidence · next.
   subagent/activity capture from the app's own records, every shown datum
   carrying its original source pointer; missing data explicit, never a
   fabricated reasoning trace; exact-task navigation stays distinct from
-  window focus. One Opus read-only architecture brief in progress
-  (scratchpad `p-codex-capture-brief.md`); no slice without root's ruling.
-- Build 4 BUILT, NOT ACTIVATED (2026-09-12, HEAD e39aba9: churn fix 7a9f865 +
-  f7aaee8, M5c-2/3, phase (b) slice 1), yomi-strix toplevel
+  window focus. Brief DONE (Opus, read-only, scratchpad
+  `p-codex-capture-brief.md`): rollouts are written live; working/idle is
+  derivable from the task_started/task_complete/turn_aborted bracket, never
+  from elapsed time; the title-less thread is a subagent (parent_thread_id,
+  nickname) that session_index.jsonl never lists; model sits in
+  turn_context; no reasoning exists on disk; occupancy is the last
+  input_tokens field alone; a 1 MiB bounded tail, sqlite rejected. Design:
+  pure fold + bounded reader in a new `codex_capture.rs`, existing record
+  fields plus one additive `sources` pointer map, enrolment and the
+  Observed/Unknown seam untouched. Slices S1 fold, S2 reader+sources, S3
+  state, S4 subagent edge+nickname title, S5 prompt (gated). Next: root
+  R1 guardian_review threads on the roster, R2 `working` on an app record,
+  R3 `sources` general vs codex-only; User D1 prompt text on the roster,
+  D2 the live check. Nothing dispatched.
+- Build 4 CONTAMINATED, DO NOT ACTIVATE (2026-09-12): the toplevel
   /nix/store/l2pahyr05ky1r90vdgjq7wnfzhfmf8wv-nixos-system-yomi-strix-26.11.20260907.dc5d91f
-  (aoide package 0mg1rj1m…; verified: `aoided` carries the P-CX-4 audit
-  string, `aoide` the channel notification string, both the aoided and
-  graph-reap units carry procps-4.0.7 on PATH). Already in the store from a
-  build registered 09:14:33Z; my run was a cache hit on the same path. Live
-  system is still cbbnif0i…; activation is the User's.
-  Live check after activation: petnames stable across ticks, a genuine
-  close still removes the card, no "ps not on PATH" audit line.
+  was built from the dirty shared checkout and carries another session's
+  STAGED, uncommitted eidolon dendrite (eidolon-0.1.0 + hm config, enabled
+  on yomi-strix). Its aoide package 0mg1rj1m… is correct (P-CX-4 audit
+  string, channel string, procps on both units) but the system closure is
+  not HEAD. Clean rebuild IN PROGRESS from a pristine worktree at HEAD
+  2432e06 (scratchpad `build5/`), no activation. Live system stays
+  cbbnif0i…. Live check after activation: petnames stable across ticks, a
+  genuine close still removes the card, no "ps not on PATH" audit line.
 
 ## 3. Interactive doorbell (native Claude channel idle wake)
 
