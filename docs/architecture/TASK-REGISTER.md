@@ -109,9 +109,32 @@ Fields per entry: status · owner · depends on · evidence · next.
   carries). Next: the User rebuilds; the live check is that the two cards
   keep their petnames across ticks and a genuine app close still removes
   them.
+- Scope (root, seq 219): what is landed is desktop ASSOCIATION only, not
+  complete integration. Root's live snapshot: both ids map to the real
+  ChatGPT window 0x5b14c12405c0 / workspace 1; `model` null for both; the
+  second thread's title absent; state `idle` even while root is working.
+- Follow-on (tracked, not dispatched): native prompt/response/tool/model/
+  subagent/activity capture from the app's own records, every shown datum
+  carrying its original source pointer; missing data explicit, never a
+  fabricated reasoning trace; exact-task navigation stays distinct from
+  window focus. One Opus read-only architecture brief in progress
+  (scratchpad `p-codex-capture-brief.md`); no slice without root's ruling.
+- Build 4 IN PROGRESS (started 09:19:51Z, HEAD e39aba9: churn fix 7a9f865 +
+  f7aaee8, M5c-2/3, phase (b) slice 1): yomi-strix toplevel, `--no-link`,
+  no activation; log at scratchpad `build4/build.log`. Tree dirty only by
+  another writer's docs reference page.
 
 ## 3. Interactive doorbell (native Claude channel idle wake)
 
+- PAUSED BY THE USER (seq 220, 2026-09-12): automatic mail-triggered wake
+  work and disposable automatic-wake tests are paused. Mail stays the
+  durable assignment/handoff carrier; sessions check it on explicit
+  conductor nudges, after an idle composer is confirmed. The channel code
+  (M5c-2/3) stays in the tree, nothing deleted. The end-to-end runbook
+  (scratchpad `p-doorbell-e2e-brief.md`) and a clean HEAD-worktree build
+  of aoide/aoided/lyra exist unused; the runner was never launched (the
+  harness permission classifier rejected the dispatch, reported seq 217).
+  Not blocked on a test; resumes only on the User's word.
 - Status: NATIVE WAKE PROVEN (root, 2026-09-11, Claude Code 2.1.260,
   disposable PTY, the Fable kit): idle wake with no keystroke, unsent draft
   survived, a text-generation turn finished before the event was answered;
@@ -149,11 +172,8 @@ Fields per entry: status · owner · depends on · evidence · next.
 - Backlog from review: `reap.rs::sweep_orphan_sockets` sweeps only
   `session-*.sock`; a SIGKILLed MCP subprocess leaves `channel-<id>.sock`
   behind (harmless: connect refuses, unlink-then-bind on restart).
-- Next: the end-to-end wake: one real interactive session
-  launched by a human with the development-channels flag, woken by a `mail
-  send` from another terminal, draft intact, recorded with session id and
-  banner. A fetch receipt or an enrolment is never a wake.
-
+- Next: nothing while paused. When resumed: the end-to-end wake per the
+  runbook, tool-busy and GUI cases, onboarding docs for the flag.
 ## 4. Lyra / AoideOS architecture migration (phased workstream)
 
 - Status: phase (a) DESIGNED (scratchpad `p-lyra-migration-a-brief.md`, Opus,
