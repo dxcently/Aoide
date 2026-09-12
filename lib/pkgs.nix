@@ -59,7 +59,6 @@ let
   # Names allowed to shadow an unrelated nixpkgs attribute (see header).
   intentionalShadows = [
     "melete" # Aoide's AI harness vs nixpkgs' `melete` headline font — unrelated.
-    "eidolon" # Aoide's coding harness vs nixpkgs' `eidolon` — a dead alias, throws "removed as unmaintained upstream".
   ];
 
   # Directory entries under ../pkgs that are packages: type == "directory",
