@@ -4161,3 +4161,19 @@ pkgs/aoide/crates/conduct/src/graph/eidolon.rs,
 pkgs/aoide/crates/conduct/src/reap.rs,
 pkgs/aoide/crates/conduct/src/graph/session_store.rs,
 pkgs/aoide/crates/storage/src/records.rs
+
+## [2026-09-12] fix | screen and a2a goldens follow the claude CR submit byte
+
+The claude submit-byte change (f171164) was verified against the protocol
+and conduct crates only; the `screen` crate's `send` golden and seven a2a
+door goldens in `server` also assert the delivered bytes of a claude
+target and still expected a trailing `\n`. The nix check phase (the whole
+workspace) caught it — after e14fa02 had already been pushed on a build
+whose failure the push step did not read. Swapped to `\r`; the a2a spawn
+golden keeps `\n` because `do_spawn` writes its own newline into the pty
+rather than the target's submit byte (E0 territory). `aoide-screen` 297,
+`aoide-server` 212 with two pre-existing `SUN_LEN` failures under a long
+`TMPDIR` (register backlog).
+
+Pages touched: pkgs/aoide/crates/screen/src/send.rs,
+pkgs/aoide/crates/server/src/a2a.rs
