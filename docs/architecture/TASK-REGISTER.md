@@ -119,10 +119,16 @@ Fields per entry: status · owner · depends on · evidence · next.
   fabricated reasoning trace; exact-task navigation stays distinct from
   window focus. One Opus read-only architecture brief in progress
   (scratchpad `p-codex-capture-brief.md`); no slice without root's ruling.
-- Build 4 IN PROGRESS (started 09:19:51Z, HEAD e39aba9: churn fix 7a9f865 +
-  f7aaee8, M5c-2/3, phase (b) slice 1): yomi-strix toplevel, `--no-link`,
-  no activation; log at scratchpad `build4/build.log`. Tree dirty only by
-  another writer's docs reference page.
+- Build 4 BUILT, NOT ACTIVATED (2026-09-12, HEAD e39aba9: churn fix 7a9f865 +
+  f7aaee8, M5c-2/3, phase (b) slice 1), yomi-strix toplevel
+  /nix/store/l2pahyr05ky1r90vdgjq7wnfzhfmf8wv-nixos-system-yomi-strix-26.11.20260907.dc5d91f
+  (aoide package 0mg1rj1m…; verified: `aoided` carries the P-CX-4 audit
+  string, `aoide` the channel notification string, both the aoided and
+  graph-reap units carry procps-4.0.7 on PATH). Already in the store from a
+  build registered 09:14:33Z; my run was a cache hit on the same path. Live
+  system is still cbbnif0i…; activation is the User's.
+  Live check after activation: petnames stable across ticks, a genuine
+  close still removes the card, no "ps not on PATH" audit line.
 
 ## 3. Interactive doorbell (native Claude channel idle wake)
 
