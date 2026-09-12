@@ -691,10 +691,35 @@ Fields per entry: status · owner · depends on · evidence · next.
   dispatch — an eidolon TUI in normal mode would submit an empty
   composer, so `spawnAgent = "eidolon"` is dead on arrival until a
   bounded E0 routes the spawn prompt through profile-aware delivery;
-  `server/` has no owner in root's table (Fable proposed). Rulings
-  pending: R1 resume by path (default `resume_args: None`), R2 native
-  send `Queued` = armed-not-stamped, R3 owner, R4 host line sequenced
-  after E0+E1+E3. No writer dispatched.
+  `server/` had no owner in root's table. RULED (User via root, seq 259):
+  R1 YES, an explicit resume mapping by log path persisted through the
+  ledger, the native id stays the identity, no silent unsupported
+  fallback, path provenance validated before launch; R2 confirmed,
+  native `Queued` = accepted for later delivery, armed and not stamped,
+  retries deduplicated on the native receipt; R3 E0 ASSIGNED to Fable,
+  bounded to `server/src/a2a.rs`: the opening turn goes through gated,
+  profile-aware native delivery after positive child discovery and
+  readiness, every other profile's behaviour and goldens preserved; R4
+  confirmed, the Yomi `spawnAgent` line switches only after E0+E1+E3 are
+  tested, packaging may land separately. E1 approved with the native
+  presence id as the lookup and no `TranscriptSpec` widening.
+- LIVE TARGET (root reviewer seq 260, re-verified read-only 2026-09-12):
+  eidolon already runs on yomi-strix. Roster petname plucky-comet is a
+  generic shell wrap (`aoide conduct --agent shell -- bash -l`, pid
+  3513862, window 0x5b14c0fe76c0) whose bash runs
+  `~/.local/bin/eidolon` (pid 3514983); presence `khoa-253b` carries pid,
+  log path, cwd, model `claude-cli:opus`, title, `busy:false`; the
+  roster has no eidolon record; `command -v eidolon` resolves to a
+  DIFFERENT nix-store binary than the running one. First acceptance:
+  this session enrols as agent `eidolon` keyed on its native id, parent
+  = the wrap via pid ancestry, the wrap's petname preserved, no
+  duplicate, no restart, no injection; native send resolves the
+  executable from the live pid, never bare PATH.
+- Slice order and writers: E1a protocol profile (dispatched 2026-09-12,
+  no conduct file, parallel to capture S3) → E1b conduct presence
+  reconciler + child record + readiness (after S3 frees conduct) → E3
+  native send arm → E0 a2a.rs → E4 resume mapping → E5/E6. Brief rev 3
+  (Opus, read-only) folds the rulings and the live target.
 
 ## Carried backlog (verified status, never implicitly done)
 
