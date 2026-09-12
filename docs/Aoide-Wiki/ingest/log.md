@@ -4204,3 +4204,41 @@ recorded). `CONTRACTS.md` outbox row shape gains `delivery` here.
 Pages touched: CONTRACTS.md, docs/architecture/MAIL.md,
 pkgs/aoide/crates/client/README.md, pkgs/aoide/crates/client/AGENTS.md,
 pkgs/aoide/crates/client/src/commands.rs
+
+## [2026-09-12] fix | mail delivery listing reads the mailbase once
+
+Fix-up to the delivery-state feature. `has_delivered_ack` re-parsed
+`state/mail/base.jsonl` for every non-refused outbox entry, so
+`mail outbox` did one mailbase read per row. `delivery_projection` and
+`has_delivered_ack` now take the caller's single `read_base()` slice:
+`handle_mail_outbox` reads it once per listing, `post_send_delivery` once
+per `mail send`; an unreadable mailbase degrades to "no ack seen", the
+same default as before. The one test independent review flagged missing
+lands with it: `mail send`'s `delivery.status == "failed"` branch, forced
+by making the link-lock `.bsy` file a directory after the spool write so
+`drain_node`'s own local I/O path fails. The client README no longer
+claims the outbox commands never touch the mailbase (they read it, never
+write it). `aoide-client` 284 → 285. Commit c63e09e.
+
+Pages touched: pkgs/aoide/crates/client/README.md,
+pkgs/aoide/crates/client/src/commands.rs
+
+## [2026-09-12] fix | conductor harness indicators sit in fixed boxes before the title
+
+Sonata conductor card (root's chiyo lane, integrated serially). The
+ϟ/π/moon/book indicators leave their floating spot right of the lamp for
+reserved boxes anchored 3px before the title — 13×16 for the glyph, moon
+and π, 24×18 for the Codex book — so the title's x and its available
+width are identical across animation frames and resting states. Harness
+identity is shared by parent and subagent cards: the `!child`
+suppression is gone for Claude, Pi, Kimi and Codex, and a working child
+animates from its published live state; idle and ended cards carry no
+motion; spawn ancestry alone never starts one; an unrecognized harness
+keeps the common activity lamp. Verified twice on an isolated offscreen
+Quickshell (root's MotionPreview harness, rerun by the integrator on the
+working-tree file): title x=51 on both cards in both frames, child tag
+x=35 width 13, only the working child spins, no QML warnings. Commit
+2f5b287; not deployed.
+
+Pages touched: song/songbook/sonata/widgets/conductor.qml,
+song/songbook/sonata/design/widget-structure.md
