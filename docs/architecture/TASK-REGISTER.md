@@ -705,3 +705,14 @@ Fields per entry: status · owner · depends on · evidence · next.
   isolated env on EVERY invocation and never calls bare `aoided`.
 - Deployed runtime on yomi-strix: aoided 0.0.22 (store `vvvwpzkq…`), predates
   everything above. Staged ≠ proved ≠ deployed until activation.
+- `mail outbox` hides transport failure: the daemon drain's back-off in
+  `state/outbox/<node>/link.json` silences the CLI's own attempt and the
+  listing shows `tries 0` with no outcome (proven 2026-09-12, gate 2). The
+  hold-off and the last transport error belong on the listing. Unowned.
+- Orphan `channel-<id>.sock` after a wrap exits: CONFIRMED live
+  (`channel-db-wrap-2.sock`, 2026-09-12); `sweep_orphan_sockets` covers
+  only `session-*.sock`. Unowned.
+- Routable door urls in node records (yomi's sakaki `http://192.168.1.202
+  :8710/`, osaka's yomi `http://192.168.1.175:8710/`): flagged, unexamined
+  against the loopback-only rule; needs a reading of what the record's url
+  means before any change. Unowned.
