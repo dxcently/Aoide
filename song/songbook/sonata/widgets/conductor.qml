@@ -53,9 +53,9 @@
 // ♪ 𝄐 𝄼 𝄽 𝄂 · state colours — working pulses via a scale animation, awaiting
 // breathes via an opacity animation) lives INSIDE a fixed 16px box at the
 // card's top-left; both animations are confined to the box — nothing floats,
-// no layout shift. The π THINK-TAG (hooked main pi sessions only, visible
+// no layout shift. The π THINK-TAG (pi sessions and subagents, visible
 // only while the live state is working) lives in a fixed 13×16 box on the
-// identity row, pen confined to the box. A main Codex agent carries a small
+// identity row, pen confined to the box. A Codex session carries a small
 // illuminated book in a 24×18 box: pages turn while working, the open spread
 // rests on a hold, and the cover closes at idle/stopped/done. Its name keeps
 // the same reserved width in every state. The KAOMOJI
@@ -77,7 +77,7 @@
 // drives the lamp glyph/colour, the metronome pulse, the terracotta breath,
 // the border, and the kaomoji face — while laurel/firstWorkingId/workingCount
 // stay roster-based (stable tallies). Hook surfacing: a ϟ tag on the identity
-// row — replaced by the π think-tag for hooked MAIN pi sessions (piTag
+// row — replaced by the π think-tag for pi sessions and subagents (piTag
 // below: exists ONLY while working — the self-writing loop; at rest it
 // vanishes; the ϟN tally and the "ϟ phase" placeholder keep ϟ) — plus a
 // "ϟ phase"
@@ -1249,26 +1249,17 @@ Item {
         readonly property bool hasWs:
             !!(s && s.workspace !== undefined && s.workspace !== null)
         readonly property bool hooked: temple.hooked(s ? s.sessionId : "")
-        // the pi-harness badge — a MAIN pi session swaps the ϟ bolt for its
-        // own π think-tag (piTag, below). The tag EXISTS only while the live
-        // state is working (the self-writing loop) — at rest it vanishes
-        // entirely, no still π and no ϟ. Subs keep the ϟ. NOT hook-gated
-        // (was card.hooked &&): kimi's moon fires on plain working with no
-        // hook, and an unhooked working pi never got its animation at all —
-        // the think-tags share one grammar now: working MAIN of that agent.
-        readonly property bool piThinking: !card.child
-            && !!card.s && !!card.s.agent
+        // Harness identity is shared by parent and child cards; live state drives motion.
+        readonly property bool piThinking: !!card.s && !!card.s.agent
             && ("" + card.s.agent).toLowerCase() === "pi"
         readonly property bool piLive: card.piThinking && card.cardWorking
-        // the kimi moon — a MAIN kimi session wears kimi-code's own thinking
-        // animation (the moon spinner) right of its name, only for the spin:
-        // nothing is reserved at rest (moonTag below).
-        readonly property bool kimiMain: !card.child && !!card.s && !!card.s.agent
+        readonly property bool kimiIdentity: !!card.s && !!card.s.agent
             && ("" + card.s.agent).toLowerCase() === "kimi"
         // Paint identity comes from the record, never the window title or model.
-        readonly property bool codexMain: !card.child && card.sKind === "agent"
+        readonly property bool codexIdentity: (card.sKind === "agent"
+            || card.sKind === "subagent" || card.sKind === "app")
             && card.agentName.toLowerCase() === "codex"
-        readonly property bool codexLive: card.codexMain && card.cardWorking
+        readonly property bool codexLive: card.codexIdentity && card.cardWorking
             && !card.cardAwaiting
 
         // troupe casting — hashed per session id, couriers from the packages
@@ -1505,15 +1496,18 @@ Item {
                 Text {                           // the ϟ hook tag — the pi
                                                  // harness wears the π think-
                                                  // tag instead (piTag below),
-                                                 // a kimi main the moon,
-                                                 // a codex main the book
+                                                 // kimi the moon,
+                                                 // codex the book
                     id: hookTag
-                    visible: card.hooked && card.cardWorking && !card.piThinking && !card.kimiMain && !card.codexMain
-                    anchors.left: lampBox.right
-                    anchors.leftMargin: 6
+                    width: 13; height: 16
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    visible: (card.hooked || card.sKind === "subagent") && card.cardWorking && !card.piThinking && !card.kimiIdentity && !card.codexIdentity
+                    anchors.right: nameT.left
+                    anchors.rightMargin: 3
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.verticalCenterOffset: 2
-                    // WORKING + claude + main → cycles the same reverse-
+                    // WORKING + claude → cycles the same reverse-
                     // engineered spinner glyphs/timing as UsageGadget's ❋
                     // (hazards §1: already live-verified at this face,
                     // "Noto Sans Symbols 2" — new size/context here, 9px
@@ -1530,7 +1524,7 @@ Item {
                     // component reopens hazards §3's same-directory dynamic-
                     // resolution risk for two call sites. Flag: a third call
                     // site would tip this toward extraction.
-                    readonly property bool spinning: card.cardWorking && !card.child
+                    readonly property bool spinning: card.cardWorking
                         && card.agentName.toLowerCase() === "claude"
                     readonly property var spinGlyphs: ["·", "✻", "✽", "✶", "✳", "✢"]
                     // guarded index, not cosmetic: triggeredOnStart's first
@@ -1573,7 +1567,7 @@ Item {
                 }
 
                 // the π think-tag — the pi harness's OWN hook badge. Where a
-                // hooked claude main cycles its glyphs, a hooked pi main
+                // working Claude cycles its glyphs, a working Pi session
                 // swaps the ϟ bolt for a slow SELF-WRITING π: left stem
                 // draws, right stem draws, then the top bar sweeps across —
                 // a long still hold — then the pen gently unwrites and the
@@ -1587,8 +1581,8 @@ Item {
                 Item {
                     id: piTag
                     visible: card.piLive
-                    anchors.left: lampBox.right
-                    anchors.leftMargin: 6
+                    anchors.right: nameT.left
+                    anchors.rightMargin: 3
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.verticalCenterOffset: 1   // rests a tick below the name's optical centre
                     width: 13; height: 16
@@ -1657,8 +1651,8 @@ Item {
                 // the loop joins on the same fully printed spread.
                 Item {
                     id: codexTag
-                    visible: card.codexMain
-                    anchors.left: lampBox.right; anchors.leftMargin: 6
+                    visible: card.codexIdentity
+                    anchors.right: nameT.left; anchors.rightMargin: 3
                     anchors.verticalCenter: parent.verticalCenter
                     width: 24; height: 18
                     clip: true
@@ -1795,13 +1789,16 @@ Item {
                     }
                 }
 
-                Text {                           // the moon think-tag — a kimi MAIN
+                Text {                           // the moon think-tag — a kimi session
                                                  // wears kimi-code's own moon
                                                  // spinner while working
                     id: moonTag
-                    visible: card.kimiMain && card.cardWorking
-                    anchors.left: lampBox.right
-                    anchors.leftMargin: 6
+                    width: 13; height: 16
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    visible: card.kimiIdentity && card.cardWorking
+                    anchors.right: nameT.left
+                    anchors.rightMargin: 3
                     anchors.verticalCenter: parent.verticalCenter
                     // frames + 120ms cadence lifted verbatim from kimi-code's
                     // MOON_SPINNER (tui/constant/rendering.ts): 8 phases, one

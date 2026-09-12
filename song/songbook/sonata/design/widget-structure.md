@@ -322,6 +322,14 @@ the root.
 
 ## 9. Motion tiers
 
+Conductor's harness indicators sit 3px before the title in reserved boxes:
+13×16 for the glyph, moon, and π; 24×18 for the Codex book. Title position
+and available width stay fixed across animation frames and resting states.
+Parent and subagent cards share their identified harness's motion, driven
+by the published live state. Working subagents need no independent hook
+badge to animate; unrecognized harnesses retain the common activity lamp.
+Spawn ancestry alone never starts an animation.
+
 Durations and easings actually in use. Stay inside these bands; a new widget
 that animates at 900ms where the house animates at 160 reads as a different
 program.
