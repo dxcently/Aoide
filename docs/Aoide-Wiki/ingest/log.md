@@ -4040,3 +4040,18 @@ executor's first commit.
 Pages touched: pkgs/aoide/crates/protocol/README.md,
 pkgs/aoide/crates/protocol/AGENTS.md,
 pkgs/aoide/crates/protocol/src/agents.rs
+
+## [2026-09-12] fix | curl rides on the aoided unit PATH so the daemon outbox drain can POST
+
+Third member of the unit-PATH class (`ps` for the desktop-Codex scan,
+`ssh` for the tunnel): the outbox drain POSTs a tunnelled letter through
+`client/src/commands.rs::post_json_to_node`, which spawns `curl`; a
+minimal user unit has none of them. On the dxflake pin the daemon-side
+delivery from Osaka failed with "curl failed (is curl installed?)" in
+`state/outbox/<node>/link.json` and the 60 s backoff held the CLI attempt
+off, so an Osaka letter minted 21:11Z never left the host (root, by direct
+outbox inspection). `pkgs.curl` joins the unit path with the comment
+naming all three; not deployed by this change.
+
+Pages touched: pkgs/aoide/module/aoided.nix
+
