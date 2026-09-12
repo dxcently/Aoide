@@ -269,9 +269,13 @@ lib.mkIf (config.aoide.enable && config.aoide.facets.quickshell.enable && config
       # libnotify rides along for `notify-send`: a sweep that actually changed the
       # roster raises a toast through dunst (a quiet sweep stays silent), and a
       # unit PATH without it would degrade that to a journal line nobody reads.
+      # procps rides along for the same reap's desktop-Codex scan (`ps` to
+      # resolve thread ownership) — without it the scan can only ever
+      # report Unknown, never a removed or enrolled record (P-CX-4).
       path = [
         pkgs.hyprland
         pkgs.libnotify
+        pkgs.procps
       ];
 
       serviceConfig = {
