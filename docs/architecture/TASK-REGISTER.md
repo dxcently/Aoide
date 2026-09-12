@@ -141,8 +141,15 @@ Fields per entry: status · owner · depends on · evidence · next.
   reviewed PASS by an independent reviewer; conduct 679, storage 403.
   S2b LANDED 56d535a+b6f3525 (cap-boundary tests, per-tick memo
   eviction; the first cut failed review on a reproduced parallel-test
-  race, fixed by a pure `retain_memo_in`; conduct 682). Next: S3 `state` under R2, then S4. Staged and proved, not
-  deployed (build 4 predates S1).
+  race, fixed by a pure `retain_memo_in`; conduct 682). S3 LANDED aadc67b
+  (state off the turn bracket, R2 consumer table in the commit body,
+  kill/send refusals asserted in `working`; reviewed PASS, conduct 689;
+  CONTRACTS §4 corrected 63b2b86). Carried S3b (review MEDIUM): `session
+  phase`/`session end` in `session_store.rs` write any record's `state`
+  with no kind gate and S3 removed the per-tick reset that self-healed a
+  stray write on an app record; fix = the kind-keyed refusal kill/send
+  hold; next conduct slot after Eidolon E1b. Then S4. Staged and proved,
+  not deployed (build 4 predates S1).
 - Build 4 = LIVE, CHURN FIX VERIFIED (2026-09-12): the clean HEAD build
   (pristine worktree at 2432e06) is
   /nix/store/cbbnif0ij38zm8y0sb7v6jfxir4k8yrl-nixos-system-yomi-strix-26.11.20260907.dc5d91f
@@ -723,8 +730,10 @@ Fields per entry: status · owner · depends on · evidence · next.
   = the wrap via pid ancestry, the wrap's petname preserved, no
   duplicate, no restart, no injection; native send resolves the
   executable from the live pid, never bare PATH.
-- Slice order and writers: E1a protocol profile (dispatched 2026-09-12,
-  no conduct file, parallel to capture S3) → E1b conduct presence
+- Slice order and writers: E1a protocol profile LANDED bc1b05f (reviewed
+  PASS, protocol 143; `--wake` verified real; broke two conduct goldens
+  listing the known agents, repaired by E1b's first commit) → E1b conduct
+  presence
   reconciler + child record + readiness (after S3 frees conduct) → E3
   native send arm → E0 a2a.rs → E4 resume mapping → E5/E6. Brief rev 3
   DONE (Opus, read-only, scratch `p-eidolon-adapter-brief-r3.md`, 752
