@@ -3794,3 +3794,84 @@ Pages touched: `pkgs/aoide/crates/conduct/src/graph/doorbell.rs`,
 README.md`, `pkgs/aoide/crates/conduct/AGENTS.md`,
 `docs/architecture/TASK-REGISTER.md`, `ingest/log.md` (this entry —
 proposed by the executor, applied by the orchestrator).
+
+## [2026-09-12] fix | a failed desktop-Codex scan is Unknown, never "no threads"
+
+Codex ruling seq 211: `graph/codex_app.rs` conflated a FAILED or INCOMPLETE
+scan (no `ps` on PATH, an unreadable lock directory/file, an unreadable
+`/proc/<pid>/fd` table for an already-enrolled thread) with a CONFIRMED
+thread exit. Live repro: `aoided.service` has no `ps` on its unit PATH, so
+`process_table()` returned `None` → `unwrap_or_default()` → zero servers →
+every held lock's `lock_holder` came back with no owner → both live
+desktop-Codex records were DROPPED; `lyra shellbridge --run` (its unit
+carries `pkgs.procps`) re-ran the sync on its own tick/window events, saw
+both threads again, and re-inserted them under fresh `mint_for` petnames —
+an observable churn loop (`app=[plucky-maple,stout-beech]` → `[]` → new
+pair → `[]` → new pair …, every few seconds) while the same app-server pid held
+both locks the entire time.
+
+Introduced `ThreadScan` (`Observed(Vec<CodexThread>)` / `Unknown(ScanFailure)`)
+as the seam between discovery and reconciliation:
+- `live_thread_locks` — `Err(NotFound)` reads as `Observed(empty)` (no
+  desktop app has ever run); any OTHER read error is `Err(LockDirUnreadable)`.
+- `lock_is_held` — now `Option<bool>`: `Some(true)` held, `Some(false)`
+  the file is genuinely gone (`NotFound` on open), `None` any other open
+  failure. `O_RDONLY` only, never `O_CREAT`, unchanged.
+- `lock_holder`/`holder_via_proc_fd` — now `Result<Option<u32>, ()>`: an
+  exited candidate pid (`/proc/<pid>/fd` `NotFound`) is skipped exactly as
+  before (not evidence of anything); any OTHER unreadable candidate fd
+  table returns `Err(())`.
+- `codex_app_threads`/`codex_app_threads_with` (the latter split out to
+  take `process_table` as an injectable closure, so a test can simulate
+  "no `ps`" without shelling out for real) propagate any of the above
+  failures as `Unknown`, and still short-circuit to `Observed(empty)`
+  without ever calling `process_table` when every lock is positively
+  released (unchanged perf gate).
+- `reconcile_codex_app_threads` now takes `&ThreadScan` and returns
+  `(sessions, false)` UNTOUCHED on `Unknown` — nothing removed, nothing
+  inserted, nothing upserted, no petname re-minted.
+- `sync_codex_app_threads` takes no stage lock and writes nothing on
+  `Unknown`; the first `ProcessTableUnavailable` observation per process
+  gets one audit line (`aoide_protocol::audit`, `Door::Daemon`, command
+  `session.reap`, message "desktop codex scan skipped: ps not on PATH
+  (records kept)"), gated by a `static AtomicBool` so it never repeats.
+
+Per-lock-unknown rule taken (brief §2 bullet 4): the ID-COUPLED rule — an
+unreadable `/proc/<pid>/fd` table only aborts the WHOLE scan as `Unknown`
+when an EXISTING `kind:"app"` record already carries that thread id;
+otherwise it is today's unchanged "no proven owner → no record" reading
+(no scan-wide effect). Chosen over the simpler "any unreadable candidate
+aborts everything" rule: once `lock_holder`/`holder_via_proc_fd` already
+needed the tri-state return for the base fix, the `known.contains_key(id)`
+check cost well under the ~30-line budget (no new plumbing — `known` was
+already in scope in `codex_app_threads_with`), and it avoids a permission
+blip on an id nothing today is tracking taking down enrolment for every
+OTHER thread in the same tick.
+
+Nix commit (separate, P-CX-4 §3, code fix stands alone from this):
+`pkgs/aoide/module/aoided.nix`'s `systemd.user.services.aoided` and
+`modules/nucleus/shellbridge.nix`'s `aoide-graph-reap` unit both gain
+`pkgs.procps` on their unit `path`, so a resident `aoided`/the graph-reap
+oneshot always has `ps` and the scan no longer runs `Unknown` forever on a
+box that never had it.
+
+Tests: 632 → 642 (10 new, `graph/codex_app.rs::tests`, pure-core where
+possible, fixture dirs under `unique_stage` tempdirs only — no live
+`~/.codex`/`~/.aoide` touched). `cargo clippy -p aoide-conduct` and
+`cargo fmt --check -p aoide-conduct` both clean of anything from this diff
+(4 pre-existing fmt mismatches elsewhere in `codex_app.rs`, and one
+pre-existing `dead_code` warning on `UNSUPPORTED_PLATFORM`, predate this
+change — confirmed against the file's `HEAD` copy, left untouched as
+out-of-scope). `nix build .#checks.x86_64-linux.fmt`/`.nix-lint` both
+green, no activation/rebuild/daemon-restart performed.
+
+Pages touched:
+- `pkgs/aoide/crates/conduct/src/graph/codex_app.rs` (module doc,
+  `reconcile_codex_app_threads` doc, new `ThreadScan`/`ScanFailure` types,
+  new tests)
+- `pkgs/aoide/crates/conduct/README.md` ("Discovery (P-CX-2)" paragraph)
+- `pkgs/aoide/crates/conduct/AGENTS.md` (codex invariant block — new
+  bullet after "A desktop thread enrols only on positive ownership
+  evidence")
+- `pkgs/aoide/module/aoided.nix` (`systemd.user.services.aoided.path`)
+- `modules/nucleus/shellbridge.nix` (`aoide-graph-reap`'s `path`)

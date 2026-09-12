@@ -94,8 +94,9 @@ Fields per entry: status · owner · depends on · evidence · next.
   the thread set reads empty and the reconcile DROPS every app record.
   Root's class diagnosis (failed scan conflated with confirmed exit) is
   confirmed; the gather-outside-lock race is NOT evidenced and is not
-  being changed. P-CX-4 DISPATCHED (scratchpad `p-cx-4-brief.md`, one
-  Sonnet executor, independent review): a scan is `Observed(set)` or
+  being changed. P-CX-4 LANDED 7a9f865 + f7aaee8 (Sonnet executor,
+  independent Sonnet review LAND; conduct 632 → 642 green, clippy and fmt
+  clean of new issues, nix fmt + nix-lint green): a scan is `Observed(set)` or
   `Unknown`; only an observed set removes or inserts, Unknown changes no
   record and takes no lock; `lock_is_held` distinguishes released from
   unreadable; a genuine close still disappears; one audit line the first
@@ -103,7 +104,11 @@ Fields per entry: status · owner · depends on · evidence · next.
   fd dirs, mixed CLI+desktop, alternating writers, genuine close. Second
   commit puts `pkgs.procps` on the aoided and graph-reap unit PATHs
   (deployment cure, no activation; the live churn stops after the User
-  rebuilds).
+  rebuilds). The audit line and the ID-coupled unknown rule shipped (an
+  unreadable fd table aborts the scan only for an id an app record already
+  carries). Next: the User rebuilds; the live check is that the two cards
+  keep their petnames across ticks and a genuine app close still removes
+  them.
 
 ## 3. Interactive doorbell (native Claude channel idle wake)
 
