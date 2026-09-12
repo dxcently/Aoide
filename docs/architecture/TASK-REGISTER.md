@@ -147,16 +147,19 @@ Fields per entry: status · owner · depends on · evidence · next.
 
 ## 3. Interactive doorbell (native Claude channel idle wake)
 
-- PAUSED BY THE USER (seq 220, 2026-09-12): automatic mail-triggered wake
-  work and disposable automatic-wake tests are paused. M5c-2/3 are in the
-  live daemon since generation 204 (09:06:22Z) but unproven end to end.
-  Mail stays the durable assignment/handoff carrier; sessions check it on explicit
-  conductor nudges, after an idle composer is confirmed. The channel code
-  (M5c-2/3) stays in the tree, nothing deleted. The end-to-end runbook
-  (scratchpad `p-doorbell-e2e-brief.md`) and a clean HEAD-worktree build
-  of aoide/aoided/lyra exist unused; the runner was never launched (the
-  harness permission classifier rejected the dispatch, reported seq 217).
-  Not blocked on a test; resumes only on the User's word.
+- RESUMED BY THE USER (seq 224/228, 2026-09-12; the seq 220 pause is
+  superseded): automatic doorbell wake is important, especially for idle
+  agents on other hosts outside direct conductor reach; manual nudges stay
+  a fallback, not a replacement. Architecture kept: remote mail reaches
+  the paired receiving host, which resolves its own current local reader
+  and wakes it through a supported local harness channel; cross-host
+  delivery alone never creates a wake path for an unsupported harness.
+  M5c-2/3 are in the live daemon since generation 204 (09:06:22Z). The
+  isolated TUI E2E (runbook scratchpad `p-doorbell-e2e-brief.md`, live
+  store package 0mg1rj1m… in an isolated root) runs IN-SESSION by Fable,
+  stepwise; the earlier subagent dispatch was rejected by the harness
+  permission classifier (seq 217) and any further rejection is reported
+  with the exact blocked action.
 - Status: NATIVE WAKE PROVEN (root, 2026-09-11, Claude Code 2.1.260,
   disposable PTY, the Fable kit): idle wake with no keystroke, unsent draft
   survived, a text-generation turn finished before the event was answered;
