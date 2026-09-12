@@ -631,6 +631,14 @@ Fields per entry: status · owner · depends on · evidence · next.
   `b3c6bcb5…` unavailable) — the Melete owner's pin, not changed here.
   Runtime grants remain NOT applied (classifier denial, seq 241); no
   all-host acceptance is claimed.
+- Osaka tracking (root, seq 265-268): the conducted shells on Osaka ran
+  real Claude processes with zero native children because
+  `~/.claude/settings.json` carried no hooks; a root agent ran the
+  existing `aoide hooks install claude` there (backup kept, no restart);
+  native enrolment still waits on a genuine hook event. Gates 3-4 on
+  Osaka read against that. Sonata meter/power widths were a runtime-copy
+  drift (340 vs the shipped 360), corrected on disk by root; no source
+  patch.
 - Flagged, unexamined: routable door urls are recorded (yomi's record of
   sakaki `http://192.168.1.202:8710/`, osaka's record of yomi
   `http://192.168.1.175:8710/`) against the loopback-only rule.
@@ -719,7 +727,25 @@ Fields per entry: status · owner · depends on · evidence · next.
   no conduct file, parallel to capture S3) → E1b conduct presence
   reconciler + child record + readiness (after S3 frees conduct) → E3
   native send arm → E0 a2a.rs → E4 resume mapping → E5/E6. Brief rev 3
-  (Opus, read-only) folds the rulings and the live target.
+  DONE (Opus, read-only, scratch `p-eidolon-adapter-brief-r3.md`, 752
+  lines): E1a gains a `native_send` argv field shaped like `resume_args`
+  (`None` for claude/kimi/pi; the one predicate E0/E3 read); two rev-2
+  errors withdrawn — `canonical_state("unknown")` is `"idle"`
+  (`protocol/src/state.rs:29-37`), so a non-TUI owner cannot be deferred
+  by state and the safety comes from the transport (a maildir write
+  never touches a composer); `meta.json` is pretty-printed, so `tail`
+  re-emits it as one compact line. Native send facts: exit 0 = accepted
+  not consumed (`delivered to` vs `written to …inbox`), no receipt id
+  exists, a repeat send deposits a second file by design; the nix-store
+  `eidolon` is a launcher shim execing `${EIDOLON_BIN:-~/.local/bin/
+  eidolon}`, so the executable resolves from the live pid. E3 constraint
+  (root seq 265): a succeeded deposit is never re-sent; a retry re-runs
+  only the native socket notify; no exactly-once claim. E0: one call
+  site (`a2a.rs:1193`), bounded wait copying `stamp_spawn_origin`'s
+  poll, timeout = audit error + today's raw write + Task `submitted`.
+  E4: resurrection argv is `eidolon tui --session <path>`. Parked, own
+  ruling needed: an A2A FOLLOW-UP into a live eidolon child is refused by
+  `decide_send_action` (`a2a.rs:726-733`), outside R3's bound.
 
 ## Carried backlog (verified status, never implicitly done)
 
