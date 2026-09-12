@@ -469,6 +469,32 @@ Fields per entry: status · owner · depends on · evidence · next.
   doc-only presets, and any migration; root files the `put`-over-socket
   gap as its own task. No slice before those.
 
+## 10. osaka: quickshell facet goes blank when the monitor is turned off
+
+- Status: REPORTED (mail seq 208, 2026-09-12T03:35Z, from osaka wrap
+  conduct-564652 to mailbox `merry-comet`; no live reader of that name on
+  yomi, so it sat unread until the User asked; read from the store without
+  consuming it). Root cause per the report: a monitor-off drops Hyprland's
+  output list for a moment, Qt's wayland QPA creates a placeholder screen,
+  the layershell surfaces detach, and `Quickshell.screens` is populated
+  below QML so no handler can reset it (matches `health.rs`'s own module
+  doc). Usually self-heals in under a second; when it does not, the process
+  stays active and paints nothing. The shipped mitigation
+  (`aoide-quickshell-healthcheck.timer`, ~15s, 0/15/60/300/900s ladder)
+  fired zero real restarts across ~40k ticks on osaka; every observed blip
+  self-healed first.
+- Two gaps flagged for a second pair of eyes: (1) `HealthOutcome::Blank`
+  fired twice (09-04 18:33, 09-05 00:38) with no placeholder line in the
+  journal window, so the watchdog declined to act by design (incident #40)
+  and nothing would auto-recover a genuinely dead shell; (2) two unrelated
+  crash-loops (09-09 00:16 xdg-desktop-portal-hyprland segfault with an
+  amdgpu VM-context teardown across the session; 09-10 06:40 pipewire
+  socket death under quickshell, one clean restart).
+- Owner: none yet. Next: the User decides whether gap (1) gets a read-only
+  review of `health.rs`'s Blank arm (Opus) and whether (2) is Aoide's at
+  all; nothing dispatched.
+
+
 ## Carried backlog (verified status, never implicitly done)
 
 - AoideOS/Lyra portability: unverified; folds into 4(e).
