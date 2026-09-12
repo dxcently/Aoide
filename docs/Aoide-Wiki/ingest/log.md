@@ -4177,3 +4177,30 @@ rather than the target's submit byte (E0 territory). `aoide-screen` 297,
 
 Pages touched: pkgs/aoide/crates/screen/src/send.rs,
 pkgs/aoide/crates/server/src/a2a.rs
+
+## [2026-09-12] feat | mailed letters report their delivery state
+
+User requirement via root (seq 274/285). A tunnelled letter's transport
+failure used to live only in `state/outbox/<node>/link.json`; `mail send`
+reported the durable spool and `mail outbox` rendered entries with no
+link state, so an Osaka letter that never left the host looked queued and
+fine. One read-only projection in the client crate
+(`commands.rs::delivery_projection`) now joins an outbox entry with its
+node's link state and is returned as `data.delivery` by both `mail send`
+(after its best-effort drain; the spool stays `ok`) and `mail outbox`:
+`refused` > `delivered` (a verified destination-signed ack only, never an
+entry's absence) > `accepted` (peer accepted, `ackPending`) > `retrying`
+(link failure with `nextAttemptAt` as the earliest allowed attempt) >
+`queued`; `failed` only for a local I/O error the command itself saw;
+`reasonScope` `link`/`entry`/`local`; an unreadable state says `status
+unavailable`. Ranking a verified ack above a pending acceptance deviates
+from root's list order and is deliberate: stronger evidence wins. Review
+PASS; the per-entry mailbase read and a direct `failed` test follow as a
+fix-up. `aoide-client` 273 → 284. Commit 9793206 (it also swept another
+writer's staged Eidolon-nix set, removed again in c879649; the executor's
+self-repair amended e445827 into c879649 — content intact, lesson
+recorded). `CONTRACTS.md` outbox row shape gains `delivery` here.
+
+Pages touched: CONTRACTS.md, docs/architecture/MAIL.md,
+pkgs/aoide/crates/client/README.md, pkgs/aoide/crates/client/AGENTS.md,
+pkgs/aoide/crates/client/src/commands.rs

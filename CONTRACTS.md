@@ -2398,7 +2398,17 @@ Read/resolved by `aoide mail outbox [node]`/`mail outbox rm <msgid>` —
 a separate CLI surface from the mailbase's own `mail` family above,
 touching `state/outbox/` only. `mail outbox` (no `node`) lists every
 node with a non-empty outbox; `mail outbox <node>` narrows to one; each
-row is `msgid`/`to`/`tries`/`lastTryAt`/`lastOutcome`/`refused`. `mail
+row is `msgid`/`to`/`tries`/`lastTryAt`/`lastOutcome`/`refused` plus a
+`delivery` object — the same read-only projection `mail send --json`
+returns after its spool — `status` (`refused` > `delivered` > `accepted`
+> `retrying` > `queued`; `failed` only for a local I/O error observed by
+the reporting command), `reason`, `reasonScope` (`link` | `entry` |
+`local`), `nextAttemptAt` (the earliest allowed attempt from the node's
+link state, never a promised schedule), `ackPending`. `delivered` is only
+ever a matching destination-signed ack, never an entry's absence; the
+node's link state is read once per listing and joined onto its rows; an
+unreadable state reports `queued` with `status unavailable` as the
+reason. `mail
 outbox rm <msgid>` is an exact-msgid removal — it walks every node with an
 outbox and removes the first match, erroring `not-found` if none held it;
 NOT the mailbase `mail rm`'s age-based prune, and neither command ever
