@@ -809,6 +809,59 @@ Fields per entry: status · owner · depends on · evidence · next.
   dxflake pin must be ≥ 533d89e. Every conduct/storage brief now adds
   `cargo test --workspace --no-run` (compile only).
 
+## 13. Ownership graph (project inheritance, lineage, sanitized spawn ancestry)
+
+User requirement via root, 2026-09-12 (seq 291/292; explicitly authorized,
+no further proposal approval for the bounded fixes). Owner: Fable
+(implementation), coordinated with capture S3b and the Eidolon conduct
+files; root's two READ-ONLY audits (`eidolon_acceptance_review`:
+project/parent inheritance across local/remote/app/subagents;
+`chiyo_config_fix`: live roster/QML actions) are not duplicated.
+
+- Requirement: Aoide groups by ownership; a spawned session inherits its
+  parent's project; app-controlled uncategorized agents stop exposing
+  unusable kill / already-ended errors; the widget shows LIVE agents only
+  (root's live-only requirement reaffirmed); historical project sessions
+  stay in separate saved/history views. Truthful per-session actions —
+  never hide a valid idle task, never kill the shared app process.
+- Ruling (seq 292): `graph/model.rs:47` and `who.rs:467` group on the
+  record's own project/cwd only. Add ONE shared effective-project resolver:
+  own explicit project > owner's effective project > own cwd anchor;
+  dangling/cyclic parents safe; a stored project stays an explicit choice
+  (no copied child project); clearing an override resumes inheritance;
+  owner reassignment propagates. Reuse the existing hook/subagent parent
+  edges. Codex native `parent_thread_id` is parsed (`codex_capture.rs:295`)
+  and ignored (`codex_app.rs:704`): the next lineage slice applies a
+  matching native parent edge preserving `kind:app` and native identity,
+  granting NO kill authority. `server/a2a.rs:1116`: clear the daemon's
+  `AOIDE_SESSION_ID` for a spawned child beside the origin clearing, keeping
+  legitimate local inheritance. `window.rs:333`: the ambient fallback must
+  resolve an existing LIVE local record, never a stale id. Remote
+  ownership needs a qualified node+session and a project mapping; never
+  insert a foreign owner as a local parent. Live symptom: app children
+  gentle-crest/spry-dune/stark-reed lose their parent edge although root
+  silent-heron's project is aoide.
+- Tests required: parent project outside the cwd anchor; nested no-cwd
+  children; explicit child override and clear; parent reassignment;
+  missing/cyclic parent fallback; stale A2A env; Codex unrelated vs native
+  children retaining the app refusal.
+- A2A prerequisite (seq 289, root's Osaka proof): `aoide node spawn`
+  reached Osaka and returned `submitted` (a2a-1572083-1789251676), but the
+  child sat in the native trust dialog for `/home/khoa` (the server's
+  default cwd) and inherited `parentSessionId` dcb327d0… (the User's own
+  Claude, from the service env) — wrong ancestry. Needed: bounded spawn
+  cwd/project-root support, sanitized inherited harness context, readiness
+  before the prompt (E0 territory). Not a reason to broaden permissions.
+- UI slice (root-owned, seq 293/294): Sonata `conductor.qml`/`SessionMenu.qml`/
+  `widget-structure.md` — 0aea55e (on origin): roster shows only
+  working/awaiting/stopped/idle; kill disabled with an honest hint for
+  app/ended/unknown/subagent; details/project retained. No backend change.
+  An explicit `unknown` observation still needs the backend if a failed scan
+  retains the record.
+- Order: capture S3b (session_store kind gate) → ownership resolver +
+  sanitized A2A ancestry (this section) → Codex native lineage slice → E3.
+  Brief: Opus, read-only, scratch `p-ownership-brief.md`.
+
 ## Carried backlog (verified status, never implicitly done)
 
 - AoideOS/Lyra portability: unverified; folds into 4(e).
