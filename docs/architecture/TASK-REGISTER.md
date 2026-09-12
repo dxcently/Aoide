@@ -130,7 +130,19 @@ Fields per entry: status · owner · depends on · evidence · next.
   state, S4 subagent edge+nickname title, S5 prompt (gated). Next: root
   R1 guardian_review threads on the roster, R2 `working` on an app record,
   R3 `sources` general vs codex-only; User D1 prompt text on the roster,
-  D2 the live check. Nothing dispatched.
+  D2 the live check. RULED (root seq 228): R1 enrol labelled, R2 every
+  `state` consumer enumerated with file:line before S3 and the app
+  kill/send refusals asserted, R3 general field one producer, D1 the
+  latest prompt is a captured field. LANDED and pushed: S1 033fead+e601074
+  (pure fold), S2 fdb6682 (bounded 1 MiB reader `capture_for`, additive
+  `sources` on `SessionRecord`, one call site in `sync_codex_app_threads`,
+  merge never writes state/lineage/title) + 537a3b3 (CONTRACTS §4 entry) +
+  92c7e9a (per-thread (len,mtime) memo and cached rollout path); each
+  reviewed PASS by an independent reviewer; conduct 679, storage 403.
+  In flight: S2b (cap-boundary tests + per-tick memo eviction; first cut
+  56d535a FAILED review on a reproduced parallel-test race, fix-up
+  pending). Next: S3 `state` under R2, then S4. Staged and proved, not
+  deployed (build 4 predates S1).
 - Build 4 = LIVE, CHURN FIX VERIFIED (2026-09-12): the clean HEAD build
   (pristine worktree at 2432e06) is
   /nix/store/cbbnif0ij38zm8y0sb7v6jfxir4k8yrl-nixos-system-yomi-strix-26.11.20260907.dc5d91f
