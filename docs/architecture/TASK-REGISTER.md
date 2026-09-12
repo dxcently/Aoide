@@ -160,6 +160,24 @@ Fields per entry: status · owner · depends on · evidence · next.
   stepwise; the earlier subagent dispatch was rejected by the harness
   permission classifier (seq 217) and any further rejection is reported
   with the exact blocked action.
+- PROVEN 2026-09-12 (isolated rig /tmp/aoide-db, live store package,
+  live daemon untouched; evidence scratch `doorbell-e2e/REPORT.md`): a
+  real Claude Code 2.1.260 TUI (`--dangerously-load-development-channels
+  server:aoide`, project `.mcp.json` → `aoide mcp serve --stdio`,
+  channel socket present) enrolled itself by reading `db-box`; IDLE: the
+  letter rang the wrap the same second, the channel line appeared in the
+  TUI and the session read the letter 3s later; DRAFT: an unsent composer
+  line survived the wake untouched; BUSY: the ring was deferred
+  (`working`) and fired on the Stop hook, read 3s after the turn ended;
+  RELAUNCH: after exit and respawn the ring targeted only the new wrap,
+  the dead one reported `unknown`. The session reported each letter and
+  refused to obey its body (house rule 4) — the RESPONSE is a report, not
+  compliance. Lessons: a project `.mcp.json` server is silently disabled
+  when the session inherits `CLAUDE_CODE_CHILD_SESSION` (pre-approve in
+  `settings.local.json`, spawn with the marker unset); `send --submit`
+  does not submit a pasted turn, a separate bare Enter does; the exited
+  wrap leaves an orphan `channel-<id>.sock` (backlog item confirmed).
+  Cross-host wake (gate 3, §11) stays blocked on the far-door grants.
 - Status: NATIVE WAKE PROVEN (root, 2026-09-11, Claude Code 2.1.260,
   disposable PTY, the Fable kit): idle wake with no keystroke, unsent draft
   survived, a text-generation turn finished before the event was answered;
