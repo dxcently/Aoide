@@ -1427,8 +1427,10 @@ classifier, parented to the harness session from the hook payload, closed on
 its own stop event and swept if its parent ends), `a2a` (§6 — an external
 A2A agent folded into the session DAG), or `app` (a task inside an app aoide
 does not conduct — e.g. a desktop Codex/ChatGPT thread, keyed by the app's
-own native thread id, `agent:"codex"`, `state:"idle"` always; no `agent`
-profile, hook, `conductable`, or `socket` exists for it). `app` is explicitly
+own native thread id, `agent:"codex"`, `state:"idle"` at enrolment and
+thereafter `working`/`idle` read off its own rollout's turn bracket by the
+capture merge (`codex_app.rs::apply_codex_capture`), never `awaiting`; no
+`agent` profile, hook, `conductable`, or `socket` exists for it). `app` is explicitly
 EXCLUDED from `is_agent_kind` and from the reaper's staleness/dedup arms —
 a shared app-server pid backs every thread it holds a lock for, so it must
 never stand as proof any one of them is alive. Absent means "unclassified" (a
