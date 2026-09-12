@@ -830,6 +830,31 @@ Fields per entry: status · owner · depends on · evidence · next.
   isolated env on EVERY invocation and never calls bare `aoided`.
 - Deployed runtime on yomi-strix: aoided 0.0.22 (store `vvvwpzkq…`), predates
   everything above. Staged ≠ proved ≠ deployed until activation.
+- USER PRIORITY 2026-09-12 (seq 281/283, supersedes the refactor-first
+  reading): (1) Osaka development working — root's `chiyo_config_fix`
+  enables dxflake Osaka's existing `aoide.openai` dendrite (ChatGPT/Codex)
+  as a separate small config commit (dxflake 155909e pushed, not
+  activated); (2) root's `eidolon_acceptance_review` proves BOTH conductor
+  input and cross-host doorbell on Osaka with its OWN disposable fixture
+  (`osaka-ring-proof-20260912`; no User sessions, no rebuilds, no
+  duplicate of the yomi rig); (3) only then the architecture refactor.
+  Fable keeps the Eidolon consumer/capture lanes and the mail-status fix;
+  no overlapping Osaka test spawn from yomi.
+- PROPOSAL QUEUE — dxflake refactor (seq 281/283; proposal only, gated on
+  (2) above; MAIN TARGET IS DXFLAKE, run on an Osaka alternative
+  branch/worktree, coordinated with the existing Osaka consumer worker, no
+  duplicate trees; Aoide changes limited to necessary upstream consumer
+  interfaces): the User authorizes direct Eidolon changes for composable
+  extension/controller APIs; an optional Aoide management extension;
+  Lyra/Nix workflow contracts (progressive repo-contract loading calling
+  the existing `aoide`/`lyra` CLI, rebuild admission retained); project
+  saved working sets; remote restore queues and web surfaces. Read-only
+  critique delivered to root (scratch `p-eidolon-extension-critique.md`):
+  saved session = derived view (ledger `logPath` + exit call, E4 scope);
+  cross-host resume must be idempotent on a caller key carried by the
+  existing outbox (a2a spawn on absent contextId is N-retries = N agents);
+  the extension seam is one `native_send` consumer (E3) + the existing
+  dendrite. No implementation until the proposal settles.
 - MAIL DELIVERY STATE (User requirement via root, seq 274/275; owner:
   Fable, after root's read-only brief; files coordinated against E3):
   a filed letter must report queued / retrying / refused /
