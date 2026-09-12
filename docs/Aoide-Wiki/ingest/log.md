@@ -3875,3 +3875,47 @@ Pages touched:
   evidence")
 - `pkgs/aoide/module/aoided.nix` (`systemd.user.services.aoided.path`)
 - `modules/nucleus/shellbridge.nix` (`aoide-graph-reap`'s `path`)
+
+## [2026-09-12] fix | ssh rides on the aoided unit PATH so the daemon outbox drain can tunnel
+
+The in-daemon outbox sweep (`server/src/daemon.rs` `run_internal_mail_drain`
+→ `client/src/mail_wire.rs` `drain_node` → `tunnel.rs` `spawn ssh`) failed
+for every loopback-door node with "spawn `ssh` … No such file or directory"
+because a minimal user unit's PATH carries no `ssh`; the 60s back-off it
+wrote to `state/outbox/<node>/link.json` then held off the CLI's own attempt
+too, so `mail outbox` showed `tries 0` and no outcome while nothing was ever
+delivered (osaka, 2026-09-12; a send timed 0.16s after the hold-off expired
+tunnelled and got a real verdict). Same class as the `ps` incident: the unit
+path now lists `pkgs.openssh` beside `pkgs.procps`. Commit 1d93184; not
+deployed by this change.
+
+Pages touched: pkgs/aoide/module/aoided.nix
+
+## [2026-09-12] feat | fold a Codex rollout into a provenance-carrying capture
+
+S1 of the native Codex capture lane (P-CX-5). New
+`pkgs/aoide/crates/conduct/src/graph/codex_capture.rs`: `CodexCapture` and
+the pure `fold_rollout(path, lines)` — no I/O, no stage write, no call site.
+Every field is `None` on empty or unrecognised input; `state` reads only
+`working`/`idle` from which of `task_started`/`task_complete`/`turn_aborted`
+appeared last (no clock, so elapsed time never downgrades `working`);
+reasoning records, encrypted or not, contribute nothing; occupancy is
+`last_token_usage.input_tokens` alone against `model_context_window`;
+`sources` maps each captured field to `<absolute path>#<ordinal>` where the
+ordinal is the line's own position in the file as read, unparseable lines
+included. The latest user prompt is a captured field with its pointer (D1,
+root seq 228) — the brief's S5 slice collapses into S1. Tests build every
+fixture inline in the shape of the real records (`session_meta`,
+`turn_context`, `event_msg`, `item_started`/`item_completed`, `token_count`),
+never a real rollout; 21 tests, `aoide-conduct` 642 → 663. Design calls the
+brief left open, recorded for S2+: `*_output` records are spelled
+`function_call_output`/`custom_tool_call_output`; the `tool` label prefers
+`CommandExecution.parsed_cmd` over raw `command`; `activity` is the
+in-flight call's bare `name`; `sources` keys are the struct's snake_case
+field names (S2 remaps to the wire's camelCase). Commits 033fead (fold)
+and e601074 (review fix-up: meta, tool-label and malformed-line tests, a
+synthetic fixture id).
+
+Pages touched: pkgs/aoide/crates/conduct/README.md,
+pkgs/aoide/crates/conduct/src/graph.rs,
+pkgs/aoide/crates/conduct/src/graph/codex_capture.rs
