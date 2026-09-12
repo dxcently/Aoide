@@ -149,8 +149,8 @@ Fields per entry: status · owner · depends on · evidence · next.
 
 - PAUSED BY THE USER (seq 220, 2026-09-12): automatic mail-triggered wake
   work and disposable automatic-wake tests are paused. M5c-2/3 are in the
-  live daemon since generation 204 (09:06:22Z) but unproven end to end. Mail stays the
-  durable assignment/handoff carrier; sessions check it on explicit
+  live daemon since generation 204 (09:06:22Z) but unproven end to end.
+  Mail stays the durable assignment/handoff carrier; sessions check it on explicit
   conductor nudges, after an idle composer is confirmed. The channel code
   (M5c-2/3) stays in the tree, nothing deleted. The end-to-end runbook
   (scratchpad `p-doorbell-e2e-brief.md`) and a clean HEAD-worktree build
