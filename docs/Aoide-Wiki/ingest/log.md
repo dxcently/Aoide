@@ -4055,3 +4055,23 @@ naming all three; not deployed by this change.
 
 Pages touched: pkgs/aoide/module/aoided.nix
 
+
+## [2026-09-12] fix | conductor test fixtures carry the `sources` field
+
+S2 (fdb6682) added `sources: Option<BTreeMap<String,String>>` to
+`SessionRecord`; the four literal fixtures in the conductor crate's tests
+(`app.rs`, `graphview.rs`, `ui.rs`, `lib.rs`) were never given it, so
+`cargo test --workspace --no-run` (what the nix package's check phase
+runs) stopped compiling at `aoide-conductor` while every per-crate run
+stayed green. Found by the pristine-worktree build of 637666b for the
+E1b enrolment proof; every commit from fdb6682 to fdbea59 fails the nix
+check the same way, so a dxflake pin inside that range does not build.
+`sources: None` on each fixture; `aoide-conductor` 77 green; the
+workspace test build compiles again. Two dead-code warnings remain from
+the capture lane (`UNSUPPORTED_PLATFORM`, `fold_rollout`) and go with
+S3b.
+
+Pages touched: pkgs/aoide/crates/conductor/src/app.rs,
+pkgs/aoide/crates/conductor/src/graphview.rs,
+pkgs/aoide/crates/conductor/src/ui.rs,
+pkgs/aoide/crates/conductor/src/lib.rs
