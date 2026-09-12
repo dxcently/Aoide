@@ -10,6 +10,8 @@ Harnox sources: src/secrets.rs, src/lib.rs, Cargo.toml. Aoide sources: pkgs/aoid
 
 ## Recommendation
 
+Harnox is required for Aoide's optional secrets-management capability, not for core Aoide. Secrets support is first-class through Aoide's normal commands and deployment configuration. A secrets-enabled build directly depends on pinned upstream Harnox; a build without secrets support must still operate normally and report secret operations as unavailable rather than silently select a fallback store. Implementation must verify both build configurations.
+
 Use Harnox's existing secrets feature as Aoide's custody implementation. Keep Aoide responsible for authenticated callers, per-operation authorization, approvals, audited delivery, and its shell-facing interface. Do not turn Harnox into an Aoide daemon or require Mneme/Melete to run for Aoide to obtain a local credential.
 
 This replaces duplicated storage where semantics match. It is not a claim that Harnox already supplies a complete secrets broker. Importing one library into three services shares implementation, not a running store, permissions, or secret values.
