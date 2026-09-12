@@ -668,9 +668,21 @@ Fields per entry: status · owner · depends on · evidence · next.
   unchanged, deferred→idle wake once, failed write stays armed) → E4
   explicit native-id ↔ log-path resume mapping → E5 capture from the
   producer export, missing facts explicit → E6 parent graph from explicit
-  native child evidence only. Brief revision (Opus) in progress; no
-  writer dispatched; open ruling: widening `TranscriptSpec.locate` with
-  the record pid.
+  native child evidence only. Brief rev 2 DONE (2026-09-12): the locate
+  pid-widening question is withdrawn (records key on the native presence
+  id, the codex_app precedent, existing profiles untouched); the child
+  record reuses the codex_app Observed/Unknown reconciler and the
+  existing pid-ancestry walk; headless eidolon never sets `busy`, so
+  non-TUI registrations are `unknown`, never idle. BLOCKER R3 (verified,
+  `server/src/a2a.rs:962-979`): the A2A spawn path runs `conduct --agent
+  a2a` and writes the raw prompt into the PTY socket, bypassing profile
+  dispatch — an eidolon TUI in normal mode would submit an empty
+  composer, so `spawnAgent = "eidolon"` is dead on arrival until a
+  bounded E0 routes the spawn prompt through profile-aware delivery;
+  `server/` has no owner in root's table (Fable proposed). Rulings
+  pending: R1 resume by path (default `resume_args: None`), R2 native
+  send `Queued` = armed-not-stamped, R3 owner, R4 host line sequenced
+  after E0+E1+E3. No writer dispatched.
 
 ## Carried backlog (verified status, never implicitly done)
 
