@@ -752,9 +752,26 @@ Fields per entry: status · owner · depends on · evidence · next.
   only the native socket notify; no exactly-once claim. E0: one call
   site (`a2a.rs:1193`), bounded wait copying `stamp_spawn_origin`'s
   poll, timeout = audit error + today's raw write + Task `submitted`.
-  E4: resurrection argv is `eidolon tui --session <path>`. Parked, own
-  ruling needed: an A2A FOLLOW-UP into a live eidolon child is refused by
-  `decide_send_action` (`a2a.rs:726-733`), outside R3's bound.
+  E4: resurrection argv is `eidolon tui --session <path>`. E7 RULED (root
+  seq 270): after E3/E0, a bounded slice routes an A2A FOLLOW-UP to a
+  positively identified eidolon child through the same gated native
+  delivery (`decide_send_action`, `a2a.rs:726-733` today refuses it),
+  preserving paired signature, capability and conductor approvals and
+  every other harness predicate; tests: a permitted peer delivers once to
+  the correct child, denied/unsigned/unpaired deposits nothing, a
+  dead/stale child refuses, a queued notify retry never redeposits; no
+  allow-all predicate. Readiness evidence is the producer observation on
+  the record (busy, TUI-or-not), never the canonical display state; the
+  live pid's `/proc/<pid>/exe` is the definitive executable.
+- E1b proof of enrolment (required before any "complete", seq 270): the
+  reviewed E1b commit built from a pristine worktree, an ISOLATED aoided
+  (own `AOIDE_ROOT`/`AOIDE_DAEMON_SOCKET`, own `XDG_RUNTIME_DIR` whose
+  `eidolon/` entry links to the real presence tree; the reconciler only
+  reads `meta.json` and pings the sock with eidolon's own liveness op),
+  reporting the isolated stage's wrap record and eidolon record (native
+  id, pid, model, title, logPath, parent = the wrap), live daemon
+  untouched (socket inodes, MainPID before/after), no injection, no
+  restart. Deployment stays the User's gate.
 
 ## Carried backlog (verified status, never implicitly done)
 
