@@ -646,6 +646,20 @@ Fields per entry: status · owner · depends on · evidence · next.
   Osaka read against that. Sonata meter/power widths were a runtime-copy
   drift (340 vs the shipped 360), corrected on disk by root; no source
   patch.
+- Osaka → yomi letter 5ba9a44d (minted 21:11Z, palette/livery override
+  topic) NEVER LEFT Osaka (root, seq 273): outbox `tries 0`, link.json
+  `lastOutcome: curl failed`, backoff 60. "curl failed" is the exact
+  spawn-failure string of the door POST (`storage/src/commands.rs:314`),
+  so the aoided unit PATH on the dxflake pin (procps+openssh) lacks
+  `curl`: same class as the `ps` and `ssh` incidents; one-line unit-path
+  fix on main, deployed by the User. Not received or fetched here.
+- The Osaka worker (silent-grove, `conduct-3796858-1789009882`) now
+  coordinates directly with this session on the dxflake Sonata Rose Pine
+  recolor (`livery.override` reaches baked Stylix/Hyprland but not the
+  runtime Quickshell seed, per its letter); it owns the dxflake consumer
+  side and its runtime findings; Aoide/Lyra core stays here; authored
+  Sonata colours preserved; no duplicate palette implementation before a
+  contract is agreed (seq 275).
 - Flagged, unexamined: routable door urls are recorded (yomi's record of
   sakaki `http://192.168.1.202:8710/`, osaka's record of yomi
   `http://192.168.1.175:8710/`) against the loopback-only rule.
@@ -794,10 +808,23 @@ Fields per entry: status · owner · depends on · evidence · next.
   isolated env on EVERY invocation and never calls bare `aoided`.
 - Deployed runtime on yomi-strix: aoided 0.0.22 (store `vvvwpzkq…`), predates
   everything above. Staged ≠ proved ≠ deployed until activation.
-- `mail outbox` hides transport failure: the daemon drain's back-off in
-  `state/outbox/<node>/link.json` silences the CLI's own attempt and the
-  listing shows `tries 0` with no outcome (proven 2026-09-12, gate 2). The
-  hold-off and the last transport error belong on the listing. Unowned.
+- MAIL DELIVERY STATE (User requirement via root, seq 274/275; owner:
+  Fable, after root's read-only brief; files coordinated against E3):
+  a filed letter must report queued / retrying / refused /
+  accepted-awaiting-signed-ack distinctly from local filing, with the
+  transport failure and reason visible before any per-entry attempt,
+  retryability and next attempt where known, refusal terminal until
+  remediation; delivered / fetched / acted stay separate. Shape ruled:
+  `outbox` joins the entry with `link.json` (no new store), `Outcome` ok
+  for a durable spool with `data.delivery` carrying the state and
+  `nextAttemptAt` (earliest, not guaranteed); one projection in client
+  `commands.rs` reused by `send` and `outbox`; CLI first, the widget
+  consumes the same backend; pending letters preserved, no purge or
+  resend storm. Tests: `tries 0` + link error; refusal precedence;
+  accepted pending ack; concurrent removal unknown; post-spool error
+  queued + status unavailable. Proven cause 2026-09-12: the daemon
+  drain's back-off in `state/outbox/<node>/link.json` silences the CLI's
+  own attempt and the listing shows `tries 0` with no outcome.
 - Orphan `channel-<id>.sock` after a wrap exits: CONFIRMED live
   (`channel-db-wrap-2.sock`, 2026-09-12); `sweep_orphan_sockets` covers
   only `session-*.sock`. Unowned.
