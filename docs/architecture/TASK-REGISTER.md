@@ -545,6 +545,84 @@ Fields per entry: status · owner · depends on · evidence · next.
   all; nothing dispatched.
 
 
+## 11. Three-host acceptance (Osaka orchestrates, Yomi develops, Sakaki works)
+
+- Assigned by the User via root (seq 229/235, 2026-09-12). Root oversees
+  acceptance; Fable runs the gates in-session; "ready" stays blocked while
+  any host path is incomplete. Direct SSH never counts as Aoide
+  orchestration (gate 4); operator grant administration over ssh is
+  recorded separately from orchestration evidence.
+- Baseline, fresh 2026-09-12 18:15Z (`aoide node pull osaka` / `sakaki`,
+  both ok, keys preserved, no re-pair): yomi-strix local, aoide 0.0.22
+  store `0mg1rj1m…` (generation 204); osaka ssh://khoa@192.168.1.201
+  paired/verified, aoided active, aoide 0.0.22 store `lp4chwsg…`; sakaki
+  ssh://khoa@192.168.1.202 paired/verified, aoided active, same
+  `lp4chwsg…` (both remotes predate P-CX-4 and the doorbell channel).
+- Gate 1 (inspect): PASS. Rosters via `node list`; binaries, services and
+  grants via read-only ssh (`node pull`/`status` expose no remote
+  revision). Before-state grants: yomi → osaka read,spawn,message; yomi →
+  sakaki read,spawn; osaka → yomi-strix read,spawn; osaka → sakaki
+  read,spawn; sakaki → yomi-strix read,spawn; sakaki → osaka read. No
+  autogate anywhere. Evidence: scratch `grants/before-*.json`.
+- Gate 2 (tagged mail every direction): FIRST FAILED GATE. Two exact
+  causes, both live-proven, tag `g2-1789236939-5021`:
+  (a) the aoided unit PATH lacked `ssh`: the daemon's outbox drain fails
+  for every loopback-door node ("spawn `ssh` … No such file"), backs off
+  60s, and that hold-off also silences the CLI's own attempt (`mail
+  outbox` showed tries 0 because the bookkeeping lives in `link.json`); a
+  send timed 0.16s after expiry tunnelled and got a real verdict. Fixed on
+  main 1d93184 (`pkgs.openssh` on the unit path), NOT deployed.
+  (b) both far doors refuse yomi-strix: "paired and validly signed, but
+  `allows` does not include `message`". Required directional grants (seq
+  235): yomi: sakaki message; osaka: yomi-strix message, sakaki message;
+  sakaki: yomi-strix message, osaka message, osaka spawn. Every `node
+  allow` mutation, local and over ssh, was refused by the harness
+  permission classifier on 2026-09-12; nothing applied, nothing revoked.
+  The User runs them on each host's own console (`aoide node allow <node>
+  <cap> on`). After-state and fresh verification pending.
+- Gate 3 (cross-host incoming-mail wake): not started, needs gate 2. The
+  local interactive channel run (§3) is its prerequisite and is in
+  progress.
+- Gate 4 (Osaka launches disposable workers on Yomi and Sakaki through
+  `aoide node spawn`): not started; needs sakaki → osaka spawn.
+- Gate 5 (checkpoint/handoff to an explicitly identified Osaka
+  orchestrator with a real task, ack, predecessor idle, reconnect
+  recovery): not started.
+- Capability lacking a scoped mechanism: a per-node conductor autogate
+  (nothing in `aoide node` or the schema flips one; only the send gate
+  exists). Reported, not invented.
+- Flagged, unexamined: routable door urls are recorded (yomi's record of
+  sakaki `http://192.168.1.202:8710/`, osaka's record of yomi
+  `http://192.168.1.175:8710/`) against the loopback-only rule.
+
+## 12. Eidolon as a first-class harness (Yomi default)
+
+- Authorized seq 229. Brief `p-eidolon-adapter-brief.md` (Opus, read-only,
+  2026-09-12; both repos untouched). Ownership proposed: Rust half
+  (`protocol`/`conduct` profile) this lane; Nix half (dendrite, package,
+  host line) the existing eidolon worker (session `63290e1c…`, staged
+  uncommitted files; coordination letter seq 233 filed, unanswered).
+- Findings: the `AgentProfile` table fits (one entry, `pi` as template).
+  Eidolon has no outbound hook or event surface (in-process broadcast bus
+  only); the machine-readable surface is the presence registry
+  `$XDG_RUNTIME_DIR/eidolon/<id>/meta.json` (id, pid, log, cwd, model,
+  title, busy) plus a doorbell socket; session ids are deterministic;
+  `.eid` logs are framed binary (no say/tool/context); `resume` takes a
+  log path; the TUI is Helix-modal (`i` then Enter), so the suffix-only
+  `submit_key` needs one closed `compose_prefix` amendment; native
+  `eidolon send --from aoide` exists (written for Aoide), parked as a third
+  transport. Stated unsupported: hook phases, awaiting/permission
+  summons, subagents, context meters, skills, any write under
+  `~/.config/eidolon/`.
+- Slices: S1 profile entry → S2 meta.json as `TranscriptSpec` → S3
+  `compose_prefix` → S4 Nix (eidolon worker) → S5 resume (needs a live
+  two-session proof) → S6 native send (parked). Nothing dispatched.
+- BLOCKING (User): what "default harness" means; no such option exists:
+  (a) what the terminal launches, (b) what bare `aoide spawn` picks (a new
+  core option), (c) installed, profiled and preselected by `onboard`.
+  Root rulings: widen `TranscriptSpec.locate` with the record pid;
+  meta.json-as-transcript acceptable; `resume_args` fed a path.
+
 ## Carried backlog (verified status, never implicitly done)
 
 - AoideOS/Lyra portability: unverified; folds into 4(e).
