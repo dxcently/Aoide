@@ -470,6 +470,9 @@ Item {
         for (var i = 0; i < all.length; i++) {
             var s = all[i]
             if (!s) continue
+            // The daemon owns liveness; this roster shows its live states only.
+            if (s.state !== "working" && s.state !== "awaiting"
+                    && s.state !== "stopped" && s.state !== "idle") continue
             if (kindOf(s) !== "shell") mine.push(s)   // agents · subagents
         }
 

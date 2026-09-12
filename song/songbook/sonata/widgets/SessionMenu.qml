@@ -65,7 +65,11 @@ Item {
     // (`conduct::kill_target`) rather than guess.
     function killLabel() {
         var rec = menu.record || {}
-        if (("" + (rec.sessionId || "")).indexOf("sub:") === 0) return "Kill (subagent)"
+        if (rec.kind === "app") return "Kill unavailable (app-owned)"
+        if (rec.state === "done") return "Kill unavailable (ended)"
+        if (rec.kind === "subagent" || ("" + (rec.sessionId || "")).indexOf("sub:") === 0)
+            return "Kill unavailable (subagent)"
+        if (!killEnabled()) return "Kill unavailable (state unknown)"
         if (rec.conductable === true && rec.pid) return "Kill process"
         if (menu.host && menu.host.conductable === true && menu.host.pid && menu.host.state !== "done")
             return "Kill terminal " + (menu.host.petname || menu.host.title || menu.host.sessionId)
@@ -73,8 +77,12 @@ Item {
     }
     function killHint() {
         var rec = menu.record || {}
-        if (("" + (rec.sessionId || "")).indexOf("sub:") === 0)
+        if (rec.kind === "app")
+            return "The app owns this task; Aoide has no task-specific stop action."
+        if (rec.state === "done") return "This session has already ended."
+        if (rec.kind === "subagent" || ("" + (rec.sessionId || "")).indexOf("sub:") === 0)
             return "A subagent shares its executor's process; kill the executor instead."
+        if (!killEnabled()) return "No live session state is available."
         if (rec.conductable === true && rec.pid) return "Stops this terminal's own process."
         if (menu.host && menu.host.conductable === true && menu.host.pid && menu.host.state !== "done")
             return "Stops the whole terminal that hosts this session."
@@ -82,7 +90,10 @@ Item {
     }
     function killEnabled() {
         var rec = menu.record || {}
-        return ("" + (rec.sessionId || "")).indexOf("sub:") !== 0
+        return rec.kind !== "app" && rec.kind !== "subagent"
+            && ("" + (rec.sessionId || "")).indexOf("sub:") !== 0
+            && (rec.state === "working" || rec.state === "awaiting"
+                || rec.state === "stopped" || rec.state === "idle")
     }
     function effectiveProject() {
         if (record.project) return record.project

@@ -300,6 +300,15 @@ an explicit relative-URL `Loader` by Conductor and Terminals. Other helpers use 
 `powermenu.qml`'s `EndingStele`, `launcher.qml`'s `ManuscriptRow`, `BookPage`,
 `GlassPage`, `PageStack`, `BoardSegment`.
 
+Conductor displays only the daemon's canonical live states: `working`,
+`awaiting`, `stopped`, and `idle`. Ended (`done`) and unknown states stay out
+of its roster; the widget neither deletes their records nor probes process
+liveness. Idle and stopped sessions remain visible. The shared session menu
+disables termination for ended, unknown, subagent, and app-owned records.
+App-owned tasks have no task-specific stop transport, so their shared app
+process is never a kill target. Copy, details, and project actions remain
+available; process termination for other live sessions stays daemon-verified.
+
 The reason is load-bearing: Quickshell's dynamic `Component.createObject(url)`
 loading — how both anchors load every widget — does not reliably grant a
 loaded file visibility into custom types in its own directory. Confirmed live:
