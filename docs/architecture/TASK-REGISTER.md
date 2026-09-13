@@ -407,9 +407,16 @@ Fields per entry: status · owner · depends on · evidence · next.
   two HIGH returned to the owner before integration (the run/qml symlink
   farm into the checkout, guarded by convention only; `--root` never
   validated against the live daemon dir), one MEDIUM on the log draft's
-  shape; 184/184 reproduced, traversal fixes real. Integration after the
-  fix-up re-review, serialized behind the I1 icon executor (shared lyra
-  mod.rs/registry.rs). Backlog: no bin resets SIGPIPE (one-line SIG_DFL
+  shape; 184/184 reproduced, traversal fixes real. Fix-up delta re-review
+  (2026-09-13): HIGH-1 RESOLVED (run/qml holds copies, refresh is
+  checkout→copy only, a write-through test proves the checkout stays
+  byte-identical; `resolve_widget_abs` maps song paths lexically to the
+  checkout, never through the root); MEDIUM-3 RESOLVED (`lyra` resets
+  SIGPIPE); HIGH-2 PARTIAL — `check_root` skips the live-dir refusal
+  when `XDG_RUNTIME_DIR` is unset and never canonicalizes a symlinked
+  `--root`; both returned to the owner with named tests (seq 517), then
+  integration by pathspec; 189/0/3, golden 54, no foreign hunks. Icons I1
+  wiring follows the preview commit (shared lyra mod.rs/registry.rs). Backlog: no bin resets SIGPIPE (one-line SIG_DFL
   in `lyra`, `aoide`, `aoided` main()). The seq 441/444 usability asks are
   follow-ups by the same owner after integration.
 
