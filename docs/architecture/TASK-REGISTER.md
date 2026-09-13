@@ -1665,3 +1665,120 @@ project/parent inheritance across local/remote/app/subagents;
   seams = Sonnet executors after the §15 ruling (ML1 → ML3 → ML4), one
   writer; root reviews. Status: REGISTERED, nothing dispatched; blocked on
   the §15 seam ruling and on §19's mail-view work landing first.
+
+## 22. Orchestration graph: runs, work nodes, goals, typed editable edges (User via root seq 630/632/634)
+
+- Requirement: the conductor Graph becomes real orchestration, not
+  ancestry drawing. Rename "DAG" → Graph/Orchestration. Named runs inside
+  projects; stable WORK nodes separate from executor sessions (objective,
+  role/agent, artifact refs, acceptance criteria, state, attempts survive
+  restarts); GOAL is a separate identity from the run and the orchestrator
+  (goal + deliverables + explicit checks + an attached verifier session;
+  several goals per run, several runs per goal; run ended ≠ goal
+  achieved). Typed edges: depends-on / hands-off-to / reviews /
+  references / contributes-to / verifies / coordinates; spawned-by and
+  project membership are observational provenance, never editable claims.
+  Free branching (fan-in/fan-out, shared prerequisites, cross-branch
+  handoffs); tree is a LAYOUT preference, not a single-parent constraint;
+  blocking dependency cycles diagnosed/refused, messaging cycles normal.
+  Edits audited, undo/redo, retry = new attempt linked to prior evidence,
+  downstream checks marked stale on upstream change; never kills/reparents
+  a live process or replays mail. Mail overlay = real msgid/thread/state
+  events. Authoritative task/run/edge/attempt records through aoided; UI
+  scene positions separate; derived index disposable. CLI first, TUI
+  consumes the same mutations. Neo4j reference = principles only, no
+  dependency.
+- Phases: 1 rename + visual tree/scene + factual session/mail edges +
+  inspect/jumps; 2 persisted runs/work nodes/typed edges/goal criteria
+  (backend + CLI + TUI); 3 attempts/retry/undo, artifact-bound
+  verification, observed mail overlay.
+- Owner: Fable = architecture and backend contracts (Opus architect
+  dispatched: existing vs missing APIs, storage shape under CONTRACTS §4,
+  acceptance incl. branch→join→shared prerequisite→review loop and
+  adding a node during a live run); designer = layout/interactions; one
+  writer per slice. Status: ARCHITECT RUNNING; nothing mutates the
+  backend before the contract is agreed with root.
+
+## 23. Conductor architecture: capability plugins + Ratatui scene widget (User via root seq 636/637)
+
+- Requirement (637): the conductor follows everything-is-a-plugin. Today:
+  closed `Panel` enum, central key/mouse matching, app-wide state — no
+  dynamic plugins exist and none are claimed. Target: a minimal shell
+  (terminal lifecycle, pane placement/focus, action routing, navigation,
+  theme) + capability modules (projects/sessions/mail/graph/mesh/
+  settings) under conventional dirs in `conductor/src`, each with state,
+  views, actions, subscriptions, tests, README/AGENTS, contributing
+  through one typed contract (stable ids, display metadata/key hints,
+  scoped event handler, render widget, entity-link resolver, required
+  capabilities); shared primitives; no reaching into another module's
+  state. Compile-time Rust modules (rebuild required) are distinct from
+  runtime extensions (versioned manifest/protocol over the existing
+  external-command seam; no dylib ABI, no plugin VM without design
+  review). Prove with one bounded extension and its remove path.
+- Requirement (636): graph rendering stops being a whole-world text grid
+  through `Paragraph.scroll`; prototype `GraphScene` as a `StatefulWidget`
+  with persistent scene/camera/selection outside render, Canvas layers
+  for connectors, fixed card widgets with a shared transform and
+  visible-node culling; ListState/TableState/Scrollbar for lists; scoped
+  action handling (modal/text first, focused pane next), same action for
+  key and click, geometry from the actual render; bounded dirty-redraw
+  animation; TestBackend snapshots + real terminal proof. Report the
+  retained-scene milestone, not spacing fixes.
+- Owner: Fable = architecture integration (Opus architect dispatched:
+  concrete tree, plugin contract, compile-time vs runtime scope, first
+  proof extension, GraphScene prototype plan against ratatui 0.30);
+  designer = UI contract; no overlapping edits. Status: ARCHITECT RUNNING.
+
+## 24. Letter provenance trails and honest ring status (User via root seq 639)
+
+- Requirement: `ring`/TUI summaries explain each non-wake reason
+  (working/deferred, interactive-composer skipped, stale reader,
+  genuinely no armed reader) and never imply a wake from a stored letter
+  or an injection. Provenance everywhere: agent list, Mesh host/session
+  detail and Graph cards show the latest outgoing trail (subject →
+  recipient title/petname or role/project mailbox, time, queued/
+  delivered/fetched/failed), expandable to a recent timeline; letter →
+  exact msgid/thread, endpoint → canonical node; bidirectional. To/Cc
+  preserved, fanout copies distinct from the logical letter, recipient
+  kind labelled; identity survives rename/restart and cross-host mirror
+  dedup; envelopes with only a mailbox show ambiguous/unresolved, never
+  an inferred session; role mail is not proof of which worker fetched it
+  (receipt/reader identity when recorded). Read-only derived index over
+  authoritative mail/session/project records; source ids recorded on
+  future sends via the backend contract; old signatures never rewritten;
+  spooled outgoing mail included.
+- Owner: folded into the §22 architect (same graph/mail overlay
+  contract); designer = surfaces. Status: ARCHITECT RUNNING.
+
+## 25. Harnox secrets first-class and easy setup/management across Aoide (User via root seq 625/627)
+
+- Requirement (625): Harnox is the first-class secrets backend, optional
+  for unrelated Aoide functions; integrate existing Harnox capabilities,
+  no second broker; runtime configuration on plain Linux without Nix or
+  repo layout, Nix declaration optional and mapped to the same contract
+  with explicit declared-vs-runtime ownership and no duplicate stores;
+  the conductor uses the same CLI/daemon APIs for backend setup/status,
+  secret references, supported grants/lifecycle (no TUI-only backend);
+  states available/locked/unconfigured/unreachable reported accurately;
+  values never in lists/logs/transcripts; no replicant server, no
+  replicas/sync or credential transfer without a supported Harnox
+  contract; reconcile with the latest Noah/Honey proposal (issue #1)
+  before implementing. §9 stays review-only until then.
+- Requirement (627): "easy" setup and ongoing management applies to ALL
+  of Aoide — projects/multiple roots, participating hosts, pairing/trust,
+  harness onboarding, roles, session defaults/resurrection, permissions,
+  secrets, mail routing, UI preferences. TUI and CLI share one
+  authoritative config contract; useful defaults; discoverable current
+  settings; clear scopes (global/host/project/session) with effective
+  values and inheritance shown; task-oriented edits; validate before
+  apply with actionable errors; advanced controls retained; runtime
+  fully usable without Nix, optional declaration maps to the same
+  capabilities with clear precedence. No speculative universal config
+  framework: reuse current command seams, improve concrete flows.
+  Acceptance wording everywhere: "easy setup and ongoing management",
+  never "simple config".
+- Owner: Fable (Opus architect dispatched: inventory of today's config
+  surfaces and command seams, the ownership/precedence contract, the
+  Harnox capability map against the `secrets` family, first concrete
+  flows); designer = TUI settings surfaces after the contract. Status:
+  ARCHITECT RUNNING; no implementation authorized yet.
