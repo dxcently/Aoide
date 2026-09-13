@@ -1617,6 +1617,13 @@ project/parent inheritance across local/remote/app/subagents;
   correction; other D5 improvements retained. authorized_keys P1 accepted,
   no mkAfter. Pin ownership = the Codex migration owner. Aoide-side A4a
   exports remain this session's slice on root's word.
+  Root audit 655/656 at 679e7af (filed in the handoff dir): user.nix/HM
+  unconditional, no non-HM lane; mkHost still injects walked songbook +
+  overlays and reaches input internals; global package list not a
+  catalog; stylix floor import + config.aoide reference = compatibility
+  debt; immich→nas-mounts undeclared cross-dendrite dependency; shelved
+  _librewolf/_hyprpaper reference deleted options. Labels: legacy
+  baseline preserved, not final architecture. Codex owner incorporates.
 - Status: ARCHITECT brief DONE (`p-dxflake-brief.md`: current state, target
   tree, U1-U8 unresolved with defaults sent to root for ruling, slices D1
   aggregates → D2 home lane → D3a/b roles → D4 portable upstream (needs
