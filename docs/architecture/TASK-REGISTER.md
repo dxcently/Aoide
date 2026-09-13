@@ -1549,8 +1549,18 @@ project/parent inheritance across local/remote/app/subagents;
   aggregates → D2 home lane → D3a/b roles → D4 portable upstream (needs
   three Aoide exports: nixosModules.default closing over its own core,
   lib.livery.resolve output, overlays.default) → D5 selections → D6
-  songbook requests). D1 DISPATCHED (Sonnet, `p-dxflake-d1-dispatch.md`,
-  acceptance P0 drvPath parity on three hosts). Flag for the User:
+  songbook requests). D1 LANDED a0156ea on the branch (pushed; not merged, nothing
+  activated): four aggregates, flake.nix one line, README/AGENTS integral.
+  Parity P1, not P0: only `environment.systemPackages` order differs
+  (identical multiset, equal priorities, identical input-.drv set —
+  independent review PASS-WITH-FIXUPS reproduced all three drvPaths and
+  went to derivation level, `dxflake-d1/review.md`); P0 is unreachable
+  under rule 7 because nixpkgs flattens imports breadth-first while the
+  walker was flat. P1 acceptance asked of root (553/567/568). The
+  review's HIGH (README still said auto-discovered) fixed before the
+  commit, chiyo drvPath re-proved. D4 Aoide-side exports: ARCHITECT
+  (Opus) dispatched for `p-dxflake-d4-aoide-brief.md` — the only slice
+  not gated on U1-U3. Flag for the User:
   `hosts/yomi-strix/default.nix:17` sets `aoide.openai.enable` against
   the flake comments. D0
   baseline executor DONE — evidence at
