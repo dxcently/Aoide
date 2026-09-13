@@ -1764,6 +1764,20 @@ project/parent inheritance across local/remote/app/subagents;
   concrete tree, plugin contract, compile-time vs runtime scope, first
   proof extension, GraphScene prototype plan against ratatui 0.30);
   designer = UI contract; no overlapping edits. Status: ARCHITECT RUNNING.
+- Brief DONE (`p-conductor-plugins-brief.md`): Panel enum + twelve
+  touch points per panel audited; graphview rebuilds the whole-world grid
+  three times per interaction (render/hit_node/node_order); target =
+  shell/ + primitives/ + capabilities/<name>/ with explicit `all()`
+  registration (automatic discovery would need a build.rs scan — refused,
+  flagged); Capability trait (meta/handle/render/resolve/subscriptions/
+  unavailable), render-time hit map so key and click share one ActionId;
+  runtime extensions over the existing external-command door with a
+  versioned manifest under `/extensions/`, no dylib/VM;
+  GraphScene StatefulWidget + Canvas plan; slices S1 shell extraction
+  (byte-identical TestBackend goldens) → S2 Log + remove path → S3
+  GraphScene (§19 retained-scene milestone) → S4 runtime extension → S5.
+  Five questions to root; #1 (who holds the crate now that the designer
+  session is closed) blocks S1.
 
 ## 24. Letter provenance trails and honest ring status (User via root seq 639)
 
