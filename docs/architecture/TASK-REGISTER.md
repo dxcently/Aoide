@@ -928,12 +928,14 @@ project/parent inheritance across local/remote/app/subagents;
   `parentSessionId` on the app record, nickname fills an empty title,
   kind stays `app`, both refusals pinned, fourteen tests, designer
   fixture; dispatch `p-own-sc-dispatch.md`; LANDED 4fa382e, review FAIL on
-  one HIGH — same-tick mutual captures pass a frozen-snapshot cycle check
-  — fix-up queued after M2, plus root seq 404: the conductor groups only
-  `kind == subagent`, so the record also publishes the native thread role
-  as additive `nativeRole` from the capture, kind untouched, and the
-  designer teaches the grouping helper to nest `nativeRole == subagent`,
-  never every parented fork) → S-D remote owner
+  one HIGH — same-tick mutual captures passed a frozen-snapshot cycle
+  check — FIXED ece83a7 (captures merge first, lineage candidates one at
+  a time against the live roster; review PASS), which also carries root
+  seq 404: the conductor groups only `kind == subagent`, so the record,
+  graph.json node and `session --json` row publish the native thread role
+  as additive `nativeRole` from the capture, kind untouched; designer
+  mailed the key and fixture, teaches the grouping helper to nest
+  `nativeRole == subagent`, never every parented fork) → S-D remote owner
   qualification (design + `link` refusal) → E3. Brief DONE (Opus,
   scratch `p-ownership-brief.md`): R1 accepted as ruled (rung 2 above rung
   3; `session project` pins a mis-grouped row), Q2 `effectiveProject` on
@@ -1012,8 +1014,12 @@ project/parent inheritance across local/remote/app/subagents;
   `aoide node list --mesh` (no sweep, candidates absent by construction,
   `id` = `<node>/<sessionId>`, live/cached counts) staging
   `state/stage/mesh.json` for both temples (R1, precedent `aoide usage`;
-  put to root); defaults on the five questions taken. Dispatch texts
-  `p-14-m1-dispatch.md` (M2 after M1).
+  put to root); defaults on the five questions taken. M1 LANDED 780818a
+  (+ fix-up b98954b, PASS); M2 LANDED 06b2982 (+ fix-up c71810b: the
+  document emits `schemaVersion`, the contract example matches the
+  writer; PASS; pristine build exit 0). Both staged, not pushed (held
+  set), not deployed. M3 is the designer's once the Mesh section data
+  is on a deployed binary; M4 after M3.
 - Order against the rest: Osaka conductor/wake gates and S-B stay ahead;
   M1 after S-B leaves the conduct crate, M2 after M1.
 
