@@ -1090,10 +1090,16 @@ project/parent inheritance across local/remote/app/subagents;
   acceptance, not a blocker. Sonata and generic Lyra/core defects stay
   upstream. The runtime palette contract remains the gate before any
   second palette implementation; the User activation gate is unchanged.
-- Status: ARCHITECT dispatched (Opus, `p-livery-seed-arch.md` →
-  `p-livery-seed-brief.md`): the seed consumes the resolved livery so both
-  fan-outs are one expression; proof by `nix eval` pair + offline build of
-  the seed derivation + one flake check case; no rebuild or activation.
+- Status: brief DONE (`p-livery-seed-brief.md`): `overrideMap`/`slotPatch`
+  have no callers; fix = `lib/livery.nix` `stagePatch` applied to the
+  committed livery.json document, the facet seeds from a `writeText` of
+  it, plus one `livery-fanout` flake check; six eval assertions true with
+  dxflake's override attached, no-override case byte-identical for all
+  five songs. Defaults taken on the three questions (runtime writers
+  `rice stage`/`reload` stay unresolved — follow-up; nix not jq; keep the
+  base16 assert). EXECUTOR dispatched (`p-16-exec-dispatch.md`, edit/test
+  only, eval + single-check build; no rebuild or activation). Follow-up:
+  the songbook livery.json twins of `rice.nix` are unchecked.
 
 ## 17. Agent Client Protocol (ACP) client in core; widget builder as its UI (User scope seq 403/405)
 
