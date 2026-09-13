@@ -415,8 +415,20 @@ Fields per entry: status · owner · depends on · evidence · next.
   SIGPIPE); HIGH-2 PARTIAL — `check_root` skips the live-dir refusal
   when `XDG_RUNTIME_DIR` is unset and never canonicalizes a symlinked
   `--root`; both returned to the owner with named tests (seq 517), then
-  integration by pathspec; 189/0/3, golden 54, no foreign hunks. Icons I1
-  wiring follows the preview commit (shared lyra mod.rs/registry.rs). Backlog: no bin resets SIGPIPE (one-line SIG_DFL
+  integration by pathspec; 189/0/3, golden 54, no foreign hunks. Round 2
+  reported (seq 537: live dir from `attest::daemon_socket_path`, candidate
+  canonicalized through its deepest existing ancestor, two new tests,
+  191/0/3) — delta re-review running. Icons I1 wiring follows the preview
+  commit (shared lyra mod.rs/registry.rs). Acceptance additions (root seq
+  548, User): lock/unlock state icon; declared/resolved widget
+  dependencies (available/missing/unknown + sources — read side a lyra
+  command, shape a CONTRACTS entry); editable isolated livery colour
+  state through the existing resolver/control API; whole-canvas arrows;
+  native picker at the widget folder; anchor/margin arrows. The owner`s
+  follow-up plan (seq 539: explicit camera, pointer-anchored zoom, Space/
+  middle drag, Iconoir rail via a copy of the facet `icons/` tree into
+  run/qml, computer-use verification) is in progress; safety fix-ups are
+  gates, never completion. Backlog: no bin resets SIGPIPE (one-line SIG_DFL
   in `lyra`, `aoide`, `aoided` main()). The seq 441/444 usability asks are
   follow-ups by the same owner after integration.
 
@@ -1236,6 +1248,16 @@ project/parent inheritance across local/remote/app/subagents;
 
 ## Carried backlog (verified status, never implicitly done)
 
+- Tokens-spent seam (designer, seq 542): no source carries per-session
+  cumulative usage (`contextTokens` is the freshest turn`s input-side
+  occupancy; Codex capture discards `total_token_usage`; the ledger has
+  no usage keys). Proposed ADDITIVE session-record `usage`
+  {inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens,
+  turns, source, sourceId, asOf}, cumulative per source transcript,
+  copied onto the ledger line at end; conduct/storage single-writer
+  slice behind ML1/ACP-A1 unless root ranks it; UI renders "—" until it
+  lands. Sent to root seq 554.
+
 - Interactive child launch environment (root diagnosis, seq 371): the
   root-launched preview and designer TUIs inherited `NO_COLOR=1` from the
   orchestrator's machine-output environment, so their windows rendered
@@ -1466,7 +1488,14 @@ project/parent inheritance across local/remote/app/subagents;
   hands off. Reservation now: root + its subagents + the designer as
   visual lead; still no Fable-dispatched worker. Designer told to design
   first and edit conductor source only after root`s graph handoff is
-  reviewed and committed.
+  reviewed and committed. Root seq 536: the graph must be a RETAINED scene
+  (stable world nodes/edges, dragging, positions kept across refresh,
+  separate camera, unified render/hit transforms); root`s interim layout
+  is not completion. Designer spec at
+  `/tmp/aoide-widget-team/design/tui/spec.md` (tab symbols with code
+  points/widths, Base16 slot→role, left-anchored Home, §6 retained scene).
+  Gate question to root (seq 554): is the graph worker`s handoff still
+  coming, or does the designer own the graph outright?
   REVIEW RESULT: set A backend PASS-WITH-FIXUPS → COMMITTED b719571
   (11 files + CONTRACTS delta; MEDIUM wording: the resend guard is a
   UI-only in-memory flag, MAIL.md says so; LOW: no isolated scalar-path
