@@ -1581,6 +1581,10 @@ project/parent inheritance across local/remote/app/subagents;
   sakaki fails identically before/after on the mneme-src git object
   35b0a4a3 (pre-existing, separate from melete-src). Commit follows the
   review; then D3, then D5; A4a after root answers the D4 questions.
+  D2 LANDED a537098 on the branch (pushed; review PASS, two LOWs: no
+  report.md, two comment fixes in aoide.nix outside the file list); D3
+  executor dispatched (`p-dxflake-d3-dispatch.md`, P0 required, evidence
+  `dxflake-d3/`).
 - Status: ARCHITECT brief DONE (`p-dxflake-brief.md`: current state, target
   tree, U1-U8 unresolved with defaults sent to root for ruling, slices D1
   aggregates → D2 home lane → D3a/b roles → D4 portable upstream (needs
@@ -1607,3 +1611,54 @@ project/parent inheritance across local/remote/app/subagents;
   forced only by sakaki`s `dx.melete.enable`; re-lock is a Spark/root
   call. Acknowledged to root (seq
   512). Flag: dxflake pins Aoide rev 3b168ce, far behind 535241f.
+
+## 21. Conductor role metadata, project conversations, mesh/pairing in the TUI (User via root seq 621)
+
+- Requirement: the TUI lists each agent's assigned ROLE separately from
+  its harness and model, shows its parent relationship and an optional
+  role mailbox, and says "unassigned" explicitly; mail/conversations are
+  project-scoped; mesh trust and pairing are manageable from the TUI
+  through Aoide's own commands and the secrets capability, with secret
+  references/grants/status visible and no ordinary raw-secret exposure.
+  No new mandatory role scheme.
+- Existing seams (what the TUI consumes; nothing here is a new store):
+  `SessionRecord` already carries `agent` (harness), `model`,
+  `native_role` (the harness's own notion: subagent/worker, ece83a7),
+  `parent_session_id` (lineage, §13) and `project`; the ASSIGNED role is
+  none of these — it is the §15 project-owned optional role
+  (`Aoide/reviewer`), bound to sessions by `mail role` (ML3, not built)
+  and published as a binding (ML4). Project conversations = the §15
+  project inbox (`project:` typed target, ML1 resolver, not built) read
+  with per-reader cursors; the TUI mail view is a VIEW of that store
+  (§19), never a second one. Mesh trust = `node allow`/`node remove`
+  (grants are global per node, §11); pairing = `pair`/`pair watch`/
+  `pair reject`/`mesh pair` (windows redesign §5 QUEUED, codes never
+  ferried); secrets = the `secrets` command family (`grant`, `revoke`,
+  `pending`, `approve`, `dismiss`, `expose`, `watch`; Harnox-backed
+  custody §9 is review-only, no migration authorized).
+- Remaining implementation (ordered, one conduct/storage writer at a time,
+  behind §15's seam ruling): (1) ML1 typed targets + resolver; (2) ML3
+  `mail role` assign/unassign/handoff with the visible binding, additive
+  `assignedRole`/`roleMailbox` fields on the published session document
+  (graph.json/`session --json`), never on `native_role`; (3) TUI: role
+  column + parent + role mailbox + "unassigned" from the published
+  document (designer, after the seam lands), project-scoped mail threads
+  from the project inbox, Mesh panel actions calling the existing
+  `node`/`pair`/`secrets` commands through the local handler + `ring`;
+  (4) secrets panel shows references, grant state and pending approvals
+  only — the value path stays `secrets expose` under its own gate.
+- Permission boundaries (binding for every brief): project membership and
+  role assignment grant NO access — mesh trust is the node-level grant
+  and stays global; a TUI action never bypasses the daemon gate (`node
+  allow`, `secrets grant/approve`, `pair`) — it issues the same command a
+  terminal would and shows the gate's answer; pairing codes are typed by
+  the User, never displayed to or relayed by an agent; no raw secret value
+  is rendered in any TUI surface, log, or letter; `--from` stays
+  attribution, a role mailbox never authenticates its assignee; unknown/
+  unassigned is displayed as such, never inferred from harness or model;
+  cross-host: a project inbox has one authority host (§15), remote rows
+  carry no local pid/window actions (§14).
+- Owners: designer = TUI (edit/test, serialized commits here); backend
+  seams = Sonnet executors after the §15 ruling (ML1 → ML3 → ML4), one
+  writer; root reviews. Status: REGISTERED, nothing dispatched; blocked on
+  the §15 seam ruling and on §19's mail-view work landing first.
