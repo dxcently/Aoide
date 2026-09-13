@@ -1505,8 +1505,15 @@ project/parent inheritance across local/remote/app/subagents;
   (if woken by the User) = Osaka-host consumer specifics; Spark =
   flake.lock / aoide pin; User = rebuild/activation. Ownership notes filed
   on osaka (seq 24 to the palette worker, seq 25 to dxflake-codex).
-- Status: ARCHITECT (Opus) writing `p-dxflake-brief.md` (recovered
-  proposal, unresolved choices, slices D1..Dn with drvPath parity); D0
+- Status: ARCHITECT brief DONE (`p-dxflake-brief.md`: current state, target
+  tree, U1-U8 unresolved with defaults sent to root for ruling, slices D1
+  aggregates → D2 home lane → D3a/b roles → D4 portable upstream (needs
+  three Aoide exports: nixosModules.default closing over its own core,
+  lib.livery.resolve output, overlays.default) → D5 selections → D6
+  songbook requests). D1 DISPATCHED (Sonnet, `p-dxflake-d1-dispatch.md`,
+  acceptance P0 drvPath parity on three hosts). Flag for the User:
+  `hosts/yomi-strix/default.nix:17` sets `aoide.openai.enable` against
+  the flake comments. D0
   baseline executor DONE — evidence at
   `scratchpad/dxflake-baseline/baseline.md`: chiyo/osaka/yomi-strix
   evaluate (drvPaths captured); sakaki FAILS eval — `melete-src` lock rev
