@@ -1000,7 +1000,10 @@ session node, and every `aoide session --json` row in both groupings
 (`--hosts` and the default project grouping, built from one
 `session_view_json`). It is LOCAL ONLY: rows a remote node's graph document
 supplies never carry it (no local session slice to walk), and `node list`
-rows do not carry it either.
+rows do not carry it either. The same rows carry `nativeRole` under the
+record rule above (present only when the record carries one); a row built
+from a remote node's graph document relays that node's own published
+`nativeRole` and never synthesizes one.
 `session kill --id ID` is a local daemon-only SIGTERM request for an exclusively
 owned, conducted process verified against the daemon seal and pinned by Linux
 pidfd. Its successful response confirms signaling, never process exit.
@@ -1460,6 +1463,20 @@ conduct` (it owns a PTY + control socket) — the same-window eviction and the
 reaper's own dedup pass both treat a `conductable` record as the control-
 socket owner, never a foreground-agent duplicate, regardless of its
 published `kind`.
+
+**Additive in v0:** a session record MAY also carry an optional `nativeRole`
+(string) — the thread-role label the NATIVE harness itself published for
+that session, present only when one was captured, never inferred or
+enumerated by aoide and never a dangling null. Today the one writer is the
+desktop-Codex capture merge (`codex_app.rs::apply_codex_capture`), which
+copies `session_meta.thread_source` (`user`/`subagent`/`guardian_review`)
+verbatim whenever the capture carries one — always-set like `say`/`tool`,
+never cleared by a capture read failure — with its provenance pointer under
+`sources["nativeRole"]`. It is a published fact BESIDE `kind`, never a
+reclassification of it: a parented app thread with `nativeRole:"subagent"`
+still carries `kind:"app"`, `agent:"codex"`, and every `app` refusal above. A
+consumer that nests a native subagent under its root keys off this field
+and `parentSessionId` together, never off `kind` alone.
 
 
 **Additive in v0 (task #89):** a session record MAY also carry an optional
@@ -2093,8 +2110,9 @@ ledger is exactly the memory that survives that prune; a `resumed` edge's
 }
 ```
 
-A session node MAY carry the sessions.json `petname` field above, present
-under the same rule.
+A session node MAY carry the sessions.json `petname` and `nativeRole` fields
+above, present under the same rule; its `role` key still comes from `kind`
+alone.
 A project node MAY likewise carry the projects.json `hosts` array above,
 present under the same rule (non-empty only) — `{ "id": "project:aoide", …,
 "hosts": [ { "name": "chiyo", "roots": ["/srv/khoa/Aoide"] } ] }`; a
