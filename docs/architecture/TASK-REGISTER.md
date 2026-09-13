@@ -239,8 +239,10 @@ Fields per entry: status · owner · depends on · evidence · next.
   runbook, tool-busy and GUI cases, onboarding docs for the flag.
 ## 4. Lyra / AoideOS architecture migration (phased workstream)
 
-- Status: phase (a) DESIGNED (scratchpad `p-lyra-migration-a-brief.md`, Opus,
-  850 lines, read-only), nothing dispatched. Decided export surface, all from
+- Status: phase (a) COMPLETE (slices 1-3 and 5 landed, below); phase (b)
+  slice 1 LANDED, later (b) slices pending; phases (c) and (d) pending.
+  Phase (a) design (scratchpad `p-lyra-migration-a-brief.md`, Opus, 850
+  lines, read-only) decided the export surface, all from
   `pkgs/aoide/flake.nix`: `packages.{default,aoide,aoide-static}` unchanged;
   NEW `packages.lyra` (= `aoide.rice`, retires the `aoide^out,rice` selector),
   NEW `overlays.default` (one attribute, one build), NEW `nixosModules.default`
@@ -307,7 +309,8 @@ Fields per entry: status · owner · depends on · evidence · next.
   vacuous check until (f), Q3 walk order, Q4 re-express `_`, Q6 skip a song
   without `rice.nix`, Q7 slice 3 in (b)); the User answers Q5 (does the
   rider's "no aggregator or walker" mean docs) and Q8 (songbook scan stays,
-  house rule 1); then slice 1. The User activates a build when ready.
+  house rule 1); slice 1 landed; then the next (b) slice. The User
+  activates a build when ready.
 - Owner: Fable (Opus design per phase).
 - Depends on: 1 for the runtime seams; docs/glossary/Mneme-optional changes
   accompany each phase, never trail it.
@@ -343,11 +346,24 @@ Fields per entry: status · owner · depends on · evidence · next.
 
 ## 6. Agent canvas
 
-- Status: NOT STARTED.
-- Owner: Fable.
-- Depends on: stable runtime seams from 4(c)/(d); reuse Lyra preview/stage,
-  provided FolderDialog only.
-- Next: proposal after 4(c).
+- Status: IN PROGRESS as the widget-preview stack (User request, root-
+  launched Fable session `widget-preview-fable`, seq 310/322/328): new
+  `lyra preview [<widget>]` + `lyra preview set …` (lyra crate) building an
+  isolated root under `$XDG_RUNTIME_DIR/aoide-preview/` (resolved livery,
+  fixture stage files, symlinked facet qml + checkout widgets; the child
+  env carries no live daemon socket), a `WidgetPreview.qml` canvas in the
+  quickshell facet (any widget, width/height per axis, 3×3 anchors,
+  viewport presets and custom, aspect lock, zoom, fixture/livery pickers
+  incl. `live`/song/file/bare base16, reload, error pane), fixtures under
+  `modules/facets/quickshell/preview/fixtures/`, `Widget-Preview.md`.
+  Edit/test only; the integrator lands it after independent review.
+- Owner: widget-preview-fable (plan + delegation + hands-on pass); Fable
+  integrates. Designer session `widget-design-fable` consumes it for the
+  card redesign (§13 UI half, now under the User's live-draft workflow).
+- Depends on: the reap-scoping slice (carried backlog) before any stage/
+  preview acceptance; native `FolderDialog` only, no custom browser.
+- Next: handoff (files, tests, start command, screenshots, reviewer
+  report) → serialized integration → log entry from the planner's scratch.
 
 ## 7. Mail attachments (`mail send --attach`, also the handoff carrier)
 
@@ -860,12 +876,19 @@ project/parent inheritance across local/remote/app/subagents;
   An explicit `unknown` observation still needs the backend if a failed scan
   retains the record.
 - Order: capture S3b (session_store kind gate; LANDED badfc7a, reviewed
-  PASS) → S-A resolver + roster callers (LANDED e746e72: `model::
-  effective_project_for`, `SessionView.effective_project` local-only,
-  conductor per-project count; nine tests; CONTRACTS §4 names the
-  stored-vs-effective distinction) → S-B sanitized A2A ancestry + bounded
-  spawn cwd + live ambient fallback → S-C Codex native lineage → S-D remote
-  owner qualification (design + `link` refusal) → E3. Brief DONE (Opus,
+  PASS) → S-A resolver + roster callers (LANDED e746e72, PUSHED 3b168ce:
+  `model::effective_project_for`, `SessionView.effective_project`
+  local-only, conductor per-project count; nine tests; CONTRACTS §4 names
+  the stored-vs-effective distinction; built-binary proof on an isolated
+  root: the seq 316 child-outside-anchor shape groups under its parent's
+  project, evidence `/tmp/aoide-own-{base,sa}/ev`) → S-B sanitized A2A
+  ancestry + bounded spawn cwd + live ambient fallback (executing) → S-A2
+  publish additive `effectiveProject` on graph.json session nodes and
+  `aoide session --json` rows, derived by the one resolver, stored
+  `project` untouched, local rows only, CONTRACTS additive (root approved
+  seq 337; widgets read it, never re-derive; dispatch text
+  `p-own-sa2-dispatch.md`) → S-C Codex native lineage → S-D remote owner
+  qualification (design + `link` refusal) → E3. Brief DONE (Opus,
   scratch `p-ownership-brief.md`): R1 accepted as ruled (rung 2 above rung
   3; `session project` pins a mis-grouped row), Q2 `effectiveProject` on
   graph.json NOT published yet, Q3 `node spawn --project` deferred (A2A
@@ -931,12 +954,34 @@ project/parent inheritance across local/remote/app/subagents;
     redesign, root-launched). Owner: UI writer named when M2 lands.
   - M4 preview verification (long names, wrapping, compact menus) and live
     acceptance on a deployed build — the User's gate.
+- Brief DONE (Opus, read-only, scratch `p-projects-mesh-brief.md`): M1 =
+  additive `Project.hosts:[{name,roots}]` (name is the registered
+  `Node.name`; roots verbatim absolute strings, never existence-checked or
+  inferred), ONE flag `--host <node>` on the existing `project add|edit|
+  remove`, bridge wire command `projectaction` (create|edit|removehost, no
+  session id anywhere), graph.json project node `hosts` when non-empty;
+  M2 = the Chiyo defect fixed at the one fold point (`build_mesh_node`
+  cache arm: cached rows under an unreachable host read `last-seen` or
+  `unknown`, `done` survives), enrichment only when published,
+  `aoide node list --mesh` (no sweep, candidates absent by construction,
+  `id` = `<node>/<sessionId>`, live/cached counts) staging
+  `state/stage/mesh.json` for both temples (R1, precedent `aoide usage`;
+  put to root); defaults on the five questions taken. Dispatch texts
+  `p-14-m1-dispatch.md` (M2 after M1).
 - Order against the rest: Osaka conductor/wake gates and S-B stay ahead;
-  M1/M2 run disjoint from S-B (different files) once S-A is on main.
+  M1 after S-B leaves the conduct crate, M2 after M1.
 
 ## Carried backlog (verified status, never implicitly done)
 
 - AoideOS/Lyra portability: unverified; folds into 4(e).
+- Preview-harness reaping is filename-scoped (root ricing audit, seq 339):
+  `song/src/reap.rs` classifies every `*Preview.qml` launched by `qs`/
+  `quickshell` as stray on `rice mode stage`, hyprlock likewise — the new
+  `WidgetPreview.qml` canvas included. A filename never establishes an owned
+  stale process; the sweep must be ownership-scoped (the preview's own
+  isolated root / pid ancestry). Slice on the song crate, reviewed, before
+  any stage or preview acceptance; the designer runs no blanket sweep to
+  validate. Owner: integrator dispatch after the preview stack lands.
 - Desktop Codex detection off Linux: UNRESOLVED (seq 190); fd evidence is
   the only positive ownership signal and it is `/proc`-shaped. Owner: 2.
 - Osaka/Sakaki deployment: sakaki re-paired 2026-09-10; no deploy.
