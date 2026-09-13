@@ -113,6 +113,17 @@ Item {
     property string copiedKey: ""
     property bool rebuilding: false
     Timer { id: copiedBeat; interval: 1200; onTriggered: gadget.copiedKey = "" }
+    // Keyboard focus keeps its row in view: Tab-walking the roster scrolls the
+    // Flickable just enough to show the focused row whole. The pointer never
+    // moves it (hover reveals, focus reveals AND scrolls).
+    function revealInPlaybill(item) {
+        if (!item || !flick.visible || flick.height <= 0) return
+        var p = item.mapToItem(flick.contentItem, 0, 0)
+        var top = p.y - 3, bottom = p.y + item.height + 3
+        var maxY = Math.max(0, flick.contentHeight - flick.height)
+        if (top < flick.contentY) flick.contentY = Math.max(0, top)
+        else if (bottom > flick.contentY + flick.height) flick.contentY = Math.min(maxY, bottom - flick.height)
+    }
 
     // ── the reveal chips — [copy] [details], swapped INTO a row's troupe box
     // on hover or keyboard focus (the Conductor's RevealChips, spoken in this
@@ -813,7 +824,7 @@ Item {
                                 readonly property string focusKey: gadget.rowKey(modelData)
                                 onActiveFocusChanged: {
                                     if (!row.focusKey) return
-                                    if (row.activeFocus) gadget.focusedKey = row.focusKey
+                                    if (row.activeFocus) { gadget.focusedKey = row.focusKey; if (!gadget.rebuilding) Qt.callLater(gadget.revealInPlaybill, row) }
                                     else if (gadget.focusedKey === row.focusKey && !gadget.rebuilding) gadget.focusedKey = ""
                                 }
                                 Keys.onPressed: function(event) {
@@ -1398,6 +1409,7 @@ Item {
                             onExited:  gadget.requestHoverClear(gadget.rowKey(modelData))
                             onClicked: function(mouse) {
                                 if (mouse.button === Qt.RightButton) { gadget.openSessionMenu(modelData, hover, mouse.x, mouse.y); return }
+                                row.forceActiveFocus()   // a clicked row joins the Tab chain
                                 // Every row now carries a sessionId — a tracked
                                 // agent/shell, or the daemon's synthetic `win:<addr>`
                                 // for a bare tty. The bridge resolves it to a window

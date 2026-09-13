@@ -149,6 +149,17 @@ Item {
     property string copiedId: ""
     property bool rebuilding: false
     Timer { id: copiedBeat; interval: 1200; onTriggered: temple.copiedId = "" }
+    // Keyboard focus keeps its plaque in view: Tab-walking the playbill scrolls
+    // the Flickable just enough to show the focused card whole. The pointer
+    // never moves it (hover reveals, focus reveals AND scrolls).
+    function revealInPlaybill(item) {
+        if (!item || !flick.visible || flick.height <= 0) return
+        var p = item.mapToItem(flick.contentItem, 0, 0)
+        var top = p.y - 6, bottom = p.y + item.height + 6
+        var maxY = Math.max(0, flick.contentHeight - flick.height)
+        if (top < flick.contentY) flick.contentY = Math.max(0, top)
+        else if (bottom > flick.contentY + flick.height) flick.contentY = Math.min(maxY, bottom - flick.height)
+    }
 
     // ── the reveal chips — [copy] [details], swapped INTO a plaque's troupe box
     // on hover or keyboard focus: same box, same clip, same height, so the
@@ -1302,7 +1313,7 @@ Item {
         onActiveFocusChanged: {
             var id = (card.s && card.s.sessionId) || ""
             if (!id) return
-            if (card.activeFocus) temple.focusedId = id
+            if (card.activeFocus) { temple.focusedId = id; if (!temple.rebuilding) Qt.callLater(temple.revealInPlaybill, card) }
             else if (temple.focusedId === id && !temple.rebuilding) temple.focusedId = ""
         }
         Component.onCompleted: {
@@ -2355,6 +2366,7 @@ Item {
             }
             onClicked: function(mouse) {
                 if (mouse.button === Qt.RightButton) { temple.openSessionMenu(card.s, cardMouse, mouse.x, mouse.y); return }
+                card.forceActiveFocus()          // a clicked plaque joins the Tab chain
                 if (!temple.bridge || !card.s) return
                 var id = (card.child && card.s.parentSessionId)
                          ? card.s.parentSessionId : card.s.sessionId
