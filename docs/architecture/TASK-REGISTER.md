@@ -1459,6 +1459,14 @@ project/parent inheritance across local/remote/app/subagents;
   A commits first by exact pathspec once PASS, B after the follow-up and a
   delta re-review. Old-daemon direct-RPC new-flag drop is a separate
   compatibility hazard; the conductor path is local-handler + `ring`.
+  Root seq 525 (2026-09-13): the User assigns the widget designer
+  (`widget-design-fable`) as design/orchestration lead for the TUI
+  (left-anchored projects, circular/Unicode tab symbols, Base16); root
+  stops visual edits; the graph worker finishes the spatial layout, then
+  hands off. Reservation now: root + its subagents + the designer as
+  visual lead; still no Fable-dispatched worker. Designer told to design
+  first and edit conductor source only after root`s graph handoff is
+  reviewed and committed.
   REVIEW RESULT: set A backend PASS-WITH-FIXUPS → COMMITTED b719571
   (11 files + CONTRACTS delta; MEDIUM wording: the resend guard is a
   UI-only in-memory flag, MAIL.md says so; LOW: no isolated scalar-path
