@@ -1368,10 +1368,18 @@ project/parent inheritance across local/remote/app/subagents;
   Executor judgment: viewBox captured post-swap per the fetched
   build.ts — review confirmed the executor against the fetched source.
   Review PASS-WITH-FIXUPS: HIGH — a `..` collection or name in an
-  identifier escapes `--out` and prune deletes outside it (fix-up
-  running: plain-name validation, canonicalized confinement before every
-  write and remove, three tests); MEDIUM — mono detection ignores
-  `style=` fills (folded in). `catalog.json` schema belongs in a facet
+  identifier escapes `--out` and prune deletes outside it; MEDIUM — mono
+  detection ignores `style=` fills. FIX-UP DONE and re-reviewed PASS by
+  the same independent reviewer (icon.rs 1843 lines, 18 tests): plain-name
+  validation in `parse_selector` (`validate_plain_name`), canonicalized
+  confinement before every write (`ensure_write_target_within`) and
+  before every prune removal (`path_is_within`; refused entries surface
+  as `skipped`), style-aware `detect_mono`, four named tests. The
+  reviewer graded by reading: without the registry wiring the module is
+  not compiled, so the integrator runs the 18 tests with the wiring
+  applied at commit time. Minor gap: the bare-attribute allow-list lacks
+  `inherit`/`transparent` (pre-existing, real Iconify data never emits
+  them). `catalog.json` schema belongs in a facet
   `icons/README.md` at I2, not CONTRACTS §4. Integration follows the
   preview set (shared lyra registry files).
   Five questions to root at defaults.
