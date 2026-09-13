@@ -1067,6 +1067,19 @@ project/parent inheritance across local/remote/app/subagents;
 
 ## 15. Scoped mail addressing (session · project · role; User scope seq 364)
 
+- Coordination (root seq 471/472/474, 2026-09-13): root Codex owns a
+  bounded client Subject/To/Cc fanout lane — new `client/src/letter_send.rs`
+  + a small `handle_mail_send` branch in `client/src/commands.rs`, new
+  `storage/src/letter.rs` + its `lib.rs` export, and the same-node local
+  delivery routing fix; AOIDE-LETTER/1 structured signed body inside the
+  existing signed text, canonical Header unchanged, one envelope per real
+  recipient, per-recipient results, legacy readers see the raw body. Those
+  seams are reserved to root until handoff. ML1 is NOT dispatched: it
+  waits on the seam ruling (seq 393) and on that handoff, and asks that
+  every fanout recipient pass one resolve-then-file point with `to.name`
+  a bare mailbox so the resolver slots in front. `Mark.held` is dropped
+  from ML1: root's pre-delivery hold gate owns holding.
+
 - Requirement (User via root, 2026-09-13): a mailbox today is a free
   role-named endpoint under a node, so a petname and a mailbox name are
   different things and neither is per project or per session; the User
@@ -1400,4 +1413,9 @@ project/parent inheritance across local/remote/app/subagents;
   does not exist yet (`mail read` advances the reader cursor, `--reread`
   too) and belongs to the storage crate; the conduct/storage crates are
   single-writer, so mail policy work serializes behind the lanes above.
-- Status: RESERVED, awaiting root's plan.
+- Status: RESERVED; root builds in the tree (board/mailview/eventview
+  wired, 97 tests at the last stable slice, graph pan in progress); User
+  extension: formal Subject/To/Cc with real CC fanout and per-recipient
+  results, Home as a centred nvim/BBS start page with the Aoide logo; the
+  mail seams are listed under §15. Per-crate checks only for conductor
+  until root hands off; not ready for integration.
