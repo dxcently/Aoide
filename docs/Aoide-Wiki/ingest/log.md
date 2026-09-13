@@ -4334,3 +4334,41 @@ the published value and never re-derives ownership. Four tests; CONTRACTS
 
 Pages touched: CONTRACTS.md, pkgs/aoide/crates/conduct/README.md,
 pkgs/aoide/crates/conduct/AGENTS.md
+
+## [2026-09-12] feat | a project can belong to other hosts, and the picker creates one without a session
+
+A project record carries an optional `hosts` list — `{name, roots}` per
+registered node — off the wire when empty and never folded into the local
+`Project::roots()`. A host's roots are verbatim strings the host itself is
+positioned to check; this machine never tests them against its own
+filesystem and never infers one from a local path. One flag, `--host
+<node>`, scopes the existing `project add|edit|remove`: membership-only
+when no path follows (never a cwd default), edit replaces that host's
+roots exactly, remove drops one host root or the membership. The
+shellbridge gains `projectaction` (`create`, `edit`, `removehost`), keyed
+by project name with no session id anywhere on the wire, through the same
+sequencer as `sessionaction`; graph.json project nodes carry `hosts` when
+non-empty. Fourteen tests (780818a; review fix-up b98954b: a non-array host roots field
+refuses the action, the edit-with-no-roots re-exec is pinned).
+
+Pages touched: CONTRACTS.md, docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md,
+pkgs/aoide/crates/storage/README.md, pkgs/aoide/crates/storage/AGENTS.md,
+pkgs/aoide/crates/conduct/README.md, pkgs/aoide/crates/conduct/AGENTS.md
+
+## [2026-09-12] feat | a Codex subagent thread is its parent's child on the graph
+
+The Codex app capture already read `parent_thread_id` from `session_meta`
+and left it unused. `apply_codex_lineage` is now the one writer of the
+edge: an app record carries that native parent as `parentSessionId` only
+when the parent is an existing local record (any state, an exited parent
+still anchors lineage), is not the record itself, and would not cycle;
+a resume re-applies the same edge once, a capture read failure changes
+nothing. A nickname fills an empty title and never overwrites one. The
+record's kind stays `app` and its agent `codex` — ancestry is published,
+process ownership is not changed — so kill on the first app hop and send
+to an app record refuse exactly as before, both pinned by tests. The
+child renders under its parent's effective project through the one
+resolver. Fourteen tests (4fa382e).
+
+Pages touched: docs/architecture/CODEX-INTEGRATION.md,
+pkgs/aoide/crates/conduct/README.md, pkgs/aoide/crates/conduct/AGENTS.md
