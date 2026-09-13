@@ -987,6 +987,14 @@ project names, omitted when automatic cwd anchoring applies. `session project
 --id ID --project NAME` assigns a registered project; `--clear` restores
 automatic anchoring without changing cwd. The exit ledger retains the value
 as `project` (null when absent), and resurrection restores it when registered.
+That stored project is distinct from the *effective* project a session
+renders under: `aoide-conduct::graph::effective_project_for` derives the
+latter (own explicit project, else the nearest owning ancestor's own explicit
+project or cwd anchor, else the session's own cwd anchor) and never writes it.
+`SessionRecord.project` and the graph node's `project` keep publishing the
+stored value only — no new field, no shape change; `aoide session`'s bucket
+names and the conductor's per-project counts are the surfaces that read the
+derived view, `graph.json` does not.
 `session kill --id ID` is a local daemon-only SIGTERM request for an exclusively
 owned, conducted process verified against the daemon seal and pinned by Linux
 pidfd. Its successful response confirms signaling, never process exit.

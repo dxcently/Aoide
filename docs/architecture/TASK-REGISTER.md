@@ -144,11 +144,12 @@ Fields per entry: status · owner · depends on · evidence · next.
   race, fixed by a pure `retain_memo_in`; conduct 682). S3 LANDED aadc67b
   (state off the turn bracket, R2 consumer table in the commit body,
   kill/send refusals asserted in `working`; reviewed PASS, conduct 689;
-  CONTRACTS §4 corrected 63b2b86). Carried S3b (review MEDIUM): `session
-  phase`/`session end` in `session_store.rs` write any record's `state`
-  with no kind gate and S3 removed the per-tick reset that self-healed a
-  stray write on an app record; fix = the kind-keyed refusal kill/send
-  hold; next conduct slot after Eidolon E1b. Then S4. Staged and proved,
+  CONTRACTS §4 corrected 63b2b86). S3b LANDED badfc7a (reviewed PASS, conduct
+  708): `session phase`/`session end` refuse a `kind:"app"` record with
+  the `codex-app-unsupported` error `send` uses, before any file write;
+  the "never publishes awaiting" claim is tightened to the fold vocabulary
+  plus every state writer refusing; dead `UNSUPPORTED_PLATFORM`/
+  `fold_rollout` removed (workspace compile warning-free). Then S4. Staged and proved,
   not deployed (build 4 predates S1).
 - Build 4 = LIVE, CHURN FIX VERIFIED (2026-09-12): the clean HEAD build
   (pristine worktree at 2432e06) is
@@ -858,9 +859,80 @@ project/parent inheritance across local/remote/app/subagents;
   app/ended/unknown/subagent; details/project retained. No backend change.
   An explicit `unknown` observation still needs the backend if a failed scan
   retains the record.
-- Order: capture S3b (session_store kind gate) → ownership resolver +
-  sanitized A2A ancestry (this section) → Codex native lineage slice → E3.
-  Brief: Opus, read-only, scratch `p-ownership-brief.md`.
+- Order: capture S3b (session_store kind gate; LANDED badfc7a, reviewed
+  PASS) → S-A resolver + roster callers (LANDED e746e72: `model::
+  effective_project_for`, `SessionView.effective_project` local-only,
+  conductor per-project count; nine tests; CONTRACTS §4 names the
+  stored-vs-effective distinction) → S-B sanitized A2A ancestry + bounded
+  spawn cwd + live ambient fallback → S-C Codex native lineage → S-D remote
+  owner qualification (design + `link` refusal) → E3. Brief DONE (Opus,
+  scratch `p-ownership-brief.md`): R1 accepted as ruled (rung 2 above rung
+  3; `session project` pins a mis-grouped row), Q2 `effectiveProject` on
+  graph.json NOT published yet, Q3 `node spawn --project` deferred (A2A
+  wire change, User), Q4 nix option for `AOIDE_A2A_SPAWN_CWD` is a
+  separate module commit, Q5 a native parent naming a tracked non-app
+  record IS applied.
+
+## 14. Projects as an app, Mesh view in both temples (User scope seq 305-307)
+
+- Requirement (User via root, 2026-09-12): project creation/editing as easy
+  as a desktop project app — name, multiple folder roots through the native
+  picker (no custom filesystem browser), connected hosts chosen in the same
+  flow; a standalone New project entry that needs no session right-click;
+  a Mesh section in BOTH Sonata conductor and terminals showing the whole
+  connected mesh with live sessions grouped by host, local host included;
+  Projects view retained; titles/petnames/harness/model/ids in details;
+  capability-aware actions. Offline/unreachable hosts stay visible but their
+  cached sessions are never counted or painted live (last-seen/unknown);
+  node-scoped ids; remote rows never take local pid/window actions; project
+  host membership is organizational, never a grant or implicit pairing;
+  host-specific roots are never inferred by copying a local absolute path.
+  Backend first through the aoided bridge; no QML-owned registry (rule 7).
+- Root audits (seq 306/307, read-only, done): `node_list.rs` already reuses
+  `who.rs` `probe_nodes`/`build_mesh_node`/`build_local_node` — one shared
+  refresh for both widgets, no per-widget probe, no sweep per frame; live
+  evidence: Chiyo unreachable since 2026-08-28 yet its cached child
+  `SessionView.presence` reads `online` — child presence must be gated by
+  the enclosing host presence/freshness. `SessionMenu.qml` already has
+  `FolderDialog` and a removable multi-path editor; `createproject` is a
+  `sessionAction(record.sessionId)` and `shellbridge.rs` creates-then-
+  assigns, so zero-session creation needs a project-scoped mutation seam,
+  never a faked session id. The shared mesh renderer must not pass remote
+  rows through `terminals.buildRows` (it dedups/focuses on the local
+  `windowAddress`). Discovery candidates stay separate from the connected
+  mesh. Local folder dialog cannot browse a remote filesystem: manual
+  remote path or an existing remote root, shown not-validated until checked
+  through the host. Match by node identity + session id, never by display
+  name or cwd string.
+- Phases (backend first; each one executor commit, reviewed, serialized by
+  the integrator; edit/test only for agents):
+  - M1 storage/CONTRACTS (additive): `Project` gains optional selected
+    registered-host references with host-local roots where configured;
+    legacy empty = local-only. Zero-session project create/edit through the
+    existing multi-root project API (`project` commands) and one
+    project-scoped bridge op for the widgets. Tests: zero-session create;
+    multi-root edit preserves assignments; an offline selected host is
+    retained. Owner: Sonnet executor, storage + conduct; after S-A lands
+    (both touch `who.rs`/roster).
+  - M2 mesh projection: one daemon projection (reusing `who.rs` roster and
+    `node_list.rs`) that groups live sessions by host with node-scoped ids,
+    host presence/freshness enclosing child presence, cached sessions of an
+    unreachable host excluded from live counts, rows minimally enriched
+    (title/model/kind/parent when published, nothing invented). Tests:
+    duplicate ids across hosts; offline cached `working` excluded from the
+    live count; real idle live retained; empty/disconnected mesh. Owner:
+    Sonnet executor, conduct; after M1.
+  - M3 UI (both temples): persistent Projects/New project entry + collapsible
+    Mesh above empty-state content; New project = name + folders + chosen
+    connected hosts → Create, then add host/folder/session; shared mesh
+    renderer; remote rows capability-aware; both widgets share one refresh.
+    Serialized behind the widget-design session's reservation on
+    `conductor.qml`/`terminals.qml`/`SessionMenu.qml` (§13 UI half + card
+    redesign, root-launched). Owner: UI writer named when M2 lands.
+  - M4 preview verification (long names, wrapping, compact menus) and live
+    acceptance on a deployed build — the User's gate.
+- Order against the rest: Osaka conductor/wake gates and S-B stay ahead;
+  M1/M2 run disjoint from S-B (different files) once S-A is on main.
 
 ## Carried backlog (verified status, never implicitly done)
 

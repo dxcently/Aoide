@@ -4267,3 +4267,33 @@ pkgs/aoide/crates/conduct/AGENTS.md,
 pkgs/aoide/crates/conduct/src/graph/session_store.rs,
 pkgs/aoide/crates/conduct/src/graph/codex_app.rs,
 pkgs/aoide/crates/conduct/src/graph/codex_capture.rs
+
+## [2026-09-12] feat | a session renders under its owner's project
+
+Ownership graph S-A (register §13; User-authorized ruling seq 291-294).
+A spawned or hooked child whose cwd anchored nowhere fell out of its
+parent's group in `aoide session` and the conductor's per-project
+counts, because `project_for` looked only at the record's own explicit
+name and cwd. `model::effective_project_for` is now the one ladder every
+grouping surface that can see a non-root session calls: own explicit
+project > owner's effective project > own cwd anchor. Derived, never
+stored — the record's `project` keeps its meaning and serialization, no
+child gets a parent's project copied onto it, and `graph.json` keeps
+publishing the stored value only. An explicit name is never overridden
+(unregistered stops the walk, as before); the owner walk is iterative
+with a cycle guard, a dangling link ends it, then the subject's own cwd
+anchor. `project_for` is unchanged and is rungs 1+3. Callers switched:
+`who::group_by_project` through a new `SessionView.effective_project`
+(populated for local records, `None` for every remote row — cross-host
+inheritance is S-D's) and the conductor's per-project count; the three
+root-only sites stay on `project_for` because a root has no owner. Nine
+tests with synthetic ids. `aoide-conduct` 708 → 717, `aoide-conductor`
+77. `CONTRACTS.md` §4 names the stored-vs-effective distinction; no
+shape change. Commit e746e72.
+
+Pages touched: CONTRACTS.md, pkgs/aoide/crates/conduct/README.md,
+pkgs/aoide/crates/conduct/AGENTS.md,
+pkgs/aoide/crates/conduct/src/graph/model.rs,
+pkgs/aoide/crates/conduct/src/graph/who.rs,
+pkgs/aoide/crates/conduct/src/graph.rs,
+pkgs/aoide/crates/conductor/src/ui.rs
