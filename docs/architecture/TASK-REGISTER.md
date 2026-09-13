@@ -418,8 +418,16 @@ Fields per entry: status · owner · depends on · evidence · next.
   integration by pathspec; 189/0/3, golden 54, no foreign hunks. Round 2
   reported (seq 537: live dir from `attest::daemon_socket_path`, candidate
   canonicalized through its deepest existing ancestor, two new tests,
-  191/0/3) — delta re-review running. Icons I1 wiring follows the preview
-  commit (shared lyra mod.rs/registry.rs). Acceptance additions (root seq
+  191/0/3) — delta re-review PASS (08:11Z). The owner then applied root's
+  seq 506/507 follow-up on top (seq 557: one camera transform, middle-drag
+  and held-Space pan, pointer-anchored Ctrl+wheel zoom, Iconoir toolbar
+  copied from the facet's `icons/` tree, computer-use evidence
+  f1-verify.md) — round-3 delta review running; owner told hands-off
+  (seq 563). Landing = ONE commit with icons I1 (the canvas copies
+  `modules/facets/quickshell/icons/**` and `default.nix` runs the lyra
+  tests in the nix build), path list `commit-preview-icons.txt`; icon
+  wiring applied in the tree by the integrator: 209 passed / 0 / 3,
+  golden 57. Acceptance additions (root seq
   548, User): lock/unlock state icon; declared/resolved widget
   dependencies (available/missing/unknown + sources — read side a lyra
   command, shape a CONTRACTS entry); editable isolated livery colour
@@ -904,8 +912,9 @@ Fields per entry: status · owner · depends on · evidence · next.
   `rig-e1b.sh`. STAGED + PROVED, not deployed. Conductor absence on the
   live desktop (root seq 445/447, 2026-09-13) is this deployment gap: the
   live aoided predates E1b; no unpublished Eidolon code exists; b6d453f
-  APPROVED (root seq 492); origin/main = 535241f (pristine builds: e00568c
-  → store qr7bdir8…, b719571 → store icw40km1…, letter fanout included);
+  APPROVED (root seq 492); origin/main = af0fd74 (pristine builds: e00568c
+  → store qr7bdir8…, b719571 → store icw40km1…, letter fanout included;
+  2cc85ea and af0fd74 aoide + song checks exit 0);
   pin via dxflake to 535241f / icw40km1…, activation the User's; post-rebuild acceptance = one agent=eidolon record for the
   native pid parented to the wrap, no duplicate, node in graph.json and
   the conductor, state follows the busy flag, no reap while the pid lives.
@@ -991,7 +1000,8 @@ project/parent inheritance across local/remote/app/subagents;
   mailed the key and fixture, teaches the grouping helper to nest
   `nativeRole == subagent`, never every parented fork; root seq 463
   2026-09-13: QML half LANDED 2cc85ea (designer lane, review PASS,
-  pristine build + song checks green); still not nested on the live
+  pristine build + song checks green) and the designer's leftovers
+  (revealInPlaybill + left-click focus) LANDED af0fd74, pushed; still not nested on the live
   desktop — three-layer gap:
   the live daemon (build 4) predates 4fa382e/ece83a7 and publishes zero
   app rows, the checkout and live conductor.qml both still group on
