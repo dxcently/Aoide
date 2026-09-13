@@ -68,6 +68,10 @@ Every widget QML file, whatever slot it fills, must follow this shape:
   structurally incapable of reaching host/facet nix options through this
   surface — no anchor passes anything nix-shaped in, ever.
 
+A slot body is designed on the canvas, not on the live dock: `lyra preview
+<slot>` opens it against an isolated root with a stub bridge — any size,
+anchor, viewport, fixture (`docs/Aoide-Wiki/concepts/desktop/Widget-Preview.md`).
+
 ## Wired slots
 
 | slot | anchor kind | host anchor | extras | fallback |

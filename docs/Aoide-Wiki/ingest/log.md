@@ -4510,3 +4510,85 @@ activated. The duplicate-receipt producer and the drain bookkeeping are a
 separate code fix in flight.
 
 Pages touched: docs/Aoide-Wiki/concepts/orchestration/A2A-Door.md
+
+## [2026-09-13] feat | a song widget is designed on an isolated canvas
+
+Widget-preview lane (widget-preview-fable). The seven `*Preview.qml`
+rigs each float one widget at one fixed size with a hand-stubbed
+palette, and `ConductorPreview` instantiates the real `ShellBridge`,
+so a click on a roster row during a design pass could focus or kill a
+live session. `lyra preview [<widget>]` now builds an isolated root
+under `$XDG_RUNTIME_DIR/aoide-preview/` — the song's committed livery
+with `song` injected, one fixture set of the four stage files,
+copies of the checkout's facet QML and every song's `widgets/` dir
+(so `import "../.."` resolves as deployed), the deployed owner map
+copied — and spawns `quickshell -p <root>/run/qml/WidgetPreview.qml`
+with `AOIDE_ROOT`/`AOIDE_STATE_DIR`/`AOIDE_STAGE_DIR` inside the root,
+`AOIDE_DAEMON_SOCKET` at a path that never exists, and every inherited
+`QS_STAGE`/`*_WIDGET` override removed; `PR_SET_PDEATHSIG` as
+`dialog_qml` does. The canvas is a `FloatingWindow` (a compositor
+client, so `screen shot --window` frames it) with a rail: widget path
+plus the native file picker, width/height number-or-auto per axis with
+an aspect lock, a 3×3 anchor grid, viewport presets 16:9 · 16:10 · 4:3
+· ultrawide · portrait · custom with a lock, zoom fit-capped-at-1 or
+exact, livery/checker ground, fixture and palette switches (`live`, any song, a livery file, or a bare
+base16 scheme synthesised by CONTRACTS §1's column — Stylix's own
+mapping reversed), a swatch strip of the five roles and sixteen base16
+slots, auto-reload off the song's `widgets/` dir plus reload and recreate,
+a Declare control (`lyra preview declare`: the previewed body and
+palette become the checkout song's, byte-identical a no-op, git and
+the rebuild the user's — `rice declare`'s own vocabulary),
+an error pane, and an action log fed by a stub bridge — no
+`ShellBridge` is ever instantiated. `preview.json` is the one control
+document the rail and `lyra preview set …` both write, so a relaunch
+resumes and an agent can drive the canvas from a shell. Fixture sets
+ship at `modules/facets/quickshell/preview/fixtures/{empty,one,many,
+long-text}/`; `many` is the designer's sixteen-case roster verbatim.
+Golden 48 → 54 (`preview`, `preview.set`, `preview.declare`, `preview.shot`, `preview.tree`, `preview.notes`). lyra crate tests: 184 pass.
+Agent tools (same feature, second slice): `lyra preview shot` (screen · canvas · widget · element, `--annotated`, a sidecar per shot), `lyra preview tree` (the live item tree joined to a static parse of the widget's QML → element path + `file:line`, `--at x,y`), `lyra preview notes` (the root's `notes.json` as a work list: highlight · shape · note, each resolved to element + line; `--add/--done/--clear`); the canvas gains an annotate rail (pick · rect · ellipse · arrow · line · note) and an IPC target `preview` (shot · tree · reload). Review fixes: `preview declare` refuses `..` widget fields and validates `--slot`; the canvas destroys a window-rooted (PanelWindow) body instead of mapping a live layer surface.
+Join rules (static QML ↔ live tree): file-rooted and inline `component X:` definitions match by type through one component map; then objectName; then the i-th static sibling of the same type; a runtime node with no static sibling of its type at all (Flickable's contentItem and the like) is a transparent wrapper that hands its children the same statics. Repeater delegates (`delegate: Column {`) are real static children, so every instance resolves to the delegate line. On sonata's conductor all 1091 live nodes resolve (35 as wrappers); a component instance reports the definition's own `id`, never the use-site's.
+Launch: the canvas is a foreground viewer (`lyra preview <widget>` holds the terminal; agents launch it with `setsid -f`). On Hyprland it is floated, sized to the FOCUSED monitor with its transform applied (a portrait panel reports its native width/height), and placed by address (`centerwindow` acts on the focused window, which is the launching terminal); the window is looked up by class + title + the root's own quickshell pid (`qs list --all`), so two open roots never float or capture each other.
+Isolation: `run/qml/*` are COPIES of the checkout's facet QML and every song's `widgets/` tree, never symlinks into it — a write through the root lands in the root. The canvas refreshes each watched file's copy from the checkout (preview.json `stage`: src → dst) before every reload path (auto, Reload, IPC); a facet edit outside the watch list needs `lyra preview --no-launch --root <ROOT>` to re-stage, which merges into the existing control file. `--root` refuses `..` and anything under `$XDG_RUNTIME_DIR/aoide/` (the live daemon's dir) as a usage error. `lyra` resets SIGPIPE to its default so `preview tree | head` ends quietly.
+
+Camera and toolbar (root follow-up): the stage became an explicit camera (pan offset + pointer-anchored scale on the one viewport item that holds both the widget and the annotation overlay); middle-drag and held-Space left-drag pan, Ctrl+wheel zooms about the pointer, Fit/1:1/typed/CLI zoom reset the camera, Space in a text field stays a space; the toolbar draws the facet's resolved Iconoir glyphs (copied into run/qml/icons/ by lyra preview) with tooltips and selected/disabled states. Verified on the real canvas with pointer and key emulation (evidence/f1-verify.md).
+
+Corrective set (root 590-592): `preview.json` carries the launching binary's absolute path as `lyra` (`current_exe`) and the canvas spawns that, never a bare `lyra` from PATH, so a canvas launched from a dev build drives the same build; `--root` refusal reads the live daemon dir from `$XDG_RUNTIME_DIR/aoide` directly and never from `$AOIDE_DAEMON_SOCKET` (which the canvas child repoints), closing the gap where an unset runtime dir skipped the check; a Rust-level test reproduces the dead-rail regression (`preview set` from inside a canvas-shaped env) and passes. lyra crate tests: 213 single-threaded; three `preview_tools` conductor-parser tests race under default threading (pre-existing lock-discipline gap, untouched here).
+
+Pages touched: docs/Aoide-Wiki/concepts/desktop/Widget-Preview.md (new),
+docs/Aoide-Wiki/ingest/index.md, modules/facets/quickshell/qml/slots.md,
+modules/facets/quickshell/qml/WidgetPreview.qml (new),
+modules/facets/quickshell/preview/fixtures/** (new),
+pkgs/aoide/crates/lyra/src/commands/preview.rs (new),
+pkgs/aoide/crates/lyra/src/commands/preview_tools.rs (new),
+pkgs/aoide/crates/lyra/Cargo.toml (+ `image`),
+pkgs/aoide/crates/lyra/src/commands/mod.rs,
+pkgs/aoide/crates/lyra/src/registry.rs,
+pkgs/aoide/crates/lyra/src/bin/lyra.rs, pkgs/aoide/Cargo.lock,
+pkgs/aoide/crates/lyra/README.md, pkgs/aoide/crates/lyra/AGENTS.md
+
+## [2026-09-13] feat | widget icons are Iconify identifiers resolved into the facet
+
+Icons lane (I1, a Sonnet executor with an independent reviewer, root seq
+424/428/433). A widget names an icon by Iconify identifier
+(`<collection>:<name>`) or brings its own file; `lyra icon collections`,
+`lyra icon list` and `lyra icon resolve` read a PINNED, hashed copy of each
+collection's IconifyJSON (`pkgs/iconify-data`: Iconoir 7.11.0 and Phosphor
+2.1.1, `fetchurl` at nix build time, never at render or resolve) and
+`resolve` is the only writer: it ports Iconify's own build algorithm
+(alias chain, dimension and transform fold, `<defs>` kept outside the
+transform wrap) into `<out>/<collection>/<name>.svg` plus one
+`catalog.json` carrying collection, source, version, licence, box and a
+mono/multicolour flag per asset; a repeat resolve is a byte no-op and a
+selection that drops a name prunes its asset. Names are validated before
+they touch a path and every write and prune is confined to `--out` after
+canonicalisation. The facet ships only the twenty selected Iconoir editor
+controls under `modules/facets/quickshell/icons/` with both licence texts
+vendored; the widget-preview canvas copies that tree into its isolated
+root and draws its toolbar from it. Golden 54 → 57; lyra crate tests 209
+(18 for `icon`). Rendering stays a song helper (`Icon.qml`, a designer
+handoff) and the picker is the preview owner's; neither is in this entry.
+
+Pages touched: pkgs/aoide/crates/lyra/src/commands/icon.rs (new),
+pkgs/aoide/crates/lyra/src/commands/mod.rs,
+pkgs/aoide/crates/lyra/src/registry.rs, pkgs/iconify-data/default.nix (new),
+modules/facets/quickshell/icons/** (new)

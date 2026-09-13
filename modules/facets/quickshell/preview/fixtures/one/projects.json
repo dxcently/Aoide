@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "0",
+  "projects": [
+    { "name": "aoide", "path": "/home/fixture/Aoide", "roots": ["/home/fixture/Aoide"] }
+  ]
+}

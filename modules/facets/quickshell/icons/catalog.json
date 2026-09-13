@@ -1,0 +1,455 @@
+{
+  "icons": {
+    "iconoir:arrow-down": {
+      "collection": "iconoir",
+      "file": "iconoir/arrow-down.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "arrow-down",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:arrow-down-left": {
+      "collection": "iconoir",
+      "file": "iconoir/arrow-down-left.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "arrow-down-left",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:arrow-down-right": {
+      "collection": "iconoir",
+      "file": "iconoir/arrow-down-right.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "arrow-down-right",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:arrow-left": {
+      "collection": "iconoir",
+      "file": "iconoir/arrow-left.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "arrow-left",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:arrow-right": {
+      "collection": "iconoir",
+      "file": "iconoir/arrow-right.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "arrow-right",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:arrow-up": {
+      "collection": "iconoir",
+      "file": "iconoir/arrow-up.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "arrow-up",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:arrow-up-left": {
+      "collection": "iconoir",
+      "file": "iconoir/arrow-up-left.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "arrow-up-left",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:arrow-up-right": {
+      "collection": "iconoir",
+      "file": "iconoir/arrow-up-right.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "arrow-up-right",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:circle": {
+      "collection": "iconoir",
+      "file": "iconoir/circle.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "circle",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:copy": {
+      "collection": "iconoir",
+      "file": "iconoir/copy.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "copy",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:cursor-pointer": {
+      "collection": "iconoir",
+      "file": "iconoir/cursor-pointer.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "cursor-pointer",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:drag-hand-gesture": {
+      "collection": "iconoir",
+      "file": "iconoir/drag-hand-gesture.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "drag-hand-gesture",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:expand": {
+      "collection": "iconoir",
+      "file": "iconoir/expand.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "expand",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:floppy-disk": {
+      "collection": "iconoir",
+      "file": "iconoir/floppy-disk.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "floppy-disk",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:folder": {
+      "collection": "iconoir",
+      "file": "iconoir/folder.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "folder",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:frame-select": {
+      "collection": "iconoir",
+      "file": "iconoir/frame-select.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "frame-select",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:info-circle": {
+      "collection": "iconoir",
+      "file": "iconoir/info-circle.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "info-circle",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:lock": {
+      "collection": "iconoir",
+      "file": "iconoir/lock.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "lock",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:lock-slash": {
+      "collection": "iconoir",
+      "file": "iconoir/lock-slash.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "lock-slash",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:minus": {
+      "collection": "iconoir",
+      "file": "iconoir/minus.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "minus",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:notes": {
+      "collection": "iconoir",
+      "file": "iconoir/notes.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "notes",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:position": {
+      "collection": "iconoir",
+      "file": "iconoir/position.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "position",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:redo": {
+      "collection": "iconoir",
+      "file": "iconoir/redo.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "redo",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:refresh-double": {
+      "collection": "iconoir",
+      "file": "iconoir/refresh-double.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "refresh-double",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:send-diagonal": {
+      "collection": "iconoir",
+      "file": "iconoir/send-diagonal.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "send-diagonal",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:square": {
+      "collection": "iconoir",
+      "file": "iconoir/square.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "square",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:undo": {
+      "collection": "iconoir",
+      "file": "iconoir/undo.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "undo",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:xmark": {
+      "collection": "iconoir",
+      "file": "iconoir/xmark.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "xmark",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:zoom-in": {
+      "collection": "iconoir",
+      "file": "iconoir/zoom-in.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "zoom-in",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    },
+    "iconoir:zoom-out": {
+      "collection": "iconoir",
+      "file": "iconoir/zoom-out.svg",
+      "height": 24,
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE"
+      },
+      "mono": true,
+      "name": "zoom-out",
+      "source": "iconify",
+      "version": "7.11.0",
+      "width": 24
+    }
+  },
+  "schemaVersion": 0
+}

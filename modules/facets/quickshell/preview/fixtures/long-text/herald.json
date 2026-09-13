@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "0",
+  "notifications": [
+    {
+      "id": "permit-f2000000-0000-4000-8000-000000000003",
+      "app": "codex",
+      "summary": "τηλέμαχος-ἀγαμέμνων-πατροκλος wants to run a command with a summary line long past sixty characters",
+      "body": "Bash: rm -rf /home/fixture/Aoide/song/songbook/sonata/widgets/deeply/nested/scratch/directory/for/the/long/text/fixture/leaf/widget-a",
+      "icon": "",
+      "urgency": "critical",
+      "progress": -1,
+      "category": "",
+      "stackTag": "permit-f2000000-0000-4000-8000-000000000003",
+      "timeoutMs": 0,
+      "receivedAt": "2026-09-12T18:29:00Z",
+      "kind": "summons",
+      "sessionId": "f2000000-0000-4000-8000-000000000003"
+    }
+  ]
+}

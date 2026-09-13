@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "0",
+  "projects": [
+    {
+      "name": "aoide",
+      "path": "/home/fixture/Aoide/song/songbook/sonata/widgets/deeply/nested/scratch/directory/for/the/long/text/fixture/leaf/widget-a",
+      "roots": [
+        "/home/fixture/Aoide/song/songbook/sonata/widgets/deeply/nested/scratch/directory/for/the/long/text/fixture/leaf/widget-a",
+        "/home/fixture/Ωδή/σονάτα/ウィジェット"
+      ]
+    },
+    { "name": "ένα-πολύ-μακρύ-όνομα-έργου-εδώ", "path": "/home/fixture/Ωδή", "roots": [] }
+  ]
+}

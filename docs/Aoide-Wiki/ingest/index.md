@@ -16,6 +16,7 @@ updated: 2026-09-07
 - [[Terminal-Commander]] — the agent-session terminal widget: tracks which window runs which agent, jumps by click or keybind
 - [[Session-Graph]] — the project/session DAG: nodes, anchors, spawned edges, the `aoide graph` commands, the graph.json contracts, and today's render paths
 - [[Gadget-Dock]] — the `AoidePanel.qml` left-edge dock: hot-edge hover, SUPER+G, four core gadgets plus an opt-in Usage stele, livery-only colour
+- [[Widget-Preview]] — `lyra preview`: the isolated design canvas for a song widget — any size, anchor, viewport and fixture, a stub bridge, never the live desktop
 - [[Lexicon]] — the whole vocabulary: the three Muses, the frozen/performed split, the machinery words, and why each word family was chosen
 - [[Snowflake-Anatomy]] — the flake's structural layers (nucleus / dendrites / facets / rime) and how the walker registers modules automatically
 - [[Clone-and-Run]] — installing Aoide: clone, `aoide onboard`; the shared-history model for upstream updates and optional contributions

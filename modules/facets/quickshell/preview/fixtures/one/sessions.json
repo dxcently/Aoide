@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "0",
+  "sessions": [
+    {
+      "sessionId": "f1000000-0000-4000-8000-000000000001",
+      "agent": "claude",
+      "kind": "agent",
+      "state": "working",
+      "petname": "single-ember",
+      "title": "Wire the preview canvas rail",
+      "say": "Reading slots.md before touching the anchor table.",
+      "tool": "Bash: rg 'required property' song/songbook/sonata/widgets",
+      "model": "claude-opus-5",
+      "contextTokens": 84000,
+      "contextCeiling": 1000000,
+      "cwd": "/home/fixture/Aoide",
+      "project": "aoide",
+      "harnessSessionId": "f1000000-0000-4000-8000-000000000001",
+      "pid": 999001,
+      "windowAddress": "0x0000fixture0001",
+      "workspace": 1,
+      "startedAt": "2026-09-12T22:10:00Z",
+      "conductable": true
+    }
+  ]
+}
