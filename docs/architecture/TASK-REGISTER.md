@@ -369,8 +369,18 @@ Fields per entry: status · owner · depends on · evidence · next.
   editing/markup (seq 388: select/move/resize with handles synced to
   numeric sizes and anchors, zoom/pan, arrows/highlights/freehand/text,
   undo/redo, annotated screenshot export; separate Interact vs
-  Edit/Annotate input modes). Geometry and annotations are preview state
-  under the preview root — never a silent rewrite of widget QML; writing
+  Edit/Annotate input modes). User usability asks (root seq 441/444,
+  fanned to the owner as 439/442): direct marker interaction — a click on
+  a numbered marker selects and opens its existing note (never a
+  duplicate; hit area + hover; Normal mode without activating widget
+  buttons; Escape keeps entered text), blank-canvas click in the Insert
+  tool places a marker and opens editing; and the tool-dispatch bug —
+  every exposed tool must own working geometry (select, arrow with
+  arrowhead, note/pin, rectangle) over the whole canvas including space
+  outside the widget, or be removed until it does; check the shared
+  selection MouseArea and loader clipping. Owner implements, designer
+  validates, evidence = screenshots per gesture. Geometry and annotations
+  are preview state under the preview root — never a silent rewrite of widget QML; writing
   geometry back into a checkout widget is a separate, User-gated command.
   Lane rule after the contained 2026-09-12 incident (an executor truncated
   the untracked canvas file through a preview-root symlink; restored
@@ -854,7 +864,14 @@ Fields per entry: status · owner · depends on · evidence · next.
   ping answers in ~5 ms against the 250 ms budget. Isolated daemon stopped
   by its own pid. Proof is of the production path; the fix-up touches
   tests/docs only, re-run if `resolve_parent` changes. Rig: scratch
-  `rig-e1b.sh`. STAGED + PROVED, not deployed.
+  `rig-e1b.sh`. STAGED + PROVED, not deployed. Conductor absence on the
+  live desktop (root seq 445/447, 2026-09-13) is this deployment gap: the
+  live aoided predates E1b; no unpublished Eidolon code exists; candidates
+  d252b55 (origin/main, store nj7ahhrh…) or c71810b (local, store
+  qr7bdir8…, behind the b6d453f ruling); pin via dxflake, activation the
+  User's; post-rebuild acceptance = one agent=eidolon record for the
+  native pid parented to the wrap, no duplicate, node in graph.json and
+  the conductor, state follows the busy flag, no reap while the pid lives.
 - BUILD BREAK found by this proof: S2 fdb6682 added `sources` to
   `SessionRecord` and four conductor test fixtures never got it, so the nix
   checkPhase (`cargo test --workspace`) failed for every commit
