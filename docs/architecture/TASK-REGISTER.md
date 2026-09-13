@@ -1131,8 +1131,14 @@ project/parent inheritance across local/remote/app/subagents;
   `stagePatch` + `checks.livery-fanout` (built green), proof 1 all true
   (seed palette.bg == Stylix base00 == #191724 with the osaka override),
   no-override case byte-identical to the live stage twin for sonata and
-  round-trip identity for all five songs, nixfmt clean; independent review
-  running. Activation of the seed remains the User's rebuild gate. Follow-up:
+  round-trip identity for all five songs, nixfmt clean; review PASS (two
+  LOW: the checks header count, fixed; a host setting `override.hot` on
+  a song whose committed palette has no `hot` key gains that key in the
+  staged document — mirrors the option-set behaviour, no reader breaks,
+  no host does it today). Log entry appended. Activation of the seed
+  remains the User's rebuild gate. Follow-up (own lane): the runtime
+  writers `rice stage`/`rice mode`/`reload` need a published override
+  source before they can apply the tier. Follow-up:
   the songbook livery.json twins of `rice.nix` are unchecked.
 
 ## 17. Agent Client Protocol (ACP) client in core; widget builder as its UI (User scope seq 403/405)
