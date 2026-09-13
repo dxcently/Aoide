@@ -1251,3 +1251,34 @@ project/parent inheritance across local/remote/app/subagents;
   :8710/`, osaka's yomi `http://192.168.1.175:8710/`): flagged, unexamined
   against the loopback-only rule; needs a reading of what the record's url
   means before any change. Unowned.
+
+## 18. Pack-independent widget icons (Iconify identifiers; User seq 424/428/433)
+
+- Order (root seq 424 → 428 → 433, newest supersedes): Iconoir is the
+  preferred editor-control look, Phosphor stays a selectable collection;
+  a widget selects an icon by Iconify `collection:name` identifier or
+  supplies its own local SVG/image; pinned IconifyJSON collection data and
+  import tooling resolve the SELECTED icons into local Qt-compatible
+  assets (aliases, dimensions, transforms handled — the raw body alone is
+  not enough); no network at render, only selected collections/assets
+  ship; the picker exposes collection + searchable names, custom files via
+  the existing native picker, and the saved choice and declaration retain
+  collection/source/license metadata; pack licenses preserved for the
+  pinned version; monochrome assets take the livery tint, intentional
+  multicolor art is preserved; actual Qt rendering verified with Iconoir
+  and one other set at small sizes (16/20/24, light/dark). Sonata's
+  bespoke art is kept. Editor coverage (seq 424): select/cursor, hand/pan,
+  text note, arrow/rectangle/highlight, undo/redo, zoom, fit, open/save,
+  copy/details, send-to-agent; text stays on primary Send and mode
+  controls; tooltips + shortcuts on compact tools.
+- Placement: paint, so `lyra` — bridge first (`lyra icon …` resolves and
+  catalogs), one reusable QML component second, picker third; rendering
+  stays separate from picker/catalog.
+- Owner: ONE implementation owner (a Sonnet executor lane, lyra crate, new
+  files only while the preview lane's lyra edits are uncommitted; the
+  integrator applies the `mod`/registry lines); the preview owner
+  implements the picker on top; the designer does the visual comparison
+  and owns anything under the live songbook. No duplicate assets writer.
+- Status: ARCHITECT dispatched (Opus, `p-icon-arch.md` → `p-icon-brief.md`).
+  Source work only: no rebuild, no activation. Mail receipt is not
+  completion — done means implemented and visually verified.
