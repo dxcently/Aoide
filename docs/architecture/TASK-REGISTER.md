@@ -403,9 +403,14 @@ Fields per entry: status · owner · depends on · evidence · next.
   lane rule forbids this — graded in review), Declare double-click
   writes the checkout widget, component instances report the
   definition id, `preview tree | head` panics on SIGPIPE (workspace-wide),
-  createObject warnings on load. Independent review dispatched;
-  integration is serialized behind the I1 icon executor because both
-  touch lyra mod.rs/registry.rs. The seq 441/444 usability asks are
+  createObject warnings on load. Independent review: PASS-WITH-FIXUPS —
+  two HIGH returned to the owner before integration (the run/qml symlink
+  farm into the checkout, guarded by convention only; `--root` never
+  validated against the live daemon dir), one MEDIUM on the log draft's
+  shape; 184/184 reproduced, traversal fixes real. Integration after the
+  fix-up re-review, serialized behind the I1 icon executor (shared lyra
+  mod.rs/registry.rs). Backlog: no bin resets SIGPIPE (one-line SIG_DFL
+  in `lyra`, `aoide`, `aoided` main()). The seq 441/444 usability asks are
   follow-ups by the same owner after integration.
 
 ## 7. Mail attachments (`mail send --attach`, also the handoff carrier)
