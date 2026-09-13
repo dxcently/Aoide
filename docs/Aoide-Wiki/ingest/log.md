@@ -4450,3 +4450,28 @@ stays uncommitted until root fixes the Graph-panel tag regression.
 Pages touched: CONTRACTS.md, docs/architecture/MAIL.md,
 pkgs/aoide/crates/client/README.md, pkgs/aoide/crates/client/AGENTS.md,
 pkgs/aoide/crates/storage/README.md, pkgs/aoide/crates/storage/AGENTS.md
+
+## [2026-09-13] feat | Sonata groups nested Codex threads and shows one-row session cards with reveal chips
+
+The widget designer's lane, integrated after an independent review
+(2cc85ea). In `conductor.qml` a record is nested when its kind is
+`subagent` or its published `nativeRole` is `subagent`, and the grouping
+climb anchors it to the nearest non-nested ancestor, so a Codex app thread
+spawned by another thread rides under its root instead of standing as a
+top-level card; the sub tag and the faces pool key on the child, and kind
+`app` logic is untouched. Every card animates from its own live state
+inside the fixed indicator boxes that 2f5b287 introduced. Both temples now
+draw one row per session — title with badges, harness and model wrapping to
+two lines with the state word kept right, petname and id left with host and
+project right, stacking when they would fight — and reveal `[copy]`
+`[details]` on hover or keyboard focus inside the fixed troupe box without
+moving any label; the reveal state lives on the gadget, so it survives
+roster rebuilds, and the session sheet's recovery copy no longer retargets
+the open sheet. Evidence lives outside the tree under
+`/tmp/aoide-widget-team/design/` (nesting proof, animation frame masks, the
+280/360/480 width matrix). The live dock still runs the composed copy the
+User placed earlier; placing these widgets and rebuilding the daemon that
+publishes `nativeRole` are the User's gates.
+
+Pages touched: song/songbook/sonata/design/intent.md,
+song/songbook/sonata/design/widget-structure.md

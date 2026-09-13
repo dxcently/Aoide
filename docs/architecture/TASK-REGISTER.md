@@ -978,7 +978,9 @@ project/parent inheritance across local/remote/app/subagents;
   as additive `nativeRole` from the capture, kind untouched; designer
   mailed the key and fixture, teaches the grouping helper to nest
   `nativeRole == subagent`, never every parented fork; root seq 463
-  2026-09-13: still not nested on the live desktop — three-layer gap:
+  2026-09-13: QML half LANDED 2cc85ea (designer lane, review PASS,
+  pristine build + song checks green); still not nested on the live
+  desktop — three-layer gap:
   the live daemon (build 4) predates 4fa382e/ece83a7 and publishes zero
   app rows, the checkout and live conductor.qml both still group on
   `kind` only, and the live composed copy is Sep 7 so the designer's
