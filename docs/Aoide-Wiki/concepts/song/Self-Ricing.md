@@ -214,7 +214,9 @@ and `stage/cover.json` anywhere in the codebase (unaffected by which of
 
 `rice stage` doesn't only hot-load the palette/notes tier any more —
 it also syncs the song's widget QML **bodies**
-(`song/songbook/<name>/widgets/*.qml`) into the live runtime tree
+(the composed copy under `$AOIDE_ROOT/song/songbook/<name>/widgets/*.qml`,
+not the git checkout — an edit reaches the desktop only once it is placed
+there) into the live runtime tree
 (`run/qml/songs/<name>/`, `crate::widgets` in `crates/song/`), so an edit to
 an EXISTING widget file reaches the desktop through Quickshell's own
 file-watcher, no rebuild. This rides the same mode gate as everything

@@ -356,7 +356,27 @@ Fields per entry: status · owner · depends on · evidence · next.
   viewport presets and custom, aspect lock, zoom, fixture/livery pickers
   incl. `live`/song/file/bare base16, reload, error pane), fixtures under
   `modules/facets/quickshell/preview/fixtures/`, `Widget-Preview.md`.
-  Edit/test only; the integrator lands it after independent review.
+  P1 (`preview/set/declare`, 107 tests, golden 51) and P2 (canvas, four
+  fixture sets, isolation verified) are done in the tree; two path-
+  traversal writes in `preview declare` (`..` in the widget field through
+  the songs symlink; unvalidated `--slot`) are being fixed and nothing is
+  offered for integration until those carry named tests and a review.
+  User extensions, same owner, phased after the core: agent tools
+  `lyra preview shot|tree|notes` (screen/canvas/widget/element shots via
+  the screen crate + canvas grab; live item tree joined to a static QML
+  parse → element path + file:line; `notes.json` work list) with a canvas
+  annotate mode (`commands/preview_tools.rs`, golden 51→54), then mouse
+  editing/markup (seq 388: select/move/resize with handles synced to
+  numeric sizes and anchors, zoom/pan, arrows/highlights/freehand/text,
+  undo/redo, annotated screenshot export; separate Interact vs
+  Edit/Annotate input modes). Geometry and annotations are preview state
+  under the preview root — never a silent rewrite of widget QML; writing
+  geometry back into a checkout widget is a separate, User-gated command.
+  Lane rule after the contained 2026-09-12 incident (an executor truncated
+  the untracked canvas file through a preview-root symlink; restored
+  byte-identical): no writes under any `run/qml`, no symlink from a
+  preview root into the checkout. Edit/test only; the integrator lands it
+  after independent review.
 - Owner: widget-preview-fable (plan + delegation + hands-on pass); Fable
   integrates. Designer session `widget-design-fable` consumes it for the
   card redesign (§13 UI half, now under the User's live-draft workflow).
@@ -971,8 +991,64 @@ project/parent inheritance across local/remote/app/subagents;
 - Order against the rest: Osaka conductor/wake gates and S-B stay ahead;
   M1 after S-B leaves the conduct crate, M2 after M1.
 
+## 15. Scoped mail addressing (session · project · role; User scope seq 364)
+
+- Requirement (User via root, 2026-09-13): a mailbox today is a free
+  role-named endpoint under a node, so a petname and a mailbox name are
+  different things and neither is per project or per session; the User
+  wants BOTH scopes. (1) A session recipient is displayed and resolved by
+  petname/title but bound to the stable native session identity; (2) a
+  project inbox survives sessions, hangs off the project record, and is
+  read by several participants with independent cursors; (3) role
+  mailboxes stay as stable orchestration endpoints with their binding
+  visible in Details, never as unexplained aliases. One canonical mail
+  store and protocol — scopes are address resolution, not a second mail
+  implementation. Typed CLI/UI targets disambiguate session vs project vs
+  role; existing `<node>/<name>` addresses keep working; an alias resolves
+  to its stable destination BEFORE filing. Addresses are host-qualified —
+  the same project name on two machines is never one identity; a
+  cross-host project inbox has one explicit authority host, no implicit
+  replication. Project membership grants no access; the doorbell notifies
+  subscribed/participating readers, never the whole mesh. Delivery,
+  fetched, and acted stay separate; a shared cursor never swallows another
+  reader's unread (per-mailbox per-reader cursors in `mail.rs` are
+  reused). `--from` is attribution only and a node signature never
+  authenticates a claimed session name — display never overstates
+  identity. Send UI: choose Session or Project, no knowledge of internal
+  role mailboxes required.
+- Roles (User decision via root, seq 365 then 375): the normal product is
+  Session + Project with zero roles configured. A role is OPTIONAL and
+  belongs to a project (`Aoide/reviewer`): a stable address that survives
+  a change of hands, with a visible assignment to one or more sessions;
+  the brief specifies assignment/handoff, unassigned-role behaviour, and
+  reader notification instead of assuming or broadcasting. No role
+  registry; existing free-named mailboxes get an explicit compatibility/
+  migration mapping, never guessed identity. UI shows project, role, and
+  current assignee; the default reply target resolves from the source
+  binding.
+- Required tests: petname collision / relabel / resume; dead target vs
+  enduring inbox; two readers with independent unseen; project rename and
+  host-qualified names; cross-host reply target; role alias shown.
+- Status: ARCHITECT brief in progress (design only, Opus); the seam goes
+  to root for agreement before any executor is dispatched. Sits on top of
+  §14 M1 (`ProjectHost`, `--host`) — no redesign of M1.
+
 ## Carried backlog (verified status, never implicitly done)
 
+- Interactive child launch environment (root diagnosis, seq 371): the
+  root-launched preview and designer TUIs inherited `NO_COLOR=1` from the
+  orchestrator's machine-output environment, so their windows rendered
+  colourless while tracking was intact. Acceptance: a user-visible TUI
+  launch never inherits the launcher's output suppression — `env -u
+  NO_COLOR`, the terminal sets `TERM`, no forced colour or `TERM` hacks;
+  fixing a live session is a same-native resume coordinated at a safe
+  checkpoint, never a kill or a duplicate launch.
+- Reload source is the composed song, not the checkout (designer, seq
+  374): `sync_song_widgets` copies from `AOIDE_ROOT/song/songbook/<song>/
+  widgets` (the composed copy) into `run/qml`; checkout edits reach the
+  live dock only once placed there, and `rice declare` copies that dir
+  INTO the checkout — nobody runs it while other writers have tree edits.
+  Placement into `~/.aoide` is the User's gate.
 - AoideOS/Lyra portability: unverified; folds into 4(e).
 - Preview-harness reaping is filename-scoped (root ricing audit, seq 339):
   `song/src/reap.rs` classifies every `*Preview.qml` launched by `qs`/
