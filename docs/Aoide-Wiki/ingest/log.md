@@ -4592,3 +4592,37 @@ Pages touched: pkgs/aoide/crates/lyra/src/commands/icon.rs (new),
 pkgs/aoide/crates/lyra/src/commands/mod.rs,
 pkgs/aoide/crates/lyra/src/registry.rs, pkgs/iconify-data/default.nix (new),
 modules/facets/quickshell/icons/** (new)
+
+## [2026-09-13] fix | the outbox neither re-mints acks for a dead link nor freezes entries behind it
+
+Outbox lane (root 660/663, register §26). Yomi's spool for osaka held
+16.5k `receipt` entries for seven letters: the A2A door re-minted a fresh
+ack on every redelivery of an already-filed letter (spec item 5 with no
+memory of a pending ack), and `drain_node` backed the link off and broke
+on a transport failure before touching any entry, so every entry sat at
+`tries: 0` while the link's backoff doubled without a ceiling. The
+transport itself had died because neither the aoided nor the A2A door
+unit carried `ssh` on its PATH (fixed on the nix side in the same
+checkpoint). Now: a per-node `.ack/<acked_msgid>` marker whose content is
+the covering receipt's msgid makes "an ack is already pending" one stat
+plus one small read, never a directory scan; the marker is not
+authoritative on its own — a marker naming an entry no longer on disk is
+deleted and the ack re-spooled, so an archive pass that moves entries
+need not know `.ack/` exists; `remove_entry` clears the marker with the
+entry. The drain attempts at most `DRAIN_BATCH_CAP` (50) entries per
+call, records a transport failure on the entry it hit before backing the
+link off, and the link backoff is capped at `BACKOFF_CEILING_SECS` (15
+minutes) so a dead link is re-probed on a schedule. `mail outbox --json`
+gains `data.summary` per non-empty node: depth, oldest age, tries
+histogram, last-outcome counts, refused count. Tests: a letter deposited
+repeatedly as a duplicate yields one pending ack; an orphaned marker
+self-heals; a dead transport records the attempt and never exceeds the
+ceiling; one dead node never blocks another's drain; the gate answers
+correctly against a spool seeded with two hundred unrelated entries.
+Three review rounds (independent Sonnet). The live backlog is untouched:
+archiving duplicate receipts is a separate, policy-gated step.
+
+Pages touched: CONTRACTS.md, pkgs/aoide/crates/storage/README.md,
+pkgs/aoide/crates/storage/AGENTS.md, pkgs/aoide/crates/client/README.md,
+pkgs/aoide/crates/client/AGENTS.md, pkgs/aoide/crates/server/README.md,
+pkgs/aoide/crates/server/AGENTS.md

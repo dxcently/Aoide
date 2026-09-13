@@ -2482,7 +2482,7 @@ second open is a clean no-op.
 The per-node BSO-style spool (MAIL.md "Outbox") — where a `mail send --to
 <node>/<name>` envelope (`node` neither `self` nor this box's own
 hostname) waits between minting and confirmed delivery. One
-directory per node, three kinds of file, one `outbox_dir()` (the ordinary
+directory per node, four kinds of file, one `outbox_dir()` (the ordinary
 `state_dir()` resolution, `$AOIDE_STATE_DIR/outbox/`):
 
 ```
@@ -2490,7 +2490,22 @@ state/outbox/<node>/<msgid>.json   one OutboxEntry per pending envelope
 state/outbox/<node>/link.json      that LINK's own backoff state (absent
                                     = not held off)
 state/outbox/<node>/.bsy           a drain's lock file — never data
+state/outbox/<node>/.ack/<acked>   pending-ack marker: its content is the
+                                    msgid of the receipt entry covering
+                                    letter <acked> — never data, never
+                                    drained
 ```
+
+The `.ack/<acked_msgid>` marker makes "is an ack for this letter already
+sitting undelivered" one stat plus one small read, never a scan of the
+node's directory, so a duplicate of a filed letter arriving while the
+link is dead re-spools nothing (MAIL.md item 5 still holds once the
+pending ack has actually gone out: the marker leaves with the entry).
+The marker is never authoritative on its own — a reader confirms the
+msgid it names is still spooled before treating it as pending, and a
+marker naming a msgid no longer on disk is stale: deleted on the next
+check, the ack re-spooled. A tool that moves or archives entries out of
+`state/outbox/<node>/` need not know `.ack/` exists.
 
 ```json
 {
@@ -2506,8 +2521,9 @@ The envelope is stored VERBATIM — a retry resends the exact signed bytes,
 never re-mints (a re-mint would also mint a fresh, different `msgid`,
 defeating the far end's dedup in `state/mail/seen.jsonl`). `refused` is
 set ONLY when a deposit attempt comes back a JSON-RPC REFUSAL (a transport
-failure backs the LINK off instead — the entry itself is untouched, see
-below): a refused entry stays in the spool forever — no auto-eviction, no
+failure backs the LINK off AND records the attempt on the entry it hit —
+`tries`/`lastTryAt`/`lastOutcome` — so an entry behind a dead link is
+never frozen at `tries: 0`, see below): a refused entry stays in the spool forever — no auto-eviction, no
 quota, no expiry, the kill-list — but a drain skips it on sight; only
 `mail outbox rm <msgid>` retires it.
 
@@ -2531,7 +2547,11 @@ backs off by `DRAIN_BACKOFF_FLOOR_SECS` (12s, matching `aoide-server::
 daemon`'s own ~12s drain cadence — backing off faster than the sweep
 itself fires would never actually skip a dial), and only a SECOND
 consecutive failure doubles it, mirroring `client::pair_watch`'s own
-`SPAWN_BACKOFF_INITIAL`-then-`next_spawn_backoff` sequencing. Success —
+`SPAWN_BACKOFF_INITIAL`-then-`next_spawn_backoff` sequencing, capped at
+`outbox::BACKOFF_CEILING_SECS` (15 minutes) — a ceiling of its own for a
+link that is dead for good (a missing `ssh` binary, say), deliberately
+separate from the process-respawn `SPAWN_BACKOFF_MAX`, so the link is
+re-probed on a schedule instead of doubling forever. Success —
 or a REFUSAL, which is the entry's problem, not the link's — clears the
 backoff outright (`link.json` removed, never merely reset), the ordinary
 "not held off" state a drain reads as `None`.
@@ -2573,8 +2593,16 @@ reason. `mail
 outbox rm <msgid>` is an exact-msgid removal — it walks every node with an
 outbox and removes the first match, erroring `not-found` if none held it;
 NOT the mailbase `mail rm`'s age-based prune, and neither command ever
-touches `state/mail/`. See §6's `aoide/mailDeposit` for the wire method
-that actually drains this spool.
+touches `state/mail/`. `mail outbox --json` additionally carries
+`data.summary`, one entry per node whose outbox is non-empty (omitted for
+a node with nothing spooled, swept or named), shaped `{"depth": <count>,
+"oldestMintedAtAgeSecs": <secs|null>, "tries": {"<tries>": <count>},
+"lastOutcomeCounts": {"<outcome|(none)>": <count>}, "refused": <count>}`
+— additive to `rows`, no change to `OutboxEntry` or `link.json` on disk.
+See §6's `aoide/mailDeposit` for the wire method that actually drains
+this spool; one `drain_node` call attempts at most `DRAIN_BATCH_CAP` (50)
+entries, a per-call cost bound, so a deep backlog drains across ticks
+rather than in one.
 
 ### `state/usage.json` — **v0**
 
