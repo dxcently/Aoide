@@ -1848,3 +1848,57 @@ project/parent inheritance across local/remote/app/subagents;
   redaction points, existence-only `has` blocker carried; the latest
   Noah/Honey proposal is NOT in the repo — six confirmations before any
   custody work. Slices C0-C5 then S0-S2; six questions to root.
+
+## 26. Mail transport: receipt loop and stalled outbox on yomi (root seq 660/663, 2026-09-13)
+
+- Facts (read-only, 2026-09-13 21:2xZ): `~/.aoide/state/outbox/osaka/` on
+  YOMI holds 16564 spool entries (+1519 empty `.tmp.3460304` files left by
+  `aoide a2a serve`, the live daemon's child, during the disk-full
+  windows). 16546 are `type: receipt` envelopes for only SEVEN distinct
+  osaka-origin msgids, each re-minted ~2390 times by five reader
+  identities (silent-heron, claude-mail, merry-comet, stark-crag,
+  codex-integration), ~2050/hour from 2026-09-12 21:00 to 06:00 local,
+  stopping when automatic mail wake was paused. All tries=0 (the drain
+  never attempted them); the 7 refused entries are the Sep-12 probes that
+  hit "allows does not include message" on osaka. Zero duplicate msgids:
+  a producer re-mints receipts for already-fetched letters on every wake
+  pass. 18 `type: letter` entries are the unique user mail to preserve.
+- Acceptance (663): bounded resource behaviour — retries reuse the stored
+  envelope, never append; bounded drain batches with backoff; permanent
+  refusals visible; queue metrics (depth/age/attempts/errors); explicit
+  archive/prune policy, no silent drop, no blind flush of the 16k, no
+  deletion of unique mail; regression: a sustained refused peer creates no
+  growing duplicates and one recipient cannot starve another. Codex
+  `.tmp` marketplace bloat is an external app issue, not this cause.
+- User addition (2026-09-13, direct): when writing or editing a letter to
+  an agent, the sender CHOOSES whether to ring the doorbell or only queue
+  the letter — an explicit send-time option in the CLI (`mail send`) and
+  the conductor composer; today `mail send` files and `mail ring` wakes as
+  separate commands with no per-letter choice at compose time. Folds into
+  §24's honest ring status and §19's composer.
+- Route: Aoide remote send yomi→osaka is dead (grant + queue). Direct ssh
+  to osaka works (slow); the Codex owner reads `dxflake-codex` (cursor at
+  the head). Handoff bundle unpacked at osaka `~/handoff-2026-09-13/
+  dxflake/`; handoff letter filed as osaka seq 29.
+- Owner: Fable (read-only investigation running; bounded fix by Sonnet
+  executor on storage/client/server, one writer; root reviews). Status:
+  INVESTIGATING; nothing flushed or deleted.
+
+## 27. Rebuild checkpoint: Osaka + Sakaki (dxflake) and Yomi (Aoide) (User via root seq 664/666/667)
+
+- Order (666/667 correct 664): finish current lanes to a coherent
+  checkpoint (preview corrective set, conductor increments, transport
+  fix), THEN prepare rebuild revisions and reproducible commands per
+  host: Osaka and Sakaki on dxflake (Codex owner; Sakaki is a config
+  target, no separate owner), Yomi on Aoide (this session: whole-system
+  `.#nixosConfigurations.yomi-strix.config.system.build.toplevel` proof,
+  not just `.#aoide`). Aoide architecture migration deferred until live
+  Aoide/Lyra portability is proven on dxflake; only minimal additive
+  exports before that. Missing pinned source objects → targeted
+  owner-approved pins, no broad flake update. No activation.
+- Yomi baseline proof: pristine-worktree toplevel build of origin/main
+  c0f8fbb STARTED 2026-09-13 21:2xZ (`build-yomi-c0f8fbb.txt`); repeated
+  at the checkpoint SHA. Live system = l2pahyr… (foreign-eidolon
+  variant, never the reviewed line).
+- Checkpoint report must list: completed fixes, actual UI/build evidence,
+  shipped SHA, outstanding deferred work.
