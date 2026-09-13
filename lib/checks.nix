@@ -1,6 +1,6 @@
 # lib/checks.nix — the contractual coupling discipline, as flake checks.
 #
-# Nine checks ride as flake `checks` (see concepts/Governance and
+# Ten checks ride as flake `checks` (see concepts/Governance and
 # concepts/Notes in the wiki, and the mechanical-integrity design for fmt +
 # discovery specifically):
 #
