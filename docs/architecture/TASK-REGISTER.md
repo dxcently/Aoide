@@ -392,8 +392,21 @@ Fields per entry: status · owner · depends on · evidence · next.
   card redesign (§13 UI half, now under the User's live-draft workflow).
 - Depends on: the reap-scoping slice (carried backlog) before any stage/
   preview acceptance; native `FolderDialog` only, no custom browser.
-- Next: handoff (files, tests, start command, screenshots, reviewer
-  report) → serialized integration → log entry from the planner's scratch.
+- Handoff RECEIVED (owner seq 454/457, 2026-09-13T03:46Z): preview.rs
+  2237 l, preview_tools.rs 3019 l, WidgetPreview.qml 2092 l, fixtures,
+  Widget-Preview.md, lyra README/AGENTS/mod.rs/registry.rs (golden 48→54),
+  Cargo +image, slots.md, ingest index; owner reports lyra 184 pass, two
+  independent passes on the agent tools, evidence under
+  /tmp/aoide-widget-team/preview/evidence, log draft at
+  /tmp/aoide-widget-team/preview/log-entry.md. Owner-declared risks:
+  run/qml/* in every preview root are SYMLINKS into the checkout (the
+  lane rule forbids this — graded in review), Declare double-click
+  writes the checkout widget, component instances report the
+  definition id, `preview tree | head` panics on SIGPIPE (workspace-wide),
+  createObject warnings on load. Independent review dispatched;
+  integration is serialized behind the I1 icon executor because both
+  touch lyra mod.rs/registry.rs. The seq 441/444 usability asks are
+  follow-ups by the same owner after integration.
 
 ## 7. Mail attachments (`mail send --attach`, also the handoff carrier)
 
@@ -1321,3 +1334,42 @@ project/parent inheritance across local/remote/app/subagents;
   root at defaults.
   Source work only: no rebuild, no activation. Mail receipt is not
   completion — done means implemented and visually verified.
+
+## 19. Conductor TUI redesign (User priority via root seq 452/458) — lane RESERVED
+
+- Direction (root audit seq 458): the TUI starts on Graph with seven tabs
+  and no Home or mail view; Compose is a terminal send, Pending is
+  send/A2A approvals, not mail interception. Redesign: vintage message
+  board with readable livery contrast and restrained square borders;
+  Home (resume projects, live sessions, mesh health, review/failed mail
+  counts), Rooms (project/session mail threads with explicit
+  participants/hosts and a reply composer), Sessions, Mesh, Review,
+  searchable History; graph stays the project/session detail. The
+  chatroom is a VIEW of existing mail, never a second store; human
+  viewing never consumes an agent inbox cursor nor emits a fetched
+  receipt; every letter shows author → recipient, time, id and its real
+  queued/delivered/fetched/error state. Hold/review/edit needs daemon
+  mail policy before local visibility or remote dispatch: default
+  delivery unchanged until the user selects a review scope, a durable
+  hold survives TUI closure, stable ids + revision checks on release,
+  an edit is an attributed revision preserving the original, release
+  exactly once; delivered signed letters are never rewritten or
+  "unsent" — correction or reply only. Direct terminal input stays an
+  explicitly labelled separate action. Readable 80x24 and 120x40,
+  keyboard + mouse, real terminal visual checks. No deployment.
+- Owner: root's contract-review agent drafts the bounded screens/API gap
+  plan; no designer or implementer spawned here until root sends the
+  phased ownership. Lane reserved: `pkgs/aoide/crates/conductor` (only
+  touch to date: four `native_role: None` fixture lines in ece83a7).
+- Active overlaps to reconcile in the plan (not conflicts yet): §15
+  scoped mail (`Mark.held` is the one storage addition proposed for
+  hold/release; project inbox + roles ARE the Rooms model — the TUI must
+  consume that seam, not invent one); the mail-status projection
+  (queued/retrying/refused/accepted/delivered/failed, client
+  `commands.rs`) is the per-letter state column; §17 ACP routes agent
+  permission asks through `pending.json`, so the Review screen and the
+  existing Pending view share one queue; a cursor-free human read path
+  does not exist yet (`mail read` advances the reader cursor, `--reread`
+  too) and belongs to the storage crate; the conduct/storage crates are
+  single-writer, so mail policy work serializes behind the lanes above.
+- Status: RESERVED, awaiting root's plan.
