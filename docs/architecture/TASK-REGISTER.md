@@ -1585,6 +1585,9 @@ project/parent inheritance across local/remote/app/subagents;
   report.md, two comment fixes in aoide.nix outside the file list); D3
   executor dispatched (`p-dxflake-d3-dispatch.md`, P0 required, evidence
   `dxflake-d3/`).
+  D3 LANDED a165011 (P0 reproduced by review, PASS; flake.nix:182 comment
+  fixup folded into D5). D5 dispatched on the brief defaults (Q1 username
+  specialArg stays, Q2 sakaki provisional, Q3 openldap floor if fleet-wide).
 - Status: ARCHITECT brief DONE (`p-dxflake-brief.md`: current state, target
   tree, U1-U8 unresolved with defaults sent to root for ruling, slices D1
   aggregates → D2 home lane → D3a/b roles → D4 portable upstream (needs
