@@ -108,8 +108,10 @@ lib.mkIf config.aoide.enable {
     # The spawn agent (and everything the conducted child execs) resolves
     # off THIS unit's PATH, not the operator's shell — `aoide.a2a.spawnPath`
     # names the packages explicitly (see the option's own live-incident
-    # note; empty when spawning is disabled).
-    path = config.aoide.a2a.spawnPath;
+    # note; empty when spawning is disabled). openssh rides alongside because
+    # the door drains the outbox after every deposit (`spool_and_drain_ack`)
+    # and the tunnel spawns `ssh` by bare name — same gap the aoided unit closed.
+    path = [ pkgs.openssh ] ++ config.aoide.a2a.spawnPath;
 
     serviceConfig = {
       ExecStart = "${pkgs.aoide}/bin/aoide a2a serve";

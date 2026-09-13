@@ -116,7 +116,10 @@ to **rebuild time** instead.
   the `aoide-a2a` unit's PATH so `spawnAgent` resolves; a host enabling spawn
   names the agent AND the package(s) that provide it, the same
   explicit-package convention `shellbridge` and the secrets popup watcher
-  already follow.
+  already follow. `openssh` is always on that PATH: the door drains the
+  outbox after every deposit and the tunnel spawns `ssh` by bare name, so
+  without it every door-side delivery fails with a spawn error and its
+  back-off holds the daemon drain off too.
 - **Bounded per request.** A `message/send` spawn runs **only** the configured
   `spawnAgent` executable — the client names the prompt, never the command. If
   `spawnAgent` is empty (the default), spawning is unavailable and the door

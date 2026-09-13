@@ -4493,3 +4493,20 @@ stays designer-owned follow-up work. 128 tests pass in the crate.
 
 Pages touched: pkgs/aoide/crates/conductor/README.md,
 pkgs/aoide/crates/conductor/AGENTS.md, pkgs/aoide/crates/conductor/DESIGN.md (new)
+
+## [2026-09-13] fix | ssh rides on the aoide-a2a unit PATH so the door-side outbox drain can tunnel
+
+The A2A door drains the sender's outbox after every deposit
+(`spool_and_drain_ack`), and that drain spawns `ssh` by bare name. The
+`aoide-a2a` unit's PATH was only `aoide.a2a.spawnPath` (default empty), so
+on yomi every door-side delivery failed with `spawn ssh ...: No such file or
+directory`, the node link backed off, and the daemon's own periodic drain
+was held off by the same link state. Found live from the daemon's
+`/proc/<pid>/environ`: the unit PATH is the minimal systemd set and never
+carried openssh, so this was a unit gap, not a garbage-collected store path.
+Fix: `openssh` is prepended to the door unit's `path`, the same closure the
+aoided unit already got. Takes effect at the next rebuild; nothing was
+activated. The duplicate-receipt producer and the drain bookkeeping are a
+separate code fix in flight.
+
+Pages touched: docs/Aoide-Wiki/concepts/orchestration/A2A-Door.md
