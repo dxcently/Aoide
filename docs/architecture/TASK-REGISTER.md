@@ -1114,8 +1114,12 @@ project/parent inheritance across local/remote/app/subagents;
   dxflake's override attached, no-override case byte-identical for all
   five songs. Defaults taken on the three questions (runtime writers
   `rice stage`/`reload` stay unresolved — follow-up; nix not jq; keep the
-  base16 assert). EXECUTOR dispatched (`p-16-exec-dispatch.md`, edit/test
-  only, eval + single-check build; no rebuild or activation). Follow-up:
+  base16 assert). LANDED 2c41661 (staged, not pushed, not deployed):
+  `stagePatch` + `checks.livery-fanout` (built green), proof 1 all true
+  (seed palette.bg == Stylix base00 == #191724 with the osaka override),
+  no-override case byte-identical to the live stage twin for sonata and
+  round-trip identity for all five songs, nixfmt clean; independent review
+  running. Activation of the seed remains the User's rebuild gate. Follow-up:
   the songbook livery.json twins of `rice.nix` are unchecked.
 
 ## 17. Agent Client Protocol (ACP) client in core; widget builder as its UI (User scope seq 403/405)
