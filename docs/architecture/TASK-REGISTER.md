@@ -1490,6 +1490,10 @@ project/parent inheritance across local/remote/app/subagents;
   on osaka (seq 24 to the palette worker, seq 25 to dxflake-codex).
 - Status: ARCHITECT (Opus) writing `p-dxflake-brief.md` (recovered
   proposal, unresolved choices, slices D1..Dn with drvPath parity); D0
-  baseline executor (Sonnet) running — evidence to
-  `scratchpad/dxflake-baseline/baseline.md`. Acknowledged to root (seq
+  baseline executor DONE — evidence at
+  `scratchpad/dxflake-baseline/baseline.md`: chiyo/osaka/yomi-strix
+  evaluate (drvPaths captured); sakaki FAILS eval — `melete-src` lock rev
+  b3c6bcb5 missing from the local ~/melete checkout (branch rewritten),
+  forced only by sakaki`s `dx.melete.enable`; re-lock is a Spark/root
+  call. Acknowledged to root (seq
   512). Flag: dxflake pins Aoide rev 3b168ce, far behind 535241f.
