@@ -1724,6 +1724,15 @@ project/parent inheritance across local/remote/app/subagents;
   scene positions separate; derived index disposable. CLI first, TUI
   consumes the same mutations. Neo4j reference = principles only, no
   dependency.
+- User addition (2026-09-13, direct): rendered for agents, the whole
+  forest of terminals, agents and project nodes is a confusing mess. The
+  graph DEFAULTS to the currently picked node (project or session) and
+  shows the whole tree/graph of agents and terminals it controls or is
+  connected to — or nothing beyond itself when it is connected nowhere;
+  never force a connection that does not exist. An explicit "ALL" view
+  renders every project's graph in one canvas. Focus is a VIEW choice
+  over the same authoritative edges (§22 semantics unchanged); belongs to
+  phase 1 (designer-side view + selection) and the §23 GraphScene.
 - Phases: 1 rename + visual tree/scene + factual session/mail edges +
   inspect/jumps; 2 persisted runs/work nodes/typed edges/goal criteria
   (backend + CLI + TUI); 3 attempts/retry/undo, artifact-bound
@@ -1897,8 +1906,8 @@ project/parent inheritance across local/remote/app/subagents;
   exports before that. Missing pinned source objects → targeted
   owner-approved pins, no broad flake update. No activation.
 - Yomi baseline proof: pristine-worktree toplevel build of origin/main
-  c0f8fbb STARTED 2026-09-13 21:2xZ (`build-yomi-c0f8fbb.txt`); repeated
-  at the checkpoint SHA. Live system = l2pahyr… (foreign-eidolon
+  c0f8fbb PASSED: `/nix/store/nqib1558436qfcbdz48jb3pb1wmlz1jb-nixos-system-yomi-strix-26.11.20260907.dc5d91f`
+  exit 0 (command: `nix build .#nixosConfigurations.yomi-strix.config.system.build.toplevel --no-link --print-out-paths --no-write-lock-file --no-update-lock-file` in a clean worktree of c0f8fbb); NOT activated; repeated at the checkpoint SHA. Live system = l2pahyr… (foreign-eidolon
   variant, never the reviewed line).
 - Checkpoint report must list: completed fixes, actual UI/build evidence,
   shipped SHA, outstanding deferred work.
