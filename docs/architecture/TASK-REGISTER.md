@@ -965,7 +965,14 @@ project/parent inheritance across local/remote/app/subagents;
   graph.json node and `session --json` row publish the native thread role
   as additive `nativeRole` from the capture, kind untouched; designer
   mailed the key and fixture, teaches the grouping helper to nest
-  `nativeRole == subagent`, never every parented fork) → S-D remote owner
+  `nativeRole == subagent`, never every parented fork; root seq 463
+  2026-09-13: still not nested on the live desktop — three-layer gap:
+  the live daemon (build 4) predates 4fa382e/ece83a7 and publishes zero
+  app rows, the checkout and live conductor.qml both still group on
+  `kind` only, and the live composed copy is Sep 7 so the designer's
+  tree edits are not placed; designer asked for the rule + the working
+  animation (fixed footprint, parent and nested children) proven on the
+  synthetic fixture; daemon deploy + placement are the User's gates) → S-D remote owner
   qualification (design + `link` refusal) → E3. Brief DONE (Opus,
   scratch `p-ownership-brief.md`): R1 accepted as ruled (rung 2 above rung
   3; `session project` pins a mis-grouped row), Q2 `effectiveProject` on
@@ -1363,10 +1370,14 @@ project/parent inheritance across local/remote/app/subagents;
   "unsent" — correction or reply only. Direct terminal input stays an
   explicitly labelled separate action. Readable 80x24 and 120x40,
   keyboard + mouse, real terminal visual checks. No deployment.
-- Owner: root's contract-review agent drafts the bounded screens/API gap
-  plan; no designer or implementer spawned here until root sends the
-  phased ownership. Lane reserved: `pkgs/aoide/crates/conductor` (only
-  touch to date: four `native_role: None` fixture lines in ece83a7).
+- Owner (User via root seq 460): root Codex and its subagents own the
+  design and the ENTIRE `pkgs/aoide/crates/conductor` crate; no Fable
+  worker there. Added specifics: persistent project-tree sidebar, live
+  AND past sessions, overall mouse support. Root edits/tests only and
+  hands off for integration; no concurrent commit/push. Only Fable
+  touch to date: four `native_role: None` fixture lines in ece83a7 — an
+  additive `SessionRecord` field forces the same one-line collateral in
+  four exhaustive test literals there, handed to root as exact lines.
 - Active overlaps to reconcile in the plan (not conflicts yet): §15
   scoped mail (`Mark.held` is the one storage addition proposed for
   hold/release; project inbox + roles ARE the Rooms model — the TUI must
