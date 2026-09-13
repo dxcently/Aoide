@@ -4410,3 +4410,20 @@ which stays `app`. Six tests (ece83a7).
 
 Pages touched: CONTRACTS.md, pkgs/aoide/crates/conduct/README.md,
 pkgs/aoide/crates/conduct/AGENTS.md, pkgs/aoide/crates/storage/README.md
+
+## [2026-09-13] fix | the activation seed applies the venue override through the resolver
+
+The quickshell facet seeded `song/stage/livery.json` from the song's
+committed livery alone, so a venue's `aoide.livery.override` recoloured the
+baked Stylix scheme and never the stage; the resolver's own `overrideMap`
+and `slotPatch` had no callers. `lib/livery.nix` gains `stagePatch`, the
+resolver's two passes applied to the committed document, and the seed
+script reads a `writeText` of it with the same `song` stamp as before. A
+host with no override seeds a byte-identical file. `checks.livery-fanout`
+pins the two fan-outs to agree on a fixed fixture. The runtime writers
+(`rice stage`, `rice mode`, `reload`'s staging arm) still re-derive from
+the raw song, so on a venue-set host the first runtime re-stage after
+activation reverts the override until that seam learns it (2c41661).
+
+Pages touched: CONTRACTS.md, modules/facets/README.md,
+modules/facets/AGENTS.md, docs/Aoide-Wiki/entities/livery.md
