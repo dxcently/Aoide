@@ -2180,6 +2180,75 @@ sent it — attribution, not authentication; both `--from` and
 `AOIDE_SESSION_ID` are ordinary same-user process state, spoofable by
 anyone who can already write to the target's control socket.
 
+### `state/stage/mesh.json` — **v0**
+
+The widget-shaped sibling of `aoide node list`'s roster (P-14 M2): staged
+ONLY by `aoide node list --mesh`, atomically (`aoide_storage::stage::
+write_stage`, write-temp-then-rename), never by bare `node list` — one
+writer, one file, so a widget `FileView`s it the same way `aoide usage`
+reads `state/usage.json`. `--mesh` skips the discovery sweep entirely
+(candidates are absent BY CONSTRUCTION, `advertising` reads `false`
+throughout — never a filtered-down sweep result) and reuses the SAME
+roster core `node list` itself probes off (`who.rs`, one prober):
+`nodes[]` holds the local row first, then every registered node in
+registry order, each `{mark, name, isLocal, paired, verified,
+advertising, presence, addr, lastSeen, liveSessions, cachedSessions,
+sessions[]}` — the `liveSessions`/`cachedSessions` pair (per row, and
+again as document totals `data.liveSessions`/`data.cachedSessions`) is
+the only new tally: `liveSessions` counts `online`/`stale` sessions
+only, `cachedSessions` counts every session that survived the shared
+`presence != "done"` filter but isn't live (`last-seen`/`unknown`) — a
+`done` session is already gone from `sessions[]` by the time this fold
+runs, same as bare `node list`. Each session entry carries an additive
+node-scoped `id` (`"<rowName>/<sessionId>"`, inverting `storage::
+addr::resolve` tier 5's `node/<rest>` grammar) beside its bare
+`sessionId` (kept verbatim for local action routing), plus `title`/
+`model`/`kind`/`parent` when the owning session published them — local
+from `sessions.json`'s own `title`/`model`/`kind` fields plus the
+resolved parent id, remote from a node's graph document (`title`/
+`model`/`role`→`kind`, and the `spawned` edge's `from` minus its
+`session:` prefix) — absent stays absent, nothing defaulted or
+cross-host-resolved. A cached (offline-host) session's presence is
+rewritten through `who.rs::cached_presence` before it ever reaches this
+document: `done` alone survives verbatim, everything else becomes
+`last-seen` (the cache carries a `fetchedAt`) or `unknown` (it doesn't).
+An offline row keeps the existing `(as of <fetchedAt>)` label; a remote
+row carries no `pid`/`windowAddress`/`workspace`, same as today. The
+message line counts LIVE sessions only. No periodic refresh timer writes
+this file (a later phase's job) — it is written exactly once per `--mesh`
+invocation.
+
+```json
+{
+  "schemaVersion": "0",
+  "host": "sakaki",
+  "generatedAt": "2026-09-12T04:00:00Z",
+  "liveSessions": 2,
+  "cachedSessions": 1,
+  "nodes": [
+    { "mark": "●", "name": "sakaki", "isLocal": true, "paired": true,
+      "verified": true, "advertising": false, "presence": "online",
+      "addr": "—", "lastSeen": null, "liveSessions": 1, "cachedSessions": 0,
+      "sessions": [ { "id": "sakaki/s1", "sessionId": "s1",
+        "label": "sakaki/root/s1", "petname": "quiet-birch", "agent": "claude",
+        "state": "working", "presence": "online", "cwd": "/home/khoa/Aoide",
+        "title": "Fix the mesh gate", "model": "claude-opus-4-5", "kind": "root" } ] },
+    { "mark": "○", "name": "chiyo", "isLocal": false, "paired": true,
+      "verified": true, "advertising": false, "presence": "unreachable",
+      "addr": "—", "lastSeen": "2026-09-12T03:58:00Z",
+      "liveSessions": 1, "cachedSessions": 1,
+      "sessions": [
+        { "id": "chiyo/s9", "sessionId": "s9", "label": "chiyo/root/s9",
+          "petname": null, "agent": "claude", "state": "idle",
+          "presence": "last-seen", "cwd": "/srv/khoa/Aoide" },
+        { "id": "chiyo/s10", "sessionId": "s10", "label": "chiyo/child/s10",
+          "petname": null, "agent": "claude", "state": "working",
+          "presence": "online", "cwd": "/srv/khoa/Aoide", "parent": "s9" }
+      ] }
+  ]
+}
+```
+
 ### `song/stage/grimoire.json` — **v0**
 
 The Grimoire launcher's own usage ledger (`GrimoireLedger.qml`), separate
@@ -6004,6 +6073,17 @@ not `state/nodes.json`, not `state/node-cache/`. `--json` emits the same
 roster structured: `nodes[]`, each `{mark, name, isLocal, paired,
 verified, advertising, presence, addr, lastSeen, sessions[]}`, plus
 `sweep` (`{heard, dropped}` or `{error}`).
+
+`aoide node list --mesh [--json]` (P-14 M2) is the widget-shaped sibling
+of the same command, not a second command path: it skips the discovery
+sweep entirely (a `◆` candidate is absent by construction, never filtered
+out afterward) and, in its place, atomically stages a `nodes[]` document
+carrying two additions — a node-scoped session `id` alongside the bare
+`sessionId`, and per-row/document `liveSessions`/`cachedSessions` tallies
+— to `state/stage/mesh.json` (see §4). Bare `node list` (no `--mesh`)
+writes nothing and its own `--json` shape above is unchanged by this
+flag's existence. See `state/stage/mesh.json`'s own §4 entry for the
+full schema.
 
 `aoide pair [<name|url|id>] [--name <n>] [--self-url <url>] [--self-via
 <ssh-target>] [--via <ssh-target>] [--secs N] [--wait SECS]
