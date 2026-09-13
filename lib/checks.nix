@@ -56,12 +56,21 @@
 #      which exempts the flat-option-assignment house style; every other
 #      lint is a hard failure naming file, line, and lint code.
 #
+#   10. livery-fanout — the two fan-outs (baked Stylix, `song/stage/
+#       livery.json` seed) resolve an `aoide.livery.override` identically.
+#       Proves the general law against a fixed in-file fixture (never a real
+#       host or committed song): `lib/livery.nix`'s `stagePatch`'s palette
+#       output matches `resolve`'s under a one-anchor override, and
+#       `stagePatch` is the identity with no override set.
+#
 # 1–3 and 5 are written so they PASS TRIVIALLY where nothing populates the
 # registry they inspect yet (1) and become real as Wave-1 facets/packages
 # land. Each resolves to a trivial derivation: it either builds (assertion
-# held) or the eval fails with a readable message (assertion broken). 4, 6,
-# 7, 8, and 9 are real `runCommand`s — each has to actually run a binary, so
-# it can only fail at build time, not eval time.
+# held) or the eval fails with a readable message (assertion broken). 10 is
+# the same eval-time-assert shape against a fixed fixture instead of a
+# registry — always real, never trivially-empty. 4, 6, 7, 8, and 9 are real
+# `runCommand`s — each has to actually run a binary, so it can only fail at
+# build time, not eval time.
 { lib, pkgs }:
 let
   # A check that succeeds as a buildable derivation, or throws at eval time
@@ -526,6 +535,61 @@ let
       statix check . -o errfmt
       touch "$out"
     '';
+
+  # ── Check 10: the two fan-outs agree under a venue override ────────────────
+  # `lib/livery.nix`'s `resolve` (the baked Stylix/compositor fan-out) and
+  # `stagePatch` (the `song/stage/livery.json` seed) must apply the identical
+  # override rule (CONTRACTS.md §1). Proved here against a FIXED fixture —
+  # never a real host's `aoide.livery` or a committed songbook file, so this
+  # check never depends on which songs or hosts are in the tree. One case (a
+  # single overridden anchor recolours a matching palette slot) plus the
+  # no-override identity `stagePatch` promises callers.
+  liveryFanout =
+    let
+      livery = import ./livery.nix { inherit lib; };
+      fixturePalette = {
+        bg = "#111111";
+        fg = "#eeeeee";
+        accent = "#222222";
+        urgent = "#333333";
+        hot = null;
+      };
+      fixtureLivery = {
+        palette = fixturePalette;
+        base16 = null;
+        bar = {
+          bg = null;
+          fg = null;
+          accent = null;
+        };
+        notif = {
+          bg = null;
+          fg = null;
+          urgent = null;
+        };
+        window = {
+          border = null;
+          borderInactive = null;
+        };
+        override = {
+          bg = "#ff0000";
+        };
+      };
+      fixtureBare = fixtureLivery // {
+        override = { };
+      };
+      # A two-key document, mirroring the committed livery.json shape
+      # (schemaVersion + palette) without reading one.
+      fixtureDoc = {
+        schemaVersion = "0";
+        palette = fixturePalette;
+      };
+      resolvedPalette = (livery.resolve fixtureLivery).palette;
+      stagedPalette = (livery.stagePatch fixtureLivery fixtureDoc).palette;
+      identity = livery.stagePatch fixtureBare fixtureDoc == fixtureDoc;
+    in
+    assertCheck "livery-fanout" (stagedPalette == resolvedPalette && identity)
+      "stagePatch and resolve disagree on the override recolour, or stagePatch is not the identity with no override set";
 in
 {
   inherit
@@ -539,5 +603,6 @@ in
     nixIndependence
     portability
     nixLint
+    liveryFanout
     ;
 }

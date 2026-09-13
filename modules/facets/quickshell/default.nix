@@ -38,6 +38,20 @@ let
   # whole `songbook` dir) so only this one file gets copied into the store.
   activeSongLivery = songbook + "/${config.aoide.song}/livery.json";
 
+  livery = import ../../../lib/livery.nix { inherit lib; };
+
+  # The stage twin is the committed livery with the VENUE applied — the same
+  # `aoide.livery.override` recolour the Stylix and compositor fan-outs get
+  # (CONTRACTS.md §1, override tier), through the same `lib/livery.nix`. Not
+  # a second rule: `stagePatch` is `resolve`'s two passes against the file's
+  # own shape. Identity when the host sets no override, so a host without a
+  # venue stages exactly the committed bytes it staged before.
+  stageLivery = pkgs.writeText "aoide-stage-livery.json" (
+    builtins.toJSON (
+      livery.stagePatch config.aoide.livery (builtins.fromJSON (builtins.readFile activeSongLivery))
+    )
+  );
+
   # ── Songbook manifest + registry, typed (W3a/W3b), generated once (C4) ──
   # `manifest.json`/`registry.json` source from eval-time nix: a `_widgets/`
   # shelf when present (sonata today) is authoritative and runs through
@@ -69,14 +83,20 @@ let
   registryJsonFile = pkgs.writeText "aoide-quickshell-registry.json" (builtins.toJSON registryAttrs);
 
   # ── Seed script for `home.activation.aoideSeedStage` (below) ───────────────
-  # Reasserts the ACTIVE song's committed livery into the live stage twin
+  # Reasserts the ACTIVE song's committed livery, with the venue override
+  # applied (`stageLivery`, above), into the live stage twin
   # (`song/stage/livery.json`, CONTRACTS.md §4) on every activation, injecting
   # the same `"song"` field `aoide rice preview <name>` would (jq's
   # `. + {song: …}`; `-S` sorts keys to match serde_json::Value's BTreeMap
   # ordering) — byte-identical to what `rice preview ${config.aoide.song}`
-  # would stage (verified by hand: `jq -S '. + {song:"sonata"}'` against
-  # song/songbook/sonata/livery.json reproduces the current staged file
-  # exactly). Write-temp-then-rename in the SAME directory (so the rename is
+  # would stage ONLY where the host sets no `aoide.livery.override` (verified
+  # by hand: `jq -S '. + {song:"sonata"}'` against song/songbook/sonata/livery.json
+  # reproduces the current staged file exactly); on an override-setting host
+  # the runtime writers (`rice stage`, `rice mode stage`/`declarative`,
+  # `reload`'s staging arm) still read the raw committed file and do not yet
+  # know the override tier, so activation stages the recoloured venue and the
+  # first runtime re-stage reverts it (tracked as a follow-up, register §16).
+  # Write-temp-then-rename in the SAME directory (so the rename is
   # atomic) mirrors `shellbridge::atomic_write` (`aoide_storage::fs::atomic_write`)
   # so a hot-reloading FileView (LiveryState.qml) never reads a torn file.
   # The write goes to livery.json, the canonical stage livery file. The whole
@@ -88,7 +108,7 @@ let
     mkdir -p "${config.aoide.root}/song/stage"
     tmp=$(mktemp "${config.aoide.root}/song/stage/.livery.json.XXXXXX")
     ${pkgs.jq}/bin/jq -S '. + {song: $song}' --arg song "${config.aoide.song}" \
-      "${activeSongLivery}" > "$tmp"
+      "${stageLivery}" > "$tmp"
     mv -f "$tmp" "${config.aoide.root}/song/stage/livery.json"
   '';
 

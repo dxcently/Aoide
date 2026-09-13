@@ -19,7 +19,12 @@ decisions (that's `song/songbook/*/widgets/`'s job). Three facets today:
 - `quickshell/` — renders the complete shell surface (bar, notifications,
   launcher, osd, lockscreen, greeter, wallpaper, agentWidgets,
   sessionGraph). Component-tier fallback (null → palette) applies locally;
-  never reads `song/` runtime paths at build time. The root `shell.qml`
+  never reads `song/` runtime paths at build time. The activation seed that
+  reasserts `song/stage/livery.json` from the active song's committed notes
+  applies the venue recolour (`aoide.livery.override`) through
+  `lib/livery.nix`'s `stagePatch`, the same rule the Stylix/compositor
+  fan-outs apply through `resolve` — so a host with a venue set stages the
+  recoloured livery, not the raw committed file. The root `shell.qml`
   runs under `//@ pragma UseQApplication` (2026-08-23): platform dbusmenus
   (`QsMenuAnchor` — the bar tray's SNI menus) hard-error in the default
   QGuiApplication mode, and the pragma only takes effect on a service

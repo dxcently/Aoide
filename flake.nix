@@ -185,6 +185,11 @@
           # Committed songs self-register from song/songbook (walked into each
           # host by lib/mkHost.nix); song-shape asserts each is a rice.nix only.
           song-shape = checks.songShape (walk ./song/songbook);
+          # The two livery fan-outs (baked Stylix, stage seed) agree under an
+          # `aoide.livery.override` — proved against a fixed fixture inside
+          # lib/checks.nix, not this host's own config (see lib/livery.nix
+          # and lib/checks.nix's Check 10).
+          livery-fanout = checks.liveryFanout;
           # Formatter enforcement — flake.nix:173 declares `formatter = nixfmt`;
           # nothing ran it before this check existed. Scoped to `self`, the
           # git-filtered committed tree (see lib/checks.nix's Check 4).

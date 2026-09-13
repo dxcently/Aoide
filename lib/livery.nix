@@ -90,11 +90,10 @@ rec {
       window = overlay "window" base.window;
     };
 
-  # The non-null named overrides as a tier-shaped attrset — Phase 2's stage-
-  # seed jq patch consumes this (`. * $slots`, applied after the value-walk,
-  # same pass order as `resolve` so the fan-outs agree on precedence). Empty
-  # `{}` when no named override is set. Exported now so the seam is stable;
-  # nothing binds it until Phase 2.
+  # The non-null named overrides as a tier-shaped attrset. `stagePatch`
+  # (below) is the caller: it applies this over the document after the
+  # anchor-recolour value-walk, same pass order as `resolve` so the fan-outs
+  # agree on precedence. Empty `{}` when no named override is set.
   slotPatch =
     livery:
     let
@@ -107,4 +106,39 @@ rec {
       notif = named "notif";
       window = named "window";
     };
+
+  # Pass 1 + Pass 2 against a committed `livery.json` DOCUMENT rather than the
+  # option set — the stage fan-out. The document already carries the component
+  # fallbacks resolved (CONTRACTS.md §4: the stage file is never null) and its
+  # own shape (schemaVersion, an optional widgets block), which the option set
+  # does not; so the stage side patches the file in place instead of
+  # re-serialising `resolve`'s output. Same two passes, same order, same
+  # precedence as `resolve` — one rule, stated once, for both fan-outs.
+  stagePatch =
+    livery: doc:
+    let
+      m = overrideMap livery;
+      o = livery.override or { };
+      slots = slotPatch livery;
+      sub = v: if builtins.isString v then (m.${norm v} or v) else v;
+      # One tier: the anchor recolour, then the named-key overlay, then the
+      # tier's own extra (palette's null-hot direct set).
+      patch =
+        tier: extra:
+        lib.optionalAttrs ((doc.${tier} or null) != null) {
+          ${tier} = lib.mapAttrs (_: sub) doc.${tier} // (slots.${tier} or { }) // extra;
+        };
+    in
+    assert lib.assertMsg ((doc.base16 or null) != null || !(slots ? base16))
+      "aoide.livery.override.base16.${lib.concatStringsSep "/" (lib.attrNames slots.base16)}: the active song's livery.json carries no base16 scheme to patch a named slot into.";
+    doc
+    // patch "palette" (
+      lib.optionalAttrs ((doc.palette.hot or null) == null && (o.hot or null) != null) {
+        inherit (o) hot;
+      }
+    )
+    // patch "base16" { }
+    // patch "bar" { }
+    // patch "notif" { }
+    // patch "window" { };
 }

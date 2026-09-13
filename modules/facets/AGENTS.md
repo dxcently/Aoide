@@ -18,6 +18,12 @@ covers only what's specific to facets.
 - **`quickshell/` never reads `song/` runtime paths at build time** —
   `checks.no-song-read` enforces this structurally, not just by
   convention.
+- **The activation seed goes through `lib/livery.nix`, never the raw
+  committed file.** `stageLivery` patches the active song's committed
+  `livery.json` with `stagePatch` (the same `aoide.livery.override` rule
+  `resolve` applies for Stylix/compositor) before it is jq-stamped with
+  `song` and written to `song/stage/livery.json` — `checks.livery-fanout`
+  is the gate.
 - **A surface takes its size from its CONTENT; content never sizes itself
   from the SCREEN.** A layer anchors only the edges it genuinely occupies
   and lets `implicitWidth`/`implicitHeight` follow what it draws (the

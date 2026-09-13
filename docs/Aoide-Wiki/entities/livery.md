@@ -47,8 +47,15 @@ adopted state cannot diverge. This is the "zero drift" guarantee. Beyond
 staging` allows it — see [[Self-Ricing#Staging vs Declarative Mode]]), the quickshell
 facet's `home.activation.aoideSeedStage` reasserts it from the active song's
 committed `song/songbook/<song>/livery.json` on every activation (see
-[[Codebase#Runtime contracts (socket + stage files)]]), so a freshly booted
-host carries a correct stage twin even before `rice stage` ever runs.
+[[Codebase#Runtime contracts (socket + stage files)]]), through
+`lib/livery.nix`'s `stagePatch` — the same `aoide.livery.override` venue
+recolour the Stylix/compositor fan-outs apply through `resolve` — so a
+freshly booted host carries a correctly recoloured stage twin even before
+`rice stage` ever runs. The runtime writers (`rice stage`, `rice mode
+stage`/`declarative`, `reload`'s staging arm) still read the raw committed
+file and do not yet know the override tier: on a host with a venue set, the
+first runtime re-stage after activation reverts the stage twin to the song's
+own colours until that seam is taught the override too.
 `stage/livery.json` is canonical; the legacy-mirror write and the fallback
 reads were dropped when Phase 4 closed the transition window
 (LIVERY-MERGE.md).

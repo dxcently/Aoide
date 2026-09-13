@@ -212,10 +212,17 @@ authored values, in BOTH fan-outs — the baked Stylix scheme and the
 not carrying an overridden anchor's value stay the song's (the ramp is the
 song's voice; wanting a different ramp is wanting a different song). `hot`
 overridden while the song left it `null` sets `palette.hot` directly.
-Consumers apply the rule through `lib/livery.nix`'s `resolve` — identical
-rules on every consumer, so the fan-outs cannot disagree. Read-side only: the
-option system keeps storing the song's authored values inert; no config-side
-`mkForce`, so no option-system recursion.
+Consumers apply the rule through `lib/livery.nix`: the baked fan-outs call
+`resolve` against the option set, the activation seed calls `stagePatch`
+against the committed document — same two passes, same order, same
+precedence, so the fan-outs cannot disagree. Read-side only: the option
+system keeps storing the song's authored values inert; no config-side
+`mkForce`, so no option-system recursion. The RUNTIME writers of
+`song/stage/livery.json` (`lyra rice stage`, `rice mode stage`/`declarative`,
+`reload`'s staging arm — §4) do not yet apply this rule: they re-derive the
+stage file from the raw committed song, so on a venue-set host the first
+runtime re-stage after activation reverts the override until that seam is
+taught it too.
 
 | Key                | Type          | Default | Recolours       |
 | ------------------ | ------------- | ------- | ---------------- |
@@ -1228,10 +1235,14 @@ mirror + fallback were dropped in Phase 4 of the livery merge —
 `stage/livery.json` is the sole stage note file.
 
 Beyond `lyra rice stage <name>`/`cover set`/other emitters writing this
-live, it is also **seeded from the active song's committed notes on every
-activation** (`home.activation.aoideSeedStage`,
-`modules/facets/quickshell/default.nix`) — so a host that boots without ever
-running `rice stage` still has a correct live stage twin from boot.
+live, it is also **seeded from the active song's committed notes, with the
+venue's `aoide.livery.override` applied, on every activation**
+(`home.activation.aoideSeedStage`, `modules/facets/quickshell/default.nix`,
+via `lib/livery.nix`'s `stagePatch`) — so a host that boots without ever
+running `rice stage` still has a correct, recoloured live stage twin from
+boot. The runtime writers named above do not yet apply the override tier:
+on a venue-set host, the first one that runs after activation reverts the
+stage twin to the song's own colours.
 
 **Additive in v0:** this path MAY be a SYMLINK rather than a plain file —
 `rice mode draft <name>` (§4's `stage/mode.json` entry) routes it into a
