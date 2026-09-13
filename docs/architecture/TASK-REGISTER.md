@@ -1074,7 +1074,8 @@ project/parent inheritance across local/remote/app/subagents;
   delivery routing fix; AOIDE-LETTER/1 structured signed body inside the
   existing signed text, canonical Header unchanged, one envelope per real
   recipient, per-recipient results, legacy readers see the raw body. Those
-  seams are reserved to root until handoff. ML1 is NOT dispatched: it
+  seams are reserved to root until handoff — handed off seq 483-485 (review
+  running, see §19). ML1 is NOT dispatched: it
   waits on the seam ruling (seq 393) and on that handoff, and asks that
   every fanout recipient pass one resolve-then-file point with `to.name`
   a bare mailbox so the resolver slots in front. `Mark.held` is dropped
@@ -1441,4 +1442,11 @@ project/parent inheritance across local/remote/app/subagents;
   hostname routing fixed); backend 3+2+9 and conductor 103 tests green per
   root; uncommitted, unreviewed, not activated. The new mail flags need
   the rebuilt daemon (User gate). Integration queue and ownership reported
-  to root (seq 482).
+  to root (seq 482). HANDOFF RECEIVED (seq 483-485): conductor/**, the
+  client letter seams, the storage letter module, MAIL.md; root holds the
+  conductor COMMIT for a small composer follow-up (seq 486: no field-edit
+  labels, recipient tree beside the composer, click-to-append To/Cc). An
+  independent Sonnet review runs over both sets (A backend, B conductor);
+  A commits first by exact pathspec once PASS, B after the follow-up and a
+  delta re-review. Old-daemon direct-RPC new-flag drop is a separate
+  compatibility hazard; the conductor path is local-handler + `ring`.
