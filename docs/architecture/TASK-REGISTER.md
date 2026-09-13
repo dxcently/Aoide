@@ -1366,8 +1366,14 @@ project/parent inheritance across local/remote/app/subagents;
   `modules/facets/quickshell/icons/` with catalog + vendored licences;
   repeat resolve a byte no-op; registry lines held as integrator steps.
   Executor judgment: viewBox captured post-swap per the fetched
-  build.ts (brief prose said pre-swap). Independent review running;
-  integration follows the preview set (shared lyra registry files).
+  build.ts — review confirmed the executor against the fetched source.
+  Review PASS-WITH-FIXUPS: HIGH — a `..` collection or name in an
+  identifier escapes `--out` and prune deletes outside it (fix-up
+  running: plain-name validation, canonicalized confinement before every
+  write and remove, three tests); MEDIUM — mono detection ignores
+  `style=` fills (folded in). `catalog.json` schema belongs in a facet
+  `icons/README.md` at I2, not CONTRACTS §4. Integration follows the
+  preview set (shared lyra registry files).
   Five questions to root at defaults.
   Source work only: no rebuild, no activation. Mail receipt is not
   completion — done means implemented and visually verified.
