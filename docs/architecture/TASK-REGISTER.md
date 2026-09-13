@@ -1542,6 +1542,15 @@ project/parent inheritance across local/remote/app/subagents;
   a5100f7 store build has it; the installed CLI does not; deploying it is
   the User gate); stale mail-view date / date grouping / canonical session
   links = designer-tasked, serialized here for commit.
+  Designer STABLE 1 (seq 647): visual pass frozen (10 files, 376+/183-,
+  128 tests, fmt residue = root's 7 lines), Past node per project inside
+  its fold + projectless "Active sessions" (live only) + one root Past for
+  projectless ended sessions, shared constant for the name; graph still
+  INTERIM. Independent review running on the frozen patch-id. Root 642/645
+  (User): semantic Base16 colour for mail/logs and Base16 readiness across
+  ALL conductor text/interaction states via one shared theme contract, no
+  per-panel palettes, no colour-only meaning, NO_COLOR respected,
+  light/dark screenshots — designer's next increment, after this review.
 
 ## 20. dxflake architecture migration (User order via root seq 510, 2026-09-13)
 
