@@ -1424,4 +1424,13 @@ project/parent inheritance across local/remote/app/subagents;
   extension: formal Subject/To/Cc with real CC fanout and per-recipient
   results, Home as a centred nvim/BBS start page with the Aoide logo; the
   mail seams are listed under §15. Per-crate checks only for conductor
-  until root hands off; not ready for integration.
+  until root hands off; not ready for integration. Root reports (seq 480,
+  2026-09-13) the full email form in source (To/Cc/Subject/body,
+  Reply/Reply all/Forward, explicit Send, recipient picker) and the
+  Subject/Cc backend (LetterContent marker inside the signed text, no
+  Header change, fanout through the existing scalar handler, per-recipient
+  status, a partial send locks the duplicate resend, canonical local
+  hostname routing fixed); backend 3+2+9 and conductor 103 tests green per
+  root; uncommitted, unreviewed, not activated. The new mail flags need
+  the rebuilt daemon (User gate). Integration queue and ownership reported
+  to root (seq 482).
