@@ -592,6 +592,22 @@ Fields per entry: status · owner · depends on · evidence · next.
   core may take a private input, retiring built-in `file`/`age` and the
   doc-only presets, and any migration; root files the `put`-over-socket
   gap as its own task. No slice before those.
+- Maintainer RESPONSE (issue #1 comment 5650085974, 2026-09-13T01:57:55Z,
+  relayed by root seq 411, maintainer claims not independently diffed):
+  recommends COPYING `src/secrets.rs` and its design into Aoide instead of
+  a pinned dependency (private distribution would need a deploy-key
+  credential; small module, narrower deps; Aoide owns the consumer
+  security discipline; the copy must track upstream fixes, notification
+  offered); no upstream change will be made for the Aoide proposal;
+  v0.3.5 tagged with `secrets.rs` claimed byte-identical to 0.3.4. The
+  maintainer treats the four dependency asks as moot under a copy. NOT
+  recorded as approving the `external_value` exec/transfer contract nor
+  as answering the missing-vs-corrupt semantics. The User wanted an
+  upstream DEPENDENCY, so the copy is NOT APPROVED: adoption, migration
+  and deletion stay held for the User. Direct dependency versus a locally
+  maintained custody module is a CHANGED ARCHITECTURAL DECISION, not an
+  adapter adjustment; core identity/authorization gaps are unchanged. No
+  executor, no copy, no PR reply dispatched.
 
 ## 10. osaka: quickshell facet goes blank when the monitor is turned off
 
@@ -1119,7 +1135,14 @@ project/parent inheritance across local/remote/app/subagents;
   acceptance. Acceptance also covers supported load/reconnect,
   unsupported capabilities, errors/disconnect, project mapping, and a real
   render/edit/vision loop.
-- Status: registered; architect dispatched.
+- Status: ARCHITECT brief written (`p-acp-brief.md`): client in
+  `aoide-conduct` (`graph/acp.rs` + `commands/acp.rs`), connection in the
+  `aoide acp` wrap, agent session id on `harnessSessionId`, kind `acp`,
+  permissions through `pending.json`, terminal capability false in A1,
+  hand-rolled newline JSON-RPC with the spec v1 schema vendored as a test
+  fixture (SDK 2.1.0 evaluated, rejected for its async runtime); only
+  `kimi acp` verified as an endpoint on this box. Plan and five questions
+  put to root; no executor before agreement.
 
 ## Carried backlog (verified status, never implicitly done)
 
