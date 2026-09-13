@@ -1603,6 +1603,15 @@ project/parent inheritance across local/remote/app/subagents;
   authorized_keys line swap — root asked to rule (accept P1 vs 4-line
   lib.mkAfter follow-up). D2-D5 COMPLETE on the branch; A4a and the pin
   edit wait on root.
+  ROOT 651/652 (2026-09-13 20:5x): dxflake ownership moves to the other
+  Codex; this session hands over (branch at 679e7af, worktree clean,
+  briefs + evidence copied to `~/worktrees/handoff-2026-09-13/dxflake/`)
+  and dispatches no further dxflake edits. D5 users layout RETRACTED by
+  root: one shared `users/khoa/default.nix` selected by host imports, the
+  four per-host copies deleted, parity re-proved — Codex owner's
+  correction; other D5 improvements retained. authorized_keys P1 accepted,
+  no mkAfter. Pin ownership = the Codex migration owner. Aoide-side A4a
+  exports remain this session's slice on root's word.
 - Status: ARCHITECT brief DONE (`p-dxflake-brief.md`: current state, target
   tree, U1-U8 unresolved with defaults sent to root for ruling, slices D1
   aggregates → D2 home lane → D3a/b roles → D4 portable upstream (needs
