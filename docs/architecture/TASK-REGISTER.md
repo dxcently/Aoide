@@ -902,12 +902,22 @@ project/parent inheritance across local/remote/app/subagents;
   the stored-vs-effective distinction; built-binary proof on an isolated
   root: the seq 316 child-outside-anchor shape groups under its parent's
   project, evidence `/tmp/aoide-own-{base,sa}/ev`) → S-B sanitized A2A
-  ancestry + bounded spawn cwd + live ambient fallback (executing) → S-A2
-  publish additive `effectiveProject` on graph.json session nodes and
-  `aoide session --json` rows, derived by the one resolver, stored
-  `project` untouched, local rows only, CONTRACTS additive (root approved
-  seq 337; widgets read it, never re-derive; dispatch text
-  `p-own-sa2-dispatch.md`) → S-C Codex native lineage → S-D remote owner
+  ancestry + bounded spawn cwd + live ambient fallback (LANDED d252b55,
+  review PASS, fix-up b9af6e8, PUSHED d252b55) → S-A2 publish additive
+  `effectiveProject` on graph.json session nodes and `aoide session
+  --json` rows, derived by the one resolver, stored `project` untouched,
+  local rows only, CONTRACTS §4 (LANDED 387f8ba, review PASS; root
+  approved seq 337; widgets read it, never re-derive) → S-C Codex native
+  lineage (executing, root priority seq 398: `parent_thread_id` →
+  `parentSessionId` on the app record, nickname fills an empty title,
+  kind stays `app`, both refusals pinned, fourteen tests, designer
+  fixture; dispatch `p-own-sc-dispatch.md`; LANDED 4fa382e, review FAIL on
+  one HIGH — same-tick mutual captures pass a frozen-snapshot cycle check
+  — fix-up queued after M2, plus root seq 404: the conductor groups only
+  `kind == subagent`, so the record also publishes the native thread role
+  as additive `nativeRole` from the capture, kind untouched, and the
+  designer teaches the grouping helper to nest `nativeRole == subagent`,
+  never every parented fork) → S-D remote owner
   qualification (design + `link` refusal) → E3. Brief DONE (Opus,
   scratch `p-ownership-brief.md`): R1 accepted as ruled (rung 2 above rung
   3; `session project` pins a mis-grouped row), Q2 `effectiveProject` on
@@ -1029,9 +1039,87 @@ project/parent inheritance across local/remote/app/subagents;
 - Required tests: petname collision / relabel / resume; dead target vs
   enduring inbox; two readers with independent unseen; project rename and
   host-qualified names; cross-host reply target; role alias shown.
-- Status: ARCHITECT brief in progress (design only, Opus); the seam goes
-  to root for agreement before any executor is dispatched. Sits on top of
+- Status: ARCHITECT brief written (`p-mail-scope-brief.md`): one store,
+  typed prefixes `session:`/`project:`/`role:` on the name half resolving
+  to flat names `session-<nativeId>` / `project-<n>` / `role-<p>-<r>`, bare
+  names compat forever and never auto-mapped, header unchanged, the only
+  storage addition `Mark.held`; slices ML1 resolver → ML2 doorbell → ML3
+  roles (one new command path, `mail role`) → ML4 published binding.
+  Seam put to root with five questions and one flagged gap (a bridge
+  path for the send UI); no executor before agreement, ML1 after M1. Sits on top of
   §14 M1 (`ProjectHost`, `--host`) — no redesign of M1.
+
+## 16. Livery stage seed bypasses the resolver (Osaka evidence, seq 395)
+
+- Defect: `modules/facets/quickshell/default.nix` seeds `activeSongLivery`
+  from the song alone and never invokes `lib/livery.nix` `resolve` /
+  `overrideMap` / `slotPatch`, so host overrides and an independently
+  selectable palette never reach the stage; the resolver header claims
+  both fanouts agree ahead of the implementation. Evidence at the dxflake
+  pin 3b168ce: Stylix base00 `191724` against a live stage palette bg
+  `f2ebde`. Recorded by osaka/dxflake-codex in dxflake
+  `docs/livery-consumer-handoff.md`.
+- Owner: the upstream stage-seed repair in `modules/facets/quickshell/
+  default.nix` + `lib/livery.nix` is Yomi core (one executor, after the
+  conduct lanes S-C and M2). Osaka Codex (`osaka/dxflake-codex`) STARTS the
+  dxflake architecture and the Lyra consumer implementation now (User,
+  seq 407) — bounded phase owners, an isolated branch, and evidence per
+  phase, no duplicate upstream writer; gate tests continue as separate
+  acceptance, not a blocker. Sonata and generic Lyra/core defects stay
+  upstream. The runtime palette contract remains the gate before any
+  second palette implementation; the User activation gate is unchanged.
+- Status: registered, not started.
+
+## 17. Agent Client Protocol (ACP) client in core; widget builder as its UI (User scope seq 403/405)
+
+- Requirement: the standard Agent Client Protocol (agentclientprotocol.com,
+  v1; stdio transport stable, streamable HTTP draft) — never a renamed
+  local JSON-RPC. Roles per the official architecture: Aoide is the ACP
+  CLIENT; the selected coding harness exposes the ACP AGENT endpoint
+  (native or a verified adapter). The reusable client — initialize/
+  version/capability negotiation, native stdio agent subprocess with clean
+  JSON-RPC stdout (never PTY injection or echo), `session/new`,
+  `session/prompt` with streamed `session/update` (messages, plans, tool
+  calls), `session/cancel`, permission requests, connection/error
+  lifecycle, `session/load` only when the agent declares it (no fictitious
+  resume) — lives in portable Aoide core as an OPTIONAL harness
+  capability/adapter with no Nix or QML dependency. CLI/conductor, the
+  Lyra widget builder, and later web/Eidolon surfaces consume the SAME
+  aoided policy/session/event interface; no parallel wire engine in Lyra
+  or QML. No second session authority: ACP session ids map to native
+  Aoide session/project ids, parent edges and reconnect identity kept.
+  Files/terminals are negotiated client capabilities routed through the
+  existing execution policy and audit log; previews stay isolated; the
+  live-draft grant stays scoped. Widget operations (load/resize/anchor/
+  palette/annotations/render/screenshot) remain existing Lyra tools via
+  CLI/MCP or explicitly namespaced extensions, never invented standard
+  methods. Context passed: selected widget paths, source/diff, preview
+  dimensions/livery/dependencies, annotated screenshot (image only when
+  the agent capability allows). Truthful pending/running/completed/
+  cancelled tool state; declared-save and rebuild gates unchanged.
+  Optional agent connection — manual preview works with no harness; TUI
+  fallback stays for harnesses with no verified endpoint; no attaching to
+  an arbitrary already-running TUI. Cross-host: the owning node hosts the
+  connection and the authenticated mesh routes requests; no network ACP
+  port. ACP does not replace store-and-forward mail, project/role
+  addressing, or missing transports; idle wake/deposit/fetch semantics
+  stay separate. The agent-side facade exposing Aoide-managed agents to
+  external clients is a distinct lane, parked until the client lane is
+  proven. Pin the protocol/schema version and one maintained SDK (Rust
+  fit evaluated); a compatibility matrix names only harness adapters
+  actually tested on this box.
+- Owners: Fable main (this register) owns the core design; the preview
+  owner (`widget-preview-fable`) owns the consuming UI; ONE wire owner.
+  Architect first (Opus, design only), plan and seams to root before any
+  executor; does not block the preview foundation (P1/P2 and their
+  fixes).
+- Phases: A0 architect brief → A1 core client + harness proof (one
+  adapter, real initialize→prompt→stream→tool/permission→cancel/complete)
+  → A2 event/UI integration (builder as client front-end) → A3 cross-host
+  acceptance. Acceptance also covers supported load/reconnect,
+  unsupported capabilities, errors/disconnect, project mapping, and a real
+  render/edit/vision loop.
+- Status: registered; architect dispatched.
 
 ## Carried backlog (verified status, never implicitly done)
 
