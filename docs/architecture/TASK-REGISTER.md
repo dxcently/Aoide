@@ -427,7 +427,7 @@ Fields per entry: status · owner · depends on · evidence · next.
   `modules/facets/quickshell/icons/**` and `default.nix` runs the lyra
   tests in the nix build), path list `commit-preview-icons.txt`; icon
   wiring applied in the tree by the integrator: 209 passed / 0 / 3,
-  golden 57. Acceptance additions (root seq
+  golden 57. The combined commit died on a full root filesystem (08:45-08:55Z; nothing committed, log tail repaired). Then two user-facing rail bugs surfaced (owner seq 586/588: rail actions run the DEPLOYED `lyra` from PATH, which has no `preview set`; and the HIGH-2 fix-up refuses the canvas own `--root` because the child env repoints AOIDE_DAEMON_SOCKET under the root). Root seq 590/592: do not ship a dead rail; owner released for ONE corrective set (P7a audited patches + LOW, `lyra` path in preview.json, root validation against the stable real daemon dir with no blanket starts_with, dark icons, P7a-2 styling, real rail-click evidence), then re-review, then the combined commit, pristine build, push. Owner released seq 595. Acceptance additions (root seq
   548, User): lock/unlock state icon; declared/resolved widget
   dependencies (available/missing/unknown + sources — read side a lyra
   command, shape a CONTRACTS entry); editable isolated livery colour
@@ -1544,6 +1544,8 @@ project/parent inheritance across local/remote/app/subagents;
   (if woken by the User) = Osaka-host consumer specifics; Spark =
   flake.lock / aoide pin; User = rebuild/activation. Ownership notes filed
   on osaka (seq 24 to the palette worker, seq 25 to dxflake-codex).
+- Pin ownership (root seq 592): Spark unavailable; claude-mail proposed as sole dxflake pin/lock editor (seq 596: only `nix flake lock --update-input aoide` on the branch, only to a pushed Aoide SHA with a build proof, reported before and after; melete-src re-lock stays the User own request); awaiting root confirmation; no lock edit before it.
+- D4 Aoide-side ARCHITECT DONE (`p-dxflake-d4-aoide-brief.md`): three additive outputs `nixosModules.default` / `overlays.default` / `lib.livery`, new `lib/modules.nix` spliced by mkHost at top level (BFS order preserved), delete the `inputs.aoide` read at nucleus/options.nix:352, one `mkBefore` on shellbridge.nix:73 so the yomi-strix toplevel drvPath stays P0; dxflake side P0 on yomi/sakaki, P1 named on chiyo; 5 questions at defaults. A4a executor queued behind the ship. D2/D3/D5 replanning under root 577 dispatched (Opus).
 - Status: ARCHITECT brief DONE (`p-dxflake-brief.md`: current state, target
   tree, U1-U8 unresolved with defaults sent to root for ruling, slices D1
   aggregates → D2 home lane → D3a/b roles → D4 portable upstream (needs
