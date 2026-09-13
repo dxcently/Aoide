@@ -8,6 +8,30 @@ relitigate it. Where this document and a brief conflict, this document
 wins. The default for anything this document leaves unruled: **do it the
 way FidoNet netmail did it** (User meta-rule).
 
+## Letter presentation and copies
+
+`mail send --to node/name --subject "Subject" --cc other/name -- text`
+places Subject, To, Cc and body in `AOIDE-LETTER/1` JSON inside the signed
+text. Optional `threadId` identifies the conversation and `replyTo` identifies
+the parent envelope. Both are 64 lowercase hexadecimal characters. New
+structured sends mint one secure random thread ID shared by every copy.
+Replies pass `--thread` and `--reply-to`; a legacy reply uses its original
+message ID as the thread anchor. Forwarding omits both and starts a new thread.
+These fields are signed context, never proof of membership or delivery.
+With any structured-content flag, To and Cc accept comma-separated
+addresses. The original envelope header remains the actual destination;
+Cc metadata names intended recipients, not confirmed delivery. Legacy
+letters remain plain text and invalid structured content displays verbatim.
+
+Every unique recipient receives an independently signed envelope through
+the scalar send path. All addresses and paired nodes validate before any
+copy is filed. `self` and the canonical local host resolve to local filing.
+The result reports each recipient's msgid, filing/spooling state and delivery
+projection. Partial filing returns an error with accepted copies retained;
+callers retry only failed copies. Fanout is not a crash-atomic transaction.
+Existing outbox retries retain each envelope's msgid; invoking send again
+creates new letters. No review/hold or interception policy is implied.
+
 ## The problem
 
 Aoide's only cross-session channel is conduct: `aoide send` injects bytes

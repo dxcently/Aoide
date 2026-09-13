@@ -2419,9 +2419,12 @@ Read/resolved by `aoide mail`/`mail send`/`mail read`/`mail show`/`mail
 mark`/`mail rm` (the outbox's own `mail outbox`/`mail outbox rm` are a
 separate surface over `state/outbox/`, below): bare `mail` prints the
 names with unread mail BY THIS READER; `mail send --to self/<name> --
-<text>` files a letter directly; `mail send --to <node>/<name> -- <text>`
-(P-M2, `node` any other registered, VERIFIED node) mints and spools
-instead of filing directly here — see `state/outbox/` below for that
+<text>` files a letter directly, and so does `--to <hostname>/<name>`
+when `<hostname>` is this box's own canonical name
+(`storage::display::local_host_name`) — the two spellings are one
+destination; `mail send --to <node>/<name> -- <text>` (P-M2, `node` any
+OTHER registered, VERIFIED node) mints and spools instead of filing
+directly here — see `state/outbox/` below for that
 path in full; either form refuses before writing anything when `<name>`
 falls outside `^[a-z0-9][a-z0-9-]*$` (`storage::node_store::
 valid_node_name`) — never clamped. A self-filed letter's data also
@@ -2430,7 +2433,16 @@ carries a `ring` field (P-M5a-2): the doorbell report forwarded through
 ring`'s own shape) when a resident daemon answered, or the literal
 string `"no-daemon"` when none did — filing itself always still
 succeeds either way, so `ring` never turns an accepted send into a
-reported failure. `mail read --for
+reported failure. `mail send` also takes `--subject <text>`, `--cc
+<addr>[,<addr>…]`, `--thread <id>` and `--reply-to <msgid>`; with any of
+them (and comma-separated `--to`) the letter's signed `text` is an
+`AOIDE-LETTER/1` JSON document (subject, to, cc, body, optional 64-hex
+`threadId`/`replyTo`) — the Header above is unchanged, every unique
+recipient gets its own independently signed envelope through the same
+scalar filing/spooling path, all addresses validate before the first copy
+is written, and a reader that does not decode the marker prints the text
+verbatim (`docs/architecture/MAIL.md`, "Letter presentation and
+copies", is the full statement). `mail read --for
 <name>`/`--all-names` prints new entries and advances ONLY the calling
 reader's mark under that name (`--reread` reprints already-read ones —
 the mark still only ever advances forward). A reader is the conducting
@@ -2468,7 +2480,8 @@ second open is a clean no-op.
 ### `state/outbox/` — **v0** (messaging plan P-M2, 2026-09-07)
 
 The per-node BSO-style spool (MAIL.md "Outbox") — where a `mail send --to
-<node>/<name>` envelope waits between minting and confirmed delivery. One
+<node>/<name>` envelope (`node` neither `self` nor this box's own
+hostname) waits between minting and confirmed delivery. One
 directory per node, three kinds of file, one `outbox_dir()` (the ordinary
 `state_dir()` resolution, `$AOIDE_STATE_DIR/outbox/`):
 
