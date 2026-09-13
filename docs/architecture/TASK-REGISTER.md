@@ -1516,6 +1516,32 @@ project/parent inheritance across local/remote/app/subagents;
   root fixes it in the composer follow-up (seq 494: tags kept as ASCII
   `[tag]`, test updated, 122 tests), then delta re-review and
   commit by pathspec.
+  SET B SHIPPED: root fixed the tag chip (ASCII `[tag]`), re-review
+  PASS-WITH-FIXUPS applied (graphview `[tag]` mapper, DESIGN.md labels the
+  graph layout INTERIM, not the retained scene) → 5c2b7cd (12 files) +
+  a5100f7 (cli `conductor_integration.rs` follows the renamed "3 Agents"
+  panel) → pushed, origin/main = a5100f7. Pristine build
+  `/nix/store/1516hvzilh9r92iz5dgmgg8wgvw9k4wc-aoide-0.0.22` exit 0 on the
+  second run; the first run failed on a PRE-EXISTING order/timing race in
+  cli `graph_residency_p_d6.rs`: `start_run_loop("hand-edit")` leaves the
+  resident tick thread alive for the whole test binary, its sweep re-stages
+  graph.json into whatever `AOIDE_STAGE_DIR` is current, and
+  `atomic_write_bytes_impl` names the temp `<stem>.tmp.<pid>`, so two
+  same-process writers collide (rename ENOENT, reason
+  stage-file-unreadable-or-unwritable). Handed to root (seq 614); fix
+  candidates: temp suffix pid+thread/counter in storage `fs.rs`, or the
+  hand-edit test isolates its run_loop. Designer visual pass (seq 606/608:
+  Mark table, marked nav/tree/legends, Home logo band, graph CANVAS_PAD +
+  camera centring, Past sessions hoisted to the sidebar root, 128 tests)
+  under the SOLE-conductor-visual-writer rule (seq 605: not the deletion/
+  confirmation/key-dispatch paths); first independent review bounced —
+  TREE MOVED (Past semantics changed again mid-review). Lane rule now: the
+  designer sends a "STABLE <n>" letter, I freeze the diff by patch-id,
+  review, commit by pathspec; no conductor edits between STABLE and my
+  reply. Root seq 612: every agent letter carries `--subject` (the
+  a5100f7 store build has it; the installed CLI does not; deploying it is
+  the User gate); stale mail-view date / date grouping / canonical session
+  links = designer-tasked, serialized here for commit.
 
 ## 20. dxflake architecture migration (User order via root seq 510, 2026-09-13)
 
@@ -1546,6 +1572,15 @@ project/parent inheritance across local/remote/app/subagents;
   on osaka (seq 24 to the palette worker, seq 25 to dxflake-codex).
 - Pin ownership (root seq 592): Spark unavailable; claude-mail proposed as sole dxflake pin/lock editor (seq 596: only `nix flake lock --update-input aoide` on the branch, only to a pushed Aoide SHA with a build proof, reported before and after; melete-src re-lock stays the User own request); awaiting root confirmation; no lock edit before it.
 - D4 Aoide-side ARCHITECT DONE (`p-dxflake-d4-aoide-brief.md`): three additive outputs `nixosModules.default` / `overlays.default` / `lib.livery`, new `lib/modules.nix` spliced by mkHost at top level (BFS order preserved), delete the `inputs.aoide` read at nucleus/options.nix:352, one `mkBefore` on shellbridge.nix:73 so the yomi-strix toplevel drvPath stays P0; dxflake side P0 on yomi/sakaki, P1 named on chiyo; 5 questions at defaults. A4a executor queued behind the ship. D2/D3/D5 replanning under root 577 dispatched (Opus).
+- D2 EXECUTED on the branch (uncommitted, review running): `aggregations.nix`
+  deleted, 25 dendrites moved into desktop/hyprland/gaming/server aggregate
+  dirs, floor of 10 shared dendrites, hosts import selected dirs + single
+  dendrites, stylix/hyprlock plain `mkEnableOption` default false with
+  explicit `true` on osaka/yomi, `dx.melete.enable=false` dropped from
+  chiyo/osaka; parity P1 at derivation level (systemPackages order only);
+  sakaki fails identically before/after on the mneme-src git object
+  35b0a4a3 (pre-existing, separate from melete-src). Commit follows the
+  review; then D3, then D5; A4a after root answers the D4 questions.
 - Status: ARCHITECT brief DONE (`p-dxflake-brief.md`: current state, target
   tree, U1-U8 unresolved with defaults sent to root for ruling, slices D1
   aggregates → D2 home lane → D3a/b roles → D4 portable upstream (needs
