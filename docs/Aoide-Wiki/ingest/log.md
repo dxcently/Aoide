@@ -4427,3 +4427,26 @@ activation reverts the override until that seam learns it (2c41661).
 
 Pages touched: CONTRACTS.md, modules/facets/README.md,
 modules/facets/AGENTS.md, docs/Aoide-Wiki/entities/livery.md
+
+## [2026-09-13] feat | Subject/To/Cc letter fanout and canonical-hostname local filing
+
+Root Codex's backend lane, integrated after an independent review
+(b719571). A letter may now carry Subject, To and Cc: `mail send` takes
+`--subject`, `--cc`, `--thread` and `--reply-to`, and with any of them the
+signed text becomes an `AOIDE-LETTER/1` JSON document (subject, to, cc,
+body, optional 64-hex thread and reply ids) — the envelope Header is
+unchanged, so a reader that does not decode the marker prints the text
+verbatim. `client/src/letter_send.rs` fans one independently signed
+envelope out to every unique recipient through the existing scalar send
+path, validates every address and paired node before the first copy is
+filed, and reports each copy's msgid, filing/spooling state and delivery
+projection; a partial fanout returns an error with the accepted copies
+retained. `--to <own canonical hostname>/<name>` files locally like
+`self/<name>`. Known and documented: the fanout is not crash-atomic and
+there is no storage-level idempotency, so a repeated send files fresh
+letters. The conductor half of the lane (mail conversations, composer)
+stays uncommitted until root fixes the Graph-panel tag regression.
+
+Pages touched: CONTRACTS.md, docs/architecture/MAIL.md,
+pkgs/aoide/crates/client/README.md, pkgs/aoide/crates/client/AGENTS.md,
+pkgs/aoide/crates/storage/README.md, pkgs/aoide/crates/storage/AGENTS.md

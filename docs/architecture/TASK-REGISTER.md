@@ -1450,3 +1450,12 @@ project/parent inheritance across local/remote/app/subagents;
   A commits first by exact pathspec once PASS, B after the follow-up and a
   delta re-review. Old-daemon direct-RPC new-flag drop is a separate
   compatibility hazard; the conductor path is local-handler + `ring`.
+  REVIEW RESULT: set A backend PASS-WITH-FIXUPS → COMMITTED b719571
+  (11 files + CONTRACTS delta; MEDIUM wording: the resend guard is a
+  UI-only in-memory flag, MAIL.md says so; LOW: no isolated scalar-path
+  hostname-routing test, outcome text says self/ for hostname form). Set
+  B conductor FAIL: graphview.rs:691-733 draws the tag chip only for
+  Project nodes, pre-existing test
+  `ui::tests::graph_panel_draws_nodes_edges_and_tags` fails (114/1) —
+  root fixes it in the composer follow-up, then delta re-review and
+  commit by pathspec.
