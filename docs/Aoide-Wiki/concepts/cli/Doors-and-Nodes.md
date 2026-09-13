@@ -148,7 +148,18 @@ lyra shellbridge [--run] [--json]
   closes; `createproject` is two invocations in order and reports a partial
   honestly if the second fails; the reply carries the CLI outcome's `data`
   verbatim when there is one; a line the whitelist refuses is dropped with
-  no reply at all). Also
+  no reply at all), and `projectaction` (a closed three-action whitelist —
+  `create`, `edit`, `removehost` — for zero-session project creation and
+  editing from the song-side project picker: no session id anywhere on the
+  wire, in the plan, the reply, or the audit line, the reply keyed by
+  `name` where `sessionaction` is keyed by `sessionId`; `create`/`edit`
+  re-exec `aoide project add|edit <name> <paths…>` then, per `hosts` entry,
+  `aoide project add|edit <name> <roots…> --host <host>` — `edit` with no
+  roots for a host uses `add`, so a host with nothing to replace keeps its
+  roots; `removehost` re-execs `aoide project remove <name> --host <host>`
+  and is refused unless exactly one host is given; the same sequencer as
+  `sessionaction`, generic over which subject owns the plan, so reply,
+  audit, and partial-failure shapes are identical). Also
   spawns the Hyprland window→session listener thread at startup
   (`graph::run_hypr_window_listener`). A malformed or unknown line is
   audited (action `unparseable`, a byte count only, never the payload) and

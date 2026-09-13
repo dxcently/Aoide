@@ -2025,6 +2025,38 @@ whole undying set is already live simply resolves to an empty-set
 with no `$AOIDE_TERMINAL`) degrades gracefully — logged, never a crashed
 tick.
 
+**Also additive in v0:** a project entry MAY carry an optional `hosts`
+array — organizational membership in OTHER registered nodes, orthogonal
+to the local `roots` above. Each entry is `{ "name": "<node>", "roots":
+["<path>", …] }`: `name` is a node already present in `state/nodes.json`
+(checked at mutation time inside the same stage lock the `roots`
+validation holds — an unregistered name is refused with
+`reason:"unknown-host"` and writes nothing), and `roots` is that host's
+OWN root list, a verbatim string never validated against THIS machine's
+filesystem (no `is_dir`, no canonicalization) and never folded into
+`Project::roots()`, which stays local-only. `#[serde(default,
+skip_serializing_if = "Vec::is_empty")]` keeps `hosts` off the wire for a
+project no `--host` invocation has touched, the discipline `autoResume`
+set. Set through the SAME three commands as local roots, scoped by a
+`--host <node>` flag: `project add NAME [PATH…] --host NODE` adds `NODE` as
+a member (membership-only when no path follows — `--host` never defaults
+to the cwd the way a bare `project add` does) and appends any given paths
+to that host's own root list, idempotently; `project edit NAME PATH… --host
+NODE` REPLACES that host's root list exactly (local roots and every other
+host untouched); `project remove NAME --host NODE` drops the whole
+membership, or `project remove NAME PATH --host NODE` drops that one host
+root (membership survives at zero roots). Hosts dedupe by name in
+first-seen order; a host's roots dedupe within it. `project list` prints
+each host under its project with its roots, and `data.projects[].hosts`
+mirrors the record verbatim in `--json`. Membership is organizational: it
+grants nothing, pairs nothing, and infers no root from a local path.
+
+```json
+{ "schemaVersion": "0", "projects": [ { "name": "aoide", "path": "/home/khoa/Aoide",
+  "roots": ["/home/khoa/Aoide"],
+  "hosts": [ { "name": "chiyo", "roots": ["/srv/khoa/Aoide"] } ] } ] }
+```
+
 ### `state/stage/graph.json` — **v0**
 
 The **fully resolved** project/session DAG, written (atomic) automatically by
@@ -2063,6 +2095,10 @@ ledger is exactly the memory that survives that prune; a `resumed` edge's
 
 A session node MAY carry the sessions.json `petname` field above, present
 under the same rule.
+A project node MAY likewise carry the projects.json `hosts` array above,
+present under the same rule (non-empty only) — `{ "id": "project:aoide", …,
+"hosts": [ { "name": "chiyo", "roots": ["/srv/khoa/Aoide"] } ] }`; a
+project no `--host` invocation has touched carries no `hosts` key at all.
 
 ### `state/stage/herald.json` — **v0**
 

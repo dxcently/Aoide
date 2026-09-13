@@ -8,8 +8,8 @@
 // Protocol: newline-delimited JSON. Each command is a JSON object with a
 // "cmd" field and payload fields. The socket path is the shellbridge default:
 // $XDG_RUNTIME_DIR/aoide/shellbridge.sock (falls back to /run/user/<uid>/aoide/shellbridge.sock).
-// Every command is fire-and-forget except "sessionaction", which is answered
-// with one JSON line on the same connection, which then closes.
+// Every command is fire-and-forget except "sessionaction" and "projectaction",
+// which are answered with one JSON line on the same connection, which then closes.
 //
 // Communication discipline: this is the ONLY outbound channel from QML.
 // No MCP, no HTTP, no shell exec from QML — shellbridge is the gate.
