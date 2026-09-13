@@ -4372,3 +4372,24 @@ resolver. Fourteen tests (4fa382e).
 
 Pages touched: docs/architecture/CODEX-INTEGRATION.md,
 pkgs/aoide/crates/conduct/README.md, pkgs/aoide/crates/conduct/AGENTS.md
+
+## [2026-09-13] feat | the mesh roster is one staged file, and a cached session never reads online
+
+`aoide node list --mesh` writes the roster that the Mesh section of both
+Sonata temples will read: `state/stage/mesh.json` (schemaVersion `0`,
+atomic temp+rename beside `pending.json`/`herald.json`), one node row per
+registered host with its sessions nested, every session `id` node-scoped
+as `<node>/<sessionId>`, and `liveSessions`/`cachedSessions` tallied per
+row and overall. `--mesh` never runs the discovery sweep, so an
+advertising-but-unpaired candidate never enters the document; bare `node
+list` output is byte-identical to before and never touches the file. The
+projection fix underneath: a session cached from an unreachable host now
+reads `last-seen` (when the cache carries `fetchedAt`) or `unknown`, never
+`online` — an online host's rows are unchanged and `done` survives. The
+same gate serves `session --hosts`, so both surfaces land the fix once.
+Thirteen tests (06b2982; review fix-up c71810b: the contract's example
+had shown an `online` row under an unreachable host, a `"—"` where the
+JSON is `null`, and a `schemaVersion` the writer did not yet emit).
+
+Pages touched: CONTRACTS.md, pkgs/aoide/crates/conduct/README.md,
+pkgs/aoide/crates/conduct/AGENTS.md
