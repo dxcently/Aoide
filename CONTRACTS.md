@@ -992,9 +992,15 @@ renders under: `aoide-conduct::graph::effective_project_for` derives the
 latter (own explicit project, else the nearest owning ancestor's own explicit
 project or cwd anchor, else the session's own cwd anchor) and never writes it.
 `SessionRecord.project` and the graph node's `project` keep publishing the
-stored value only — no new field, no shape change; `aoide session`'s bucket
-names and the conductor's per-project counts are the surfaces that read the
-derived view, `graph.json` does not.
+stored value only; `aoide session`'s bucket names and the conductor's
+per-project counts read the derived view. An additive `effectiveProject`
+(string) rides beside the stored `project` on two documents, present only
+when the resolver finds one — never a dangling null: the `graph.json`
+session node, and every `aoide session --json` row in both groupings
+(`--hosts` and the default project grouping, built from one
+`session_view_json`). It is LOCAL ONLY: rows a remote node's graph document
+supplies never carry it (no local session slice to walk), and `node list`
+rows do not carry it either.
 `session kill --id ID` is a local daemon-only SIGTERM request for an exclusively
 owned, conducted process verified against the daemon seal and pinned by Linux
 pidfd. Its successful response confirms signaling, never process exit.
