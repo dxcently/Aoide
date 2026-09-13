@@ -4297,3 +4297,40 @@ pkgs/aoide/crates/conduct/src/graph/model.rs,
 pkgs/aoide/crates/conduct/src/graph/who.rs,
 pkgs/aoide/crates/conduct/src/graph.rs,
 pkgs/aoide/crates/conductor/src/ui.rs
+
+## [2026-09-12] fix | an A2A-spawned child never inherits the daemon's own session id, and its cwd is a registered root or nothing
+
+The `aoide a2a serve` daemon spawned children carrying its own
+`AOIDE_SESSION_ID`, so a spawned harness registered as if it were the
+daemon's session and its stored parent could point at an ended record.
+`server::a2a::spawn_child_command` (factored out of `do_spawn`, otherwise
+unchanged) now clears `AOIDE_SESSION_ID` beside the `AOIDE_SESSION_ORIGIN`
+it already cleared; every other variable passes through. The child's
+working directory is an operator choice only: `--spawn-cwd` on
+`aoide a2a serve`, then `AOIDE_A2A_SPAWN_CWD`, then inherit — read once at
+serve time like the agent command, never from a peer's message — and it is
+applied only when byte-identical to a root of a registered project, else
+one audit line ("skipped") and inherit. In conduct,
+`resolve_registration_parent`'s third tier (the ambient `AOIDE_SESSION_ID`)
+now requires a live local record with that id — a missing or `done`
+record is refused, tiers one and two unchanged. Six tests name the three
+behaviours (d252b55; review fix-up b9af6e8: doc block restored to
+`do_spawn`, sibling-variable passthrough proven, registered-but-not-a-
+directory audit message split).
+
+Pages touched: pkgs/aoide/crates/server/README.md,
+pkgs/aoide/crates/conduct/README.md
+
+## [2026-09-12] feat | the derived effective project is published beside the stored one
+
+`graph.json` session nodes and every `aoide session --json` row (the
+`--hosts` grouping and the default project grouping, both built from one
+`session_view_json`) carry an additive `effectiveProject` string beside the
+stored `project`, present only when `effective_project_for` resolves one
+and never a dangling null. It is local only: rows a remote node's graph
+document supplies and `node list` rows never carry it. A widget consumes
+the published value and never re-derives ownership. Four tests; CONTRACTS
+§4 names the two publish sites (387f8ba).
+
+Pages touched: CONTRACTS.md, pkgs/aoide/crates/conduct/README.md,
+pkgs/aoide/crates/conduct/AGENTS.md
