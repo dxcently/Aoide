@@ -1546,7 +1546,12 @@ project/parent inheritance across local/remote/app/subagents;
   128 tests, fmt residue = root's 7 lines), Past node per project inside
   its fold + projectless "Active sessions" (live only) + one root Past for
   projectless ended sessions, shared constant for the name; graph still
-  INTERIM. Independent review running on the frozen patch-id. Root 642/645
+  INTERIM. Review PASS-WITH-FIXUPS (two test gaps → next increment) →
+  COMMITTED 5f59c11, pristine build
+  `/nix/store/z8i4bf6a8xi8112a2jp7d255yw6dqz2c-aoide-0.0.22` exit 0;
+  on origin/main. Slip recorded: the register push that followed carried
+  5f59c11 before its build finished (green afterwards); register commits
+  now wait for the build or push by explicit built SHA. Root 642/645
   (User): semantic Base16 colour for mail/logs and Base16 readiness across
   ALL conductor text/interaction states via one shared theme contract, no
   per-panel palettes, no colour-only meaning, NO_COLOR respected,
@@ -1813,3 +1818,12 @@ project/parent inheritance across local/remote/app/subagents;
   Harnox capability map against the `secrets` family, first concrete
   flows); designer = TUI settings surfaces after the contract. Status:
   ARCHITECT RUNNING; no implementation authorized yet.
+- Brief DONE (`p-easy-config-secrets-brief.md`): 28-row inventory; the
+  existing `aoide config`/config.toml becomes a read/validate projection
+  (scopes, `config explain`, runtime/declared/default ownership,
+  `--dry-run` + consequences), `config set` never writes another domain;
+  secrets = Harnox custody only + one new `secrets status`
+  (unconfigured/unreachable/locked/available) + `[secrets]` section, six
+  redaction points, existence-only `has` blocker carried; the latest
+  Noah/Honey proposal is NOT in the repo — six confirmations before any
+  custody work. Slices C0-C5 then S0-S2; six questions to root.
