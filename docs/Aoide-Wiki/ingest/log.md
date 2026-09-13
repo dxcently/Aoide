@@ -4393,3 +4393,20 @@ JSON is `null`, and a `schemaVersion` the writer did not yet emit).
 
 Pages touched: CONTRACTS.md, pkgs/aoide/crates/conduct/README.md,
 pkgs/aoide/crates/conduct/AGENTS.md
+
+## [2026-09-13] fix | Codex lineage lands one edge at a time, and a native thread role is published beside kind
+
+The lineage writer checked every same-tick capture against a roster
+snapshot taken before any of the tick's own edges landed, so two app
+threads whose captures each named the other as parent both passed the
+cycle check and a two-node loop persisted. Captures now merge first, then
+lineage candidates are applied one at a time against the live roster, so
+at most one such edge lands. A session record, its graph.json node, and
+its `aoide session --json` row carry an additive `nativeRole` (the
+harness's own `user`/`subagent`/`guardian_review` from the capture, present
+only when published, never inferred) so a widget can nest a native
+subagent under its root without this crate ever reclassifying `kind`,
+which stays `app`. Six tests (ece83a7).
+
+Pages touched: CONTRACTS.md, pkgs/aoide/crates/conduct/README.md,
+pkgs/aoide/crates/conduct/AGENTS.md, pkgs/aoide/crates/storage/README.md
