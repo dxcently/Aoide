@@ -1588,6 +1588,12 @@ project/parent inheritance across local/remote/app/subagents;
   D3 LANDED a165011 (P0 reproduced by review, PASS; flake.nix:182 comment
   fixup folded into D5). D5 dispatched on the brief defaults (Q1 username
   specialArg stays, Q2 sakaki provisional, Q3 openldap floor if fleet-wide).
+  D5 LANDED 679e7af (review PASS-WITH-FIXUPS): users/khoa.nix x4 verbatim,
+  soundconverter to osaka, openldap stays floor, packages not split (sakaki),
+  yomi/openai docs fixed; system.path P0 x3, toplevel P1 by one inert
+  authorized_keys line swap — root asked to rule (accept P1 vs 4-line
+  lib.mkAfter follow-up). D2-D5 COMPLETE on the branch; A4a and the pin
+  edit wait on root.
 - Status: ARCHITECT brief DONE (`p-dxflake-brief.md`: current state, target
   tree, U1-U8 unresolved with defaults sent to root for ruling, slices D1
   aggregates → D2 home lane → D3a/b roles → D4 portable upstream (needs
@@ -1698,6 +1704,13 @@ project/parent inheritance across local/remote/app/subagents;
   adding a node during a live run); designer = layout/interactions; one
   writer per slice. Status: ARCHITECT RUNNING; nothing mutates the
   backend before the contract is agreed with root.
+- Brief DONE (`p-orch-graph-brief.md`): all orchestration nouns missing;
+  edges derived only (spawned XOR anchors); one `orchestration.json` +
+  append-only `orchestration-ledger.jsonl`; graph.json gains one additive
+  `orchestration` key; noun-first run/work/goal/edge commands; blocking
+  cycles = depends-on only; §24 source ids as a local unsigned
+  `Entry.origin` (LetterContent is deny_unknown_fields). Six questions to
+  root with defaults; awaiting agreement.
 
 ## 23. Conductor architecture: capability plugins + Ratatui scene widget (User via root seq 636/637)
 
