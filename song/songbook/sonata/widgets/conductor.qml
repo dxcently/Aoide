@@ -122,18 +122,68 @@ Item {
         source: Qt.resolvedUrl("SessionMenu.qml")
         onLoaded: { item.livery = temple.livery; item.bridge = temple.bridge }
     }
-    function openSessionMenu(record, sourceItem, x, y) {
+    function openSessionMenu(record, sourceItem, x, y, page) {
         if (!sessionMenu.item) return
         var point = sourceItem.mapToItem(temple, x, y)
-        var host = null
+        sessionMenu.item.open(record, point.x, point.y, temple.hostOf(record), page)
+    }
+    // the immediate parent record — the menu names it as the kill target
+    function hostOf(record) {
         var parentId = record && record.parentSessionId
-        if (parentId) {
-            var all = temple._sessions || []
-            for (var i = 0; i < all.length; i++) {
-                if (all[i] && all[i].sessionId === parentId) { host = all[i]; break }
+        if (!parentId) return null
+        var all = temple._sessions || []
+        for (var i = 0; i < all.length; i++)
+            if (all[i] && all[i].sessionId === parentId) return all[i]
+        return null
+    }
+    // the reveal chips' copy: the menu's own recovery text, menu kept closed
+    function copySession(record) {
+        if (sessionMenu.item) sessionMenu.item.copyRecovery(record)
+        copiedId = (record && record.sessionId) || ""
+        copiedBeat.restart()
+    }
+    // plaque state that must outlive the plaques: the roster is reassigned on
+    // every heartbeat and every delegate is rebuilt, so focus and the copy
+    // chip's one-beat acknowledgement are keyed by session id up here
+    property string focusedId: ""
+    property string copiedId: ""
+    property bool rebuilding: false
+    Timer { id: copiedBeat; interval: 1200; onTriggered: temple.copiedId = "" }
+
+    // ── the reveal chips — [copy] [details], swapped INTO a plaque's troupe box
+    // on hover or keyboard focus: same box, same clip, same height, so the
+    // reveal steals no label width and shifts nothing. The chips take the
+    // click above cardMouse (inner is z:1) but leave hover to it: no
+    // hoverEnabled and no HoverHandler on a chip, because any hover-accepting
+    // item under the pointer blinks cardMouse.containsMouse on entry and the
+    // troupe frame flashes back for a beat. So the chips carry no hover tint.
+    component RevealChips: Row {
+        required property var plaque
+        property int size: 10
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 6
+        Text {
+            // the acknowledgement is the same six glyphs wide as the verb —
+            // the row's width never moves inside the clipped troupe box
+            text: (plaque.s && plaque.s.sessionId && temple.copiedId === plaque.s.sessionId) ? "[done]" : "[copy]"
+            font.family: temple.faceMono; font.pixelSize: parent.size
+            color: temple.withA(temple.signature, 0.9)
+            MouseArea {
+                anchors.fill: parent
+                onClicked: temple.copySession(plaque.s)
             }
         }
-        sessionMenu.item.open(record, point.x, point.y, host)
+        Text {
+            id: detailsChip
+            text: "[details]"
+            font.family: temple.faceMono; font.pixelSize: parent.size
+            color: temple.withA(temple.signature, 0.9)
+            MouseArea {
+                anchors.fill: parent
+                onClicked: function(mouse) { temple.openSessionMenu(plaque.s, detailsChip, mouse.x, mouse.y, "details") }
+            }
+        }
     }
 
     implicitWidth: 360
@@ -368,6 +418,13 @@ Item {
         if (s && s.kind) return s.kind
         return (s && s.agent === "shell") ? "shell" : "agent"
     }
+    // A courier nests under its parent: a `subagent` record, or a record whose
+    // native harness published the thread role `subagent` (a nested Codex
+    // thread keeps kind `app` for faces and refusals). Never every parented
+    // record — a parented `app` with no such role stays a top-level card.
+    function nested(s) {
+        return !!s && (kindOf(s) === "subagent" || s.nativeRole === "subagent")
+    }
 
     // The card's display name: its own title when the daemon published one,
     // else the agent string. NEVER the model id — that renders in full, as
@@ -479,17 +536,18 @@ Item {
         var byId = {}
         for (i = 0; i < mine.length; i++) byId[mine[i].sessionId] = mine[i]
 
-        // Split tops from subagent children; clamp depth by climbing to the
-        // nearest NON-subagent ancestor present in the roster.
+        // Split tops from nested children (`nested()` above); clamp depth by
+        // climbing to the nearest NON-nested ancestor present in the roster,
+        // so a grandchild rides under the same root as its parent.
         var tops = [], kids = {}
         for (i = 0; i < mine.length; i++) {
             var s2 = mine[i]
-            if (kindOf(s2) === "subagent") {
+            if (nested(s2)) {
                 var anchor = null, cur = s2, hops = 0
                 while (cur && cur.parentSessionId && hops < 8) {
                     var par = byId[cur.parentSessionId]
                     if (!par) break
-                    if (kindOf(par) !== "subagent") { anchor = par; break }
+                    if (!nested(par)) { anchor = par; break }
                     cur = par; hops++
                 }
                 if (anchor) {
@@ -572,7 +630,9 @@ Item {
                 }
             }
         }
+        temple.rebuilding = true
         temple.groups = gs
+        temple.rebuilding = false
         temple.totalCount = total
         temple.workingCount = work
         temple.firstWorkingId = fw
@@ -1068,7 +1128,7 @@ Item {
                                         width: playbill.width
                                         spacing: 3
 
-                                        SessionCard { s: bay.row.s; hue: movement.hue }
+                                        SessionCard { s: bay.row.s; hue: movement.hue; place: movement.g.anchored ? movement.g.name : "" }
 
                                         Repeater {
                                             model: bay.row.kids
@@ -1092,6 +1152,7 @@ Item {
                                                     s: modelData
                                                     child: true
                                                     hue: movement.hue
+                                                    place: movement.g.anchored ? movement.g.name : ""
                                                 }
                                             }
                                         }
@@ -1173,47 +1234,96 @@ Item {
     // ═════ ONE PLAQUE ══════════════════════════════════════════════════════════
     // A hairline-bordered card, ONE SURFACE — not zones. The plaque fill/
     // border and the left pilaster are the card's only chrome; no rectangle
-    // scopes a sub-region beneath them. Six rows, crest to ground:
+    // scopes a sub-region beneath them. Seven rows, crest to ground, ONE
+    // left edge: the title alone starts at x=51 (lamp 16 + the 35px
+    // indicator lane); every subordinate line starts at 21, past the lamp.
     //
-    // 1 · IDENTITY — lamp · agent name (s.agent VERBATIM, no lookup — the
-    // autohook) · ⟐/⇄ kind + ϟ hook tags, and the CATALOGUE CORNER reading
-    // right→left: the #NN graph badge outermost (rebuild()'s ordinal — #NN
-    // main, #NN.k sub — rendered here, never assigned), wsN inside it
-    // (mains only).
+    // 1 · IDENTITY — lamp · [indicator box] · title (the published title,
+    // else the harness; serif 14, WRAPS to two lines, then elides) and the
+    // CATALOGUE CORNER reading right→left on LINE ONE: the #NN graph badge
+    // outermost (rebuild()'s ordinal — #NN main, #NN.k sub — rendered here,
+    // never assigned), wsN inside it (mains only). A wrapped title never
+    // drags the lamp, the boxes or the corner down.
     //
-    // 2 · PROVENANCE — harness/model beside petname and real ID suffix.
-    // Expandable details preserve the complete ID and copyable recovery data.
+    // 2 · PROVENANCE — harness / model (mono 10, WRAPS to two lines against
+    // a FIXED right cell) · the state word, the lamp's caption. A title that
+    // already is the harness, with no model, leaves the left run empty.
     //
-    // 3 · DIRECTIVE — explicit prompt content, independent of the title.
+    // 3 · PLACE — petname · …id (screenshot hints; the full ID is in
+    // Details) · host · project, only what is published; the place block
+    // steps under the petname when the two would fight for the line.
     //
-    // 4 · VOICE: thinking — a FIXED box (4 lines main / 2 sub, full width):
+    // 4 · DIRECTIVE — explicit prompt content, independent of the title.
+    //
+    // 4½ · HAND — the tool, one line, ▸ caret, its own slot.
+    //
+    // 5 · VOICE: thinking — a FIXED box (4 lines main / 2 sub, full width):
     // text wraps, the LAST line elides, tool text popping in never shifts
     // the card. sudo — the one urgent flag — pins to the lane's own top-
     // right corner when held.
     //
-    // 4½ · SUMMONS — a 20px lane that EXISTS only while a permission summons
+    // 5½ · SUMMONS — a 20px lane that EXISTS only while a permission summons
     // for this session stands in the herald ledger: the ask (the summons
     // summary) left, approve / deny chips right. The one place the card's
-    // silhouette moves automatically; details expand only on request. Same wire line and same daemon guards as the herald's card.
+    // silhouette moves automatically. Same wire line and same daemon guards
+    // as the herald's card.
     //
-    // 5 · PULSE — ctx (this session's OWN context window, NUMBERS ONLY —
-    // no percentage text, no bar glyph; ctxColor severity rides the colour
-    // alone; mains only) and up (elapsed since start, both kinds) SHARE one
-    // line: ctx left, up right-anchored beside it on mains (the same read-
-    // right-to-left corner idiom as the #NN/wsN pair in row 1); subs (no
-    // ctx to share with) left-anchor up alone at the row's usual margin.
+    // 6 · PULSE — ctx (this session's OWN context window, NUMBERS ONLY;
+    // mains only) and up (elapsed since start, both kinds) SHARE one line:
+    // ctx left, up right-anchored; subs left-anchor up alone.
     //
-    // 6 · GROUND — mains close with cwd (ElideLeft keeps the tail) beside
-    // the clipped troupe box — the pairing idiom rows 2 and 5 both copy;
-    // subs close with the troupe alone. Unmoved.
+    // 7 · GROUND — mains close with cwd (ElideLeft keeps the tail) beside
+    // the clipped troupe box; subs close with the troupe alone. The troupe
+    // box is ALSO the reveal surface: on hover or keyboard focus the kaomoji
+    // frame gives way to [copy] [details] inside the same box (RevealChips
+    // above) — the right-click menu stays the full sheet.
     //
-    // Closed details and fixed activity lanes keep a stable silhouette, no
-    // jitter as live data streams in; the animated elements ride reserved
-    // boxes (lamp 16px, troupe 116px main / 90px sub) so nothing floats.
-    // No zone-break spacers, no card-level dividers — one Column rhythm,
-    // one container. radius 0; colour only from temple.livery.* roles.
-    component SessionCard: Item {
+    // Keyboard: Tab reaches every plaque (a 1px signature keyline marks the
+    // focused one); Return focuses the session's window, c copies, d opens
+    // Details, Menu / Shift+F10 opens the full sheet.
+    //
+    // Fixed activity lanes keep a stable silhouette, no jitter as live data
+    // streams in; the animated elements ride reserved boxes (lamp 16px, the
+    // indicator 13×16 / 24×18 before the title, troupe 116px main / 90px
+    // sub) so nothing floats. No zone-break spacers, no card-level dividers —
+    // one Column rhythm, one container. radius 0; colour only from
+    // temple.livery.* roles.
+    component SessionCard: FocusScope {
         id: card
+        // the effective project this plaque hangs in (the folder's name, ""
+        // when unanchored) — shown on the place line, never minted here
+        property string place: ""
+        activeFocusOnTab: true
+        readonly property bool revealed: cardMouse.containsMouse || card.activeFocus
+        // Keyboard focus lives in temple.focusedId, not in this delegate: the
+        // roster is reassigned on every heartbeat and the Repeater rebuilds
+        // every plaque, so a rebuilt plaque takes focus back by id. Focus is
+        // released only when it moves for real (not while rebuilding).
+        onActiveFocusChanged: {
+            var id = (card.s && card.s.sessionId) || ""
+            if (!id) return
+            if (card.activeFocus) temple.focusedId = id
+            else if (temple.focusedId === id && !temple.rebuilding) temple.focusedId = ""
+        }
+        Component.onCompleted: {
+            if (card.s && card.s.sessionId && card.s.sessionId === temple.focusedId) card.forceActiveFocus()
+        }
+        Keys.onPressed: function(event) {
+            if (!card.s) return
+            var chord = event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
+            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                var id = (card.child && card.s.parentSessionId) ? card.s.parentSessionId : card.s.sessionId
+                if (id && temple.bridge) temple.bridge.focusSession(id)
+            } else if (event.key === Qt.Key_C && !chord) {
+                temple.copySession(card.s)
+            } else if (event.key === Qt.Key_D && !chord) {
+                temple.openSessionMenu(card.s, card, 0, 0, "details")
+            } else if (event.key === Qt.Key_Menu
+                       || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
+                temple.openSessionMenu(card.s, card, 0, 0)
+            } else return
+            event.accepted = true
+        }
 
         property var s: ({})
         property bool child: false
@@ -1266,7 +1376,7 @@ Item {
         // pool, everyone else from the general pool; resting states hold the
         // shared still pose for their (live) state.
         readonly property var facePool:
-            sKind === "subagent" ? faces.packages : faces.working
+            card.child ? faces.packages : faces.working
         readonly property int faceSet:
             faces.pickFor((s && s.sessionId) || "", facePool)
         readonly property var faceFrames: faces.workingFrames(faceSet, facePool)
@@ -1360,6 +1470,16 @@ Item {
                                : temple.withA(card.hue, 0.6)
         }
 
+        // keyboard focus — a 1px keyline in the signature hue, inset 2px so it
+        // reads inside the plaque's own hairline (hover has the wash instead)
+        Rectangle {
+            anchors.fill: parent; anchors.margins: 2
+            visible: card.activeFocus
+            color: "transparent"
+            border.width: 1
+            border.color: temple.withA(card.laurel ? temple.livery.paletteHot : temple.signature, 0.9)
+        }
+
         Column {
             id: inner
             anchors.left: parent.left; anchors.leftMargin: 9
@@ -1378,12 +1498,14 @@ Item {
             // outermost, so the name owns the whole left run.
             Item {
                 width: parent.width
-                height: card.child ? 16 : 20
+                // the 2f5b287 row height while the title holds one line; only a
+                // wrapped title grows the row
+                height: nameT.lineCount > 1 ? nameT.implicitHeight + 2 : (card.child ? 16 : 20)
 
                 Text {                           // #NN — the catalogue corner
                     id: badgeT
                     anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.baseline: nameT.baseline
                     text: card.noBadge
                     font.family: temple.faceMono; font.pixelSize: 10
                     font.weight: Font.DemiBold
@@ -1394,7 +1516,7 @@ Item {
                     id: wsT
                     visible: !card.child && card.hasWs
                     anchors.right: badgeT.left; anchors.rightMargin: 8
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.baseline: nameT.baseline
                     text: card.hasWs ? ("ws" + card.s.workspace) : ""
                     font.family: temple.faceMono; font.pixelSize: 9
                     // the bar's own note hue for this workspace — the same
@@ -1402,26 +1524,10 @@ Item {
                     // (noteColor is safe for id <= 0)
                     color: temple.withA(temple.livery.noteColor(card.hasWs ? card.s.workspace : 0), 0.9)
                 }
-                Text {                           // state word — the lamp's caption,
-                                                 // same live state + colour source as
-                                                 // the glyph so the two never disagree;
-                                                 // always rendered ("—" fallback) so the
-                                                 // corner slot never jitters.
-                    id: stateWordT
-                    anchors.right: wsT.visible ? wsT.left : badgeT.left
-                    anchors.rightMargin: 8
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: card.cardLiveState !== "" ? card.cardLiveState : "—"
-                    font.family: temple.faceSerif; font.italic: true
-                    font.pixelSize: 10   // the family state-word size (Terminals matches)
-                    color: temple.withA(temple.lampColor(card.cardLiveState),
-                                        card.cardResting ? 0.55 : 1.0)
-                }
-
                 Item {                           // the reserved lamp box
                     id: lampBox
                     x: 0
-                    anchors.verticalCenter: parent.verticalCenter
+                    y: card.child ? 0 : 2   // seats on line one — a wrapped title never drags it
                     width: 16; height: 16
 
                     Text {
@@ -1467,14 +1573,15 @@ Item {
                     // Every harness keeps the same reserved animation lane at rest.
                     anchors.left: lampBox.right
                     anchors.leftMargin: 35
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.top: parent.top; anchors.topMargin: card.child ? 0 : 1
                     text: card.displayName
                     elide: Text.ElideRight
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 2
                     width: Math.min(implicitWidth,
                                     parent.width - 51 - badgeT.implicitWidth - 10
                                     - (kindTag.visible ? kindTag.implicitWidth + 6 : 0)
-                                    - (wsT.visible ? wsT.implicitWidth + 8 : 0)
-                                    - (stateWordT.implicitWidth + 8))
+                                    - (wsT.visible ? wsT.implicitWidth + 8 : 0))
                     font.family: temple.faceSerif
                     // 14 on mains — the family name size (Terminals' main
                     // label is serif/mono 14); subs keep their smaller step.
@@ -1486,9 +1593,9 @@ Item {
                 }
                 Text {                           // kind tag — WITH the name
                     id: kindTag
-                    visible: card.sKind === "subagent"
+                    visible: card.child
                     anchors.left: nameT.right; anchors.leftMargin: 6
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.baseline: nameT.baseline
                     text: "⟐ sub"
                     font.family: temple.faceMono; font.pixelSize: 9
                     color: temple.livery.violet
@@ -1505,7 +1612,7 @@ Item {
                     visible: (card.hooked || card.sKind === "subagent") && card.cardWorking && !card.piThinking && !card.kimiIdentity && !card.codexIdentity
                     anchors.right: nameT.left
                     anchors.rightMargin: 3
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenter: lampBox.verticalCenter
                     anchors.verticalCenterOffset: 2
                     // WORKING + claude → cycles the same reverse-
                     // engineered spinner glyphs/timing as UsageGadget's ❋
@@ -1583,7 +1690,7 @@ Item {
                     visible: card.piLive
                     anchors.right: nameT.left
                     anchors.rightMargin: 3
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenter: lampBox.verticalCenter
                     anchors.verticalCenterOffset: 1   // rests a tick below the name's optical centre
                     width: 13; height: 16
 
@@ -1653,7 +1760,7 @@ Item {
                     id: codexTag
                     visible: card.codexIdentity
                     anchors.right: nameT.left; anchors.rightMargin: 3
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenter: lampBox.verticalCenter
                     width: 24; height: 18
                     clip: true
                     readonly property color ink: temple.withA(temple.lampColor(card.cardLiveState), 0.95)
@@ -1799,7 +1906,7 @@ Item {
                     visible: card.kimiIdentity && card.cardWorking
                     anchors.right: nameT.left
                     anchors.rightMargin: 3
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenter: lampBox.verticalCenter
                     // frames + 120ms cadence lifted verbatim from kimi-code's
                     // MOON_SPINNER (tui/constant/rendering.ts): 8 phases, one
                     // full lunation ≈ 1s, uncoloured — the emoji face carries
@@ -1823,36 +1930,81 @@ Item {
                 }
             }
 
+            // ── 2 · PROVENANCE — harness / model ── the state word ───────────
+            // The harness/model WRAPS (two lines at most) against a FIXED right
+            // cell: the state word, the lamp's caption — same live state and
+            // colour source as the glyph so the two never disagree.
             Item {
                 id: identityRow
                 width: parent.width
-                readonly property bool split: width < 300 && harnessIdentity.visible
-                height: split ? 28 : 14
-                readonly property real availableWidth: width
+                height: Math.max(14, harnessIdentity.implicitHeight)
+                Text {
+                    id: stateWordT
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    text: card.cardLiveState !== "" ? card.cardLiveState : "—"
+                    font.family: temple.faceSerif; font.italic: true
+                    font.pixelSize: 10   // the family state-word size (Terminals matches)
+                    color: temple.withA(temple.lampColor(card.cardLiveState),
+                                        card.cardResting ? 0.55 : 1.0)
+                }
                 Text {
                     id: harnessIdentity
-                    anchors.left: parent.left
-                    visible: !!(card.s && card.s.model) || card.displayName !== card.agentName
-                    width: !visible ? 0 : (identityRow.split ? parent.width
-                        : Math.max(0, identityRow.availableWidth - Math.max(96, identityRow.availableWidth * 0.55) - 8))
-                    text: card.agentName + ((card.s && card.s.model) ? " / " + card.s.model : "")
-                    elide: Text.ElideMiddle
+                    x: 21
+                    anchors.top: parent.top
+                    width: Math.max(0, parent.width - 21 - stateWordT.implicitWidth - 8)
+                    // a title that already IS the harness, with no model, does
+                    // not echo itself here
+                    text: (!!(card.s && card.s.model) || card.displayName !== card.agentName)
+                          ? card.agentName + ((card.s && card.s.model) ? " / " + card.s.model : "")
+                          : ""
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 2
+                    elide: Text.ElideRight
                     font.family: temple.faceMono; font.pixelSize: 10
                     color: temple.withA(temple.livery.paletteFg, 0.65)
                 }
+            }
+
+            // ── 3 · PLACE — petname · …id ── host · project ─────────────────
+            // Petname and ID suffix are screenshot hints (the full ID lives in
+            // Details); the place block shows only what is published — a host
+            // when the record carries one, the effective project when the
+            // plaque hangs in a folder — and steps under the petname when the
+            // two would fight for the line.
+            Item {
+                id: placeRow
+                width: parent.width
+                readonly property string hostText: (card.s && card.s.host) ? ("" + card.s.host) : ""
+                readonly property string placeText:
+                    hostText + ((hostText !== "" && card.place !== "") ? " · " : "") + card.place
+                readonly property bool stacked: placeText !== ""
+                    && (width - 21 - idT.implicitWidth - 8 < Math.min(placeT.implicitWidth, 96))
+                height: stacked ? 28 : 14
                 Text {
-                    anchors.left: harnessIdentity.visible && !identityRow.split ? harnessIdentity.right : parent.left
-                    anchors.leftMargin: harnessIdentity.visible && !identityRow.split ? 8 : 0
-                    y: identityRow.split ? 14 : 0
-                    anchors.right: parent.right
-                    anchors.rightMargin: 0
-                    horizontalAlignment: Text.AlignRight
+                    id: idT
+                    x: 21
+                    anchors.top: parent.top
+                    width: Math.min(implicitWidth, parent.width - 21)
                     text: card.idCallout
                     elide: Text.ElideMiddle
                     font.family: temple.faceMono; font.pixelSize: 10
                     color: temple.withA(temple.livery.paletteFg, 0.65)
                 }
-
+                Text {
+                    id: placeT
+                    visible: placeRow.placeText !== ""
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.topMargin: placeRow.stacked ? 14 : 0
+                    width: Math.max(0, placeRow.stacked ? parent.width - 21
+                                                        : parent.width - 21 - idT.width - 8)
+                    horizontalAlignment: Text.AlignRight
+                    text: placeRow.placeText
+                    elide: Text.ElideMiddle
+                    font.family: temple.faceMono; font.pixelSize: 10
+                    color: temple.withA(temple.livery.holoBlue, 0.85)
+                }
             }
 
             // Prompt content has its own field; a title never substitutes for it.
@@ -2123,6 +2275,7 @@ Item {
                     width: 90; height: 15
                     clip: true
                     Text {
+                        visible: !card.revealed
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
                         text: card.faceText
@@ -2132,6 +2285,7 @@ Item {
                         color: card.laurel ? temple.livery.paletteHot
                                            : temple.withA(temple.lampColor(card.cardLiveState), 0.85)
                     }
+                    RevealChips { visible: card.revealed; plaque: card; size: 9 }
                 }
             }
 
@@ -2150,6 +2304,7 @@ Item {
                     width: 116; height: 17
                     clip: true
                     Text {
+                        visible: !card.revealed
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
                         text: card.faceText
@@ -2159,6 +2314,7 @@ Item {
                         color: card.laurel ? temple.livery.paletteHot
                                            : temple.withA(temple.lampColor(card.cardLiveState), 0.85)
                     }
+                    RevealChips { visible: card.revealed; plaque: card; size: 10 }
                 }
                 Text {                           // cwd — left-anchored, tail
                     anchors.left: parent.left; anchors.leftMargin: 21          // kept via ElideLeft

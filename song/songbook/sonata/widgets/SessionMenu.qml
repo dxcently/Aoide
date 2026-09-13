@@ -30,29 +30,41 @@ Item {
     property real pointY: 0
     visible: false
     property string face: "JetBrainsMono Nerd Font"
-    readonly property string recovery: "Session: " + (record.sessionId || "unavailable")
-        + "\nNative session: " + (record.harnessSessionId || "unavailable")
-        + "\nPID: " + (record.pid || "unavailable")
-        + "\nWindow: " + (record.windowAddress || "unavailable")
-        + "\nTitle: " + (record.title || "unavailable")
-        + "\nPetname: " + (record.petname || "unavailable")
-        + "\nHarness: " + (record.agent || "unavailable")
-        + "\nModel: " + (record.model || "unavailable")
-        + "\nHost: " + (record.host || "unavailable")
-        + "\nDirectory: " + (record.cwd || "unavailable")
-        + "\nState: " + (record.state || "unavailable")
-        + "\nProject: " + effectiveProject()
-        + "\nPrompt: " + (record.prompt || "unavailable")
-    function open(rec, x, y, host) {
+    readonly property string recovery: recoveryFor(record)
+    function recoveryFor(rec) {
+        rec = rec || {}
+        return "Session: " + (rec.sessionId || "unavailable")
+        + "\nNative session: " + (rec.harnessSessionId || "unavailable")
+        + "\nPID: " + (rec.pid || "unavailable")
+        + "\nWindow: " + (rec.windowAddress || "unavailable")
+        + "\nTitle: " + (rec.title || "unavailable")
+        + "\nPetname: " + (rec.petname || "unavailable")
+        + "\nHarness: " + (rec.agent || "unavailable")
+        + "\nModel: " + (rec.model || "unavailable")
+        + "\nHost: " + (rec.host || "unavailable")
+        + "\nDirectory: " + (rec.cwd || "unavailable")
+        + "\nState: " + (rec.state || "unavailable")
+        + "\nProject: " + effectiveProjectOf(rec)
+        + "\nPrompt: " + (rec.prompt || "unavailable")
+    }
+    function open(rec, x, y, host, page) {
         if (busy) return
         record = JSON.parse(JSON.stringify(rec || {}))
         menu.host = host || null
         undyingFile.reload()
         record.undying = undyingIds.indexOf(record.sessionId) >= 0
-        pointX = x; pointY = y; page = "actions"; editing = false; message = ""; failed = false
+        pointX = x; pointY = y; menu.page = page || "actions"; editing = false; message = ""; failed = false
         nameInput.text = ""; pathInput.text = ""; paths = record.cwd ? [record.cwd] : []
         visible = true; forceActiveFocus(); projectFile.reload()
     }
+    // the plaques' copy chip — the same recovery text the menu copies, menu kept closed
+    function copyRecovery(rec) {
+        clipText.text = recoveryFor(rec)
+        clipText.selectAll(); clipText.copy(); clipText.deselect()
+    }
+    // the plaques' clipboard courier — never shown, never the open sheet's
+    // record, so a copy from a card cannot retarget a sheet already open
+    TextEdit { id: clipText; visible: false; readOnly: true; textFormat: TextEdit.PlainText }
     function clearUndying() {
         undyingIds = []
         var rec = JSON.parse(JSON.stringify(record)); rec.undying = false; record = rec
@@ -95,9 +107,9 @@ Item {
             && (rec.state === "working" || rec.state === "awaiting"
                 || rec.state === "stopped" || rec.state === "idle")
     }
-    function effectiveProject() {
-        if (record.project) return record.project
-        var best = "", length = -1, cwd = record.cwd || ""
+    function effectiveProjectOf(rec) {
+        if (rec.project) return rec.project
+        var best = "", length = -1, cwd = rec.cwd || ""
         for (var i = 0; i < projects.length; i++) {
             var roots = projects[i].roots && projects[i].roots.length ? projects[i].roots : [projects[i].path]
             for (var j = 0; j < roots.length; j++) {

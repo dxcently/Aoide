@@ -95,10 +95,59 @@ Item {
         source: Qt.resolvedUrl("SessionMenu.qml")
         onLoaded: { item.livery = gadget.livery; item.bridge = gadget.bridge }
     }
-    function openSessionMenu(record, sourceItem, x, y) {
+    function openSessionMenu(record, sourceItem, x, y, page) {
         if (!sessionMenu.item) return
         var point = sourceItem.mapToItem(gadget, x, y)
-        sessionMenu.item.open(record, point.x, point.y)
+        sessionMenu.item.open(record, point.x, point.y, null, page)
+    }
+    // the reveal chips' copy: the menu's own recovery text, menu kept closed
+    function copySession(record) {
+        if (sessionMenu.item) sessionMenu.item.copyRecovery(record)
+        copiedKey = rowKey(record)
+        copiedBeat.restart()
+    }
+    // row state that must outlive the rows: the roster is reassigned when it
+    // changes and every delegate is rebuilt, so focus and the copy chip's
+    // one-beat acknowledgement are keyed by rowKey up here
+    property string focusedKey: ""
+    property string copiedKey: ""
+    property bool rebuilding: false
+    Timer { id: copiedBeat; interval: 1200; onTriggered: gadget.copiedKey = "" }
+
+    // ── the reveal chips — [copy] [details], swapped INTO a row's troupe box
+    // on hover or keyboard focus (the Conductor's RevealChips, spoken in this
+    // temple's aegean): same box, same clip, same height, so the reveal
+    // steals no label width and shifts nothing. The chips take the click
+    // above the row's hover area (body is z:1) but leave hover to it: no
+    // hoverEnabled and no HoverHandler on a chip, because any hover-accepting
+    // item under the pointer blinks the row's containsMouse on entry and the
+    // troupe frame flashes back for a beat. So the chips carry no hover tint.
+    component RevealChips: Row {
+        required property var plaque
+        property int size: 10
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 6
+        Text {
+            // same six glyphs wide as the verb — the row never moves in the clipped box
+            text: (plaque.focusKey && gadget.copiedKey === plaque.focusKey) ? "[done]" : "[copy]"
+            font.family: gadget.faceMono; font.pixelSize: parent.size
+            color: gadget.withA(gadget.sig, 0.9)
+            MouseArea {
+                anchors.fill: parent
+                onClicked: gadget.copySession(plaque.modelData)
+            }
+        }
+        Text {
+            id: detailsChip
+            text: "[details]"
+            font.family: gadget.faceMono; font.pixelSize: parent.size
+            color: gadget.withA(gadget.sig, 0.9)
+            MouseArea {
+                anchors.fill: parent
+                onClicked: function(mouse) { gadget.openSessionMenu(plaque.modelData, detailsChip, mouse.x, mouse.y, "details") }
+            }
+        }
     }
 
     implicitWidth: 360
@@ -346,7 +395,9 @@ Item {
         var sig = rosterSig(next);
         if (sig !== _rosterSig || rows.length !== next.length) {
             _rosterSig = sig;
+            rebuilding = true;
             rows = next;
+            rebuilding = false;
         }
     }
 
@@ -748,20 +799,55 @@ Item {
                         Repeater {
                             model: gadget.rows
 
-                            delegate: Item {
+                            delegate: FocusScope {
                                 id: row
                                 required property var modelData
+                                // Tab reaches every row; hover OR keyboard focus reveals the
+                                // chips (the Conductor's plaque law). Return focuses the
+                                // window, c copies, d opens Details, Menu / Shift+F10 the sheet.
+                                activeFocusOnTab: true
+                                readonly property bool revealed: hover.containsMouse || row.activeFocus
+                                // focus lives in gadget.focusedKey (the roster model is
+                                // reassigned and every row rebuilt when it changes); a
+                                // rebuilt row takes focus back by its key
+                                readonly property string focusKey: gadget.rowKey(modelData)
+                                onActiveFocusChanged: {
+                                    if (!row.focusKey) return
+                                    if (row.activeFocus) gadget.focusedKey = row.focusKey
+                                    else if (gadget.focusedKey === row.focusKey && !gadget.rebuilding) gadget.focusedKey = ""
+                                }
+                                Keys.onPressed: function(event) {
+                                    var chord = event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
+                                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                        if (modelData.sessionId && gadget.bridge && gadget.bridge.focusSession)
+                                            gadget.bridge.focusSession(modelData.sessionId)
+                                    } else if (event.key === Qt.Key_C && !chord) {
+                                        gadget.copySession(modelData)
+                                    } else if (event.key === Qt.Key_D && !chord) {
+                                        gadget.openSessionMenu(modelData, row, 0, 0, "details")
+                                    } else if (event.key === Qt.Key_Menu
+                                               || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
+                                        gadget.openSessionMenu(modelData, row, 0, 0)
+                                    } else return
+                                    event.accepted = true
+                                }
                                 width: parent.width
                         // ONE plaque silhouette — the Conductor's card law worn
                         // at two sizes (see the ROWS note in the header): an
-                        // AGENT terminal is a main plaque (identity · screen
-                        // pane · vitals · ground — the pane + [▓░] vitals being
-                        // the owner's carve-out, this temple's own info core),
-                        // a bare tty the sub-scale plaque (identity · vitals ·
-                        // ground). Fixed lanes per kind — live data streaming
-                        // in never moves either. The sanctioned growths: a cwd
+                        // AGENT terminal is a main plaque (identity · provenance
+                        // · place · screen pane · vitals · ground — the pane +
+                        // [▓░] vitals being the owner's carve-out, this temple's
+                        // own info core), a bare tty the sub-scale plaque
+                        // (identity · provenance · place · vitals · ground).
+                        // Fixed lanes per kind — live data streaming in never
+                        // moves either. The sanctioned growths: the title and
+                        // the harness/model wrapping to their line caps, a cwd
                         // long enough to wrap (yazi's live dir — the dir must
                         // stay readable) and the command lines' 3-line cap.
+                        // The ground's troupe box doubles as the reveal surface:
+                        // hover or keyboard focus swaps the kaomoji for
+                        // [copy] [details] (RevealChips); right-click keeps the
+                        // full sheet.
                         height: body.implicitHeight + 11   // 5 top + text + 6 base (card law)
 
                         // an emph row must have a real sessionId — plain untracked
@@ -857,8 +943,10 @@ Item {
                             ? livery.ctxPercent(modelData.contextTokens, modelData.contextCeiling) : 0
 
                         // Re-assert the bar highlight if this row is rebuilt while
-                        // it is the hovered one (roster refresh under a still pointer).
+                        // it is the hovered one (roster refresh under a still pointer),
+                        // and take keyboard focus back if it was the focused one.
                         Component.onCompleted: {
+                            if (row.focusKey && row.focusKey === gadget.focusedKey) row.forceActiveFocus();
                             if (gadget.shared && gadget.shared.hoveredSessionId !== ""
                                 && gadget.shared.hoveredSessionId === gadget.rowKey(modelData))
                                 gadget.setHover(gadget.rowKey(modelData),
@@ -891,6 +979,16 @@ Item {
                             height: parent.height
                             color: row.emph ? livery.paletteHot
                                             : gadget.withA(row.wsTagColor, 0.6)
+                        }
+
+                        // keyboard focus — a 1px keyline in this temple's aegean, inset
+                        // 2px inside the plaque's hairline (hover has the wash instead)
+                        Rectangle {
+                            anchors.fill: parent; anchors.margins: 2
+                            visible: row.activeFocus
+                            color: "transparent"
+                            border.width: 1
+                            border.color: gadget.withA(row.emph ? livery.paletteHot : gadget.sig, 0.9)
                         }
 
                         Column {
@@ -933,19 +1031,6 @@ Item {
                                     font.family: gadget.faceMono; font.pixelSize: 9
                                     font.bold: row.wsSpecial   // the bar bolds its note glyphs too
                                     color: gadget.withA(row.wsTagColor, row.wsSpecial ? 0.95 : 0.9)
-                                }
-                                Text {                     // state word — the lamp's caption,
-                                                            // same state + colour source as the
-                                                            // glyph so the two never disagree
-                                    id: stateWordT
-                                    anchors.right: wsTagT.visible ? wsTagT.left : parent.right
-                                    anchors.rightMargin: wsTagT.visible ? 8 : 0
-                                    anchors.baseline: procName.baseline
-                                    text: gadget.stateLabel(modelData.state)
-                                    font.family: gadget.faceSerif; font.italic: true
-                                    font.pixelSize: 10   // the family state-word size
-                                    color: gadget.withA(gadget.stateColor(modelData.state),
-                                                        row.resting ? 0.55 : 1.0)
                                 }
                                 Item {                     // the reserved lamp box
                                     id: lampBox
@@ -1011,7 +1096,6 @@ Item {
                                     maximumLineCount: 3
                                     width: parent.width - 21
                                            - (wsTagT.visible ? wsTagT.implicitWidth + 8 : 0)
-                                           - (stateWordT.implicitWidth + 8)
                                     text: row.agentRow ? row.displayName : row.procText
                                     font.family: row.agentRow ? gadget.faceSerif : gadget.faceMono
                                     font.pixelSize: row.agentRow ? 14 : 12
@@ -1019,26 +1103,81 @@ Item {
                                     color: gadget.withA(livery.paletteFg, row.agentRow ? 1.0 : 0.85)
                                 }
                             }
-                            Text {
-                                width: parent.width
-                                text: (modelData.agent || "shell") + (modelData.model ? " / " + modelData.model : "")
-                                elide: Text.ElideMiddle
-                                font.family: gadget.faceMono; font.pixelSize: 10
-                                color: gadget.withA(gadget.livery.paletteFg, 0.65)
-                            }
+                            // ── 2 · PROVENANCE — harness / model ── the state word ──
+                            // The Conductor's row 2: harness/model WRAPS (two lines at
+                            // most) against the FIXED state-word cell, the lamp's
+                            // caption. An agent row titled by its own harness with no
+                            // model leaves the run empty rather than echoing itself; a
+                            // bare tty (its label is the command) names its shell here.
                             Item {
+                                id: identityRow
                                 width: parent.width
-                                height: 14
+                                height: Math.max(14, harnessIdentity.implicitHeight)
                                 Text {
-                                    anchors.left: parent.left
+                                    id: stateWordT
                                     anchors.right: parent.right
-                                    anchors.rightMargin: 0
+                                    anchors.top: parent.top
+                                    text: gadget.stateLabel(modelData.state)
+                                    font.family: gadget.faceSerif; font.italic: true
+                                    font.pixelSize: 10   // the family state-word size
+                                    color: gadget.withA(gadget.stateColor(modelData.state),
+                                                        row.resting ? 0.55 : 1.0)
+                                }
+                                Text {
+                                    id: harnessIdentity
+                                    x: 21
+                                    anchors.top: parent.top
+                                    width: Math.max(0, parent.width - 21 - stateWordT.implicitWidth - 8)
+                                    readonly property bool echoesTitle: row.agentRow && !modelData.model
+                                        && row.displayName === (modelData.agent || "agent")
+                                    text: echoesTitle ? ""
+                                          : (modelData.agent || "shell") + (modelData.model ? " / " + modelData.model : "")
+                                    wrapMode: Text.Wrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: gadget.withA(gadget.livery.paletteFg, 0.65)
+                                }
+                            }
+
+                            // ── 3 · PLACE — petname · …id ── host · project ──────────
+                            // Screenshot hints left (the full ID is in Details); host and
+                            // project right, only when the record publishes them, stepping
+                            // under the petname when the two would fight for the line.
+                            Item {
+                                id: placeRow
+                                width: parent.width
+                                readonly property string placeText:
+                                    (modelData.host || "")
+                                    + ((modelData.host && modelData.project) ? " · " : "")
+                                    + (modelData.project || "")
+                                readonly property bool stacked: placeText !== ""
+                                    && (width - 21 - idT.implicitWidth - 8 < Math.min(placeT.implicitWidth, 96))
+                                height: stacked ? 28 : 14
+                                Text {
+                                    id: idT
+                                    x: 21
+                                    anchors.top: parent.top
+                                    width: Math.min(implicitWidth, parent.width - 21)
                                     text: row.identityLabel
                                     elide: Text.ElideMiddle
                                     font.family: gadget.faceMono; font.pixelSize: 10
                                     color: gadget.withA(gadget.livery.paletteFg, 0.65)
                                 }
-
+                                Text {
+                                    id: placeT
+                                    visible: placeRow.placeText !== ""
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.topMargin: placeRow.stacked ? 14 : 0
+                                    width: Math.max(0, placeRow.stacked ? parent.width - 21
+                                                                        : parent.width - 21 - idT.width - 8)
+                                    horizontalAlignment: Text.AlignRight
+                                    text: placeRow.placeText
+                                    elide: Text.ElideMiddle
+                                    font.family: gadget.faceMono; font.pixelSize: 10
+                                    color: gadget.withA(gadget.sig, 0.85)
+                                }
                             }
 
                             Text {
@@ -1188,6 +1327,7 @@ Item {
                                     clip: true
                                     Text {
                                         id: kao            // the mood face
+                                        visible: !row.revealed
                                         anchors.right: parent.right
                                         anchors.verticalCenter: parent.verticalCenter
                                         // WORKING animates; every resting state
@@ -1223,6 +1363,7 @@ Item {
                                             onTriggered: kao.frame = (kao.frame + 1) % kao.frames.length
                                         }
                                     }
+                                    RevealChips { visible: row.revealed; plaque: row; size: row.agentRow ? 10 : 9 }
                                 }
                                 Text {                     // cwd — left-anchored; a real
                                                             // dir wraps, the title fallback

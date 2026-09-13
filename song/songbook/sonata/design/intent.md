@@ -163,26 +163,53 @@ text on the wallpaper, so no outline treatment is in use.
 
 ## Session identity semantics in sonata widgets
 
-Conductor and Terminals show the published title as their main heading, falling
-back to the harness when absent. Harness and reported model share a secondary
-line; missing models remain absent. Conductor puts its recovery handle on that
-same line and suppresses a redundant harness when it already serves as the
-heading without a model. Narrow cards retain two secondary lines; each continues to carry identity,
-not a dedicated action bar. Conductor reserves a fixed animation lane left of
-the heading in every state; Terminals adds no identity animation. A separate line carries the
-petname and the real session ID's final four characters. These
-are screenshot hints, not unique routing keys. Missing titles or petnames stay
-absent; the widgets never mint substitutes.
+Conductor and Terminals share one row hierarchy with one left edge. The
+heading is the published title, falling back to the harness when absent; it
+wraps to two lines before eliding, and the catalogue corner (workspace tag,
+graph badge) rides its first line. Conductor reserves a fixed animation lane
+left of the heading in every state; Terminals adds no identity animation.
+Every subordinate line starts past the lamp, so the heading leads and nothing
+below it reads as centred.
 
-Every card, including children and terminal rows, keeps recovery copy and details
-inside the context menu. Hover never changes the identity labels’ available
-width. Details retain the full session ID, published title, harness, model,
-state, petname, working directory, prompt, native harness ID, PID/window, and
-effective project name. Copy uses
-Qt’s text clipboard without a shell command. Host is shown only when published;
-missing host data remains unavailable. Session IDs remain unchanged for focus,
-tracing, permissions, and row matching. Prompt content is displayed only from
-the explicit prompt field, never inferred from the title.
+The provenance line carries harness and reported model, wrapping to two lines
+against a fixed right cell that holds the state word (the lamp's caption,
+same live state and colour as the glyph); missing models remain absent, and a
+heading that already is the harness, with no model, leaves the run empty
+rather than echoing itself. The place line carries the petname and the real
+session ID's final four characters on the left — screenshot hints, not unique
+routing keys — and host and effective project on the right, only when
+published (host from the record; project the folder the Conductor card
+hangs in, or the record's own project on a Terminals row), and
+steps the place block under the petname when the two would fight for the
+line. Missing titles, petnames, hosts or projects stay absent; the widgets
+never mint substitutes.
+
+A card nests under its parent only when it is a courier: a `subagent`
+record, or a record whose native harness published the thread role
+`subagent` (`nativeRole`), which keeps its own kind — a nested Codex thread
+stays `app` for its faces and refusals and wears the `⟐ sub` tag. A
+parented record with no such role stays a top-level card under its
+project. Depth is clamped by climbing to the nearest non-courier ancestor,
+so a grandchild rides under the same root as its parent as `N.2`. Every
+card animates from its own live state inside its reserved boxes (lamp,
+indicator, troupe); a working parent and its working children move
+together, and no label moves when the motion starts or stops.
+
+Every card, including children and terminal rows, reveals recovery copy and
+details on hover and on keyboard focus, inside the ground row's reserved
+troupe box: the kaomoji frame gives way to `[copy] [details]` in the same
+box, so the reveal steals no label width and shifts nothing. Tab reaches
+every card (a one-pixel keyline in the card's own hue — signature, laurel
+for the emphasised one — marks the focused card, and the focus survives the
+roster's heartbeat rebuilds); Return focuses the session's window, plain
+`c` copies, plain `d` opens
+Details, Menu or Shift+F10 opens the full sheet. Details retain the full
+session ID, published title, harness, model, state, petname, working
+directory, prompt, native harness ID, PID/window, and effective project
+name. Copy uses Qt's text clipboard without a shell command. Session IDs
+remain unchanged for focus, tracing, permissions, and row matching. Prompt
+content is displayed only from the explicit prompt field, never inferred
+from the title.
 
 Right-clicking a card opens the shared square `SessionMenu.qml` sheet; ordinary
 left-click keeps focusing the session. The menu carries recovery copy/details,

@@ -324,11 +324,18 @@ the root.
 
 Conductor's harness indicators sit 3px before the title in reserved boxes:
 13×16 for the glyph, moon, and π; 24×18 for the Codex book. Title position
-and available width stay fixed across animation frames and resting states.
-Parent and subagent cards share their identified harness's motion, driven
-by the published live state. Working subagents need no independent hook
-badge to animate; unrecognized harnesses retain the common activity lamp.
-Spawn ancestry alone never starts an animation.
+and available width stay fixed across animation frames and resting states,
+and the boxes seat on the title's first line, so a wrapped title never
+drags them. Parent and subagent cards share their identified harness's
+motion, driven by the published live state. Working subagents need no
+independent hook badge to animate; unrecognized harnesses retain the common
+activity lamp. Spawn ancestry alone never starts an animation.
+
+The ground row's troupe box (116px main / 90px sub in both temples) is the
+one reserved box that changes CONTENT on interaction: hover or keyboard
+focus swaps the kaomoji frame for the `[copy] [details]` chips inside the
+same clipped box. The box itself never resizes, so the reveal is layout-
+neutral by construction.
 
 Durations and easings actually in use. Stay inside these bands; a new widget
 that animates at 900ms where the house animates at 160 reads as a different
