@@ -4475,3 +4475,21 @@ publishes `nativeRole` are the User's gates.
 
 Pages touched: song/songbook/sonata/design/intent.md,
 song/songbook/sonata/design/widget-structure.md
+
+## [2026-09-13] fix | the conductor confirms a project removal by its typed name
+
+Conductor lane (root, set B; independent review PASS-WITH-FIXES, fixes
+applied at integration). Removing a project from the TUI now opens a
+confirmation overlay that dispatches only when the exact project name has
+been typed: the key that opened it never dispatches, an empty or
+mismatched name never dispatches, Esc cancels, the target is captured
+when the overlay opens so a roster change cannot retarget it, and no file
+on disk is deleted. Numeric keys and Tab follow the displayed panel order
+1..9,0 from one shared table; mail tags render as ASCII `[tag]` on both
+card branches; Home is one padded surface with the logo aligned and its
+duplicate headings gone. The graph is an interim fixed-card, leaf-centred
+layout recomputed on each refresh, not the retained scene graph, which
+stays designer-owned follow-up work. 128 tests pass in the crate.
+
+Pages touched: pkgs/aoide/crates/conductor/README.md,
+pkgs/aoide/crates/conductor/AGENTS.md, pkgs/aoide/crates/conductor/DESIGN.md (new)
