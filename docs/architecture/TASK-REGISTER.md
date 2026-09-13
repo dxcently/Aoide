@@ -1305,6 +1305,15 @@ project/parent inheritance across local/remote/app/subagents;
   integrator applies the `mod`/registry lines); the preview owner
   implements the picker on top; the designer does the visual comparison
   and owns anything under the live songbook. No duplicate assets writer.
-- Status: ARCHITECT dispatched (Opus, `p-icon-arch.md` → `p-icon-brief.md`).
+- Status: brief DONE (`p-icon-brief.md`): `lyra icon collections|list|resolve`
+  (resolver ports Iconify's build algorithm; selected SVGs + `catalog.json`
+  with license/version/mono; pinned data = hashed `fetchurl` at
+  `pkgs/iconify-data`, never shipped); tint = MultiEffect alpha mask of a
+  livery-coloured rectangle for mono, plain `Image` for multicolor; 18
+  controls mapped to verified names in both collections. Facet carries
+  `IconCatalog.qml` DATA only; `Icon.qml` is a song helper (CONTRACTS §0)
+  via designer handoff. I1 EXECUTOR dispatched (`p-icon-i1-dispatch.md`,
+  new files only; registry lines are integrator steps); five questions to
+  root at defaults.
   Source work only: no rebuild, no activation. Mail receipt is not
   completion — done means implemented and visually verified.
