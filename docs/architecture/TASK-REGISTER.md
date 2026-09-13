@@ -1460,3 +1460,36 @@ project/parent inheritance across local/remote/app/subagents;
   root fixes it in the composer follow-up (seq 494: tags kept as ASCII
   `[tag]`, test updated, 122 tests), then delta re-review and
   commit by pathspec.
+
+## 20. dxflake architecture migration (User order via root seq 510, 2026-09-13)
+
+- Order: start NOW; isolated branch/worktree; baseline first (per-host eval +
+  the current rebuild error); then incremental migration with host
+  evaluation and package/config parity; conventional `default.nix`
+  aggregation instead of the custom walker; opt-in lane imports
+  (NixOS/HM/Darwin); shared aggregates/overrides below host; per-host
+  user/package selections; portable upstream Aoide/Lyra consumption;
+  compact songbook (shared covers, pure-Nix palette files); runtime
+  integrations upstream; build only, no switch, no activation; pin/lock
+  ownership coordinated (Spark sole editor); unresolved proposal details
+  reported, never invented.
+- Osaka owner status: root's assignment (yomi msgid 07575e63) never left
+  the yomi outbox (tries 0 — the live daemon predates the ssh/curl PATH
+  fix); relayed verbatim into osaka's mailbase as osaka seq 23; no armed
+  reader on `dxflake-codex` (cursor 0), kind-clover is a Codex desktop
+  thread (`codex-app-unsupported`), osaka's architecture worktree has no
+  commits ahead of main. Replacement with distinct ownership (the User's
+  instruction) = this lane.
+- Active branch: `fable/dxflake-architecture`, worktree
+  `/home/khoa/worktrees/dxflake-fable` (yomi), from origin/main 1cf1721;
+  the User's `~/dxflake` checkout untouched.
+- Ownership: Fable lane = structural migration (composition, aggregates,
+  lanes, per-host selections, upstream consumption); Osaka dxflake-codex
+  (if woken by the User) = Osaka-host consumer specifics; Spark =
+  flake.lock / aoide pin; User = rebuild/activation. Ownership notes filed
+  on osaka (seq 24 to the palette worker, seq 25 to dxflake-codex).
+- Status: ARCHITECT (Opus) writing `p-dxflake-brief.md` (recovered
+  proposal, unresolved choices, slices D1..Dn with drvPath parity); D0
+  baseline executor (Sonnet) running — evidence to
+  `scratchpad/dxflake-baseline/baseline.md`. Acknowledged to root (seq
+  512). Flag: dxflake pins Aoide rev 3b168ce, far behind 535241f.
