@@ -2241,27 +2241,27 @@ invocation.
   "schemaVersion": "0",
   "host": "sakaki",
   "generatedAt": "2026-09-12T04:00:00Z",
-  "liveSessions": 2,
-  "cachedSessions": 1,
+  "liveSessions": 1,
+  "cachedSessions": 2,
   "nodes": [
     { "mark": "●", "name": "sakaki", "isLocal": true, "paired": true,
       "verified": true, "advertising": false, "presence": "online",
-      "addr": "—", "lastSeen": null, "liveSessions": 1, "cachedSessions": 0,
+      "addr": null, "lastSeen": null, "liveSessions": 1, "cachedSessions": 0,
       "sessions": [ { "id": "sakaki/s1", "sessionId": "s1",
         "label": "sakaki/root/s1", "petname": "quiet-birch", "agent": "claude",
         "state": "working", "presence": "online", "cwd": "/home/khoa/Aoide",
         "title": "Fix the mesh gate", "model": "claude-opus-4-5", "kind": "root" } ] },
     { "mark": "○", "name": "chiyo", "isLocal": false, "paired": true,
       "verified": true, "advertising": false, "presence": "unreachable",
-      "addr": "—", "lastSeen": "2026-09-12T03:58:00Z",
-      "liveSessions": 1, "cachedSessions": 1,
+      "addr": null, "lastSeen": "2026-09-12T03:58:00Z",
+      "liveSessions": 0, "cachedSessions": 2,
       "sessions": [
         { "id": "chiyo/s9", "sessionId": "s9", "label": "chiyo/root/s9",
           "petname": null, "agent": "claude", "state": "idle",
           "presence": "last-seen", "cwd": "/srv/khoa/Aoide" },
         { "id": "chiyo/s10", "sessionId": "s10", "label": "chiyo/child/s10",
           "petname": null, "agent": "claude", "state": "working",
-          "presence": "online", "cwd": "/srv/khoa/Aoide", "parent": "s9" }
+          "presence": "last-seen", "cwd": "/srv/khoa/Aoide", "parent": "s9" }
       ] }
   ]
 }
