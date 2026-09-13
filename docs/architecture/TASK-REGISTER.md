@@ -884,10 +884,10 @@ Fields per entry: status · owner · depends on · evidence · next.
   tests/docs only, re-run if `resolve_parent` changes. Rig: scratch
   `rig-e1b.sh`. STAGED + PROVED, not deployed. Conductor absence on the
   live desktop (root seq 445/447, 2026-09-13) is this deployment gap: the
-  live aoided predates E1b; no unpublished Eidolon code exists; candidates
-  d252b55 (origin/main, store nj7ahhrh…) or c71810b (local, store
-  qr7bdir8…, behind the b6d453f ruling); pin via dxflake, activation the
-  User's; post-rebuild acceptance = one agent=eidolon record for the
+  live aoided predates E1b; no unpublished Eidolon code exists; b6d453f
+  APPROVED (root seq 492); origin/main = 535241f (pristine builds: e00568c
+  → store qr7bdir8…, b719571 → store icw40km1…, letter fanout included);
+  pin via dxflake to 535241f / icw40km1…, activation the User's; post-rebuild acceptance = one agent=eidolon record for the
   native pid parented to the wrap, no duplicate, node in graph.json and
   the conductor, state follows the busy flag, no reap while the pid lives.
 - BUILD BREAK found by this proof: S2 fdb6682 added `sources` to
@@ -1457,5 +1457,6 @@ project/parent inheritance across local/remote/app/subagents;
   B conductor FAIL: graphview.rs:691-733 draws the tag chip only for
   Project nodes, pre-existing test
   `ui::tests::graph_panel_draws_nodes_edges_and_tags` fails (114/1) —
-  root fixes it in the composer follow-up, then delta re-review and
+  root fixes it in the composer follow-up (seq 494: tags kept as ASCII
+  `[tag]`, test updated, 122 tests), then delta re-review and
   commit by pathspec.
