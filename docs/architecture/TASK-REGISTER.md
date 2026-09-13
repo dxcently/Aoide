@@ -1347,9 +1347,15 @@ project/parent inheritance across local/remote/app/subagents;
   livery-coloured rectangle for mono, plain `Image` for multicolor; 18
   controls mapped to verified names in both collections. Facet carries
   `IconCatalog.qml` DATA only; `Icon.qml` is a song helper (CONTRACTS §0)
-  via designer handoff. I1 EXECUTOR dispatched (`p-icon-i1-dispatch.md`,
-  new files only; registry lines are integrator steps); five questions to
-  root at defaults.
+  via designer handoff. I1 DONE in the tree (uncommitted): `icon.rs`
+  1521 lines, 14 tests; `pkgs/iconify-data` hashes reproduced (iconoir
+  663723 B, ph 4566288 B); 20 Iconoir controls resolved into
+  `modules/facets/quickshell/icons/` with catalog + vendored licences;
+  repeat resolve a byte no-op; registry lines held as integrator steps.
+  Executor judgment: viewBox captured post-swap per the fetched
+  build.ts (brief prose said pre-swap). Independent review running;
+  integration follows the preview set (shared lyra registry files).
+  Five questions to root at defaults.
   Source work only: no rebuild, no activation. Mail receipt is not
   completion — done means implemented and visually verified.
 
