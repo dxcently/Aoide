@@ -1090,7 +1090,10 @@ project/parent inheritance across local/remote/app/subagents;
   acceptance, not a blocker. Sonata and generic Lyra/core defects stay
   upstream. The runtime palette contract remains the gate before any
   second palette implementation; the User activation gate is unchanged.
-- Status: registered, not started.
+- Status: ARCHITECT dispatched (Opus, `p-livery-seed-arch.md` →
+  `p-livery-seed-brief.md`): the seed consumes the resolved livery so both
+  fan-outs are one expression; proof by `nix eval` pair + offline build of
+  the seed derivation + one flake check case; no rebuild or activation.
 
 ## 17. Agent Client Protocol (ACP) client in core; widget builder as its UI (User scope seq 403/405)
 
