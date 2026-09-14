@@ -4666,3 +4666,47 @@ either fix and is not reproducible: see the diagnosis note in the register.
 
 Pages touched: pkgs/aoide/crates/storage/AGENTS.md,
 pkgs/aoide/crates/client/AGENTS.md
+
+## [2026-09-14] fix | the link backs off through a spool write failure, and a wedged ring peer cannot park the daemon's lock
+
+Mail-reliability lane, continued. First: `mail_wire::drain_node`'s
+`TransportFailed` arm wrote the entry's own bookkeeping (`tries`/
+`last_try_at`/`last_outcome`) with a bare `?` before calling
+`outbox::back_off`, so a local spool write failure — a full or read-only
+disk, exactly the condition under which the link is also most likely
+failing — skipped the backoff entirely and left the link re-dialed on
+every following tick with no delay. `write_entry`'s `Result` is now
+captured instead of `?`-ed away, `back_off` runs unconditionally, and the
+write's own error still propagates afterward. Pinned by
+`a_link_backs_off_even_when_the_entrys_own_record_cannot_be_written`,
+which plants a directory at `atomic_write`'s own `<msgid>.tmp.<pid>` temp
+path to force the write to fail with EISDIR deterministically, no chmod
+and no root needed; confirmed failing against the old code before the fix
+and passing after.
+
+Second: `aoide-conduct`'s doorbell (`graph::doorbell::ring_locked`) runs
+its whole select → inject → stamp sequence for a mailbox name under
+`.ring.lock`, inside the resident daemon, with both the channel and the
+PTY transport dialing out via a bare `UnixStream::connect` and no write
+timeout. A peer that accepts the connection but never reads — a wedged
+agent child, a stopped process — fills the socket buffer and blocks the
+write forever, parking every OTHER mailbox's ring behind that one hung
+peer. Both transports now connect through `connect_for_ring`, which arms
+a `RING_WRITE_TIMEOUT` (2s) on the stream before either write, so it
+covers `write_delivery`'s second write (the submit keystroke) as well as
+the first; a timed-out write is an ordinary `Err` and lands in the SAME
+`write-failed` skip a connect/write failure already used, latch
+untouched, reader still armed. Pinned by
+`a_ring_write_to_a_peer_that_never_reads_gives_up_instead_of_holding_the_ring_lock`,
+which binds a listener, accepts and never reads, and writes 8 MiB through
+the real transport; confirmed against a temporarily unbounded connect
+that hung past an 8-second bound before the fix, and gives up well inside
+it after.
+
+Both regressions are pinned by tests proven failing/hanging against the
+code as it stood. client 294 pass; conduct 771 pass, the same two
+`SUN_LEN` socket-path-length failures verified identical at HEAD.
+
+Pages touched: pkgs/aoide/crates/client/AGENTS.md,
+pkgs/aoide/crates/conduct/AGENTS.md, pkgs/aoide/crates/conduct/README.md,
+docs/architecture/MAIL.md

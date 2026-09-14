@@ -590,11 +590,15 @@ reader's `rung` to the arming letter's `seq`). The stamp follows the
 write, never precedes it: a write that fails — connect or write
 itself, channel or PTY alike, reported `write-failed` either way —
 leaves the reader armed, so a target that was merely unreachable for a
-moment is not silently skipped forever. The whole select → inject →
+moment is not silently skipped forever. A peer that accepts the
+connection but never reads is the same failure, not a hang: the write
+gives up after a bounded two-second timeout and reports `write-failed`
+exactly like any other. The whole select → inject →
 stamp sequence
 for one name runs under one cross-process critical section — a
 dedicated `.ring.lock` file, held across the real socket I/O and the
-submit delay, **never** the ordinary stage lock (`try_stage_lock`),
+submit delay, bounded by that same timeout rather than open-ended,
+**never** the ordinary stage lock (`try_stage_lock`),
 which is only ever held briefly and must never be asked to wait on a
 socket. Two concurrent rings for the same name simply serialize on that
 file: the second always selects after the first has already stamped,
