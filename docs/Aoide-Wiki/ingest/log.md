@@ -4626,3 +4626,43 @@ Pages touched: CONTRACTS.md, pkgs/aoide/crates/storage/README.md,
 pkgs/aoide/crates/storage/AGENTS.md, pkgs/aoide/crates/client/README.md,
 pkgs/aoide/crates/client/AGENTS.md, pkgs/aoide/crates/server/README.md,
 pkgs/aoide/crates/server/AGENTS.md
+
+## [2026-09-14] fix | a parked wall no longer starves the drain, and a failed write no longer litters the spool
+
+Mail-reliability lane, two defects found while checking 99c144a's bounded
+retry and receipt behaviour on the live box. First: `drain_node` applied
+`DRAIN_BATCH_CAP` to the raw spool listing and only then skipped `refused`
+entries, so a batch's worth of parked entries at the head — and they sort
+oldest-first, because parking is what happens to an entry that was tried —
+consumed the whole cap on entries the loop could never dial. A fresh letter
+behind fifty parked ones was never attempted again, silently, with the
+outbox still reporting it as waiting. `client/README.md` already specified
+"up to `DRAIN_BATCH_CAP` (50) non-refused entries", so this was the code
+missing its own stated contract, not a design change; the filter now runs
+before the cap. Yomi's osaka spool is entirely refused entries today, six
+of them, which is how close the live box was to it.
+
+Second: `fs::atomic_write` returned a write failure without unlinking the
+temp it had just created, and `sweep_stale_temps` only ever matched temps
+sharing the target's own stem — so a temp stranded that way was reclaimable
+only by a later write of the same file. For a write-once name there is no
+later write: 1519 zero-byte `<msgid>.tmp.3460304` orphans sat in
+`state/outbox/osaka/` from a dead pid, grown out of the same ack storm
+99c144a fixed, and had inflated that directory to a 3 MB inode. Both halves
+of the write now share one unlink, and the sweep reclaims any sibling
+`<stem>.tmp.<dead pid>` in the directory, which costs nothing (the
+`read_dir` was already paid on every write) and heals the existing litter on
+the next write into it. `.tmp.` is matched as a whole separator so
+`migrate_state_tree`'s `migrate-tmp.<pid>` and `seed_if_absent`'s
+`seed.<pid>` stay out of it. The live spool is not touched by hand.
+
+Both regressions are pinned by tests that fail against the code as it
+stood. storage 415, client 293 pass; the three remaining conduct/server
+failures are the same `SUN_LEN` socket-path-length shape 99c144a recorded,
+verified failing identically at HEAD.
+
+The `mail send --thread` hang reported in the same lane is NOT diagnosed by
+either fix and is not reproducible: see the diagnosis note in the register.
+
+Pages touched: pkgs/aoide/crates/storage/AGENTS.md,
+pkgs/aoide/crates/client/AGENTS.md
