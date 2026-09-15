@@ -228,12 +228,11 @@ in
         # quickshell wallpaper layer supersedes it live at render time.
         image = lib.mkDefault wallpaper;
 
-        # Cursor: a stock theme; v0 notes carry no cursor field yet, so this is
-        # a sane default the rice engine / host can override.
+        # Maple is the shared cursor default; hosts can override it.
         cursor = lib.mkDefault {
-          package = pkgs.adwaita-icon-theme;
-          name = "Adwaita";
-          size = 24;
+          package = pkgs.maplestory-cursor;
+          name = "Maple";
+          size = 40;
         };
 
         # Fonts: v0 notes carry no font field yet — sane default, host/rice
