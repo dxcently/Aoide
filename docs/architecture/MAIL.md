@@ -413,11 +413,17 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   regardless of the flag.
 - `link.json` is `.hld`: exponential backoff per link on failure,
   cleared on success. Per-entry `tries`/`lastOutcome` live in the entry.
-  A `refused` outcome stops that entry's retries and records the reason.
+  A `refused` outcome parks that entry (drains skip it) and records the
+  reason. Parked is not condemned: the refusing `allows` set is the
+  RECEIVING node's record of the sender, so once that host runs `aoide
+  node allow <sender> message on`, the sender runs `aoide mail outbox
+  retry <msgid>` (or `--refused [<node>]`) to un-park and dial at once.
+  The stored signed envelope is resent as-is, never re-minted, so the far
+  end's msgid dedup still holds.
 - A `down` node's directory is skipped entirely; entries whose ORIGIN is
   `down` are dropped at the next drain.
 - An entry retires only on a valid ack (above) or `aoide mail outbox rm
-  <msgid>`. `aoide mail outbox [<node>]` answers "did it land" truthfully
+  <msgid>`; `mail outbox retry` never retires anything. `aoide mail outbox [<node>]` answers "did it land" truthfully
   per entry via `data.delivery` — the same projection `aoide mail send`
   reports right after its own best-effort drain attempt, so neither
   command can drift from the other on what "queued"/"retrying"/etc. mean
