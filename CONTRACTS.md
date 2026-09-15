@@ -219,10 +219,12 @@ precedence, so the fan-outs cannot disagree. Read-side only: the option
 system keeps storing the song's authored values inert; no config-side
 `mkForce`, so no option-system recursion. The RUNTIME writers of
 `song/stage/livery.json` (`lyra rice stage`, `rice mode stage`/`declarative`,
-`reload`'s staging arm — §4) do not yet apply this rule: they re-derive the
-stage file from the raw committed song, so on a venue-set host the first
-runtime re-stage after activation reverts the override until that seam is
-taught it too.
+`reload`'s staging arm — §4) derive the DECLARED song's notes from the declared
+twin the activation seed publishes (`song/declared/livery.json`, §4) instead of
+the raw committed file, so re-staging the declared song reproduces the venue
+recolour rather than reverting it. Staging any OTHER song still re-derives from
+that song's own committed notes: the rule is the VENUE recolouring the song it
+declares, and the twin names exactly that song.
 
 | Key                | Type          | Default | Recolours       |
 | ------------------ | ------------- | ------- | ---------------- |
@@ -1240,9 +1242,10 @@ venue's `aoide.livery.override` applied, on every activation**
 (`home.activation.aoideSeedStage`, `modules/facets/quickshell/default.nix`,
 via `lib/livery.nix`'s `stagePatch`) — so a host that boots without ever
 running `rice stage` still has a correct, recoloured live stage twin from
-boot. The runtime writers named above do not yet apply the override tier:
-on a venue-set host, the first one that runs after activation reverts the
-stage twin to the song's own colours.
+boot. The same jq run publishes the declared twin below, which is what the
+runtime writers re-derive the DECLARED song from — so their next re-stage
+reproduces the venue recolour rather than reverting the stage twin to the
+song's own colours.
 
 **Additive in v0:** this path MAY be a SYMLINK rather than a plain file —
 `rice mode draft <name>` (§4's `stage/mode.json` entry) routes it into a
@@ -1283,6 +1286,35 @@ tier). `lyra rice stage` reads it (alongside `window.border`/
 `borderInactive`) to build its best-effort `hyprctl keyword` batch — a missing
 block, or a missing/null field within it, is skipped rather than defaulted;
 readers must tolerate both forms.
+
+### `song/declared/livery.json` — **v0**
+
+The DECLARED song's notes: the active song's committed `livery.json` with the
+venue's `aoide.livery.override` applied (`lib/livery.nix`'s `stagePatch`, §1's
+override tier), its top-level `song` field set to that song's name, keys
+sorted (`jq -S`, matching `serde_json::Value`'s BTreeMap ordering). Written by
+the SAME activation seed that writes `song/stage/livery.json` above
+(`home.activation.aoideSeedStage`, `modules/facets/quickshell/default.nix`) —
+one `jq` run, two destinations, so the two files can never disagree.
+
+Why it exists: `stage/livery.json` is the LIVE stage, rewritten by runtime
+writers, so it cannot itself say what the venue declared. This file is the
+venue's read-only statement of that, and the runtime writers reach for it when
+they need to re-derive the DECLARED song's notes rather than the committed
+ones. A plain file, never a symlink (nothing routes it — the draft routing
+above applies to `stage/livery.json` alone). **Absent** means the facet has
+never activated on this host; readers then fall back to the committed
+`song/songbook/<name>/livery.json` unchanged, which is the ordinary
+behaviour on a host with no venue override anyway.
+
+Readers: `lyra rice stage <name>`, `rice mode stage <name>`, and
+`rice mode declarative` — for the declared song ONLY. The scoping test is the
+file's own `"song"` field compared against the name being staged: staging any
+other song derives from that song's own committed notes. `rice mode
+declarative`'s no-`<name>` form also resolves its song off this same field
+(falling back to `stage/livery.json`'s own `"song"` breadcrumb when the file is
+absent). Nothing else reads it, and nothing in the Rust crates writes it —
+`handle_rice_stage` only reads.
 
 ### `song/stage/mode.json` — **v0**
 
@@ -1325,8 +1357,9 @@ current mode was entered.
 
 **Additive in v0 (khoa, 2026-08-17):** `stagingSong` remembers the last song
 actively used in `Staging` mode — distinct from `song`, which `rice mode
-declarative` legitimately overwrites to reflect whatever's now actually
-active. Locking declarative must never touch or clear `stagingSong`, so a
+declarative` legitimately overwrites to name the song it re-pinned to (the
+declared song `song/declared/livery.json` names, else the currently staged
+one). Locking declarative must never touch or clear `stagingSong`, so a
 later bare `rice mode stage` (no name — what the bar toggle sends) can still
 resolve back to what was being staged, instead of losing that memory the
 moment a declarative round-trip overwrites `song`. Absent when never set (a

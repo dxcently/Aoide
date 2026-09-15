@@ -239,14 +239,17 @@ given a name, it also stages that song's declared content immediately,
 combining unlock-and-stage into one call. `lyra rice mode declarative
 [<name>]` locks staging (also leaving `draft` mode the same way) — with a
 name, or with none: it re-pins `stage/livery.json` to the resolved song's
-committed notes FIRST (the current stage's own song when no name is given,
-same auto-resolve `rice mode stage` uses) and only writes the lock marker
-after that write succeeds, so the re-pin can never trip the lock it is
-about to set. This means a bare `rice mode declarative` **discards whatever
-unsaved live edits sat in the stage** — `rice draft save` first to keep
-them (the CLI's own success message says as much). Only when no song can be
-resolved at all (a genuinely fresh box with no stage file yet) does it fall
-back to a bare lock with nothing to re-pin.
+declared notes FIRST (with no name, the DECLARED song — the song
+`song/declared/livery.json` names, the venue's activation-published twin of
+the committed notes with any `aoide.livery.override` already applied; only a
+host that never activated the facet falls back to the current stage's own
+song, the auto-resolve `rice mode stage` uses) and only writes the lock
+marker after that write succeeds, so the re-pin can never trip the lock it
+is about to set. This means a bare `rice mode declarative` **discards
+whatever unsaved live edits sat in the stage** — `rice draft save` first to
+keep them (the CLI's own success message says as much). Only when no song
+can be resolved at all (a genuinely fresh box with no stage file and no
+declared twin) does it fall back to a bare lock with nothing to re-pin.
 
 The enforcement lives at the two write entrypoints only —
 `handle_rice_stage_entry` in `crates/song/src/commands/rice.rs`,

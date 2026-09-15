@@ -85,31 +85,39 @@ let
   # ── Seed script for `home.activation.aoideSeedStage` (below) ───────────────
   # Reasserts the ACTIVE song's committed livery, with the venue override
   # applied (`stageLivery`, above), into the live stage twin
-  # (`song/stage/livery.json`, CONTRACTS.md §4) on every activation, injecting
+  # (`song/stage/livery.json`, CONTRACTS.md §4) AND its declared twin
+  # (`song/declared/livery.json`) on every activation, injecting
   # the same `"song"` field `aoide rice preview <name>` would (jq's
   # `. + {song: …}`; `-S` sorts keys to match serde_json::Value's BTreeMap
   # ordering) — byte-identical to what `rice preview ${config.aoide.song}`
   # would stage ONLY where the host sets no `aoide.livery.override` (verified
   # by hand: `jq -S '. + {song:"sonata"}'` against song/songbook/sonata/livery.json
-  # reproduces the current staged file exactly); on an override-setting host
-  # the runtime writers (`rice stage`, `rice mode stage`/`declarative`,
-  # `reload`'s staging arm) still read the raw committed file and do not yet
-  # know the override tier, so activation stages the recoloured venue and the
-  # first runtime re-stage reverts it (tracked as a follow-up, register §16).
-  # Write-temp-then-rename in the SAME directory (so the rename is
-  # atomic) mirrors `shellbridge::atomic_write` (`aoide_storage::fs::atomic_write`)
-  # so a hot-reloading FileView (LiveryState.qml) never reads a torn file.
-  # The write goes to livery.json, the canonical stage livery file. The whole
-  # thing is one script
-  # (not inline `run` commands) so a `--dry-run` activation either runs it in
-  # full or not at all — never a half-applied mkdir/mktemp/jq/mv sequence.
+  # reproduces the current staged file exactly). The declared twin is what the
+  # runtime writers (`rice stage`, `rice mode stage`/`declarative`) read back
+  # for the declared song — that song's notes with the venue recolour already
+  # applied — so a re-stage after activation reproduces the venue rather than
+  # reverting to the song's own colours.
+  # Write-temp-then-rename in the SAME directory as each destination (so each
+  # rename is atomic) mirrors `shellbridge::atomic_write`
+  # (`aoide_storage::fs::atomic_write`) so a hot-reloading FileView
+  # (LiveryState.qml) never reads a torn file. The stage write goes to
+  # livery.json, the canonical stage livery file. The whole thing is one
+  # script (not inline `run` commands) so a `--dry-run` activation either runs
+  # it in full or not at all — never a half-applied mkdir/mktemp/jq/cp/mv
+  # sequence.
   seedStageScript = pkgs.writeShellScript "aoide-seed-stage" ''
     set -euo pipefail
-    mkdir -p "${config.aoide.root}/song/stage"
+    mkdir -p "${config.aoide.root}/song/stage" "${config.aoide.root}/song/declared"
     tmp=$(mktemp "${config.aoide.root}/song/stage/.livery.json.XXXXXX")
     ${pkgs.jq}/bin/jq -S '. + {song: $song}' --arg song "${config.aoide.song}" \
       "${stageLivery}" > "$tmp"
+    # The declared twin is the SAME bytes, published in its own directory
+    # (CONTRACTS.md §4) — copied into a temp there rather than renamed across
+    # directories, so the rename below can never cross a filesystem.
+    declared=$(mktemp "${config.aoide.root}/song/declared/.livery.json.XXXXXX")
+    cp "$tmp" "$declared"
     mv -f "$tmp" "${config.aoide.root}/song/stage/livery.json"
+    mv -f "$declared" "${config.aoide.root}/song/declared/livery.json"
   '';
 
   # ── QML root — the full skeleton config installed into run/qml/ ────────────
