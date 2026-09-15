@@ -73,6 +73,10 @@ in
             ad = "cd ${flakeDir}";
             adrebuild = "nh os switch ${flakeDir}/";
             adupdate = "nh os switch ${flakeDir}/ --update";
+            # Re-lock just the first-party corner and switch. `adupdate` moves
+            # every input including nixpkgs; this one moves only what we own,
+            # so a muse bump never drags a world rebuild behind it.
+            adbump = "nix flake update --flake ${flakeDir} aoide && nh os switch ${flakeDir}/";
             adboot = "nh os boot ${flakeDir}/";
             adtest = "nh os test ${flakeDir}/";
             adbuild = "nh os build ${flakeDir}/";
