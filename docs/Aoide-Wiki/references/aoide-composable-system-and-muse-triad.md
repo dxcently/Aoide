@@ -2,7 +2,13 @@
 
 This is the consolidated architecture and implementation plan. It distinguishes agreed requirements, verified source behavior, and proposed contracts. It does not declare the migration implemented or authorize a rebuild. The detailed [question register](mneme-aoide-open-questions.md) and [Mneme proposal](mneme-shared-memory-and-aoide.md) remain companion documents; their unresolved questions are not silently closed here.
 
-The implementation target is **AoideOS in the Aoide repository**, with **dxflake as the first external test consumer of the exported Aoide and Lyra cores**. The Nix composition tree, aggregates, platform lanes, users, package selection, and Lyra rice model below describe the AoideOS target. Implementation belongs here; dxflake validates consumption through public packages and modules without importing private module trees. Its wider configuration migration follows that consumer test. Aoide core's portable mail, identity, and context work remains independent of the AoideOS deployment migration.
+The authoritative Nix composition target and build sequence are in
+[Selective Nix composition](../../architecture/NIX-COMPOSITION.md). dxflake is
+the first live portability consumer; AoideOS migrates its walkers after that
+proof. Minimal additive upstream exports may precede the migration. That page
+governs provider selection, aggregations, shared users, selective lanes, and
+constructor implementation. This page supplies broader Lyra and muse-triad
+context, not a competing Nix migration specification.
 
 ## Agreed direction
 
@@ -35,86 +41,18 @@ The wallpaper override rule remains a proposed mechanism: follow the active song
 
 Aoide does not replace Melete's scheduler. Nix declares the Melete service; systemd supervises the daemon. Melete supervises its own jobs and hosted apps. Aoide dispatches and controls those jobs through Melete's lifecycle interface. Admission and execution audits remain distinct but correlated.
 
-## Proposed source tree
+## Nix composition and deployment
 
-~~~text
-Aoide/
-├── flake.nix                       outputs and platform constructors
-├── hosts/
-│   ├── yomi-strix/default.nix      roles, hardware, local service values
-│   ├── osaka/default.nix          roles, users, rice/package exceptions
-│   └── sakaki/default.nix         server roles, storage and public routes
-├── users/
-│   ├── khoa.nix                   account and home lanes
-│   └── guest.nix
-├── modules/
-│   ├── aggregates.nix            shared membership and defaults, by lane
-│   ├── overrides/kitty.nix        optional shared exception, selected explicitly
-│   ├── nucleus/default.nix        minimum shared contracts/foundation
-│   ├── dendrites/
-│   │   ├── kitty/default.nix      lane registry, small modules inline
-│   │   ├── melete/default.nix
-│   │   ├── mneme/default.nix
-│   │   └── cloudflared/default.nix
-│   └── facets/                    existing paint adapters; migration owned explicitly
-├── songbook/
-│   ├── covers/
-│   ├── sonata/{default.nix,widgets/,design/}
-│   └── nocturne/{default.nix,widgets/,design/}
-└── pkgs/                          real package builds and shared overrides
-~~~
+See [Selective Nix composition](../../architecture/NIX-COMPOSITION.md) for the
+source tree, host/user examples, provider registries, aggregation defaults,
+package overrides, platform lanes, and phased acceptance gates. Selection is
+resolved before platform module evaluation. `mkDefault` controls priority; it
+does not undo imports. No recursive walker or separate registry file is needed.
 
-This is a target tree. It does not rename existing files by assertion. In particular, song/songbook paths, rice.nix modules, packaging, runtime seed paths, and ownership documentation must migrate together. Splitting larger implementations into home.nix/nixos.nix/darwin.nix remains optional. A plain packages.nix catalogue is only warranted for shared custom choices or overrides; nixpkgs already supplies ordinary individual package entries.
-
-A registry is an ordinary attribute set whose values are Nix modules or module paths:
-
-~~~nix
-# A dendrite's default.nix
-{
-  nixos = { ... }: { /* system integration */ };
-  homeManager = ./home.nix;
-}
-~~~
-
-Aggregates import only needed registries and select their lanes. NixOS uses nixos; HM uses homeManager whether standalone or attached to NixOS/Darwin; Darwin system settings use darwin. A registry is not itself a NixOS module. No custom recursive loader is necessary. Imports are selected independently of the module config fixed point; enable=false cannot retroactively undo an import.
-
-The shared nucleus must contain only requirements of every selected consumer, not a hidden desktop or Melete installation. An optional dependency belongs in a selected aggregate/dendrite. Existing facets retain their closed livery/arrangement/surfaces contract until an explicit amendment moves or replaces it.
-
-## Hosts, users, packages, and platform outputs
-
-~~~text
-Host roles ──> selected system aggregate lanes ──> system services/packages
-     │
-     └─ user attachments
-          ├─ shared identity/preferences
-          ├─ selected HM aggregate lanes
-          └─ host-specific user overrides ──> per-user configuration/state
-~~~
-
-A system without HM selects only system lanes. A user can run standalone HM on a compatible existing OS. A plain package consumer can install an exported package without any module; that does not configure its services or secrets. programs.*.enable and services.*.enable belong to their evaluator, often install their own packages, and should not be duplicated behind redundant aoide.* flags.
-
-The proposed repeated-workstation grouping can be selected by Yomi, Osaka, and Chiyo. Each keeps its own tunnel identity and hardware values. Sakaki selects a server aggregate and its own hosted-service bundles; it need not import the workstation graph. This is a proposed grouping, not current deployed membership.
-
-Osaka can select workstation/gaming system lanes, Khoa's workstation/gaming home lanes, and a simpler Guest home. Khoa can use Nocturne and Guest Sonata while sharing cover files. System packages go in environment.systemPackages; user additions go in home.packages. The existing singleton aoide.user deployment cannot implement this merely by duplicating user names.
-
-The shared remote-access aggregate supplies Cloudflared implementation and SSH routing defaults. Host tunnel UUIDs and credential-file references remain explicit. Sakaki's credential file is currently a module default in dxflake and must move into Sakaki's configuration. An optional web-exposure aggregate can derive tunnel web hostnames from its exposed Caddy site map, avoiding two manually synchronized lists. Gateway access policy remains separate from route existence.
-
-| Change | Expected editing surface |
-|---|---|
-| Add a feature shared by three hosts | New dendrite registry and relevant shared aggregate membership |
-| Add a system/user lane to a feature | That registry/implementation and selecting aggregate |
-| Add a plain package to one host/user | That host/user package selection |
-| Add a custom package shared across hosts | Package build/override and selected consumers or shared aggregate |
-| Add a user | User registry and account/HM attachments on selected hosts |
-| Change a host's hardware, tunnel, or rice preference | Host configuration |
-| Add a rice to a shared installed set | Song definition/assets and selecting aggregate |
-| Add an external flake dependency | Relevant input/lock plus selected consumer; not universally a one-file change |
-
-Package selection follows the host's chosen nixpkgs by default. Integrated HM uses the host package set when useGlobalPkgs is enabled; standalone HM receives its selected set explicitly. Prefer upstream module defaults and existing package options over redundant wrappers. External flake follows declarations are explicit, never generated automatically. Shared package exceptions are ordinary modules imported only by affected hosts/aggregates; mkDefault makes a shared preference overridable, while a normal-priority assignment conflicts with a competing normal assignment.
-
-A package override changes an executable; selecting a different module implementation happens before imports are assembled. Separate named inputs can pin different revisions. Selective module evaluation does not isolate the root lock graph: lock resolution or broad flake checks can still encounter unrelated inputs. Separate root flakes are only needed if independent dependency-lock failure domains are required.
-
-Required outputs include exported modules, NixOS configurations, standalone HM configurations, nix-darwin configurations where supported, and packages. Adding output constructors does not port Linux-specific Rust APIs or Wayland widgets to macOS. Darwin runtime portability is a separately verified workstream.
+System accounts and Home Manager attachments are separate, with shared user
+sources under `users/`. NixOS without HM, standalone HM, supported Darwin lanes,
+and package-only consumers have explicit boundaries. Aoide core remains
+independent of this deployment structure.
 
 ## Lyra composition, staging, and complete configuration activation
 

@@ -12,7 +12,8 @@ context across clients, including clients that do not run Melete.
 | Status used throughout this page | Meaning |
 |---|---|
 | **CURRENT — source verified** | Behavior found in the named source snapshots; not a claim about deployment. |
-| **REQUIRED — constraint** | Melete independence, shell access, and the Aoide core/Lyra boundary must hold for the integration. |
+| **UPSTREAM PR — reviewed, unmerged** | Code present in the pinned PR revision; separate from the local baseline and a deployed service. |
+| **REQUIRED — constraint** | Melete independence, shell access, the Aoide core/Lyra boundary, and shared persona memory/history under Aoide must hold for the integration. |
 | **PROPOSED — awaiting decision** | The concrete design being put forward for discussion; not approved or implemented by this document. |
 | **OPEN — decision needed** | A choice the proposal does not settle. Diagrams do not silently settle it. |
 
@@ -23,12 +24,14 @@ identity issuer, or source of runtime state for another harness. Mneme's MCP
 entry points remain available. Aoide's integration must also be reachable from
 a shell without a configured MCP connector or a Lyra desktop.
 
+**Shared persona continuity under Aoide is a requirement.** Sessions bound to the same persona under Aoide share that persona's memories and history through Mneme across harnesses, including Claude and Codex. Individual session and provider conversation identities remain distinguishable so history retains its origin. Sharing is established by the persona binding, not merely by matching display names or roles. The stable binding mechanism, history representation, retrieval into each turn, and retention remain open. This requirement does not imply automatic sharing by clients outside Aoide or access to another persona's records. It is a decided behavior requirement, not a claim that the integration exists.
+
 **What this draft proposes changing**
 
 | Area | CURRENT — source verified | PROPOSED — awaiting decision | OPEN — decision needed |
 |---|---|---|---|
 | Persona definitions and reference notes | Already in Mneme-served vault folders. Melete loads the persona entry note. | Other clients resolve and use those definitions and selected references through Mneme. | Folder versus named-vault layout; persona metadata versus separate profile records; selection and refresh rules. |
-| Accumulated persona memory | Melete persists it under its own home directory and loads it into its chat turns. | Mneme serves and owns the shared memory; Melete becomes a client of that shared memory, as Codex and Claude would be. | Whether to adopt this transfer, how to migrate existing files, and which sessions share a memory scope. |
+| Accumulated persona memory | Melete persists it under its own home directory and loads it into its chat turns. | Mneme serves and owns the shared memory; Melete becomes a client of that shared memory, as Codex and Claude would be. | How to migrate existing files and maintain client compatibility. Mneme provides the shared memories and history for same-persona Aoide sessions; the binding and history representation remain open. |
 | Session integration | Aoide tracks supported harness events and conducts sessions; it does not hydrate Mneme context. | An Aoide adapter binds sessions to permitted context, exposes retrieval and handoffs, and connects notifications to subscribed sessions. | Identity binding, grants, context selection, and harness-specific turn delivery. |
 | Storage and replication | Mneme serves files; external sync or Git moves them. | A separate managed-store extension adds transactional revisions and snapshot/change replication. | Whether and when to adopt the database extension, which vaults migrate, and the editor contract. It is not required for the initial shared-context integration. |
 | Lyra surfaces | Existing widgets display Aoide session state. | Widgets can display persona bindings, handoff availability, and context freshness obtained from an Aoide bridge. | Which fields and interactions belong in the widgets. Memory access remains available without them. |
@@ -46,6 +49,10 @@ The current-operation column describes reviewed source snapshots: Mneme
 `5512299`, Melete `7619d40939f7e6cf4307b32d7e2928e27a0dff23`, and the local Aoide
 development revision `8df8e600c21975c5f8f760037286ce78c57cfaca`. It is not a claim
 about deployed services or the contents of upstream Aoide `main`.
+
+The baseline table describes those checkouts. The upstream assessment below
+separately identifies changes present in an unmerged PR; it does not silently
+replace the baseline or claim those changes are deployed.
 
 | Concern                 | CURRENT — Mneme / Melete / Aoide source                                                                                                                                            | PROPOSED — awaiting decision                                                                                                                                                             |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -78,13 +85,13 @@ Melete evidence in the local `/home/khoa/melete` checkout at the revision above:
 `gather_persona_memory`), `src/persona_memory.rs` (`PersonaMemory::write`,
 `slug_for`, `area_locks`), and `src/rune_scope.rs` (`memory_op` persona operations).
 
-**Chart 1 — CURRENT: the source-verified split between vault and local memory.**
+**Chart 1 — CURRENT baseline: the split between vault and local memory.**
 Arrows name access paths. There is no shared-memory bridge between the two stores.
 Deployment packaging for the Mneme service is omitted.
 
 ```mermaid
 flowchart TB
-    subgraph Current["CURRENT — source verified, deployment not verified"]
+    subgraph Current["CURRENT baseline — Mneme 5512299; PR changes shown separately"]
         Other["Other Mneme clients"] -->|"OAuth / MCP note operations"| Mneme["Mneme service"]
         Melete["Melete chat"] -->|"MCP: persona entry note"| Mneme
         Mneme -->|"read / write"| Vault["Vault folders: persona definitions, reference notes, project knowledge"]
@@ -95,10 +102,80 @@ flowchart TB
     end
 ```
 
+**Upstream response — file-backed capabilities, not the full shared-memory design**
+
+[Mneme PR #49](https://github.com/noah427/mneme/pull/49) is reviewed at
+`99a5aa9ed6c6dba16a0cc3cf5de6247ab38fbf1c` against base `5512299`. It is open
+and unmerged at this review. Its description identifies the work as a response
+to the earlier proposal review. It does not establish agreement on this draft's
+later persona-memory transfer, identity model, Melete independence contract, or
+Aoide adapter. Those remain evaluated against the requirements of this draft.
+
+| Earlier gap | UPSTREAM PR — behavior present at the reviewed head | Effect on this proposal and remaining boundary |
+|---|---|---|
+| Rejected pushes could resolve conflicts in favor of local content through `git pull --no-edit -X ours`. | Rejected-push recovery fetches and compares histories. Strictly behind fast-forwards and retries; divergence returns `[sync-conflict]`; other cases retry once. | Removes that local-favoring recovery path. The divergence error occurs after the local write/commit, not before mutation. This does not introduce a single write authority or replace the separate read-time pull path. |
+| Whole-note updates lack a revision precondition. | `update_note`, `append_to_note`, and `replace_section` accept optional `expected_head`; `get_vault_revision` exposes the current Git HEAD. | Supplies a limited client preflight check for those three operations. It is a vault-wide commit token, not a per-note revision, a transaction, or an idempotency key. Omitted/blank means unconditional; unavailable Git history produces `[stale-check-unavailable]` when a token is supplied. |
+| Index and skill retrieval are default-vault-only; conventions use a shared store. | RPC `get_index`, `get_conventions`, `read_convention`, and `skill_body` accept a named `vault`, with per-vault index, convention, and skill configuration. | Provides concrete retrieval functions for the proposed context adapter. Vault selection still does not authenticate an agent or grant access. Cross-vault ranking and memory lifecycle remain separate work. |
+| Other entry points cannot select the same vault context. | Natural-language `dispatch` and MCP resources `convention:///` and `skill:///` remain default-vault-only. Dispatch also supplies no expected-HEAD precondition to its write handlers. | A client using explicit RPC can access the new behavior; existing resource/dispatch consumers do not gain it automatically. Melete's existing persona calls still omit the vault argument. |
+| Knowledge changes need attribution and replayable publication. | The post-write sync signature accepts attribution for commit messages, but the inspected handlers pass `None`. The PR description schedules a replayable audit log as later work; it is absent at this head. | A signature accepting attribution is not authenticated caller attribution. No replayable change feed, notification outbox, or replica cursor contract is established by this PR. |
+| Shared personas must work independently of Melete. | Changes are inside Mneme; there is no Melete runtime dependency introduced and no persona-memory migration in the diff. | The requirement remains compatible with this work. Making Melete-local memories available to other clients, binding sessions, and delivering idle-agent context remain proposed integration work. |
+
+Implementation evidence: [write handlers and revision check](https://github.com/noah427/mneme/blob/99a5aa9ed6c6dba16a0cc3cf5de6247ab38fbf1c/src/main.rs),
+[Git synchronization](https://github.com/noah427/mneme/blob/99a5aa9ed6c6dba16a0cc3cf5de6247ab38fbf1c/src/sync.rs),
+and [RPC contract](https://github.com/noah427/mneme/blob/99a5aa9ed6c6dba16a0cc3cf5de6247ab38fbf1c/wiki/tools.md).
+
+The inspected expected-HEAD check and subsequent file write are separate
+operations without a shared transaction spanning the check, write, and commit.
+Uncommitted edits do not move HEAD, while commits affecting an unrelated note do.
+The PR therefore cannot establish the proposed guarantee that every competing
+write is revision-checked atomically. These are source-level limits, not a
+runtime concurrency test result.
+
+The sync result also has a narrower meaning than remote durability. Non-conflict
+Git failures can remain warnings. The rejected-push helper does not return the
+retry's success separately, so its caller can log a failure warning even after
+a successful retry. Neither a generic success nor that warning is an adequate
+standalone statement that another machine has applied the change.
+
+**Chart 1b — UPSTREAM PR #49: explicit RPC and write outcomes, not deployed behavior.**
+The first branch happens before mutation; the sync branch happens afterward.
+This chart does not depict a transactional shared store.
+
+```text
+UPSTREAM PR #49 @ 99a5aa9 — OPEN / UNMERGED / SOURCE REVIEW ONLY
+
+Explicit RPC + vault name
+  +--> index / conventions / skill body from that vault
+  +--> get_vault_revision --> Git HEAD for a client precondition
+
+update_note / append_to_note / replace_section
+  |
+  +-- expected_head omitted or blank ----------> unconditional write path
+  |
+  +-- expected_head supplied
+        +-- no usable Git HEAD ----------------> stale-check-unavailable; no write
+        +-- HEAD differs ----------------------> stale-write; no write
+        +-- HEAD matches ----------------------> proceed to file write
+                                                   |
+                              [check and write are NOT one transaction]
+                                                   |
+                                  configured post-write sync
+                                    +-- passive --> external sync owns propagation
+                                    +-- Git ----> commit / attempt push
+                                                   +-- diverged --> sync-conflict
+                                                   |                local change remains
+                                                   +-- other failures may be warnings
+
+Default-only entry points remain: dispatch, convention:///, skill:///.
+No persona-memory transfer, per-agent grants, audit replay, or replicas here.
+```
+
 **Chart 2 — PROPOSED: shared knowledge with Melete as an optional client.**
 Every edge names the interaction being proposed. A client accesses Mneme's API
 directly or through Aoide's shell bridge; it does not need to pass through
-Melete. This chart does not require the database or replica extension.
+Melete. This chart does not require the database or replica extension. PR #49 supplies
+some RPC retrieval and write-check primitives shown in Chart 1b; shared memory,
+grants, and session integration in this chart remain proposed work.
 
 ```mermaid
 flowchart TB
@@ -141,7 +218,9 @@ an access boundary. Mneme independently supports named vault roots through
 The existing read path fetches a persona through `cfg.vault.mcp_url` and calls
 `read_note` without a `vault` argument, selecting Mneme's default vault. Naming
 additional vaults in Mneme does not by itself make Melete's persona picker or
-loader select them.
+loader select them. PR #49 extends additional explicit RPC functions with a
+vault selector but does not change these Melete calls or automatically select
+a persona-specific vault for them.
 
 Memory operations already include `persona_read`, `persona_write`,
 `persona_append`, and `persona_list` behind Melete's `memory_op` primitive.
@@ -162,8 +241,8 @@ These questions describe what a decision changes. They do not select an answer.
 
 | Decision                                                                           | Existing behavior and consequence to account for                                                                                                                                                                                                                                  |
 | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| What identifies a continuing agent, and how does it relate to a persona?           | Melete's persona is character/voice and its name keys memory. Several sessions can share that character. Distinct agents using the same persona and one agent continuing across harnesses require an explicit interpretation of that sharing.                                     |
-| Is the proposed transfer of shared memory to Mneme adopted, and how would migration work?                                      | Definitions are already in the vault; accumulated memory is in Melete's local store. This draft proposes Mneme ownership of shared memory. Adopting that transfer requires a migration and compatibility contract for existing clients. Melete's absence must not prevent another client from reading or writing shared memory.                              |
+| How is the shared persona identity bound to sessions? | Same-persona sessions under Aoide share memories and history across harnesses. The stable identifier, authenticated binding, rename behavior, and history representation remain open; separate session IDs retain provenance. |
+| How does existing persona memory migrate to Mneme? | Mneme provides the shared memories and history for same-persona sessions under Aoide. Definitions are already in vaults; Melete accumulated memory is local. Import, client compatibility, and the treatment of existing local copies remain open. Melete is optional. |
 | Does each persona have a folder, a named vault, or references into several vaults? | Folder organization, vault selection, and client authorization are separate mechanisms. The choice affects discovery, grants, replication selection, and handling identical names in different collections.                                                                       |
 | How does a turn select supporting knowledge?                                       | Current persona loading reads one note, while siblings remain outside that path. Automatic expansion, explicit retrieval, and a bounded context package have different context costs and freshness behavior.                                                                      |
 | When do persona or skill edits affect an active session?                           | Melete re-fetches persona text every turn. The revision-pinned context model below instead assumes explicit refresh or a new session. That is a behavior change for existing clients, not an already shared convention.                                                           |
@@ -175,7 +254,7 @@ These questions describe what a decision changes. They do not select an answer.
 | Proposed concept | Meaning in this draft | Illustrative example | Proposed management rule |
 |---|---|---|---|
 | Agent memory management | A lifecycle and retrieval service over records. | A session handoff, a verified constraint, a learned preference. | Capture with provenance; distinguish observations from maintained facts; supersede outdated records; exclude expired records from normal retrieval. |
-| Agent vault | A logical collection for a persistent agent identity, or an explicitly shared team collection. | Rook's handoffs and working observations across different harnesses and machines. | Scope by agent, project, and access. Two agents with the same role keep separate memories unless they explicitly share them. |
+| Agent vault | A logical collection for a persistent agent identity, or an explicitly shared team collection. | Rook's handoffs and working observations across different harnesses and machines. | Same-persona sessions under Aoide share memories and history. Project and access boundaries remain explicit; matching role names alone does not establish the same persona. |
 | Regular notes vault | Human-facing documents and project knowledge. | Personal notes, project wikis, architecture decisions, research. | Edit, organize, link, search, version, and sync. No automatic memory expiry applies to ordinary notes. |
 
 These are different axes: a vault is a container; memory management is behavior.
@@ -187,16 +266,18 @@ links to it rather than copying its body into a private knowledge base.
 This is a reference map, not a replacement directory tree for existing personas.
 
 ```text
-PROPOSED — logical references, awaiting identity and scope decisions
+REQUIRED — same-persona memory and history sharing under Aoide
+REQUIRED — shared memories and history through Mneme
+PROPOSED — the integration mechanism
 
-Session binding
-  +--> Persona definition       existing vault note
-  +--> Selected knowledge       existing project/reference notes
-  +--> Memory scope             proposed shared Mneme access
-          +--> observations and handoffs
-          +--> references to maintained project notes
+Claude session --+
+                +--> Aoide binding to the same persona
+Codex session --+      +--> Persona definition     existing vault note
+                      +--> Shared memories
+                      +--> Shared history         source session retained
+                      +--> Selected knowledge     project/reference notes
 
-OPEN: several sessions may share a memory scope or use distinct scopes.
+OPEN: stable binding, history representation, retention, and turn retrieval.
 OPEN: a scope may use folders, named vaults, or references across vaults.
 No directory move or new profile registry is implied by this chart.
 ```
@@ -244,25 +325,29 @@ storage does not make every agent's memories visible to every other agent.
 | Callable tools  | Profile references to required capabilities.                                                            | The harness and Aoide resolve available tools and enforce actual grants. Storing a tool name in Mneme cannot confer permission or install its implementation. |
 | Skills          | Canonical versioned skill documents, referenced by each profile.                                        | The adapter loads only the selected, compatible skills; executable dependencies and credentials stay with the runtime.                                        |
 | Knowledge       | Shared project documents, agent-authored observations, and maintained domain collections.               | Retrieval follows explicit collection grants, project scope, and the current task.                                                                            |
-| Personal memory | Agent-owned lessons, preferences, unresolved hypotheses, and handoffs with sources and lifecycle state. | The identity owns its default write scope; sharing with another agent is deliberate.                                                                          |
-| Session context | Checkpoints and selected references that need to survive the session.                                   | Live conversation and tool state belong to the harness. A new session reconstructs useful context; it does not inherit every transcript.                      |
+| Personal memory | Persona memories and history with source-session provenance. | Aoide sessions bound to the same persona share these across harnesses; unrelated personas do not gain access from a matching role name. |
+| Session context | Shared history references and checkpoints; the history representation remains open. | Live execution and provider conversation state remain session-specific. Shared history must be accessible across same-persona Aoide sessions; how much enters each prompt is a separate retrieval decision. |
 
 The table describes information and relationships, not required replacements
 for `wiki/personalities/` or `wiki/projects/`. In this proposed model, a session ID identifies one run;
 an agent ID identifies the continuing agent; a role describes its job; a harness
 describes how it runs. Reusing a role or changing the model does not merge agent
-identities. An explicit binding lets the same agent resume on another machine or
-harness, while a separately created agent starts with its own memory collection.
+identities. Under Aoide, sessions explicitly bound to the same persona share memories
+and history across harnesses, including newly created provider conversations. A
+separate session ID does not create a separate persona memory collection.
 
 A builder can record an implementation hypothesis while the reviewer records a
 contradicting observation. Both retain author and source provenance. Neither
-private record overwrites the maintained project decision. A validated finding
+observation overwrites the maintained project decision. A validated finding
 updates that decision through the normal revision-checked write; each agent can
 then reference the same resulting record. Derived summaries retain source
 revisions so later edits can invalidate them.
 
 **Chart 5 — PROPOSED context selection, including the revision-pinning assumption.**
-This describes the candidate adapter, not the current Melete loader.
+This describes the candidate adapter, not the current Melete loader. PR #49
+provides explicit vault selection for index, convention, and skill RPCs; the
+authenticated bindings, grants, memory filtering, and revision-pinned context
+package in this chart remain proposed.
 
 ```text
 PROPOSED — context-selection and refresh decisions remain OPEN
@@ -301,7 +386,10 @@ database or credential files bypasses an API boundary.
 Centralization can start today by pointing clients at one file-backed Mneme
 instance. Shared persona access does not require a database conversion. This
 draft separately proposes a database-backed transactional record model and
-replication; whether to adopt that extension remains open.
+replication; whether to adopt that extension remains open. PR #49 provides
+file-backed conflict reporting and optional Git-HEAD checks without introducing
+this database. Those changes reduce the earlier gaps but do not implement this
+extension's transactional revisions, idempotency, journal, or replica protocol.
 
 For the managed store, the proposed first implementation is SQLite on the
 authority's local disk, accessed only through Mneme. It keeps the existing
@@ -312,6 +400,7 @@ the engine. [SQLite deployment guidance](https://www.sqlite.org/whentouse.html),
 
 **Chart 6 — PROPOSED managed-store extension, only if adopted for a vault.**
 This diagram shows the database option, not the prerequisite for Chart 2.
+Nothing in PR #49 implements the database, editor adapter, or replicas shown.
 
 ```text
 PROPOSED EXTENSION — database, editor adapter, replicas; NOT CURRENT
@@ -386,6 +475,9 @@ serving several existing roots gives one API, but does not yet give one database
 **Chart 8 — PROPOSED handoff, with optional replication on its own branch.**
 The recipient may fetch from Mneme directly; it does not wait for a replica.
 The turn-delivery bridge is new work, not a capability supplied by storing a note.
+PR #49 does not implement the change-notice adapter or the replayable journal
+needed for automatic crash-recoverable publication. Explicit handoff letters
+remain distinct from that automatic publication path.
 
 ```mermaid
 flowchart TB
@@ -431,7 +523,10 @@ hubs. The inspected mail design explicitly treats mail as readable data at rest.
 In the managed-store extension, the proposed durable change journal also acts
 as the notification outbox: the adapter
 retries committed entries after a crash. Recipients tolerate duplicate notices;
-periodic cursor reconciliation catches missed notices. This is the
+periodic cursor reconciliation catches missed notices. The replayable audit log
+mentioned as future PR #49 work is not yet this journal: its eventual event
+contents, cursor semantics, and relationship to committed writes need evidence
+before it can satisfy this contract. This is the
 [transactional outbox pattern](https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html).
 Aoide's mail outbox handles transport delivery; the proposed Mneme journal records
 which knowledge changes exist. These stores have different responsibilities.
@@ -452,6 +547,7 @@ Existing source admission policy in Aoide applies when connecting new content.
 | Proposed change, if adopted | What it could retire or avoid | What that does not remove |
 |---|---|---|
 | Move shared persona memory into Mneme | Melete's local files as the authoritative store for migrated shared memories, after client cutover and verification. | Melete itself, its conversations, prompt assembly, or unrelated local state. No existing memory is deleted by this proposal. |
+| Adopt PR #49 file-backed primitives | The rejected-push `-X ours` fallback and default-only limitations of the four named RPC functions. | Melete-local persona memory, default-only dispatch/resources, or the need for explicit identity, grants, and context integration. |
 | Use Mneme for shared knowledge retrieval | A separate Aoide wiki database, embedding engine, or duplicate index for the same records. Aoide content commands are currently stubs, so much of this is avoided future implementation. | Aoide's content admission policy, session graph, conduct, mailbase, and audit log. |
 | Adopt managed storage and replication for a vault | That vault's external folder-sync authority and file-backed history path once migrated. | File-backed support for unmigrated vaults, or sync for attachments outside this draft's scope. Supporting both modes may initially increase code. |
 | Reference repository-owned documents from context | Duplicate maintained summaries of the same source facts. | Git-owned architecture documents, song definitions, widget files, design notes, drafts, or takes. Their ownership is not transferred by a diagram. |
@@ -460,8 +556,8 @@ Existing source admission policy in Aoide applies when connecting new content.
 
 | Proposed work | What it requires | What it does not require | Evidence that it works |
 |---|---|---|---|
-| Shared persona context and memory | Decide identity/scopes and memory ownership; implement grants and the client/Aoide adapter contract; account for existing persona notes and memory. | Melete running, a database migration, replicas, or Lyra. | With Melete absent, two clients load authorized persona context and exchange a handoff. Shared/separate memory behavior matches the chosen bindings across sessions; persona metadata cannot widen tool grants. |
-| Managed authority extension | A separate storage decision, stable record IDs, transactional revisions, journal, import/export, and an editor adapter for a pilot vault. | Replica deployment or Aoide remote mail. | Stale edits cannot silently overwrite newer ones; a committed change survives a crash with its journal entry; text, links, and Canvas survive import/export. |
+| Shared persona context and memory | Implement the required same-persona memory/history sharing under Aoide; decide stable bindings, history representation, and migration; implement grants and the client/Aoide adapter contract; account for existing persona notes and memory. PR #49 offers explicit vault-aware retrieval primitives if adopted/deployed, but not the grants or shared-memory service. | Melete running, a database migration, replicas, or Lyra. | With Melete absent, two clients load authorized persona context and exchange a handoff. Shared/separate memory behavior matches the chosen bindings across sessions; persona metadata cannot widen tool grants. |
+| Managed authority extension | A separate storage decision (not settled by PR #49), stable record IDs, transactional revisions, journal, import/export, and an editor adapter for a pilot vault. | Replica deployment or Aoide remote mail. | Stale edits cannot silently overwrite newer ones; a committed change survives a crash with its journal entry; text, links, and Canvas survive import/export. |
 | Replica extension | Managed authority's authorized snapshot/change protocol and a reachable Mneme endpoint. | Aoide change notices or an agent turn. | Reconnection converges, including renames and deletions; repeated changes do not duplicate content; unauthorized collections are absent. |
 | Aoide handoff/change notices | A reference-producing client or adapter and usable mail transport; remote use also requires compatible paired nodes. | A replica or database for an explicit handoff letter. Automatic crash-recoverable publication of every managed change does require the journal contract. | A delivered letter references retrievable authorized context. With journal-based notices, missed or duplicate notices do not affect replica convergence. |
 | Idle-agent context delivery | A subscription, permitted prompt-ready turn delivery, a working conduct/native harness channel, and a retrieval entry point. | Melete, Lyra, or a local replica. | A waiting agent receives a turn opportunity and retrieves the handoff; mail delivery and context consumption are reported separately. |
@@ -482,5 +578,5 @@ resolves those questions by itself.
 - Availability: replicas improve read availability; automatic write failover needs a separate ownership/consensus design.
 - Memory removal: expiry stops routine retrieval; erasure across revisions, replicas, exports, and backups needs an explicit retention policy.
 - Scope: the first pilot covers Mneme's current text and Canvas surface; general attachment storage is not specified here.
-- Verification: the source snapshots identified above establish implementation behavior, not deployment. No live persona vault, running shared-memory service, cross-machine synchronization, or executable tests of this proposal were exercised.
+- Verification: the baseline snapshots and PR #49 at `99a5aa9` were reviewed as source. The PR is open at review and reports `cargo check --tests`; that is compile checking, not evidence of executed behavioral tests. This review did not independently run its checks or verify CI. No live persona vault, running shared-memory service, cross-machine synchronization, or executable tests of this proposal were exercised.
 - Documentation drift: older README counts and parts of the roadmaps lag the source; Aoide's mail design describes more than its current implementation.
