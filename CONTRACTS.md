@@ -929,7 +929,9 @@ then the EXISTING on-disk file's entries for every song that still has a
 directory in the host songbook are overlaid on top of it (a song whose
 directory is gone is pruned, never kept immortal), then the
 currently-staged song's own freshly-scanned entry is patched in last,
-winning over both. Without the overlay layer, composing and staging a
+winning over both — only when that song HAS a host-songbook directory to
+scan; a shipped song staged from the declared twin before any seed keeps
+its baked entry, since an empty patch would delete it. Without the overlay layer, composing and staging a
 second song on a repo-less host would silently drop the first song's
 entry — it lives in neither the frozen baseline (a runtime composition) nor
 the second song's own scan.

@@ -4710,3 +4710,92 @@ code as it stood. client 294 pass; conduct 771 pass, the same two
 Pages touched: pkgs/aoide/crates/client/AGENTS.md,
 pkgs/aoide/crates/conduct/AGENTS.md, pkgs/aoide/crates/conduct/README.md,
 docs/architecture/MAIL.md
+
+## [2026-09-15] fix | the activation seed publishes a declared twin, so a runtime re-stage keeps the venue
+
+Register §16's follow-up closed. Two defects, one root. First: the
+quickshell facet's activation seed already wrote `stage/livery.json` with
+the venue's `aoide.livery.override` applied (2c41661), but the runtime
+writers — `rice stage`, `rice mode stage`, `rice mode declarative`,
+`reload`'s staging arm — re-derived their bytes from the raw committed
+`song/songbook/<name>/livery.json`, so the first re-stage on a venue-set
+host (osaka, chiyo: sonata + Rosé Pine) reverted the desktop to sonata's
+own palette. The seed had no published place for the recoloured notes to
+live, and only the nix evaluator can compute the override tier, so the
+writers could not simply apply it themselves. Second: bare `rice mode
+declarative` re-pinned the CURRENTLY STAGED song (`mode.json`'s own
+`song`, which a staging round-trip legitimately moves), so with nocturne
+staged, "back to declarative" landed on nocturne.
+
+The seed now publishes the same bytes a second time at
+`song/declared/livery.json` (CONTRACTS.md §4) — one `jq` run, two
+destinations, so the two files can never disagree. Content: the declared
+song's committed notes with the override applied, top-level `"song"` set
+to that song's name, keys sorted. That field is the whole scope:
+`commands::rice::notes_source` reads the twin only when `declared_song()`
+— the same field, shape-guarded — equals the name being staged, so the
+declared song reproduces the venue recolour while every OTHER song still
+derives from its own committed notes. `declared_song()` is also what
+`handle_mode_declarative` resolves first when no `<name>` is given, so
+bare `rice mode declarative` re-pins the declared song and falls back to
+`current_staged_song()` only on a host with no twin at all. `stagingSong`
+is untouched, so a later bare `rice mode stage` still returns to the
+staged song. The facet is the twin's ONLY writer — the Rust side reads it
+and never writes, since a second writer would race the seed and could not
+compute the override the nix evaluator owns.
+
+Evidence: song 325 + storage 418 tests green (three new tests: the twin
+read for the declared song, the twin ignored for another, and the
+declarative re-pin landing on the declared song over a different staged
+one); workspace `--no-run` clean; yomi-strix evaluates; the seed script
+was executed against a scratch root and both destinations carry the same
+bytes with `"song"` injected.
+
+Pages touched: docs/Aoide-Wiki/entities/livery.md,
+docs/Aoide-Wiki/concepts/cli/Rice-and-Livery.md,
+docs/Aoide-Wiki/concepts/cli/CLI-Reference.md,
+docs/Aoide-Wiki/concepts/song/Song-Anatomy.md,
+docs/Aoide-Wiki/concepts/song/Self-Ricing.md,
+docs/Aoide-Wiki/concepts/Codebase.md,
+docs/Aoide-Wiki/concepts/Full-Architecture.md,
+docs/Aoide-Wiki/concepts/Snowflake-Anatomy.md,
+docs/architecture/NIX-COMPOSITION.md,
+docs/architecture/TASK-REGISTER.md, docs/BUILD.md,
+modules/facets/README.md, modules/facets/AGENTS.md
+(the same commit's code-side pages: CONTRACTS.md,
+pkgs/aoide/crates/song/README.md, pkgs/aoide/crates/song/AGENTS.md,
+modules/facets/quickshell/default.nix)
+
+## [2026-09-15] fix | the template manifest fallback keeps a shipped song's baked entry when the host songbook never seeded it
+
+Found live on osaka the same day the declared twin landed: the bar's
+rice-mode toggle to declarative blanked every Quickshell surface
+(`[aoide/surfaceslot] no song (active or baseline) provides slot herald`,
+`StagingEngine.qml: Cannot read property 'bar' of undefined`), and
+toggling back to staging brought nocturne back intact. Reproduced by
+hand: `lyra rice mode declarative` dropped `sonata` from
+`run/qml/songs/manifest.json` (`["etude","fugue","nocturne","quodlibet"]`)
+and left `registry.json`'s `sonata` as `{}`; `rice mode stage` restored
+both from the baked baseline.
+
+Cause: the twin lets `rice stage sonata` proceed on a host whose runtime
+songbook holds only nocturne (osaka never seeded sonata — `rice mode
+declarative` does not seed, and before the twin this path failed on the
+missing songbook notes, so the defect was latent). The stage's widget
+sync then regenerated the manifest through
+`eval_songbook_from_templates`, whose layer-3 patch scanned
+`songbook/sonata/` unconditionally, got an empty entry, and removed
+`sonata` — the baked baseline entry, which was the truth.
+
+Fix: layer 3 runs only when `name` has a directory in the host songbook.
+Directory present → the fresh scan wins, as before (including the empty
+scan pruning a stale entry); directory absent → the baseline entry
+stands. Pinned by
+`stage_from_templates_keeps_a_shipped_songs_baked_entry_when_its_songbook_dir_is_absent`
+(baked manifest+registry name sonata, twin says sonata, no
+`songbook/sonata/`; both entries survive the stage). song 326 pass,
+workspace `--no-run` clean. Live verification on osaka waits on its
+rebuild.
+
+Pages touched: pkgs/aoide/crates/song/AGENTS.md,
+pkgs/aoide/crates/song/README.md, CONTRACTS.md
