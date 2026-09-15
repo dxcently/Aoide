@@ -88,6 +88,7 @@ song/                         mirrors ~/.aoide/song/ byte for byte
       design/
   covers/                     shared cover art, beside the rices, any rice wears any cover
   stage/                      runtime only, gitignored: what lyra renders and programs watch
+  declared/                   runtime only: the activation seed's twin of the declared song
 pkgs/                         custom package definitions only
 ```
 
@@ -590,10 +591,13 @@ shared palette + song widgets + composition + dependency references
 
 Songs live under `song/songbook/<name>/`, and `song/covers/` sits beside the
 songbook, not inside a rice: an image is not a look, and any rice may wear any
-cover. The repository's `song/` mirrors the runtime `~/.aoide/song/` exactly;
-`song/stage/` is the one directory that exists only at runtime, gitignored,
-where lyra renders what programs watch and hot-reload. The wallpaper manager is
-independent of individual rices. Each user has independent state.
+cover. The repository's `song/` mirrors the runtime `~/.aoide/song/` in the
+committed half, and two of its runtime subdirectories exist only there,
+gitignored: `song/stage/`, where lyra renders what programs watch and
+hot-reload, and `song/declared/`, the quickshell facet's activation seed of
+the declared song's notes with the venue override applied, which the runtime
+writers re-derive the declared song from (CONTRACTS.md §4). The wallpaper
+manager is independent of individual rices. Each user has independent state.
 Lyra ships reusable QML components and named bridges (including optional Aoide
 integration); consumers customize widgets in their songbook without copying the
 entire runtime. Importing Lyra's public module supplies capabilities without

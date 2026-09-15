@@ -136,7 +136,8 @@ no behaviour, so an empty config evaluates. The surface:
 - `aoide.enable` (master switch), `aoide.user` (default `"khoa"`, owner of the
   `~/Aoide` clone).
 - `aoide.root` (default `~/.aoide`, exported as `AOIDE_ROOT`) — the runtime
-  root: `song/stage/`, `state/` (+ `state/stage/`), `run/qml/`, the composed
+  root: `song/stage/`, `song/declared/`, `state/` (+ `state/stage/`),
+  `run/qml/`, the composed
   host `song/songbook/`, the audit log. `aoide.checkout` (default `~/Aoide`,
   exported as `AOIDE_FLAKE_ROOT`) — the dev git checkout: `soundcheck`'s scan
   root, `rice declare`'s commit-in target, the songbook `nix eval` registry
@@ -241,7 +242,14 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   `rice stage` writes, so a host that boots without ever staging still
   carries a correct live stage twin from the baked default), `mode.json`
   (the staging/declarative mode marker — absent reads as `declarative`), and
-  `grimoire.json` (QML-only writer). `state/stage/` holds CONDUCTING
+  `grimoire.json` (QML-only writer). That same seed also publishes the
+  DECLARED twin at `song/declared/livery.json` — the declared song's
+  committed notes with the venue recolour applied, one `jq` run to two
+  destinations (`CONTRACTS.md §4`). It exists because the live stage is
+  rewritten by the runtime writers and so cannot itself state what the venue
+  declared; those writers read the twin for the song its own `"song"` field
+  names, and the committed songbook for every other. `state/stage/` holds
+  CONDUCTING
   state — `sessions.json` (agent session roster, written by
   [[shellbridge]]; records may carry an additive optional `parentSessionId`),
   `hooks.json` (live Claude Code hook phases), `projects.json` (the project

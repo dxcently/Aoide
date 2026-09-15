@@ -52,7 +52,8 @@ start at [[aoide-cli]] and the group pages linked below.
 - [[Rice-and-Livery|Rice-and-Livery]] — the self-ricing loop:
   `rice lint/stage/compose/declare/transpose`, the `rice draft` / `rice mode` /
   `rice take` groups, `rice back`, `cover set`, and the `livery` engine commands.
-  Stage files: `song/stage/{livery,cover,mode}.json`; songbook and drafts trees.
+  Stage files: `song/stage/{livery,cover,mode}.json` and the declared twin
+  `song/declared/livery.json`; songbook and drafts trees.
 - [[Graph-and-Conduct|Graph-and-Conduct]] — the session DAG: bare
   `graph`/`graph link` (the read/analysis lens), `project add/list/remove`,
   `session start/phase/end/hook/undying/permit/pending list/approve/deny/

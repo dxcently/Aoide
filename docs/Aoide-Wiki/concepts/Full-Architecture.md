@@ -404,7 +404,9 @@ Live state lands in two stage trees under the runtime root (`$AOIDE_ROOT`,
 default `~/.aoide`), split by owner: `song/stage/*.json`
 (livery, mode, cover — rice/paint staging) and `state/stage/*.json`
 (sessions, hooks, projects, graph, herald, pending — the [[Session-Graph]]
-DAG layer's own conducting files). `lib/mkHost.nix`
+DAG layer's own conducting files). Beside them, the quickshell facet's
+activation seed publishes `song/declared/livery.json`, the venue's read-only
+statement of the declared song (CONTRACTS §4). `lib/mkHost.nix`
 injects `pkgs.aoide` by overlay from the **same**
 `callPackage` paths as the flake's `packages` output, so the units and the
 flake always build the same binaries, never a drifted copy.
@@ -466,7 +468,8 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 The map above is the dev git checkout (`~/Aoide`, reached via
 `$AOIDE_FLAKE_ROOT`). Every runtime tree hangs off one root instead —
 `$AOIDE_ROOT` when set to an absolute path, else `~/.aoide` (the `aoide.root`
-option): `song/stage/`, `state/` (+ `state/stage/`), `run/qml/`, the composed
+option): `song/stage/`, `song/declared/`, `state/` (+ `state/stage/`),
+`run/qml/`, the composed
 host `song/songbook/`, and the audit `log/`, created at runtime by
 systemd-tmpfiles, the quickshell facet's home-manager activation, and the
 binaries themselves; on first run the binaries migrate pre-existing

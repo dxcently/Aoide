@@ -125,6 +125,7 @@ the runtime root (`$AOIDE_ROOT`, default `~/.aoide`):
 |---|---|---|---|
 | `livery.json` | the fully-resolved livery values (colours concrete, no `null`) | [[livery]] `emit stage` / `lyra rice stage` | `song/stage/` |
 | `cover.json` | the live wallpaper seed (seeded from the song's baked `wallpaper`) | Quickshell wallpaper layer | `song/stage/` |
+| `livery.json` | the DECLARED song's notes, venue `aoide.livery.override` applied, `"song"` naming it — the read-only twin the runtime writers re-derive that song from ([[livery]]) | the quickshell facet's `home.activation.aoideSeedStage` | `song/declared/` |
 | `sessions.json` | the agent-session roster (`sessionId, agent, windowAddress, workspace, cwd, state, startedAt`, optional `parentSessionId`) | [[shellbridge]] + `aoide session` | `state/stage/` |
 | `hooks.json` | live Claude Code hook phases | shellbridge + `aoide session` | `state/stage/` |
 | `projects.json` | the project-anchor registry | `aoide project` | `state/stage/` |
@@ -159,6 +160,7 @@ $AOIDE_FLAKE_ROOT/song/  (dev git checkout — committed score, default ~/Aoide/
 $AOIDE_ROOT/             (runtime root, default ~/.aoide — created on demand)
 ├── song/
 │   ├── stage/           live preview state — livery.json · cover.json · mode.json · grimoire.json
+│   ├── declared/        the declared twin — livery.json, written by the activation seed
 │   └── songbook/        composed host songbook (rice compose) · <song>/drafts/ (rice draft save)
 ├── state/               conducting state — state/stage/ holds sessions/hooks/projects/graph
 ├── run/qml/             live-deployed QML tree the desktop shell reads

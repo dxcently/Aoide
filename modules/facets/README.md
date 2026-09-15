@@ -24,7 +24,11 @@ decisions (that's `song/songbook/*/widgets/`'s job). Three facets today:
   applies the venue recolour (`aoide.livery.override`) through
   `lib/livery.nix`'s `stagePatch`, the same rule the Stylix/compositor
   fan-outs apply through `resolve` — so a host with a venue set stages the
-  recoloured livery, not the raw committed file. The root `shell.qml`
+  recoloured livery, not the raw committed file. The same one `jq` run also
+  publishes those bytes as the declared twin
+  (`song/declared/livery.json`, `CONTRACTS.md §4`), which is what the runtime
+  writers re-derive the declared song from — so their next re-stage keeps the
+  venue recolour instead of reverting it. The root `shell.qml`
   runs under `//@ pragma UseQApplication` (2026-08-23): platform dbusmenus
   (`QsMenuAnchor` — the bar tray's SNI menus) hard-error in the default
   QGuiApplication mode, and the pragma only takes effect on a service

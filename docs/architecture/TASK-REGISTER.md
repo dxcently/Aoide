@@ -1197,6 +1197,19 @@ project/parent inheritance across local/remote/app/subagents;
   writers `rice stage`/`rice mode`/`reload` need a published override
   source before they can apply the tier. Follow-up:
   the songbook livery.json twins of `rice.nix` are unchecked.
+- Status: LANDED eaafa6e (pushed): the facet publishes
+  `song/declared/livery.json` (CONTRACTS.md §4) — the declared song's
+  committed notes with `aoide.livery.override` applied in one `jq` run to
+  two destinations; `commands::rice::notes_source` reads it whenever its
+  `"song"` field equals the name being staged (the songbook otherwise),
+  and `handle_mode_declarative` resolves that same field first, so bare
+  `rice mode declarative` re-pins the declared song rather than the
+  currently staged one. `stagingSong` is untouched, so a later bare
+  `rice mode stage` still returns to the staged song. Follow-up closed.
+  Live activation on osaka/chiyo remains the User's rebuild gate.
+  Remaining: the songbook livery.json twins of `rice.nix` are unchecked
+  (carried).
+
 
 ## 17. Agent Client Protocol (ACP) client in core; widget builder as its UI (User scope seq 403/405)
 

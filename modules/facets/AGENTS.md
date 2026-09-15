@@ -23,7 +23,11 @@ covers only what's specific to facets.
   `livery.json` with `stagePatch` (the same `aoide.livery.override` rule
   `resolve` applies for Stylix/compositor) before it is jq-stamped with
   `song` and written to `song/stage/livery.json` — `checks.livery-fanout`
-  is the gate.
+  is the gate. The one run writes the same bytes to `song/declared/
+  livery.json` too (CONTRACTS.md §4): the declared twin, and the facet is
+  its ONLY writer — `rice stage` and the other runtime writers read it and
+  must never write it, since only the nix evaluator can compute the override
+  tier.
 - **A surface takes its size from its CONTENT; content never sizes itself
   from the SCREEN.** A layer anchors only the edges it genuinely occupies
   and lets `implicitWidth`/`implicitHeight` follow what it draws (the

@@ -72,10 +72,13 @@ lyra rice lint [<name>|<path>] [--json]
 lyra rice stage [<name>] [--json]
 ```
 
-- **Reads:** `song/stage/mode.json` (entrypoint guard), then
-  `song/songbook/<name>/livery.json` (must parse as JSON; full schema
-  validation is `rice lint`'s job). No `<name>`: re-resolves the current song
-  from the staged livery's own `"song"` field (`song/stage/livery.json`).
+- **Reads:** `song/stage/mode.json` (entrypoint guard), then the notes for
+  `<name>` (must parse as JSON; full schema validation is `rice lint`'s job)
+  — the DECLARED twin `song/declared/livery.json` when its own `"song"` field
+  equals `<name>`, else that song's committed
+  `song/songbook/<name>/livery.json` (CONTRACTS.md §4). No `<name>`:
+  re-resolves the current song from the staged livery's own `"song"` field
+  (`song/stage/livery.json`).
   Env: `$HYPRLAND_INSTANCE_SIGNATURE` (guards the compositor apply),
   `$AOIDE_SESSION_ID` (stamped on an auto-take), `$AOIDE_STAGE_DIR`.
 - **Writes:** `song/stage/livery.json` (atomic, symlink-transparent — in
@@ -248,18 +251,23 @@ lyra rice mode stage [<name>] [--json]
 lyra rice mode declarative [<name>] [--json]
 ```
 
-- **Reads:** `song/stage/mode.json`; with no `<name>`, resolves the current
-  song off `song/stage/livery.json`'s `"song"` field.
+- **Reads:** `song/stage/mode.json`; with no `<name>`, resolves the declared
+  song off `song/declared/livery.json`'s `"song"` field, falling back to
+  `song/stage/livery.json`'s own `"song"` field only when no such twin exists
+  (CONTRACTS.md §4).
 - **Writes:** tears down any Draft-mode routing symlink; when a song
   resolves, re-pins `song/stage/livery.json` (plus cover/widget/registry
   sync, same as `rice stage`) from that song's COMMITTED
-  `song/songbook/<name>/livery.json`; then writes `song/stage/mode.json`
+  `song/songbook/<name>/livery.json` — or, for the song the declared twin
+  names, from the twin, venue recolour included; then writes
+  `song/stage/mode.json`
   (`mode: "declarative"`, `draft` cleared; `stagingSong` carried forward
   unchanged).
 - **Output:** data `{mode: "declarative", song}`.
 - **Notes:** locks staging — afterwards `rice stage` and `cover set` refuse
-  with `declarative-mode-locked`. The no-name form re-pins from the committed
-  songbook rather than freezing the stage: unsaved live edits are discarded
+  with `declarative-mode-locked`. The no-name form re-pins the declared song
+  from its own notes rather than freezing the stage: unsaved live edits are
+  discarded
   (`rice draft save` first to keep them). A failed re-pin does not flip the
   marker. Locking while already locked with nothing resolvable is a no-op
   `ok`.

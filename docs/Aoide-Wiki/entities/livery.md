@@ -51,11 +51,14 @@ committed `song/songbook/<song>/livery.json` on every activation (see
 `lib/livery.nix`'s `stagePatch` — the same `aoide.livery.override` venue
 recolour the Stylix/compositor fan-outs apply through `resolve` — so a
 freshly booted host carries a correctly recoloured stage twin even before
-`rice stage` ever runs. The runtime writers (`rice stage`, `rice mode
-stage`/`declarative`, `reload`'s staging arm) still read the raw committed
-file and do not yet know the override tier: on a host with a venue set, the
-first runtime re-stage after activation reverts the stage twin to the song's
-own colours until that seam is taught the override too.
+`rice stage` ever runs. The same run also publishes the DECLARED twin,
+`song/declared/livery.json` (CONTRACTS.md §4) — those same bytes under their
+own name, its `"song"` field naming the song the venue declared. That field
+is the whole scope: the runtime writers (`rice stage`, `rice mode
+stage`/`declarative`, `reload`'s staging arm) derive the DECLARED song's
+notes from the twin, so re-staging it reproduces the venue recolour, while a
+song the twin does not name still re-derives from that song's own committed
+notes.
 `stage/livery.json` is canonical; the legacy-mirror write and the fallback
 reads were dropped when Phase 4 closed the transition window
 (LIVERY-MERGE.md).
