@@ -19,6 +19,7 @@
     ./fonts.nix
     ./git.nix
     ./hyprland.nix
+    ./inference.nix
     ./kimi-code.nix
     ./kitty.nix
     ./mcfly.nix

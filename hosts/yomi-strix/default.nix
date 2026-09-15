@@ -161,4 +161,8 @@
   aoide.pi-coding-agent.enable = true;
   aoide.openai.enable = true;
   aoide.eidolon.enable = true; # replaces pi for daily interactive use — see its dendrite header
+
+  # Local model-serving tooling (Ollama + llama.cpp), CPU/RAM only for now —
+  # see the dendrite header for the GPU-backend fork and the dxflake precedent.
+  aoide.inference.enable = true;
 }

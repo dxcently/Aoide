@@ -4,8 +4,9 @@ Optional, additive host capabilities — every dendrite self-gates on its own
 `aoide.<name>.enable` and is named once, in `default.nix`, by the directory
 that holds it. Today's set spans desktop apps (firefox, obsidian,
 kitty), CLI tooling (git, yazi, starship, mcfly, nh), agent and desktop AI
-tooling (claude-code, eidolon, kimi-code, pi-coding-agent, OpenAI Codex + ChatGPT), and
-system services (dunst, networkmanager, audio).
+tooling (claude-code, eidolon, kimi-code, pi-coding-agent, OpenAI Codex + ChatGPT),
+local model-serving tooling (inference: Ollama + llama.cpp), and system
+services (dunst, networkmanager, audio).
 
 ## Named seams (what it exposes)
 
@@ -24,6 +25,9 @@ system services (dunst, networkmanager, audio).
 `openai.nix` installs Codex and the local `pkgs/chatgpt-linux` package.
 `aoide.openai.enable` enables both tools. ChatGPT uses the official Linux
 release pinned by version and hash, with its bundled desktop runtime.
+
+`inference.nix` installs plain `ollama` and `llama-cpp` — CPU/RAM inference,
+no GPU override. Neither package needs `allowUnfree` (both MIT).
 
 `config.aoide.*` options it declares itself, plus stock NixOS/Home-Manager
 options. A dendrite reads no other module's internals — not even another
