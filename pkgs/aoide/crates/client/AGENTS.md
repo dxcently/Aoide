@@ -601,18 +601,34 @@
   `aoide_conduct::mail_bridge`, and `handle_mail_send`'s one-shot attempt
   right after it spools — so there is exactly one `aoide/mailDeposit` wire
   implementation to keep in sync with the server side.
-- **`drain_node` never attempts more than `DRAIN_BATCH_CAP` (50) entries
-  in one call, and always records a `TransportFailed` on the entry it hit
-  before backing off (mail register §26 outbox fix).** Both are load-bearing:
-  the cap bounds one tick's cost against an unbounded backlog rather than
-  scaling with it, and the per-entry bookkeeping (`tries`/`last_try_at`/
+- **`drain_node` never attempts more than `DRAIN_BATCH_CAP` (50) NON-PARKED
+  entries in one call, and always records a `TransportFailed` on the entry it
+  hit before backing off (mail register §26 outbox fix).** All three are
+  load-bearing: the cap bounds one tick's cost against an unbounded backlog
+  rather than scaling with it; `refused` entries are filtered OUT BEFORE the
+  cap applies, never skipped inside the loop (a parked entry is permanent
+  until `mail outbox rm` retires it and they sort oldest-first, so counting
+  them against a cap the loop then skips leaves every fresh letter behind one
+  batch's worth of them undialled forever —
+  `a_wall_of_parked_entries_never_starves_a_fresh_letter_out_of_the_batch`
+  pins it); and the per-entry bookkeeping (`tries`/`last_try_at`/
   `last_outcome`, written via `outbox::write_entry` before the
   `outbox::back_off` call) is what makes `mail outbox --json`'s tries
   histogram and `lastOutcomeCounts` (see `commands::outbox_node_summary`)
   meaningful for a link that has been dead a long time — don't move the
   `back_off` call ahead of the entry write, and don't drop the cap without
   re-checking `a_drain_never_attempts_more_than_the_batch_cap_per_call`.
-  `drain_all`'s per-node loop is unaffected by either change: one node's
+  **The entry write's own success is never a precondition for the
+  back-off, either.** `write_entry`'s `Result` is captured, not `?`-ed
+  away, so a local write failure — a full or read-only disk, the exact
+  condition under which the link is also likely failing — still lets
+  `back_off` run before that write's own error propagates to the caller;
+  an early `?` here used to skip `back_off` outright on that failure,
+  leaving the link un-backed-off and re-dialed every following tick
+  precisely when the box is already sick
+  (`a_link_backs_off_even_when_the_entrys_own_record_cannot_be_written`
+  pins it).
+  `drain_all`'s per-node loop is unaffected by any of them: one node's
   `TransportFailed` break stays scoped to that node's own iteration, never
   short-circuiting the loop over other nodes (see
   `aoide_conduct::mail_bridge`'s own

@@ -4626,3 +4626,87 @@ Pages touched: CONTRACTS.md, pkgs/aoide/crates/storage/README.md,
 pkgs/aoide/crates/storage/AGENTS.md, pkgs/aoide/crates/client/README.md,
 pkgs/aoide/crates/client/AGENTS.md, pkgs/aoide/crates/server/README.md,
 pkgs/aoide/crates/server/AGENTS.md
+
+## [2026-09-14] fix | a parked wall no longer starves the drain, and a failed write no longer litters the spool
+
+Mail-reliability lane, two defects found while checking 99c144a's bounded
+retry and receipt behaviour on the live box. First: `drain_node` applied
+`DRAIN_BATCH_CAP` to the raw spool listing and only then skipped `refused`
+entries, so a batch's worth of parked entries at the head — and they sort
+oldest-first, because parking is what happens to an entry that was tried —
+consumed the whole cap on entries the loop could never dial. A fresh letter
+behind fifty parked ones was never attempted again, silently, with the
+outbox still reporting it as waiting. `client/README.md` already specified
+"up to `DRAIN_BATCH_CAP` (50) non-refused entries", so this was the code
+missing its own stated contract, not a design change; the filter now runs
+before the cap. Yomi's osaka spool is entirely refused entries today, six
+of them, which is how close the live box was to it.
+
+Second: `fs::atomic_write` returned a write failure without unlinking the
+temp it had just created, and `sweep_stale_temps` only ever matched temps
+sharing the target's own stem — so a temp stranded that way was reclaimable
+only by a later write of the same file. For a write-once name there is no
+later write: 1519 zero-byte `<msgid>.tmp.3460304` orphans sat in
+`state/outbox/osaka/` from a dead pid, grown out of the same ack storm
+99c144a fixed, and had inflated that directory to a 3 MB inode. Both halves
+of the write now share one unlink, and the sweep reclaims any sibling
+`<stem>.tmp.<dead pid>` in the directory, which costs nothing (the
+`read_dir` was already paid on every write) and heals the existing litter on
+the next write into it. `.tmp.` is matched as a whole separator so
+`migrate_state_tree`'s `migrate-tmp.<pid>` and `seed_if_absent`'s
+`seed.<pid>` stay out of it. The live spool is not touched by hand.
+
+Both regressions are pinned by tests that fail against the code as it
+stood. storage 415, client 293 pass; the three remaining conduct/server
+failures are the same `SUN_LEN` socket-path-length shape 99c144a recorded,
+verified failing identically at HEAD.
+
+The `mail send --thread` hang reported in the same lane is NOT diagnosed by
+either fix and is not reproducible: see the diagnosis note in the register.
+
+Pages touched: pkgs/aoide/crates/storage/AGENTS.md,
+pkgs/aoide/crates/client/AGENTS.md
+
+## [2026-09-14] fix | the link backs off through a spool write failure, and a wedged ring peer cannot park the daemon's lock
+
+Mail-reliability lane, continued. First: `mail_wire::drain_node`'s
+`TransportFailed` arm wrote the entry's own bookkeeping (`tries`/
+`last_try_at`/`last_outcome`) with a bare `?` before calling
+`outbox::back_off`, so a local spool write failure — a full or read-only
+disk, exactly the condition under which the link is also most likely
+failing — skipped the backoff entirely and left the link re-dialed on
+every following tick with no delay. `write_entry`'s `Result` is now
+captured instead of `?`-ed away, `back_off` runs unconditionally, and the
+write's own error still propagates afterward. Pinned by
+`a_link_backs_off_even_when_the_entrys_own_record_cannot_be_written`,
+which plants a directory at `atomic_write`'s own `<msgid>.tmp.<pid>` temp
+path to force the write to fail with EISDIR deterministically, no chmod
+and no root needed; confirmed failing against the old code before the fix
+and passing after.
+
+Second: `aoide-conduct`'s doorbell (`graph::doorbell::ring_locked`) runs
+its whole select → inject → stamp sequence for a mailbox name under
+`.ring.lock`, inside the resident daemon, with both the channel and the
+PTY transport dialing out via a bare `UnixStream::connect` and no write
+timeout. A peer that accepts the connection but never reads — a wedged
+agent child, a stopped process — fills the socket buffer and blocks the
+write forever, parking every OTHER mailbox's ring behind that one hung
+peer. Both transports now connect through `connect_for_ring`, which arms
+a `RING_WRITE_TIMEOUT` (2s) on the stream before either write, so it
+covers `write_delivery`'s second write (the submit keystroke) as well as
+the first; a timed-out write is an ordinary `Err` and lands in the SAME
+`write-failed` skip a connect/write failure already used, latch
+untouched, reader still armed. Pinned by
+`a_ring_write_to_a_peer_that_never_reads_gives_up_instead_of_holding_the_ring_lock`,
+which binds a listener, accepts and never reads, and writes 8 MiB through
+the real transport; confirmed against a temporarily unbounded connect
+that hung past an 8-second bound before the fix, and gives up well inside
+it after.
+
+Both regressions are pinned by tests proven failing/hanging against the
+code as it stood. client 294 pass; conduct 771 pass, the same two
+`SUN_LEN` socket-path-length failures verified identical at HEAD.
+
+Pages touched: pkgs/aoide/crates/client/AGENTS.md,
+pkgs/aoide/crates/conduct/AGENTS.md, pkgs/aoide/crates/conduct/README.md,
+docs/architecture/MAIL.md
