@@ -942,15 +942,28 @@ Fields per entry: status · owner · depends on · evidence · next.
   the golden at 82). The INSTALLED eidolon has none of the producer until
   the User rebuilds it; until then every eidolon record stays on the
   presence rule and `session trace` answers with the taught no-trace error.
-- E5b ping-back, NOT dispatched, BLOCKED on one policy answer (asked
-  2026-09-17): the reap tick remembers the last trace id per eidolon child
-  and delivers ONE line to the parent through the send door on
-  `TurnSettled`, `Cancelled`, `TurnBudget`/`TurnDeadline`,
-  `ToolResult{is_error}`, `AskUser`, ten minutes of silence on an open
-  turn, or a dead pid with an open turn. The door's autogate is
-  parent-of-target and sibling-of-target; a child-to-parent line is
-  neither. Default proposed: reciprocal (a parent hears the children it
-  spawned); the alternative holds it pending like a stranger's send.
+- E5b ping-back, RULED (User, 2026-09-17: "parent should be able to hear
+  its child spawns") and LANDED a5e0f63: the autogate is reciprocal — a
+  parent hears the children it spawned (child-of-target, the fourth rule
+  in `Conductor-Channel.md`). `conduct/graph/pingback.rs` runs after the
+  post-lock `sync_eidolon_sessions()` in every `Door::Daemon` reap: per
+  eidolon child it reads the trace, picks ONE line by priority (settled /
+  cancelled > died mid-turn > asking > wrapping up > failing > ten minutes
+  silent), claims it under the stage lock in `state/stage/pingback.json`
+  (`{<child>: {seen, silentAt}}`, at-most-once per record id) and rings
+  the parent's doorbell (`[eidolon <petname>] …`, clipped to 80 chars,
+  control chars stripped, a leading `/` or `!` spaced; headless parents
+  get the submit keystroke; shell parents, done parents and interactive
+  parents without a channel are skipped; audit `delivered … (autogate-
+  child)`). `sync_eidolon_sessions()` now also returns the records
+  dropped this pass so a child that exited between ticks still reports.
+  Review found and fixed one defect the executor missed: a clean eidolon
+  exit removes its presence dir, so the locate returned nothing and a
+  settled headless run was never reported — `eidolon_transcript_locate`
+  now falls back to the record's `logPath` (`<stem>.eid` → sibling
+  `<stem>.jsonl`), passed from both the live and the dropped path.
+  Verified protocol 154, conduct 812 (15 pingback tests), cli 42. Fires
+  only once `aoided` runs this code AND eidolon is rebuilt from `trace`.
 - Conductor-state eval kit `evals/conductor-state/` (same commit): the
   per-node VV classifier's testing kit — `eidolon log` → features → one
   delexicalized state line → condition / decision / risk (the CIA leg at
