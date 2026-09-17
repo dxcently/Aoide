@@ -274,9 +274,11 @@ through.
 
     in that priority order, with a `ToolResult{is_error:true}` among the new
     records riding a higher line as ` · <k> tool errors` and three or more in
-    a row standing as their own. Quoted text is untrusted model output: one
-    line, control characters stripped, clipped to 80 characters, and never
-    allowed to start with `/` or `!`. Per-child at-most-once is the
+    a row standing as their own. Every child-authored fragment — the quoted
+    say, prompt and stop reason, and the tool label on the failing and
+    silence lines — is untrusted model output: one line, control characters
+    stripped, clipped to 80 characters; the quoted ones never allowed to
+    start with `/` or `!`. Per-child at-most-once is the
     `state/stage/pingback.json` cursor, claimed before the write. A parent
     that is a bare shell is skipped outright — a line typed into a shell RUNS
     — as is a parent whose record is gone, not conductable, or already

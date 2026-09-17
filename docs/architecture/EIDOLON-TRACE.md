@@ -162,9 +162,10 @@ carries whatever the journal carries; that fix is harnox's.
   `UserMessage`/`ExternalMessage` when that record is still in the 1 MiB
   tail (the segment is omitted otherwise, as is `<M> min`); `<say>` is the
   last assistant `text` block; a `ToolResult{is_error:true}` among the new
-  records rides a priority-1..3 line as ` · <k> tool errors`. Quoted text is
-  untrusted model output: one line, control characters stripped, clipped to
-  80 characters with `…`, and never able to start with `/` or `!`.
+  records rides a priority-1..3 line as ` · <k> tool errors`. Every
+  child-authored fragment — quoted or the bare `<tool label>` — is untrusted
+  model output: one line, control characters stripped, clipped to 80
+  characters with `…`; the quoted ones never able to start with `/` or `!`.
 
   **It is the daemon's own line, not a send.** The send door attests the
   sender from the running process's `/proc` ancestry, so inside the daemon
