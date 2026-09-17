@@ -115,6 +115,10 @@ aoide session                                   # roster
 aoide graph                                     # the session DAG
 ```
 
-Children spawned by the orchestrator inherit its autogate; other sessions
-need `--yes`. Test hook, socket, graph, and reaper changes end to end:
+Children spawned by the orchestrator inherit its autogate, and the
+reciprocal holds: a parent automatically hears the children it spawned, as a
+daemon-delivered one-line report off the child's own trace (settled,
+cancelled, asking, wrapping up, failing, silent) — never a prompted send,
+never a pending entry. Other sessions need `--yes`. Test hook, socket, graph,
+and reaper changes end to end:
 register, command, kill, and observe the reaping.

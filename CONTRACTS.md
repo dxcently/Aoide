@@ -2290,7 +2290,12 @@ The held-injection queue: entries `aoide send` writes when its gate
 doesn't clear immediate delivery (no `--yes`, no autogate match), and the
 A2A door's own `message/send` Inject path reuses VERBATIM when its admission
 check doesn't clear a caller either (`crates/server/src/a2a.rs::do_inject`) —
-one queue, two writers, no second pending-queue implementation. Read and
+one queue, two writers, no second pending-queue implementation. The gate's
+delivering rules are `--yes`, the global switch, parent-of-target,
+sibling-of-target, and the reciprocal child-of-target — the last is the
+daemon's OWN one-line report about a parent's eidolon child, never a send: it
+never reaches this file at all, so a child's progress is never held pending
+while a stranger's send still is. Read and
 resolved by `aoide session pending list/approve/deny`: `list` enumerates every
 entry (a malformed one — a stale hand-edited line — surfaces as
 `"state": "malformed"` rather than failing the read); `approve` re-drives the
@@ -2328,6 +2333,34 @@ answer like a permission-verdict digit never does), the payload is prefixed
 sent it — attribution, not authentication; both `--from` and
 `AOIDE_SESSION_ID` are ordinary same-user process state, spoofable by
 anyone who can already write to the target's control socket.
+
+### `state/stage/pingback.json` — **v0**
+
+The ping-back's per-child cursor (P-EIDOLON slice E5b,
+`docs/architecture/EIDOLON-TRACE.md`'s "Second slice"): one entry per
+`agent:"eidolon"` child whose trace the reaper tick has examined, keyed by
+that child's own native session id (the eidolon presence id, verbatim —
+the same id `sessions.json` carries).
+
+```json
+{
+  "user-0001": { "seen": "131", "silentAt": "120" },
+  "user-0002": { "seen": "40" }
+}
+```
+
+`seen` is the last trace record id examined — delivered or merely passed
+over — and `silentAt` (absent until a silence line has been sent) is the
+record id that line was sent for; any new record re-arms it by removing the
+key. Both are opaque record ids, rendered as strings exactly as the trace's
+own `#<id>` is (the journal writes numbers; nothing promises it stays one).
+This file is written ONLY by `graph/pingback.rs`, and only inside the
+resident daemon: it is read, decided over and rewritten (atomically,
+temp-then-rename) inside one short `state/stage/.stage.lock` section BEFORE
+the delivery — so a line is delivered at most once, and a crash between the
+claim and the write loses a line rather than duplicating one. A child whose
+eidolon record leaves the roster drops out of this file on the same pass.
+There is no command that reads or edits it: it is a cursor, not a queue.
 
 ### `state/stage/mesh.json` — **v0**
 

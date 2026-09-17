@@ -24,7 +24,9 @@ the node, so the DAG reads as a live map of who is doing what.
 Every terminal runs conducted by default, so it is a tracked, conductable
 session out of the box — no opt-in. The parent-autogate rule lets an
 orchestrator freely command the children it spawned; sibling sessions
-(sharing a live parent) autogate each other too. Headless conduct
+(sharing a live parent) autogate each other too; and the reciprocal holds as
+well — a parent automatically hears the children it spawned, as the daemon's
+own one-line report off the child's trace, never a prompted send. Headless conduct
 (`--headless`, no controlling terminal at all), `spawn` (the detached
 launch command), and sender provenance (a delivered payload carries a `from
 <sender>: ` prefix) round out the no-terminal case without changing the core
@@ -211,9 +213,10 @@ through.
   exact `send` door (`--yes`, in-process) and removes it, `deny <id>`
   removes it without injecting. This is CLI-only today — the conductor
   TUI's own one-key approve/deny (below) is still Phase ③.
-- **Autogate policy.** Three rules ship today, all still audited, in
+- **Autogate policy.** Four rules ship today, all still audited, in
   priority order: `--yes` ▸ the global switch ▸ parent-of-target ▸
-  sibling-of-target ▸ else pending.
+  sibling-of-target ▸ else pending. The fourth is the daemon's own line,
+  never a prompted send: child-of-target.
   - **Parent-of-target.** A send delivers without a prompt when the
     sender's own session is the target session's `parentSessionId` — an
     orchestrator freely commanding a child it spawned. Cross-tree or
@@ -240,6 +243,46 @@ through.
     approval. A dead/absent parent or a cross-tree pair stays gated.
   - **Global switch.** `AOIDE_CONDUCT_AUTOGATE` in `{1,true,yes,all}`
     declares a box-wide orchestration mode where every send delivers.
+  - **Child-of-target (reciprocal).** The three rules above gate a SEND —
+    somebody is trying to speak to a session. This one runs the other way:
+    a parent automatically hears the children it spawned, so a child's own
+    progress reaches its `parentSessionId` with no prompt and no pending
+    entry in between. It is not a send at all. The send door attests the
+    SENDER from the running process's own `/proc` ancestry, and inside the
+    resident daemon that attested sender is the daemon, never the child — so
+    the reciprocal rule could never be `sender_is_parent` made symmetric,
+    and it is not implemented as one. It is the daemon's OWN line about the
+    parent's child, delivered on the doorbell's path: raw injection into the
+    target's transport (a live Claude Code channel socket if one is bound —
+    one write, then close — else the control socket with the target's own
+    submit keystroke), with no gate, no `pending.json` entry, no provenance
+    prefix, no title rename, and no mailbase receipt; each delivery writes
+    one audit line with gate label `autogate-child`. The reaper tick is what
+    speaks: for each `agent:"eidolon"` child it reads the trace the child's
+    harness mirrors beside its journal, picks the highest-priority new event
+    since that child's cursor, and renders ONE line —
+
+    ```
+    [eidolon <petname>] settled <stop_reason> · <N> calls · <M> min · last: "<say>"
+    [eidolon <petname>] cancelled · <N> calls · last: "<say>"
+    [eidolon <petname>] died mid-turn · <N> calls · last: "<say>"
+    [eidolon <petname>] asking: "<prompt>"
+    [eidolon <petname>] wrapping up · <n> calls left      (or · <s> s left)
+    [eidolon <petname>] failing · <k> tool errors in a row · last: <tool label>
+    [eidolon <petname>] silent <M> min · last: <tool label or say>
+    ```
+
+    in that priority order, with a `ToolResult{is_error:true}` among the new
+    records riding a higher line as ` · <k> tool errors` and three or more in
+    a row standing as their own. Quoted text is untrusted model output: one
+    line, control characters stripped, clipped to 80 characters, and never
+    allowed to start with `/` or `!`. Per-child at-most-once is the
+    `state/stage/pingback.json` cursor, claimed before the write. A parent
+    that is a bare shell is skipped outright — a line typed into a shell RUNS
+    — as is a parent whose record is gone, not conductable, or already
+    `done`. Nothing wider than the children it spawned: a stranger's send
+    still holds pending. The full statement is `docs/architecture/
+    EIDOLON-TRACE.md`'s "Second slice".
 - **Sender provenance.** A delivered payload that NAMES the node (carries a
   letter — a real message, not a bare keystroke answer) is prefixed on its
   first line with `from <sender>: `, where `<sender>` resolves from

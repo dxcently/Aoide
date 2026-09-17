@@ -21,6 +21,7 @@ aoide (reap tick, every session)
    EIDOLON_PROFILE       transcript spec ─▶ say · tool · model · context tokens · title
    aoide session trace <id> [--tail N] [--follow] [--json]     the run, step by step
    reap: new records on a child ─▶ one line to the parent        (ping-back, second slice)
+   state/stage/pingback.json  per-child cursor: seen · silentAt
 ```
 
 ## The contract (read side: Aoide; write side: eidolon)
@@ -123,7 +124,11 @@ carries whatever the journal carries; that fix is harnox's.
 
 - `protocol/src/agents.rs` — `EIDOLON_PROFILE.transcript`: `locate` reads
   `meta.json.trace` and returns the `.jsonl` when it exists (else
-  `meta.json`, today's stand-in); `tail` is the ordinary line tail for a
+  `meta.json`, today's stand-in); once the presence is gone — eidolon
+  removes its dir on a clean exit — the caller's hint is the record's own
+  `logPath` and the `.jsonl` beside that `.eid` is returned when it exists,
+  which is how a run that settled and left between two ticks is still read;
+  `tail` is the ordinary line tail for a
   `.jsonl` (the compacting meta read stays for the stand-in); the
   extractors read the table above from trace lines, meta lines as today.
 - `conduct/src/graph/eidolon.rs` — `PresenceMeta.trace`, and the state rule
@@ -133,13 +138,56 @@ carries whatever the journal carries; that fix is harnox's.
   per record (`#id  hh:mm:ss  kind  summary` — assistant: thinking dimmed
   and cut, text, tool names; tool result: first line, `!` on error;
   settled: stop reason, tokens); `--json` passes the lines through.
-- Second slice, **ping-back**: the reap tick remembers the last trace id it
-  saw per eidolon child and, on `TurnSettled`, `Cancelled`, `TurnBudget`/
-  `TurnDeadline`, `ToolResult{is_error}`, `AskUser`, a turn open with no
-  new record for ten minutes, or a dead process with an open turn, delivers
-  ONE line to the parent through the send door (`[eidolon <petname>] settled
-  end_turn · 90 calls · 31 min` / `… cancelled at call 97 · last: "…"`). The
-  door's autogate rules today are parent-of-target and sibling-of-target; a
-  child-to-parent event is neither, so this slice needs a policy answer
-  first: reciprocal autogate (a parent hears the children it spawned) or
-  held pending like a stranger's send.
+- Second slice, **ping-back** (`conduct/src/graph/pingback.rs`; the User's
+  ruling, 2026-09-17: a parent automatically hears the children it spawned —
+  nothing wider, so a stranger's send still holds pending): the reap tick
+  remembers the last trace id it saw per eidolon child and, on
+  `TurnSettled`, `Cancelled`, a dropped record whose turn is still open
+  (`died mid-turn`), `AskUser{answer:null}`, `TurnBudget`/`TurnDeadline`,
+  three or more `ToolResult{is_error:true}` in a row, or an open turn with no
+  new record for ten minutes (latched, one line per silence), delivers ONE
+  line to the parent. The lines, in priority order:
+
+  ```
+  [eidolon <petname>] settled <stop_reason> · <N> calls · <M> min · last: "<say>"
+  [eidolon <petname>] cancelled · <N> calls · last: "<say>"
+  [eidolon <petname>] died mid-turn · <N> calls · last: "<say>"
+  [eidolon <petname>] asking: "<prompt>"
+  [eidolon <petname>] wrapping up · <n> calls left      (or · <s> s left)
+  [eidolon <petname>] failing · <k> tool errors in a row · last: <tool label>
+  [eidolon <petname>] silent <M> min · last: <tool label or say>
+  ```
+
+  `<N> calls` counts `tool_use` blocks since the turn's opening
+  `UserMessage`/`ExternalMessage` when that record is still in the 1 MiB
+  tail (the segment is omitted otherwise, as is `<M> min`); `<say>` is the
+  last assistant `text` block; a `ToolResult{is_error:true}` among the new
+  records rides a priority-1..3 line as ` · <k> tool errors`. Quoted text is
+  untrusted model output: one line, control characters stripped, clipped to
+  80 characters with `…`, and never able to start with `/` or `!`.
+
+  **It is the daemon's own line, not a send.** The send door attests the
+  sender from the running process's `/proc` ancestry, so inside the daemon
+  the attested sender is the daemon and never the child — which is why the
+  reciprocal rule is not `sender_is_parent` made symmetric. The line takes
+  the doorbell's path instead: a live Claude Code channel socket if one is
+  bound (one write, close, no keystroke), else `write_delivery` + the
+  wrap's own submit key for a headless wrap — no gate, no `pending.json`
+  entry, no provenance prefix, no title rename, one audit line with gate
+  label `autogate-child`. It runs in `reap()`'s post-lock collector block
+  after `sync_eidolon_sessions()`, only under `Door::Daemon`, and its result
+  never joins `outcome.changed`. A parent that is a bare shell is skipped —
+  a line typed into a shell runs — as is one whose record is gone, not
+  conductable, or already `done`.
+
+  **At-most-once by a claimed cursor.** `state/stage/pingback.json`
+  (`{ "<child id>": { "seen": "<id>", "silentAt": "<id>" } }`) is read,
+  decided over and rewritten (atomically) inside one short `.stage.lock`
+  section BEFORE the socket write; a crash between the two loses a line,
+  which is the safe direction, and a child whose eidolon record is gone
+  drops out of the file on the same pass. A `seen` that is not in the tail
+  treats the whole tail as new ONCE and says nothing about what it lost.
+  `sync_eidolon_sessions` returns the records it dropped this tick
+  (`Vec<DroppedEidolon>`) as an ADDITIVE second half — the boolean means
+  what it always did — and that is the `died mid-turn` row's only evidence;
+  no second liveness probe exists (`reap` is the only sweep).

@@ -209,6 +209,25 @@ lock, and never reaches the daemon. A session whose harness keeps no trace,
 or whose presence names none, is a taught error naming which of the two it
 is, never an empty listing.
 
+**And the parent hears it.** The same tick that folds the state also reads
+the child's new records and, under the resident daemon alone, delivers ONE
+line about the child to the parent that spawned it — `[eidolon <petname>]
+settled end_turn · 90 calls · 31 min · last: "…"`, `… cancelled …`, `… died
+mid-turn …` (its eidolon record was just dropped with the turn still open),
+`… asking: "…"`, `… wrapping up · 8 calls left`, `… failing · 3 tool errors
+in a row · last: <tool label>`, `… silent 12 min · last: …`. It is not a
+send and never becomes one: the send door attests the sender from the running
+process's `/proc` ancestry, so inside the daemon the sender is the daemon and
+never the child — the line is raw-injected the doorbell's way (a live channel
+socket, else the control socket with the wrap's own submit key), with no
+gate, no pending entry, no provenance prefix and no rename of the parent.
+`state/stage/pingback.json` holds the per-child cursor (`seen`, `silentAt`),
+claimed inside one short stage-lock section before the write, so each event
+is delivered at most once. A parent that is a bare shell is skipped — a line
+typed into a shell would run — as is one whose record is gone, not
+conductable, or already `done`. The ruling is the User's (2026-09-17): a
+parent hears the children it spawned, and nothing wider.
+
 The contrasting shape is **a desktop Codex/ChatGPT thread**
 (`graph/codex_app.rs`): `kind:"app"`, because it is a task inside an app
 aoide does not conduct — no agent profile, no hook, no control socket, and it
