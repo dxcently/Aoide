@@ -14,18 +14,18 @@
 // built-in auto-reload-on-file-change path calls `reload(false)` — soft —
 // so this matches that, not `true`.
 //
-// ── Placeholder-screen diagnostic (breadcrumb only, no fix) ─────────────
+// ── Placeholder-screen diagnostic ──────────────────────────────────────
 // `Quickshell.screens`/`screensChanged` (confirmed against the compiled
-// 0.3.0 plugin's own quickshell-core.qmltypes: `QuickshellGlobal`'s
+// 0.3.1 plugin's own quickshell-core.qmltypes: `QuickshellGlobal`'s
 // `screens` property, `notify: "screensChanged"`) is logged on every
-// change purely so the journal shows the screen list collapsing at the
-// moment a placeholder-screen lockup happens, not only after the fact from
-// `hyprctl`. `crates/song/src/health.rs`'s own module doc already rules out
-// a QML-side FIX here: `Quickshell.screens` is populated below QML by
-// `QGuiApplication`'s wayland platform plugin, so no in-process handler can
-// reach or reset the stuck QPA state — only `aoide-quickshell-healthcheck.
-// timer`'s process restart does. `console.warn`, not a state change: zero
-// behavior difference from this file's IPC responsibility above.
+// change so the journal shows the screen list collapsing at the moment a
+// placeholder-screen lockup happens, not only after the fact from `hyprctl`.
+// A surface bound to `Quickshell.screens` (the bar, the wallpaper) or to
+// the focused monitor (the dock) re-homes by itself: the list came back on
+// its own, nothing needed resetting, and only unbound singletons failed to
+// follow. A process restart remains the recovery for a QPA state that
+// genuinely wedges and paints nothing anywhere. `console.warn`, not a state
+// change: zero behavior difference from this file's IPC responsibility above.
 
 import QtQuick
 import Quickshell

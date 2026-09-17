@@ -103,6 +103,13 @@ match on these namespaces (`layerrule blur` + hyprglass) — the namespace
 string is part of the slot's documented contract, not an implementation
 detail a song widget is free to rename.
 
+A namespace in this table is a **mapped layer surface** — and a song declares
+which of those it expects to be persistently mapped, by namespace, in
+`aoide.arrangement.surfaces` (`CONTRACTS.md` §5, published as
+`run/qml/songs/surfaces.json`): `bar`/`wallpaper` per-monitor, `dock` single.
+Surfaces summoned on demand — `powermenu`/`launcher` here, plus the OSD, lock
+screen, greeter and `*Preview` surfaces — are deliberately **not** declared.
+
 A slot is added to this table **only once a real anchor (`WidgetSlot` or
 `SurfaceSlot`) is wired for it** — matching CONTRACTS.md §5's "what IS
 built, not what's speculatively planned" discipline. A song authoring

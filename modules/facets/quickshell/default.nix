@@ -82,6 +82,30 @@ let
   manifestJsonFile = pkgs.writeText "aoide-quickshell-manifest.json" (builtins.toJSON manifestAttrs);
   registryJsonFile = pkgs.writeText "aoide-quickshell-registry.json" (builtins.toJSON registryAttrs);
 
+  # ── Expected paint, published (v1 `aoide.arrangement.surfaces`) ─────────
+  # The ACTIVE song's expected-paint declaration, published so a health
+  # consumer can assert what SHOULD be mapped instead of only counting what
+  # is (`lyra quickshell healthcheck`). Deliberately NOT keyed by song, unlike
+  # the two files above: those describe the whole songbook because
+  # `rice preview` can switch songs at runtime, while an expectation is about
+  # what the ACTIVE song should have mapped right now — and
+  # `config.aoide.arrangement.surfaces` already IS that (the song's rice.nix
+  # self-gates on `config.aoide.song`). `song` names which song's declaration
+  # this is; the keys are the RESOLVED layer-shell namespaces (`aoide-<slot>`
+  # — the same derivation `widgetType.namespace` applies when null), so the
+  # consumer compares them directly against the compositor's layer list and
+  # derives nothing of its own. An empty `surfaces` object is emitted for a
+  # song that declares none — the legitimate "expect nothing" shape, never an
+  # omitted file (CONTRACTS.md §5).
+  surfacesJsonFile = pkgs.writeText "aoide-quickshell-surfaces.json" (
+    builtins.toJSON {
+      song = config.aoide.song;
+      surfaces = lib.mapAttrs' (
+        slot: entry: lib.nameValuePair "aoide-${slot}" entry
+      ) config.aoide.arrangement.surfaces;
+    }
+  );
+
   # ── Seed script for `home.activation.aoideSeedStage` (below) ───────────────
   # Reasserts the ACTIVE song's committed livery, with the venue override
   # applied (`stageLivery`, above), into the live stage twin
@@ -184,6 +208,14 @@ let
     jq . ${manifestJsonFile} > "$manifest"
     registry="$out/qml/songs/registry.json"
     jq . ${registryJsonFile} > "$registry"
+    # The ACTIVE song's expected-paint declaration (CONTRACTS.md §5) —
+    # `surfacesJsonFile` above. NOT keyed by song, unlike the two above it:
+    # the expectation is about what the active song should have mapped now,
+    # and the option it comes from already is that. A consumer finds this file
+    # absent (an older host, or a facet that never deployed) and falls back to
+    # its previous behaviour.
+    surfaces="$out/qml/songs/surfaces.json"
+    jq . ${surfacesJsonFile} > "$surfaces"
 
     # ── Carry over per-song flavor widgets ──────────────────────────────────
     # Copy the WHOLE widgets/ dir per song (bring any helper .qml/asset

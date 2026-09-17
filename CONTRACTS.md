@@ -4119,6 +4119,65 @@ nix option → build-time `registry.json` walk → `rice lint` → `rice
 stage` hot-sync → `SongSurfaces.qml` render — end to end. No
 committed song declares a `kind = "dock"` entry yet.
 
+### Expected paint — `run/qml/songs/surfaces.json`
+
+`aoide.arrangement.surfaces` (`modules/nucleus/options.nix`, the same
+`arrangement` namespace as `widgets` above — deliberately NOT a fourth
+top-level `aoide.*` name, and not `aoide.surfaces`, which is the separate
+facet ownership registry Stylix reads) declares which painted surfaces a
+song **expects to be mapped**. It is `attrsOf` one-flag entries, keyed by
+slot name, `perMonitor` (bool, default `false`): `true` = one mapped layer
+surface per enabled output, `false` = exactly one, wherever it lands. A
+declaration is an **expectation** and instantiates nothing — the surfaces it
+names are facet-owned windows (`shell.qml`'s bar/wallpaper `Variants`
+delegates, `SurfaceSlot { slot: "dock" }`), never `arrangement.widgets`
+entries, which would stand up a second copy of each.
+
+Only **persistently mapped** surfaces belong in it. A surface summoned on
+demand — a launcher, an OSD, a lock screen, a `*Preview` surface, or any
+declared flavor widget — must NOT be declared, or a consumer would read a
+closed surface as a lost one and act on a healthy desktop. A surface whose
+owner is not this shell at all (a host where waybar owns the bar) is
+likewise declared by nobody, which is the point: the expectation is the
+song's statement, not a hardcoded list.
+
+**The generated artifact:** the quickshell facet's build
+(`modules/facets/quickshell/default.nix`) emits
+`$out/qml/songs/surfaces.json`, deployed with the rest of the tree to
+`run/qml/songs/surfaces.json`. It is deliberately NOT keyed by song, unlike
+`manifest.json`/`registry.json` beside it: those describe the whole
+songbook because `rice preview` can switch songs at runtime, whereas an
+expectation is about what the **active song** should have mapped right now —
+and the option it comes from already is that, since a song's `rice.nix`
+self-gates on `config.aoide.song`. So one object, whose keys are the
+**resolved layer-shell namespaces** (`aoide-<slot>`, the same derivation
+`widgetType.namespace` applies when null), so a consumer compares them
+directly against the compositor's layer list and derives nothing of its own:
+
+```json
+{ "song": "sonata",
+  "surfaces": { "aoide-bar": { "perMonitor": true },
+                "aoide-wallpaper": { "perMonitor": true },
+                "aoide-dock": { "perMonitor": false } } }
+```
+
+`song` is `config.aoide.song`. An empty `surfaces` object is the legitimate
+shape for a song that declares none and is **emitted rather than omitted**.
+
+**Readers:** `lyra quickshell healthcheck`
+(`pkgs/aoide/crates/song/src/health.rs`). With the file present it asserts
+every declared namespace against `hyprctl layers -j` — on every enabled
+output for a `perMonitor` entry, at least once otherwise — and a shortfall
+is the bad state the journal gate then classifies. A total count of painted
+surfaces cannot see a PARTIAL loss (the wallpaper mapped while the bar and
+dock are not), which is why the declaration exists. An **absent file means
+"no expectation declared"**, and the reader falls back to its previous
+behaviour — zero `aoide-*` surfaces anywhere — rather than inventing one,
+the same tolerate-missing stance `registry.json` and the stage files hold.
+This is a build-time statement of intent, not stage state: nothing writes it
+at runtime, and it is not a `lyra rice stage` hot-sync target
+(`manifest.json`/`registry.json` are).
+
 ### Elements
 
 A song may also carry non-QML rice targets — waybar, dunst, a compositor,

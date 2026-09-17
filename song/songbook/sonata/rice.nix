@@ -31,6 +31,24 @@ in
 
     aoide.arrangement.widgets = (song.composeSong widgets).arrangement.widgets;
 
+    # ── Expected paint — the three surfaces sonata keeps mapped ────────────
+    # bar/wallpaper are one mapped layer surface PER enabled output (each is a
+    # `Variants` delegate over Quickshell.screens in shell.qml); dock is a
+    # single column, wherever it lands. These declare an EXPECTATION and
+    # instantiate nothing: all three are facet-owned windows hardcoded in the
+    # shell — never `arrangement.widgets` entries, which would stand up a
+    # second copy of each.
+    #
+    # Declaration is for PERSISTENTLY mapped surfaces ONLY. Everything else in
+    # this facet — launcher, osd, lockscreen, greeter, the `*Preview` surfaces,
+    # and any declared flavor widget — is summoned on demand and must NOT be
+    # declared, or a consumer would read a CLOSED surface as a lost one.
+    aoide.arrangement.surfaces = {
+      bar.perMonitor = true; # aoide-bar — one bar per output (shell.qml Variants)
+      wallpaper.perMonitor = true; # aoide-wallpaper — one per output (same)
+      dock.perMonitor = false; # aoide-dock — one column, single
+    };
+
     # ── Palette tier (base16 mapping — the Greek marble register) ───────────
     aoide.livery.palette = {
       bg = "#f2ebde"; # pale warm marble ground            (base00)

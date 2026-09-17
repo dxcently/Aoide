@@ -19,7 +19,12 @@ decisions (that's `song/songbook/*/widgets/`'s job). Three facets today:
 - `quickshell/` — renders the complete shell surface (bar, notifications,
   launcher, osd, lockscreen, greeter, wallpaper, agentWidgets,
   sessionGraph). Component-tier fallback (null → palette) applies locally;
-  never reads `song/` runtime paths at build time. The activation seed that
+  never reads `song/` runtime paths at build time. Beside the songbook-wide
+  `manifest.json`/`registry.json`, its build publishes the ACTIVE song's
+  expected-paint declaration as `run/qml/songs/surfaces.json`
+  (`CONTRACTS.md §5`, from `aoide.arrangement.surfaces`) — the statement a
+  health consumer asserts against, since counting painted surfaces alone
+  cannot see a partial loss. An absent file declares nothing. The activation seed that
   reasserts `song/stage/livery.json` from the active song's committed notes
   applies the venue recolour (`aoide.livery.override`) through
   `lib/livery.nix`'s `stagePatch`, the same rule the Stylix/compositor

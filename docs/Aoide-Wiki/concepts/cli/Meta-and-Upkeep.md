@@ -264,14 +264,17 @@ lyra quickshell healthcheck [--json]
 - **Notes:** not gated; best-effort throughout — a failed
   `systemctl`/`journalctl`/`hyprctl` call reads as `healthy` (nothing
   confirmed), never as a command failure. The two signals are asked in
-  order: a live `hyprctl layers -j` reading of zero `aoide-*` surfaces is
-  the blank desktop and decides `healthy` on its own, and the journal's
-  placeholder-screen line (scoped to the unit's own `ActiveEnterTimestamp`,
-  so a recovered occurrence can never re-trigger) then decides whether the
-  watchdog may act. Zero surfaces with that line is the lockup and is
-  restarted; zero surfaces without it is `blank` — reported, never
-  restarted, because the placeholder screen is the only mechanism a restart
-  is known to undo. See [[Quickshell]]'s "Session service & resilience" for
+  order: a live `hyprctl layers -j` reading is compared against the active
+  song's declared surfaces (`run/qml/songs/surfaces.json`, per-output where
+  declared `perMonitor`; a host that publishes no declaration falls back to
+  "zero `aoide-*` surfaces anywhere"), and a shortfall decides `healthy` on
+  its own; the journal's placeholder-screen line (scoped to the unit's own
+  `ActiveEnterTimestamp`, so a recovered occurrence can never re-trigger)
+  then decides whether the watchdog may act. A shortfall with that line is
+  the lockup and is restarted; a shortfall without it is `blank` — reported,
+  never restarted, because the placeholder screen is the only mechanism a
+  restart is known to undo. With no real output enabled the check stands
+  down. See [[Quickshell]]'s "Session service & resilience" for
   the full detection and retry-ladder reasoning. Restarts are throttled on a
   retry ladder (0s/15s/60s/300s, floor 900s, indexed by restarts in the
   trailing hour) that never stops trying — the floor repeats indefinitely.

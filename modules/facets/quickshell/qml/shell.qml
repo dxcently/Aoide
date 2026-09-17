@@ -39,7 +39,20 @@ ShellRoot {
     // undefined" from AoideWallpaper). This handle is the delegate-safe way to
     // reach the shared LiveryState: it is resolved HERE, in root scope, and
     // read through the root id from inside the delegate.
+    //
+    // The hazard is broader than that one binding: a delegate child that
+    // DECLARES a property under the same name as a root-scope id gets no id at
+    // all there. `bridge: bridge` / `stagingEngine: stagingEngine` on a
+    // WidgetSlot inside a delegate resolve to the anchor's own not-yet-set
+    // property and settle at undefined — silently, exactly like the livery
+    // case above, with the loud symptom landing one layer down ("Cannot read
+    // property 'songName' of undefined" from WidgetSlot's own resolver). Ids
+    // nothing collides with (`shared`, `powermenuSlot`, `dockSlot`) still
+    // resolve. Every root singleton a delegate reaches gets a handle for that
+    // reason.
     readonly property var liveryRef: livery
+    readonly property var bridgeRef: bridge
+    readonly property var stagingRef: stagingEngine
 
     // ── Shared singletons (one instance for the whole session) ─────────────
     LiveryState { id: livery }
@@ -149,39 +162,54 @@ ShellRoot {
     // WidgetSlot like calendar/notifications. The song fully owns its own
     // footprint now: implicitHeight/exclusiveZone read back from the loaded
     // item's own implicitHeight rather than a facet-pinned constant.
-    PanelWindow {
-        id: barWin
-        anchors { top: true; left: true; right: true }
-        implicitHeight: barSlot.implicitHeight
-        exclusiveZone: barSlot.implicitHeight
-        color: "transparent"
-        WlrLayershell.layer: WlrLayer.Top
-        // Distinct namespace → target of the compositor facet's glass
-        // layerrule (blur behind the translucent barBg — dxflake's
-        // "namespace waybar" posture, aoide-native name).
-        WlrLayershell.namespace: "aoide-bar"
+    //
+    // ONE BAR PER OUTPUT, same as the wallpaper above: a singleton bound to
+    // one dead screen stayed dead after an output blip, while a Variants
+    // delegate is rebuilt from the new Quickshell.screens list and re-homes
+    // itself. `screen: modelData` pins each instance to its own output.
+    Variants {
+        model: Quickshell.screens
 
-        WidgetSlot {
-            id: barSlot
-            anchors.fill: parent
-            livery: livery
-            bridge: bridge
-            stagingEngine: stagingEngine
-            slot: "bar"
-            // stagingEngine is ALSO threaded as an extra (beyond the
-            // anchor's own required stagingEngine above) because the loaded
-            // bar widget needs its own handle to resolve its embedded
-            // calendar WidgetSlot — two separate reads of the same
-            // singleton, not a conflict. `powermenu` is the powermenu
-            // slot's live item (declared below with the overlay surfaces —
-            // QML resolves id references regardless of order, the
-            // clipboard→launcher precedent).
-            extraProps: ({
-                shared: shared,
-                powermenu: powermenuSlot.item,
-                dock: dockSlot.item,
-                stagingEngine: stagingEngine
-            })
+        PanelWindow {
+            id: barWin
+            required property var modelData
+            screen: modelData
+
+            anchors { top: true; left: true; right: true }
+            implicitHeight: barSlot.implicitHeight
+            exclusiveZone: barSlot.implicitHeight
+            color: "transparent"
+            WlrLayershell.layer: WlrLayer.Top
+            // Distinct namespace → target of the compositor facet's glass
+            // layerrule (blur behind the translucent barBg — dxflake's
+            // "namespace waybar" posture, aoide-native name).
+            WlrLayershell.namespace: "aoide-bar"
+
+            WidgetSlot {
+                id: barSlot
+                anchors.fill: parent
+                // Root-qualified singletons: WidgetSlot declares properties of
+                // these very names, which is what blinds a delegate's bare id
+                // reference — see shellRoot's handle block above.
+                livery: shellRoot.liveryRef
+                bridge: shellRoot.bridgeRef
+                stagingEngine: shellRoot.stagingRef
+                slot: "bar"
+                // stagingEngine is ALSO threaded as an extra (beyond the
+                // anchor's own required stagingEngine above) because the loaded
+                // bar widget needs its own handle to resolve its embedded
+                // calendar WidgetSlot — two separate reads of the same
+                // singleton, not a conflict. `powermenu` is the powermenu
+                // slot's live item (declared below with the overlay surfaces —
+                // QML resolves id references regardless of order, the
+                // clipboard→launcher precedent).
+                extraProps: ({
+                    shared: shared,
+                    powermenu: powermenuSlot.item,
+                    dock: dockSlot.item,
+                    stagingEngine: shellRoot.stagingRef
+                })
+            }
         }
     }
 

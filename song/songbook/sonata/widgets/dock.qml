@@ -204,7 +204,34 @@ PanelWindow {
     // fore-edge always peeks and the hot strip is always live; the mask (below)
     // keeps the shut dock from deadening the screen. exclusiveZone 0 reserves
     // nothing; transparent so only the codex draws.
+    //
+    // SINGULAR AND FOLLOWING, deliberately not per-output. The bar and the
+    // wallpaper are one surface per output (shell.qml's Variants over
+    // Quickshell.screens) because each output carries its own copy of that
+    // chrome. The dock is a SUMMONED overlay — one surface the user calls up,
+    // so a copy per output would mean N summoned docks. It binds to the
+    // focused monitor instead and re-homes when that changes, reading both
+    // `Hyprland.focusedMonitor` and `Quickshell.screens` so either notify
+    // re-runs the binding (a blip changes the screen list; moving focus
+    // changes the monitor).
+    //
+    // Every hop is null-guarded, and the guard returns `null` rather than
+    // guessing: `focusedMonitor` is null before Hyprland's IPC answers, and
+    // during a blip its name can match no screen in Quickshell.screens. null
+    // hands placement back to the compositor — the behaviour this surface
+    // already had when it bound no screen at all, so the guard is strictly no
+    // worse than before. There is no monitor→screen accessor in the 0.3.1 API
+    // (HyprlandMonitor carries name/id/geometry, no screen), hence the name
+    // match.
     anchors { left: true }
+    screen: {
+        var mon = Hyprland.focusedMonitor
+        if (!mon) return null
+        var screens = Quickshell.screens
+        for (var i = 0; i < screens.length; i++)
+            if (screens[i].name === mon.name) return screens[i]
+        return null
+    }
     margins.left: 0
     exclusiveZone: 0
     color: "transparent"

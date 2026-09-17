@@ -34,9 +34,10 @@ QML), **`AoideIpc`** (the external-reload IPC target, below), and
 lives) — plus a plain `QtObject` holding cross-widget session state (the
 floating-gadget model, the hover-trace link).
 
-Two surfaces are facet-owned `Item`s wrapped in their own `PanelWindow`:
-**`AoideWallpaper`** (the background layer, `WlrLayer.Background`) and the
-**bar** (`WlrLayer.Top`, exclusive height), whose content is a per-song
+Two surfaces are facet-owned `Item`s wrapped in their own `PanelWindow`, one
+per output (a `Variants` delegate over `Quickshell.screens`, so each re-homes
+itself after an output blip): **`AoideWallpaper`** (the background layer,
+`WlrLayer.Background`) and the **bar** (`WlrLayer.Top`, exclusive height), whose content is a per-song
 widget loaded through `WidgetSlot` (`slot: "bar"`) rather than a facet
 component — the song owns its own footprint. **`AoidePanel`** (the
 [[Gadget-Dock]]) owns its PanelWindow, layer, and toggle shortcut
@@ -232,9 +233,11 @@ stays `active` — no crash, no exit — so systemd has nothing to restart on,
 and the desktop (bar/dock/wallpaper/herald) sits bare until something
 restarts the unit. `Quickshell.screens` is populated below QML by
 `QGuiApplication`'s wayland platform plugin, so no in-process
-`Quickshell.reload()`/`onScreensChanged` handler can reach or reset the
-stuck state — only a full process re-exec does, which is what the watchdog
-below provides.
+`Quickshell.reload()`/`onScreensChanged` handler can reach or reset that
+wedged QPA state — only a full process re-exec does, which is what the
+watchdog below provides. That is the one case a restart is for: a surface
+bound to `Quickshell.screens` or to the focused monitor re-homes by itself
+when the screen list comes back, and only an unbound singleton stays lost.
 
 **`aoide-quickshell-healthcheck.timer`**
 (`modules/facets/quickshell/default.nix`, gated on `aoide.lyra.enable`) is
@@ -248,27 +251,44 @@ own restart was meant to clear — instead of finishing green over a bare
 desktop.
 
 The check asks two independent signals, in order, and they answer different
-questions. `hyprctl layers -j` reporting zero `aoide-`-namespaced surfaces
-anywhere is the blank desktop itself — the user-visible failure, true right
-now — and it decides health on its own. The journal (`There are no outputs -
-creating placeholder screen`, Qt's own line, read since the unit's own
-`ActiveEnterTimestamp` so a recovered occurrence can never re-trigger after
-a restart moves that timestamp forward) names a mechanism, and only one, so
-it decides whether the watchdog may act rather than whether anything is
-wrong. Zero surfaces with that line is the placeholder lockup and is
-restarted; zero surfaces without it is reported as `blank` and left alone,
-since a restart is only known to undo the placeholder screen. Asking the
-journal first would let an unrecognized mechanism report a bare desktop as
-healthy, which is how a pre-QML deadlock in the `QApplication` constructor
-— emitting no QPA line at all — once sat unreported for 22 minutes on two
-hosts.
+questions. `hyprctl layers -j` is compared against what the active song
+DECLARED should be painted — `aoide.arrangement.surfaces`, published by the
+facet's build as `run/qml/songs/surfaces.json` (CONTRACTS.md §5): each
+declared `aoide-<slot>` namespace must be mapped on every enabled output
+when it is `perMonitor`, and at least once otherwise. A declared surface
+that is missing is the user-visible failure, true right now, and it decides
+health on its own. The journal (`There are no outputs - creating placeholder
+screen`, Qt's own line, read since the unit's own `ActiveEnterTimestamp` so
+a recovered occurrence can never re-trigger after a restart moves that
+timestamp forward) names a mechanism, and only one, so it decides whether
+the watchdog may act rather than whether anything is wrong. A shortfall with
+that line is the placeholder lockup and is restarted; a shortfall without it
+is reported as `blank` and left alone, since a restart is only known to undo
+the placeholder screen. Asking the journal first would let an unrecognized
+mechanism report a bare desktop as healthy, which is how a pre-QML deadlock
+in the `QApplication` constructor — emitting no QPA line at all — once sat
+unreported for 22 minutes on two hosts.
 
-A failed or unparsable `hyprctl` call reads as unconfirmed, never as a blank
-desktop; that guard is load-bearing, since the surface count is asked first.
-The count is summed system-wide, never per-monitor — no `PanelWindow` in
-`modules/facets/quickshell/qml/` binds to a screen, so this shell always
-paints exactly one output, and every other enabled monitor legitimately and
-permanently carries zero layers by design.
+The expectation is declared, never hardcoded, because the same watchdog
+runs on a host where waybar owns the bar: expecting `aoide-bar` there would
+restart a healthy desktop every fifteen minutes forever. A host whose song
+declares nothing, or whose facet has not yet published the file, falls back
+to the bare total — zero `aoide-*` surfaces anywhere is the blank desktop —
+which is what the check was before surfaces went per-output. A total cannot
+see a partial loss: the per-screen wallpaper (a `Variants` delegate over
+`Quickshell.screens`) re-homes itself after an output blip while a singleton
+window bound to the dead output does not, and one surviving surface kept the
+count nonzero for hours on osaka. The bar is now a `Variants` delegate too,
+and the dock follows `Hyprland.focusedMonitor`.
+
+A failed or unparsable `hyprctl` call reads as unconfirmed, never as a
+shortfall; that guard is load-bearing, since the surface check is asked
+first. `perMonitor` counts DISTINCT outputs, not surfaces, so two copies on
+one head never satisfy a two-head expectation. Hyprland's synthesized
+`FALLBACK` output is excluded on both sides, and with zero real outputs the
+check stands down entirely: there is nothing to paint on, a restart would
+only reproduce the placeholder state, and the delegates re-home on their
+own when a head returns.
 
 Recovery runs on a retry ladder: minimum gaps of 0s, 15s, 60s, 300s indexed
 by how many restarts already sit in the last hour, settling on a 900s floor

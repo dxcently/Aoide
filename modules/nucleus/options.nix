@@ -347,6 +347,31 @@ let
     };
   };
 
+  # ── Expected-paint entry (v1 `arrangement.surfaces`) ──────────────────────
+  # One flag per declared surface. Keyed by slot name in
+  # `arrangement.surfaces` below — the attribute name IS the slot name,
+  # resolving to the layer-shell namespace `aoide-<slot>` exactly as
+  # `widgetType.namespace` derives one when null. This declares an
+  # EXPECTATION and instantiates nothing: no surface is stood up by naming
+  # one here.
+  surfaceExpectationType = types.submodule {
+    options = {
+      perMonitor = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          How many mapped instances this surface is expected to have:
+          true = one per ENABLED OUTPUT (the consumer reads the live output
+          list and expects that many namespaced layer surfaces), false =
+          exactly one, wherever it lands. The flag is the surface's own
+          multiplicity, never the monitor count — a per-monitor surface on a
+          single-output host and a one-instance surface on a six-monitor host
+          both read correctly.
+        '';
+      };
+    };
+  };
+
 in
 {
   imports = [ inputs.aoide.nixosModules.default ];
@@ -464,14 +489,15 @@ in
     # ── Arrangement seam (v1) — structure, livery's sibling ────────────────
     arrangement = mkOption {
       description = ''
-        The v1 arrangement schema — the second (and only other) namespace a
-        facet may read. Where `aoide.livery` carries the song's DRESS
-        (palette · base16 · component tiers · geometry · cover), arrangement
-        carries its STRUCTURE: which widget/surface TYPES the song brings
-        into existence. Dress and structure are different questions, so they
+        The v1 arrangement schema — one of the three namespaces a facet may
+        read. Where `aoide.livery` carries the song's DRESS (palette · base16
+        · component tiers · geometry · cover), arrangement carries its
+        STRUCTURE: which widget/surface TYPES the song brings into existence
+        (`widgets`) and which painted surfaces it expects to stay mapped
+        (`surfaces`). Dress and structure are different questions, so they
         are different option trees; the facet read-whitelist stays an
-        enumerated, closed PAIR (AGENTS.md house rule 5), never an open
-        `aoide.*`.
+        enumerated, closed set — livery, arrangement, and the `aoide.surfaces`
+        ownership registry (AGENTS.md house rule 5) — never an open `aoide.*`.
       '';
       default = { };
       type = types.submodule {
@@ -502,6 +528,44 @@ in
               NIX NAMESPACE decision about what facets may read; it is not a
               file split. Precedent: livery.json already carries a top-level
               `song` key with no `aoide.livery.song` option (CONTRACTS.md §4).
+            '';
+          };
+          surfaces = mkOption {
+            type = types.attrsOf surfaceExpectationType;
+            default = { };
+            example = literalExpression ''
+              { bar.perMonitor = true; wallpaper.perMonitor = true; dock.perMonitor = false; }
+            '';
+            description = ''
+              Which painted surfaces this song EXPECTS to be mapped, declared
+              so a health consumer can assert what SHOULD be painted instead
+              of only counting whatever is. Keyed by slot name; each key
+              resolves to the layer-shell namespace `aoide-<slot>` (the same
+              derivation `widgetType.namespace` applies when null), so the
+              consumer compares declarations directly against the
+              compositor's live layer list and derives nothing of its own.
+              The build publishes this as `run/qml/songs/surfaces.json`
+              (CONTRACTS.md §5), which is what the consumer reads; it is NOT
+              keyed by song, since an expectation is about what the ACTIVE
+              song should have mapped right now.
+
+              Declare only surfaces that are PERSISTENTLY mapped — a surface
+              summoned on demand (a launcher, an OSD, a preview) must NOT be
+              declared, or a consumer treating a closed surface as a loss
+              would act on a healthy desktop.
+
+              This declares an EXPECTATION and instantiates nothing. It is a
+              different question from `arrangement.widgets` above, which
+              declares and INSTANTIATES per-song flavor widget types: the
+              facet-owned surfaces named here are hardcoded in the shell and
+              are never widget registrations, so declaring one here must
+              never be read as asking for a second copy of it.
+
+              An EMPTY set (the default) declares nothing and expects
+              nothing: a consumer must then fall back to its previous
+              behaviour, so a song that says nothing here keeps it. Nothing
+              else populates this option — the default is the whole of the
+              no-declaration case.
             '';
           };
         };
