@@ -94,9 +94,10 @@ let
   # this is; the keys are the RESOLVED layer-shell namespaces (`aoide-<slot>`
   # — the same derivation `widgetType.namespace` applies when null), so the
   # consumer compares them directly against the compositor's layer list and
-  # derives nothing of its own. An empty `surfaces` object is emitted for a
-  # song that declares none — the legitimate "expect nothing" shape, never an
-  # omitted file (CONTRACTS.md §5).
+  # derives nothing of its own. A song that declares none gets an empty
+  # `surfaces` object — emitted rather than omitted, and read by the consumer
+  # exactly as an absent file: no expectation, the old count decides
+  # (CONTRACTS.md §5).
   surfacesJsonFile = pkgs.writeText "aoide-quickshell-surfaces.json" (
     builtins.toJSON {
       song = config.aoide.song;
@@ -212,8 +213,8 @@ let
     # `surfacesJsonFile` above. NOT keyed by song, unlike the two above it:
     # the expectation is about what the active song should have mapped now,
     # and the option it comes from already is that. A consumer finds this file
-    # absent (an older host, or a facet that never deployed) and falls back to
-    # its previous behaviour.
+    # absent (an older host, or a facet that never deployed) or empty (a song
+    # that declares none) and falls back to its previous behaviour.
     surfaces="$out/qml/songs/surfaces.json"
     jq . ${surfacesJsonFile} > "$surfaces"
 

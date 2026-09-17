@@ -4161,8 +4161,9 @@ directly against the compositor's layer list and derives nothing of its own:
                 "aoide-dock": { "perMonitor": false } } }
 ```
 
-`song` is `config.aoide.song`. An empty `surfaces` object is the legitimate
-shape for a song that declares none and is **emitted rather than omitted**.
+`song` is `config.aoide.song`. The file is published on every host, so a
+song that declares none ships an empty `surfaces` object — emitted rather
+than omitted, and read exactly as an absent file (below).
 
 **Readers:** `lyra quickshell healthcheck`
 (`pkgs/aoide/crates/song/src/health.rs`). With the file present it asserts
@@ -4170,10 +4171,13 @@ every declared namespace against `hyprctl layers -j` — on every enabled
 output for a `perMonitor` entry, at least once otherwise — and a shortfall
 is the bad state the journal gate then classifies. A total count of painted
 surfaces cannot see a PARTIAL loss (the wallpaper mapped while the bar and
-dock are not), which is why the declaration exists. An **absent file means
-"no expectation declared"**, and the reader falls back to its previous
-behaviour — zero `aoide-*` surfaces anywhere — rather than inventing one,
-the same tolerate-missing stance `registry.json` and the stage files hold.
+dock are not), which is why the declaration exists. An **absent, unreadable,
+or empty declaration means "no expectation declared"**, and the reader falls
+back to its previous behaviour — zero `aoide-*` surfaces anywhere — rather
+than inventing one, the same tolerate-missing stance `registry.json` and the
+stage files hold. The empty case is the common one, since every
+non-declaring song publishes it: a check with nothing to assert would read a
+blank desktop as healthy on precisely the hosts that never opted in.
 This is a build-time statement of intent, not stage state: nothing writes it
 at runtime, and it is not a `lyra rice stage` hot-sync target
 (`manifest.json`/`registry.json` are).

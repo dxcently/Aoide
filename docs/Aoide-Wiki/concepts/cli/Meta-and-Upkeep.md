@@ -266,8 +266,9 @@ lyra quickshell healthcheck [--json]
   confirmed), never as a command failure. The two signals are asked in
   order: a live `hyprctl layers -j` reading is compared against the active
   song's declared surfaces (`run/qml/songs/surfaces.json`, per-output where
-  declared `perMonitor`; a host that publishes no declaration falls back to
-  "zero `aoide-*` surfaces anywhere"), and a shortfall decides `healthy` on
+  declared `perMonitor`; a host whose declaration is absent or empty — every
+  song that declares nothing publishes an empty one — falls back to "zero
+  `aoide-*` surfaces anywhere"), and a shortfall decides `healthy` on
   its own; the journal's placeholder-screen line (scoped to the unit's own
   `ActiveEnterTimestamp`, so a recovered occurrence can never re-trigger)
   then decides whether the watchdog may act. A shortfall with that line is
