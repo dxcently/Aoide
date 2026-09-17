@@ -924,6 +924,50 @@ Fields per entry: status · owner · depends on · evidence · next.
   fdb6682..fdbea59 while per-crate runs stayed green; fixed 533d89e. Any
   dxflake pin must be ≥ 533d89e. Every conduct/storage brief now adds
   `cargo test --workspace --no-run` (compile only).
+- E5 LANDED 5ee097b (2026-09-17, `feat(trace)`): the producer export is
+  eidolon's TRACE — every journal record mirrored as one JSON line to
+  `<stem>.jsonl` beside the `.eid`, named in presence `meta.json.trace`
+  (`~/eidolon` 536c425 on `theme-roles`, NOT pushed — Noah's remote; the
+  same commit makes SIGTERM = SIGINT in `drive`/repl and adds `--deadline
+  <secs>` with a `TurnDeadline{secs_left}` wrap-up nudge). Aoide reads it:
+  `protocol/agents.rs` locate/tail/extractors (model, title, say, the tool
+  in flight, context tokens; `tool_use.input` is a JSON STRING, parsed a
+  second time), `conduct/graph/eidolon.rs` state = the LAST record
+  (`TurnSettled` idle, `Cancelled` stopped, `AskUser{answer:null}`
+  awaiting, else working; no trace = the presence rule), and `aoide
+  session trace <id> [--tail N] [--follow] [--json]`. Contract:
+  CONTRACTS.md §4 + `docs/architecture/EIDOLON-TRACE.md`; the `timeout`
+  SIGTERM post-mortem in `EIDOLON-HEADLESS-DISPATCH.md`. Verified against
+  real traces from the new build (protocol 153, conduct 796, cli 42 with
+  the golden at 82). The INSTALLED eidolon has none of the producer until
+  the User rebuilds it; until then every eidolon record stays on the
+  presence rule and `session trace` answers with the taught no-trace error.
+- E5b ping-back, NOT dispatched, BLOCKED on one policy answer (asked
+  2026-09-17): the reap tick remembers the last trace id per eidolon child
+  and delivers ONE line to the parent through the send door on
+  `TurnSettled`, `Cancelled`, `TurnBudget`/`TurnDeadline`,
+  `ToolResult{is_error}`, `AskUser`, ten minutes of silence on an open
+  turn, or a dead pid with an open turn. The door's autogate is
+  parent-of-target and sibling-of-target; a child-to-parent line is
+  neither. Default proposed: reciprocal (a parent hears the children it
+  spawned); the alternative holds it pending like a stranger's send.
+- Conductor-state eval kit `evals/conductor-state/` (same commit): the
+  per-node VV classifier's testing kit — `eidolon log` → features → one
+  delexicalized state line → condition / decision / risk (the CIA leg at
+  stake, the DAD harm if wrong); 106 hand-labelled seeds from 40 real
+  journals (14 hinge rows where hand ≠ rule), rule-labelled synthetic
+  rows, four runners (verba-volantia, jevlike byte, jevlike + frozen
+  Qwen2.5-0.5B, RLCD-style zero-shot Qwen2.5-1.5B) scored by one script
+  into `report.md`; devshell `nix develop path:…/evals/conductor-state`.
+  FINDING: every trained lane learns the rule (VV 99–100% on plain seeds
+  and synthetic, 30 ms/case); no lane beats the rule on the hinge rows
+  (VV 21/21/50%, zero-shot 1.5B 0/14/36% at ~6 s/case) and VV's
+  calibrated abstention accepts every wrong hinge row at ~98% — judgment
+  needs hand-labelled training rows or relation phrases in the writer,
+  not a bigger encoder. The secrets-node sketch (VV classifies, abstains
+  below margin, the human gate opens on accept + corroboration from the
+  other nodes' ledgers, the broker executes, a MAIL letter records) is a
+  chart, not a lane: https://claude.ai/code/artifact/f2304e5c-0c94-435f-9fe9-570320a4e549
 
 ## 13. Ownership graph (project inheritance, lineage, sanitized spawn ancestry)
 
