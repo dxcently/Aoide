@@ -2028,6 +2028,91 @@ The field is general, not Codex-only, but carries one producer at a time by
 design: a second reader pointing at its own native source earns its own
 schema review here, never a second field beside this one.
 
+### The session TRACE — **v0** (P-EIDOLON E6, `docs/architecture/EIDOLON-TRACE.md`)
+
+The one on-disk contract in this section Aoide READS and does not own: a
+harness's own trace file. `eidolon` — Aoide's on-box agent — mirrors its
+journal (`<stem>.eid`, bitcode, private to eidolon) as ONE JSON LINE PER
+RECORD and names that file from its own presence metadata. The producer is
+eidolon; the reader is Aoide. `docs/architecture/EIDOLON-TRACE.md` is the
+canonical prose statement; the two halves below are quoted from it verbatim,
+and a change to either is an edit THERE first.
+
+**File.** `<sessions_dir>/<stem>.jsonl`, beside `<sessions_dir>/<stem>.eid`
+with the same stem (`~/.local/share/eidolon/sessions/1789603005561.jsonl`).
+Created with the journal, appended for the journal's life; `resume` reopens
+it for append. The journal is written first and is authoritative; the trace
+mirrors it. A trace write that fails is reported once on stderr and never
+fails the turn.
+
+`state/stage/sessions.json`'s own record for such a session does not carry
+the path — the trace is found through the producer's presence metadata at
+`$XDG_RUNTIME_DIR/eidolon/<id>/meta.json`, whose one added field is
+`"trace": "<absolute path>"`. Absent on an older eidolon; Aoide's
+`PresenceMeta` treats it as `Option`, and `aoide_protocol::agents::
+eidolon_transcript_locate` returns the `.jsonl` when it names one that
+exists, else `meta.json` as before. `aoide session trace` resolves a path
+the same way, through `TranscriptSpec::locate` — never a path of its own.
+
+**Line.** `serde_json::to_string(&Record)` + `\n` — the record's own serde
+form, which `Record`/`RecordKind` already derive, so the shape is not
+designed, only exposed: externally tagged enum, snake_case content blocks.
+
+```json
+{"id":0,"parent":null,"ts_ms":1789603005561,"kind":{"SessionStart":{"model":"ollama:deepseek-v4.1-flash","cwd":"/home/khoa/Aoide","system":null}}}
+{"id":1,"parent":0,"ts_ms":1789603005570,"kind":{"UserMessage":{"role":"user","content":[{"type":"text","text":"# Brief A: …"}]}}}
+{"id":2,"parent":1,"ts_ms":1789603009102,"kind":{"AssistantMessage":{"role":"assistant","content":[{"type":"thinking","thinking":"…","signature":"…"},{"type":"text","text":"Let me read the slot catalog first."},{"type":"tool_use","id":"call_8vr43zri","name":"read","input":{"path":"modules/facets/quickshell/qml/slots.md"}}]}}}
+{"id":3,"parent":2,"ts_ms":1789603009140,"kind":{"ToolResult":{"tool_use_id":"call_8vr43zri","content":"     1\t# Per-song widget slots — catalog\n…","is_error":false}}}
+{"id":120,"parent":119,"ts_ms":1789606380000,"kind":{"TurnBudget":{"calls_left":8}}}
+{"id":131,"parent":130,"ts_ms":1789606421000,"kind":{"TurnSettled":{"stop_reason":"end_turn","usage":{"input_tokens":9570000,"output_tokens":71900,"cache_creation_input_tokens":0,"cache_read_input_tokens":9430000}}}}
+{"id":77,"parent":76,"ts_ms":1789626990000,"kind":"Cancelled"}
+{"id":40,"parent":39,"ts_ms":1789626500000,"kind":{"AskUser":{"call_id":"call_x","prompt":"Overwrite?","answer":null}}}
+{"id":41,"parent":40,"ts_ms":1789626501000,"kind":{"ContextSize":{"tokens":134700}}}
+{"id":55,"parent":54,"ts_ms":1789626700000,"kind":{"ExternalMessage":{"from":"orchestrator","channel":null,"text":"STOP: write the report now"}}}
+```
+
+`id`/`parent` are the journal's own record ids — `parent` is the branch, so
+a `fork_at`/`Excluded` shows up as records whose `parent` is not the previous
+line. `ts_ms` is eidolon's clock at append. Every `RecordKind` variant
+appears; the ones Aoide reads:
+
+| record | Aoide reads it as |
+|---|---|
+| `SessionStart{model,cwd}` / `ModelChanged{model}` | `model` |
+| `UserMessage` (first) | `title` (the first thing asked) |
+| `AssistantMessage.content[type=text]` (last) | `say` — what it last said |
+| `AssistantMessage.content[type=thinking]` | shown by `session trace`, never summarised into a field |
+| `AssistantMessage.content[type=tool_use]` (last) | `tool` — the call in flight, until its `ToolResult` lands |
+| `ToolResult{is_error}` | a tool failed (ping-back) |
+| `AskUser{answer:null}` | state `awaiting` |
+| `TurnSettled` | state `idle`; stop reason + usage |
+| `Cancelled` | state `stopped` |
+| `TurnBudget{calls_left}` / `TurnDeadline{secs_left}` | the harness told it to wrap up (ping-back) |
+| `ContextSize{tokens}` | `context tokens` |
+| `PolicyVerdict{outcome}` | shown by `session trace` |
+| `ExternalMessage{from,text}` | what a steer said, and who |
+
+**State rule** (the reconciler's, in `graph/eidolon.rs`): the LAST record
+decides, and only Aoide's five canonical states are ever written
+(`protocol/src/state.rs` `canonical_state`: working · awaiting · stopped ·
+idle · done). `TurnSettled` → `idle` (at rest, as `busy: false` reads
+today); `Cancelled` → `stopped` (the vocabulary's "turn ended by a stop");
+`AskUser` with `answer: null` → `awaiting`; anything else → `working` (a
+turn is open). No trace file → today's rule (presence `busy`, TUI-only) —
+an older eidolon, still enrolled, still `unknown`-folded-to-`idle`.
+
+**Reading it from a shell.** `aoide session trace <id> [--tail N]
+[--follow] [--json]` renders the run step by step: one line per record,
+`#<id>  <hh:mm:ss local>  <kind>  <summary>`, where an assistant message
+shows its thinking (dimmed, cut) then its text then each `→ tool(name)`, a
+tool result shows its first line prefixed `!` when `is_error`, and a settled
+turn shows its stop reason and input/output tokens. `--tail N` shows the
+last N records (default 50); `--follow` re-reads for new lines until Ctrl-C
+(CLI-only); `--json` passes the raw lines through unchanged. Read-only — no
+stage write, no daemon. A session whose harness keeps no trace, or whose
+presence names none, is a taught error naming which of the two it is, never
+an empty listing.
+
 ### `state/stage/projects.json` — **v0**
 
 Registered project anchor roots for the graph. Written by

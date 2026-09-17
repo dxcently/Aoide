@@ -1,0 +1,6 @@
+corpus/
+weights/
+pred/
+runs/
+cases/seed.draft.jsonl
+cases/synthetic.jsonl

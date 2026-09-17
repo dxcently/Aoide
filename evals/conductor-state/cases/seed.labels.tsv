@@ -1,0 +1,109 @@
+# id	condition	decision	note — hand labels for the harvested checkpoints (the rows the report scores). Settled rows are settled/collect unless listed.
+1789234755480#15	cancelled	collect	user hit ctrl-c on a TUI turn; nothing to resume
+1789369589483#4	cancelled	collect	cancelled before the first call
+1789369589483#403	progressing	wait	
+1789369589483#493	progressing	wait	the steer just arrived; nothing yet says it was misrouted
+1789369589483#494	misrouted	cancel	its own words: no brief, no build step 2 — the wake hit the wrong session
+1789442770546#1	dead	escalate	no assistant record ever: the provider never answered; resume repeats the failure
+1789452798155#120	progressing	wait	
+1789452798155#239	progressing	wait	
+1789452798155#247	dead	resume	SIGTERM from the shell timeout mid-results at call 82
+1789453311563#99	progressing	wait	
+1789453311563#200	progressing	wait	polling a bg job log: identical output means no news, not a loop
+1789453311563#201	progressing	wait	same poll
+1789454784108#119	progressing	wait	
+1789454852561#23	progressing	wait	call 7; the gate declined a compound command, the agent is re-shaping it
+1789454852561#24	progressing	wait	same
+1789454852561#116	progressing	wait	
+1789454852561#168	dead	resume	SIGTERM mid-results at call 57
+1789459105685#109	progressing	wait	
+1789459105685#208	progressing	wait	
+1789459450149#109	progressing	wait	
+1789459450149#188	dead	resume	died while adding tests at call 73
+1789483331584#94	progressing	wait	
+1789483331584#176	progressing	wait	
+1789483331584#256	progressing	nudge	call 100, still verifying, no report yet — say wrap up now
+1789483331584#258	wrapping-up	wait	nudge delivered; let it write
+1789483331584#275	exhausted	resume	128 calls spent, no report; resume with a wrap-up prompt
+1789514384656#119	progressing	wait	
+1789514384656#224	progressing	wait	
+1789514384656#317	progressing	nudge	call 100, still editing docs, no report yet
+1789514384656#319	wrapping-up	wait	
+1789514384656#337	exhausted	resume	
+1789543918520#29	dead	resume	killed early
+1789544041771#37	dead	resume	killed at call 13
+1789544315813#26	dead	resume	killed at call 9
+1789544606370#98	progressing	wait	
+1789544606370#142	dead	resume	killed at call 57
+1789545992902#25	dead	resume	killed at call 9
+1789546613822#39	progressing	wait	repeated nix warning prefix across different commands, not a loop
+1789546613822#115	progressing	wait	
+1789546613822#223	progressing	wait	
+1789546613822#237	dead	resume	killed at call 85
+1789603005561#91	progressing	wait	quickshell probe launches with the same banner, different probes
+1789603005561#106	progressing	wait	
+1789603005561#190	progressing	wait	
+1789603005561#233	dead	resume	SIGTERM at call 97 (the post-mortem run)
+1789606499704#92	progressing	wait	
+1789606499704#182	progressing	wait	
+1789610971430#88	progressing	wait	
+1789626749164#110	failing	steer	three 404s fetching a repo it cannot reach; tell it to stop fetching
+1789626749164#114	failing	steer	still fetching
+1789626749164#226	progressing	wait	offscreen qml experiments print the same line for different tries
+1789626749164#313	wrapping-up	wait	the steer said STOP write the report; it is doing that
+1789626749164#314	wrapping-up	wait	report write in flight
+1789630556602#114	progressing	wait	
+1789633647483#88	progressing	wait	an addition to the brief arrived; it acknowledged and continued
+1789633647483#89	progressing	wait	
+1789633647483#109	progressing	wait	
+1789633647483#195	progressing	wait	
+1789633647483#200	progressing	wait	alive right now, mid-build
+1789633649742#104	progressing	wait	
+1789633649742#114	progressing	wait	a correction arrived
+1789633649742#115	progressing	wait	
+1789633649742#190	progressing	wait	
+1789633649742#220	progressing	wait	alive right now
+1789234755480#5	settled	collect	
+1789234755480#10	settled	collect	
+1789234755480#49	settled	collect	
+1789234755480#70	settled	collect	
+1789234755480#89	settled	collect	
+1789234755480#95	settled	collect	
+1789234755480#99	settled	collect	
+1789234755480#103	settled	collect	
+1789234755480#228	settled	collect	
+1789234755480#232	settled	collect	
+1789234755480#242	settled	collect	
+1789234755480#258	settled	collect	
+1789369589483#89	settled	collect	
+1789369589483#95	settled	collect	
+1789369589483#99	settled	collect	
+1789369589483#156	settled	collect	
+1789369589483#195	settled	collect	
+1789369589483#250	settled	collect	
+1789369589483#265	settled	collect	
+1789369589483#280	settled	collect	
+1789369589483#312	settled	collect	
+1789369589483#492	settled	collect	
+1789369933818#4	settled	collect	
+1789370009078#4	settled	collect	
+1789370021128#4	settled	collect	
+1789370022016#4	settled	collect	
+1789370054476#4	settled	collect	
+1789370101078#4	settled	collect	
+1789442770365#8	settled	collect	
+1789442770564#4	settled	collect	
+1789442789574#6	settled	collect	
+1789453311563#233	settled	collect	
+1789454784108#161	settled	collect	
+1789457216470#86	settled	collect	
+1789459105685#244	settled	collect	
+1789459156365#75	settled	collect	
+1789459156365#96	settled	collect	
+1789483405670#27	settled	collect	
+1789483405698#36	settled	collect	
+1789606499704#207	settled	collect	
+1789610971430#169	settled	collect	
+1789626749164#318	settled	collect	
+1789626749164#324	settled	collect	
+1789630556602#183	settled	collect	

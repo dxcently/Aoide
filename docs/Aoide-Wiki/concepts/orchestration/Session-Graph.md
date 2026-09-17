@@ -11,9 +11,9 @@ tags: [aoide, graph, session, terminal, agent, cli]
 sessions**: who spawned whom, and which project each session belongs to. The
 DAG's terminal viewer and management layer spans several top-level command
 families — bare `graph` (the render) and `graph link` are the read/analysis
-lens; `project add|remove|list`, `session start|phase|end|hook|undying|
-permit|pending list|approve|deny|reap|prune`, bare `session` (the undying
-picker, command-defrag task #101, Lane U), and bare `send`/`spawn`/
+lens; `project add|remove|list`, `session start|phase|end|hook|grant|trace|
+permit|pending list|approve|deny|reap|prune`, bare `session` (the roster,
+grouped by project or by host), and bare `send`/`spawn`/
 `resurrect` are the acting/lifecycle surface (command-defrag task #101, Lane
 R). Every subcommand is
 implemented, per `aoide schema --json`. Like every command it registers into
@@ -125,6 +125,11 @@ should follow).
 - **`session pending list|approve|deny`** — the resolve surface over sends held
   without standing authorization (`state/stage/pending.json`); `approve`
   re-drives a held entry through `send` with `--yes`.
+- **`session trace <id>`** — render a session's own trace file, one line per
+  record: the run, step by step (see "Agents enrolled from outside" above).
+  `--tail N` shows the last N records (default 50), `--follow` re-reads for
+  new ones until Ctrl-C (CLI-only), `--json` passes the raw lines through
+  unchanged. `<id>` resolves like `send --to` — id, tail4, or petname.
 - **`session permit`** — publish a permission SUMMONS card to
   `state/stage/herald.json` for a session blocked on a tool/permission prompt;
   the desktop herald surface renders it with approve/deny buttons whose click
@@ -161,6 +166,55 @@ should follow).
 A durability rule spans the layer: the stage rewriters **round-trip unknown
 fields** (serde flatten), so graph management never clobbers fields other
 writers add to the same records.
+
+## Agents enrolled from outside — eidolon, and the trace
+
+Two producers write records into this DAG from OUTSIDE, without ever running
+`aoide conduct` — one record per native session, keyed by the producer's own
+id verbatim (no synthetic prefix; the id is already stable), each gathered on
+the reaper's tick and each holding the same "a failed observation changes
+nothing" rule.
+
+**eidolon** (`conduct/src/graph/eidolon.rs`) is the on-box agent. Its swarm
+presence at `$XDG_RUNTIME_DIR/eidolon/<id>/{meta.json,sock}` is read, never
+swept — a stale directory is the producer's own to clean up — and liveness is
+the presence socket answering `{"op":"ping"}` with `{"ok":true}` inside a
+250ms budget: never a stat, never `/proc`. Unlike a desktop Codex thread this
+IS an agent session (`kind:"agent"`), so it is a normal dedup/staleness
+candidate and its `parentSessionId` is resolved here (the first conducted
+ancestor up the presence pid's own process chain).
+
+**Its state comes from the trace, when there is one.** eidolon mirrors its
+journal as `<log>.jsonl` — one JSON record per line — and names that file
+from its own `meta.json`. The LAST record decides, and only the five
+canonical states are ever written: `TurnSettled` → `idle`, `Cancelled` →
+`stopped`, `AskUser` with `answer: null` → `awaiting`, anything else →
+`working` (a turn is open). Nothing falls back to the presence's `busy`
+while a trace exists — a headless run's `busy` is permanently false, which is
+the non-fact the trace replaces. With no trace at all (an older eidolon) the
+presence rule applies instead: a TUI owner's `busy` maps to `working`/`idle`,
+anything else carries the literal `"unknown"` rather than a guessed verdict,
+folded to `idle`.
+
+The file, its line shape, the record table and the state rule are one
+contract — `docs/architecture/EIDOLON-TRACE.md`, restated at CONTRACTS.md §4.
+The producer owns the file; aoide reads it. `aoide session trace <id>
+[--tail N] [--follow] [--json]` renders it step by step, one line per record
+(`#<id>  <hh:mm:ss local>  <kind>  <summary>`) — an assistant message shows
+its thinking (dimmed, cut) then its text then each `→ tool(name)`, a tool
+result shows its first line prefixed `!` when it errored, a settled turn
+shows its stop reason and tokens — and `--follow` re-reads for new records
+until Ctrl-C. The command is read-only: it writes nothing, takes no stage
+lock, and never reaches the daemon. A session whose harness keeps no trace,
+or whose presence names none, is a taught error naming which of the two it
+is, never an empty listing.
+
+The contrasting shape is **a desktop Codex/ChatGPT thread**
+(`graph/codex_app.rs`): `kind:"app"`, because it is a task inside an app
+aoide does not conduct — no agent profile, no hook, no control socket, and it
+keeps out of the reaper's agent-arm entirely, since N threads of one app
+legitimately share one window address and one app-server pid. Its discovery
+is a try-flock on the thread's own writer lock plus one parsed `ps` table.
 
 ## Liveness reaping — the SIGKILL problem
 

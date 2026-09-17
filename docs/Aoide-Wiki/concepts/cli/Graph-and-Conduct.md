@@ -623,6 +623,64 @@ aoide session pending deny <id> [--json]
 - **Output:** `data: {id, sessionId}`. A malformed or out-of-range id fails
   cleanly, leaving the entry untouched.
 
+### aoide session trace
+
+```
+aoide session trace <id> [--tail N] [--follow] [--json]
+```
+
+- **Reads:** `state/stage/sessions.json` (for `<id>`'s own record — its
+  `agent` selects the profile, its `cwd` feeds the locator) and the session's
+  own TRACE file, found through the producer's presence metadata
+  (`$XDG_RUNTIME_DIR/eidolon/<id>/meta.json`'s `trace` field, via the
+  harness profile's `TranscriptSpec::locate` — the same locator the reaper's
+  transcript refresh uses). `<id>` resolves like `send --to`: an exact
+  session id, its tail4, or its petname (`aoide_storage::addr::resolve`, the
+  one resolver).
+- **Writes:** nothing. Read-only — no stage lock, no daemon dispatch, no file
+  touched.
+- **Output:** text — one line per record, the last `--tail` of them (default
+  50):
+
+  ```
+  #131  04:13:41  TurnSettled  end_turn · in 9570000 out 71900
+  #2  04:16:49  AssistantMessage  I should read the slot catalog first…  Let me read the slot catalog first.  → read
+  #3  04:16:49  ToolResult  # Per-song widget slots — catalog
+  #4  04:16:50  ToolResult  ! ENOENT: no such file
+  ```
+
+  `#<id>  <hh:mm:ss local>  <kind>  <summary>`. An `AssistantMessage` renders
+  its thinking blocks first (cut to 80 chars, dimmed on a terminal) then its
+  text blocks (cut to 120) then `→ <tool name>` per `tool_use`; a
+  `ToolResult` renders its first line cut to 120, prefixed `!` when
+  `is_error`; `TurnSettled` renders its stop reason and input/output tokens;
+  `Cancelled`, `TurnBudget{calls_left}`, `TurnDeadline{secs_left}`,
+  `AskUser` (with `(open)`/`(answered)`), `ExternalMessage` and
+  `ContextSize{tokens}` each render their one salient field; a kind aoide has
+  never heard of renders its own payload rather than vanishing, and a line
+  that is not a readable record renders flagged `#?  --:--:--  ?  …`.
+  `--json` passes the raw trace lines through **unchanged**, byte for byte,
+  as `data.lines`, beside `sessionId`/`trace`/`tail`/`records`.
+- **Flags:** `--tail N` shows the last N records (a non-numeric or zero value
+  is a usage error, never a silently empty listing). `--follow` re-reads the
+  trace every 500ms and prints new records as they land, blocking until
+  Ctrl-C — **CLI-only** (a follow that parks a connection makes no sense over
+  MCP/A2A/the daemon socket, the same stance `events tail` takes).
+- **Errors (exit 1), each naming WHY:** `not-found` (`<id>` matches no local
+  session), `ambiguous`, `remote-target` (a `node/<rest>` target — a trace is
+  a file on the node that wrote it; run the command there), `unknown-agent`
+  (no profile for the record's `agent`), `no-trace-capability` (the harness
+  keeps no trace at all — `eidolon` is the one that does today),
+  `no-presence` (the presence metadata is gone), `no-trace` (the presence
+  names no trace file, or names one that is not there — an older eidolon).
+  A trace that EXISTS and holds no records yet is an honest `0 record(s)`,
+  not an error.
+- **Notes:** the trace is a contract aoide READS and the harness owns — file,
+  line shape and the state rule are `docs/architecture/EIDOLON-TRACE.md`,
+  restated at CONTRACTS.md §4. The same last record decides the enrolled
+  session's own `state` on the reaper's tick
+  ([[Session-Graph]]'s "Agents enrolled from outside").
+
 ### aoide session permit
 
 ```
