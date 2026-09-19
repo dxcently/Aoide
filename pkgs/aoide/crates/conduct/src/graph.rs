@@ -104,7 +104,7 @@ pub use self::doorbell::{mail_ring, ring, RingReport};
 // crate boundary.
 pub(crate) use self::pingback::pingback;
 pub use self::model::{
-    anchor_for, effective_project_for, project_for, canonical_state, merged_sessions, HookRecord, HooksFile, Project, ProjectsFile,
+    anchor_for, effective_project_for, lead_over, leads_project, project_for, canonical_state, merged_sessions, HookRecord, HooksFile, Project, ProjectsFile,
     SessionRecord, SessionsFile,
 };
 pub use self::pending::{pending_approve, pending_deny, pending_list};
@@ -146,7 +146,7 @@ pub use self::resurrect::session_resurrect;
 // `graph/grant.rs`'s module doc.
 pub use self::grant::session_grant;
 pub use self::manage::{
-    link, project_add, project_edit, project_list, project_remove, prune,
+    link, project_add, project_edit, project_lead, project_list, project_remove, prune,
     register_bootstrap_project, view,
 };
 // Bare `session` (session-surface redesign, command-defrag lane X): the

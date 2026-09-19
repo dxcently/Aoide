@@ -369,6 +369,7 @@ fn add_roots(name: &str, paths: &[String], new: bool, auto_resume: bool, host: O
                     roots: full,
                     auto_resume,
                     hosts: Vec::new(),
+                    lead: None,
                 });
                 changed.push(format!("registered project {name} → {first}"));
                 if auto_resume {
@@ -866,8 +867,87 @@ pub fn project_list(_inv: &Invocation) -> Outcome {
         for h in &p.hosts {
             message.push_str(&format!("\n     @{} {}", h.name, h.roots.join(", ")));
         }
+        if let Some(lead) = &p.lead {
+            message.push_str(&format!("\n     lead {lead}"));
+        }
     }
     Outcome::ok("project.list", message).with_data(json!({ "projects": projects }))
+}
+
+/// `project lead <name> <session>` — place one session directly under the
+/// project; every other parentless session of the project then hangs off
+/// it. `--none` clears the lead. The session must be in the roster now (a
+/// lead that later leaves the roster is simply ignored by the graph).
+/// DAEMON-OWNED (`local_daemon`, above), same as the other mutations.
+pub fn project_lead(inv: &Invocation) -> Outcome {
+    if let Some(out) = local_daemon(inv) {
+        return out;
+    }
+    let args = match require_args(inv, &["name"]) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let name = args[0].clone();
+    let lead = if inv.flags.contains_key("none") {
+        None
+    } else {
+        match inv.args.get(1) {
+            Some(id) => Some(id.clone()),
+            None => {
+                return Outcome::usage(
+                    "project.lead",
+                    "give a session id to lead the project, or `--none` to clear the lead",
+                )
+            }
+        }
+    };
+    set_lead(&name, lead.as_deref())
+}
+
+fn set_lead(name: &str, lead: Option<&str>) -> Outcome {
+    with_stage_lock(|| {
+        let mut file: ProjectsFile = match load_stage(&projects_path()) {
+            Ok(f) => f,
+            Err(e) => return stage_error("project.lead", e),
+        };
+        let Some(project) = file.projects.iter_mut().find(|p| p.name == name) else {
+            return Outcome::error(
+                "project.lead",
+                format!("no project named `{name}` — register it first with `project add`"),
+            )
+            .with_data(json!({ "reason": "unknown", "name": name }));
+        };
+        if let Some(id) = lead {
+            let sessions: SessionsFile = match load_stage(&sessions_path()) {
+                Ok(f) => f,
+                Err(e) => return stage_error("project.lead", e),
+            };
+            if !sessions.sessions.iter().any(|s| s.session_id == id) {
+                return Outcome::error(
+                    "project.lead",
+                    format!("no session `{id}` in the roster"),
+                )
+                .with_data(json!({ "reason": "unknown-session", "id": id }));
+            }
+        }
+        if project.lead.as_deref() == lead {
+            return Outcome::ok("project.lead", format!("project `{name}` lead unchanged"))
+                .with_data(json!({ "name": name, "lead": lead }));
+        }
+        project.lead = lead.map(str::to_string);
+        file.schema_version = STAGE_GRAPH_VERSION.to_string();
+        if let Err(e) = write_stage(&projects_path(), &file) {
+            return stage_error("project.lead", e);
+        }
+        if let Err(e) = restage_graph() {
+            return stage_error("project.lead", e);
+        }
+        let message = match lead {
+            Some(id) => format!("session `{id}` now leads project `{name}`"),
+            None => format!("project `{name}` has no lead"),
+        };
+        Outcome::ok("project.lead", message).with_data(json!({ "name": name, "lead": lead }))
+    })
 }
 
 /// `graph link <child> <parent>` — set the spawned-by edge on the child.
@@ -1511,6 +1591,54 @@ mod tests {
             !file.projects.iter().any(|p| p.name == "bogus"),
             "the bad root wrote nothing"
         );
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn project_lead_sets_a_roster_session_and_clears_with_none() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("lead");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let root = stage.join("a");
+        std::fs::create_dir_all(&root).unwrap();
+        let root = root.to_string_lossy().into_owned();
+        assert_eq!(
+            project_add(&daemon_invocation(&["project", "add"], &["aoide", &root])).status,
+            aoide_protocol::output::Status::Ok
+        );
+        let rec = session("s1", &root, "running", "2026-01-01T00:00:00Z", None);
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![rec] })
+            .unwrap();
+
+        let out = project_lead(&daemon_invocation(&["project", "lead"], &["aoide", "s1"]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        let file: ProjectsFile = load_stage(&projects_path()).unwrap();
+        assert_eq!(file.projects[0].lead.as_deref(), Some("s1"));
+        let doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(stage.join("graph.json")).unwrap()).unwrap();
+        assert_eq!(doc["nodes"][0]["lead"], "s1");
+
+        let out = project_lead(&daemon_invocation(&["project", "lead"], &["aoide", "nope"]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "unknown-session");
+
+        let out = project_lead(&daemon_invocation(&["project", "lead"], &["other", "s1"]));
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "unknown");
+
+        let out = project_lead(&daemon_invocation(&["project", "lead"], &["aoide"]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Usage);
+
+        let out = project_lead(&project_invocation(&["project", "lead"], &["aoide"], &[("none", "true")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        let file: ProjectsFile = load_stage(&projects_path()).unwrap();
+        assert_eq!(file.projects[0].lead, None);
+        assert!(!std::fs::read_to_string(&projects_path()).unwrap().contains("lead"));
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),

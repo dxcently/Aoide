@@ -40,6 +40,20 @@
   writes a record and is never re-entered recursively by its own ancestor
   walk (each hop calls `project_for` on that one ancestor).
 
+- **Those three root callers resolve the lead FIRST.** `doc.rs`'s edge
+  build, `doc.rs`'s render and `app.rs`'s `dag_rows` each ask
+  `leads_project(session)` (the project whose `Project.lead` names this
+  session) before falling back to `project_for`/`effective_project_for`,
+  then hand that index to `lead_over` — which yields the project's lead
+  only when it is in the visible roster and is not the session itself.
+  A session the lead covers hangs under the lead's node (`leads` edge,
+  nested row) instead of anchoring; the lead itself is the one anchored to
+  the project, whatever its cwd says. A lead missing from the roster
+  resolves to `None`, so grouping is exactly what it was before a lead was
+  named; never invent a parentless-session anchor for one. `leads_project`
+  and `lead_over` are the only lead lookups — a fourth grouping surface
+  reads them, never `Project.lead` directly.
+
 - **A widget consumes the published `effectiveProject`, never re-derives it
   (P-OWN S-A2).** `doc.rs`'s session-node builder and `who.rs`'s
   `session_view_json` (shared by `node_json`/`group_json`) are the only two

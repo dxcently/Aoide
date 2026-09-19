@@ -1805,6 +1805,7 @@ fn context_action_symbol(action: crate::app::ContextAction) -> &'static str {
         ContextAction::WriteLetter => "@",
         ContextAction::Open => ">",
         ContextAction::AssignProject => "#",
+        ContextAction::LeadProject => "*",
         ContextAction::Resurrect => "^",
         ContextAction::AddFolder => "+",
     }

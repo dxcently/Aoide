@@ -107,7 +107,7 @@ Enter applies it and Escape closes the menu.
 | Target | Available actions |
 |---|---|
 | Every target | Details |
-| Live local session | Open / focus; Set project (blank restores automatic attribution) |
+| Live local session | Open / focus; Set project (blank restores automatic attribution); Lead project (its effective project, so that project's other roots nest beneath it) |
 | Live local agent with a mailbox petname | Write letter |
 | Project | Write letter recipient chooser; Add folder; Resurrect its existing undying set |
 | Historical session with a registered project and native session ID or restore snapshot | Resurrect that exact session |

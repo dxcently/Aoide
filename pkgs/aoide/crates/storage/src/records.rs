@@ -64,6 +64,14 @@ pub struct Project {
     /// never consulted by anchoring (`Project::roots()` stays local-only).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hosts: Vec<ProjectHost>,
+    /// The session that leads this project: the one node placed directly
+    /// under the project, every other parentless session of the project
+    /// hanging off it (`leads` edges, CONTRACTS.md graph.json). Set by
+    /// `project lead <name> <session>`, cleared with `--none`; absent off
+    /// the wire. A lead that has left the roster is ignored by the graph
+    /// until it is replaced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lead: Option<String>,
 }
 
 /// One registered node a [`Project`] is ORGANIZATIONALLY a member of (P-14

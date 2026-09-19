@@ -446,6 +446,7 @@ mod tests {
                 roots: Vec::new(),
                 auto_resume: false,
                 hosts: Vec::new(),
+                lead: None,
             },
             super::super::model::Project {
                 name: "b".into(),
@@ -453,6 +454,7 @@ mod tests {
                 roots: Vec::new(),
                 auto_resume: false,
                 hosts: Vec::new(),
+                lead: None,
             },
         ];
         let mut a = rec("a");
@@ -519,6 +521,7 @@ mod tests {
                     roots: Vec::new(),
                     auto_resume: false,
                     hosts: Vec::new(),
+                    lead: None,
                 }],
                 ..Default::default()
             },

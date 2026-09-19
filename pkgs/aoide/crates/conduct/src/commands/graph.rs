@@ -411,6 +411,24 @@ pub fn register(r: &mut Registry) {
             "project edit aoide ~/Aoide",
         ],
     ));
+    r.insert(cmd!(
+        path: ["project", "lead"],
+        summary: "Place one session directly under the project; every other parentless session of the project hangs off it.",
+        args: [
+            arg!("name", "string", true, "Project name; must already be registered."),
+            arg!("session", "string", false, "Session id to lead the project; must be in the roster. Omit with --none to clear."),
+        ],
+        flags: [
+            flag!("none", "bool", "Clear the project's lead."),
+        ],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::project_lead,
+        examples: [
+            "project lead aoide 7e3f5976-98b2-44a4-827c-c687a0d9526e",
+            "project lead aoide --none",
+        ],
+    ));
 }
 
 /// `mail ring` (P-M5a-2, MAIL.md "Delivery and the doorbell") — registered

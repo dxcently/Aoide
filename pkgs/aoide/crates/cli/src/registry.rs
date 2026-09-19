@@ -324,6 +324,7 @@ mod tests {
             "pair.watch",
             "project.add",
             "project.edit",
+            "project.lead",
             "project.list",
             "project.remove",
             "resurrect",

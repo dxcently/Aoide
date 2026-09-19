@@ -40,7 +40,9 @@ pub(in crate::graph) fn is_conductable_now(s: &SessionRecord) -> bool {
 
 /// Build the fully resolved graph document (`graph.json` v0 shape). A session
 /// with a resolved parent carries only its `spawned` edge; root sessions carry
-/// an `anchors` edge to their longest-prefix project (or none, unanchored).
+/// an `anchors` edge to their longest-prefix project (or none, unanchored) —
+/// unless that project has a live lead, in which case they carry a `leads`
+/// edge from the lead, and the lead itself is the one anchored.
 pub fn build_graph(
     projects: &[Project],
     sessions: &[SessionRecord],
@@ -67,6 +69,9 @@ pub fn build_graph(
         // touched stays byte-for-byte as before this field existed.
         if !p.hosts.is_empty() {
             node["hosts"] = json!(p.hosts);
+        }
+        if let Some(lead) = &p.lead {
+            node["lead"] = json!(lead);
         }
         nodes.push(node);
     }
@@ -181,12 +186,21 @@ pub fn build_graph(
                 "to": format!("session:{}", s.session_id),
                 "kind": "spawned",
             }));
-        } else if let Some(i) = super::model::project_for(s, &projects) {
-            edges.push(json!({
-                "from": format!("project:{}", projects[i].name),
-                "to": format!("session:{}", s.session_id),
-                "kind": "anchors",
-            }));
+        } else if let Some(i) = super::model::leads_project(s, &projects)
+            .or_else(|| super::model::project_for(s, &projects))
+        {
+            match super::model::lead_over(s, i, &projects, &ids) {
+                Some(lead) => edges.push(json!({
+                    "from": format!("session:{lead}"),
+                    "to": format!("session:{}", s.session_id),
+                    "kind": "leads",
+                })),
+                None => edges.push(json!({
+                    "from": format!("project:{}", projects[i].name),
+                    "to": format!("session:{}", s.session_id),
+                    "kind": "anchors",
+                })),
+            }
         }
         // Additive `resumed` edge (P-D8, CONTRACTS.md §4): a session revived
         // by `graph resurrect` names the ledger entry's own sessionId it was
@@ -391,8 +405,13 @@ pub fn render(
     let mut unanchored: Vec<&SessionRecord> = Vec::new();
     let mut per_project: Vec<Vec<&SessionRecord>> = vec![Vec::new(); projects.len()];
     for s in &roots {
-        match super::model::project_for(s, &projects) {
-            Some(i) => per_project[i].push(s),
+        match super::model::leads_project(s, &projects)
+            .or_else(|| super::model::project_for(s, &projects))
+        {
+            Some(i) => match super::model::lead_over(s, i, &projects, &ids) {
+                Some(lead) => children.entry(lead.to_string()).or_default().push(s),
+                None => per_project[i].push(s),
+            },
             None => unanchored.push(s),
         }
     }
@@ -676,6 +695,60 @@ mod tests {
         assert!(!would_cycle(&sessions, "c", "a"));
         assert!(!would_cycle(&sessions, "a", "unregistered"));
     }
+    #[test]
+    fn a_live_lead_is_anchored_and_the_rest_of_the_project_hangs_off_it() {
+        let mut projects = fixture_projects();
+        projects[1].lead = Some("s2".into());
+        let sessions = vec![
+            session("s1", "/home/k/Aoide", "running", "2026-01-01T00:00:00Z", None),
+            session("s2", "/tmp", "running", "2026-01-02T00:00:00Z", None),
+            session("s3", "/home/k/Aoide", "idle", "2026-01-03T00:00:00Z", Some("s1")),
+        ];
+        let doc = build_graph(&projects, &sessions, &[]);
+        let edges: Vec<(String, String, String)> = doc["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| {
+                (
+                    e["from"].as_str().unwrap().into(),
+                    e["to"].as_str().unwrap().into(),
+                    e["kind"].as_str().unwrap().into(),
+                )
+            })
+            .collect();
+        // The lead anchors to the project it leads, whatever its cwd says;
+        // the project's other root hangs off the lead; spawned is untouched.
+        // Edges land in session order (s1, s2, s3), as everywhere else.
+        assert_eq!(
+            edges,
+            vec![
+                ("session:s2".into(), "session:s1".into(), "leads".into()),
+                ("project:aoide".into(), "session:s2".into(), "anchors".into()),
+                ("session:s1".into(), "session:s3".into(), "spawned".into()),
+            ]
+        );
+        let project = doc["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "project:aoide").unwrap();
+        assert_eq!(project["lead"], "s2");
+
+        let host = aoide_storage::display::local_host_name();
+        let expected = format!(
+            "\
+◆ aoide  /home/k/Aoide
+└─ ● {host}/root/s2  claude  working  /tmp
+   └─ ● {host}/child/s1  claude  working  /home/k/Aoide
+      └─ ● {host}/child/s3  claude  idle  /home/k/Aoide
+◆ nested  /home/k/Aoide/sub"
+        );
+        assert_eq!(render(&projects, &sessions, &[], None), expected);
+
+        // A lead that has left the roster changes nothing.
+        projects[1].lead = Some("gone".into());
+        let doc = build_graph(&projects, &sessions, &[]);
+        assert_eq!(doc["edges"][0]["kind"], "anchors");
+        assert_eq!(doc["edges"][0]["to"], "session:s1");
+    }
+
     #[test]
     fn render_is_deterministic_snapshot() {
         let projects = fixture_projects();

@@ -27,7 +27,7 @@ the MCP door share the group ([[Agent-Interface]]).
 Commands that take a node (`graph --focus`) accept either the
 full node id or the bare id.
 
-**Edges** come in two kinds:
+**Edges** come in three kinds:
 
 - **`anchors`** (project → session): a session is anchored to the registered
   project whose path is the **longest cwd prefix** — matched path-component-
@@ -41,10 +41,20 @@ full node id or the bare id.
   (`hookAncestry`, stamped once at registration) is intersected against
   every live agent-kind session's own `hookAncestry`, and the closest
   matching ancestor wins as parent (CONTRACTS.md §4).
+- **`leads`** (session → session): a project that names a **lead**
+  (`aoide project lead <name> <session>`, CONTRACTS.md §4's
+  `projects.json`) hangs its other parentless sessions off that one
+  session, one edge per follower. The lead is the node the project
+  anchors, whatever the lead's own cwd says; the followers carry this
+  edge instead of an `anchors` edge. `--none` clears it, and a lead that
+  has left the roster is ignored — those sessions anchor as before.
 
 Precedence: a session with a resolved parent carries **only** its `spawned`
 edge (no redundant anchors edge); a *dangling* `parentSessionId` (parent no
-longer in the roster) falls back to project anchoring. Sessions matching no
+longer in the roster) falls back to project anchoring. A parentless session
+resolves its project by the lead it is (`Project.lead` points at it) and
+then by cwd, and hangs under the project's live lead when that lead is not
+itself; the lead is anchored to the project it leads. Sessions matching no
 project group under a synthetic `(unanchored)` root. Each session's live
 state is the latest hook phase from `hooks.json` merged over its raw roster
 state ([[shellbridge]] writes both files).

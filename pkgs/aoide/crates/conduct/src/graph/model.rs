@@ -88,6 +88,26 @@ pub fn effective_project_for(
     anchor_for(&session.cwd, projects)
 }
 
+/// The project this session LEADS (`Project.lead`), if any — a lead hangs
+/// directly under the project it leads, whatever its cwd says.
+pub fn leads_project(session: &SessionRecord, projects: &[Project]) -> Option<usize> {
+    projects.iter().position(|p| p.lead.as_deref() == Some(session.session_id.as_str()))
+}
+
+/// The lead a parentless session of `projects[i]` hangs under: the
+/// project's lead when it is live (`ids`) and is not `session` itself.
+pub fn lead_over<'a>(
+    session: &SessionRecord,
+    i: usize,
+    projects: &'a [Project],
+    ids: &HashSet<&str>,
+) -> Option<&'a str> {
+    projects[i]
+        .lead
+        .as_deref()
+        .filter(|l| ids.contains(l) && *l != session.session_id)
+}
+
 /// The anchoring project for a cwd: the longest matching root wins across
 /// EVERY root of EVERY project, so nested projects and a project's own
 /// second root anchor correctly. Returns an index into `projects`.

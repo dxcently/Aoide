@@ -2199,6 +2199,21 @@ each host under its project with its roots, and `data.projects[].hosts`
 mirrors the record verbatim in `--json`. Membership is organizational: it
 grants nothing, pairs nothing, and infers no root from a local path.
 
+**Also additive in v0:** a project entry MAY carry an optional `lead` — the
+session id of the ONE session placed directly under the project, with every
+other parentless session of the project hanging off it (`graph.json`'s
+`leads` edges, below). Written by `aoide project lead <name> <session>`
+(the session must be in the `sessions.json` roster at mutation time — an
+unknown project name or an unrostered session is refused, `reason`
+`"unknown"`/`"unknown-session"`, and writes nothing) and cleared by `aoide
+project lead <name> --none`, which removes the key outright.
+`#[serde(default, skip_serializing_if = "Option::is_none")]` keeps `lead`
+off the wire when unset, the discipline `autoResume`/`hosts` set. `project
+list` prints it under its project as `lead <session>`, and the conductor's
+"Lead project" context action is this same command with the session's own
+effective project. A lead that later leaves the roster is not an error —
+the graph reads it as no lead at all until it is replaced or cleared.
+
 ```json
 { "schemaVersion": "0", "projects": [ { "name": "aoide", "path": "/home/khoa/Aoide",
   "roots": ["/home/khoa/Aoide"],
@@ -2227,6 +2242,18 @@ pruned from `sessions.json` by the time the resurrection happens, since the
 ledger is exactly the memory that survives that prune; a `resumed` edge's
 `to` is therefore a bare id reference, not a guaranteed node lookup).
 
+**Additive edge kind in v0:** a project naming a live `lead` (projects.json
+above) hangs its other parentless sessions off that lead with a `leads`
+edge (session → session). The lead is the one node the project anchors
+(`anchors`), whatever the lead's own cwd says; every OTHER parentless
+session whose project resolves to that same project carries a `leads` edge
+from the lead instead of its own `anchors` edge. Resolution is
+`Project.lead` first, then the ordinary cwd anchoring, and the lead nests
+roots only — a session with a resolved parent still carries nothing but its
+`spawned` edge. A lead absent from the current roster is not an error and
+changes nothing: the project's roots anchor exactly as they did before a
+lead was ever named.
+
 ```json
 {
   "schemaVersion": "0",
@@ -2248,6 +2275,10 @@ A project node MAY likewise carry the projects.json `hosts` array above,
 present under the same rule (non-empty only) — `{ "id": "project:aoide", …,
 "hosts": [ { "name": "chiyo", "roots": ["/srv/khoa/Aoide"] } ] }`; a
 project no `--host` invocation has touched carries no `hosts` key at all.
+It MAY also carry that project's `lead` session id, under the same rule
+(only when one is named) — `{ "id": "project:aoide", …, "lead":
+"abc123" }`; the id is echoed as stored, whether or not the roster still
+holds it.
 
 ### `state/stage/herald.json` — **v0**
 

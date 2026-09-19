@@ -156,6 +156,7 @@ pub enum ContextAction {
     WriteLetter,
     Open,
     AssignProject,
+    LeadProject,
     Resurrect,
     AddFolder,
 }
@@ -166,6 +167,7 @@ impl ContextAction {
             Self::WriteLetter => "Write letter",
             Self::Open => "Open / focus",
             Self::AssignProject => "Set project",
+            Self::LeadProject => "Lead project",
             Self::Resurrect => "Resurrect",
             Self::AddFolder => "Add folder",
         }
@@ -1511,8 +1513,13 @@ impl App {
         let mut per_project: Vec<Vec<&SessionRecord>> = vec![Vec::new(); projects.len()];
         let mut loose: Vec<&SessionRecord> = Vec::new();
         for r in &roots {
-            match graph::effective_project_for(r, &merged, &projects) {
-                Some(i) => per_project[i].push(r),
+            match graph::leads_project(r, &projects)
+                .or_else(|| graph::effective_project_for(r, &merged, &projects))
+            {
+                Some(i) => match graph::lead_over(r, i, &projects, &ids) {
+                    Some(lead) => children.entry(lead).or_default().push(r),
+                    None => per_project[i].push(r),
+                },
                 None => loose.push(r),
             }
         }
@@ -1862,6 +1869,7 @@ impl App {
             if self.sessions.iter().any(|s| s.session_id == rec.session_id) {
                 actions.push(ContextAction::Open);
                 actions.push(ContextAction::AssignProject);
+                actions.push(ContextAction::LeadProject);
             }
         }
         self.context_menu = Some(ContextMenu {
@@ -2038,6 +2046,21 @@ impl App {
                     collected: vec![],
                     kind: InputKind::SessionProject { id: rec.session_id },
                 });
+            }
+            (ContextTarget::Session(rec), ContextAction::LeadProject) => {
+                let merged = self.merged();
+                match graph::effective_project_for(&rec, &merged, &self.projects) {
+                    Some(i) => {
+                        let name = self.projects[i].name.clone();
+                        self.dispatch(&["project", "lead"], &[name, rec.session_id]);
+                    }
+                    None => {
+                        self.last_outcome = Some(Outcome::usage(
+                            "project.lead",
+                            "Session is anchored to no project; set one first.",
+                        ));
+                    }
+                }
             }
             (ContextTarget::Project(name), ContextAction::AddFolder) => {
                 self.input = Some(Input {
@@ -4632,6 +4655,50 @@ mod tests {
             app.last_outcome.as_ref().unwrap().command,
             "session.project"
         );
+    }
+
+    #[test]
+    fn lead_project_dispatches_the_effective_project_and_exact_session_id() {
+        fn lead(inv: &Invocation) -> Outcome {
+            if inv.path == ["project", "lead"] {
+                assert_eq!(inv.args, vec!["aoide".to_string(), "wanted".to_string()]);
+                return Outcome::ok("project.lead", "led");
+            }
+            Outcome::usage("read", "ignored")
+        }
+        with_isolated_stage(|| {
+            let mut app = App::for_test_with_dispatch(lead);
+            app.projects = vec![graph::Project { name: "aoide".into(), path: "/x".into(), ..Default::default() }];
+            let rec = session("wanted", "/x/sub", "working", None);
+            app.sessions = vec![rec.clone()];
+            app.open_context_for_session(rec, 3, 4);
+            let menu = app.context_menu.as_ref().unwrap();
+            let index = menu.actions.iter().position(|a| *a == ContextAction::LeadProject).unwrap();
+            app.run_context_action(index);
+            assert_eq!(app.last_outcome.as_ref().unwrap().command, "project.lead");
+
+            // A lead nests the project's other roots beneath it in the Graph panel.
+            // Re-seeded wholesale: the dispatch above reloaded the isolated stage.
+            app.projects = vec![graph::Project {
+                name: "aoide".into(),
+                path: "/x".into(),
+                lead: Some("wanted".into()),
+                ..Default::default()
+            }];
+            app.sessions = vec![
+                session("wanted", "/x/sub", "working", None),
+                session("other", "/x", "working", None),
+            ];
+            let rows = app.dag_rows();
+            let ids: Vec<&str> = rows
+                .iter()
+                .filter_map(|r| match r {
+                    DagRow::Session { rec, .. } => Some(rec.session_id.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(ids, vec!["wanted", "other"]);
+        });
     }
 
     #[test]
