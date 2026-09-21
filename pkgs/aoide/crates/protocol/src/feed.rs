@@ -8,8 +8,10 @@
 //! depends on (`aoide-secrets` depends on `aoide-protocol`/`libc`/`serde`/
 //! `serde_json` only — its own `AGENTS.md` invariant), so it is the only
 //! crate that can host a shared primitive here without adding a new
-//! dependency edge; this module adds none of its own (`serde_json` and
-//! `std` only).
+//! dependency edge; this module adds none of its own — `serde_json` and
+//! `std` on every target, and a TARGET-SCOPED `windows-sys` (the crate's
+//! only Windows API surface, compiled for `cfg(windows)` alone) for the
+//! native half described below.
 //!
 //! **This is a pure extraction — [`Follower`] moved verbatim from
 //! `aoide_secrets::watch::Follower`, generalized away from secrets-specific
@@ -28,12 +30,84 @@
 //! only, and transparently reopens across both an in-place truncation and
 //! a delete-and-recreate (a producer restart under a `RuntimeDirectory=`
 //! that gets wiped between runs).
+//!
+//! **Two host facts sit behind the same two decisions.** "Who may read this
+//! feed" and "is this still the same file" are the filesystem's answers on
+//! Unix (`chmod` to the caller's mode on creation, `(dev, ino)` to identify
+//! a file) and native API questions on Windows, where neither exists: the
+//! Windows half lives in `feed_windows.rs`, is private to this module, and
+//! answers both against the file's own handle rather than the path — a
+//! protected owner-only DACL attached AT creation (a post-create tightening
+//! step would leave a window in which the file is openable by another
+//! principal), and the native 128-bit file id for identity. Its one
+//! supported creation mode is `0o600`; every other mode is a named refusal
+//! there, before any file or directory is touched. The algorithm itself —
+//! append, cap, truncate-in-place, tail — is one implementation for both
+//! hosts; only these two facts differ, and no failure of either is ever
+//! read as success.
 
 use serde_json::Value;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom};
+#[cfg(unix)]
+use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+
+/// The Windows half of the writer (creation/validation) and of the tail's
+/// identity check. A sibling file is not a non-`mod.rs` parent's default
+/// resolution, hence the explicit `#[path]`; the module is private — this is
+/// a feed seam, not a general ACL framework, and it stays one until a second
+/// consumer exists.
+#[cfg(windows)]
+#[path = "feed_windows.rs"]
+mod feed_windows;
+
+/// The one creation mode native Windows can honor: a protected owner-only
+/// DACL. Everything else is a named refusal there (see
+/// [`FeedWriter::append`]), never a silent narrowing — a group-shared or
+/// world-readable feed has no Windows mapping in this slice.
+#[cfg(any(windows, test))]
+fn owner_only_mode(mode: u32) -> bool {
+    mode == 0o600
+}
+
+// ── what identifies one file on this host ────────────────────────────────
+
+/// The identity of an open handle, for [`Follower::poll`]'s comparison.
+/// Unix asks `(dev, ino)` out of the fd's own metadata — the same pair, and
+/// the same propagation of a failure, this module has always used. Windows
+/// has no such pair (`std::os::windows::fs::MetadataExt`'s file-index
+/// methods are unstable): identity comes from the handle through the native
+/// 128-bit file id. Both are only ever compared for equality, and both
+/// propagate their errors — an unknown identity is never "the same file".
+#[cfg(unix)]
+fn file_identity(file: &File) -> std::io::Result<(u64, u64)> {
+    let meta = file.metadata()?;
+    Ok((meta.dev(), meta.ino()))
+}
+
+#[cfg(windows)]
+fn file_identity(file: &File) -> std::io::Result<feed_windows::FileId> {
+    feed_windows::file_identity(file)
+}
+
+/// The identity of the file the PATH names right now. On Unix this is
+/// `stat(2)` on the path; on Windows it is a handle opened for attributes
+/// only, so a missing path still reports exactly what a missing path does
+/// on Unix ([`std::io::ErrorKind::NotFound`]) and no other failure is
+/// folded into it.
+#[cfg(unix)]
+fn path_identity(path: &Path) -> std::io::Result<(u64, u64)> {
+    let meta = std::fs::metadata(path)?;
+    Ok((meta.dev(), meta.ino()))
+}
+
+#[cfg(windows)]
+fn path_identity(path: &Path) -> std::io::Result<feed_windows::FileId> {
+    feed_windows::path_identity(path)
+}
 
 // ── the writer half ──────────────────────────────────────────────────────
 
@@ -55,58 +129,86 @@ impl FeedWriter {
     /// [`FeedWriter::append`] truncates the file to empty FIRST rather than
     /// growing it further (the feed is ephemeral cues, not an unbounded
     /// audit trail — that stays `aoide_protocol::audit`, unbounded, on a
-    /// different path entirely); `create_mode` is the Unix permission bits
-    /// applied via an EXPLICIT `chmod` the one time this writer creates the
-    /// file (never left to the process umask — a caller sharing the file
-    /// with a specific group, the way `aoide-secrets` shares its own feed
-    /// with `aoide-secrets-access`, needs the mode to be exactly what it
-    /// asked for).
+    /// different path entirely); `create_mode` is the permission policy
+    /// applied the one time this writer creates the file (never left to the
+    /// process umask — a caller sharing the file with a specific group, the
+    /// way `aoide-secrets` shares its own feed with `aoide-secrets-access`,
+    /// needs the mode to be exactly what it asked for). On Unix that is an
+    /// explicit `chmod` to the mode's bits; on Windows the only mode this
+    /// slice supports is `0o600`, expressed as a protected owner-only DACL
+    /// attached at creation (see [`FeedWriter::append`]).
     pub fn new(path: PathBuf, cap: u64, create_mode: u32) -> Self {
         Self { path, cap, create_mode }
     }
 
     /// Append one line: `payload` serialized compactly, plus a trailing
     /// `\n`. Creates the parent directory and the file itself on first use;
-    /// chmods to `create_mode` only on the write that actually creates the
-    /// file (checked via `exists()` immediately before opening) — every
-    /// later append reuses whatever permissions are already there, even if
-    /// something else changed them since. Past `cap`, this truncates the
-    /// file to empty before writing the new line rather than rotating it —
-    /// [`Follower::poll`]'s own `len() < pos` reopen-at-0 branch is what
+    /// on Unix chmods to `create_mode` only on the write that actually
+    /// creates the file (checked via `exists()` immediately before opening)
+    /// — every later append reuses whatever permissions are already there,
+    /// even if something else changed them since. Past `cap`, this truncates
+    /// the file to empty before writing the new line rather than rotating it
+    /// — [`Follower::poll`]'s own `len() < pos` reopen-at-0 branch is what
     /// makes that transparent to a live tail.
+    ///
+    /// **Windows takes the same two decisions by different means.** A
+    /// `create_mode` other than `0o600` is refused by name before any
+    /// directory or file is touched: the group-shared mode `aoide-secrets`'
+    /// broker asks for has no Windows mapping in this slice, and a
+    /// world-readable mode is documented unsupported rather than silently
+    /// narrowed. A fresh file is created with the protected owner-only DACL
+    /// already attached (never created broadly and then tightened — that
+    /// leaves a window in which another principal can open it), and an
+    /// EXISTING file has its owner and DACL read off its own handle and
+    /// verified before anything is seeked, truncated, or written: a
+    /// broadened, inherited, null or foreign-owned DACL is refused with the
+    /// file left exactly as it was. Both are still best-effort at this
+    /// boundary — every failure is narrated on stderr and swallowed, exactly
+    /// as on Unix — but no refusal is ever swallowed into a write.
     pub fn append(&self, payload: &Value) {
-        if let Some(parent) = self.path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                eprintln!("[aoide/feed] could not create the feed directory: {e}");
-                return;
-            }
-        }
-        let existed = self.path.exists();
-        let over_cap = std::fs::metadata(&self.path).map(|m| m.len() >= self.cap).unwrap_or(false);
-
-        let mut opts = std::fs::OpenOptions::new();
-        opts.create(true);
-        if over_cap {
-            opts.write(true).truncate(true);
-        } else {
-            opts.append(true);
-        }
-        let mut f = match opts.open(&self.path) {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("[aoide/feed] could not open the feed file: {e}");
-                return;
-            }
-        };
-        if !existed {
-            if let Err(e) = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(self.create_mode)) {
-                eprintln!("[aoide/feed] could not chmod the feed file to {:o}: {e}", self.create_mode);
-            }
-        }
         let mut line = payload.to_string();
         line.push('\n');
-        if let Err(e) = f.write_all(line.as_bytes()) {
-            eprintln!("[aoide/feed] could not write the feed file: {e}");
+
+        #[cfg(windows)]
+        {
+            if let Err(message) = feed_windows::append(&self.path, self.cap, self.create_mode, line.as_bytes()) {
+                eprintln!("[aoide/feed] {message}");
+            }
+        }
+
+        #[cfg(unix)]
+        {
+            if let Some(parent) = self.path.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    eprintln!("[aoide/feed] could not create the feed directory: {e}");
+                    return;
+                }
+            }
+            let existed = self.path.exists();
+            let over_cap = std::fs::metadata(&self.path).map(|m| m.len() >= self.cap).unwrap_or(false);
+
+            let mut opts = std::fs::OpenOptions::new();
+            opts.create(true);
+            if over_cap {
+                opts.write(true).truncate(true);
+            } else {
+                opts.append(true);
+            }
+            let mut f = match opts.open(&self.path) {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("[aoide/feed] could not open the feed file: {e}");
+                    return;
+                }
+            };
+            if !existed {
+                if let Err(e) = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(self.create_mode)) {
+                    eprintln!("[aoide/feed] could not chmod the feed file to {:o}: {e}", self.create_mode);
+                }
+            }
+            if let Err(e) = f.write_all(line.as_bytes()) {
+                eprintln!("[aoide/feed] could not write the feed file: {e}");
+            }
         }
     }
 }
@@ -116,15 +218,16 @@ impl FeedWriter {
 /// Tail-follows one file from EOF, delta-reads only — NEVER re-reads from
 /// the start. Moved verbatim from `aoide_secrets::watch::Follower` (P-D1);
 /// see this module's own doc for the shim `aoide-secrets` now consumes it
-/// through. **`poll` stats the PATH itself and compares `(dev, ino)`
-/// against the open fd on every call**: a producer restart under a
-/// `RuntimeDirectory=`-shaped tmpfs unlinks the file and a fresh process
-/// creates a brand-new inode at the same path, and the OLD fd's own
-/// `metadata().len()` freezes at deletion-time forever after — a
-/// length-only comparison can never see that a same-or-larger replacement
-/// landed, so every event after a restart would silently vanish into a
-/// permanently frozen read position with no error at all. A partial
-/// trailing line (no `\n` yet) is held across polls, never parsed early.
+/// through. **`poll` identifies the PATH itself and compares that against
+/// the open fd on every call** — `(dev, ino)` on Unix, the native 128-bit
+/// file id on Windows: a producer restart under a `RuntimeDirectory=`-shaped
+/// tmpfs unlinks the file and a fresh process creates a brand-new file at
+/// the same path, and the OLD fd's own `metadata().len()` freezes at
+/// deletion-time forever after — a length-only comparison can never see
+/// that a same-or-larger replacement landed, so every event after a restart
+/// would silently vanish into a permanently frozen read position with no
+/// error at all. A partial trailing line (no `\n` yet) is held across polls,
+/// never parsed early.
 pub struct Follower {
     path: PathBuf,
     file: File,
@@ -141,26 +244,24 @@ impl Follower {
         Ok(Self { path: path.to_path_buf(), file, pos: len, partial: String::new() })
     }
 
-    /// One poll: `stat(2)` the PATH (never only the open fd — see this
-    /// struct's own doc for why). If the path now names a different
-    /// `(dev, ino)` than the open fd — a new inode landed at the same path
-    /// — reopen at 0 and start following the new file, the same state
-    /// reset the truncation branch below already performs. If the path
-    /// doesn't exist yet (mid-restart, before the new file lands), this
-    /// poll simply reports no lines; the reopen fires on the next poll
-    /// that finds the path back. Once confirmed to be reading the right
-    /// inode, read exactly the new bytes and return every COMPLETE line
-    /// found (a trailing partial line is held for the next poll); no
-    /// growth returns an empty `Vec`, no read syscall at all. `len() <
-    /// pos` on the (possibly just-reopened) fd still covers an in-place
-    /// truncation of the SAME inode (a [`FeedWriter`] past its own cap) —
-    /// reopen and start again from 0 rather than sit at a now-meaningless
-    /// offset forever.
+    /// One poll: identify the PATH's file (never only the open fd — see this
+    /// struct's own doc for why). If the path now names a different file
+    /// than the open fd — a new inode landed at the same path — reopen at 0
+    /// and start following the new file, the same state reset the truncation
+    /// branch below already performs. If the path doesn't exist yet
+    /// (mid-restart, before the new file lands), this poll simply reports no
+    /// lines; the reopen fires on the next poll that finds the path back.
+    /// Once confirmed to be reading the right object, read exactly the new
+    /// bytes and return every COMPLETE line found (a trailing partial line
+    /// is held for the next poll); no growth returns an empty `Vec`, no read
+    /// syscall at all. `len() < pos` on the (possibly just-reopened) fd
+    /// still covers an in-place truncation of the SAME file (a
+    /// [`FeedWriter`] past its own cap) — reopen and start again from 0
+    /// rather than sit at a now-meaningless offset forever.
     pub fn poll(&mut self) -> std::io::Result<Vec<String>> {
-        match std::fs::metadata(&self.path) {
-            Ok(path_meta) => {
-                let fd_meta = self.file.metadata()?;
-                if (path_meta.dev(), path_meta.ino()) != (fd_meta.dev(), fd_meta.ino()) {
+        match path_identity(&self.path) {
+            Ok(path_id) => {
+                if path_id != file_identity(&self.file)? {
                     self.file = File::open(&self.path)?;
                     self.pos = 0;
                     self.partial.clear();
@@ -199,6 +300,7 @@ impl Follower {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::io::Write;
 
     fn tmp_path(tag: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -313,8 +415,57 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
+    /// The absent-path arm: while the path names nothing at all — the window
+    /// between a restart's unlink/rename-away and the new file landing — a
+    /// poll reports no lines rather than an error, and the tail picks the
+    /// new file up as soon as it appears. The rename-away spelling is the
+    /// one that holds on every host (a deleted-but-still-open file is
+    /// "delete pending" on Windows, where the NAME is what goes away, and a
+    /// rename-away is the same name-level disappearance without that state).
+    #[test]
+    fn follower_reports_no_lines_while_the_path_is_absent() {
+        let path = tmp_path("absent");
+        let moved = tmp_path("absent-moved");
+        std::fs::write(&path, b"before\n").unwrap();
+        let mut f = Follower::open_at_end(&path).unwrap();
+        assert_eq!(f.poll().unwrap(), Vec::<String>::new());
+
+        std::fs::rename(&path, &moved).unwrap();
+        assert_eq!(
+            f.poll().unwrap(),
+            Vec::<String>::new(),
+            "an absent path is no lines, never an error"
+        );
+
+        std::fs::write(&path, b"back\n").unwrap();
+        assert_eq!(f.poll().unwrap(), vec!["back".to_string()]);
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_file(&moved).ok();
+    }
+
+    // ── the creation-mode policy ──────────────────────────────────────
+
+    /// The pure policy every host shares the ANSWER to, even though only
+    /// Windows acts on it (Unix honors the caller's mode as given): `0o600`
+    /// is the one mode native Windows can express as a protected owner-only
+    /// DACL, so a group-shared or world-readable mode is refused there
+    /// rather than narrowed.
+    #[test]
+    fn owner_only_mode_is_exactly_0600() {
+        assert!(owner_only_mode(0o600));
+        for mode in [0o640, 0o644, 0o400, 0o660, 0o700, 0o600 | 0o2000, 0o0] {
+            assert!(!owner_only_mode(mode), "mode {mode:o} must not pass as owner-only");
+        }
+    }
+
     // ── FeedWriter ────────────────────────────────────────────────────
 
+    /// Unix-specific: this asserts the MODE BITS the create_mode chmod left,
+    /// and `0o640` is exactly the group-shared mode native Windows refuses
+    /// (it has no gid to name). Gated, not narrowed to `0o600` — that would
+    /// stop proving what the test exists to prove.
+    #[cfg(unix)]
     #[test]
     fn feed_writer_creates_the_file_at_the_given_mode() {
         let path = tmp_path("writer-perms");
@@ -324,6 +475,8 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
+    /// Unix-specific for the same reason: reading and SETTING Unix mode bits.
+    #[cfg(unix)]
     #[test]
     fn feed_writer_does_not_rechmod_an_existing_file() {
         let path = tmp_path("writer-no-rechmod");
@@ -342,13 +495,20 @@ mod tests {
     fn feed_writer_truncates_once_the_cap_is_exceeded() {
         let path = tmp_path("writer-cap");
         let cap: u64 = 1024;
-        std::fs::write(&path, vec![b'x'; (cap + 1) as usize]).unwrap();
+        // The padding is written THROUGH the writer, not with a bare
+        // `std::fs::write`: on Windows a writer only appends to a file whose
+        // owner and DACL it can verify, so a file seeded by an ordinary
+        // write would be (correctly) refused instead of truncated. The
+        // padding carries no 'x' so the assertion below still means what it
+        // says.
+        let writer = FeedWriter::new(path.clone(), cap, 0o600);
+        writer.append(&json!({"pad": "y".repeat(cap as usize + 1)}));
         assert!(std::fs::metadata(&path).unwrap().len() > cap);
 
-        FeedWriter::new(path.clone(), cap, 0o640).append(&json!({"event": "released"}));
+        writer.append(&json!({"event": "released"}));
 
         let contents = std::fs::read_to_string(&path).unwrap();
-        assert!(!contents.contains('x'), "the oversized padding must be gone after truncation: {contents}");
+        assert!(!contents.contains('y'), "the oversized padding must be gone after truncation: {contents}");
         assert!(contents.contains("\"event\":\"released\""), "{contents}");
         assert!(
             (contents.len() as u64) < cap,
@@ -361,8 +521,11 @@ mod tests {
     #[test]
     fn feed_writer_and_follower_round_trip() {
         let path = tmp_path("round-trip");
-        let writer = FeedWriter::new(path.clone(), 1024 * 1024, 0o640);
-        std::fs::write(&path, b"").unwrap();
+        let writer = FeedWriter::new(path.clone(), 1024 * 1024, 0o600);
+        // Seeded through the writer for the same reason as the cap test: on
+        // Windows the file's owner-only policy has to be attached by the
+        // creator, and `open_at_end` starts strictly AFTER the seed line.
+        writer.append(&json!({"event": "seed"}));
         let mut f = Follower::open_at_end(&path).unwrap();
 
         writer.append(&json!({"event": "parked", "id": "1"}));

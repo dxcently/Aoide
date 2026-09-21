@@ -88,8 +88,8 @@
   `PATHEXT`, so an `aoide.cmd` beside the build cannot shadow it; and an
   `AOIDE_CORE_BIN`/`AOIDE_RICE_BIN` override still reaches `resolve`
   trimmed and comes back untouched.
-- **`feed::Follower::poll` MUST stat the PATH on every call, never only the
-  open fd.** A producer restart under a `RuntimeDirectory=`-shaped tmpfs
+- **`feed::Follower::poll` MUST identify the PATH on every call, never only
+  the open fd.** A producer restart under a `RuntimeDirectory=`-shaped tmpfs
   unlinks the file the fd still refers to; Linux keeps that deleted inode
   readable with its length FROZEN at deletion, so a length-only comparison
   can never see a same-or-larger replacement land at the same path — the
@@ -97,6 +97,26 @@
   makes a delete-and-recreate (or a rename-away-and-recreate) transparent
   to a live tail instead of silently going deaf forever. Don't collapse
   this back to a bare `self.file.metadata()?.len()` check "for simplicity."
+  Windows has neither half of that pair: `feed_windows::path_identity`
+  opens the path and compares the native 128-bit file id
+  (`FILE_ID_INFO`) against the open handle's, with
+  `GetFileInformationByHandle` only on `ERROR_INVALID_PARAMETER` — and a
+  failure to identify is propagated, never read as "same file".
+- **`feed::FeedWriter::append`'s Windows arm verifies before it writes, and
+  never repairs.** A fresh file is created with its protected owner-only
+  DACL attached in `SECURITY_ATTRIBUTES`, then read back through the same
+  owner/DACL verification an existing file gets, and refused (before the
+  first payload byte) if this filesystem did not honor the descriptor; an
+  existing file is validated on its own handle — a broadened, inherited,
+  null, non-`SE_DACL_PROTECTED` or foreign-owned DACL, a deny/audit ACE,
+  any nonzero ACE flags, or a mask short of `GENERIC_READ|GENERIC_WRITE` all
+  refuse. Only a validated handle is truncated or appended to, the truncate
+  is `SetFilePointerEx(0)` + `SetEndOfFile`, and the append is the
+  documented EOF `WriteFile` (`OVERLAPPED.Offset`/`OffsetHigh`
+  `0xFFFFFFFF`) — never `write_all`, which passes a null `OVERLAPPED` and
+  writes at the file pointer. Never add a post-create tightening step: the
+  window between create and tighten is the race this shape exists to
+  remove.
 - **`feed::FeedWriter::append` truncates past `cap`, never rotates.** A
   feed is ephemeral cues, not an audit trail (that stays
   `aoide_protocol::audit`, unbounded, on a different path); rotation would

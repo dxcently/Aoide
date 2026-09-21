@@ -56,19 +56,20 @@ Two classes follow from that, and every row below is one of them:
 | shell resolution | `conduct/src/graph/resurrect.rs::passwd_login_shell` | required; **remaining** — a `getent passwd` shell-out (glibc/nss; its absence falls back to `/bin/sh`) |
 | `ps` invocation | `conduct/src/graph/codex_app.rs::process_table` | required, **named dependency** — `ps -axo pid=,ppid=,command=` works on Linux/macOS/FreeBSD; POSIX.1 only mandates `ps -e -f -o <format>`, so a strict/`BusyBox` `ps` may reject it |
 | stage/state lock | `storage/src/fs.rs`, `storage/src/outbox.rs`, `conduct/src/graph/codex_app.rs::lock_is_held` | required, **non-POSIX primitive by design** — `flock(2)` is BSD/XSI, not POSIX.1 (POSIX offers `fcntl(F_SETLK)`, per-process and dropped when any fd to the file closes). The guarantees here — the lock surviving a `fork`/`setsid` into a detached child, and `lock_is_held` as a liveness probe that never creates the file — rest on open-file-description semantics |
+| append-only feed file (create policy + tail identity) | `protocol/src/feed.rs`, private `protocol/src/feed_windows.rs` | required baseline for the algorithm (append · cap · truncate-in-place · tail); **policy by host, never silently weakened**, `pkgs/aoide/crates/protocol/README.md`'s `feed` entry names the seams. Unix: `chmod` to the caller's exact `create_mode`, `(dev, ino)` identity — unchanged. Native Windows: owner-only policy attached at creation and read back before the first payload byte (a filesystem that ignores ACLs refuses), an existing file validated on its own handle before truncate/append, reparse points refused, identity by native 128-bit file id; **`0o600` is the only supported creation mode** — `0o640` (the group-shared broker feed) is refused by name, so the group feed is unavailable there, not narrowed. Compile-checked for `x86_64-pc-windows-gnu`; no runtime evidence yet (see below). |
 | desktop / systemd capabilities in core | `hyprctl` window ops, `loginctl` lock gate, power actions, `notify-send`, `zenity`/`lyra` dialogs, `/run`+`/var/lib` deployment paths | optional host-specific — window ops gate on `HYPRLAND_INSTANCE_SIGNATURE` and degrade to `None`; power actions surface a spawn failure rather than a named refusal; the deployment paths are env-overridable placeholders, not POSIX shapes |
 
 ## Evidence and limits
 
 - **Run**: Linux source, Linux tests, `x86_64-unknown-linux-gnu` only.
-- **Not run**: no macOS/FreeBSD runner or target std was available, and no
-  target was downloaded, so every non-Linux branch above is compile-gated but
-  **unverified at runtime**. Nothing here was executed on a non-Linux host,
+- **Not run**: no macOS/FreeBSD runner or target std was available. Every
+  non-Linux branch above remains **unverified at runtime**.
+  Nothing here was executed on a non-Linux host,
   and no POSIX conformance claim follows from a `cfg` branch — `cfg(unix)` is
   not evidence of POSIX (the tree already contains `cfg(unix)` branches whose
-  *semantics* are Linux: `SO_PEERCRED`, `flock`). Windows — native or WSL — was
-  not attempted at all, and the `cfg(target_os)` arms above are Unix-family
-  guards: they neither build nor measure anything on a Windows target.
+  *semantics* are Linux: `SO_PEERCRED`, `flock`). The protocol library and
+  isolated native Windows test modules compile for `x86_64-pc-windows-gnu`;
+  this does not establish a working Windows core or POSIX conformance.
 - **Per-OS claims above** (which targets define `libc::ucred`, the `sun_path`
   width, `sa_family_t`'s width, `getpeereid`'s signature) were read from the
   workspace's libc 0.2.189 source, not from documentation.
@@ -85,6 +86,15 @@ Two classes follow from that, and every row below is one of them:
   are either Linux-gated (they vanish elsewhere) or red elsewhere, so the
   non-Linux arms need a macOS/FreeBSD runner, per-crate
   (`cargo test -p <crate>`, never `--workspace`).
+- **Windows runtime gap, feed specifically**: the feed's Windows arms are
+  compile-checked for `x86_64-pc-windows-gnu` (the crate's lib, and the feed
+  module's own tests through a scratch harness) and **nothing has run on a
+  Windows host**. One outstanding runtime check concerns append positioning:
+  the EOF `WriteFile` form is Microsoft's documented way to position
+  a write at end-of-file, but **cross-writer atomicity against a concurrent
+  appender is unproven** and Unix-`O_APPEND` equivalence must not be claimed
+  until a native two-process stress test appends short lines and shows no
+  interleaving and no lost line.
 - **Refusal convention**: where a capability is host-specific, the shape is
   the named refusal — `cfg(target_os)` on the existing body plus a non-host arm
   that keeps today's fail-closed semantics — never a fabricated uid/pid, never

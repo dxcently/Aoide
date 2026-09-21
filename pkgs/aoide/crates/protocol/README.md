@@ -75,7 +75,14 @@ other crate in this workspace sits above.
   modules (`docs/architecture/AOIDED.md`'s "L1 — the event bus" section) so
   `aoided`'s own event bus and any future producer/consumer pair can share
   it — `aoide-secrets` consumes it via `pub use` at its old
-  `watch::Follower` path.
+  `watch::Follower` path. "Who may read this feed" and "is this still the
+  same file" are host facts behind the same two decisions: Unix chmods to
+  the caller's `create_mode` on creation and identifies a file by
+  `(dev, ino)`; the private `feed_windows.rs` attaches an explicit,
+  `SE_DACL_PROTECTED`, owner-only DACL AT creation (no post-create
+  tightening) and identifies a file by its native 128-bit id — and there
+  `0o600` is the only supported mode, so the group-shared broker feed
+  (`aoide-secrets`' `0o640`) is refused by name rather than narrowed.
 - `dialog` — the code-entry dialog substrate: `DialogResult` (a dialog
   child's outcome — approved/dismissed/cancelled/cancelled-externally/
   spawn-error/infra-failure) and `run_entry_dialog` (the generic

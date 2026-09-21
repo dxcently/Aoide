@@ -19,3 +19,15 @@ serde_json = { workspace = true }
 # touch (no fuzzy-filtered lists, no one-line compact rendering, no
 # prompt! macros), so they stay off.
 inquire = { version = "0.9.4", default-features = false, features = ["crossterm"] }
+
+# Native feed permissions, file identity and EOF writes; only Windows needs these APIs.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+] }

@@ -112,6 +112,7 @@ dependencies = [
  "inquire",
  "serde",
  "serde_json",
+ "windows-sys",
 ]
 
 [[package]]
