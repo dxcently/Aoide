@@ -62,3 +62,16 @@ Scratch evidence on Yomi: `/tmp/aoide-native-e2e/thinkchiyo-report.md`,
 
 The full native core port, daemon deployment and HTTPS implementation remain
 unfinished. These results cover the protocol modules only.
+
+## ThinkChiyo to Yomi app connection preparation
+
+The User requested an SSH connection from ThinkChiyo. A dedicated Ed25519
+key was generated on ThinkChiyo as `.ssh/id_ed25519_aoide_yomi`; its private
+half remains there. Its public key was appended to Yomi's authorized keys.
+Yomi's actual host public key was installed in ThinkChiyo's known-hosts file.
+
+ThinkChiyo's `.ssh/config` now contains `Host Yomi`, targeting
+`khoa@192.168.1.158` with that identity. `ssh Yomi hostname` from Windows
+returns `yomi-strix`. Codex is available in the remote login shell and reports
+an existing ChatGPT login. The remaining app action is to enable `Yomi` under
+SSH connections and select `/home/khoa/Aoide`; no app handoff is claimed.
