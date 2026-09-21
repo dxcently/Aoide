@@ -1744,7 +1744,8 @@ project/parent inheritance across local/remote/app/subagents;
   `pair reject`/`mesh pair` (windows redesign §5 QUEUED, codes never
   ferried); secrets = the `secrets` command family (`grant`, `revoke`,
   `pending`, `approve`, `dismiss`, `expose`, `watch`; Harnox-backed
-  custody §9 is review-only, no migration authorized).
+  custody §9 is review-only, no migration authorized). `secrets status`
+  reports broker-backed policy metadata without values or backend probes.
 - Remaining implementation (ordered, one conduct/storage writer at a time,
   behind §15's seam ruling): (1) ML1 typed targets + resolver; (2) ML3
   `mail role` assign/unassign/handoff with the visible binding, additive
@@ -1767,10 +1768,12 @@ project/parent inheritance across local/remote/app/subagents;
   unassigned is displayed as such, never inferred from harness or model;
   cross-host: a project inbox has one authority host (§15), remote rows
   carry no local pid/window actions (§14).
-- Owners: designer = TUI (edit/test, serialized commits here); backend
-  seams = Sonnet executors after the §15 ruling (ML1 → ML3 → ML4), one
-  writer; root reviews. Status: REGISTERED, nothing dispatched; blocked on
-  the §15 seam ruling and on §19's mail-view work landing first.
+- Operators use Eidolon executors and independent reviewers with Ollama
+  `deepseek-v4.1-flash`; root inspects and lands scoped commits. The TUI
+  operator slice covers pairing, node trust, configuration and secrets
+  metadata/grants through existing commands; implementation and independent
+  review are complete. Assigned roles and project-mail work retain their
+  §15/§19 dependencies.
 
 ## 22. Orchestration graph: runs, work nodes, goals, typed editable edges (User via root seq 630/632/634)
 
@@ -1917,7 +1920,12 @@ project/parent inheritance across local/remote/app/subagents;
   surfaces and command seams, the ownership/precedence contract, the
   Harnox capability map against the `secrets` family, first concrete
   flows); designer = TUI settings surfaces after the contract. Status:
-  ARCHITECT RUNNING; no implementation authorized yet.
+  Custody migration remains review-only. The authorized operator slice has
+  `secrets status` implemented and independently reviewed: metadata comes
+  from the broker; unreachable or refused reads are errors, never an empty
+  success. TUI configuration, pairing and grant controls are implemented and
+  independently reviewed. Backend setup and custody migration remain separate
+  work.
 - Brief DONE (`p-easy-config-secrets-brief.md`): 28-row inventory; the
   existing `aoide config`/config.toml becomes a read/validate projection
   (scopes, `config explain`, runtime/declared/default ownership,

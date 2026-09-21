@@ -248,6 +248,17 @@ fn handle_key(app: &mut App, key: KeyEvent) -> bool {
         }
         return false;
     }
+    // The dedicated pairing-ceremony popup is modal for the same reason the
+    // log tail is: it holds a code, and while it is open nothing else may act
+    // on a screen that is showing one. Dismissing it drops the code.
+    if app.pair_ceremony.is_some() {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter => app.dismiss_pair_ceremony(),
+            _ => {}
+        }
+        return false;
+    }
+
     // The help overlay swallows keys until dismissed (pi-style modal overlay).
     if app.help_open {
         match key.code {
@@ -351,18 +362,23 @@ fn handle_key(app: &mut App, key: KeyEvent) -> bool {
             _ => {}
         }
     }
-    if key.code == KeyCode::Char('e')
-        && matches!(
-            app.panel,
-            Panel::Graph | Panel::Session | Panel::Terminals | Panel::Projects
-        )
-    {
+    // The tree/graph/session/project menu, exactly as before — plus the Mesh
+    // and Status rows, whose `e` opens the same controller right-click does
+    // (both gated on the keyboard focus already being in the body pane, so the
+    // tree keeps its own menu on every panel).
+    let body_menu = matches!(
+        app.panel,
+        Panel::Graph | Panel::Session | Panel::Terminals | Panel::Projects
+    ) || (!app.sidebar_focused && matches!(app.panel, Panel::Roster | Panel::Status));
+    if key.code == KeyCode::Char('e') && body_menu {
         let hit = if app.sidebar_focused {
             board::Hit::Tree(app.sidebar_sel)
         } else {
             board::Hit::Row(match app.panel {
                 Panel::Graph => graphview::selected_index(app),
                 Panel::Projects => app.proj_sel,
+                Panel::Roster => app.roster_sel,
+                Panel::Status => app.status_sel,
                 _ => app.dag_sel,
             })
         };
@@ -530,10 +546,19 @@ fn handle_mouse(app: &mut App, area: ratatui::layout::Rect, mouse: MouseEvent) {
         }
         return;
     }
-    if app.help_open || app.tail.is_some() {
-        if mouse.kind == MouseEventKind::Down(MouseButton::Right) {
+    // A popup is modal for the pointer exactly as it is for the keyboard: the
+    // help overlay, the log tail and the pairing ceremony all swallow mouse
+    // events, and the established dismissal (a right button down) closes them.
+    // Without this a click could switch panels or open a context menu under a
+    // popup that is still painting its own copy of a code.
+    if app.help_open || app.tail.is_some() || app.pair_ceremony.is_some() {
+        if mouse.kind == MouseEventKind::Down(MouseButton::Right)
+            || (app.pair_ceremony.is_some()
+                && mouse.kind == MouseEventKind::Down(MouseButton::Left))
+        {
             app.help_open = false;
             app.close_tail();
+            app.dismiss_pair_ceremony();
         }
         return;
     }
@@ -799,7 +824,7 @@ fn handle_mouse(app: &mut App, area: ratatui::layout::Rect, mouse: MouseEvent) {
                         }
                         Panel::Projects if i < app.projects.len() => app.proj_sel = i,
                         Panel::Roster if i < app.roster_flat_rows().len() => app.roster_sel = i,
-                        Panel::Pending if i < app.pending_rows().len() => app.pending_sel = i,
+                        Panel::Pending if i < app.review_rows().len() => app.select_review_row(i),
                         Panel::Log if i < app.log.len() => {
                             app.log_sel = i;
                             app.log_scroll = 0;
@@ -952,6 +977,26 @@ fn open_context_hit(app: &mut App, hit: board::Hit, x: u16, y: u16) {
             if let Some(name) = app::sorted_project_names(&app.projects).get(i) {
                 app.open_context_for_project(name.clone(), x, y);
             }
+        }
+        // The Mesh pane's own rows: a node header carries the registry's
+        // snapshot, a drift row names a node to pair. Both open the same menu
+        // the right-click does, from the same row model the pane drew.
+        board::Hit::Row(i) if app.panel == Panel::Roster => {
+            if let Some(row) = app.roster_flat_rows().get(i).cloned() {
+                match row {
+                    app::RosterRow::NodeHeader { name, .. } => {
+                        app.open_context_for_node(name, x, y)
+                    }
+                    app::RosterRow::Drift { node, .. } => app.open_context_for_node(node, x, y),
+                    _ => {}
+                }
+            }
+        }
+        // The Status pane's rows: a config key's Edit value, or a secret's two
+        // consumer verbs.
+        board::Hit::Row(i) if app.panel == Panel::Status => {
+            app.select_status_row(i);
+            app.open_status_menu();
         }
         board::Hit::Project(name) => app.open_context_for_project(name, x, y),
         _ => {}
@@ -1487,6 +1532,159 @@ mod tests {
             handle_key(&mut app, KeyEvent::from(KeyCode::Tab));
             assert_eq!(app.panel, board::NAV[(index + 1) % board::NAV.len()].0);
         }
+    }
+
+    /// A Mesh node row: synthetic fixtures only — one roster node, its registry
+    /// row, and one declared mesh with a divergence. No pairing state and no
+    /// credential is involved.
+    fn mesh_pane() -> App {
+        let mut app = App::for_test(vec![], vec![], vec![]);
+        app.panel = Panel::Roster;
+        app.sidebar_focused = false;
+        app.roster.outcome = Some(
+            aoide_protocol::output::Outcome::ok("session", "1 node").with_data(serde_json::json!({
+                "nodes": [{
+                    "name": "osaka", "isLocal": false, "presence": "online",
+                    "fetchedAt": "2026-09-20T00:00:00Z",
+                    "sessions": [],
+                }],
+            })),
+        );
+        app.nodes = Some(
+            aoide_protocol::output::Outcome::ok("node.status", "1 node(s) registered")
+                .with_data(serde_json::json!({ "nodes": [{
+                    "name": "osaka", "verified": true, "allows": ["read", "spawn"],
+                    "state": "fresh", "url": "http://127.0.0.1:8710/",
+                }] })),
+        );
+        app.mesh = Some(
+            aoide_protocol::output::Outcome::ok("mesh", "1 divergence").with_data(serde_json::json!({
+                "report": { "sections": [{
+                    "name": "home", "grant": ["read"], "sameOperator": true,
+                    "declared": 2, "selfDeclared": true,
+                    "rows": [{ "node": "yomi", "class": "missing" }],
+                }], "undeclared": [] },
+            })),
+        );
+        app
+    }
+
+    /// A right-click and `e` must reach the same menu on the same row: the
+    /// pointer resolves the row through `board::hit`, the key through the
+    /// panel's own selection, and both open the target's snapshot.
+    #[test]
+    fn a_right_click_on_a_mesh_row_opens_the_same_menu_as_e() {
+        let mut app = mesh_pane();
+        let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+
+        handle_key(&mut app, KeyEvent::from(KeyCode::Char('e')));
+        let by_key = app
+            .context_menu
+            .as_ref()
+            .map(|m| (m.title.clone(), m.actions.clone()))
+            .expect("`e` opens the selected row's menu");
+
+        app.context_menu = None;
+        // Find a cell the hit test resolves to the list's first row — the same
+        // function the right-click below goes through, so the test never
+        // re-derives the pane's layout.
+        let g = board::page_geometry(area, &app);
+        let cell = (g.body.y..g.body.bottom())
+            .flat_map(|y| (g.body.x..g.body.right()).map(move |x| (x, y)))
+            .find(|&(x, y)| board::hit(area, &app, x, y) == board::Hit::Row(0))
+            .expect("the Mesh pane paints its first row");
+        handle_mouse(
+            &mut app,
+            area,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Right),
+                column: cell.0,
+                row: cell.1,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        let by_mouse = app
+            .context_menu
+            .as_ref()
+            .map(|m| (m.title.clone(), m.actions.clone()))
+            .expect("the right-click opens the row's menu");
+        assert_eq!(by_key, by_mouse);
+        assert_eq!(
+            by_mouse.1,
+            vec![
+                app::ContextAction::PairNode,
+                app::ContextAction::ToggleRead,
+                app::ContextAction::ToggleSpawn,
+                app::ContextAction::ToggleMessage,
+                app::ContextAction::RemoveNode,
+            ]
+        );
+
+        // A left click on that same cell selects the very row the pointer
+        // resolved, so mouse and keyboard name one row.
+        app.context_menu = None;
+        handle_mouse(
+            &mut app,
+            area,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: cell.0,
+                row: cell.1,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(app.roster_sel, 0);
+    }
+
+    /// A popup is modal for the pointer exactly as it is for the keyboard: with
+    /// the pairing ceremony open, no click may switch a panel or open a menu
+    /// under it, and the established dismissal (a right button down, or a left
+    /// click on the popup) closes it.
+    #[test]
+    fn the_pairing_ceremony_popup_is_modal_for_the_mouse_too() {
+        let mut app = mesh_pane();
+        app.pair_ceremony = Some(app::PairCeremony {
+            name: "osaka".to_string(),
+            codes: vec![("your code".to_string(), "740-729".to_string())],
+            note: String::new(),
+        });
+        let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+        let before = app.panel;
+
+        // A left click on the tab strip: swallowed, popup dismissed, no switch.
+        let nav = board::nav_regions(board::page_geometry(area, &app).nav);
+        let (rect, _, _) = nav[0];
+        handle_mouse(
+            &mut app,
+            area,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: rect.x + 1,
+                row: rect.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(app.panel, before, "a click under the popup switches nothing");
+        assert!(app.pair_ceremony.is_none(), "and it dismisses the popup");
+
+        // A right click anywhere does the same.
+        app.pair_ceremony = Some(app::PairCeremony {
+            name: "osaka".to_string(),
+            codes: vec![("your code".to_string(), "740-729".to_string())],
+            note: String::new(),
+        });
+        handle_mouse(
+            &mut app,
+            area,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Right),
+                column: area.width / 2,
+                row: area.height / 2,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert!(app.pair_ceremony.is_none());
+        assert!(app.context_menu.is_none(), "no menu opens under a popup");
     }
 
     #[test]

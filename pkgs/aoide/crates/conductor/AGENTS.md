@@ -84,6 +84,51 @@
 - Pending IDs are array positions. Relist after every approve/deny before
   using another selection; never recycle those indices as durable mail
   proposal identifiers.
+- A pairing code lives only in the dedicated ceremony popup
+  (`app::PairCeremony`, no `Debug`). Take it from a pair outcome's own
+  `sas`/`replySas` fields, never by scanning text; sanitise the outcome before
+  it reaches `last_outcome`, and never write a code into a row, a status or
+  detail line, a log view or a test fixture (fixtures may carry a synthetic
+  code; only a REAL one is forbidden anywhere). A code the operator types is
+  masked as it is drawn, is never pre-filled, and is dropped on submit: an empty
+  field and Escape dispatch nothing, and a rejected code or TOTP is never
+  replayed.
+- Never dispatch bare `pair` (the CLI raises its interactive menu on this
+  process's own tty), never a `pair` wait other than `--wait 0`, and never a
+  code on a new request. A pairing leg that dials or sweeps runs on the
+  background thread and is drained without blocking; a new request follows an
+  explicit UI activation.
+- Anything that can cross the broker socket runs on a worker: `secrets pending`
+  and `secrets status` reads, and every secrets mutation
+  (`approve`/`dismiss`/`grant`/`revoke`), whose client reads are unbounded.
+  Exactly ONE mutation is in flight at a time — a second is refused with a
+  visible reason, never queued or raced — and nothing retries automatically.
+  While a read is in flight the last rows stay on screen and the pane says it
+  is reading.
+- While a pairing leg is in flight, no node write is advertised or dispatched:
+  the leg's commit writes `state/nodes.json` from its own thread, so a
+  `node allow`/`node remove` from the UI thread at the same time is a lost
+  update. The refusal names the reason, and the pane that started the leg
+  renders its own "working…" line. The INBOUND approval is the same kind of
+  write even though its leg is local, so it is refused while another leg is on
+  the wire too, and the refused prompt is dropped with the code. `pair reject`
+  needs no such guard: it writes only the flock-guarded pairing store, never the
+  node registry, so it cannot lose a commit — its outcome is the command's own
+  (an entry the leg has already taken reads as unknown).
+- Every popup is modal for the pointer as well as the keyboard: no click
+  switches a panel or opens a menu under an open popup, and the established
+  dismissal closes it.
+- A failed read renders that read's own refusal. A `secrets status` answer that
+  never arrived — absent socket, unknown subcommand — is an error line and no
+  rows, never an empty inventory. Render only the metadata fields the command
+  names.
+- Review and Status selections are row identities, clamped by identity after a
+  re-list; a shrink moves the cursor with its own row and never onto a section
+  header. Draw and hit test split those panes through the same function.
+- Grants and configuration go through their existing commands (`node allow`,
+  `config set`, `secrets grant|revoke`, `pair`), whose validation and refusals
+  are the gate. This frontend adds no custody, no privilege and no second
+  schema.
 - All exit paths preserve `TermGuard` restoration and panic-hook cleanup.
   Keep terminal/mouse state correct after normal exit, errors and panics.
 - No Wayland, image, Qt, Nix or song runtime dependency enters this core

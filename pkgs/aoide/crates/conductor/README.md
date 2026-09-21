@@ -40,6 +40,10 @@ whenever it holds more rows than fit, and stays gone otherwise.
 | `p` in Graph | Prune ended sessions |
 | `?` | Context help |
 | `q` / Ctrl-C | Quit outside text entry / quit globally |
+| Review: `j` / `k` | Walk session approvals, pairing requests and TOTP asks |
+| Review: `a` / `d` / `r` | Approve or resume / deny, reject or dismiss / re-list every queue |
+| Mesh: `e` / right-click | Pair, toggle a node's read/spawn/message grant, or unregister it |
+| Status: Enter or `e` | Edit the selected config key, or a secret's consumer grant |
 
 The single-line `𝄞 CONDUCTOR` header keeps the clef on the left and anchors the
 project, agent and terminal count buttons on the right. Every kind of thing has
@@ -111,9 +115,16 @@ Enter applies it and Escape closes the menu.
 | Live local agent with a mailbox petname | Write letter |
 | Project | Write letter recipient chooser; Add folder; Resurrect its existing undying set |
 | Historical session with a registered project and native session ID or restore snapshot | Resurrect that exact session |
+| Registered node (Mesh) | Pair / re-pair; toggle read, spawn, message; Unregister node (exact name) |
+| Node named by mesh drift, with no local record | Pair / re-pair only |
+| Config key (Status) | Edit value |
+| Secret reference (Status) | Grant consumer; Revoke consumer |
 
 Historical actions never focus a stale process. The menu retains the exact
-selected target through dispatch. Rename and Kill are not context actions.
+selected target through dispatch. Rename and Kill are not context actions. A
+node menu carries the `allows` set it opened with, so a toggle states the
+change it showed, and a node this box holds no record of is never offered a
+grant or a removal the registry would refuse.
 
 Projects use the existing project registry and its multiple-root model.
 Removing a project from Projects or a session group opens a confirmation.
@@ -122,7 +133,69 @@ This removes the registration, not project files.
 Mesh reuses bounded asynchronous `session --hosts` probes with cached
 fallback; a last-seen remote session is not asserted to be currently live.
 Session steering dispatches `send`; Mail dispatches signed correspondence.
-Pending remains the conductor-input/A2A approval queue, not mail editing.
+Review's first queue remains the conductor-input/A2A approval queue, not mail
+editing.
+
+## Pairing, mesh trust and settings
+
+Review lists three queues under one cursor: session send/A2A approvals from
+`session pending list`, pending pairing requests from `pair --json`, and parked
+secrets TOTP asks from `secrets pending --json`. Each section header carries its
+own read's refusal, so a failed read never renders as an empty, all-clear
+queue. The cursor follows a row's identity, so a resolve that shortens the list
+moves the cursor with the rows that remain.
+
+`a` acts on whatever the cursor names. Approving or resuming a pairing request,
+like approving a TOTP ask, opens a masked prompt that names its exact target: a
+pairing code is read off the other screen and typed once. An empty field and
+Escape dispatch nothing, and submitting drops the prompt, so a rejected code or
+TOTP is never replayed. An inbound approval is a local comparison; an outbound
+resume polls the approver's door exactly once (`--wait 0`) and a new request
+sweeps, dials and parks — both run on a worker thread so the interface keeps
+responding, and a still-pending answer is the command's own wording, committing
+nothing.
+
+A pairing code is held in one place: the dedicated ceremony popup, opened by a
+pair outcome and dismissed by Enter, Escape or `q`. It is taken only from the
+outcome's own `sas`/`replySas` fields, never harvested out of text, and the
+outcome stored for the status line has any code-shaped token replaced with a
+pointer at that popup. No row, status line, log view or document string carries
+a code; the ceremony popup exists because the ceremony itself requires a human
+to read their own code to the other operator. Pairing never dispatches bare
+`pair` (which would raise its interactive menu over this screen), never a
+blocking `--wait`, and never a code on a new request.
+
+Mesh adds the registry's own trust rows (`node status --json`) and every
+declared mesh's divergence (`mesh --json`) beneath the roster probe: the node's
+verified flag, its `allows` set, its cache state, and drift reported in the
+compare's own words. Drift is reported, never repaired here — `e` or a
+right-click offers the pairing ceremony for a divergent name, the three
+capability toggles for a node with a record, and removal behind an exact-name
+confirmation. Both trust reads are local, so opening Mesh dials nothing. While a
+pairing leg is running this pane says so in its own status line, offers pairing
+only, and refuses a node write it is asked for anyway: the leg's commit writes
+the node registry from its own thread, and two read-modify-writes of that file
+would lose one of them.
+
+Status shows the config keys this instance may edit, walked from `config --json`
+one level deep (`pairing.defaultGrant`, `upkeep.verifyCommand`), with the file's
+own provenance — path, managed or unmanaged, present or absent — and the
+backend's validation as the only gate for a value. Below them, `secrets
+status --json` supplies the broker's own answer and one row per secret carrying
+only the metadata fields that command names (backend, TOTP requirement,
+consumers, automation, sharedWith, remote, allowRemoteOrigin). A broker that did
+not answer — an absent socket, an unknown subcommand — renders that command's
+error and no rows at all, never an empty inventory. Grant and revoke dispatch
+the existing `secrets grant|revoke <name> <consumer>` and show the admin
+command's own refusal verbatim; this pane escalates nothing and sets up no
+custody.
+
+Both secrets reads and every secrets mutation run on a worker thread: the broker
+reads are unbounded, so a broker that accepts and never answers must leave the
+interface painting. The last rows read stay on screen while a read is in flight,
+with "reading…" beside them, and exactly one mutation runs at a time — a second
+is refused with the reason on the status line rather than queued or raced, a
+rejected TOTP is never replayed, and nothing is retried automatically.
 
 ## Correspondence and activity
 
@@ -185,6 +258,7 @@ visible alongside the previous successful snapshot.
 | Module | Owns |
 |---|---|
 | `app::App` | Loaded state, selections, folding, history, asynchronous roster refresh and dispatched actions |
+| `app::PairCeremony` | The one place a pairing code is held and drawn; dropped on dismissal |
 | `board` | Home/workspace composition, navigation, sidebar and shared drawing/hit-test geometry |
 | `ui` | Pure panel/detail/overlay rendering |
 | `scene` | Camera, view choice, retained world positions and the clipping painter |

@@ -47,6 +47,11 @@ session ledger ──── historical entries ─────────┤
 mail base ───────── bounded letters ────────────┤
 audit JSONL ─────── bounded full events ────────┼─ App ── pure views
 roster dispatch ─── live/cache classification ──┤           │
+pair --json ─────── parked pairing requests ────┤           │
+secrets pending ─── parked TOTP asks ───────────┤           │
+node status ─────── registry + allows ──────────┤           │
+mesh ────────────── declared-vs-registered ─────┤           │
+config / secrets status ── keys + references ───┤
 rice stage ──────── palette only ───────────────┘     shared geometry
                                                          │
                                                 keyboard / mouse
@@ -56,6 +61,21 @@ rice stage ──────── palette only ──────────�
                                               existing Aoide engine
 ```
 
+The reads that cross a socket (`secrets pending`, `secrets status`) and the
+secrets mutations (`approve`/`dismiss`/`grant`/`revoke`) all run on worker
+threads and are drained without blocking, because their client reads are
+unbounded; exactly one mutation is in flight at a time, and a second activation
+is refused with a visible reason rather than queued. A pairing leg's commit
+writes `state/nodes.json` from its own thread, so node writes are held back
+while one is in flight, with the busy line naming the leg on the pane that
+started it. Every other mutation is an existing command through the injected
+dispatcher. A pair outcome is split on arrival: its code goes to
+`app::PairCeremony`, which only the dedicated popup draws and which dismissal
+clears, and the sanitised remainder is what the status line keeps.
+`Panel::Status`'s environment block and its row list come from one function, so
+the reserved height is the painted height and the hit test resolves exactly the
+rows that were painted.
+
 Context menus hold a snapshot of the selected tree, graph, project or
 session target. Right-click and `e` enter the same controller; arrows or
 `j` / `k` select, Enter applies and Escape closes. Details is universal.
@@ -64,6 +84,11 @@ also expose Write letter. Project actions reuse the recipient chooser,
 Add folder and existing undying resurrection. Historical resurrection
 requires a registered project plus native session ID or restore snapshot
 and dispatches the exact project and ID. It never substitutes live focus.
+A Mesh row's menu snapshots the node's `allows` set and its registry record, so
+a capability toggle states the change it showed and an unknown name offers only
+pairing; a Status row's menu offers Edit value for a config key and the two
+consumer verbs for a secret. Removal — project or node — confirms an exact name
+and never fires from Escape or a near miss.
 
 Local mail/audit reads capture complete records within a bounded tail.
 They do not repair an actively appended file. Ledger reads use the storage

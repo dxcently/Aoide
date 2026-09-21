@@ -67,7 +67,7 @@ impl Panel {
             Panel::Log => "LOG",
             Panel::Status => "STATUS",
             Panel::Roster => "ROSTER",
-            Panel::Pending => "PENDING",
+            Panel::Pending => "REVIEW",
             Panel::Home => "HOME",
             Panel::Mail => "MAIL",
             Panel::Terminals => "TERMINALS",
@@ -107,7 +107,7 @@ pub struct LogLine {
 
 /// An inline text prompt (project add, link-under-parent). When `Some`, keys go
 /// to the prompt, not the global keymap.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Input {
     pub label: String,
     pub buffer: String,
@@ -117,6 +117,44 @@ pub struct Input {
     pub collected: Vec<String>,
     /// The action this prompt feeds.
     pub kind: InputKind,
+}
+
+/// The one glyph a masked prompt draws per typed character.
+pub const MASK: char = '*';
+
+impl Input {
+    /// True while this prompt collects a code the operator is reading off
+    /// ANOTHER screen (a pairing code, a TOTP). Every render path draws
+    /// [`Input::display_buffer`], never `buffer`, so no generic surface — the
+    /// status bar, a popup body, a log line — can print what was typed.
+    pub fn masked(&self) -> bool {
+        matches!(self.kind, InputKind::PairCode { .. } | InputKind::TotpCode { .. })
+    }
+
+    /// The buffer as it may be drawn: one mask glyph per typed character for a
+    /// code prompt, verbatim for every other prompt.
+    pub fn display_buffer(&self) -> String {
+        if self.masked() {
+            MASK.to_string().repeat(self.buffer.chars().count())
+        } else {
+            self.buffer.clone()
+        }
+    }
+}
+
+/// Hand-written so a stray `{:?}` (a panic dump, a test's own debug print)
+/// cannot expose a code the operator typed from the other screen — the same
+/// reason [`PairCeremony`] carries no `Debug` at all.
+impl std::fmt::Debug for Input {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Input")
+            .field("label", &self.label)
+            .field("buffer", &self.display_buffer())
+            .field("step", &self.step)
+            .field("collected", &self.collected)
+            .field("kind", &self.kind)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,6 +180,46 @@ pub enum InputKind {
     Compose {
         target: String,
     },
+    /// The TYPED pairing code for the request named by this exact snapshot
+    /// (taken at menu time, never re-read at Enter). The operator reads it off
+    /// the OTHER screen; it is masked while typed, cleared on submit, and
+    /// never replayed — a wrong code has already burned one of the entry's
+    /// three persisted tries. `outbound` selects the leg's own dispatch shape:
+    /// an inbound approval is purely local and passes no `--wait`, while an
+    /// outbound resume polls the approver's door exactly once, so it rides the
+    /// background path with `--wait 0`.
+    PairCode {
+        id: String,
+        name: String,
+        outbound: bool,
+    },
+    /// The TOTP for one parked secrets ask — `secrets approve <id> --totp`.
+    /// Masked like [`InputKind::PairCode`]; the value never rides any reply.
+    TotpCode {
+        id: String,
+        secret: String,
+        consumer: String,
+    },
+    /// Edit ONE existing config key through `config set <key> <value>`. The
+    /// snapshot is the key plus the value the pane last read, so a refresh
+    /// cannot retarget the prompt; the backend's own validation is the gate.
+    ConfigValue {
+        key: String,
+        current: String,
+    },
+    /// Grant or revoke a node's consumer entry for one secret —
+    /// `secrets grant|revoke <name> <consumer>`. `current` is the consumer
+    /// list the pane last read, shown in the prompt only.
+    SecretConsumer {
+        name: String,
+        revoke: bool,
+        current: Vec<String>,
+    },
+    /// Type a node's exact name to unregister it (`node remove <name>`), the
+    /// [`InputKind::ProjectRemove`] shape one pane over.
+    NodeRemove {
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -149,6 +227,28 @@ pub enum ContextTarget {
     Session(SessionRecord),
     Project(String),
     History(aoide_storage::ledger::LedgerEntry),
+    /// A registered node in the Mesh pane: its name plus the `allows` set the
+    /// pane last read, snapshotted so a refresh between opening the menu and
+    /// applying an action cannot retarget the toggle or flip it twice.
+    /// `known: false` is a drift row naming a node this box has no record of —
+    /// only pairing is offered there, never a grant this registry cannot hold.
+    Node {
+        name: String,
+        allows: Vec<String>,
+        known: bool,
+    },
+    /// One existing config key in the Status pane — `config set <key> <value>`.
+    Setting {
+        key: String,
+        value: String,
+    },
+    /// One secret's reference row in the Status pane: `grant`/`revoke` a
+    /// consumer through the secrets admin commands, which answer with their
+    /// own refusal when this euid may not write policy.
+    Secret {
+        name: String,
+        consumers: Vec<String>,
+    },
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextAction {
@@ -159,6 +259,22 @@ pub enum ContextAction {
     LeadProject,
     Resurrect,
     AddFolder,
+    /// Start (or re-start) the pairing ceremony with this node's name —
+    /// `pair <name> --yes --wait 0`, on the background path because the sweep
+    /// and the dial are network work.
+    PairNode,
+    /// Flip one capability in the node's `allows` set (`node allow <name>
+    /// <cap> on|off`); the on/off is read from the menu's own snapshot.
+    ToggleRead,
+    ToggleSpawn,
+    ToggleMessage,
+    /// Unregister the node, behind an exact-name confirmation.
+    RemoveNode,
+    /// Edit one existing config key (`config set`).
+    EditValue,
+    /// `secrets grant <name> <consumer>` / `secrets revoke <name> <consumer>`.
+    GrantSecret,
+    RevokeSecret,
 }
 impl ContextAction {
     pub fn label(self) -> &'static str {
@@ -170,6 +286,14 @@ impl ContextAction {
             Self::LeadProject => "Lead project",
             Self::Resurrect => "Resurrect",
             Self::AddFolder => "Add folder",
+            Self::PairNode => "Pair / re-pair",
+            Self::ToggleRead => "Toggle read",
+            Self::ToggleSpawn => "Toggle spawn",
+            Self::ToggleMessage => "Toggle message",
+            Self::RemoveNode => "Unregister node",
+            Self::EditValue => "Edit value",
+            Self::GrantSecret => "Grant consumer",
+            Self::RevokeSecret => "Revoke consumer",
         }
     }
 }
@@ -331,6 +455,16 @@ pub struct LogTail {
 /// never on every ~500ms UI tick.
 pub const ROSTER_THROTTLE: std::time::Duration = std::time::Duration::from_secs(15);
 
+/// Throttle for the Review pane's `secrets pending --json` read. Unlike the
+/// pending queue (a local file) this crosses the broker's unix socket, so it is
+/// not re-dispatched on every ~500ms tick while the pane is open; a parked ask
+/// is a human-timescale event and `r` re-lists on demand.
+pub const SECRETS_ASK_THROTTLE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Throttle for the Status pane's `secrets status --json` read — the same
+/// socket-crossing reasoning, a second pane over.
+pub const SECRETS_STATUS_THROTTLE: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// One session row under a [`RosterNode`] — reshaped straight from `session
 /// --hosts --json`'s `nodes[].sessions[]` (`conduct/src/graph/
 /// who.rs::node_json`), never re-derived: `label`/`state` are exactly the
@@ -383,10 +517,24 @@ pub enum RosterRow {
         is_local: bool,
         presence: String,
         fetched_at: Option<String>,
+        /// The registry's own verdict for this name, when this box has a
+        /// record of it — `None` for a node the roster sees only over the wire
+        /// (an advertiser, or a peer whose record was removed).
+        verified: Option<bool>,
+        /// The node's `allows` set as one short cell, read off
+        /// `node status --json` — never re-derived here.
+        grants: String,
     },
     Session {
         session: RosterSession,
         is_last: bool,
+    },
+    /// One declared mesh's divergence from the live registry
+    /// (`mesh --json`), reported exactly as the compare classified it.
+    Drift {
+        mesh: String,
+        node: String,
+        label: String,
     },
     Empty,
 }
@@ -405,6 +553,287 @@ pub struct PendingRow {
     pub queued_at: String,
     pub from: Option<String>,
     pub state: String,
+}
+
+/// One pending pairing request — reshaped straight from `pair --json`'s
+/// `data.requests[]` (`client/src/commands.rs::pending_listing`), never
+/// re-derived. That listing deliberately carries **no** pairing code: the
+/// requester's own code rides a pair Outcome's `data.sas`/`data.replySas` and
+/// belongs to [`PairCeremony`], which is the only place in this crate a code is
+/// ever held or drawn.
+#[derive(Debug, Clone, Default)]
+pub struct PairingRow {
+    pub id: String,
+    /// `inbound` (this box must approve) or `outbound` (this box must resume).
+    pub direction: String,
+    pub name: String,
+    pub url: String,
+    /// Inbound: the requester's own nonce has been revealed, so a code can be
+    /// compared at all.
+    pub revealed: bool,
+    pub approved: bool,
+    /// Outbound only — the parked entry's own state word.
+    pub state: String,
+    pub requested_at: String,
+    pub expires_at: String,
+}
+
+impl PairingRow {
+    pub fn outbound(&self) -> bool {
+        self.direction == "outbound"
+    }
+
+    /// The row's own one-line state, in this pane's wording — the same facts
+    /// `pending_listing` renders, without any of its "run `aoide pair <id>`
+    /// with the code" coaching (the pane's own action does that), and never a
+    /// code.
+    pub fn status(&self) -> String {
+        if self.outbound() {
+            return if self.state.is_empty() {
+                "outbound".to_string()
+            } else {
+                self.state.clone()
+            };
+        }
+        if !self.revealed {
+            "awaiting their reveal".to_string()
+        } else if self.approved {
+            "approved · awaiting their poll".to_string()
+        } else {
+            "revealed · approve with the code from their screen".to_string()
+        }
+    }
+
+    /// The exact target snapshot a code prompt carries.
+    pub fn target(&self) -> String {
+        format!(
+            "{} · {} · {}",
+            self.direction,
+            self.name,
+            if self.url.is_empty() { "no url" } else { &self.url }
+        )
+    }
+}
+
+/// One parked secrets TOTP ask — `secrets pending --json`'s `data.pending[]`,
+/// value-free by construction (`secrets::client::PendingAsk` has no value field
+/// at all). Nothing here is re-derived and nothing here is invented: an absent
+/// field stays absent.
+#[derive(Debug, Clone, Default)]
+pub struct SecretAskRow {
+    pub id: String,
+    pub secret: String,
+    pub consumer: String,
+    pub requested_at: String,
+    pub peer_uid: Option<String>,
+}
+
+/// One registered node's trust row — `node status --json`'s `data.nodes[]`, the
+/// registry's own record plus its cache classification. This is a local read;
+/// the sweep-shaped `node list` is deliberately not used, so opening Mesh never
+/// dials anything on this path.
+#[derive(Debug, Clone, Default)]
+pub struct NodeTrustRow {
+    pub name: String,
+    pub verified: bool,
+    pub allows: Vec<String>,
+    /// `fresh` / `stale` / `never-pulled` — the backend's own word.
+    pub state: String,
+    /// The last pull's recorded error, when the cache carries one.
+    pub error: Option<String>,
+    pub hub: bool,
+    pub autogate: bool,
+    pub url: String,
+}
+
+impl NodeTrustRow {
+    /// Does this node's `allows` set carry `cap`? Read off the registry's own
+    /// snapshot — the toggle's on/off is decided here, never guessed.
+    pub fn allows_cap(&self, cap: &str) -> bool {
+        self.allows.iter().any(|a| a == cap)
+    }
+
+    /// The grants as one short cell: `read` / `read,spawn` / `—` when the set
+    /// is empty. Only the closed capability vocabulary the backend validates.
+    pub fn grants(&self) -> String {
+        if self.allows.is_empty() {
+            "—".to_string()
+        } else {
+            self.allows.join(",")
+        }
+    }
+}
+
+/// One declared mesh's divergence from the live registry — `mesh --json`'s
+/// `data.report.sections[].rows[]`, reported exactly as the command classified
+/// it. Drift is never itself a failure, so nothing here is asserted to be one.
+#[derive(Debug, Clone, Default)]
+pub struct MeshDriftRow {
+    pub mesh: String,
+    pub node: String,
+    /// The backend's own `class` word: `missing`, `unverified`, `via-mismatch`.
+    pub class: String,
+    pub declared: Option<String>,
+    pub recorded: Option<String>,
+}
+
+impl MeshDriftRow {
+    /// The backend's classification, spelled out for the row — never
+    /// re-derived here, and never a claim the reporter did not make.
+    pub fn label(&self) -> String {
+        match (self.class.as_str(), &self.declared, &self.recorded) {
+            ("via-mismatch", Some(declared), Some(recorded)) => {
+                format!("via-mismatch: declared {declared}, recorded {recorded}")
+            }
+            ("via-mismatch", Some(declared), None) => {
+                format!("via-mismatch: declared {declared}, recorded none")
+            }
+            ("missing", _, _) => "missing (declared, no node record)".to_string(),
+            ("unverified", _, _) => "unverified (pairing never confirmed)".to_string(),
+            (other, _, _) => other.to_string(),
+        }
+    }
+}
+
+/// One entry of `secrets status --json`'s `data.secrets[]` — the reference and
+/// grant metadata the status contract names. Each field is `Option`, so a
+/// field the command did not send renders as absent rather than as an invented
+/// value; no secret VALUE is ever part of this shape.
+#[derive(Debug, Clone, Default)]
+pub struct SecretRefRow {
+    pub name: String,
+    pub backend: Option<String>,
+    pub require_totp: Option<bool>,
+    pub consumers: Vec<String>,
+    /// `automation.enabled` / `automation.consumers` — an object in
+    /// `secrets status --json`'s own shape, read field by field.
+    pub automation: Option<bool>,
+    pub automation_consumers: Vec<String>,
+    pub shared_with: Vec<String>,
+    pub remote: Option<bool>,
+    pub allow_remote_origin: Option<bool>,
+}
+
+impl SecretRefRow {
+    /// Every known metadata field as one line, skipping what the command did
+    /// not send.
+    pub fn detail(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(b) = &self.backend {
+            parts.push(format!("backend {b}"));
+        }
+        if let Some(t) = self.require_totp {
+            parts.push(format!("totp {}", if t { "required" } else { "off" }));
+        }
+        if !self.consumers.is_empty() {
+            parts.push(format!("consumers {}", self.consumers.join(",")));
+        }
+        match (self.automation, self.automation_consumers.is_empty()) {
+            (Some(enabled), true) => parts.push(format!(
+                "automation {}",
+                if enabled { "on" } else { "off" }
+            )),
+            (Some(enabled), false) => parts.push(format!(
+                "automation {} ({})",
+                if enabled { "on" } else { "off" },
+                self.automation_consumers.join(",")
+            )),
+            (None, _) => {}
+        }
+        if !self.shared_with.is_empty() {
+            parts.push(format!("sharedWith {}", self.shared_with.join(",")));
+        }
+        if let Some(r) = self.remote {
+            parts.push(format!("remote {}", if r { "allowed" } else { "denied" }));
+        }
+        if let Some(a) = self.allow_remote_origin {
+            parts.push(format!(
+                "allowRemoteOrigin {}",
+                if a { "on" } else { "off" }
+            ));
+        }
+        if parts.is_empty() {
+            parts.push("no metadata reported".to_string());
+        }
+        parts.join(" · ")
+    }
+}
+
+/// The dedicated human pairing ceremony's popup state — the ONE place a
+/// pairing code lives in this frontend, and the only surface that ever draws
+/// one. Deliberately carries no `Debug`: nothing can dump it accidentally.
+/// Dropping it (Escape, Enter, `q`, or any dismissal) drops the code with it;
+/// nothing copies a code out into a row, the status line, a log view or a
+/// document string.
+pub struct PairCeremony {
+    /// Which node this ceremony is with, exactly as the outcome named it.
+    pub name: String,
+    /// `(what it is, the code)` pairs, taken ONLY from the naming fields a pair
+    /// outcome declares (`data.sas`, `data.replySas`) — never scanned out of
+    /// free text, and never harvested out of another surface.
+    pub codes: Vec<(String, String)>,
+    /// The code-free half of the outcome's own wording.
+    pub note: String,
+}
+
+impl PairCeremony {
+    /// True while any code is held (so the render side can say so plainly).
+    pub fn has_codes(&self) -> bool {
+        !self.codes.is_empty()
+    }
+}
+
+/// One flattened row of the Review pane — the session send/A2A approval queue,
+/// then pending pairing requests, then secrets TOTP asks, under one selection.
+/// Mirrors [`DagRow`]/[`RosterRow`]: one `Vec` is the single source of truth for
+/// render, keys, hit test and clamping.
+#[derive(Debug, Clone)]
+pub enum ReviewRow {
+    Header(&'static str),
+    Pending(PendingRow),
+    Pairing(PairingRow),
+    Ask(SecretAskRow),
+}
+
+impl ReviewRow {
+    /// The row's stable identity — what the cursor follows across a re-list, so
+    /// a shrinking queue moves the selection with the row rather than leaving it
+    /// on whatever slid into the same index. `None` for a section header.
+    pub fn key(&self) -> Option<String> {
+        match self {
+            ReviewRow::Header(_) => None,
+            ReviewRow::Pending(r) => Some(format!("session:{}", r.id)),
+            ReviewRow::Pairing(r) => Some(format!("pair:{}", r.id)),
+            ReviewRow::Ask(r) => Some(format!("ask:{}", r.id)),
+        }
+    }
+}
+
+/// One flattened row of the Status pane: the config keys this instance may edit,
+/// then the secrets broker's own reference rows.
+#[derive(Debug, Clone)]
+pub enum StatusRow {
+    Header {
+        title: String,
+        /// The provenance/detail line that belongs to this section — a path and
+        /// its managed state for config, the broker's own answer for secrets.
+        note: String,
+    },
+    Config {
+        key: String,
+        value: String,
+    },
+    Secret(SecretRefRow),
+}
+
+impl StatusRow {
+    pub fn key(&self) -> Option<String> {
+        match self {
+            StatusRow::Header { .. } => None,
+            StatusRow::Config { key, .. } => Some(format!("config:{key}")),
+            StatusRow::Secret(r) => Some(format!("secret:{}", r.name)),
+        }
+    }
 }
 
 /// The whole conductor state.
@@ -489,8 +918,57 @@ pub struct App {
     /// synchronously on the same cadence every other local pane uses (see
     /// [`App::refresh_pending`]).
     pub pending: Option<Outcome>,
-    /// Selected row in the PENDING panel (indexes [`App::pending_rows`]).
-    pub pending_sel: usize,
+    /// Selected row in the Review pane (indexes [`App::review_rows`]).
+    pub review_sel: usize,
+    /// The identity of that row ([`ReviewRow::key`]) — the cursor follows it
+    /// across a re-list, so a resolve that shifts positions downstream cannot
+    /// silently move the selection onto a different request.
+    review_key: Option<String>,
+    /// The Review pane's pairing cache — last `pair --json` [`Outcome`], the
+    /// listing form of `pending_listing` (local read, no sweep, no tty menu).
+    pub pairing: Option<Outcome>,
+    /// The Review pane's secrets-ask cache — last `secrets pending --json`
+    /// [`Outcome`]. This one does cross a unix socket to the broker and the read
+    /// is unbounded by design, so it runs on a worker thread
+    /// ([`App::spawn_secrets_pending`]) and is drained without blocking; the
+    /// spawn is throttled ([`SECRETS_ASK_THROTTLE`]) and happens only while the
+    /// pane is visible.
+    pub secrets_pending: Option<Outcome>,
+    secrets_pending_at: Option<Instant>,
+    /// `Some` while a `secrets pending` read is in flight — the last read's rows
+    /// stay on screen until this lands.
+    secrets_pending_rx: Option<mpsc::Receiver<Outcome>>,
+    /// The dedicated human pairing-ceremony popup, when open. See
+    /// [`PairCeremony`] — the crate's only code custody.
+    pub pair_ceremony: Option<PairCeremony>,
+    /// `Some` while a background pair dispatch (a new request, or an outbound
+    /// resume's single door poll) is in flight. Same non-blocking channel shape
+    /// the roster fetch uses.
+    pair_rx: Option<mpsc::Receiver<Outcome>>,
+    /// The Mesh pane's trust reads: `node status --json` (the registry's own
+    /// rows) and `mesh --json` (declared-vs-registered drift). Both local reads.
+    pub nodes: Option<Outcome>,
+    pub mesh: Option<Outcome>,
+    /// The Status pane's config read (`config --json`, local).
+    pub config_outcome: Option<Outcome>,
+    /// The Status pane's `secrets status --json` read — a broker socket call,
+    /// run on a worker thread like the asks read
+    /// ([`App::spawn_secrets_status`]), throttled by
+    /// [`SECRETS_STATUS_THROTTLE`] and never rendered as an inventory when it did
+    /// not answer.
+    pub secrets_status: Option<Outcome>,
+    secrets_status_at: Option<Instant>,
+    /// `Some` while a `secrets status` read is in flight.
+    secrets_status_rx: Option<mpsc::Receiver<Outcome>>,
+    /// `Some` while a secrets MUTATION (approve/dismiss/grant/revoke) is in
+    /// flight — one at a time, never queued (see
+    /// [`App::spawn_secrets_action`]).
+    secrets_mutation_rx: Option<mpsc::Receiver<Outcome>>,
+    /// What that mutation is, for the panes' own busy line.
+    secrets_mutation_label: Option<String>,
+    /// Selected row in the Status pane (indexes [`App::status_rows`]).
+    pub status_sel: usize,
+    status_key: Option<String>,
 }
 
 /// How many audit lines the LOG panel keeps in memory.
@@ -575,7 +1053,24 @@ impl App {
             roster_rx: None,
             roster_sel: 0,
             pending: None,
-            pending_sel: 0,
+            review_sel: 0,
+            review_key: None,
+            pairing: None,
+            secrets_pending: None,
+            secrets_pending_at: None,
+            secrets_pending_rx: None,
+            pair_ceremony: None,
+            pair_rx: None,
+            nodes: None,
+            mesh: None,
+            config_outcome: None,
+            secrets_status: None,
+            secrets_status_at: None,
+            secrets_status_rx: None,
+            secrets_mutation_rx: None,
+            secrets_mutation_label: None,
+            status_sel: 0,
+            status_key: None,
         }
     }
 
@@ -684,6 +1179,23 @@ impl App {
         // time `handle_key`'s a/d handler returns, `self.pending` already
         // reflects the post-resolve queue, positions and all.
         self.refresh_pending();
+        // Pairing requests (`pair --json`'s listing form — a local read) and
+        // the Mesh pane's two registry reads are local too, so they ride the
+        // same synchronous cadence: a `pair reject` or a `node allow` shows its
+        // effect on the very next paint. The two socket-crossing reads
+        // (`secrets pending`/`secrets status`) are NOT here — they refresh only
+        // while their own pane is visible, below and in `poll_refresh`.
+        self.refresh_pairing();
+        self.refresh_nodes();
+        self.refresh_mesh();
+        // Both socket-crossing reads: spawn only (on a worker thread), and only
+        // while their own pane is visible. The drain runs every tick, so a read
+        // that lands after the pane changed still refreshes the cache.
+        self.poll_secrets_pending();
+        self.poll_secrets_status();
+        if self.panel == Panel::Status {
+            self.refresh_config();
+        }
 
         self.mtimes = StageMtimes {
             history: Self::history_mtime(),
@@ -855,6 +1367,27 @@ impl App {
             changed = true;
         }
 
+        // PAIRING / SECRETS: drain any background pair dispatch that landed
+        // (it may carry a code into the ceremony popup, or a refusal into the
+        // status line), then re-list whichever of the two socket-crossing reads
+        // belongs to the pane currently on screen.
+        if self.poll_pair_dispatch() {
+            changed = true;
+        }
+        if self.poll_secrets_action() {
+            changed = true;
+        }
+        if self.poll_secrets_pending() {
+            changed = true;
+        }
+        if self.poll_secrets_status() {
+            changed = true;
+        }
+        if self.panel == Panel::Status {
+            // The config read is local and cheap; the secrets reads above are not.
+            self.refresh_config();
+        }
+
         changed
     }
 
@@ -1010,11 +1543,20 @@ impl App {
     pub fn roster_flat_rows(&self) -> Vec<RosterRow> {
         let mut rows = Vec::new();
         for n in self.roster_nodes() {
+            // The registry's own row for this name, when there is one: the
+            // trust fields are read off `node status --json`, never re-derived
+            // from the roster's presence probe.
+            let trust = self.node_trust(&n.name);
             rows.push(RosterRow::NodeHeader {
                 name: n.name,
                 is_local: n.is_local,
                 presence: n.presence.clone(),
                 fetched_at: n.fetched_at,
+                verified: trust.as_ref().map(|t| t.verified),
+                grants: trust
+                    .as_ref()
+                    .map(NodeTrustRow::grants)
+                    .unwrap_or_else(|| "—".to_string()),
             });
             let len = n.sessions.len();
             if len == 0 && n.presence != "never-pulled" {
@@ -1027,6 +1569,14 @@ impl App {
                 });
             }
         }
+        // Declared-vs-registered drift closes the pane, one row per divergent
+        // node, in the compare's own order. Drift is reported, never fixed
+        // here: the row's own action is the pairing ceremony a human runs.
+        rows.extend(self.mesh_drift_rows().into_iter().map(|d| RosterRow::Drift {
+            mesh: d.mesh.clone(),
+            node: d.node.clone(),
+            label: d.label(),
+        }));
         rows
     }
 
@@ -1140,6 +1690,1055 @@ impl App {
             Some(o) => o.message.lines().next().unwrap_or("").to_string(),
             None => "not yet fetched".to_string(),
         }
+    }
+
+    // ── PAIRING: the queue read, the ceremony popup, and the two async legs ───
+    //
+    // Three reads and three actions, all the existing `pair` command:
+    //
+    //   * `pair --json` — `pending_listing`: a LOCAL read of the two parked
+    //     queues. Never bare `pair` (which raises an `inquire` menu on this
+    //     process's own tty, i.e. over this very screen) and never a listing
+    //     that carries a code: the listing form has none by construction.
+    //   * `pair <id> --code <typed>` — the INBOUND approval: purely local, so
+    //     it dispatches synchronously like every other pane's action.
+    //   * `pair <id> --wait 0 --code <typed>` — the OUTBOUND resume: ONE poll of
+    //     the approver's door, i.e. network. `--wait 0` is mandatory (`--wait
+    //     600`, the CLI default, would park the whole tick loop), and the poll
+    //     rides the background path with the new request below.
+    //   * `pair <name> --yes --wait 0` — a NEW request: a discovery sweep plus a
+    //     dial plus a park, seconds of network, also on the background path.
+    //     `--yes` is not a shortcut around the gate (each side still types the
+    //     other's code); it is what keeps `confirm_invite`'s own y/N — an
+    //     `inquire` prompt — off this tty.
+    //
+    // A pair outcome is the ONE place a code legitimately arrives. It is split:
+    // the code goes to [`PairCeremony`] (drawn only by the dedicated popup) and
+    // the outcome stored for the status line is sanitised, so no generic surface
+    // — status bar, row, log view — ever holds or draws it.
+
+    /// Refresh `self.pairing` — `pair --json`, the listing form. The message is
+    /// redacted on the way in: the listing is code-free by construction, but the
+    /// status bar renders whatever message a read carries, and this frontend
+    /// must not be the surface that prints a code even if a backend ever did.
+    fn refresh_pairing(&mut self) {
+        let inv = Invocation {
+            path: vec!["pair".to_string()],
+            args: Vec::new(),
+            flags: BTreeMap::from([("json".to_string(), "true".to_string())]),
+            door: Door::Cli,
+        };
+        let mut outcome = (self.dispatch_fn)(&inv);
+        outcome.message = redact_codes(&outcome.message);
+        self.pairing = Some(outcome);
+    }
+
+    /// Refresh `self.secrets_pending` — `secrets pending --json`, the
+    /// operator-side, value-free broker read. Throttled ([`SECRETS_ASK_THROTTLE`])
+    /// because it crosses the broker socket, unlike the local pending queue.
+    /// Start one `secrets pending --json` read on a worker thread. The read is
+    /// UNBOUNDED by design (`secrets::client`'s own note), so it may never run on
+    /// the UI thread: a broker that accepts and never answers must leave the
+    /// interface painting, with the last rows it read still on screen. A no-op
+    /// while a read is already in flight.
+    fn spawn_secrets_pending(&mut self) {
+        if self.secrets_pending_rx.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let dispatch_fn = self.dispatch_fn;
+        std::thread::spawn(move || {
+            let inv = Invocation {
+                path: vec!["secrets".to_string(), "pending".to_string()],
+                args: Vec::new(),
+                flags: BTreeMap::from([("json".to_string(), "true".to_string())]),
+                door: Door::Cli,
+            };
+            let _ = tx.send(dispatch_fn(&inv));
+        });
+        self.secrets_pending_rx = Some(rx);
+        self.secrets_pending_at = Some(Instant::now());
+    }
+
+    /// Non-blocking: if a `secrets pending` read finished, keep its outcome as
+    /// the cache. The previous rows stay until this lands.
+    fn drain_secrets_pending(&mut self) -> bool {
+        let Some(rx) = &self.secrets_pending_rx else {
+            return false;
+        };
+        match rx.try_recv() {
+            Ok(outcome) => {
+                self.secrets_pending = Some(outcome);
+                self.secrets_pending_rx = None;
+                true
+            }
+            Err(mpsc::TryRecvError::Empty) => false,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                // The worker died without sending; drop the marker so the next
+                // due tick tries again rather than wedging the pane.
+                self.secrets_pending_rx = None;
+                false
+            }
+        }
+    }
+
+    /// Is a `secrets pending` read in flight? (Drives "reading…" beside the
+    /// cached rows.)
+    pub fn secrets_pending_busy(&self) -> bool {
+        self.secrets_pending_rx.is_some()
+    }
+
+    // ── SECRETS MUTATIONS: ONE serialized worker ─────────────────────────────
+    //
+    // `secrets approve`/`dismiss` ride the broker socket and `grant`/`revoke`
+    // may too; their client reads are unbounded, so none of them may run on the
+    // UI thread either. There is exactly ONE in flight at a time: a second
+    // activation is refused visibly rather than queued or raced (two policy
+    // writes interleaving is exactly what the pane must not cause), and nothing
+    // is retried automatically — a refusal is shown and the operator decides.
+
+    /// The mutation in flight, by name, or `None`. One worker, one label.
+    pub fn secrets_action_busy(&self) -> Option<&str> {
+        self.secrets_mutation_label.as_deref()
+    }
+
+    /// Run one secrets mutation on the shared worker. If one is already in
+    /// flight the invocation is NOT dispatched and NOT queued: the status line
+    /// says which one is running.
+    fn spawn_secrets_action(&mut self, inv: Invocation, label: &str) {
+        if self.secrets_mutation_rx.is_some() {
+            let running = self.secrets_mutation_label.clone().unwrap_or_default();
+            self.last_outcome = Some(Outcome::usage(
+                inv.path.join("."),
+                format!(
+                    "{running} is already in flight — wait for the broker's answer before \
+                     starting another secrets action"
+                ),
+            ));
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let dispatch_fn = self.dispatch_fn;
+        std::thread::spawn(move || {
+            let _ = tx.send(dispatch_fn(&inv));
+        });
+        self.secrets_mutation_rx = Some(rx);
+        self.secrets_mutation_label = Some(label.to_string());
+    }
+
+    /// Non-blocking: land a finished secrets mutation. Its outcome is the status
+    /// line's own wording (a refusal verbatim), and both caches are marked stale
+    /// so the next tick re-reads them — the ask that was just approved or
+    /// dismissed is gone from the list, and a grant changes the reference rows.
+    fn poll_secrets_action(&mut self) -> bool {
+        let Some(rx) = &self.secrets_mutation_rx else {
+            return false;
+        };
+        match rx.try_recv() {
+            Ok(outcome) => {
+                self.secrets_mutation_rx = None;
+                self.secrets_mutation_label = None;
+                self.secrets_pending_at = None;
+                self.secrets_status_at = None;
+                self.last_outcome = Some(outcome);
+                self.reload_all();
+                true
+            }
+            Err(mpsc::TryRecvError::Empty) => false,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.secrets_mutation_rx = None;
+                self.secrets_mutation_label = None;
+                false
+            }
+        }
+    }
+
+    /// Tick-driven asks refresh: drain whatever landed, then start the next read
+    /// only while the pane is visible and past [`SECRETS_ASK_THROTTLE`].
+    fn poll_secrets_pending(&mut self) -> bool {
+        let mut changed = self.drain_secrets_pending();
+        let due = self.secrets_pending_at.is_none_or(|at| {
+            at.elapsed() >= SECRETS_ASK_THROTTLE && !self.secrets_pending_rx.is_some()
+        });
+        if self.panel == Panel::Pending && due {
+            self.spawn_secrets_pending();
+            changed = true;
+        }
+        changed
+    }
+
+    /// The parked pairing requests, parsed from the cached `pair --json`
+    /// [`Outcome`] (never re-derived, never a code).
+    pub fn pairing_rows(&self) -> Vec<PairingRow> {
+        let Some(data) = self.pairing.as_ref().and_then(|o| o.data.as_ref()) else {
+            return Vec::new();
+        };
+        data.get("requests")
+            .and_then(|v| v.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or(&[])
+            .iter()
+            .map(|v| PairingRow {
+                id: v["id"].as_str().unwrap_or("").to_string(),
+                direction: v["direction"].as_str().unwrap_or("").to_string(),
+                name: v["name"].as_str().unwrap_or("").to_string(),
+                url: v["url"].as_str().unwrap_or("").to_string(),
+                revealed: v["revealed"].as_bool().unwrap_or(false),
+                approved: v["approved"].as_bool().unwrap_or(false),
+                state: v["state"].as_str().unwrap_or("").to_string(),
+                requested_at: v["requestedAt"].as_str().unwrap_or("").to_string(),
+                expires_at: v["expiresAt"].as_str().unwrap_or("").to_string(),
+            })
+            .collect()
+    }
+
+    /// The parked secrets asks, parsed from `secrets pending --json`'s
+    /// `data.pending[]`. Only the five fields that read carries are read.
+    pub fn secret_ask_rows(&self) -> Vec<SecretAskRow> {
+        let Some(data) = self.secrets_pending.as_ref().and_then(|o| o.data.as_ref()) else {
+            return Vec::new();
+        };
+        data.get("pending")
+            .and_then(|v| v.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or(&[])
+            .iter()
+            .map(|v| SecretAskRow {
+                id: scalar_text(&v["id"]),
+                secret: v["secret"].as_str().unwrap_or("").to_string(),
+                consumer: v["consumer"].as_str().unwrap_or("").to_string(),
+                requested_at: epoch_text(&v["requestedAt"]),
+                peer_uid: v
+                    .get("peerUid")
+                    .filter(|p| !p.is_null())
+                    .map(scalar_text)
+                    .filter(|s| !s.is_empty()),
+            })
+            .collect()
+    }
+
+    /// A read's own first-line error, in the shared `[tag] command: message`
+    /// shape — the one mapping every pane's header uses, so a failed read never
+    /// renders as an empty, all-clear list.
+    fn read_status(outcome: Option<&Outcome>, missing: &str) -> String {
+        match outcome {
+            Some(o) if o.status != Status::Ok => {
+                let first = o.message.lines().next().unwrap_or("");
+                format!("[{}] {}: {first}", status_tag(o.status), o.command)
+            }
+            Some(o) => o.message.lines().next().unwrap_or("").to_string(),
+            None => missing.to_string(),
+        }
+    }
+
+    pub fn pairing_status(&self) -> String {
+        Self::read_status(self.pairing.as_ref(), "pairing not yet listed")
+    }
+
+    pub fn secrets_pending_status(&self) -> String {
+        let mut status =
+            Self::read_status(self.secrets_pending.as_ref(), "secrets asks not yet read");
+        if self.secrets_pending_busy() {
+            status.push_str(" · reading…");
+        }
+        if let Some(label) = self.secrets_action_busy() {
+            status.push_str(&format!(" · {label}…"));
+        }
+        status
+    }
+
+    /// True when every read the Review pane shows answered — used to qualify its
+    /// empty-state line: a failed pairing/asks read leaves the same empty rows as
+    /// a genuinely quiet queue, and the line must not claim the quiet case.
+    pub fn review_reads_ok(&self) -> bool {
+        [&self.pending, &self.pairing, &self.secrets_pending]
+            .iter()
+            .all(|o| o.as_ref().is_some_and(|o| o.status == Status::Ok))
+    }
+
+    /// Sanitise one pair-family outcome: hand back the ceremony state its own
+    /// naming fields declare (`data.sas`, `data.replySas` — never a scan of free
+    /// text), plus the same outcome with any code-shaped token in its message
+    /// replaced, so the status line cannot print what the popup is holding.
+    fn split_pair_outcome(outcome: &Outcome) -> (Option<PairCeremony>, Outcome) {
+        let mut codes: Vec<(String, String)> = Vec::new();
+        let mut name = String::new();
+        if let Some(data) = outcome.data.as_ref() {
+            name = data["name"].as_str().unwrap_or("").to_string();
+            for (field, what) in [
+                ("sas", "your confirmation code — read it to the other operator"),
+                ("replySas", "the reply code — read it back to the other operator"),
+            ] {
+                if let Some(code) = data
+                    .get(field)
+                    .and_then(|v| v.as_str())
+                    .filter(|c| !c.trim().is_empty())
+                {
+                    codes.push((what.to_string(), code.to_string()));
+                }
+            }
+        }
+        let mut clean = outcome.clone();
+        clean.message = redact_codes(&outcome.message);
+        let ceremony = if codes.is_empty() {
+            None
+        } else {
+            Some(PairCeremony {
+                name,
+                codes,
+                note: clean.message.lines().next().unwrap_or("").to_string(),
+            })
+        };
+        (ceremony, clean)
+    }
+
+    /// Land one pair-family outcome: keep its code (if any) in the dedicated
+    /// ceremony popup and store only the sanitised half for the status line.
+    fn land_pair_outcome(&mut self, outcome: Outcome) {
+        let (ceremony, clean) = Self::split_pair_outcome(&outcome);
+        if let Some(c) = ceremony {
+            self.pair_ceremony = Some(c);
+        }
+        self.last_outcome = Some(clean);
+        self.reload_all();
+    }
+
+    /// Spawn a pair dispatch on a background thread — the legs that dial
+    /// (`pair <name> --yes --wait 0`, `pair <id> --wait 0 --code …`). A second
+    /// activation while one is in flight is REFUSED **visibly**: the leg writes
+    /// `state/nodes.json` when it commits, and a concurrent `node allow`/
+    /// `node remove` from this same UI thread would read-modify-write that same
+    /// file, losing one of the two updates. So while a pair is pending the Mesh
+    /// pane advertises no node writes (see [`App::open_context_for_node`]) and
+    /// this refusal says why, rather than swallowing the key.
+    fn spawn_pair_dispatch(&mut self, inv: Invocation) {
+        if self.pair_rx.is_some() {
+            self.last_outcome = Some(Outcome::usage(
+                "pair",
+                "a pairing leg is already in flight — wait for it to finish before starting \
+                 another, and before changing a node's grants or registration",
+            ));
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let dispatch_fn = self.dispatch_fn;
+        std::thread::spawn(move || {
+            let outcome = dispatch_fn(&inv);
+            let _ = tx.send(outcome);
+        });
+        self.pair_rx = Some(rx);
+    }
+
+    /// May the Mesh pane dispatch a node write right now? A pairing leg commits
+    /// `state/nodes.json` from its own worker thread, so a node write from this
+    /// thread at the same time is a lost update — refused, visibly, until the
+    /// leg lands.
+    pub fn node_writes_blocked(&self) -> bool {
+        self.pair_rx.is_some()
+    }
+
+    /// The refusal a blocked node write reports, in one place.
+    fn refuse_node_write(&mut self, what: &str) {
+        self.last_outcome = Some(Outcome::usage(
+            "node",
+            format!(
+                "{what} is held back while a pairing leg is in flight — the leg writes the node \
+                 registry when it commits, and both would rewrite it"
+            ),
+        ));
+    }
+
+    /// Non-blocking: pick up a finished background pair dispatch, if any.
+    fn poll_pair_dispatch(&mut self) -> bool {
+        let Some(rx) = &self.pair_rx else {
+            return false;
+        };
+        match rx.try_recv() {
+            Ok(outcome) => {
+                self.pair_rx = None;
+                self.land_pair_outcome(outcome);
+                true
+            }
+            Err(mpsc::TryRecvError::Empty) => false,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                // The thread ended without sending (panicked) — drop the
+                // in-flight marker so the pane can try again rather than
+                // wedging, exactly as the roster drain does.
+                self.pair_rx = None;
+                false
+            }
+        }
+    }
+
+    /// Is a background pair dispatch in flight? (Drives the pane's own
+    /// "working…" note so a slow sweep is visible, never a frozen screen.)
+    pub fn pair_busy(&self) -> bool {
+        self.pair_rx.is_some()
+    }
+
+    /// The dedicated ceremony popup's dismissal — the ONLY path that drops a
+    /// held code.
+    pub fn dismiss_pair_ceremony(&mut self) {
+        self.pair_ceremony = None;
+    }
+
+    // ── REVIEW: one row model over three approval queues ─────────────────────
+
+    /// The Review pane's rows: the session send/A2A approval queue, then the
+    /// parked pairing requests, then the parked secrets TOTP asks, each under
+    /// its own header. One `Vec` for render, keys, hit test and clamping.
+    pub fn review_rows(&self) -> Vec<ReviewRow> {
+        let mut rows = vec![ReviewRow::Header("pending · session send / A2A")];
+        rows.extend(self.pending_rows().into_iter().map(ReviewRow::Pending));
+        rows.push(ReviewRow::Header("pairing requests"));
+        rows.extend(self.pairing_rows().into_iter().map(ReviewRow::Pairing));
+        rows.push(ReviewRow::Header("secrets · TOTP asks"));
+        rows.extend(self.secret_ask_rows().into_iter().map(ReviewRow::Ask));
+        rows
+    }
+
+    pub fn review_row(&self) -> Option<ReviewRow> {
+        self.review_rows().get(self.review_sel).cloned()
+    }
+
+    /// Move the cursor by one selectable row, never onto a header and never
+    /// past either end.
+    fn move_review(&mut self, delta: isize) {
+        let rows = self.review_rows();
+        let selectable = |i: usize| rows.get(i).is_some_and(|r| r.key().is_some());
+        let mut i = self.review_sel;
+        loop {
+            let next = i as isize + delta;
+            if next < 0 || next as usize >= rows.len() {
+                return;
+            }
+            i = next as usize;
+            if selectable(i) {
+                self.select_review_row(i);
+                return;
+            }
+        }
+    }
+
+    /// Park the cursor on row `i`, remembering that row's identity.
+    pub fn select_review_row(&mut self, i: usize) {
+        self.review_sel = i;
+        self.review_key = self.review_rows().get(i).and_then(ReviewRow::key);
+    }
+
+    /// Keep `review_sel` on the same IDENTITY across a re-list: the row that
+    /// resolved is gone, so the cursor moves with the rows that remain rather
+    /// than staying on an index that now names a different request. Falls back
+    /// to the nearest selectable row when that identity is gone too.
+    fn clamp_review(&mut self) {
+        let rows = self.review_rows();
+        if let Some(key) = self.review_key.clone() {
+            if let Some(i) = rows.iter().position(|r| r.key().as_deref() == Some(key.as_str())) {
+                self.review_sel = i;
+                return;
+            }
+        }
+        if self.review_sel >= rows.len() {
+            self.review_sel = rows.len().saturating_sub(1);
+        }
+        if rows.get(self.review_sel).is_some_and(|r| r.key().is_none()) {
+            // Landed on a header: the nearest selectable row after it, else
+            // the last one before it.
+            match rows
+                .iter()
+                .enumerate()
+                .skip(self.review_sel)
+                .find(|(_, r)| r.key().is_some())
+                .or_else(|| {
+                    rows.iter()
+                        .enumerate()
+                        .take(self.review_sel)
+                        .rev()
+                        .find(|(_, r)| r.key().is_some())
+                }) {
+                Some((i, _)) => self.review_sel = i,
+                None => self.review_sel = 0,
+            }
+        }
+        self.review_key = rows.get(self.review_sel).and_then(ReviewRow::key);
+    }
+
+    /// Keys for the Review pane: `j`/`k` walk every section's rows, `a` acts on
+    /// whatever the cursor names (approve a session entry, approve/resume a
+    /// pairing request, approve a TOTP ask — opening the masked prompt for the
+    /// two code-taking kinds), `d` denies/dismisses/rejects it, and `r` re-lists
+    /// all three queues.
+    fn handle_review_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => self.move_review(1),
+            KeyCode::Char('k') | KeyCode::Up => self.move_review(-1),
+            KeyCode::Char('a') => self.resolve_review_row(true),
+            KeyCode::Char('d') => self.resolve_review_row(false),
+            KeyCode::Char('r') => {
+                self.refresh_pending();
+                self.refresh_pairing();
+                self.spawn_secrets_pending();
+            }
+            _ => {}
+        }
+    }
+
+    /// Act on the selected Review row, by that row's own kind. A no-op on a
+    /// header or an empty pane (nothing is selected), never a panic and never a
+    /// guessed target.
+    fn resolve_review_row(&mut self, accept: bool) {
+        let Some(row) = self.review_row() else {
+            return;
+        };
+        match row {
+            ReviewRow::Header(_) => {}
+            ReviewRow::Pending(r) => {
+                let command = if accept { "approve" } else { "deny" };
+                self.dispatch(&["session", "pending", command], &[r.id]);
+                self.clamp_review();
+            }
+            ReviewRow::Pairing(r) => {
+                if accept {
+                    // The typed code is the gate on both legs; the prompt
+                    // carries this exact request as its snapshot.
+                    self.input = Some(Input {
+                        label: format!(
+                            "pairing code for {} — typed from {}'s own screen",
+                            r.target(),
+                            r.name
+                        ),
+                        buffer: String::new(),
+                        step: 0,
+                        collected: Vec::new(),
+                        kind: InputKind::PairCode {
+                            id: r.id.clone(),
+                            name: r.name.clone(),
+                            outbound: r.outbound(),
+                        },
+                    });
+                } else {
+                    self.dispatch(&["pair", "reject"], &[r.id]);
+                    self.clamp_review();
+                }
+            }
+            ReviewRow::Ask(r) => {
+                if accept {
+                    self.input = Some(Input {
+                        label: format!(
+                            "TOTP for secrets approve #{} — {} → {}",
+                            r.id, r.secret, r.consumer
+                        ),
+                        buffer: String::new(),
+                        step: 0,
+                        collected: Vec::new(),
+                        kind: InputKind::TotpCode {
+                            id: r.id.clone(),
+                            secret: r.secret.clone(),
+                            consumer: r.consumer.clone(),
+                        },
+                    });
+                } else {
+                    self.spawn_secrets_action(
+                        Invocation {
+                            path: vec!["secrets".to_string(), "dismiss".to_string()],
+                            args: vec![r.id.clone()],
+                            flags: BTreeMap::new(),
+                            door: Door::Cli,
+                        },
+                        &format!("dismissing ask #{}", r.id),
+                    );
+                }
+            }
+        }
+    }
+
+    // ── MESH TRUST: the registry's own rows plus declared-mesh drift ─────────
+
+    /// Refresh `self.nodes` — `node status --json`, the local registry read
+    /// (deliberately not the sweep-shaped `node list`: opening Mesh must not
+    /// dial anything).
+    fn refresh_nodes(&mut self) {
+        let inv = Invocation {
+            path: vec!["node".to_string(), "status".to_string()],
+            args: Vec::new(),
+            flags: BTreeMap::from([("json".to_string(), "true".to_string())]),
+            door: Door::Cli,
+        };
+        self.nodes = Some((self.dispatch_fn)(&inv));
+    }
+
+    /// Refresh `self.mesh` — `mesh --json`, the declared-vs-registered compare
+    /// (a local config read). Its report is reported as written; drift is never
+    /// itself a failure.
+    fn refresh_mesh(&mut self) {
+        let inv = Invocation {
+            path: vec!["mesh".to_string()],
+            args: Vec::new(),
+            flags: BTreeMap::from([("json".to_string(), "true".to_string())]),
+            door: Door::Cli,
+        };
+        self.mesh = Some((self.dispatch_fn)(&inv));
+    }
+
+    /// The registered nodes' trust rows, from `node status --json`'s
+    /// `data.nodes[]`.
+    pub fn node_trust_rows(&self) -> Vec<NodeTrustRow> {
+        let Some(data) = self.nodes.as_ref().and_then(|o| o.data.as_ref()) else {
+            return Vec::new();
+        };
+        data.get("nodes")
+            .and_then(|v| v.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or(&[])
+            .iter()
+            .map(|n| NodeTrustRow {
+                name: n["name"].as_str().unwrap_or("").to_string(),
+                verified: n["verified"].as_bool().unwrap_or(false),
+                allows: n["allows"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|c| c.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                state: n["state"].as_str().unwrap_or("").to_string(),
+                error: n["error"].as_str().map(String::from),
+                hub: n["hub"].as_bool().unwrap_or(false),
+                autogate: n["autogate"].as_bool().unwrap_or(false),
+                url: n["url"].as_str().unwrap_or("").to_string(),
+            })
+            .collect()
+    }
+
+    pub fn node_trust(&self, name: &str) -> Option<NodeTrustRow> {
+        self.node_trust_rows().into_iter().find(|n| n.name == name)
+    }
+
+    /// Every declared mesh's divergent nodes, from `mesh --json`'s
+    /// `data.report`.
+    pub fn mesh_drift_rows(&self) -> Vec<MeshDriftRow> {
+        let Some(report) = self
+            .mesh
+            .as_ref()
+            .and_then(|o| o.data.as_ref())
+            .and_then(|d| d.get("report"))
+        else {
+            return Vec::new();
+        };
+        let mut rows = Vec::new();
+        for section in report
+            .get("sections")
+            .and_then(|v| v.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or(&[])
+        {
+            let mesh = section["name"].as_str().unwrap_or("").to_string();
+            for row in section
+                .get("rows")
+                .and_then(|v| v.as_array())
+                .map(|a| a.as_slice())
+                .unwrap_or(&[])
+            {
+                rows.push(MeshDriftRow {
+                    mesh: mesh.clone(),
+                    node: row["node"].as_str().unwrap_or("").to_string(),
+                    class: row["class"].as_str().unwrap_or("").to_string(),
+                    declared: row["declared"].as_str().map(String::from),
+                    recorded: row["recorded"].as_str().map(String::from),
+                });
+            }
+        }
+        rows
+    }
+
+    /// The Mesh pane's trust line: the registry read's own status, then the
+    /// mesh compare's — each surfacing its own refusal rather than an empty,
+    /// all-clear trust list.
+    pub fn trust_status(&self) -> String {
+        format!(
+            "nodes: {} · mesh: {}",
+            Self::read_status(self.nodes.as_ref(), "registry not yet read"),
+            Self::read_status(self.mesh.as_ref(), "mesh not yet compared")
+        )
+    }
+
+    // ── STATUS: the config keys this instance may edit, plus secret grants ───
+
+    /// Refresh `self.config_outcome` — `config --json` (a local read).
+    fn refresh_config(&mut self) {
+        let inv = Invocation {
+            path: vec!["config".to_string()],
+            args: Vec::new(),
+            flags: BTreeMap::from([("json".to_string(), "true".to_string())]),
+            door: Door::Cli,
+        };
+        self.config_outcome = Some((self.dispatch_fn)(&inv));
+    }
+
+    /// Refresh `self.secrets_status` — `secrets status --json`, the broker's
+    /// own answer. Throttled ([`SECRETS_STATUS_THROTTLE`]).
+    /// Start one `secrets status --json` read on a worker thread — the same
+    /// reasoning as the asks read, one pane over (the client bounds connect and
+    /// the round trip, so a wedged broker is seconds, not forever; still not the
+    /// UI thread's seconds). A no-op while a read is in flight.
+    fn spawn_secrets_status(&mut self) {
+        if self.secrets_status_rx.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let dispatch_fn = self.dispatch_fn;
+        std::thread::spawn(move || {
+            let inv = Invocation {
+                path: vec!["secrets".to_string(), "status".to_string()],
+                args: Vec::new(),
+                flags: BTreeMap::from([("json".to_string(), "true".to_string())]),
+                door: Door::Cli,
+            };
+            let _ = tx.send(dispatch_fn(&inv));
+        });
+        self.secrets_status_rx = Some(rx);
+        self.secrets_status_at = Some(Instant::now());
+    }
+
+    fn drain_secrets_status(&mut self) -> bool {
+        let Some(rx) = &self.secrets_status_rx else {
+            return false;
+        };
+        match rx.try_recv() {
+            Ok(outcome) => {
+                self.secrets_status = Some(outcome);
+                self.secrets_status_rx = None;
+                true
+            }
+            Err(mpsc::TryRecvError::Empty) => false,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.secrets_status_rx = None;
+                false
+            }
+        }
+    }
+
+    /// Is a `secrets status` read in flight? (The pane's header says so rather
+    /// than letting a slow broker look like an unchanged answer.)
+    pub fn secrets_status_busy(&self) -> bool {
+        self.secrets_status_rx.is_some()
+    }
+
+    fn poll_secrets_status(&mut self) -> bool {
+        let mut changed = self.drain_secrets_status();
+        let due = self
+            .secrets_status_at
+            .is_none_or(|at| at.elapsed() >= SECRETS_STATUS_THROTTLE && !self.secrets_status_rx.is_some());
+        if self.panel == Panel::Status && due {
+            self.spawn_secrets_status();
+            changed = true;
+        }
+        changed
+    }
+
+    /// The config keys this pane shows: `config --json`'s `data.config`, walked
+    /// ONE level deep — so `pairing.defaultGrant` and `upkeep.verifyCommand`
+    /// appear, and the map-shaped sections (`mesh`, `context`) are skipped
+    /// rather than flattened. The schema stays the authority: this never
+    /// invents a key and `config set`'s own validation remains the gate.
+    pub fn config_rows(&self) -> Vec<(String, String)> {
+        let Some(config) = self
+            .config_outcome
+            .as_ref()
+            .and_then(|o| o.data.as_ref())
+            .and_then(|d| d.get("config"))
+            .and_then(|c| c.as_object())
+        else {
+            return Vec::new();
+        };
+        let mut rows = Vec::new();
+        for (section, keys) in config {
+            let Some(keys) = keys.as_object() else {
+                continue; // a map-shaped section is not a settable key
+            };
+            for (key, value) in keys {
+                let Some(value) = json_scalar(value) else {
+                    continue;
+                };
+                rows.push((format!("{section}.{key}"), value));
+            }
+        }
+        rows
+    }
+
+    /// The config read's own provenance: the file, whether the environment
+    /// manages it, and whether it exists at all — a missing file is every
+    /// default, never an error, and saying so is the honest rendering.
+    pub fn config_provenance(&self) -> String {
+        let Some(o) = self.config_outcome.as_ref() else {
+            return "config not yet read".to_string();
+        };
+        if o.status != Status::Ok {
+            let first = o.message.lines().next().unwrap_or("");
+            return format!("[{}] {}: {first}", status_tag(o.status), o.command);
+        }
+        let Some(data) = o.data.as_ref() else {
+            return "config: no data".to_string();
+        };
+        format!(
+            "{} ({}, {})",
+            data["path"].as_str().unwrap_or(""),
+            if data["managed"].as_bool().unwrap_or(false) {
+                "managed — the environment owns it; set refuses"
+            } else {
+                "unmanaged"
+            },
+            if data["present"].as_bool().unwrap_or(false) {
+                "present"
+            } else {
+                "absent — every value below is a default"
+            },
+        )
+    }
+
+    /// The broker's own line for the secrets section: its `broker` answer, home
+    /// and socket when the command answered, or that command's own refusal when
+    /// it did not — absent socket, unknown subcommand, broker down. Never a
+    /// fabricated empty inventory: no rows are rendered from a non-Ok read.
+    pub fn secrets_ref_status(&self) -> String {
+        let mut status = match self.secrets_status.as_ref() {
+            Some(o) if o.status != Status::Ok => {
+                let first = o.message.lines().next().unwrap_or("");
+                format!("[{}] {}: {first}", status_tag(o.status), o.command)
+            }
+            Some(o) => {
+                let data = o.data.as_ref();
+                format!(
+                    "broker {} · home {} · socket {}",
+                    data.and_then(|d| d["broker"].as_str()).unwrap_or("unknown"),
+                    data.and_then(|d| d["home"].as_str()).unwrap_or("unknown"),
+                    data.and_then(|d| d["socket"].as_str()).unwrap_or("unknown"),
+                )
+            }
+            None => "secrets status not yet read".to_string(),
+        };
+        // A broker that is slow is a fact the pane states, so an unchanged
+        // answer is never mistaken for a fresh one.
+        if self.secrets_status_busy() {
+            status.push_str(" · reading…");
+        }
+        if let Some(label) = self.secrets_action_busy() {
+            status.push_str(&format!(" · {label}…"));
+        }
+        status
+    }
+
+    /// The broker's own reference rows — and ONLY when it answered. A failed or
+    /// absent read yields no rows at all, so a socket that is not there can
+    /// never render as "no secrets configured".
+    pub fn secret_ref_rows(&self) -> Vec<SecretRefRow> {
+        let Some(data) = self
+            .secrets_status
+            .as_ref()
+            .filter(|o| o.status == Status::Ok)
+            .and_then(|o| o.data.as_ref())
+        else {
+            return Vec::new();
+        };
+        data.get("secrets")
+            .and_then(|v| v.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or(&[])
+            .iter()
+            .map(|s| SecretRefRow {
+                name: s["name"].as_str().unwrap_or("").to_string(),
+                backend: s["backend"].as_str().map(String::from),
+                require_totp: s["requireTotp"].as_bool(),
+                consumers: string_list(&s["consumers"]),
+                automation: s["automation"]["enabled"].as_bool(),
+                automation_consumers: string_list(&s["automation"]["consumers"]),
+                shared_with: string_list(&s["sharedWith"]),
+                remote: s["remote"].as_bool(),
+                allow_remote_origin: s["allowRemoteOrigin"].as_bool(),
+            })
+            .collect()
+    }
+
+    /// The Status pane's rows: config keys first, the broker's secret
+    /// references second, each under a header carrying its own provenance or
+    /// refusal.
+    pub fn status_rows(&self) -> Vec<StatusRow> {
+        let mut rows = vec![StatusRow::Header {
+            title: "config".to_string(),
+            note: self.config_provenance(),
+        }];
+        rows.extend(
+            self.config_rows()
+                .into_iter()
+                .map(|(key, value)| StatusRow::Config { key, value }),
+        );
+        rows.push(StatusRow::Header {
+            title: "secrets".to_string(),
+            note: self.secrets_ref_status(),
+        });
+        rows.extend(self.secret_ref_rows().into_iter().map(StatusRow::Secret));
+        rows
+    }
+
+    pub fn status_row(&self) -> Option<StatusRow> {
+        self.status_rows().get(self.status_sel).cloned()
+    }
+
+    fn move_status(&mut self, delta: isize) {
+        let rows = self.status_rows();
+        let mut i = self.status_sel;
+        loop {
+            let next = i as isize + delta;
+            if next < 0 || next as usize >= rows.len() {
+                return;
+            }
+            i = next as usize;
+            if rows[i].key().is_some() {
+                self.select_status_row(i);
+                return;
+            }
+        }
+    }
+
+    pub fn select_status_row(&mut self, i: usize) {
+        self.status_sel = i;
+        self.status_key = self.status_rows().get(i).and_then(StatusRow::key);
+    }
+
+    fn clamp_status(&mut self) {
+        let rows = self.status_rows();
+        if let Some(key) = self.status_key.clone() {
+            if let Some(i) = rows.iter().position(|r| r.key().as_deref() == Some(key.as_str())) {
+                self.status_sel = i;
+                return;
+            }
+        }
+        if self.status_sel >= rows.len() {
+            self.status_sel = rows.len().saturating_sub(1);
+        }
+        if rows.get(self.status_sel).is_some_and(|r| r.key().is_none()) {
+            match rows
+                .iter()
+                .enumerate()
+                .skip(self.status_sel)
+                .find(|(_, r)| r.key().is_some())
+            {
+                Some((i, _)) => self.status_sel = i,
+                None => self.status_sel = 0,
+            }
+        }
+        self.status_key = rows.get(self.status_sel).and_then(StatusRow::key);
+    }
+
+    /// Keys for the Status pane: `j`/`k` walk the config keys and the broker's
+    /// reference rows, Enter edits a config value, `e` opens the same menu
+    /// right-click does, `r` re-reads both.
+    fn handle_status_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => self.move_status(1),
+            KeyCode::Char('k') | KeyCode::Up => self.move_status(-1),
+            KeyCode::Enter => self.edit_status_row(),
+            KeyCode::Char('e') => self.open_status_menu(),
+            KeyCode::Char('r') => {
+                self.refresh_config();
+                self.spawn_secrets_status();
+            }
+            _ => {}
+        }
+    }
+
+    /// Enter on a Status row: a config key opens its value prompt; a secret row
+    /// opens the same menu `e` does (there is no single obvious mutation of a
+    /// grant, so the menu is what Enter means there too — never a silent write).
+    fn edit_status_row(&mut self) {
+        match self.status_row() {
+            Some(StatusRow::Config { key, value }) => self.open_config_value(key, value),
+            Some(StatusRow::Secret(_)) => self.open_status_menu(),
+            _ => {}
+        }
+    }
+
+    fn open_config_value(&mut self, key: String, current: String) {
+        self.input = Some(Input {
+            label: format!("{key} (currently `{current}`) — the backend validates the value"),
+            buffer: String::new(),
+            step: 0,
+            collected: Vec::new(),
+            kind: InputKind::ConfigValue { key, current },
+        });
+    }
+
+    /// The Status row's own menu, snapshotted: a config key offers Edit value, a
+    /// secret offers the two consumer verbs. Never an action this row cannot
+    /// support.
+    pub fn open_status_menu(&mut self) {
+        let sel = self.status_sel;
+        let rows = self.status_rows();
+        let Some(row) = rows.get(sel) else {
+            return;
+        };
+        let (target, actions) = match row.clone() {
+            StatusRow::Header { .. } => return,
+            StatusRow::Config { key, value } => (
+                ContextTarget::Setting { key, value },
+                vec![ContextAction::EditValue],
+            ),
+            StatusRow::Secret(r) => (
+                ContextTarget::Secret {
+                    name: r.name,
+                    consumers: r.consumers,
+                },
+                vec![ContextAction::GrantSecret, ContextAction::RevokeSecret],
+            ),
+        };
+        self.context_menu = Some(ContextMenu {
+            x: 2,
+            y: 4,
+            title: rows
+                .get(sel)
+                .and_then(StatusRow::key)
+                .unwrap_or_else(|| "status".to_string()),
+            target,
+            actions,
+            selected: 0,
+        });
+    }
+
+    /// The Mesh row's own menu, snapshotted — opened identically by `e` and by
+    /// right-click (`lib.rs`'s `open_context_hit`). A node this box has a record
+    /// of offers the pair action plus the three capability toggles and the
+    /// exact-name removal; a drift row naming a node with no record offers
+    /// pairing only, because `node allow`/`node remove` would refuse there.
+    pub fn open_context_for_node(&mut self, name: String, x: u16, y: u16) {
+        let trust = self.node_trust(&name);
+        let (known, allows) = match &trust {
+            Some(t) => (true, t.allows.clone()),
+            None => (false, Vec::new()),
+        };
+        // A pairing leg in flight is already going to write the node registry
+        // when it commits, so no node write is advertised while it runs: the
+        // menu offers pairing (which itself reports the leg) and nothing else.
+        let writes_ok = known && !self.node_writes_blocked();
+        let mut actions = vec![ContextAction::PairNode];
+        if writes_ok {
+            actions.push(ContextAction::ToggleRead);
+            actions.push(ContextAction::ToggleSpawn);
+            actions.push(ContextAction::ToggleMessage);
+            actions.push(ContextAction::RemoveNode);
+        }
+        self.context_menu = Some(ContextMenu {
+            x,
+            y,
+            title: name.clone(),
+            target: ContextTarget::Node {
+                name,
+                allows,
+                known,
+            },
+            actions,
+            selected: 0,
+        });
     }
 
     // ── The DAG row model (one truth for render + keys) ─────────────────────
@@ -1604,10 +3203,12 @@ impl App {
         if self.roster_sel >= n_roster.max(1) {
             self.roster_sel = n_roster.saturating_sub(1);
         }
-        let n_pending = self.pending_rows().len();
-        if self.pending_sel >= n_pending.max(1) {
-            self.pending_sel = n_pending.saturating_sub(1);
-        }
+        // The Review and Status cursors follow an identity, not an index: a
+        // resolve/relist (or a read that shrinks the list) must move the cursor
+        // with its own row rather than leave it on whatever slid into the same
+        // position.
+        self.clamp_review();
+        self.clamp_status();
     }
 
     // ── Panel switching ─────────────────────────────────────────────────────
@@ -1628,7 +3229,20 @@ impl App {
             self.spawn_roster_fetch();
         }
         if p == Panel::Pending {
+            // Three queues, one pane: the local pending list and pairing
+            // listing, then the broker's asks. The two socket-crossing reads
+            // refresh here and on their own throttle, never on every tick.
             self.refresh_pending();
+            self.refresh_pairing();
+            self.spawn_secrets_pending();
+            self.clamp_review();
+        }
+        if p == Panel::Status {
+            // The config read is local; `secrets status` crosses the broker
+            // socket, so it is throttled like the roster's probe.
+            self.refresh_config();
+            self.spawn_secrets_status();
+            self.clamp_status();
         }
     }
     pub fn next_panel(&mut self) {
@@ -1790,7 +3404,21 @@ impl App {
             Panel::Pending => self.handle_pending_key(key),
             Panel::Mail => self.handle_mail_key(key),
             Panel::Log => self.handle_log_key(key),
-            Panel::Home | Panel::Status => {} // read-only panels
+            Panel::Status => self.handle_status_key(key),
+            Panel::Home => {} // read-only panel
+        }
+    }
+
+    /// Test-only: park the Review cursor on the first session send/A2A row —
+    /// the section an approval test drives.
+    #[cfg(test)]
+    pub fn select_first_pending_row(&mut self) {
+        if let Some(i) = self
+            .review_rows()
+            .iter()
+            .position(|r| matches!(r, ReviewRow::Pending(_)))
+        {
+            self.select_review_row(i);
         }
     }
 
@@ -2088,8 +3716,113 @@ impl App {
                     );
                 }
             }
+            (ContextTarget::Node { name, .. }, ContextAction::PairNode) => {
+                // A NEW request — a discovery sweep, a dial and a park, all
+                // network work — so it runs on the background path and the tick
+                // loop never blocks on it. `--yes` skips the sweep's own y/N
+                // confirm (an `inquire` prompt, which would open over this very
+                // screen); it bypasses neither side's typed code, which is the
+                // gate the ceremony rests on.
+                self.spawn_pair_dispatch(Invocation {
+                    path: vec!["pair".to_string()],
+                    args: vec![name],
+                    flags: BTreeMap::from([
+                        ("yes".to_string(), "true".to_string()),
+                        ("wait".to_string(), "0".to_string()),
+                    ]),
+                    door: Door::Cli,
+                });
+            }
+            (ContextTarget::Node { name, allows, .. }, ContextAction::ToggleRead) => {
+                self.toggle_node_cap(name, allows, "read")
+            }
+            (ContextTarget::Node { name, allows, .. }, ContextAction::ToggleSpawn) => {
+                self.toggle_node_cap(name, allows, "spawn")
+            }
+            (ContextTarget::Node { name, allows, .. }, ContextAction::ToggleMessage) => {
+                self.toggle_node_cap(name, allows, "message")
+            }
+            (ContextTarget::Node { name, .. }, ContextAction::RemoveNode) => {
+                if self.node_writes_blocked() {
+                    self.refuse_node_write(&format!("unregistering `{name}`"));
+                    return;
+                }
+                // Exact-name confirmation, the `project remove` shape: the menu
+                // snapshot carries the name, and Escape or a near-miss
+                // unregisters nothing.
+                self.input = Some(Input {
+                    label: format!("Unregister node `{name}`; type its exact name to confirm"),
+                    buffer: String::new(),
+                    step: 0,
+                    collected: Vec::new(),
+                    kind: InputKind::NodeRemove { name },
+                });
+            }
+            (ContextTarget::Setting { key, value }, ContextAction::EditValue) => {
+                self.open_config_value(key, value)
+            }
+            (ContextTarget::Secret { name, consumers }, ContextAction::GrantSecret) => {
+                let existing = if consumers.is_empty() {
+                    "none listed".to_string()
+                } else {
+                    consumers.join(",")
+                };
+                self.input = Some(Input {
+                    label: format!(
+                        "consumer to grant `{name}` (currently {existing}) — the secrets admin \
+                         command validates it and reports its own refusal"
+                    ),
+                    buffer: String::new(),
+                    step: 0,
+                    collected: Vec::new(),
+                    kind: InputKind::SecretConsumer {
+                        name,
+                        revoke: false,
+                        current: consumers,
+                    },
+                });
+            }
+            (ContextTarget::Secret { name, consumers }, ContextAction::RevokeSecret) => {
+                let existing = if consumers.is_empty() {
+                    "none listed".to_string()
+                } else {
+                    consumers.join(",")
+                };
+                self.input = Some(Input {
+                    label: format!(
+                        "consumer to revoke from `{name}` (currently {existing}) — the secrets \
+                         admin command validates it and reports its own refusal"
+                    ),
+                    buffer: String::new(),
+                    step: 0,
+                    collected: Vec::new(),
+                    kind: InputKind::SecretConsumer {
+                        name,
+                        revoke: true,
+                        current: consumers,
+                    },
+                });
+            }
             _ => {}
         }
+    }
+
+    /// Flip one capability in a node's `allows` set, from the menu's own
+    /// snapshot of the registry row: the dispatch states the intent the menu
+    /// showed, `node allow` is idempotent, and a name this box has no record of
+    /// is never advertised a toggle in the first place. Refused while a pairing
+    /// leg is in flight (both would rewrite `nodes.json`).
+    fn toggle_node_cap(&mut self, name: String, allows: Vec<String>, cap: &str) {
+        if self.node_writes_blocked() {
+            self.refuse_node_write(&format!("`{name}`'s {cap} grant"));
+            return;
+        }
+        let next = if allows.iter().any(|a| a == cap) {
+            "off"
+        } else {
+            "on"
+        };
+        self.dispatch(&["node", "allow"], &[name, cap.to_string(), next.to_string()]);
     }
 
     pub fn open_mail_to(&mut self, recipient: String) {
@@ -2545,48 +4278,10 @@ impl App {
         }
     }
 
-    /// Keys for the PENDING panel (P-C5): `j`/`k` walk [`App::pending_rows`];
-    /// `a`/`d` approve/deny the selected row. `Invocation.args` carries the
-    /// entry's `id` — its ARRAY POSITION, not a stable id
-    /// (`conduct/src/graph/pending.rs`'s module doc) — so [`App::dispatch`]'s
-    /// `reload_all` -> `refresh_pending` re-list, which runs synchronously
-    /// before the next paint, is not an optimization: it is what keeps a
-    /// second a/d keypress in the same visit from resolving whatever now
-    /// sits at a STALE selected index instead of the row on screen.
+    /// Keys for the Review pane. The pane's own handler is
+    /// [`App::handle_review_key`]; this name is kept for the panel match.
     fn handle_pending_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
-                let n = self.pending_rows().len();
-                if n > 0 && self.pending_sel + 1 < n {
-                    self.pending_sel += 1;
-                }
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.pending_sel = self.pending_sel.saturating_sub(1);
-            }
-            KeyCode::Char('a') => self.resolve_pending("approve"),
-            KeyCode::Char('d') => self.resolve_pending("deny"),
-            _ => {}
-        }
-    }
-
-    /// Approve or deny the selected PENDING row, then clamp the cursor —
-    /// `dispatch` has already re-listed by the time this returns (see
-    /// [`App::handle_pending_key`]'s doc), so a shrunk queue never leaves
-    /// `pending_sel` pointing past the end. A no-op on an empty list
-    /// (nothing selected to resolve) rather than a panic; the door itself
-    /// (not this frontend) is what rejects a malformed entry.
-    fn resolve_pending(&mut self, command: &'static str) {
-        let rows = self.pending_rows();
-        let Some(row) = rows.get(self.pending_sel) else {
-            return;
-        };
-        let id = row.id.clone();
-        self.dispatch(&["session", "pending", command], &[id]);
-        let n = self.pending_rows().len();
-        if self.pending_sel >= n.max(1) {
-            self.pending_sel = n.saturating_sub(1);
-        }
+        self.handle_review_key(key);
     }
 
     /// Keys for the Graph panel walk the same tree the scene draws, never a
@@ -2892,6 +4587,116 @@ impl App {
                     flags.insert("yes".to_string(), "true".to_string());
                     self.dispatch_with_flags(&["send"], &[text], flags);
                 }
+                InputKind::PairCode { id, outbound, .. } => {
+                    let code = input.buffer.trim().to_string();
+                    if code.is_empty() {
+                        // An empty code is not a ceremony: nothing is
+                        // dispatched, and the prompt stays open for a real one.
+                        self.input = Some(input);
+                        return;
+                    }
+                    // The prompt is DROPPED here, code and all: a refusal has
+                    // already burned one of the entry's three persisted tries,
+                    // and a re-prompt that started from the old buffer would
+                    // replay a code the door just rejected. Getting another
+                    // try means opening a fresh, empty prompt.
+                    let mut flags = BTreeMap::from([
+                        ("code".to_string(), code),
+                        ("yes".to_string(), "true".to_string()),
+                    ]);
+                    if outbound {
+                        // ONE door poll, never the 600s blocking default: the
+                        // still-pending answer is an ordinary `Error` outcome
+                        // with `reason=awaiting-node-approval`, shown as the
+                        // status line's own wording, nothing committed.
+                        flags.insert("wait".to_string(), "0".to_string());
+                        self.spawn_pair_dispatch(Invocation {
+                            path: vec!["pair".to_string()],
+                            args: vec![id],
+                            flags,
+                            door: Door::Cli,
+                        });
+                    } else {
+                        // The approver's leg is purely local (no wire call), so
+                        // it dispatches synchronously like every other action —
+                        // but it COMMITS the node registry, so it is refused
+                        // while another leg is already on the wire: the same
+                        // lost-update guard the Mesh writes carry. The prompt is
+                        // dropped with the refusal, so the typed code is not
+                        // replayed against the next attempt.
+                        if self.node_writes_blocked() {
+                            self.refuse_node_write("approving the pairing request");
+                            return;
+                        }
+                        let outcome = (self.dispatch_fn)(&Invocation {
+                            path: vec!["pair".to_string()],
+                            args: vec![id],
+                            flags,
+                            door: Door::Cli,
+                        });
+                        self.land_pair_outcome(outcome);
+                    }
+                }
+                InputKind::TotpCode { id, .. } => {
+                    let totp = input.buffer.trim().to_string();
+                    if totp.is_empty() {
+                        self.input = Some(input);
+                        return;
+                    }
+                    // Same no-replay rule as the pairing code: the prompt is
+                    // dropped, so a rejected TOTP is never re-sent by a second
+                    // Enter. The round trip crosses the broker socket, whose read
+                    // is unbounded, so it runs on the serialized secrets worker.
+                    self.input = None;
+                    let label = format!("approving ask #{id}");
+                    self.spawn_secrets_action(
+                        Invocation {
+                            path: vec!["secrets".to_string(), "approve".to_string()],
+                            args: vec![id],
+                            flags: BTreeMap::from([("totp".to_string(), totp)]),
+                            door: Door::Cli,
+                        },
+                        &label,
+                    );
+                }
+                InputKind::ConfigValue { key, .. } => {
+                    let value = input.buffer.trim().to_string();
+                    if value.is_empty() {
+                        // An empty value is a real intent for a scalar ("empty
+                        // disables the lane") but an ambiguous one here — the
+                        // backend's own words, not this pane's guess. Re-opening
+                        // the prompt empty is the honest no-op.
+                        self.input = Some(input);
+                        return;
+                    }
+                    self.dispatch(&["config", "set"], &[key, value]);
+                }
+                InputKind::SecretConsumer { name, revoke, .. } => {
+                    let consumer = input.buffer.trim().to_string();
+                    if consumer.is_empty() {
+                        self.input = Some(input);
+                        return;
+                    }
+                    let command = if revoke { "revoke" } else { "grant" };
+                    // The secrets admin commands may cross the broker socket;
+                    // they share the one serialized worker with approve/dismiss.
+                    self.spawn_secrets_action(
+                        Invocation {
+                            path: vec!["secrets".to_string(), command.to_string()],
+                            args: vec![name.clone(), consumer.clone()],
+                            flags: BTreeMap::new(),
+                            door: Door::Cli,
+                        },
+                        &format!("{command}ing `{name}` for {consumer}"),
+                    );
+                }
+                InputKind::NodeRemove { name } => {
+                    if input.buffer == name {
+                        self.dispatch(&["node", "remove"], &[name]);
+                    } else {
+                        self.input = Some(input);
+                    }
+                }
             },
             _ => {
                 self.input = Some(input);
@@ -2914,6 +4719,96 @@ pub fn is_terminal(rec: &SessionRecord) -> bool {
 
 pub fn is_done(state: &str) -> bool {
     graph::canonical_state(state) == "done"
+}
+
+/// A JSON scalar as display text: a string verbatim, a number/bool by its own
+/// rendering, anything else empty. Used where a field's type is the backend's
+/// business (a secrets ask's `peerUid`, a config value) and this frontend only
+/// has to show what arrived.
+pub(crate) fn scalar_text(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        _ => String::new(),
+    }
+}
+
+/// One config value as it may be shown and re-typed: a scalar by
+/// [`scalar_text`], a list of scalars comma-joined (the exact spelling `config
+/// set` parses a closed list from). A nested map or a mixed array is not one
+/// settable key's value, so it is `None` — skipped rather than flattened into a
+/// key this pane cannot honestly edit.
+pub(crate) fn json_scalar(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::Array(items) => {
+            let parts: Vec<String> = items.iter().map(scalar_text).collect();
+            if parts.iter().any(|p| p.is_empty()) {
+                return None;
+            }
+            Some(parts.join(","))
+        }
+        serde_json::Value::Object(_) | serde_json::Value::Null => None,
+        other => Some(scalar_text(other)),
+    }
+}
+
+/// A wire field that may be either an epoch-second count or a string, as
+/// display text. `secrets pending`'s `requestedAt` is an epoch
+/// (`secrets::client::PendingAsk::requested_at: u64`) while `pair --json`'s is
+/// an ISO string, so both shapes reach a row: an epoch renders in the same UTC
+/// spelling the rest of the panes use, anything else by its own text. Never an
+/// empty cell for a fact the command did send.
+pub(crate) fn epoch_text(v: &serde_json::Value) -> String {
+    match v.as_i64() {
+        Some(secs) => aoide_storage::time::iso_utc_from_epoch(secs),
+        None => scalar_text(v),
+    }
+}
+
+/// A JSON array of strings as a list; anything else (absent, null, mixed) is
+/// empty. The one reader for the `consumers`/`automation`/`sharedWith` shapes.
+pub(crate) fn string_list(v: &serde_json::Value) -> Vec<String> {
+    v.as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|e| e.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Replace a PAIRING-CODE-shaped token (`NNN-NNN` — the exact shape
+/// `storage::pairing::derive_sas` derives, three digits, a dash, three digits)
+/// with a pointer at the dedicated ceremony popup.
+///
+/// Redaction only: this runs on the message of an outcome already being stored
+/// for the status line, and the codes themselves come from that outcome's own
+/// named fields (`data.sas`/`data.replySas`). Nothing here scans text to LEARN
+/// a code — no surface of this frontend harvests one — and the sanitised string
+/// is what a row, the status bar or a log view may hold.
+pub fn redact_codes(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let digit = |c: char| c.is_ascii_digit();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let code_at = i + 7 <= chars.len()
+            && (0..3).all(|k| digit(chars[i + k]))
+            && !digit(chars[i + 3])
+            && chars[i + 3] != '\n'
+            && (4..7).all(|k| digit(chars[i + k]))
+            && (i == 0 || !digit(chars[i - 1]))
+            && (i + 7 == chars.len() || !digit(chars[i + 7]));
+        if code_at {
+            out.push_str("[code in the pairing popup]");
+            i += 7;
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 /// Fold `(live, total)` over one root's subtree, cycle-guarded.
@@ -3480,8 +5375,46 @@ mod tests {
     /// `~/Aoide/state/stage` (conducting) and `~/Aoide/song/stage` (rice),
     /// not a fixture. `AOIDE_STAGE_DIR` overrides both at once, same as
     /// today — see `App::stage`/`App::rice_stage`.
-    fn with_isolated_stage<R>(f: impl FnOnce() -> R) -> R {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    /// [`with_isolated_stage`] as a guard, for a test that needs the isolated
+    /// stage across several statements (the artifact renders) instead of one
+    /// closure. Same lock, same env vars, same cleanup.
+    struct IsolatedStage {
+        dir: PathBuf,
+        saved_stage: Option<String>,
+        saved_audit: Option<String>,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+    impl IsolatedStage {
+        fn new() -> Self {
+            let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let dir = tmp_dir("stage-isolated");
+            let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+            let saved_audit = std::env::var("AOIDE_AUDIT_LOG").ok();
+            std::env::set_var("AOIDE_STAGE_DIR", &dir);
+            std::env::set_var("AOIDE_AUDIT_LOG", dir.join("audit.log"));
+            Self {
+                dir,
+                saved_stage,
+                saved_audit,
+                _guard: guard,
+            }
+        }
+    }
+    impl Drop for IsolatedStage {
+        fn drop(&mut self) {
+            match &self.saved_stage {
+                Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+                None => std::env::remove_var("AOIDE_STAGE_DIR"),
+            }
+            match &self.saved_audit {
+                Some(v) => std::env::set_var("AOIDE_AUDIT_LOG", v),
+                None => std::env::remove_var("AOIDE_AUDIT_LOG"),
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn with_isolated_stage<R>(f: impl FnOnce() -> R) -> R {        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tmp_dir("stage-isolated");
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_audit = std::env::var("AOIDE_AUDIT_LOG").ok();
@@ -4393,19 +6326,26 @@ mod tests {
             let mut app = App::for_test_with_dispatch(recording_pending_dispatch);
             app.select_panel(Panel::Pending); // immediate synchronous fetch — no tick needed
             assert_eq!(app.pending_rows().len(), 3);
-            app.pending_sel = 0; // s0, the entry at position 0
+            app.select_first_pending_row(); // s0, the entry at position 0
 
             app.handle_key(KeyEvent::from(KeyCode::Char('a'))); // approve
 
             let calls = PENDING_CALLS.lock().unwrap();
-            let last_two = &calls[calls.len() - 2..];
+            // `reload_all` also refreshes the pair/node/mesh reads this slice
+            // added — assert the queue's own two calls and their order.
+            let at = calls
+                .iter()
+                .position(|(p, _)| p == "session.pending.approve")
+                .expect("the resolve dispatched");
             assert_eq!(
-                last_two[0],
+                calls[at],
                 ("session.pending.approve".to_string(), vec!["0".to_string()])
             );
-            assert_eq!(
-                last_two[1],
-                ("session.pending.list".to_string(), Vec::<String>::new())
+            assert!(
+                calls[at + 1..]
+                    .iter()
+                    .any(|(p, _)| p == "session.pending.list"),
+                "a resolve must re-list the queue"
             );
             drop(calls);
 
@@ -4426,19 +6366,24 @@ mod tests {
         with_isolated_stage(|| {
             let mut app = App::for_test_with_dispatch(recording_pending_dispatch);
             app.select_panel(Panel::Pending);
-            app.pending_sel = 0;
+            app.select_first_pending_row();
 
             app.handle_key(KeyEvent::from(KeyCode::Char('d'))); // deny
 
             let calls = PENDING_CALLS.lock().unwrap();
-            let last_two = &calls[calls.len() - 2..];
+            let at = calls
+                .iter()
+                .position(|(p, _)| p == "session.pending.deny")
+                .expect("the resolve dispatched");
             assert_eq!(
-                last_two[0],
+                calls[at],
                 ("session.pending.deny".to_string(), vec!["0".to_string()])
             );
-            assert_eq!(
-                last_two[1],
-                ("session.pending.list".to_string(), Vec::<String>::new())
+            assert!(
+                calls[at + 1..]
+                    .iter()
+                    .any(|(p, _)| p == "session.pending.list"),
+                "a resolve must re-list the queue"
             );
             drop(calls);
 
@@ -4466,7 +6411,7 @@ mod tests {
         with_isolated_stage(|| {
             let mut app = App::for_test_with_dispatch(recording_pending_dispatch);
             app.select_panel(Panel::Pending);
-            app.pending_sel = 0;
+            app.select_first_pending_row();
 
             app.handle_key(KeyEvent::from(KeyCode::Char('a')));
             app.handle_key(KeyEvent::from(KeyCode::Char('a')));
@@ -4496,11 +6441,16 @@ mod tests {
         assert!(app.pending_rows().is_empty());
         // Neither key dispatched an approve/deny — nothing was selected.
         let calls = PENDING_CALLS.lock().unwrap();
-        assert!(calls.iter().all(|(p, _)| p == "session.pending.list"));
+        assert!(
+            calls
+                .iter()
+                .all(|(p, _)| p != "session.pending.approve" && p != "session.pending.deny"),
+            "no resolve was dispatched from an empty queue"
+        );
     }
 
     #[test]
-    fn pending_selection_walks_rows_and_clamps() {
+    fn review_selection_walks_rows_and_clamps() {
         let _g = PENDING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         PENDING_CALLS.lock().unwrap().clear();
         *PENDING_QUEUE.lock().unwrap() = vec![("s0".into(), "a".into()), ("s1".into(), "b".into())];
@@ -4508,16 +6458,1384 @@ mod tests {
         let mut app = App::for_test_with_dispatch(recording_pending_dispatch);
         app.select_panel(Panel::Pending);
 
-        assert_eq!(app.pending_sel, 0);
+        // The cursor opens on the first SELECTABLE row — the queue's first
+        // entry, never the section header above it.
+        assert_eq!(
+            app.review_row().and_then(|r| r.key()).as_deref(),
+            Some("session:0"),
+            "the cursor starts on the first session entry, not a header"
+        );
         app.handle_key(KeyEvent::from(KeyCode::Char('j')));
-        assert_eq!(app.pending_sel, 1);
+        assert_eq!(
+            app.review_row().and_then(|r| r.key()).as_deref(),
+            Some("session:1")
+        );
         app.handle_key(KeyEvent::from(KeyCode::Char('j')));
-        assert_eq!(app.pending_sel, 1, "j never walks past the last row");
+        assert_eq!(
+            app.review_row().and_then(|r| r.key()).as_deref(),
+            Some("session:1"),
+            "j never walks past the last row"
+        );
         app.handle_key(KeyEvent::from(KeyCode::Char('k')));
-        assert_eq!(app.pending_sel, 0);
+        assert_eq!(
+            app.review_row().and_then(|r| r.key()).as_deref(),
+            Some("session:0")
+        );
         app.handle_key(KeyEvent::from(KeyCode::Char('k')));
-        assert_eq!(app.pending_sel, 0, "k never walks before the first row");
+        assert_eq!(
+            app.review_row().and_then(|r| r.key()).as_deref(),
+            Some("session:0"),
+            "k never walks before the first row"
+        );
     }
+    // ── T1: pairing / mesh trust / status panes ──────────────────────────────
+
+    /// One recorded dispatch: path, args, sorted flags.
+    type Recorded = (String, Vec<String>, Vec<(String, String)>);
+
+    static T1_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static T1_CALLS: std::sync::Mutex<Vec<Recorded>> = std::sync::Mutex::new(Vec::new());
+    static T1_PAIR: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
+    static T1_PAIR_MESSAGE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    static T1_STATUS: std::sync::Mutex<Option<Outcome>> = std::sync::Mutex::new(None);
+    static T1_CONFIG: std::sync::Mutex<Option<Outcome>> = std::sync::Mutex::new(None);
+
+    fn t1_record(inv: &Invocation) {
+        T1_CALLS.lock().unwrap().push((
+            inv.path.join("."),
+            inv.args.clone(),
+            inv.flags.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        ));
+    }
+
+    fn t1_calls() -> Vec<Recorded> {
+        T1_CALLS.lock().unwrap().clone()
+    }
+
+    /// The injected dispatch every T1 test drives: every path this slice
+    /// dispatches answers with a fixture, so a test asserting on the recorded
+    /// tape also proves nothing unexpected was reached.
+    fn recording_t1_dispatch(inv: &Invocation) -> Outcome {
+        t1_record(inv);
+        let path = inv.path.join(".");
+        maybe_stall(&path, inv);
+        match path.as_str() {
+            "session.pending.list" => {
+                Outcome::ok("session.pending.list", "0 pending")
+                    .with_data(json!({ "pending": [] }))
+            }
+            "pair" if inv.flags.contains_key("json") => {
+                let message = T1_PAIR_MESSAGE
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .unwrap_or_else(|| "2 pending pairing request(s)".to_string());
+                let data = T1_PAIR
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .unwrap_or_else(|| json!({ "requests": [] }));
+                Outcome::ok("pair", message).with_data(data)
+            }
+            "pair" => {
+                // The two code-taking legs and the new request all land here in
+                // a test; the fixture answers as the approver's commit does, so
+                // one fixture covers the ceremony's own shape.
+                Outcome::ok(
+                    "pair",
+                    "paired with `osaka` (code 740-729) — verified; read THIS code back: 811-202",
+                )
+                .with_data(json!({
+                    "confirmed": true, "name": "osaka", "sas": "740-729", "replySas": "811-202",
+                }))
+            }
+            "pair.reject" => Outcome::ok("pair.reject", "removed the pending request"),
+            "node.status" => Outcome::ok("node.status", "2 node(s) registered")
+                .with_data(json!({ "nodes": [
+                    { "name": "osaka", "verified": true, "allows": ["read", "spawn"],
+                      "state": "fresh", "url": "http://127.0.0.1:8710/", "hub": false,
+                      "autogate": true, "error": Value::Null },
+                    { "name": "box", "verified": false, "allows": [],
+                      "state": "never-pulled", "url": "http://box:8710/", "hub": true,
+                      "autogate": false, "error": "unreachable" },
+                ] })),
+            "node.allow" => Outcome::ok("node.allow", "capability updated"),
+            "node.remove" => Outcome::ok("node.remove", "node unregistered"),
+            "mesh" => Outcome::ok("mesh", "1 mesh, 2 divergence(s)").with_data(json!({
+                "report": {
+                    "sections": [{
+                        "name": "home", "grant": ["read"], "sameOperator": true,
+                        "declared": 3, "selfDeclared": true,
+                        "rows": [
+                            { "node": "yomi", "class": "missing" },
+                            { "node": "sakaki", "class": "via-mismatch",
+                              "declared": "ssh://sakaki", "recorded": Value::Null },
+                        ],
+                    }],
+                    "undeclared": [],
+                }
+            })),
+            "config" => {
+                if let Some(o) = T1_CONFIG.lock().unwrap().clone() {
+                    return o;
+                }
+                Outcome::ok("config", "config listing").with_data(json!({
+                    "schemaVersion": "0", "path": "/tmp/aoide/config.toml",
+                    "managed": false, "present": true,
+                    "config": {
+                        "pairing": { "defaultGrant": ["read"] },
+                        "upkeep": { "verifyCommand": "cargo check" },
+                        "mesh": { "home": { "nodes": {} } },
+                        "context": { "agents": {}, "vaults": {} },
+                    },
+                }))
+            }
+            "config.set" => Outcome::ok("config.set", "config set pairing.defaultGrant"),
+            "secrets.pending" => Outcome::ok("secrets.pending", "1 pending ask(s)")
+                .with_data(json!({ "pending": [
+                    { "id": "3", "secret": "db-prod", "consumer": "m",
+                      "requestedAt": 1789862400, "peerUid": 1000 },
+                ] })),
+            "secrets.status" => {
+                if let Some(o) = T1_STATUS.lock().unwrap().clone() {
+                    return o;
+                }
+                Outcome::ok("secrets.status", "broker answered").with_data(json!({
+                    "broker": "answered", "home": "/home/x/.aoide/secrets",
+                    "socket": "/run/aoide/secrets.sock",
+                    "secrets": [{
+                        "name": "db-prod", "backend": "pass", "requireTotp": true,
+                        "consumers": ["m", "n"],
+                        "automation": { "enabled": true, "consumers": ["m"] },
+                        "sharedWith": ["osaka"],
+                        "remote": false, "allowRemoteOrigin": false,
+                    }],
+                }))
+            }
+            "secrets.approve" => Outcome::ok("secrets.approve", "approved"),
+            "secrets.dismiss" => Outcome::ok("secrets.dismiss", "dismissed"),
+            "secrets.grant" | "secrets.revoke" => Outcome::usage(
+                "secrets.grant",
+                "this euid may not write policy — run it as the secret's owner",
+            ),
+            other => Outcome::usage("test", format!("unexpected path {other}")),
+        }
+    }
+
+    fn t1_app() -> App {
+        T1_CALLS.lock().unwrap().clear();
+        *T1_PAIR.lock().unwrap() = None;
+        *T1_PAIR_MESSAGE.lock().unwrap() = None;
+        *T1_STATUS.lock().unwrap() = None;
+        *T1_CONFIG.lock().unwrap() = None;
+        *T1_STALL.lock().unwrap() = None;
+        T1_RELEASE.store(true, std::sync::atomic::Ordering::SeqCst);
+        App::for_test_with_dispatch(recording_t1_dispatch)
+    }
+
+    /// The controlled channel: while `T1_STALL` names a path and `T1_RELEASE` is
+    /// false, that fixture blocks — a worker that accepts and never answers,
+    /// without a broker, a socket or a real ceremony anywhere. Bounded, so a bug
+    /// cannot hang the suite.
+    static T1_STALL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    static T1_RELEASE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+    fn stall(path: &str) {
+        *T1_STALL.lock().unwrap() = Some(path.to_string());
+        T1_RELEASE.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn release() {
+        T1_RELEASE.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn maybe_stall(path: &str, inv: &Invocation) {
+        // The controlled channel stands in for a leg on the WIRE or a broker that
+        // never answers. The `pair` LISTING (`--json`) is a local read the command
+        // answers without a dial, so it is never stalled: stalling it would fake a
+        // condition the real command cannot have, and would make the pane
+        // unreadable exactly while a leg runs. The secrets reads do cross the
+        // broker socket and are exactly what a stall stands in for.
+        let local_listing =
+            path == "pair" && inv.flags.get("json").map(String::as_str) == Some("true");
+        if local_listing {
+            return;
+        }
+        let armed = T1_STALL.lock().unwrap().clone();
+        if armed.as_deref() != Some(path) {
+            return;
+        }
+        for _ in 0..600 {
+            if T1_RELEASE.load(std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    /// The loop's WORKER DRAINS only (pair, secrets action, secrets asks,
+    /// secrets status) — the partial poll the settling helpers use while a test
+    /// watches one worker. The responsiveness assertions deliberately drive the
+    /// full `App::poll_refresh` tick instead, so what they measure is the real
+    /// loop (stage watch, roster/asks spawn gating and all).
+    fn tick(app: &mut App) {
+        app.poll_pair_dispatch();
+        app.poll_secrets_action();
+        app.poll_secrets_pending();
+        app.poll_secrets_status();
+    }
+
+    /// Run ticks until every background read and mutation this slice owns has
+    /// landed. A worker that never answers fails the test rather than hanging it.
+    fn settle_reads(app: &mut App) {
+        for _ in 0..400 {
+            if !app.pair_busy()
+                && !app.secrets_pending_busy()
+                && !app.secrets_status_busy()
+                && app.secrets_action_busy().is_none()
+            {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            tick(app);
+        }
+        panic!("a background read or mutation never landed");
+    }
+
+    fn pairing_fixture() -> Value {
+        json!({ "requests": [
+            { "id": "4f2a91bc", "direction": "inbound", "name": "osaka",
+              "url": "http://127.0.0.1:8710/", "revealed": false, "approved": false,
+              "requestedAt": "2026-09-20T00:00:00Z", "expiresAt": "2026-09-20T00:10:00Z" },
+            { "id": "9c1d", "direction": "inbound", "name": "yomi",
+              "url": "http://127.0.0.1:8711/", "revealed": true, "approved": true,
+              "requestedAt": "2026-09-20T00:01:00Z", "expiresAt": "2026-09-20T00:11:00Z" },
+            { "id": "aa77", "direction": "outbound", "name": "sakaki",
+              "url": "http://127.0.0.1:8712/", "state": "awaiting-approval",
+              "requestedAt": "2026-09-20T00:02:00Z", "expiresAt": "2026-09-20T00:12:00Z" },
+        ] })
+    }
+
+    #[test]
+    fn pairing_rows_parse_the_pending_listing_without_deriving_anything() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        *T1_PAIR.lock().unwrap() = Some(pairing_fixture());
+        app.select_panel(Panel::Pending);
+        settle_reads(&mut app);
+
+        let rows = app.pairing_rows();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].status(), "awaiting their reveal");
+        assert_eq!(
+            rows[1].status(),
+            "approved · awaiting their poll",
+            "the listing's own three-way wording, not a re-derived state"
+        );
+        assert_eq!(rows[2].status(), "awaiting-approval");
+        assert!(rows[2].outbound() && !rows[0].outbound());
+        assert_eq!(rows[0].id, "4f2a91bc");
+        assert_eq!(rows[1].url, "http://127.0.0.1:8711/");
+        // The listing is asked for in its `--json` form: bare `pair` on this
+        // process's tty would raise the interactive menu over the pane.
+        let listing = t1_calls()
+            .into_iter()
+            .find(|(p, _, _)| p == "pair")
+            .expect("the pairing listing was dispatched");
+        assert_eq!(listing.0, "pair");
+        assert!(listing.1.is_empty(), "the listing takes no target");
+        assert!(listing.2.contains(&("json".to_string(), "true".to_string())));
+    }
+
+    #[test]
+    fn pairing_and_secrets_surfaces_never_render_a_code_or_a_value() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        *T1_PAIR.lock().unwrap() = Some(pairing_fixture());
+        *T1_PAIR_MESSAGE.lock().unwrap() = Some(
+            "pairing request sent to `osaka` — confirmation code 740-729 — read it aloud"
+                .to_string(),
+        );
+        app.select_panel(Panel::Pending);
+        settle_reads(&mut app);
+
+        // Every string this pane can build from its own state: rows, headers,
+        // statuses. The listing's own message carries a code in this fixture,
+        // and it must not reach any of them.
+        let mut rendered: Vec<String> = Vec::new();
+        for row in app.review_rows() {
+            rendered.push(format!("{row:?}"));
+            match row {
+                ReviewRow::Pending(r) => rendered.push(r.text.clone()),
+                ReviewRow::Pairing(r) => {
+                    rendered.push(r.status());
+                    rendered.push(r.target());
+                }
+                ReviewRow::Ask(r) => {
+                    rendered.push(r.secret.clone());
+                    rendered.push(r.consumer.clone());
+                }
+                ReviewRow::Header(t) => rendered.push(t.to_string()),
+            }
+        }
+        rendered.push(app.pairing_status());
+        rendered.push(app.pending_status());
+        rendered.push(app.secrets_pending_status());
+        rendered.push(app.status_message());
+        let joined = rendered.join("\n");
+        assert!(
+            !joined.contains("740-729"),
+            "no generic surface may render a pairing code: {joined}"
+        );
+
+        // The dedicated ceremony popup is the ONE place a code is held, and the
+        // outcome that produced it was sanitized on the way in.
+        app.land_pair_outcome(
+            Outcome::ok("pair", "paired with `osaka` (code 740-729) — read it back: 811-202")
+                .with_data(json!({ "name": "osaka", "sas": "740-729", "replySas": "811-202" })),
+        );
+        let ceremony = app.pair_ceremony.as_ref().expect("the ceremony holds the code");
+        assert_eq!(ceremony.codes.len(), 2);
+        assert!(ceremony.codes.iter().any(|(_, c)| c == "740-729"));
+        assert!(
+            !app.status_message().contains("740-729")
+                && !app.status_message().contains("811-202"),
+            "the status line is sanitized: {}",
+            app.status_message()
+        );
+        assert!(
+            app.last_outcome
+                .as_ref()
+                .is_some_and(|o| o.message.contains("[code in the pairing popup]")),
+            "the stored outcome points at the popup instead of printing the code"
+        );
+        app.dismiss_pair_ceremony();
+        assert!(app.pair_ceremony.is_none(), "dismissing clears the code");
+    }
+
+    #[test]
+    fn no_typed_code_ever_reaches_a_generated_debug_dump() {
+        let input = Input {
+            label: "pairing code".into(),
+            buffer: "740729".into(),
+            step: 0,
+            collected: Vec::new(),
+            kind: InputKind::PairCode {
+                id: "x".into(),
+                name: "osaka".into(),
+                outbound: false,
+            },
+        };
+        assert_eq!(input.display_buffer(), "******");
+        let dump = format!("{input:?}");
+        assert!(!dump.contains("740729"), "a Debug dump must mask it: {dump}");
+        assert!(dump.contains("******"));
+    }
+
+    #[test]
+    fn approve_dispatches_the_pair_id_and_the_typed_code_on_each_leg() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // INBOUND: purely local, so no `--wait` at all.
+        let mut app = t1_app();
+        let _stage = IsolatedStage::new();
+        *T1_PAIR.lock().unwrap() = Some(pairing_fixture());
+        app.select_panel(Panel::Pending);
+        settle_reads(&mut app);
+        let first = app
+            .review_rows()
+            .iter()
+            .position(|r| matches!(r, ReviewRow::Pairing(_)))
+            .unwrap();
+        app.select_review_row(first);
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        let input = app.input.as_ref().expect("a masked prompt opened");
+        assert!(input.masked());
+        app.handle_key(KeyEvent::from(KeyCode::Char('7')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('4')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('0')));
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        let call = t1_calls()
+            .into_iter()
+            .find(|(p, a, _)| p == "pair" && a == &vec!["4f2a91bc".to_string()])
+            .expect("the inbound approval dispatched");
+        assert_eq!(call.2.iter().find(|(k, _)| k == "code").map(|(_, v)| v.as_str()), Some("740"));
+        assert!(
+            !call.2.iter().any(|(k, _)| k == "wait"),
+            "an inbound approval is local; a wait would be meaningless"
+        );
+
+        // OUTBOUND: the resume polls once, so it carries `--wait 0` and rides
+        // the background path — never the blocking 600s default.
+        let mut app = t1_app();
+        *T1_PAIR.lock().unwrap() = Some(pairing_fixture());
+        app.select_panel(Panel::Pending);
+        settle_reads(&mut app);
+        let out = app
+            .review_rows()
+            .iter()
+            .position(|r| matches!(r, ReviewRow::Pairing(r) if r.outbound()))
+            .unwrap();
+        app.select_review_row(out);
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('9')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('9')));
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert!(app.pair_busy(), "the door poll runs off the tick loop");
+        let mut spins = 0;
+        while app.pair_busy() && spins < 400 {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            app.poll_refresh();
+            spins += 1;
+        }
+        assert!(!app.pair_busy(), "the background resume landed");
+        let call = t1_calls()
+            .into_iter()
+            .find(|(p, a, _)| p == "pair" && a == &vec!["aa77".to_string()])
+            .expect("the outbound resume dispatched");
+        assert_eq!(call.2.iter().find(|(k, _)| k == "wait").map(|(_, v)| v.as_str()), Some("0"));
+        assert_eq!(call.2.iter().find(|(k, _)| k == "code").map(|(_, v)| v.as_str()), Some("99"));
+    }
+
+    #[test]
+    fn empty_or_cancelled_codes_never_dispatch() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        *T1_PAIR.lock().unwrap() = Some(pairing_fixture());
+        app.select_panel(Panel::Pending);
+        settle_reads(&mut app);
+        let first = app
+            .review_rows()
+            .iter()
+            .position(|r| matches!(r, ReviewRow::Pairing(_)))
+            .unwrap();
+        app.select_review_row(first);
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        app.handle_key(KeyEvent::from(KeyCode::Enter)); // empty code
+        assert!(
+            !t1_calls().iter().any(|(p, a, _)| p == "pair" && !a.is_empty()),
+            "an empty code dispatches nothing"
+        );
+        app.handle_key(KeyEvent::from(KeyCode::Esc)); // cancel
+        assert!(app.input.is_none());
+        assert!(
+            !t1_calls().iter().any(|(p, a, _)| p == "pair" && !a.is_empty()),
+            "Escape dispatches nothing either"
+        );
+
+        // The TOTP prompt obeys the same rule.
+        let ask = app
+            .review_rows()
+            .iter()
+            .position(|r| matches!(r, ReviewRow::Ask(_)))
+            .unwrap();
+        app.select_review_row(ask);
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        assert!(app.input.as_ref().is_some_and(Input::masked));
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert!(!t1_calls().iter().any(|(p, _, _)| p == "secrets.approve"));
+    }
+
+    #[test]
+    fn a_rejected_code_is_never_replayed() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        *T1_PAIR.lock().unwrap() = Some(pairing_fixture());
+        app.select_panel(Panel::Pending);
+        settle_reads(&mut app);
+        let first = app
+            .review_rows()
+            .iter()
+            .position(|r| matches!(r, ReviewRow::Pairing(_)))
+            .unwrap();
+        app.select_review_row(first);
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        for c in "111222".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert!(
+            app.input.is_none(),
+            "the prompt is dropped after a submit, so nothing can replay the code"
+        );
+        // A second Enter with no prompt open cannot fire the old value.
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        let codes: Vec<String> = t1_calls()
+            .into_iter()
+            .filter(|(p, _, _)| p == "pair")
+            .filter_map(|(_, _, f)| f.into_iter().find(|(k, _)| k == "code").map(|(_, v)| v))
+            .collect();
+        assert_eq!(codes, vec!["111222".to_string()], "the code is sent once");
+
+        // Re-opening the prompt starts from an empty buffer, never the rejected
+        // value.
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        assert_eq!(app.input.as_ref().unwrap().buffer, "");
+    }
+
+    #[test]
+    fn never_dispatches_bare_pair_or_a_blocking_wait() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        *T1_PAIR.lock().unwrap() = Some(pairing_fixture());
+        // Walk every pane this slice touches, pressing the keys it owns.
+        for panel in [Panel::Pending, Panel::Roster, Panel::Status] {
+            app.select_panel(panel);
+            for key in ['j', 'k', 'a', 'd', 'r', 'e', 'q'] {
+                app.handle_key(KeyEvent::from(KeyCode::Char(key)));
+            }
+        }
+        for (path, args, flags) in t1_calls() {
+            if path == "pair" {
+                assert!(
+                    !args.is_empty() || flags.iter().any(|(k, v)| k == "json" && v == "true"),
+                    "bare `pair` would raise its interactive menu over this tty"
+                );
+                for (k, v) in flags {
+                    if k == "wait" {
+                        assert_eq!(v, "0", "a blocking wait would freeze the tick loop");
+                    }
+                }
+            }
+            assert_ne!(path, "pair.watch");
+        }
+    }
+
+    #[test]
+    fn node_grants_toggle_from_the_menu_snapshot_and_removal_needs_the_exact_name() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        app.select_panel(Panel::Roster);
+        app.refresh_nodes();
+
+        // Toggling reads the on/off from the snapshot the menu opened with:
+        // `read` is present, so the dispatch turns it OFF.
+        app.open_context_for_node("osaka".into(), 2, 4);
+        let menu = app.context_menu.as_ref().unwrap();
+        assert_eq!(menu.title, "osaka");
+        let toggle_read = menu
+            .actions
+            .iter()
+            .position(|a| *a == ContextAction::ToggleRead)
+            .unwrap();
+        app.run_context_action(toggle_read);
+        let call = t1_calls()
+            .into_iter()
+            .find(|(p, _, _)| p == "node.allow")
+            .expect("a toggle dispatched node allow");
+        assert_eq!(call.1, vec!["osaka", "read", "off"]);
+
+        // A name this box has no record of offers pairing only — never a grant
+        // the registry cannot hold.
+        app.open_context_for_node("yomi".into(), 2, 4);
+        let menu = app.context_menu.as_ref().unwrap();
+        assert_eq!(menu.actions, vec![ContextAction::PairNode]);
+
+        // Removal: a near-miss and an Escape unregister nothing.
+        app.open_context_for_node("osaka".into(), 2, 4);
+        let remove = app
+            .context_menu
+            .as_ref()
+            .unwrap()
+            .actions
+            .iter()
+            .position(|a| *a == ContextAction::RemoveNode)
+            .unwrap();
+        app.run_context_action(remove);
+        for c in "osak".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert!(
+            !t1_calls().iter().any(|(p, _, _)| p == "node.remove"),
+            "a near-miss must not unregister"
+        );
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        app.open_context_for_node("osaka".into(), 2, 4);
+        let remove = app
+            .context_menu
+            .as_ref()
+            .unwrap()
+            .actions
+            .iter()
+            .position(|a| *a == ContextAction::RemoveNode)
+            .unwrap();
+        app.run_context_action(remove);
+        for c in "osaka".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        let call = t1_calls()
+            .into_iter()
+            .find(|(p, _, _)| p == "node.remove")
+            .expect("the exact name unregisters");
+        assert_eq!(call.1, vec!["osaka"]);
+    }
+
+    #[test]
+    fn pairing_a_hostname_is_a_worker_thread_and_never_carries_a_grading_flag() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        let _stage = IsolatedStage::new();
+        app.select_panel(Panel::Roster);
+        app.refresh_nodes();
+        app.open_context_for_node("osaka".into(), 2, 4);
+        let pair = app
+            .context_menu
+            .as_ref()
+            .unwrap()
+            .actions
+            .iter()
+            .position(|a| *a == ContextAction::PairNode)
+            .unwrap();
+        app.run_context_action(pair);
+        assert!(app.pair_busy(), "the sweep and dial run off the tick loop");
+        let mut spins = 0;
+        while app.pair_busy() && spins < 400 {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            app.poll_refresh();
+            spins += 1;
+        }
+        let call = t1_calls()
+            .into_iter()
+            .find(|(p, a, _)| p == "pair" && a == &vec!["osaka".to_string()])
+            .expect("the new request dispatched");
+        let flag = |k: &str| call.2.iter().find(|(f, _)| f == k).map(|(_, v)| v.as_str());
+        assert_eq!(flag("wait"), Some("0"), "a parked request, never a 600s block");
+        assert_eq!(flag("yes"), Some("true"), "`--yes` keeps inquire off this tty");
+        assert_eq!(flag("code"), None, "a new request never carries a code");
+    }
+
+    #[test]
+    fn mesh_rows_report_the_verbs_verbatim_and_never_assert_a_failure() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        app.select_panel(Panel::Roster);
+        app.refresh_mesh();
+        let rows = app.mesh_drift_rows();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].mesh, "home");
+        assert_eq!(rows[0].node, "yomi");
+        assert_eq!(rows[0].label(), "missing (declared, no node record)");
+        assert_eq!(
+            rows[1].label(),
+            "via-mismatch: declared ssh://sakaki, recorded none"
+        );
+        // A successful compare is not a failure report, and the pane's own
+        // status line surfaces the compare's wording.
+        assert!(app.trust_status().contains("mesh"));
+        assert!(!app.trust_status().starts_with("[err]"));
+    }
+
+    #[test]
+    fn status_rows_walk_the_config_and_edit_through_config_set() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        app.select_panel(Panel::Status);
+        settle_reads(&mut app);
+        let rows = app.status_rows();
+        let configs: Vec<(String, String)> = app.config_rows();
+        assert_eq!(
+            configs,
+            vec![
+                ("pairing.defaultGrant".to_string(), "read".to_string()),
+                ("upkeep.verifyCommand".to_string(), "cargo check".to_string()),
+            ],
+            "one level deep: the map-shaped sections are skipped, not flattened"
+        );
+        assert!(app.config_provenance().contains("unmanaged"));
+        assert!(app.config_provenance().contains("present"));
+        assert!(app.secrets_ref_status().contains("broker answered"));
+
+        let idx = rows
+            .iter()
+            .position(|r| matches!(r, StatusRow::Config { key, .. } if key == "pairing.defaultGrant"))
+            .unwrap();
+        app.select_status_row(idx);
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert!(app.input.is_some(), "Enter opens the value prompt");
+        for c in "read,spawn".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        let call = t1_calls()
+            .into_iter()
+            .find(|(p, _, _)| p == "config.set")
+            .expect("the edit dispatched config set");
+        assert_eq!(call.1, vec!["pairing.defaultGrant", "read,spawn"]);
+    }
+
+    /// A worker that never answers must not freeze the interface, and a pairing
+    /// leg in flight must hold back every competing node write — both with a
+    /// visible reason, and nothing dispatched twice.
+    #[test]
+    fn a_stalled_pair_leg_keeps_the_ui_ticking_and_holds_back_competing_writes() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        let _stage = IsolatedStage::new();
+        // The inbound request the approval case below drives, plus the registry
+        // rows the Mesh assertions read.
+        *T1_PAIR.lock().unwrap() = Some(pairing_fixture());
+        app.select_panel(Panel::Roster);
+        app.refresh_nodes();
+        settle_reads(&mut app);
+        stall("pair");
+
+        app.open_context_for_node("osaka".into(), 2, 4);
+        let pair = app
+            .context_menu
+            .as_ref()
+            .unwrap()
+            .actions
+            .iter()
+            .position(|a| *a == ContextAction::PairNode)
+            .unwrap();
+        app.run_context_action(pair);
+        assert!(app.pair_busy(), "the leg is on the worker");
+
+        // The UI thread keeps ticking: five ticks against a stuck worker cost
+        // nothing, because nothing here waits on it.
+        let started = Instant::now();
+        for _ in 0..5 {
+            app.poll_refresh();
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(200),
+            "a tick must never wait on the worker (took {:?})",
+            started.elapsed()
+        );
+
+        // Visible busy feedback on the pane that started it.
+        let backend = ratatui::backend::TestBackend::new(100, 30);
+        let mut term = ratatui::Terminal::new(backend).unwrap();
+        term.draw(|f| crate::board::draw(f, &app)).unwrap();
+        let text = dump_cells(term.backend().buffer());
+        assert!(
+            text.contains("pair: working…"),
+            "Mesh says the leg is running: {text}"
+        );
+
+        // A second activation is refused VISIBLY and dispatches nothing.
+        app.open_context_for_node("osaka".into(), 2, 4);
+        assert_eq!(
+            app.context_menu.as_ref().unwrap().actions,
+            vec![ContextAction::PairNode],
+            "no node write is advertised while the leg runs"
+        );
+        let pair = app
+            .context_menu
+            .as_ref()
+            .unwrap()
+            .actions
+            .iter()
+            .position(|a| *a == ContextAction::PairNode)
+            .unwrap();
+        app.run_context_action(pair);
+        settle_ticks(&mut app, 5);
+        assert!(
+            app.status_message().contains("already in flight"),
+            "the refusal says why: {}",
+            app.status_message()
+        );
+        let pair_calls = |calls: &[Recorded]| {
+            calls
+                .iter()
+                .filter(|(p, a, _)| p == "pair" && a == &vec!["osaka".to_string()])
+                .count()
+        };
+        assert_eq!(
+            pair_calls(&t1_calls()),
+            1,
+            "exactly one leg is on the wire — the second activation was not queued"
+        );
+
+        // A snapshot taken BEFORE the leg (the review's own repro) is refused at
+        // the action, not just hidden from the menu: the worker's commit writes
+        // nodes.json, so a UI-thread node write at the same time is a lost
+        // update.
+        let stale = ContextMenu {
+            x: 2,
+            y: 4,
+            title: "osaka".to_string(),
+            target: ContextTarget::Node {
+                name: "osaka".to_string(),
+                allows: vec!["read".to_string()],
+                known: true,
+            },
+            actions: vec![ContextAction::ToggleRead],
+            selected: 0,
+        };
+        let allow_before = t1_calls().iter().filter(|(p, _, _)| p == "node.allow").count();
+        app.context_menu = Some(stale);
+        app.run_context_action(0);
+        settle_ticks(&mut app, 5);
+        assert_eq!(
+            t1_calls().iter().filter(|(p, _, _)| p == "node.allow").count(),
+            allow_before,
+            "the toggle is refused while the leg runs"
+        );
+        assert!(app.context_menu.is_none());
+        assert!(
+            app.status_message().contains("held back") || app.status_message().contains("already in flight"),
+            "and it says so: {}",
+            app.status_message()
+        );
+
+        // The INBOUND approval is the other leg that commits the node registry,
+        // and it dispatches inline — so it too is refused while a leg is on the
+        // wire, with the prompt (and the typed code) dropped rather than
+        // replayed. The pairing listing is a local read, so it fills the rows
+        // without waiting for the outstanding leg.
+        app.select_panel(Panel::Pending);
+        let inbound = app
+            .review_rows()
+            .iter()
+            .position(|r| matches!(r, ReviewRow::Pairing(p) if !p.outbound()))
+            .unwrap();
+        app.select_review_row(inbound);
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        assert!(app.input.is_some(), "the masked prompt opened");
+        for c in "740729".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        settle_ticks(&mut app, 5);
+        assert!(app.input.is_none(), "the refused prompt is dropped, code and all");
+        assert!(
+            app.status_message().contains("held back"),
+            "the inbound approval says why: {}",
+            app.status_message()
+        );
+        assert_eq!(
+            t1_calls()
+                .iter()
+                .filter(|(p, a, _)| p == "pair" && a == &vec!["4f2a91bc".to_string()])
+                .count(),
+            0,
+            "no inbound approval was dispatched while the leg runs"
+        );
+
+        // Release: the leg lands, the ceremony holds its own code, and the
+        // registry reads are re-listed.
+        release();
+        settle_reads(&mut app);
+        assert!(!app.pair_busy(), "the leg landed");
+        assert!(
+            app.pair_ceremony.is_some(),
+            "the worker's outcome reached the dedicated ceremony popup"
+        );
+
+        // With the worker drained, the same inbound approval dispatches — the
+        // guard is a hold, not a lock-out.
+        app.dismiss_pair_ceremony();
+        app.select_panel(Panel::Pending);
+        settle_reads(&mut app);
+        let inbound = app
+            .review_rows()
+            .iter()
+            .position(|r| matches!(r, ReviewRow::Pairing(p) if !p.outbound()))
+            .unwrap();
+        app.select_review_row(inbound);
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        for c in "740729".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        let approved = t1_calls()
+            .into_iter()
+            .find(|(p, a, _)| p == "pair" && a == &vec!["4f2a91bc".to_string()])
+            .expect("the approval dispatches once the leg is drained");
+        assert_eq!(
+            approved.2.iter().find(|(k, _)| k == "code").map(|(_, v)| v.as_str()),
+            Some("740729")
+        );
+    }
+
+    /// A worker that never answers must leave the cached rows on screen (with a
+    /// visible "reading…"), and a second secrets action must be refused rather
+    /// than raced: one mutation at a time, never queued, never retried.
+    #[test]
+    fn a_stalled_secrets_read_keeps_cached_rows_and_a_stalled_mutation_refuses_a_second() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        let _stage = IsolatedStage::new();
+        *T1_PAIR.lock().unwrap() = Some(pairing_fixture());
+        app.select_panel(Panel::Pending);
+        settle_reads(&mut app); // first read answers: one ask on screen
+        assert_eq!(app.secret_ask_rows().len(), 1);
+
+        // Now the broker goes quiet while the pane re-lists.
+        stall("secrets.pending");
+        app.handle_key(KeyEvent::from(KeyCode::Char('r')));
+        assert!(app.secrets_pending_busy(), "the re-list is on the worker");
+        let started = Instant::now();
+        for _ in 0..5 {
+            app.poll_refresh();
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(200),
+            "the tick never waits on the broker (took {:?})",
+            started.elapsed()
+        );
+        assert_eq!(
+            app.secret_ask_rows().len(),
+            1,
+            "the cached rows stay while the read is in flight"
+        );
+        assert!(
+            app.secrets_pending_status().contains("reading…"),
+            "and the pane says it is reading: {}",
+            app.secrets_pending_status()
+        );
+        release();
+        settle_reads(&mut app);
+        assert_eq!(app.secret_ask_rows().len(), 1);
+
+        // A stalled MUTATION: the TOTP submit goes to the worker (its socket
+        // round trip is unbounded), the tick keeps running, and a second submit
+        // is refused instead of racing the first.
+        stall("secrets.approve");
+        let ask = app
+            .review_rows()
+            .iter()
+            .position(|r| matches!(r, ReviewRow::Ask(_)))
+            .unwrap();
+        app.select_review_row(ask);
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        assert!(app.input.as_ref().is_some_and(Input::masked), "still masked");
+        for c in "123456".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(
+            app.secrets_action_busy(),
+            Some("approving ask #3"),
+            "the pane knows what is running"
+        );
+        assert!(app.input.is_none(), "the prompt was dropped, never replayed");
+
+        let started = Instant::now();
+        for _ in 0..5 {
+            app.poll_refresh();
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(200),
+            "the tick never waits on the mutation (took {:?})",
+            started.elapsed()
+        );
+        assert!(
+            app.secrets_pending_status().contains("approving ask #3…"),
+            "the busy line names it: {}",
+            app.secrets_pending_status()
+        );
+
+        // A second action while the first is in flight: refused, visibly, and
+        // nothing dispatched. (The refusal is synchronous, so this is exact; the
+        // count of the mutation itself is asserted once the worker has landed.)
+        app.handle_key(KeyEvent::from(KeyCode::Char('d'))); // dismiss the same ask
+        settle_ticks(&mut app, 5);
+        let dismissals: Vec<Recorded> = t1_calls()
+            .into_iter()
+            .filter(|(p, _, _)| p == "secrets.dismiss")
+            .collect();
+        assert!(
+            dismissals.is_empty(),
+            "no competing mutation was spawned: {dismissals:?}"
+        );
+        assert!(
+            app.status_message().contains("already in flight"),
+            "the refusal is visible: {}",
+            app.status_message()
+        );
+
+        release();
+        settle_reads(&mut app);
+        assert!(app.secrets_action_busy().is_none());
+        assert_eq!(
+            t1_calls()
+                .iter()
+                .filter(|(p, _, _)| p == "secrets.approve")
+                .count(),
+            1,
+            "exactly one mutation reached the broker — the refused second never did"
+        );
+        assert!(
+            t1_calls().iter().any(|(p, _, _)| p == "secrets.approve"),
+            "the approved mutation's own outcome landed"
+        );
+    }
+
+    /// Run a fixed number of ticks without waiting for any worker.
+    fn settle_ticks(app: &mut App, ticks: usize) {
+        for _ in 0..ticks {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            tick(app);
+        }
+    }
+
+    #[test]
+    fn secret_ask_rows_render_the_numeric_wire_timestamp() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        app.select_panel(Panel::Pending);
+        settle_reads(&mut app);
+        let asks = app.secret_ask_rows();
+        assert_eq!(asks.len(), 1);
+        assert_eq!(asks[0].id, "3");
+        assert_eq!(asks[0].peer_uid.as_deref(), Some("1000"));
+        // The wire sends epoch SECONDS (`secrets::client::PendingAsk`), and the
+        // row must render that fact, not an empty cell: the same UTC spelling
+        // the rest of the panes use.
+        assert_eq!(
+            asks[0].requested_at,
+            aoide_storage::time::iso_utc_from_epoch(1789862400)
+        );
+        assert!(
+            asks[0].requested_at.contains('T') && asks[0].requested_at.ends_with('Z'),
+            "an epoch is rendered as a timestamp, never raw and never blank: {}",
+            asks[0].requested_at
+        );
+        let dumped = format!("{:?}", app.review_rows());
+        assert!(
+            dumped.contains(&asks[0].requested_at),
+            "the rendered row carries it: {dumped}"
+        );
+    }
+
+    /// The Status pane's environment block is exactly as tall as the geometry
+    /// reserves, and its last line is painted: the palette summary was the line
+    /// a hand-counted split clipped.
+    #[test]
+    fn status_env_geometry_is_exact_and_the_palette_line_is_painted() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        app.panel = Panel::Status;
+        let area = ratatui::layout::Rect::new(0, 0, 100, 30);
+        let block = crate::ui::status_env_block(&app);
+        let (env, list) = crate::ui::status_parts(area, &app);
+        assert_eq!(
+            env.height as usize,
+            block.len(),
+            "the reserved rows and the painted rows are one number"
+        );
+        assert_eq!(list.y, env.bottom(), "the list starts where the block ends");
+
+        let backend = ratatui::backend::TestBackend::new(100, 30);
+        let mut term = ratatui::Terminal::new(backend).unwrap();
+        term.draw(|f| crate::board::draw(f, &app)).unwrap();
+        let text = dump_cells(term.backend().buffer());
+        assert!(
+            text.contains("palette"),
+            "the block's last line reaches the screen: {text}"
+        );
+        assert!(
+            text.contains("── config"),
+            "and the list still begins below it: {text}"
+        );
+    }
+
+    #[test]
+    fn secret_rows_render_only_known_metadata_and_an_unanswered_broker_is_not_an_inventory() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        app.select_panel(Panel::Status);
+        settle_reads(&mut app);
+        let refs = app.secret_ref_rows();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].name, "db-prod");
+        let detail = refs[0].detail();
+        assert!(detail.contains("backend pass"));
+        assert!(detail.contains("totp required"));
+        assert!(detail.contains("consumers m,n"));
+        assert!(
+            detail.contains("automation on (m)"),
+            "the automation object is read field by field: {detail}"
+        );
+        assert!(detail.contains("sharedWith osaka"));
+        assert!(detail.contains("remote denied"));
+        assert!(detail.contains("allowRemoteOrigin off"));
+
+        // Grant/revoke go through the admin commands, whose own refusal — this
+        // euid may not write policy — is what the status line shows.
+        let secret = app.status_rows()
+            .iter()
+            .position(|r| matches!(r, StatusRow::Secret(_)))
+            .expect("the broker's reference row is listed");
+        app.select_status_row(secret);
+        app.open_status_menu();
+        let grant = app
+            .context_menu
+            .as_ref()
+            .unwrap()
+            .actions
+            .iter()
+            .position(|a| *a == ContextAction::GrantSecret)
+            .unwrap();
+        app.run_context_action(grant);
+        for c in "n".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        settle_reads(&mut app);
+        let call = t1_calls()
+            .into_iter()
+            .find(|(p, _, _)| p == "secrets.grant")
+            .expect("the grant dispatched");
+        assert_eq!(call.1, vec!["db-prod", "n"]);
+        assert!(
+            app.status_message().contains("may not write policy"),
+            "the backend's refusal is shown truthfully: {}",
+            app.status_message()
+        );
+
+        // A broker that never answered (socket absent, or the subcommand not
+        // there yet) renders its own error and NO rows — never an empty
+        // inventory that reads like "no secrets".
+        let mut app = t1_app();
+        *T1_STATUS.lock().unwrap() = Some(Outcome::error(
+            "secrets.status",
+            "connecting to /run/aoide/secrets.sock: No such file or directory (os error 2)",
+        ));
+        app.select_panel(Panel::Status);
+        settle_reads(&mut app);
+        assert!(app.secret_ref_rows().is_empty());
+        assert!(
+            app.secrets_ref_status().starts_with("[err] secrets.status:"),
+            "the failure is surfaced: {}",
+            app.secrets_ref_status()
+        );
+        assert!(
+            app.secrets_ref_status().contains("No such file or directory"),
+            "the broker's own words, not a paraphrase"
+        );
+    }
+
+    #[test]
+    fn review_selection_survives_a_shrinking_queue() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        *T1_PAIR.lock().unwrap() = Some(pairing_fixture());
+        app.select_panel(Panel::Pending);
+        settle_reads(&mut app);
+        // Park the cursor on the LAST pairing request, then shrink the listing
+        // to nothing: the cursor must land on a selectable row, never on a
+        // header and never out of bounds.
+        let last = app
+            .review_rows()
+            .iter()
+            .rposition(|r| matches!(r, ReviewRow::Pairing(_)))
+            .unwrap();
+        app.select_review_row(last);
+        *T1_PAIR.lock().unwrap() = Some(json!({ "requests": [] }));
+        app.refresh_pairing();
+        app.clamp_selection();
+        let row = app.review_row().expect("a row is still selected");
+        assert!(
+            row.key().is_some(),
+            "the cursor is on a real row, not a section header"
+        );
+        assert!(app.review_sel < app.review_rows().len());
+
+        // And a mid-list shrink keeps the SAME request selected by identity.
+        let mut app = t1_app();
+        *T1_PAIR.lock().unwrap() = Some(pairing_fixture());
+        app.select_panel(Panel::Pending);
+        settle_reads(&mut app);
+        let second = app
+            .review_rows()
+            .iter()
+            .rposition(|r| matches!(r, ReviewRow::Pairing(_)))
+            .unwrap();
+        app.select_review_row(second);
+        *T1_PAIR.lock().unwrap() = Some(json!({ "requests": [
+            { "id": "aa77", "direction": "outbound", "name": "sakaki",
+              "url": "http://127.0.0.1:8712/", "state": "awaiting-approval",
+              "requestedAt": "2026-09-20T00:02:00Z", "expiresAt": "2026-09-20T00:12:00Z" },
+        ] }));
+        app.refresh_pairing();
+        app.clamp_selection();
+        match app.review_row().unwrap() {
+            ReviewRow::Pairing(r) => assert_eq!(r.id, "aa77", "the same request stays selected"),
+            other => panic!("expected the same pairing row, got {other:?}"),
+        }
+    }
+
+    /// Plain-text dump of a TestBackend buffer — the reviewer reads the pane's
+    /// real layout instead of trusting a summary of it.
+    fn dump_cells(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area;
+        (area.y..area.bottom())
+            .map(|y| {
+                (area.x..area.right())
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Save one rendered pane as plain text for the review lane that inspects
+    /// this slice's layout. Synthetic fixtures only — never real pairing state
+    /// or a real secret. Errors are ignored: this is a review artifact, not a
+    /// behaviour of the pane.
+    fn save_render(name: &str, text: &str) {
+        let dir = std::path::Path::new("/tmp/aoide-ops-20260920");
+        let _ = std::fs::create_dir_all(dir);
+        let _ = std::fs::write(dir.join(format!("render-{name}.txt")), format!("{text}\n"));
+    }
+
+    /// Seed the Mesh pane's three reads with synthetic fixtures — a roster node,
+    /// its registry row and one declared mesh divergence. For the layout dump
+    /// only: no pairing state and no credential is involved.
+    fn t1_mesh_state(app: &mut App) {
+        app.roster.outcome = Some(
+            Outcome::ok("session", "1 node").with_data(json!({
+                "nodes": [{
+                    "name": "osaka", "isLocal": false, "presence": "online",
+                    "fetchedAt": "2026-09-20T00:00:00Z",
+                    "sessions": [{
+                        "label": "fable (…snd)", "state": "working",
+                    }],
+                }],
+            })),
+        );
+        app.nodes = Some(
+            Outcome::ok("node.status", "2 node(s) registered").with_data(json!({
+                "nodes": [
+                    { "name": "osaka", "verified": true, "allows": ["read", "spawn"],
+                      "state": "fresh", "url": "http://127.0.0.1:8710/", "hub": false,
+                      "autogate": true, "error": Value::Null },
+                    { "name": "yomi", "verified": false, "allows": [],
+                      "state": "never-pulled", "url": "http://yomi:8710/", "hub": false,
+                      "autogate": false, "error": Value::Null },
+                ],
+            })),
+        );
+        app.mesh = Some(
+            Outcome::ok("mesh", "1 mesh, 1 divergence(s)").with_data(json!({
+                "report": { "sections": [{
+                    "name": "home", "grant": ["read"], "sameOperator": true,
+                    "declared": 2, "selfDeclared": true,
+                    "rows": [{ "node": "yomi", "class": "missing" }],
+                }], "undeclared": ["osaka"] },
+            })),
+        );
+    }
+
+    #[test]
+    fn each_changed_pane_renders_at_a_narrow_width_and_saves_its_dump() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // An isolated stage, so the artifacts show THIS slice's synthetic
+        // pairing/config/secrets fixtures and never the operator's stage tree
+        // (the pane chrome renders the tree).
+        let _stage = IsolatedStage::new();
+        for (w, h) in [(100u16, 28u16), (60, 20), (40, 12)] {
+            let mut app = t1_app();
+            *T1_PAIR.lock().unwrap() = Some(pairing_fixture());
+            t1_mesh_state(&mut app);
+            for panel in [Panel::Pending, Panel::Roster, Panel::Status] {
+                app.select_panel(panel);
+                // Settle the async reads first, so the artifact shows the states
+                // the fixtures describe (the ask row with its numeric wire
+                // timestamp included), not a pane mid-read.
+                settle_reads(&mut app);
+                let backend = ratatui::backend::TestBackend::new(w, h);
+                let mut term = ratatui::Terminal::new(backend).unwrap();
+                term.draw(|f| crate::board::draw(f, &app)).unwrap();
+                let text = dump_cells(term.backend().buffer());
+                if w == 100 {
+                    save_render(
+                        match panel {
+                            Panel::Pending => "review",
+                            Panel::Roster => "mesh",
+                            _ => "status",
+                        },
+                        &text,
+                    );
+                }
+                assert!(!text.is_empty());
+            }
+        }
+
+        // The states a plain fixture cannot show, saved for the same review:
+        // a busy Mesh, a busy Review, the masked code popup (whose digits must
+        // not reach the screen) and a Status pane whose broker did not answer.
+        let mut app = t1_app();
+        *T1_PAIR.lock().unwrap() = Some(pairing_fixture());
+        t1_mesh_state(&mut app);
+        app.select_panel(Panel::Roster);
+        settle_reads(&mut app);
+        stall("pair");
+        app.open_context_for_node("osaka".into(), 2, 4);
+        let pair = app
+            .context_menu
+            .as_ref()
+            .unwrap()
+            .actions
+            .iter()
+            .position(|a| *a == ContextAction::PairNode)
+            .unwrap();
+        app.run_context_action(pair);
+        assert!(app.pair_busy());
+        save_render("mesh-busy", &render(&mut app, 100, 28));
+        app.select_panel(Panel::Pending);
+        // The asks read is on its own worker and answers; ticks drain it without
+        // waiting for the stalled pair leg, so the artifact shows the ask row too.
+        settle_ticks(&mut app, 40);
+        save_render("review-busy", &render(&mut app, 100, 28));
+        release();
+        settle_reads(&mut app);
+
+        // The masked prompt, drawn: the typed digits never appear.
+        let mut app = t1_app();
+        *T1_PAIR.lock().unwrap() = Some(pairing_fixture());
+        app.select_panel(Panel::Pending);
+        settle_reads(&mut app);
+        let first = app
+            .review_rows()
+            .iter()
+            .position(|r| matches!(r, ReviewRow::Pairing(_)))
+            .unwrap();
+        app.select_review_row(first);
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        for c in "740729".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        let masked = render(&mut app, 100, 28);
+        assert!(
+            masked.contains("******"),
+            "the typed code is drawn as a mask: {masked}"
+        );
+        assert!(
+            !masked.contains("740729"),
+            "and never in the clear, anywhere on the screen: {masked}"
+        );
+        save_render("review-masked", &masked);
+
+        // A broker that did not answer: the error line, and no rows.
+        let mut app = t1_app();
+        *T1_STATUS.lock().unwrap() = Some(Outcome::error(
+            "secrets.status",
+            "connecting to /run/aoide/secrets.sock: No such file or directory (os error 2)",
+        ));
+        app.select_panel(Panel::Status);
+        settle_reads(&mut app);
+        assert!(app.secret_ref_rows().is_empty());
+        save_render("status-error", &render(&mut app, 100, 28));
+    }
+
+    /// One pane as plain text, through the whole-screen composer.
+    fn render(app: &mut App, w: u16, h: u16) -> String {
+        let backend = ratatui::backend::TestBackend::new(w, h);
+        let mut term = ratatui::Terminal::new(backend).unwrap();
+        term.draw(|f| crate::board::draw(f, app)).unwrap();
+        dump_cells(term.backend().buffer())
+    }
+
     #[test]
     fn mail_draft_navigation_and_unicode_edits_do_not_send() {
         let mut app = App::for_test(vec![], vec![], vec![]);

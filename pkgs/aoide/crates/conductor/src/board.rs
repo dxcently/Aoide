@@ -120,8 +120,13 @@ pub fn action_regions(
         ],
         Panel::Projects => &[('a', "Add folder"), ('r', "Resurrect")],
         Panel::Session | Panel::Terminals => &[('\n', "Open / focus")],
-        Panel::Roster => &[('s', "Terminal input"), ('r', "Refresh")],
-        Panel::Pending => &[('a', "Approve"), ('d', "Deny")],
+        Panel::Roster => &[('s', "Terminal input"), ('r', "Refresh"), ('e', "Actions")],
+        Panel::Pending => &[
+            ('a', "Approve"),
+            ('d', "Deny or reject"),
+            ('r', "Re-list"),
+        ],
+        Panel::Status => &[('e', "Actions"), ('r', "Refresh")],
         Panel::Mail => &[
             ('n', "New letter"),
             ('s', "Reply"),
@@ -981,14 +986,29 @@ pub fn hit(area: Rect, app: &App, x: u16, y: u16) -> Hit {
             let p = Layout::vertical([
                 Constraint::Length(1),
                 Constraint::Length(1),
+                Constraint::Length(1),
                 Constraint::Min(3),
             ])
             .split(body);
-            (p[2], app.roster_sel, vec![1; app.roster_flat_rows().len()])
+            (p[3], app.roster_sel, vec![1; app.roster_flat_rows().len()])
         }
         Panel::Pending => {
-            let p = Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).split(body);
-            (p[1], app.pending_sel, vec![1; app.pending_rows().len()])
+            // Three fixed rows above the list (pending status, pairing+asks
+            // status, then the rows) — the same split `draw_pending` makes.
+            let p = Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(3),
+            ])
+            .split(body);
+            (p[2], app.review_sel, vec![1; app.review_rows().len()])
+        }
+        Panel::Status => {
+            // The environment block, then the list of config keys and secret
+            // references. Both halves come from `ui::status_parts`, so this hit
+            // test resolves the very rows that were painted.
+            let (_, list) = crate::ui::status_parts(body, app);
+            (list, app.status_sel, vec![1; app.status_rows().len()])
         }
         Panel::Projects => {
             let p = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(body);
@@ -1808,6 +1828,14 @@ fn context_action_symbol(action: crate::app::ContextAction) -> &'static str {
         ContextAction::LeadProject => "*",
         ContextAction::Resurrect => "^",
         ContextAction::AddFolder => "+",
+        ContextAction::PairNode => "&",
+        ContextAction::ToggleRead => "r",
+        ContextAction::ToggleSpawn => "s",
+        ContextAction::ToggleMessage => "m",
+        ContextAction::RemoveNode => "-",
+        ContextAction::EditValue => "=",
+        ContextAction::GrantSecret => "+",
+        ContextAction::RevokeSecret => "-",
     }
 }
 

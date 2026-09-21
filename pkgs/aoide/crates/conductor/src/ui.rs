@@ -49,24 +49,149 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
     if app.tail.is_some() {
         draw_log_tail(f, area, app);
     }
+    // The dedicated human pairing ceremony, when one is open. This is the ONE
+    // surface in the whole frontend that draws a pairing code — the code lives
+    // in `App::pair_ceremony` (no `Debug`, cleared on dismissal) and nowhere
+    // else, so nothing here can leak it into a row, the status bar or a log
+    // view. When no code is held (a refusal, a still-pending resume) the same
+    // popup carries only the command's own sanitised wording.
+    if let Some(c) = &app.pair_ceremony {
+        let mut lines: Vec<String> = Vec::new();
+        lines.push(if c.has_codes() {
+            format!("Pairing ceremony with `{}` — human, out-of-band only.", c.name)
+        } else {
+            format!("Pairing ceremony with `{}`.", c.name)
+        });
+        lines.push(String::new());
+        for (what, code) in &c.codes {
+            lines.push(format!("  {what}"));
+            lines.push(format!("  {code}"));
+        }
+        if !c.has_codes() {
+            lines.push(format!("  {}", c.note));
+        }
+        lines.push(String::new());
+        lines.push("Enter or Esc dismisses and clears the code.".to_string());
+        let body = lines.join("\n");
+        let width = area.width.min(72).max(24);
+        let height = area.height.min(lines.len() as u16 + 4).max(6);
+        let popup = centered(width, height, area);
+        f.render_widget(Clear, popup);
+        f.render_widget(
+            Paragraph::new(body)
+                .wrap(ratatui::widgets::Wrap { trim: false })
+                .style(theme::accent_style(&app.palette))
+                .block(
+                    Block::default()
+                        .title(" Pairing — read this aloud ")
+                        .borders(Borders::ALL),
+                ),
+            popup,
+        );
+    }
     if let Some(input) = &app.input {
-        if let crate::app::InputKind::ProjectRemove { name } = &input.kind {
-            let width = area.width.min(68);
-            let height = area.height.min(10);
-            let popup = Rect::new(
-                area.x + (area.width - width) / 2,
-                area.y + (area.height - height) / 2,
-                width,
-                height,
-            );
-            f.render_widget(Clear, popup);
-            f.render_widget(
-                Paragraph::new(format!("Unregister project `{name}`?\nProject files are kept.\n\nType the exact project name: {}▏\n\nEnter confirms matching name; Esc cancels", input.buffer))
+        match &input.kind {
+            crate::app::InputKind::ProjectRemove { name } => {
+                let width = area.width.min(68);
+                let height = area.height.min(10);
+                let popup = Rect::new(
+                    area.x + (area.width - width) / 2,
+                    area.y + (area.height - height) / 2,
+                    width,
+                    height,
+                );
+                f.render_widget(Clear, popup);
+                f.render_widget(
+                    Paragraph::new(format!("Unregister project `{name}`?\nProject files are kept.\n\nType the exact project name: {}▏\n\nEnter confirms matching name; Esc cancels", input.buffer))
+                        .wrap(ratatui::widgets::Wrap { trim: false })
+                        .style(theme::accent_style(&app.palette))
+                        .block(Block::default().title(" Confirm project removal ").borders(Borders::ALL)),
+                    popup,
+                );
+            }
+            // The code prompts. Masked, always: what was typed is drawn as one
+            // glyph per character, so a shoulder or a screenshot keeps the
+            // secret, and the pane around it names only the exact target the
+            // code belongs to. Empty Enter dispatches nothing; the prompt is
+            // dropped entirely once a code is submitted, so a refusal is never
+            // replayed.
+            crate::app::InputKind::PairCode { name, .. } => {
+                let width = area.width.min(70);
+                let height = area.height.min(9);
+                let popup = Rect::new(
+                    area.x + (area.width - width) / 2,
+                    area.y + (area.height - height) / 2,
+                    width,
+                    height,
+                );
+                f.render_widget(Clear, popup);
+                f.render_widget(
+                    Paragraph::new(format!(
+                        "Type the code SHOWN on {name}'s own screen.\n\
+                         It is read out of band, never discovered or fetched.\n\n\
+                         code: {}▏\n\n\
+                         Enter approves; Esc cancels. Nothing is sent while the field is empty.",
+                        input.display_buffer()
+                    ))
                     .wrap(ratatui::widgets::Wrap { trim: false })
                     .style(theme::accent_style(&app.palette))
-                    .block(Block::default().title(" Confirm project removal ").borders(Borders::ALL)),
-                popup,
-            );
+                    .block(
+                        Block::default()
+                            .title(" Pairing code (masked) ")
+                            .borders(Borders::ALL),
+                    ),
+                    popup,
+                );
+            }
+            crate::app::InputKind::TotpCode {
+                secret, consumer, ..
+            } => {
+                let width = area.width.min(70);
+                let height = area.height.min(9);
+                let popup = Rect::new(
+                    area.x + (area.width - width) / 2,
+                    area.y + (area.height - height) / 2,
+                    width,
+                    height,
+                );
+                f.render_widget(Clear, popup);
+                f.render_widget(
+                    Paragraph::new(format!(
+                        "TOTP for `{secret}` requested by {consumer}.\n\
+                         The code approves the ORIGINAL parked request; it is never echoed back.\n\n\
+                         totp: {}▏\n\n\
+                         Enter approves; Esc cancels. Nothing is sent while the field is empty.",
+                        input.display_buffer()
+                    ))
+                    .wrap(ratatui::widgets::Wrap { trim: false })
+                    .style(theme::accent_style(&app.palette))
+                    .block(
+                        Block::default()
+                            .title(" Secrets approval (masked) ")
+                            .borders(Borders::ALL),
+                    ),
+                    popup,
+                );
+            }
+            crate::app::InputKind::NodeRemove { name } => {
+                let width = area.width.min(68);
+                let height = area.height.min(9);
+                let popup = Rect::new(
+                    area.x + (area.width - width) / 2,
+                    area.y + (area.height - height) / 2,
+                    width,
+                    height,
+                );
+                f.render_widget(Clear, popup);
+                f.render_widget(
+                    Paragraph::new(format!("Unregister node `{name}`?\nThe pairing/key material recorded here is dropped.\n\nType the exact node name: {}▏\n\nEnter confirms matching name; Esc cancels", input.buffer))
+                        .wrap(ratatui::widgets::Wrap { trim: false })
+                        .style(theme::accent_style(&app.palette))
+                        .block(Block::default().title(" Confirm node removal ").borders(Borders::ALL)),
+                    popup,
+                );
+            }
+            _ => {}
         }
     }
 }
@@ -76,7 +201,7 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
 pub(crate) fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     let hint = keymap_hint(app.panel);
     let msg = if let Some(input) = &app.input {
-        format!("{}: {}▏", input.label, input.buffer)
+        format!("{}: {}▏", input.label, input.display_buffer())
     } else {
         app.status_message()
     };
@@ -124,11 +249,11 @@ fn keymap_hint(panel: Panel) -> &'static str {
         }
         Panel::Projects => "j/k select · a add root · d remove · Tab panel · ? help · q quit",
         Panel::Log => "Tab panel · ? help · q quit",
-        Panel::Status => "Tab panel · ? help · q quit",
+        Panel::Status => "j/k select · Enter edit · e actions · r refresh · ? help · q quit",
         Panel::Roster => {
-            "j/k select · s compose · r refresh (auto ~15s while open) · Tab panel · ? help · q quit"
+            "j/k select · s compose · e actions · r refresh (auto ~15s while open) · Tab panel · ? help · q quit"
         }
-        Panel::Pending => "j/k select · a approve · d deny · Tab panel · ? help · q quit",
+        Panel::Pending => "j/k select · a approve/resume · d deny/reject · r re-list · Tab panel · ? help · q quit",
     }
 }
 
@@ -541,7 +666,11 @@ fn draw_projects(f: &mut Frame, area: Rect, app: &App) {
 
 // ── [3] LOG — the audit tail ────────────────────────────────────────────────
 
-fn draw_status_panel(f: &mut Frame, area: Rect, app: &App) {
+/// The Status pane's fixed environment block, exactly as it is painted. The
+/// split and the paint both come from THIS function, so the reserved height is
+/// the painted height and no line can be clipped by a second, drifting count
+/// (the palette summary was the one that fell off the old hand-counted split).
+pub(crate) fn status_env_block(app: &App) -> Vec<Line<'static>> {
     // Two roots since command-defrag S1 (2026-08-27): conducting state
     // (`sessions.json`/`hooks.json`/`projects.json`/`graph.json`) lives under
     // `state/stage/`; rice/paint state (`livery.json`) stays `song/stage/`.
@@ -597,8 +726,59 @@ fn draw_status_panel(f: &mut Frame, area: Rect, app: &App) {
     )));
     lines.push(Line::from(""));
     lines.push(palette_summary(app));
+    lines
+}
 
-    f.render_widget(Paragraph::new(lines), area);
+/// The Status pane's two halves: the environment block, then the list of config
+/// keys and secret references. Draw and hit test both call this, so a click
+/// resolves the row that was painted.
+pub(crate) fn status_parts(area: Rect, app: &App) -> (Rect, Rect) {
+    let parts = Layout::vertical([
+        Constraint::Length(status_env_block(app).len() as u16),
+        Constraint::Min(3),
+    ])
+    .split(area);
+    (parts[0], parts[1])
+}
+
+fn draw_status_panel(f: &mut Frame, area: Rect, app: &App) {
+    let (env, list) = status_parts(area, app);
+    f.render_widget(Paragraph::new(status_env_block(app)), env);
+
+    // The editable half: the config keys this instance may write, then the
+    // secrets broker's own reference rows. A key renders with the value the
+    // read carried; a secret renders only the fields the status contract names.
+    let rows = app.status_rows();
+    let items: Vec<ListItem> = rows.iter().map(status_row_item).collect();
+    let widget = List::new(items).highlight_style(selection_style(app));
+    let mut state = ListState::default();
+    state.select(Some(app.status_sel.min(rows.len().saturating_sub(1))));
+    f.render_stateful_widget(widget, list, &mut state);
+}
+
+/// One Status row: a section header carrying its own provenance/refusal, a
+/// settable config key with the value that was read, or one secret's reference
+/// metadata. Never a secret value — the command's own read carries none.
+fn status_row_item<'a>(row: &crate::app::StatusRow) -> ListItem<'a> {
+    use crate::app::StatusRow;
+    match row {
+        StatusRow::Header { title, note } => ListItem::new(Line::from(vec![
+            Span::styled(
+                format!("── {title} "),
+                theme::dim().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(note.clone(), theme::dim()),
+        ])),
+        StatusRow::Config { key, value } => ListItem::new(Line::from(format!(
+            "{key} = {}   (Enter edits)",
+            if value.is_empty() { "``" } else { value }
+        ))),
+        StatusRow::Secret(r) => ListItem::new(Line::from(format!(
+            "{}  {}",
+            r.name,
+            r.detail()
+        ))),
+    }
 }
 
 fn file_status<'a>(path: &std::path::Path, label: &str, count: usize) -> Line<'a> {
@@ -681,6 +861,7 @@ fn draw_roster(f: &mut Frame, area: Rect, app: &App) {
     let parts = Layout::vertical([
         Constraint::Length(1), // glyph legend
         Constraint::Length(1), // fetch status (probing… / fetched Ns ago)
+        Constraint::Length(1), // registry + mesh-drift status
         Constraint::Min(3),    // node/session list
     ])
     .split(area);
@@ -691,15 +872,32 @@ fn draw_roster(f: &mut Frame, area: Rect, app: &App) {
     .style(theme::dim());
     f.render_widget(Paragraph::new(legend), parts[0]);
 
-    let status = Line::from(format!(" {}", app.roster_status())).style(theme::dim());
+    let status = Line::from(format!(
+        " {}{}",
+        app.roster_status(),
+        // The pairing leg this pane starts is a background sweep+dial; say so
+        // here, where it was activated, not only in Review.
+        if app.pair_busy() {
+            " · pair: working…"
+        } else {
+            ""
+        }
+    ))
+    .style(theme::dim());
     f.render_widget(Paragraph::new(status), parts[1]);
+
+    // The registry's own status and the mesh compare's, each surfacing its own
+    // refusal: a failed `node status`/`mesh` read must not render as an
+    // all-clear trust list.
+    let trust = Line::from(format!(" {}", app.trust_status())).style(theme::dim());
+    f.render_widget(Paragraph::new(trust), parts[2]);
 
     if rows.is_empty() {
         let lines = vec![
             Line::from(""),
             Line::from("   no roster data yet — press r to fetch.").style(theme::dim()),
         ];
-        f.render_widget(Paragraph::new(lines), parts[2]);
+        f.render_widget(Paragraph::new(lines), parts[3]);
         return;
     }
 
@@ -710,7 +908,7 @@ fn draw_roster(f: &mut Frame, area: Rect, app: &App) {
     let list = List::new(items).highlight_style(selection_style(app));
     let mut state = ListState::default();
     state.select(Some(app.roster_sel.min(rows.len().saturating_sub(1))));
-    f.render_stateful_widget(list, parts[2], &mut state);
+    f.render_stateful_widget(list, parts[3], &mut state);
 }
 
 fn roster_row_item<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette) -> ListItem<'a> {
@@ -720,6 +918,8 @@ fn roster_row_item<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette) -
             is_local,
             presence,
             fetched_at,
+            verified,
+            grants,
         } => {
             let glyph = graph::glyph(presence);
             let head = match presence.as_str() {
@@ -732,11 +932,22 @@ fn roster_row_item<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette) -
                 _ if *is_local => format!("{glyph} {} (this host)", name),
                 _ => format!("{glyph} {}", name),
             };
-            ListItem::new(Line::from(Span::styled(
-                head,
-                Style::default().add_modifier(Modifier::BOLD),
-            )))
+            // The registry's own verdict and grant set ride the same header
+            // line: a name with no record says so rather than implying one.
+            let trust = match verified {
+                Some(true) => format!("  paired · allows {grants}"),
+                Some(false) => format!("  unverified (no pairing on record) · allows {grants}"),
+                None => "  no registry record".to_string(),
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(head, Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(trust, theme::dim()),
+            ]))
         }
+        crate::app::RosterRow::Drift { mesh, node, label } => ListItem::new(Line::from(vec![
+            Span::raw(format!("  drift {mesh}: {node} — ")),
+            Span::styled(label.clone(), theme::dim()),
+        ])),
         crate::app::RosterRow::Session {
             session: s,
             is_last,
@@ -757,40 +968,97 @@ fn roster_row_item<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette) -
     }
 }
 
-// ── [6] PENDING ──────────────────────────────────────────────────────────
+// ── [6] REVIEW (the PENDING tab) ─────────────────────────────────────────
 
-/// Held `send` / A2A entries (messaging/presence plan, P-C5) — rows
-/// from `session pending list --json`, dispatched through the same injected
-/// `DispatchFn` as every other pane, never re-derived. `a`/`d` approve/deny
-/// the selected row; `id` in each row is an ARRAY POSITION, not a stable id
-/// (`conduct/src/graph/pending.rs`'s module doc), so [`App`] always re-lists
-/// immediately after a resolve — this view never trusts a row across one.
+/// The Review pane: the session send/A2A approval queue, the parked pairing
+/// requests and the parked secrets TOTP asks, one selection over the three.
+/// Every row is a reshape of an existing command's JSON (never re-derived) —
+/// `session pending list --json`, `pair --json`, `secrets pending --json` — and
+/// none of them carries a secret value or a pairing code. The two status lines
+/// above the list carry the three reads' own outcomes, refusals included; the
+/// section headers below them are titles with no note of their own.
 fn draw_pending(f: &mut Frame, area: Rect, app: &App) {
-    let rows = app.pending_rows();
+    let rows = app.review_rows();
 
     let parts = Layout::vertical([
-        Constraint::Length(1), // fetch status
-        Constraint::Min(3),    // pending list
+        Constraint::Length(1), // pending read status
+        Constraint::Length(1), // pairing + secrets read status
+        Constraint::Min(3),    // sectioned list
     ])
     .split(area);
 
-    let status = Line::from(format!(" {}", app.pending_status())).style(theme::dim());
-    f.render_widget(Paragraph::new(status), parts[0]);
+    let mut status = format!(" {}", app.pending_status());
+    if app.pair_busy() {
+        status.push_str(" · pair: working…");
+    }
+    f.render_widget(
+        Paragraph::new(Line::from(status)).style(theme::dim()),
+        parts[0],
+    );
+    f.render_widget(
+        Paragraph::new(Line::from(format!(
+            " pairing: {} · asks: {}",
+            app.pairing_status(),
+            app.secrets_pending_status()
+        )))
+        .style(theme::dim()),
+        parts[1],
+    );
 
-    if rows.is_empty() {
-        let lines = vec![
-            Line::from(""),
-            Line::from("   nothing held — state/stage/pending.json is empty.").style(theme::dim()),
-        ];
-        f.render_widget(Paragraph::new(lines), parts[1]);
+    if rows.iter().all(|r| r.key().is_none()) {
+        // The qualified empty state: empty rows are what a FAILED read leaves
+        // too, so the all-clear wording is only used when every read answered.
+        // Otherwise the error lines above say what happened, and this says so.
+        let line = if app.review_reads_ok() {
+            "   nothing held — no session approvals, no pairing requests, no TOTP asks."
+        } else {
+            "   no rows to show — a read above did not answer; the queue state is unknown."
+        };
+        let lines = vec![Line::from(""), Line::from(line).style(theme::dim())];
+        f.render_widget(Paragraph::new(lines), parts[2]);
         return;
     }
 
-    let items: Vec<ListItem> = rows.iter().map(pending_row_item).collect();
+    let items: Vec<ListItem> = rows.iter().map(review_row_item).collect();
     let list = List::new(items).highlight_style(selection_style(app));
     let mut state = ListState::default();
-    state.select(Some(app.pending_sel.min(rows.len().saturating_sub(1))));
-    f.render_stateful_widget(list, parts[1], &mut state);
+    state.select(Some(app.review_sel.min(rows.len().saturating_sub(1))));
+    f.render_stateful_widget(list, parts[2], &mut state);
+}
+
+/// One Review row: a section header, or one queue entry in its own shape. The
+/// pairing row states the direction, the node and that entry's own state — and
+/// never a code; the ask row shows only the five metadata fields the read
+/// carries.
+fn review_row_item<'a>(row: &crate::app::ReviewRow) -> ListItem<'a> {
+    use crate::app::ReviewRow;
+    match row {
+        ReviewRow::Header(title) => ListItem::new(Line::from(Span::styled(
+            format!("── {title}"),
+            theme::dim().add_modifier(Modifier::BOLD),
+        ))),
+        ReviewRow::Pending(r) => pending_row_item(r),
+        ReviewRow::Pairing(r) => ListItem::new(Line::from(format!(
+            "[{}] {} {} · {} · {}  (requested {})",
+            r.id,
+            r.direction,
+            r.name,
+            r.status(),
+            if r.url.is_empty() { "no url" } else { &r.url },
+            r.requested_at,
+        ))),
+        ReviewRow::Ask(r) => ListItem::new(Line::from(format!(
+            "[{}] {} → {}  (requested {}){}",
+            r.id,
+            r.secret,
+            r.consumer,
+            r.requested_at,
+            r.peer_uid
+                .as_deref()
+                .map(|u| format!("  peer uid {u}"))
+                .unwrap_or_default(),
+        ))),
+    }
 }
 
 fn pending_row_item<'a>(row: &crate::app::PendingRow) -> ListItem<'a> {
@@ -1731,14 +1999,14 @@ mod tests {
         let mut a = App::for_test(vec![], vec![], vec![]);
         a.panel = Panel::Pending;
         a.pending = Some(pending_fixture());
-        a.pending_sel = 1;
+        a.select_first_pending_row();
 
         let backend = TestBackend::new(100, 20);
         let mut term = Terminal::new(backend).unwrap();
         term.draw(|f| draw(f, &a)).unwrap();
         let out = dump(term.backend().buffer());
 
-        assert!(out.contains("PENDING"), "panel title: {out}");
+        assert!(out.contains("REVIEW"), "panel title: {out}");
         assert!(
             out.contains("[0] s0 ← do the thing [submit] (from sakaki/root/brave-otter (…snd))"),
             "first entry, full grammar: {out}"
@@ -1757,8 +2025,18 @@ mod tests {
     fn pending_panel_shows_the_empty_hint_when_the_queue_is_empty() {
         let mut a = App::for_test(vec![], vec![], vec![]);
         a.panel = Panel::Pending;
+        // All three reads answered: an idle box, so the all-clear wording is the
+        // honest one.
         a.pending = Some(
             aoide_protocol::output::Outcome::ok("session.pending.list", "0 pending")
+                .with_data(serde_json::json!({ "pending": [] })),
+        );
+        a.pairing = Some(
+            aoide_protocol::output::Outcome::ok("pair", "no pending pairing requests")
+                .with_data(serde_json::json!({ "requests": [] })),
+        );
+        a.secrets_pending = Some(
+            aoide_protocol::output::Outcome::ok("secrets.pending", "0 pending ask(s)")
                 .with_data(serde_json::json!({ "pending": [] })),
         );
 
@@ -1770,6 +2048,33 @@ mod tests {
         assert!(
             out.contains("nothing held"),
             "an empty queue tells the human, not a bare blank pane: {out}"
+        );
+
+        // A read that did NOT answer leaves the same empty rows: the pane says
+        // the queue state is unknown instead of claiming an all-clear.
+        let mut a = App::for_test(vec![], vec![], vec![]);
+        a.panel = Panel::Pending;
+        a.pending = Some(aoide_protocol::output::Outcome::error(
+            "session.pending.list",
+            "cannot read state/stage/pending.json",
+        ));
+        a.pairing = Some(aoide_protocol::output::Outcome::ok("pair", "no pending pairing requests")
+            .with_data(serde_json::json!({ "requests": [] })));
+        a.secrets_pending = Some(
+            aoide_protocol::output::Outcome::ok("secrets.pending", "0 pending ask(s)")
+                .with_data(serde_json::json!({ "pending": [] })),
+        );
+        let backend = TestBackend::new(80, 20);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| draw(f, &a)).unwrap();
+        let out = dump(term.backend().buffer());
+        assert!(
+            out.contains("no rows to show"),
+            "a failed read must not render as an all-clear: {out}"
+        );
+        assert!(
+            out.contains("cannot read state/stage/p"),
+            "the read's own refusal rides the status line above: {out}"
         );
     }
 
