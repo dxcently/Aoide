@@ -429,13 +429,13 @@
   record while the old child it named is still alive and about to become
   untracked — a second forward to the same target is never opened
   alongside a live, untracked one. `terminate_pid` reaps with a real
-  `waitpid(pid, WNOHANG)` poll before ever falling back to its `/proc`
-  poll — required, not cosmetic, for the case where `open` and `close` (or
+  `waitpid(pid, WNOHANG)` poll before ever falling back to its liveness
+  poll (`proc_exists`, the shared `kill(pid, 0)` probe) — required, not cosmetic, for the case where `open` and `close` (or
   a stale reopen) run in the SAME process: that pid genuinely IS this
   process's own child, and nothing else will ever collect it, so skipping
   `waitpid` there would leave a real zombie. `ECHILD` (the ordinary
   cross-invocation case — an earlier `aoide` run parented the child, not
-  this process) falls back to the `/proc` poll, same as always.
+  this process) falls back to the liveness poll, same as always.
 - **Every cross-box network call resolves its dial url through
   `resolve_dial_url` (P-S4) — not just the signed POSTs, and never
   `post_json(&node.url, …)`/`post_json(&some_raw_url, …)`/`run_curl(&["--",

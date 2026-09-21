@@ -28,7 +28,18 @@
 //! this module reads `SO_PEERCRED` directly via `libc` — already this
 //! crate's dependency (`client::connect_bounded`'s own module doc), zero
 //! new deps, matching this crate's house rule.
+//!
+//! **`SO_PEERCRED` is a Linux/Android capability, not a POSIX one.** POSIX.1
+//! defines no peer-credential API, and BSD `getpeereid(3)` carries no pid —
+//! it could not fill `PeerCred.pid`, the field the origin gate walks as the
+//! kernel's ancestry fact (`aoide_storage::attest`'s `attested_session`). So
+//! every other host gets the SAME UNIDENTIFIED `None` a failed read gives
+//! ([`peer_cred`]'s `#[cfg]` arm below): `broker::handle_dismiss`'s peer-uid
+//! match and `broker::admin_gate` refuse, as they already do for an
+//! unidentified connection. Never a fabricated uid/pid, never a second
+//! mechanism.
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
 
@@ -51,6 +62,11 @@ pub struct PeerCred {
 /// handle_dismiss`'s own doc is the one place this matters today) — the
 /// absence of kernel-truth identity is not license to assume a benign
 /// caller.
+///
+/// "A platform that doesn't support it at all" is structural, not
+/// hypothetical (module doc): the `None` arm below, on every host that is
+/// not Linux/Android.
+#[cfg(any(target_os = "linux", target_os = "android"))]
 pub fn peer_cred(stream: &UnixStream) -> Option<PeerCred> {
     let fd = stream.as_raw_fd();
     let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
@@ -73,6 +89,13 @@ pub fn peer_cred(stream: &UnixStream) -> Option<PeerCred> {
         return None;
     }
     Some(PeerCred { uid: cred.uid, gid: cred.gid, pid: cred.pid })
+}
+
+/// No peer-credential mechanism on this host (module doc): the SAME
+/// UNIDENTIFIED `None` a failed read gives, so gates keep refusing.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+pub fn peer_cred(_stream: &UnixStream) -> Option<PeerCred> {
+    None
 }
 
 /// Best-effort `uid` -> username lookup (`getpwuid_r`, the thread-safe form
@@ -132,7 +155,10 @@ mod tests {
     /// A `UnixStream::pair()` socketpair is entirely local to THIS process
     /// — both ends' `SO_PEERCRED` must therefore report exactly this
     /// process's own euid/pid, which is a real, checkable fact (not a
-    /// placeholder) without needing a second process or root.
+    /// placeholder) without needing a second process or root. Linux/Android
+    /// only, like the mechanism itself: elsewhere the honest assertion is
+    /// the `None` arm, which the broker's refusal path covers.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
     fn peer_cred_on_a_scratch_socketpair_matches_this_processs_own_identity() {
         let (a, b) = UnixStream::pair().expect("socketpair");
@@ -148,7 +174,9 @@ mod tests {
 
     /// `SO_PEERCRED` on a fd that isn't a socket at all fails cleanly —
     /// proves the "failure = unidentified, never a panic" contract without
-    /// needing to fabricate a genuinely broken socket.
+    /// needing to fabricate a genuinely broken socket. Linux/Android only
+    /// (it asserts the `Some` happy path).
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
     fn peer_cred_is_none_after_the_peer_has_hung_up_and_the_fd_reused_is_out_of_scope() {
         // A stream whose OTHER end has already been dropped is still a
@@ -177,6 +205,9 @@ mod tests {
         assert_eq!(username_for_uid(u32::MAX), None);
     }
 
+    /// Linux-only (like `read_comm` itself, a `/proc` read — the module doc's
+    /// "`/proc` unmounted" case is the *normal* case on any other host).
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
     fn read_comm_resolves_this_processs_own_comm() {
         assert!(read_comm(std::process::id() as i32).is_some(), "/proc/<this pid>/comm must be readable for this live process");

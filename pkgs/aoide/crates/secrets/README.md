@@ -392,6 +392,18 @@ stream, an unexpected `getsockopt` error) is treated as an UNIDENTIFIED
 connection, never a panic and never a fabricated uid — every decision keyed
 on it below fails CLOSED on that case, never open.
 
+**This is a Linux/Android capability, not a POSIX one.** POSIX.1 defines no
+peer-credential API at all, and the BSD alternative (`getpeereid(3)`) reports
+euid/egid with **no pid** — it cannot fill `PeerCred.pid`, the field the
+sealed-session origin gate walks as the kernel's own ancestry fact
+(`aoide_storage::attest`'s `attested_session`). Swapping the syscall would
+therefore weaken that gate rather than port it, so `peercred::peer_cred` is
+`#[cfg]`-gated to Linux/Android and answers the SAME `None` (unidentified) on
+every other host: there, the fail-closed paths below are what runs —
+`dismiss` cannot match an absent peer uid, and `admin` refuses outright.
+Porting peer identity is a design change to those gates (an ancestry-free
+variant, `pid: Option<i32>`), never a drop-in replacement.
+
 **This does not authenticate `consumer`.** The self-asserted honesty note
 above is unchanged: nothing on the wire proves a caller's claimed
 `consumer` name. What peer identity adds is a SEPARATE fact recorded

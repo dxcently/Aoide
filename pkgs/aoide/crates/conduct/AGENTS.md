@@ -444,12 +444,11 @@
   directly for its from-a-checkout refusal (the only repo-root detector in
   the tree) rather than re-deriving the walk-up. Don't narrow it back
   without checking that dependency first.
-- **`reap::proc_exists` is `pub`, not private, on purpose** (task #33) —
-  `aoide-server`'s A2A `tasks/get` resolution feeds this SAME `/proc` probe
-  into `is_session_dead` at read time, so a session that dies after its
-  spawn ack reads `failed` instead of stale `submitted`, without a second
-  `/proc`-reading predicate forked into `server`. Don't narrow it back
-  without checking that dependency first.
+- **`reap::proc_exists` is `pub` on purpose** (task #33) and is a RE-EXPORT of
+  `aoide_storage::fs::pid_is_alive`, core's shared liveness probe (POSIX
+  `kill(pid, 0)`; `ESRCH` alone absent, every other errno live).
+  `aoide-server`'s A2A `tasks/get` consumes it: don't narrow it back, and don't
+  turn it into a local `/proc` read.
 - **A killed terminal never self-reports `done`.** `reap` is the only
   sanctioned sweep of dead sessions; don't add a second liveness mechanism.
   Reaping now also runs IN the daemon's own tick (P-D6, ~12s cadence) when
@@ -1564,7 +1563,14 @@
   crate::graph)` (LANE IDENTITY P-ID3) — `shellbridge.rs` reuses them
   directly.** Widened once, for exactly the reason `graph.rs`'s own `mod
   identity` doc comment gives: a sibling module reusing the SAME kernel-
-  truth primitive beats a second `SO_PEERCRED` read in this crate. Do not
+  truth primitive beats a second `SO_PEERCRED` read in this crate. **That
+  primitive is a Linux/Android capability, never a portable one: every other
+  host takes the SAME UNIDENTIFIED `None` an unreadable creds read gives — a
+  named `cfg` refusal, never a substitute (`getpeereid` reports no pid, so it
+  could not fill the `PeerCred.pid` these gates walk).** Both callers keep
+  their posture: `shellbridge`'s accept-time `cross_uid_gate` REFUSES an
+  unidentified peer, and the control socket's self-injection check reads it as
+  not-self (that narrow guard refuses only true self-injection). Do not
   widen further to plain `pub` "for convenience" — this stays an internal
   primitive, never crossing the `aoide-conduct` -> `aoide` crate boundary
   root's shim re-exports onward; `aoide-server` reuses `aoide_secrets::

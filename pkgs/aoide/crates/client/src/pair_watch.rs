@@ -161,6 +161,9 @@ use aoide_protocol::dialog::{
     SPAWN_BACKOFF_INITIAL, SPAWN_BACKOFF_MAX,
 };
 use aoide_protocol::feed::Follower;
+// `pid_is_alive` is `aoide_storage::fs::pid_is_alive` — the one liveness probe
+// in core (POSIX `kill(pid, 0)`), imported rather than re-derived.
+use aoide_storage::fs::pid_is_alive;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -955,21 +958,14 @@ fn marker_path(id: &str) -> Option<std::path::PathBuf> {
     safe.then(|| marker_runtime_dir().join("pair-active").join(format!("{id}.pid")))
 }
 
-/// Is `pid` a live process? `aoide_client::tunnel::proc_exists`'s exact
-/// `/proc/<pid>` check, RE-DERIVED here — that function is private to its
-/// own module (not even `pub(crate)`), and a two-line check carries none of
-/// the "no cross-crate copying" weight a moved TYPE or FUNCTION would
-/// ([`marker_runtime_dir`]'s own doc gives the identical reasoning).
-fn pid_is_alive(pid: u32) -> bool {
-    std::path::Path::new("/proc").join(pid.to_string()).exists()
-}
-
 /// Pure: does a marker naming `marker_pid` mean "a blocking `aoide pair`
 /// is live for this id right now"? Takes the liveness ANSWER as a
-/// parameter rather than probing `/proc` itself — the same injected-probe
-/// discipline [`popup_allowed`] already holds for `locked_state`'s own OR.
+/// parameter rather than probing the process table itself — the same
+/// injected-probe discipline [`popup_allowed`] already holds for
+/// `locked_state`'s own OR.
 /// `None` (no marker file, or one that failed to parse) never suppresses —
-/// an unanswerable probe reads as "not live," never as "live"
+/// nothing recorded reads as "not live", never as "live" (a pid the probe
+/// cannot answer for is the opposite case, and reads live).
 /// (`aoide_protocol::dialog::probe_loginctl_locked`'s own doc gives the
 /// identical posture for its own OR term).
 fn marker_suppresses(marker_pid: Option<u32>, is_alive: impl FnOnce(u32) -> bool) -> bool {

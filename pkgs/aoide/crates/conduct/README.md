@@ -301,7 +301,11 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   every in-crate caller and unit test calls directly, and what the
   daemon's own tick runs internally on its ~12s cadence — the systemd timer
   becomes a redundant backstop once a daemon is resident, never a second
-  liveness mechanism. Beyond session records, the same pass collects two
+  liveness mechanism. Liveness is one probe for the whole tree
+  (`reap::proc_exists`, a re-export of `aoide_storage::fs::pid_is_alive` — a
+  POSIX `kill(pid, 0)`, never a `/proc` existence check), so an unanswerable
+  probe never condemns a record.
+  Beyond session records, the same pass collects two
   kinds of leavings a killed session left in `$XDG_RUNTIME_DIR/aoide`: its
   control socket (`sweep_orphan_sockets`) and, for the ssh-transport lane,
   every tunnel it opened and never closed (`sweep_orphan_tunnels` — a
@@ -938,7 +942,15 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   honestly in `CONTRACTS.md` rather than oversold here); `peer_cred`
   reads `SO_PEERCRED` off an accepted `UnixStream` (a local
   reimplementation of `aoide_secrets::peercred`'s own shape — no new
-  cross-crate edge for one struct+fn). `graph/conduct.rs`'s per-session
+  cross-crate edge for one struct+fn). **That mechanism is Linux/Android
+  only, and deliberately NOT ported**: any other host gets the same
+  UNIDENTIFIED `None` an unreadable creds read gives — a named refusal,
+  never a pid-less `getpeereid` substitute, which could not fill the
+  `PeerCred.pid` those gates walk. The two callers keep their posture:
+  `shellbridge`'s accept-time cross-uid floor refuses an unidentified peer
+  outright, while the control socket's narrow self-injection check reads it
+  as not-self (that guard refuses only true self-injection; the security
+  floor is the cross-uid gate). `graph/conduct.rs`'s per-session
   accept loop calls `peer_cred` on every accepted connection and refuses
   one whose OWN nearest live registered session (`identity::
   is_self_originated` — nearest-first, session-boundary aware, review

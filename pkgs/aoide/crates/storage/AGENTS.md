@@ -247,6 +247,12 @@
   adding a nonce store here — that would duplicate state across a
   crate boundary for no benefit, the same anti-pattern the "no cross-crate
   copying" cross-crate rule already forbids.
+- **`fs::pid_is_alive` is the shared liveness probe in core** — a POSIX
+  `kill(pid, 0)` where `ESRCH` alone is absent and every other errno (including
+  `EPERM`) reads live, so an unanswerable probe never reaps or unlinks. `0` and
+  `pid > pid_t::MAX` are refused BEFORE the syscall: both name a process group.
+  Live is NOT identity, so a caller about to SIGNAL a pid still checks its own
+  argv/port. Callers re-export or import this probe; never fork a `/proc` copy.
 - **`fs::atomic_write`'s temp cleanup is directory-wide, and every failing
   half unlinks its own temp.** `sweep_stale_temps` reclaims any sibling
   `<stem>.tmp.<pid>` whose pid is dead, not only temps sharing the target's

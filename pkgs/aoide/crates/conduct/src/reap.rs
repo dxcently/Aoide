@@ -77,16 +77,14 @@ use aoide_protocol::output::Outcome;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
-/// Does `/proc/<pid>` still exist? The real liveness probe for [`is_session_dead`]
-/// (injected as a closure in tests so the predicate stays pure).
+/// Liveness probe for [`is_session_dead`] (injected as a closure in tests so the
+/// predicate stays pure): a re-export of [`aoide_storage::fs::pid_is_alive`], the
+/// one POSIX `kill(pid, 0)` probe — never a `/proc` existence check. Live is not
+/// identity.
 ///
-/// `pub` (task #33): `aoide-server`'s A2A `tasks/get` resolution feeds this
-/// SAME probe into `is_session_dead` at read time, so a session that died
-/// after its spawn ack reads `failed` instead of stale `submitted` —
-/// widened rather than forked (`crates/AGENTS.md` "no cross-crate copying").
-pub fn proc_exists(pid: u32) -> bool {
-    std::path::Path::new("/proc").join(pid.to_string()).exists()
-}
+/// `pub` (task #33): `aoide-server`'s A2A `tasks/get` feeds this SAME probe into
+/// `is_session_dead` at read time.
+pub use aoide_storage::fs::pid_is_alive as proc_exists;
 
 /// How long an AT-REST (`idle`/`stopped`) record that staleness may judge (see
 /// [`is_session_dead`]) may go without any evidence of life before its own
@@ -153,8 +151,8 @@ pub const REAP_SPAWNED_SHELL_STALE_SECS: i64 = 48 * 3600; // 48 hours (2 days)
 /// DEAD when ANY of three signals fires:
 ///   * **window gone** — a non-empty `windowAddress` that is NOT among the live
 ///     `hyprctl clients -j` addresses (the SUPER+Q kill: the window vanished), OR
-///   * **process gone** — a recorded `pid` whose `/proc/<pid>` no longer exists
-///     (the process-killed case), OR
+///   * **process gone** — a recorded `pid` that no longer names a live process
+///     (the process-killed case), per the `kill(pid, 0)` probe `proc_exists`, OR
 ///   * **stale abandonment** — every evidence stream (`last_seen` — the MAX of
 ///     transcript mtime, hook `updatedAt`, and `startedAt`) has been silent
 ///     past a state-dependent band, for a record staleness may judge:
@@ -298,7 +296,7 @@ fn live_windows() -> Option<(HashSet<String>, HashMap<String, u32>)> {
 /// the whole windowed roster off that snapshot is exactly the transient drop this
 /// fix targets, so an EMPTY gathered set against a roster that still holds
 /// windowed, not-`done` sessions is treated as degenerate and DOWNGRADED to
-/// `None` (pid-only liveness) for the pass — a vanished `/proc/<pid>` is still
+/// `None` (pid-only liveness) for the pass — a vanished pid is still
 /// authoritative, so a genuinely-closed terminal (its owning pid gone too) is
 /// still reaped, while a live-but-momentarily-unlisted window is spared. A
 /// non-empty set, or an empty set with nothing windowed to protect, passes
@@ -563,7 +561,7 @@ pub fn boot_epoch() -> Option<i64> {
 ///     that also restarted may not be up yet on the first passes;
 ///   * the pid signal reads a RECYCLED pid as alive — on a busy box (22 dead
 ///     `conduct-*` in eight minutes of use) a fresh process lands on the old
-///     number and `/proc/<pid>` exists again, shielding the ghost forever;
+///     number and the pid reads live again, shielding the ghost forever;
 ///   * the staleness bands hold their fire for 72h / 7 days, and the live-pid
 ///     veto can stop them firing at all.
 /// This collapses that wait to the one thing already known for certain: the
@@ -913,7 +911,7 @@ fn orphan_tunnel_candidates(
 /// **Deliberately called OUTSIDE `with_stage_lock`, unlike
 /// [`sweep_orphan_sockets`].** A candidate's pid may still be a live `ssh`
 /// child, and `kill_if_still_our_ssh` → `terminate_pid` does a bounded
-/// `SIGTERM` + `waitpid`/`/proc` poll that can take up to ~1s PER kill —
+/// `SIGTERM` + `waitpid`/liveness-poll that can take up to ~1s PER kill —
 /// the exact cost `do_session_end` (`graph/session_store.rs`) already
 /// avoids paying under the lock for its own tunnel close. `.stage.lock` is
 /// a cross-process flock every other stage writer (hooks, the ~1Hz conduct
@@ -1917,7 +1915,7 @@ mod tests {
     fn stale_hook_only_at_rest_session_is_reaped() {
         // No window, no pid, `idle`, last evidence of life 100h ago (> the 72h
         // threshold) — the exact stranded-UUID-orphan case this signal exists
-        // for. Live-address/proc-exists probes are irrelevant here (neither
+        // for. Live-address/pid-liveness probes are irrelevant here (neither
         // window nor pid signal can fire), so wire up dummies.
         let now = 1_800_000_000_i64;
         let stale = |_: &SessionRecord| Some(now - 100 * 3600);
@@ -2692,7 +2690,7 @@ mod tests {
         // ledger line, never two" — `do_session_end`'s own half lives in
         // `session_store.rs`'s test suite. A pre-boot ghost (every evidence
         // stream predates `boot_epoch()`) is used to guarantee a REAL reap
-        // deterministically, with no dependency on a real `/proc/<pid>`
+        // deterministically, with no dependency on a real pid-liveness
         // probe finding a pid absent.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = crate::graph::testutil::EnvVars::save(&[
@@ -2885,7 +2883,7 @@ mod tests {
     fn pre_boot_ghosts_are_condemned_and_everything_since_the_boot_is_spared() {
         // The signal the recycled pid used to shield: a record whose evidence
         // is all older than the machine's boot instant cannot be attached to
-        // anything running, whatever `/proc/<pid>` now says.
+        // anything running, whatever the liveness probe now says.
         let boot = 1_800_000_000_i64;
         let ghost = hook_only("from-last-boot", "working");
         let live = hook_only("since-boot", "working");
@@ -3663,7 +3661,7 @@ mod tests {
         );
         // This test process is very much still alive — the whole point of
         // the safety pin above.
-        assert!(std::path::Path::new("/proc").join(my_pid.to_string()).exists());
+        assert!(proc_exists(my_pid));
 
         let _ = std::fs::remove_dir_all(&runtime);
     }

@@ -79,6 +79,11 @@ by decision — no embedded database yet
   resolver uses, applied to a directory instead of an executable. Returns
   `None` (never a default that might not exist) when neither resolves; the
   caller turns that into a taught error naming both locations.
+- `fs::pid_is_alive` — the one process-liveness probe (POSIX `kill(pid, 0)`:
+  `0`/`EPERM` live, `ESRCH` absent, any other errno conservatively live; `0`
+  and `pid > pid_t::MAX` refused before the syscall, both naming a process
+  group). Live is not identity. Backs the stale-temp sweep, is re-exported as
+  `aoide_conduct::reap::proc_exists`, and is imported by `aoide-client`.
 - `records::Project` — a project is a set of anchor roots, not one
   directory: `path` is always the first root, mirrored at `roots[0]`;
   `roots` is the FULL ordered root list, always written by

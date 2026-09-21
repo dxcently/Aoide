@@ -195,7 +195,9 @@ never the inbound/serve half (that's `aoide-server`).
   wrapped as `kill_if_still_our_ssh`, shared with the stale-reopen path
   above) — a pid an earlier `aoide` invocation recorded may have been
   recycled by the OS to an unrelated process by the time anything acts on
-  it, and a pid alone is never enough to justify a signal.
+  it, and a pid alone is never enough to justify a signal. Existence is asked
+  of the process table (`proc_exists`, the shared `kill(pid, 0)` probe), never
+  of `/proc` — `/proc` is read only for the cmdline identity check above.
   `kill_if_still_our_ssh` returns whether the pid is now safe to forget
   (never alive, never ours, or ours and confirmed dead) versus still alive
   and still ours — `#[must_use]`, since every caller (`close`, the
@@ -207,10 +209,10 @@ never the inbound/serve half (that's `aoide-server`).
   later sweep pass and retries the kill, until it is finally confirmed
   dead — never a one-attempt affair. Once a kill IS justified, `terminate_pid` reaps
   with a real `waitpid(pid, WNOHANG)` poll before ever falling back to a
-  `/proc` poll — required whenever `open` and `close` (or a stale reopen)
+  liveness poll (`proc_exists`) — required whenever `open` and `close` (or a stale reopen)
   share a process, since that pid genuinely IS this process's own child and
   nothing else will ever collect it; `ECHILD` (the ordinary
-  cross-invocation case) falls back to the `/proc` poll, same as always.
+  cross-invocation case) falls back to the liveness poll, same as always.
   `close_all_for_session(session_id)` closes every tunnel recorded for that
   session, best-effort across all of them. The actual
   spawn is an injected closure internally (the same `Arc<dyn Fn(...)>`

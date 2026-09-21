@@ -151,7 +151,14 @@
   PROCESS, not which of possibly many self-asserted consumer names that
   process is claiming); don't wire `SO_PEERCRED`'s uid into
   `automation.consumers`/policy `consumers[]` matching as if it were an
-  authenticated consumer name — it isn't one.
+  authenticated consumer name — it isn't one. **And it is a Linux/Android
+  capability, deliberately not a portable one**: `peercred::peer_cred` is
+  `#[cfg]`-gated to those hosts and returns the SAME `None` (unidentified ⇒
+  refuse) everywhere else. Don't add a second mechanism there —
+  `getpeereid(3)` carries no pid, so it cannot feed the ancestry-based origin
+  gate, and a pid-less "verified" identity would replace a refusal with a
+  weaker check. Porting it is a change to the gate's shape, never a syscall
+  swap.
 - **The broker socket is the single writer for every admin CRUD mutation
   when a daemon is listening (task #79, built on #73's peer-cred gate) —
   direct-write-to-`policy.json` survives ONLY as the no-daemon fallback.**

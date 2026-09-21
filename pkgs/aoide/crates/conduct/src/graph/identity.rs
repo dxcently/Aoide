@@ -1,7 +1,8 @@
 //! LANE IDENTITY P-ID2 (`docs/architecture/CONTRACTS.md`'s identity
 //! section; plan file "LANE IDENTITY (#63)"'s thesis) — the kernel-truth
 //! primitives the send gate and the per-session control socket both build
-//! on: `SO_PEERCRED` for a connecting `UnixStream` peer, and
+//! on: `SO_PEERCRED` for a connecting `UnixStream` peer (Linux/Android — see
+//! [`peer_cred`]), and
 //! [`attested_sender`], the pure decision function that walks a pid's real
 //! `/proc` ancestry to find the (verified) sealed session it is running
 //! under.
@@ -27,6 +28,7 @@
 //! guard, which only ever guarded well-behaved callers of `aoide send`).
 
 use super::model::SessionRecord;
+#[cfg(any(target_os = "linux", target_os = "android"))]
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
 
@@ -43,15 +45,25 @@ pub(crate) struct PeerCred {
 }
 
 /// Read `SO_PEERCRED` off `stream` — `None` on ANY failure (a non-`AF_UNIX`
-/// stream, an unexpected `getsockopt` error). Same fail-to-`None`, never-a-
-/// panic, never-a-fabricated-identity contract `aoide_secrets::peercred::
-/// peer_cred` documents for its own callers.
+/// stream, an unexpected `getsockopt` error), or on any host that has no such
+/// mechanism at all (the arm below). Same fail-to-`None`, never-a-panic,
+/// never-a-fabricated-identity contract `aoide_secrets::peercred::peer_cred`
+/// documents for its own callers.
+///
+/// `SO_PEERCRED` is Linux/Android: POSIX.1 defines no peer-credential API, and
+/// BSD `getpeereid` carries no pid — it could not fill the `PeerCred.pid` that
+/// [`attested_sender`]/[`is_self_originated`] walk as the kernel's ancestry
+/// fact. So every other host gets the same UNIDENTIFIED `None` a failed read
+/// gives, and every caller keeps its existing posture: `shellbridge.rs`'s
+/// cross-uid floor refuses, `conduct.rs`'s self-injection guard sees not-self.
+/// A pid-less second mechanism is a design change to those gates, never a port.
 ///
 /// `pub(crate)`, not `pub(in crate::graph)` (LANE IDENTITY P-ID3): this
 /// crate's `shellbridge.rs` — a sibling of `graph`, not a descendant — reuses
 /// this exact primitive for its own accept-time cross-uid floor rather than
 /// re-implementing a second `SO_PEERCRED` read (`graph.rs`'s own `mod
 /// identity` doc comment).
+#[cfg(any(target_os = "linux", target_os = "android"))]
 pub(crate) fn peer_cred(stream: &UnixStream) -> Option<PeerCred> {
     let fd = stream.as_raw_fd();
     let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
@@ -74,6 +86,14 @@ pub(crate) fn peer_cred(stream: &UnixStream) -> Option<PeerCred> {
         return None;
     }
     Some(PeerCred { uid: cred.uid, pid: cred.pid })
+}
+
+/// No peer-credential mechanism on this host — the same UNIDENTIFIED `None`
+/// a failed `SO_PEERCRED` read gives (doc above), so callers refuse as they
+/// already do.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+pub(crate) fn peer_cred(_stream: &UnixStream) -> Option<PeerCred> {
+    None
 }
 
 /// Reconstruct the exact `SealedIdentity` `rec.seal` was signed over and
@@ -509,7 +529,9 @@ mod tests {
     /// — both ends' `SO_PEERCRED` must report exactly this process's own
     /// euid/pid, a real checkable fact (mirrors `aoide_secrets::peercred`'s
     /// own test of the same shape, proving the local reimplementation here
-    /// behaves identically).
+    /// behaves identically). Linux/Android only, like the mechanism itself:
+    /// on any other host the honest assertion is `None`.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
     fn peer_cred_on_a_scratch_socketpair_matches_this_processs_own_identity() {
         let (a, b) = UnixStream::pair().expect("socketpair");

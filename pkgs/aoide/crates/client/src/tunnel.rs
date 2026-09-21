@@ -44,6 +44,10 @@
 //! and optionally binds the target port itself, so every reuse/stale/
 //! timeout branch below runs with no `ssh` anywhere in the test binary.
 
+// `proc_exists` is `aoide_storage::fs::pid_is_alive` — the one liveness probe in
+// core (POSIX `kill(pid, 0)`), imported rather than re-derived. Live is not
+// identity: the recycled-pid decision below still confirms WHOSE process it is.
+use aoide_storage::fs::pid_is_alive as proc_exists;
 use aoide_storage::tunnel::{TunnelRecord, Via, TUNNEL_VERSION};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
@@ -234,15 +238,6 @@ pub fn close_all_for_session(session_id: &str) -> Result<(), String> {
 
 // ── process-liveness / signaling ────────────────────────────────────────
 
-/// Is `pid` a live process? `aoide_conduct::reap::proc_exists`'s exact
-/// two-line check, RE-DERIVED here rather than imported — `aoide-client`
-/// sits below `aoide-conduct` in the crate DAG, the same reason
-/// `aoide_storage::tunnel::runtime_dir` re-derives `conduct_socket_path`'s
-/// convention instead of depending on it.
-fn proc_exists(pid: u32) -> bool {
-    std::path::Path::new("/proc").join(pid.to_string()).exists()
-}
-
 /// The module doc's "recycled-pid decision": read `/proc/<pid>/cmdline`
 /// (NUL-separated argv) and confirm it is actually an `ssh` process
 /// carrying THIS record's exact `-L <local_port>:<remote_host>:<remote_port>`
@@ -284,8 +279,8 @@ fn looks_like_our_ssh(pid: u32, local_port: u16, remote_port: u16) -> bool {
 /// `close`/`close_all_for_session`/the reaper can only ever act on a pid
 /// they load FROM a record), and
 /// `aoide-conduct::reap::sweep_orphan_tunnels` (P-S5),
-/// which loads a record whose SESSION is gone but whose pid still answers
-/// `/proc` and needs the exact same guarded kill before the record is
+/// which loads a record whose SESSION is gone but whose pid is still live — it
+/// needs the exact same guarded kill before the record is
 /// unlinked out from under it. `pub` (not `pub(crate)`): `aoide-conduct`
 /// sits above `aoide-client` in the crate DAG (`client/AGENTS.md`, "the
 /// `conduct -> client` edge is load-bearing"), so the reaper reuses this
@@ -321,8 +316,8 @@ pub fn kill_if_still_our_ssh(pid: u32, local_port: u16, remote_port: u16) -> boo
 /// is no longer, a child of this process — the ordinary cross-invocation
 /// case: an earlier `aoide` run opened it) means a real wait can never
 /// succeed here at all; that, and any other `waitpid` failure, falls back
-/// to the original best-effort courtesy of polling `/proc/<pid>` for its
-/// exit within a short bound — never a guarantee, just a nicety for the
+/// to the original best-effort courtesy of polling the pid's liveness until it
+/// stops reading live, within a short bound — never a guarantee, just a nicety for the
 /// caller's own next action.
 fn terminate_pid(pid: u32) {
     // SAFETY: `pid` was just proven by `looks_like_our_ssh` to be this
@@ -346,7 +341,7 @@ fn terminate_pid(pid: u32) {
             // Most commonly ECHILD (not our child) — any negative return
             // means a real wait(2) on this pid cannot succeed from this
             // process; stop polling waitpid and fall through to the
-            // /proc poll below.
+            // liveness poll below.
             break;
         }
         if Instant::now() >= waitpid_deadline {
@@ -960,14 +955,14 @@ mod tests {
         });
     }
 
-    /// Review finding (MEDIUM): `terminate_pid` used to only poll `/proc`
-    /// after `SIGTERM`, never `waitpid` — harmless when the pid belongs to
+    /// Review finding (MEDIUM): `terminate_pid` used to only poll the pid's
+    /// liveness after `SIGTERM`, never `waitpid` — harmless when the pid belongs to
     /// an earlier `aoide` invocation (this process was never its parent,
     /// so no zombie is ours to leave), but a real zombie when `open` and
     /// `close` run in the SAME process, since nothing else ever reaps a
     /// child THIS process itself spawned. Proves the fix does a REAL
-    /// `wait(2)`, not just "vanished from /proc" (a zombie still has a
-    /// `/proc/<pid>` entry): a second `waitpid` on the same pid, run by
+    /// `wait(2)`, not just "the pid stopped answering" (a zombie still
+    /// answers `kill(pid, 0)`): a second `waitpid` on the same pid, run by
     /// this test AFTER `close`, must itself fail — nothing left to wait
     /// for, because `close` already collected it.
     #[test]
@@ -1062,7 +1057,7 @@ mod tests {
             unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
             let mut status: libc::c_int = 0;
             unsafe { libc::waitpid(pid as libc::pid_t, &mut status, 0) };
-            assert!(!proc_exists(pid), "a fully reaped pid must not exist under /proc");
+            assert!(!proc_exists(pid), "a fully reaped pid names no process");
 
             assert!(close("sess-k", "sakaki").is_ok());
             assert!(

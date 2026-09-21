@@ -900,10 +900,32 @@ pub(crate) fn lock_path<T>(path: std::path::PathBuf, f: impl FnOnce() -> T) -> R
     Ok(out)
 }
 
-/// Does `/proc/<pid>` still exist? (the liveness probe [`sweep_stale_temps`] uses
-/// to tell an interrupted writer's stranded temp from a live node's in-flight one).
-fn pid_is_alive(pid: u32) -> bool {
-    std::path::Path::new("/proc").join(pid.to_string()).exists()
+/// Is `pid` a live process? The one liveness probe in core: POSIX `kill(pid, 0)`
+/// — `0`/`EPERM` live, `ESRCH` absent, any other errno conservatively live. Live
+/// is not identity: a recycled pid is live.
+pub fn pid_is_alive(pid: u32) -> bool {
+    let Some(pid) = probeable_pid(pid) else {
+        return false;
+    };
+    // SAFETY: signal 0 is never delivered; the call only asks whether `pid`
+    // exists and whether this process may signal it.
+    let rc = unsafe { libc::kill(pid, 0) };
+    if rc == 0 {
+        return true;
+    }
+    probe_verdict(std::io::Error::last_os_error().raw_os_error())
+}
+
+/// `pid` as a `pid_t`, or `None` for `0`/`pid > pid_t::MAX` — both name a
+/// process GROUP, never one process, so `kill` is never handed either.
+fn probeable_pid(pid: u32) -> Option<libc::pid_t> {
+    (pid > 0 && pid <= libc::pid_t::MAX as u32).then_some(pid as libc::pid_t)
+}
+
+/// A failed `kill(pid, 0)`: `ESRCH` alone is absent; every other errno (and no
+/// errno at all) is conservatively live, so an unanswerable probe never reaps.
+fn probe_verdict(errno: Option<i32>) -> bool {
+    errno != Some(libc::ESRCH)
 }
 
 /// Remove leaked atomic-write temporaries from `path`'s DIRECTORY: any sibling
@@ -1497,6 +1519,60 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── the process-liveness probe (POSIX `kill(pid, 0)`) ──
+
+    #[test]
+    fn pid_is_alive_reads_this_process_and_a_waited_child() {
+        assert!(pid_is_alive(std::process::id()));
+
+        // SAFETY: the child branch calls only `_exit`, so the forked copy never
+        // reaches a panic, the harness, or an atexit handler.
+        let child = unsafe { libc::fork() };
+        if child == 0 {
+            unsafe { libc::_exit(0) };
+        }
+        assert!(child > 0, "fork failed: {}", std::io::Error::last_os_error());
+        assert!(pid_is_alive(child as u32), "a forked child is a live pid");
+
+        let mut status: libc::c_int = 0;
+        let waited = loop {
+            // SAFETY: `child` is this process's own child and is waited exactly
+            // once; `&mut status` is a valid local.
+            let r = unsafe { libc::waitpid(child, &mut status, 0) };
+            if r != -1 || std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+                break r;
+            }
+        };
+        assert_eq!(waited, child, "the child is reaped, not merely polled");
+        assert!(
+            libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+            "the forked child must exit cleanly, never via a panic: status {status}"
+        );
+        assert!(!pid_is_alive(child as u32), "a reaped pid names no process");
+    }
+
+    #[test]
+    fn pid_is_alive_refuses_a_pid_that_cannot_name_one_process() {
+        // `kill(0, …)` addresses the caller's own process GROUP, and a value
+        // above `pid_t::MAX` wraps to a negative group/broadcast address —
+        // neither names ONE process, so both are refused before the syscall
+        // rather than answered by a kernel that would call both live.
+        assert!(!pid_is_alive(0));
+        assert!(!pid_is_alive(u32::MAX));
+        assert!(!pid_is_alive(libc::pid_t::MAX as u32 + 1));
+    }
+
+    #[test]
+    fn probe_verdict_reads_only_esrch_as_absent() {
+        assert!(!probe_verdict(Some(libc::ESRCH)), "ESRCH is the one absent verdict");
+        assert!(probe_verdict(Some(libc::EPERM)), "another user's process exists — live");
+        assert!(
+            probe_verdict(Some(libc::EINVAL)),
+            "an unexpected errno is unknown, never evidence of death"
+        );
+        assert!(probe_verdict(None), "an unanswerable probe is never evidence of death");
     }
 
     // ── atomic_write is symlink-transparent (rice draft mode's routing) ──

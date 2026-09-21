@@ -1,0 +1,62 @@
+# aoide core · POSIX portability
+
+> **Status: the required baseline is NOT met yet.** This page records, per
+> capability, where core (`aoide`/`aoided` and their dependency closure)
+> stands against POSIX.1-2008. It is deliberately *not* a certification and
+> not a claim that core runs on a POSIX host today: the Linux source and the
+> Linux test suite are what has actually been run (see "Evidence and limits").
+
+## What is portable, what is a capability
+
+The repo's own rule (root `AGENTS.md`): a portable capability is written
+against a POSIX process table and unix file locks; a `cfg(target_os)` branch
+is a **tie-break or a taught refusal, never a second discovery path**. A
+capability that exists only on one host is allowed to say so by name and
+refuse elsewhere — the precedent is `conduct/src/graph/actions.rs`'s
+`terminate_verified` ("verified process termination requires Linux pidfds").
+
+Two classes follow from that, and every row below is one of them:
+
+- **required baseline** — must work on any POSIX.1-2008 host;
+- **optional host-specific** — a refusal (or a named degradation) is the
+  correct behavior off its host, and must be legible, never silent.
+
+## Matrix
+
+| capability | sites | class / status |
+| --- | --- | --- |
+| process liveness | `storage/src/fs.rs::pid_is_alive`, re-exported as `conduct::reap::proc_exists` and imported by `client/src/{tunnel,pair_watch}.rs` | required; **one portable probe** — `kill(pid, 0)`, with `0` and any value above `pid_t::MAX` rejected as process-group names, `ESRCH` alone read as absent, and every other errno (including `EPERM`) conservatively live. Liveness is not identity |
+| peer credentials (`SO_PEERCRED`) | `conduct/src/graph/identity.rs::peer_cred`, `secrets/src/peercred.rs::peer_cred`; consumed by `server/src/daemon.rs::cross_uid_gate` | **required for the daemon dispatch door; Linux/Android mechanism only**. Other hosts return unidentified `None`: `aoided` refuses every dispatch connection, the shell bridge refuses connections, and secrets `dismiss`/`admin` refuse. The source guards remove two compile blockers but leave the core runtime baseline unmet. POSIX defines no peer-credential API; BSD `getpeereid` lacks the PID required by the ancestry checks. |
+| verified process termination | `conduct/src/graph/actions.rs` (pidfd) | optional host-specific, **Linux**; taught refusal off Linux |
+| argv / `comm` / `cwd` / ancestry identity | `conduct/src/graph/conduct.rs` (`cwd`, `cmdline`, `comm`, `/proc/<pid>/task/<pid>/children`), `client/src/tunnel.rs::looks_like_our_ssh`, `storage/src/attest.rs::pid_starttime`/`parent_pid`/`pid_ancestry`, `secrets/src/peercred.rs::read_comm` | required; **remaining `/proc` reads** — the sealed-credential pid-reuse defence reads `/proc/<pid>/stat` starttime, which has no POSIX equivalent, so off Linux that defence resolves nothing and the sealed-identity lane does not verify |
+| lock probe | `protocol/src/dialog.rs::probe_locker_running` | required; **remaining `/proc` scan** for the locker's `comm`, and an unreadable `/proc` answers "not running" (`probe_loginctl_locked` is systemd-logind only) |
+| boot epoch | `conduct/src/reap.rs::boot_epoch` (`/proc/stat` `btime`, reused by `server/src/daemon.rs`) | required; **remaining** — off Linux `boot_epoch` is `None`, so the pre-boot reap signal and the boot-epoch-guarded auto-resume never fire |
+| runtime dir | `conduct/src/graph/conduct.rs::conduct_socket_path`/`channel_socket_path`, `conduct/src/shellbridge.rs`, `storage/src/tunnel.rs::runtime_dir` | required; **remaining** — a hardcoded `/run/user/1000` fallback (logind-shaped, and wrong for any uid ≠ 1000), and no `sun_path` budget check on the bind side |
+| unix socket addressing | `secrets/src/client.rs::unix_sockaddr` | required; **remaining** — a hand-built `sockaddr_un` capping at a hardcoded 108 and computing the length from `size_of::<sa_family_t>()`. Per libc 0.2.189, `sun_path` is `[c_char; 104]` and `sa_family_t` is `u8` on BSD (with a `sun_len` field Linux lacks), so outside Linux a 105..107-byte path passes that guard and is zero-filled, and the computed length is one byte short |
+| shell resolution | `conduct/src/graph/resurrect.rs::passwd_login_shell` | required; **remaining** — a `getent passwd` shell-out (glibc/nss; its absence falls back to `/bin/sh`) |
+| `ps` invocation | `conduct/src/graph/codex_app.rs::process_table` | required, **named dependency** — `ps -axo pid=,ppid=,command=` works on Linux/macOS/FreeBSD; POSIX.1 only mandates `ps -e -f -o <format>`, so a strict/`BusyBox` `ps` may reject it |
+| stage/state lock | `storage/src/fs.rs`, `storage/src/outbox.rs`, `conduct/src/graph/codex_app.rs::lock_is_held` | required, **non-POSIX primitive by design** — `flock(2)` is BSD/XSI, not POSIX.1 (POSIX offers `fcntl(F_SETLK)`, per-process and dropped when any fd to the file closes). The guarantees here — the lock surviving a `fork`/`setsid` into a detached child, and `lock_is_held` as a liveness probe that never creates the file — rest on open-file-description semantics |
+| desktop / systemd capabilities in core | `hyprctl` window ops, `loginctl` lock gate, power actions, `notify-send`, `zenity`/`lyra` dialogs, `/run`+`/var/lib` deployment paths | optional host-specific — window ops gate on `HYPRLAND_INSTANCE_SIGNATURE` and degrade to `None`; power actions surface a spawn failure rather than a named refusal; the deployment paths are env-overridable placeholders, not POSIX shapes |
+
+## Evidence and limits
+
+- **Run**: Linux source, Linux tests, `x86_64-unknown-linux-gnu` only.
+- **Not run**: no macOS/FreeBSD runner or target std was available, and no
+  target was downloaded, so every non-Linux branch above is compile-gated but
+  **unverified at runtime**. Nothing here was executed on a non-Linux host,
+  and no POSIX conformance claim follows from a `cfg` branch — `cfg(unix)` is
+  not evidence of POSIX (the tree already contains `cfg(unix)` branches whose
+  *semantics* are Linux: `SO_PEERCRED`, `flock`).
+- **Per-OS claims above** (which targets define `libc::ucred`, the `sun_path`
+  width, `sa_family_t`'s width, `getpeereid`'s signature) were read from the
+  workspace's libc 0.2.189 source, not from documentation.
+- **Test-runner gap**: non-Linux behavior has no runner. Tests asserting
+  `/proc` facts, `/run/user/1000` paths, and Linux-only peer-credential reads
+  are either Linux-gated (they vanish elsewhere) or red elsewhere, so the
+  non-Linux arms need a macOS/FreeBSD runner, per-crate
+  (`cargo test -p <crate>`, never `--workspace`).
+- **Refusal convention**: where a capability is host-specific, the shape is
+  the named refusal — `cfg(target_os)` on the existing body plus a non-host arm
+  that keeps today's fail-closed semantics — never a fabricated uid/pid, never
+  a weaker check standing in for a stronger one, and never a parallel
+  discovery mechanism beside the portable path.
