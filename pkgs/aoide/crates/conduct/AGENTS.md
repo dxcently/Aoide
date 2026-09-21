@@ -285,10 +285,17 @@
 - **Aoide never sweeps or writes under the eidolon presence root.**
   `$XDG_RUNTIME_DIR/eidolon` is read-only territory: this crate lists it and
   reads `meta.json`/probes `sock`, and nothing here ever removes a stale
-  directory, writes a file under it, or runs the `eidolon` binary. A
-  presence entry whose socket has gone quiet loses its Aoide-side record
-  the next `Observed` pass finds it missing (below); the directory itself
-  stays the producer's own to clean up.
+  directory or writes a file under it. A presence entry whose socket has gone
+  quiet loses its Aoide-side record the next `Observed` pass finds it missing
+  (below); the directory itself stays the producer's own to clean up.
+  **The ONE exec of the `eidolon` binary is the producer's own read-only
+  export** — `eidolon log --json <journal> [--after <id>]`, the door
+  `docs/architecture/EIDOLON-TRACE.md` states — and it is reached only through
+  the harness CAPABILITY (`TranscriptSpec::locate` + `TranscriptSpec::trace` in
+  `aoide-protocol`), only when the producer's own `log --help` proves it is the
+  read-only generation, and never against a journal whose producer generation
+  cannot be proven. Nothing else in this crate runs that binary, and nothing
+  here ever asks it to write.
 
 - **TUI-vs-not is read off the SAME parsed `ps` table `codex_app.rs` already
   owns — no second discovery path.** `eidolon.rs::is_tui_argv` classifies a
@@ -357,9 +364,13 @@
   `eidolon_state_from_trace` returns `None` there and the function carries
   the literal `"unknown"` (the vocabulary's own absence-of-evidence arm)
   rather than a guess from a weaker signal. `read_presence_trace` is the one
-  place the presence's `trace` field becomes lines (delegating to
-  `aoide_protocol::agents::eidolon_trace_tail`, the ONE trace reader); a
-  non-`.jsonl` path, a missing file, or an absent key is `None` — the older-
+  place a presence becomes lines: it resolves the trace through the harness
+  CAPABILITY — `TranscriptSpec::locate` (the same locator the reaper's
+  transcript refresh and `session trace` use, which answers a current mirror,
+  else the journal when the producer's read-only export door is there, else the
+  presence file) and then `TranscriptSpec::trace` (the one trace reader) — so a
+  producer that publishes no mirror still feeds this state fold. A trace that
+  does not resolve at all, or that is not a trace, is `None` — the older-
   eidolon shape, which is exactly when the presence rule below applies. Don't
   reorder the two rules, and don't soften the `None`/`Some(empty)`
   distinction: it is what makes a headless run (whose `busy` is permanently
@@ -381,6 +392,34 @@
   the reaper's transcript refresh calls. `--follow` is CLI-only (a follow
   that parks a connection makes no sense over MCP/A2A/the daemon socket),
   with the `events tail`/`secrets watch` signal-loop shape.
+- **`data.steps` is PROJECTED from the same window `data.lines` carries, and
+  bounded before it is built (Phase B).** `steps_of` is the one projector: one
+  step per non-empty content block in the record's own order, and `render_line`
+  renders `steps_of(record, Clip::Line)` so the human line and the JSON cannot
+  drift. Never "one step per record" (`Option<Step>`) — an `AssistantMessage`
+  routinely holds thinking + text + tool_use, and a single-step projector drops
+  all but one silently. Never remove a bound to make a step list longer: the
+  `--tail` window, `MAX_BLOCKS_PER_RECORD`, `MAX_STEPS` and `Clip` are what keep
+  one hostile record (or one hostile journal) from making an answer unbounded,
+  and every cut must stay NAMED (`Step::clipped`, the `+N more block(s)` note,
+  `stepsOmitted`) — a silently shortened list is the bug these exist to
+  prevent. `Clip::Detail` widens ONE clip (blocks' own line breaks, tool
+  arguments); it never turns the projection into the journal.
+- **The bridge's trace query is bounded by the DOOR, not by the caller's
+  cadence.** A polled read (`sessiontrace`) must answer or refuse on the
+  connection; never leave a parked caller. `parse_command` refuses a blank
+  `sessionId`, a nonsense `lines` and an unknown `clip` (clamping `lines` from
+  above only), and `handle_conn` still ANSWERS a line naming that verb which
+  fails its gate (`bad-request`) — silence is not an answer. `run_core_bounded`
+  is the only way this module runs a child: a wall-clock deadline with kill +
+  `wait` (no zombie, no live child past the bound), pipes drained by
+  SLOT-COUNTED reader threads that are NEVER joined (`ReaderSlot`; a descendant
+  that inherited a pipe must cost a slot, never the deadline), and a partial
+  read DISCARDED rather than parsed when EOF does not arrive inside the grace.
+  Don't reintroduce a `join()` on a reader, and don't add a bound that one
+  timed-out tick can outrun. Refusals are audited; a successful poll is not
+  (one line per second per card is not a human gesture), and an audit line never
+  carries an argument value.
 
 - **`session bind` assigns continuity, never authority.** Keep the operation
   daemon-owned and local-only; no missing-daemon fallback. It does not load
@@ -1691,3 +1730,89 @@
   reply shape updates `ShellBridge.qml`'s protocol comment and
   `concepts/cli/Doors-and-Nodes.md`'s socket-command list, in the same
   commit.
+
+## Managed task wrapper (`spawn --task`, `session watch`)
+
+- **The instruction sidecar is written once, 0600, and carries only the
+  operator's bytes.** `state/sessions/<id>.instructions.md` is created
+  exclusively by `spawn` BEFORE the child re-execs; a second write for the same
+  session id is a taught error naming the stale file, never a raw io error and
+  never a silent overwrite. No credential, token or environment dump is ever
+  appended to it. The child reaches it by PATH (`AOIDE_TASK_INSTRUCTIONS`,
+  `instructionsPath`), never by re-derivation.
+- **`session watch` is read-only and cursor-free.** It never calls
+  `write_stage`, `mark`, `read_for`, `ring` or writes the conduct socket; its
+  only mail reader is `mail::unread_for(slug, Some(child))` — a reader-selected
+  PEEK that advances no cursor — so watching consumes neither the child's nor
+  the observer's unread state, and the rail is the CHILD's own queue rather
+  than every letter in the mailbox. Every untrusted fragment it renders is
+  sanitized (control characters stripped, lines clipped) — including a sender's
+  id, wherever it is printed — and raw PTY bytes go only to a real terminal.
+- **A finished run's exit report is filed by the daemon tick through the
+  registered `mail.send` implementation** (`Door::Daemon`, in-process — the
+  daemon authority path, not a bypass), never by the mail layer called directly
+  from conduct and never by the dying child. The tick's trigger is the record
+  (`task` set, `state = done`, no cursor entry), so a daemon that was down
+  reports on its next pass.
+- **Delivery semantics: single delivery in the normal path, never lost, and one
+  stated duplicate window.** The cursor (`state/stage/taskreport.json`) advances
+  only after the letter is really in the mailbase, so a filing failure is
+  retried on the next tick. The guarantee is **at-least-once, normally exactly
+  once**: a crash between the filing and the cursor write re-files, and the
+  retry mints a new msgid, so the mailbase's own duplicate memory cannot
+  collapse it. Those words — at-least-once, normally exactly once — are the
+  whole delivery description of this lane; no stronger guarantee is claimed.
+- **An unfiled task run is not prunable.** `prune_done` skips a `task`-carrying
+  `done` record with no cursor entry, so neither the reaper's sweep nor
+  `session prune` can drop the report lane's own trigger before it fires.
+- **A signal death is not an exit code.** The record's `exitCode` is written
+  from `ExitStatus::code()`, which is `None` for a signal death; a killed run
+  keeps `endedAt` and no `exitCode`, and nothing may read that absence as `0`.
+  A signal death carries no `exitCode` in the command envelope either: the
+  field is inserted only when there is a real status, so no consumer ever sees
+  a fabricated `-1`.
+- **One wake per event, and its reason is kept.** The lane takes the mail-side
+  doorbell once; no second raw line is injected. The ring's own outcome
+  (`rang:N`, `deferred:<state>`, `skipped:<reason>`, or its failure) is recorded
+  in the cursor and shown by the view — a never-conducted (Codex desktop/app)
+  parent cannot be woken at all, and that is reported rather than papered over.
+- **The live-slug check is a courtesy, not a lock.** `spawn --task` refuses a
+  slug whose record is not `done`, but two concurrent spawns can both pass it;
+  nothing afterwards enforces uniqueness, and no code claims it. In that race
+  both records carry the slug and the mailbox holds both runs' letters, kept
+  apart by each letter's `from` session id.
+- **The child is its task mailbox's own reader, and channels are distinct.**
+  `spawn`/`conduct` enrol the RUN's session id under the slug, so a mailbox
+  records what was sent TO the subagent against the subagent's own cursor. The
+  run's exit report is filed to the REPORT mailbox (`--report-to`, else the
+  parent's id when that is a legal mailbox name, else the documented role
+  mailbox `conductor`) — never to `self/<slug>`, whose only contents are the
+  letters sent to the child. An id that is not a legal mailbox name is never
+  rewritten into one: two identities must not collide on a name.
+- **The only reader-selected mail read is a PEEK.** `aoide_storage::mail::
+  unread_for(name, reader)` returns `(mark, entries)` and writes nothing — no
+  `save_cursors`, no mark created, no `read_for`/`mark`. `session watch` uses it,
+  so the observer consumes neither the child's mail nor its own, and the live
+  view prints `child read through seq <n>` when the CHILD's own mark advances.
+- **`--timeout` is the supervisor's WALL CLOCK, never inactivity.** It is
+  checked on every multiplex iteration and bounds the `poll` wait
+  (`min(remaining, poll_timeout)`, checked arithmetic both sides). On expiry the
+  wrapper kills the DIRECT child it spawned (`Child::kill`, never a
+  roster-resolved id or an ancestry walk) and reads the post-kill status as
+  `killedWith` — secondary evidence, never the result. A silent child is alive
+  until the deadline; a child printing continuously is still killed at it.
+- **The end is a CLOSED vocabulary, and a kill is never an exit code.**
+  `outcome` is `exit` (with `exitCode`), `signal` (with `signal`; no
+  `exitCode`), `timeout` (the wrapper's own act), or `stopped` (no status:
+  reaped or killed outside the wrapper). `exitCode` is written only for
+  `exit`; the old `code().unwrap_or(-1)` collapse is gone, and
+  `do_session_end`/the reaper stamp `stopped` for a run they never saw exit.
+  Nothing in this path reads a harness trace, so completion reporting does not
+  depend on the ping-back (VV/JEV) lane.
+- **A completed task run is HISTORY, not garbage.** Routine cleanup retains
+  every `task`-carrying `done` record — `prune_done` cannot drop one, filed or
+  not — so a finished run stays resolvable by `session watch` (instructions,
+  the child's unread queue, output, outcome, report). Only the explicit
+  `aoide session prune` may drop a FILED task run; an unfiled one is retained
+  even there, and after any explicit prune the durable history (ledger line,
+  letters, PTY transcript, instruction sidecar) is still on disk.

@@ -16,9 +16,76 @@ Item {
     }
     property var livery
     property var bridge
+    // The temple-level trace controller (conductor.qml's `temple.trace`): the
+    // ONE read-only trace query, claimed by the Details page while it is open.
+    // Null on a host that passes none — the page then shows the recovery block
+    // alone, exactly as before.
+    property var trace: null
     property var record: ({})
     property var host: null
     property string page: "actions"
+
+    // ── the trace panel (Details) ──────────────────────────────────────────
+    // The SAME step grammar the card's lanes paint — one object per emitted
+    // content block, in the record's own order — in the wider window the daemon
+    // is asked for here (`lines: 24`, `clip: "detail"`), so emitted reasoning
+    // and multi-line tool output are READABLE instead of cut at a card face's
+    // one line. Every step's text is the harness's own emitted text: untrusted
+    // DATA, painted PlainText, never interpreted.
+    //
+    // A snapshot, not a stream: the panel is refreshed while this page is OPEN
+    // (the claim below), and the stamp is the answer's OWN read time — a failed
+    // or superseded query never gets a fresh-looking stamp.
+    readonly property string traceSessionId: (record && record.sessionId) ? ("" + record.sessionId) : ""
+    readonly property var traceSteps: trace ? trace.stepsFor(traceSessionId) : []
+    readonly property string traceError: trace ? trace.errorFor(traceSessionId) : ""
+    readonly property int traceOmitted: trace ? trace.omittedFor(traceSessionId) : 0
+    readonly property string traceStamp: trace ? trace.stampFor(traceSessionId) : ""
+    readonly property bool traceOpen: trace !== null && visible && page === "details"
+        && traceSessionId !== ""
+    onTraceOpenChanged: menu.syncTraceClaim()
+    onTraceSessionIdChanged: menu.syncTraceClaim()
+    Component.onDestruction: if (trace) trace.release("menu")
+    function syncTraceClaim() {
+        if (!trace) return
+        if (traceOpen) trace.claim("menu", traceSessionId, true)
+        else trace.release("menu")
+    }
+    // The honest note above the steps: a refusal/absence names itself, a
+    // truncated projection says how much it dropped, and a populated panel says
+    // WHEN it was read — never "live", because nothing here streams.
+    function traceNote() {
+        if (menu.traceError !== "") return menu.traceError
+        if (menu.traceSteps.length === 0)
+            return menu.traceOpen && menu.trace
+                ? (menu.trace.isTarget(menu.traceSessionId)
+                   ? "reading this session's trace…"
+                   : "no trace read for this session")
+                : ""
+        var note = "snapshot read at " + (menu.traceStamp !== "" ? menu.traceStamp : "unknown time")
+        note += " · " + menu.traceSteps.length + " step(s)"
+        if (menu.traceOmitted > 0) note += " · " + menu.traceOmitted + " older step(s) not shown"
+        return note
+    }
+    function stepLabel(step) {
+        if (!step) return ""
+        if (step.kind === "thinking") return "thinking"
+        if (step.kind === "say") return "said"
+        if (step.kind === "tool") return "▸"
+        if (step.kind === "result") return step.error ? "! result" : "result"
+        if (step.kind === "settled") return "settled"
+        if (step.kind === "user") return "asked"
+        return "·"
+    }
+    function stepColor(step) {
+        if (!step) return menu.livery ? menu.livery.paletteFg : "transparent"
+        var fg = menu.livery ? menu.livery.paletteFg : "transparent"
+        var accent = menu.livery ? menu.livery.paletteAccent : fg
+        if (step.kind === "tool") return accent
+        if (step.kind === "result" && step.error)
+            return menu.livery ? menu.livery.paletteUrgent : fg
+        return fg
+    }
     property bool editing: false
     property string message: ""
     property bool failed: false
@@ -30,6 +97,10 @@ Item {
     property real pointY: 0
     visible: false
     property string face: "JetBrainsMono Nerd Font"
+    // The song serif face for the agent own voice - the trace panel paints
+    // thinking/say in it exactly as the card voice lane does (same name,
+    // same value as conductor.qml faceSerif).
+    property string faceSerif: "Noto Serif"
     readonly property string recovery: recoveryFor(record)
     function recoveryFor(rec) {
         rec = rec || {}
@@ -223,6 +294,71 @@ Item {
                     visible: menu.page === "details"; text: menu.recovery
                     textFormat: TextEdit.PlainText; readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere
                     font.family: menu.face; font.pixelSize: 10; color: menu.livery ? menu.livery.paletteFg : "transparent"
+                }
+                // ── the trace: what this session emitted, newest last ───────
+                // PlainText throughout (the text is harness DATA), one block per
+                // step in the record's own order, each labelled by kind. The
+                // note above is honest about a refusal, a bound and the read
+                // time; nothing here is captioned "live".
+                Column {
+                    width: parent.width; spacing: 3
+                    visible: menu.page === "details" && menu.trace !== null
+                    Text {
+                        width: parent.width
+                        text: "┌─ trace ─┐"
+                        font.family: menu.face; font.pixelSize: 10
+                        color: menu.livery ? menu.livery.paletteAccent : "transparent"
+                    }
+                    Text {
+                        width: parent.width
+                        text: menu.traceNote()
+                        visible: text !== ""
+                        textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere
+                        font.family: menu.face; font.pixelSize: 9
+                        color: menu.livery
+                               ? (menu.traceError !== "" ? menu.livery.paletteUrgent : menu.livery.paletteFg)
+                               : "transparent"
+                        opacity: menu.traceError !== "" ? 1 : 0.65
+                    }
+                    Repeater {
+                        model: menu.traceSteps
+                        delegate: Column {
+                            required property var modelData
+                            width: parent.width; spacing: 1
+                            Row {
+                                width: parent.width; spacing: 4
+                                Text {
+                                    text: menu.stepLabel(modelData)
+                                    font.family: menu.face; font.pixelSize: 9
+                                    color: menu.stepColor(modelData)
+                                    opacity: 0.75
+                                }
+                                Text {
+                                    text: modelData.clipped ? "clipped" : ""
+                                    font.family: menu.face; font.pixelSize: 9
+                                    color: menu.livery ? menu.livery.paletteFg : "transparent"
+                                    opacity: 0.4
+                                }
+                            }
+                            TextEdit {
+                                width: parent.width
+                                height: visible ? contentHeight : 0
+                                visible: ("" + modelData.text) !== ""
+                                text: "" + modelData.text
+                                textFormat: TextEdit.PlainText; readOnly: true
+                                selectByMouse: true; wrapMode: TextEdit.WrapAnywhere
+                                // the agent's reasoning takes the voice's own
+                                // serif italic; everything else is machine text
+                                font.family: modelData.kind === "thinking" || modelData.kind === "say"
+                                             ? menu.faceSerif : menu.face
+                                font.italic: modelData.kind === "thinking"
+                                font.pixelSize: 10
+                                color: menu.stepColor(modelData)
+                                opacity: (modelData.kind === "thinking" || modelData.kind === "say")
+                                         ? 0.85 : 0.8
+                            }
+                        }
+                    }
                 }
                 Column {
                     width: parent.width; visible: menu.page === "projects"; spacing: 2

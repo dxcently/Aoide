@@ -29,11 +29,12 @@
 //! `lyra`'s.
 
 use super::conduct::{captures_like_a_shell, conduct_socket_path, unix_ts};
-use super::model::{load_stage, sessions_path, SessionsFile};
+use super::model::{canonical_state, load_stage, sessions_path, SessionsFile};
 use super::send::session_send;
 use super::undying::nothing_to_restore_warning;
 use aoide_protocol::output::{Outcome, Status};
 use aoide_protocol::Invocation;
+use aoide_storage::fs::session_logs_dir;
 use aoide_storage::undying::{load_undying, save_undying, set_undying};
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -85,15 +86,21 @@ fn spawn_exe() -> std::io::Result<PathBuf> {
 /// path shared by the headless (`spawn`) and windowed (`spawn
 /// --windowed`) branches, the `--headless` flag aside: `["conduct",
 /// ("--headless",)? "--agent", agent, "--id", id, ("--parent", parent)?,
-/// "--", <command…>]`. Registration, the control socket, and the
-/// parent-autogate lane (`send.rs`'s `sender_is_parent`) all key off this
-/// same shape either way — do NOT fork a second builder for the windowed
-/// path.
+/// ("--task", slug, "--instructions-path", path)?, "--", <command…>]`.
+/// Registration, the control socket, and the parent-autogate lane
+/// (`send.rs`'s `sender_is_parent`) all key off this same shape either way —
+/// do NOT fork a second builder for the windowed path, or for the managed
+/// task mode: `--task` rides the SAME argv, so a windowed wrapper run and a
+/// headless one register identically.
 fn build_conduct_args(
     headless: bool,
     agent: &str,
     id: &str,
     parent: Option<&str>,
+    task: Option<&str>,
+    instructions_path: Option<&str>,
+    timeout_secs: Option<u64>,
+    report_to: Option<&str>,
     command: &[String],
 ) -> Vec<String> {
     let mut args: Vec<String> = vec!["conduct".to_string()];
@@ -112,9 +119,114 @@ fn build_conduct_args(
         args.push("--parent".to_string());
         args.push(parent.to_string());
     }
+    // Managed task wrapper mode: the CHILD stamps both facts on its own
+    // record at registration (one writer), so `spawn` never touches
+    // `sessions.json` itself.
+    if let Some(task) = task {
+        args.push("--task".to_string());
+        args.push(task.to_string());
+    }
+    if let Some(path) = instructions_path {
+        args.push("--instructions-path".to_string());
+        args.push(path.to_string());
+    }
+    // A6/A4 ride the SAME argv, so the foreground shape and the detached one
+    // are the same wrapper by construction.
+    if let Some(secs) = timeout_secs {
+        args.push("--timeout".to_string());
+        args.push(secs.to_string());
+    }
+    if let Some(name) = report_to {
+        args.push("--report-to".to_string());
+        args.push(name.to_string());
+    }
     args.push("--".to_string());
     args.extend(command.iter().cloned());
     args
+}
+
+/// Read `--instructions`'s value in its three accepted forms: `@<path>` (the
+/// file's own bytes, read here and now), `-` (this process's stdin, to EOF)
+/// and anything else (the operator's literal text, verbatim — no shell, no
+/// expansion, no escaping). Every failure is a taught error; nothing is
+/// spawned on one. The bytes are carried verbatim: they are the operator's,
+/// and this path never appends environment, tokens or credentials to them.
+fn read_instructions(spec: &str) -> Result<String, String> {
+    if let Some(path) = spec.strip_prefix('@') {
+        std::fs::read_to_string(path).map_err(|e| format!("reading --instructions @{path}: {e}"))
+    } else if spec == "-" {
+        use std::io::Read as _;
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|e| format!("reading --instructions - from stdin: {e}"))?;
+        Ok(buf)
+    } else {
+        Ok(spec.to_string())
+    }
+}
+
+/// Write a managed task run's INSTRUCTION SIDECAR once —
+/// `state/sessions/<id>.instructions.md`, the same directory and lifecycle
+/// as that session's PTY log (`session_logs_dir`). Mode `0600`, created
+/// exclusively (`create_new`): the file is write-once by construction, so a
+/// second write for the same session id is a taught error rather than a
+/// silent overwrite of the instructions a run was started with. Returns the
+/// absolute path.
+fn write_instructions_sidecar(id: &str, text: &str) -> Result<String, String> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt;
+    let dir = session_logs_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = dir.join(format!("{id}.instructions.md"));
+    let mut file = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+    {
+        Ok(f) => f,
+        // Write-once, TAUGHT: a second write for one session id is not a raw
+        // io error — it names the stale file and both ways out, because a
+        // reused `--id` is the ordinary way to land here.
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(format!(
+                "{} already exists — a run's instruction sidecar is written once and never \
+                 overwritten, so this session id cannot be given new instructions; spawn with a \
+                 different --id, or remove that stale sidecar by hand",
+                path.display()
+            ))
+        }
+        Err(e) => return Err(format!("writing {}: {e}", path.display())),
+    };
+    file.write_all(text.as_bytes())
+        .map_err(|e| format!("writing {}: {e}", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// The LIVE run already holding a task slug, if any — a record whose `task`
+/// names the slug and whose state has not reached `done` (through
+/// `canonical_state`, so any spelling of done reads as done). A slug with a
+/// live run is refused; a slug whose run is `done` is free, and respawning it
+/// mints a NEW session id — a new run on the same mailbox.
+///
+/// **This is a read-then-spawn check, and the code does NOT claim slug
+/// uniqueness.** Two concurrent spawns of one slug can both pass it before
+/// either child registers, and nothing afterwards prevents that: the child's
+/// own `stamp_task` writes whatever slug it was given, so in that race both
+/// records carry the slug — last writer wins for display, the mailbox simply
+/// holds two runs' letters, and each letter's `from` session id keeps them
+/// apart (which is the whole run-attribution story). The check is a courtesy
+/// against the ordinary mistake, not a lock.
+fn live_run_for(slug: &str) -> Option<(String, String)> {
+    load_stage::<SessionsFile>(&sessions_path())
+        .ok()
+        .and_then(|f| {
+            f.sessions
+                .into_iter()
+                .find(|r| r.task.as_deref() == Some(slug) && canonical_state(&r.state) != "done")
+        })
+        .map(|r| (r.session_id, r.started_at))
 }
 
 /// Spawn `argv0` with `args`, detached into its own session (`setsid`) with
@@ -324,11 +436,23 @@ fn wait_for(path: &std::path::Path, budget: Duration) -> bool {
 }
 
 /// `aoide spawn [--agent <name>] [--parent <sessionId>] [--id <id>]
-/// [--prompt <text>] [--windowed] [--undying] -- <command …>` — spawn
-/// `<command>` as a conducted session that OUTLIVES this call (headless by
-/// default, or in a real terminal with `--windowed`), wait briefly for it to
-/// register, and return `{ sessionId, agent, socket, logPath, registered,
-/// prompt, windowed, undying }`.
+/// [--prompt <text>] [--task <slug>] [--instructions <text|@file|->]
+/// [--windowed] [--undying] -- <command …>` — spawn `<command>` as a
+/// conducted session that OUTLIVES this call (headless by default, or in a
+/// real terminal with `--windowed`), wait briefly for it to register, and
+/// return `{ sessionId, agent, socket, logPath, registered, prompt,
+/// windowed, undying, task, instructionsPath, parentReader }`.
+///
+/// `--task <slug>` turns the run into a MANAGED TASK WRAPPER run
+/// (`docs/Aoide-Wiki/concepts/orchestration/Managed-Task-Wrapper.md`): the
+/// slug is validated with the mailbox predicate, refused while another live
+/// record already holds it, kept as the task's mailbox name, with the parent
+/// (`--parent`, else `AOIDE_SESSION_ID`) enrolled as one of its readers.
+/// `--instructions <text|@file|->` stores the operator's own bytes as a
+/// write-once `0600` sidecar beside the run's PTY log; the child receives its
+/// PATH through the spawner's argv (never the bytes), and reads it as
+/// `AOIDE_TASK_INSTRUCTIONS` in its own environment. It is not injected as a
+/// turn — the caller's own `--prompt` is the injection path, unchanged.
 ///
 /// Ordering mirrors `conduct`/`wrap`: the re-exec'd `conduct` child (headless
 /// or, under `--windowed`, running inside the just-opened terminal) spawns
@@ -345,7 +469,7 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
     if inv.args.is_empty() {
         return Outcome::usage(
             cmd,
-            "usage: aoide spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt <text>] [--windowed] -- <command …>",
+            "usage: aoide spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt <text>] [--task <slug>] [--instructions <text|@file|->] [--windowed] -- <command …>",
         );
     }
     let program = inv.args[0].clone();
@@ -362,6 +486,118 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
 
     let windowed = inv.flag_present("windowed");
     let cwd = inv.flags.get("cwd").map(String::as_str);
+
+    // ── managed task wrapper mode (`--task <slug>`) ──────────────────────
+    let task = inv
+        .flags
+        .get("task")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    // A4/A6's two extra facts, validated here so an unusable value refuses
+    // before any file or process exists — the child re-execs with exactly what
+    // was accepted, and `spawn` never writes the record itself.
+    let report_to = inv
+        .flags
+        .get("report-to")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if let Some(name) = &report_to {
+        if !aoide_storage::node_store::valid_node_name(name) {
+            return Outcome::usage(
+                cmd,
+                format!("--report-to `{name}` is not a legal mailbox name (^[a-z0-9][a-z0-9-]*$)"),
+            );
+        }
+    }
+    let timeout_secs = match inv.flags.get("timeout") {
+        None => None,
+        Some(raw) => match raw.trim().parse::<u64>() {
+            Ok(secs) if secs > 0 => Some(secs),
+            _ => {
+                return Outcome::usage(
+                    cmd,
+                    format!(
+                        "--timeout must be a positive whole number of seconds (got `{raw}`); \
+                         omit it for no deadline"
+                    ),
+                )
+            }
+        },
+    };
+    if task.is_none() && inv.flags.contains_key("instructions") {
+        return Outcome::usage(
+            cmd,
+            "--instructions stores a managed task run's instruction sidecar; give --task <slug> with it",
+        );
+    }
+    let instructions = match (task.as_deref(), inv.flags.get("instructions")) {
+        (Some(_), Some(spec)) => match read_instructions(spec) {
+            Ok(text) => Some(text),
+            Err(e) => {
+                return Outcome::usage(cmd, e)
+                    .with_data(json!({ "reason": "bad-instructions", "sessionId": id }))
+            }
+        },
+        _ => None,
+    };
+    if let Some(slug) = task.as_deref() {
+        if !aoide_storage::node_store::valid_node_name(slug) {
+            return Outcome::usage(
+                cmd,
+                format!("task name `{slug}` is not a legal mailbox name (^[a-z0-9][a-z0-9-]*$)"),
+            )
+            .with_data(json!({ "reason": "invalid-task", "sessionId": id, "task": slug }));
+        }
+        // One live run per slug: two live runs must never share one mailbox,
+        // and the refusal names BOTH the holding session and its start
+        // instant so the operator can find it. Nothing is written, nothing
+        // is spawned.
+        if let Some((held_by, started_at)) = live_run_for(slug) {
+            return Outcome::error(
+                cmd,
+                format!(
+                    "task `{slug}` already has a live run — session `{held_by}` (started {started_at}); \
+                     end it, or spawn under a different task name"
+                ),
+            )
+            .with_data(json!({
+                "reason": "task-live",
+                "sessionId": id,
+                "task": slug,
+                "liveSessionId": held_by,
+            }));
+        }
+    }
+    // The sidecar is written BEFORE the re-exec, once, 0600: the child then
+    // receives only its PATH (`--instructions-path`), so the brief text never
+    // has to be re-derived and the child's own argv carries no brief bytes.
+    let instructions_path = match (&task, &instructions) {
+        (Some(_), Some(text)) => match write_instructions_sidecar(&id, text) {
+            Ok(path) => Some(path),
+            Err(e) => {
+                return Outcome::error(cmd, e).with_data(json!({
+                    "reason": "instructions-write-failed",
+                    "sessionId": id,
+                }))
+            }
+        },
+        _ => None,
+    };
+    // A1: the CHILD is its task mailbox's own reader, so mail sent TO the
+    // subagent is shown against the subagent's own cursor. The parent is NOT
+    // enrolled on the slug: the run's own report goes to its REPORT mailbox
+    // (A4), and `--report-to <role>` enrols the parent under THAT role name
+    // instead (`conduct`'s registration does it, where the resolved parent id
+    // is in hand).
+    // report mailbox (A4), and a parent holding the slug's reader mark would be
+    // consuming the child's inbox.
+    let child_reader = match task.as_deref() {
+        Some(slug) => match aoide_storage::mail::enrol_reader(slug, &id) {
+            Ok(()) => format!("enrolled:{id}"),
+            Err(e) => format!("failed:{e}"),
+        },
+        None => "none".to_string(),
+    };
 
     let exe = match spawn_exe() {
         Ok(e) => e,
@@ -381,6 +617,10 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
         &agent,
         &id,
         inv.flags.get("parent").map(String::as_str),
+        task.as_deref(),
+        instructions_path.as_deref(),
+        timeout_secs,
+        report_to.as_deref(),
         &inv.args,
     );
 
@@ -526,6 +766,12 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
     if undying {
         changed.push(format!("session {id}: undying"));
     }
+    if let Some(slug) = &task {
+        changed.push(format!("session {id}: task {slug}"));
+    }
+    if let Some(path) = &instructions_path {
+        changed.push(format!("{path}: instructions written (0600, once)"));
+    }
 
     let data = json!({
         "sessionId": id,
@@ -536,6 +782,11 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
         "prompt": prompt_result,
         "windowed": windowed,
         "undying": undying,
+        "task": task,
+        "instructionsPath": instructions_path,
+        "childReader": child_reader,
+        "reportTo": report_to,
+        "timeoutSecs": timeout_secs,
     });
 
     let mut message = format!(
@@ -544,6 +795,14 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
     );
     if let Some(warning) = &undying_warning {
         message = format!("{message} — {warning}");
+    }
+    if let Some(slug) = &task {
+        message = format!(
+            "{message}\nmanaged task `{slug}` — watch it with `aoide session watch {id}`; \
+             mail sent TO the child lands in `aoide mail read --for {slug}`, and the run's own \
+             report goes to its REPORT mailbox (`--report-to`, else the parent's id, else the \
+             role mailbox `conductor`)"
+        );
     }
 
     Outcome::ok(cmd, message)
@@ -898,7 +1157,17 @@ mod tests {
         std::env::remove_var("DISPLAY");
 
         let exe = std::path::Path::new("/usr/bin/aoide");
-        let conduct_args = build_conduct_args(false, "claude", "win-1", None, &["claude".to_string()]);
+        let conduct_args = build_conduct_args(
+            false,
+            "claude",
+            "win-1",
+            None,
+            None,
+            None,
+            None,
+            None,
+            &["claude".to_string()],
+        );
         let argv = resolve_windowed_argv(exe, &conduct_args).expect("template + display resolve");
         assert_eq!(
             argv,

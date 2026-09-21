@@ -322,6 +322,63 @@ pub struct SessionRecord {
     /// one stays absent" discipline as `logPath` above.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub petname: Option<String>,
+    /// The task slug of a MANAGED TASK WRAPPER run (`aoide spawn --task
+    /// <slug>`, `docs/Aoide-Wiki/concepts/orchestration/
+    /// Managed-Task-Wrapper.md`) — stamped ONCE at registration by the
+    /// child's own `conduct`, exactly like `logPath`/`petname` above.
+    /// It is also that run's MAILBOX name: a slug is refused at spawn
+    /// unless `aoide_storage::node_store::valid_node_name` accepts it, the
+    /// same predicate `mail send` applies to a mailbox, so the pair can
+    /// never drift. A slug outlives a respawn (addressing is by role name,
+    /// never by petname) — the RUN is identified by `sessionId`, which is
+    /// why this is a display/attribution field and never a lookup key.
+    /// Additive/v0-safe: absent on a legacy record and on every ordinary
+    /// (non-wrapper) session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
+    /// Absolute path of a managed task run's write-once INSTRUCTION SIDECAR
+    /// (`state/sessions/<sessionId>.instructions.md`, `CONTRACTS.md` §4
+    /// beside the `state/sessions/<id>.log` transcript) — the operator's own
+    /// bytes, written by the spawner before the child re-execs, stamped by
+    /// the child at registration. Shares the PTY log's directory and
+    /// lifecycle, so a deleted session takes its sidecar with it. Carries no
+    /// credential material, ever. Additive/v0-safe, same discipline as
+    /// `task` above.
+    #[serde(rename = "instructionsPath", default, skip_serializing_if = "Option::is_none")]
+    pub instructions_path: Option<String>,
+    /// A managed task run's REAL process exit status, stamped by the child's
+    /// own exit path (`conduct`) the instant `conduct_multiplex` returns.
+    /// **Absent — never `0` — when the status is genuinely unknown**: a
+    /// killed, reaped or SIGKILLed run has no exit code to report, so the
+    /// key is simply not there, and no consumer may read an absent value as
+    /// success. Additive/v0-safe, same discipline as `task` above.
+    #[serde(rename = "exitCode", default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    /// The instant a managed task run's record left the running state —
+    /// stamped by the same conduct exit path as `exitCode`, and by
+    /// `do_session_end`/the reaper for a run that never reached it (a kill,
+    /// a liveness reap). Additive/v0-safe, same discipline as `task` above.
+    #[serde(rename = "endedAt", default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<String>,
+    /// A managed task run's DISCRIMINATED end, from a closed set —
+    /// `exit` (a real status, with `exitCode`), `signal` (the agent died by a
+    /// signal; `exitCode` absent), `timeout` (the wrapper's own wall-clock
+    /// deadline fired), or `stopped` (reaped or killed outside the wrapper:
+    /// no status, no code). Stamped by the child's own exit path, and by
+    /// `do_session_end`/the reaper for a run that never reached it. Absent on
+    /// every ordinary session and on a legacy record — and `exitCode` is
+    /// ALWAYS absent unless `outcome` says `exit`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    /// The mailbox a managed task run's exit report is addressed to
+    /// (`spawn --report-to <name>`, or `conduct --report-to`), validated with
+    /// the same name predicate every mailbox name is. The report lane prefers
+    /// this name, then the run's `parentSessionId` when that is a legal mailbox
+    /// name, then the documented stable role mailbox — a canonical parent id
+    /// that is not a legal name is never sanitized into a colliding one.
+    /// Absent means "the default resolution", never "no report".
+    #[serde(rename = "reportTo", default, skip_serializing_if = "Option::is_none")]
+    pub report_to: Option<String>,
     /// Up to 8 ancestor pids of the HOOK-FIRING process (a `/proc` `ppid`
     /// walk, self-first), stamped ONCE at a hook session's own
     /// SessionStart/self-heal registration (`graph session hook`,
@@ -1051,6 +1108,53 @@ mod tests {
         let legacy: SessionRecord =
             serde_json::from_str(r#"{ "sessionId": "s", "windowAddress": "0x1" }"#).unwrap();
         assert_eq!(legacy.petname, None);
+    }
+    #[test]
+    fn session_record_task_fields_round_trip_and_stay_absent_when_unset() {
+        // serde: the managed-task wrapper's four additive keys (`task`,
+        // `instructionsPath`, `exitCode`, `endedAt`) serialise when set and
+        // are skipped (skip_serializing_if) when None — the same
+        // additive/v0-safe wire contract `logPath`/`petname` hold above. No
+        // schema-version bump: a record this version doesn't know about
+        // round-trips, an absent one stays absent.
+        let mut rec = SessionRecord {
+            session_id: "s".into(),
+            ..Default::default()
+        };
+        rec.task = Some("fix-flaky".into());
+        rec.instructions_path = Some("/state/sessions/s.instructions.md".into());
+        rec.exit_code = Some(7);
+        rec.ended_at = Some("2026-09-21T05:00:00Z".into());
+        let json = serde_json::to_string(&rec).unwrap();
+        assert!(json.contains("\"task\":\"fix-flaky\""), "serialised: {json}");
+        assert!(
+            json.contains("\"instructionsPath\":\"/state/sessions/s.instructions.md\""),
+            "serialised: {json}"
+        );
+        assert!(json.contains("\"exitCode\":7"), "serialised: {json}");
+        assert!(json.contains("\"endedAt\":\"2026-09-21T05:00:00Z\""), "serialised: {json}");
+        let back: SessionRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.task, rec.task);
+        assert_eq!(back.instructions_path, rec.instructions_path);
+        assert_eq!(back.exit_code, rec.exit_code);
+        assert_eq!(back.ended_at, rec.ended_at);
+
+        // Unset: no key noise at all, and a pre-wrapper legacy record parses
+        // to None on all four rather than to a fabricated `exitCode: 0`.
+        let bare = SessionRecord {
+            session_id: "s".into(),
+            ..Default::default()
+        };
+        let bare_json = serde_json::to_string(&bare).unwrap();
+        for key in ["task", "instructionsPath", "exitCode", "endedAt"] {
+            assert!(!bare_json.contains(key), "{key} in {bare_json}");
+        }
+        let legacy: SessionRecord =
+            serde_json::from_str(r#"{ "sessionId": "s", "windowAddress": "0x1" }"#).unwrap();
+        assert_eq!(legacy.task, None);
+        assert_eq!(legacy.instructions_path, None);
+        assert_eq!(legacy.exit_code, None);
+        assert_eq!(legacy.ended_at, None);
     }
     #[test]
     fn session_record_restore_round_trips_and_stays_absent_when_unset() {

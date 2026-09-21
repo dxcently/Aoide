@@ -535,9 +535,45 @@ pub fn prune_done(
     Vec<String>,
     Vec<String>,
 ) {
+    prune_done_scoped(sessions, hooks, false)
+}
+
+/// [`prune_done`] with the retention scope made explicit.
+///
+/// A finished managed task run is a HISTORY artifact: its record is what
+/// `session watch` resolves to show the instructions, the child's own unread
+/// queue, the output, the outcome and the report — so routine cleanup must not
+/// make a completed task vanish. An AUTOMATIC sweep (`reap_inner`, and anything
+/// else routing through [`prune_done`]) therefore retains EVERY `task`-carrying
+/// `done` record, filed or not; an unfiled one is retained by both scopes,
+/// because the record is the report lane's own trigger. `explicit: true` is the
+/// user's own `aoide session prune` — the one path allowed to drop a filed task
+/// run, and even then it keeps an UNFILED one. After an explicit prune the
+/// history still lives on disk (the session ledger line, the letters, the PTY
+/// transcript, the instruction sidecar); only the roster record is gone.
+pub fn prune_done_scoped(
+    sessions: Vec<SessionRecord>,
+    hooks: Vec<HookRecord>,
+    explicit: bool,
+) -> (
+    Vec<SessionRecord>,
+    Vec<HookRecord>,
+    Vec<String>,
+    Vec<String>,
+) {
+    let unfiled = super::taskreport::unfiled_task_runs(&sessions);
     let doomed: HashSet<&str> = sessions
         .iter()
         .filter(|s| s.state == "done")
+        .filter(|s| {
+            let is_task_run = s.task.as_deref().is_some_and(|t| !t.is_empty());
+            if !is_task_run {
+                return true; // an ordinary finished session: swept as always
+            }
+            // A task run: retained against every automatic sweep, and retained
+            // even by the explicit prune while its report is unfiled.
+            explicit && !unfiled.contains(s.session_id.as_str())
+        })
         .map(|s| s.session_id.as_str())
         .collect();
     drop_sessions(&sessions, &doomed, hooks)

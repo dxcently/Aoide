@@ -3,7 +3,7 @@
 //! [`super::doc::restage_graph`] so the read path never drifts.
 
 use super::common::{load_inputs, require_args, stage_error};
-use super::doc::{build_graph, prune_done, render, restage_graph, would_cycle};
+use super::doc::{build_graph, prune_done_scoped, render, restage_graph, would_cycle};
 use super::model::{
     hooks_path, load_stage, projects_path, sessions_path, sorted_projects,
     write_stage, HooksFile, Project, ProjectHost, ProjectsFile, SessionsFile, STAGE_GRAPH_VERSION,
@@ -1029,9 +1029,14 @@ pub fn prune(_inv: &Invocation) -> Outcome {
         Err(e) => return stage_error("session.prune", e),
     };
 
-    let (kept_s, kept_h, removed, cleared) = prune_done(
+    let (kept_s, kept_h, removed, cleared) = prune_done_scoped(
         std::mem::take(&mut s_file.sessions),
         std::mem::take(&mut h_file.hooks),
+        // The user's OWN sweep: the one path allowed to drop a finished task
+        // run once its report is filed (an unfiled one is kept even here, and
+        // the durable history — ledger, letters, transcript, sidecar — stays on
+        // disk either way).
+        true,
     );
 
     if removed.is_empty() {

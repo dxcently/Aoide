@@ -169,7 +169,7 @@ pub fn register(r: &mut Registry) {
     });
     r.insert(cmd!(
         path: ["spawn"],
-        summary: "Spawn ANY agent command as a DETACHED conducted session that outlives this call — headless by default (re-execs `conduct --headless`), or in a real terminal with --windowed (execs $AOIDE_TERMINAL running the same conducted command) — waits briefly for it to register its control socket, and returns. Exports AOIDE_SESSION_ID to the child same as `conduct`/`wrap`. An optional --prompt is injected through the one gated injection door (`send --yes --submit`) once registration succeeds; skipped (honestly reported) if it never does.",
+        summary: "Spawn ANY agent command as a DETACHED conducted session that outlives this call — headless by default (re-execs `conduct --headless`), or in a real terminal with --windowed (execs $AOIDE_TERMINAL running the same conducted command) — waits briefly for it to register its control socket, and returns. Exports AOIDE_SESSION_ID to the child same as `conduct`/`wrap`. For a FOREGROUND wait-and-stream wrapper, `aoide conduct --task …` is the same wrapper without detaching. An optional --prompt is injected through the one gated injection door (`send --yes --submit`) once registration succeeds; skipped (honestly reported) if it never does.",
         args: [arg!("command", "string", true, "The wrapped command and its args — put them after `--` so the child's own flags pass through verbatim.")],
         flags: [
             flag!("agent", "string", "Agent name for the roster (default: the command's basename)."),
@@ -179,11 +179,18 @@ pub fn register(r: &mut Registry) {
             flag!("windowed", "bool", "Open a real terminal (from $AOIDE_TERMINAL, a whitespace-split argv with a `{cmd}` placeholder) instead of a detached headless child. A bare `{cmd}` splices the conducted argv as separate arguments (`kitty -e {cmd}`); a quote-wrapped `'{cmd}'` joins it shell-quoted into one word for `sh -c` templates (`foot sh -c '{cmd}'`). Taught errors when unset, or when no display is present."),
             flag!("cwd", "string", "Working directory for the spawned child (default: this process's own cwd) — for --windowed, the terminal emulator's own cwd, which its own shell inherits."),
             flag!("undying", "bool", "Mark the spawned session durable in state/undying.json once it registers (no-op if it never does) — the same mark `session grant undying on` sets, so this project's whole undying set can later be resurrected together."),
+            flag!("task", "string", "MANAGED TASK WRAPPER MODE: the task's slug, which is also its mailbox name (^[a-z0-9][a-z0-9-]*$, the same predicate `mail send` applies). Refused while another live session already holds the slug. The run's instructions, output, mail and exit report are readable with `session watch <id>`; the report is filed to self/<slug> when the run ends. Requires no new daemon or store."),
+            flag!("report-to", "string", "The mailbox this run's exit report is addressed to (^[a-z0-9][a-z0-9-]*$), when the report must outlive the parent's session. Omitted: the run's parent session id when that is itself a legal mailbox name, else the documented role mailbox `conductor` — an id that is NOT a legal mailbox name is never rewritten into one, because two ids could then collide. The child's own inbox (self/<task>) never carries the report."),
+            flag!("timeout", "int", "Wall-clock deadline in seconds for the run (omitted = no deadline). It is the SUPERVISOR's clock, never inactivity: a silent child is alive until the deadline and a child printing continuously is still killed at it. On expiry the wrapper kills the direct child IT spawned and records outcome=timeout, with the post-kill status kept as secondary evidence — its own kill is never reported as the child's exit code."),
+            flag!("instructions", "string", "The task's original instruction text, stored once beside the run's log (state/sessions/<id>.instructions.md, mode 0600) and handed to the child as AOIDE_TASK_INSTRUCTIONS. Three forms: literal text, @<path> to read a file, or - to read this command's stdin. Stored, never injected — a first turn is still --prompt's job, and mail text is never injected either. Carries no credentials and no environment."),
         ],
         gated: false,
         implemented: true,
         handler: crate::graph::session_spawn,
-        examples: ["spawn --agent codex -- codex --model x"],
+        examples: [
+            "spawn --agent codex -- codex --model x",
+            "spawn --task fix-flaky --instructions @brief.md -- claude",
+        ],
     ));
     r.insert(cmd!(
         path: ["resurrect"],
@@ -236,10 +243,11 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["session", "trace"],
-        summary: "Render a session's TRACE, one line per record — the run, step by step (docs/architecture/EIDOLON-TRACE.md: eidolon mirrors its journal as one JSON record per line and names that file from its own presence metadata; it is the one harness that does today). <id> resolves like `send --to` (id / tail4 / petname). Human form is `#<id>  <hh:mm:ss local>  <kind>  <summary>` — an assistant message shows its thinking (dimmed, cut) then its text then each `→ tool(name)`, a tool result shows its first line prefixed `!` when it errored, a settled turn shows its stop reason and tokens. --tail N shows the last N records (default 50); --follow re-reads for new lines until Ctrl-C (CLI-only); --json passes the raw trace lines through unchanged, byte for byte. A session whose harness keeps no trace (or whose presence names none) is a taught error naming which of the two it is, never an empty listing. Read-only: no stage write, no daemon, no lock.",
+        summary: "Render a session's TRACE, one line per record — the run, step by step (docs/architecture/EIDOLON-TRACE.md: eidolon publishes its journal as one JSON record per line — as a `<log>.jsonl` mirror the installed generation writes, or through its own read-only export door `eidolon log --json <journal> [--after <id>]` — and Aoide resolves it through the record's presence metadata; it is the one harness that does today). <id> resolves like `send --to` (id / tail4 / petname). Human form is `#<id>  <hh:mm:ss local>  <kind>  <summary>` — an assistant message shows its thinking (dimmed, cut) then its text then each `→ tool(name)`, a tool result shows its first line prefixed `!` when it errored, a settled turn shows its stop reason and tokens. --tail N shows the last N records (default 50); --follow re-reads for new lines until Ctrl-C (CLI-only); --json carries the raw trace lines through unchanged, byte for byte, PLUS `data.steps`: the same window PROJECTED, one object per emitted content block in the record's own order (`{id, ts, kind, text, error, clipped}`, kind in thinking/say/tool/result/settled/user/other), bounded by the window, by blocks-per-record and by a whole-projection cap (`stepsOmitted` names the last one's count); --clip line|detail sets how much of each block `steps` keeps. A session whose harness keeps no trace (or whose presence names none) is a taught error naming which of the two it is, never an empty listing. Read-only: no stage write, no daemon, no lock.",
         args: [arg!("id", "string", true, "Session to render: a local session id, its tail4, or its petname (resolved by the same resolver `send --to` uses).")],
         flags: [
             flag!("tail", "int", "Show only the last N records (default 50). A non-numeric or zero value is a usage error, never a silently empty listing."),
+            flag!("clip", "string", "How much of each emitted block `--json`'s `data.steps` carries: `line` (default — each block on one clipped line, the same spelling the human body shows) or `detail` (the block's own line breaks, kept longer, plus a tool call's arguments, for a details view). An unknown word is a usage error, never a silent widening. `data.lines` is unaffected: it stays the raw records."),
             flag!("follow", "bool", "Re-read the trace every 500ms and print new records as they land; blocks until Ctrl-C. CLI-only — a follow that parks a connection makes no sense over MCP/A2A/the daemon socket."),
         ],
         gated: false,
@@ -250,6 +258,25 @@ pub fn register(r: &mut Registry) {
             "session trace 7d23 --tail 20",
             "session trace Aoide-7d23 --follow",
             "session trace brave-otter --json",
+        ],
+    ));
+    r.insert(cmd!(
+        path: ["session", "watch"],
+        summary: "Watch a managed task run (`snapshot`/live): the instructions it was started with, its live output, the CHILD's own unread queue (the letters sent TO the subagent), and where it stands — LIVE by default, until the run ends or Ctrl-C. --snapshot returns ONE frame instead (the bounded mode a door that must return asks for); --tail N widens the output window (default 50); --json returns the frame in the registry's structured envelope. Read-only by construction: no stage write, no lock, no cursor — mail is read with `mail::unread_for` (a reader-selected PEEK), so watching advances neither the child's nor the observer's unread state, and the run's own report never lands in the child's inbox (it goes to its report mailbox). The footer's report line is read from the report lane's cursor, never inferred from a letter; a process exit is never rendered as task success, and a killed run's absent exitCode is reported as absent, never 0. Refusals: an unknown id, a `sub:` card, and a record that keeps no conduct-owned PTY.",
+        args: [arg!("id", "string", true, "Session to watch: a local session id, its tail4, or its petname (resolved by the same resolver `send --to` uses).")],
+        flags: [
+            flag!("tail", "int", "Show the last N lines of the run's output (default 50). A non-numeric or zero value is a usage error, never a silently empty view."),
+            flag!("snapshot", "bool", "Print ONE frame and return, instead of following. The only bounded mode: live following is the default, and a door that must return (MCP/stdin) is told to ask for this rather than being silently narrowed."),
+            flag!("json", "bool", "Return the frame in the registry's structured envelope (sanitized), instead of the rendered block."),
+        ],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::session_watch,
+        examples: [
+            "session watch task-fix-flaky",
+            "session watch fix-flaky --tail 200",
+            "session watch fix-flaky --snapshot",
+            "session watch fix-flaky --snapshot --json",
         ],
     ));
     r.insert(cmd!(
@@ -314,7 +341,7 @@ pub fn register(r: &mut Registry) {
     // ── conduct: the PTY-backed conductable wrap (concepts/Conductor-Channel) ─
     r.insert(cmd!(
         path: ["conduct"],
-        summary: "Run an agent command on its own PTY as a CONDUCTABLE session: spawn, register running, wait, end (exit mirrored, AOIDE_SESSION_ID exported), with a controlling tty + a per-session control socket, so `send` can type into the running agent while its TUI runs undisturbed.",
+        summary: "Run an agent command on its own PTY as a CONDUCTABLE session: spawn, register running, wait, end (exit mirrored, AOIDE_SESSION_ID exported), with a controlling tty + a per-session control socket, so `send` can type into the running agent while its TUI runs undisturbed. WITH --task it is also the FOREGROUND managed-task wrapper: it blocks, streams the child's own output, prints the task's instruction/unread context, and returns one deterministic outcome (exit | signal | timeout | stopped) — the same wrapper `spawn --task` runs detached.",
         args: [arg!("command", "string", true, "The wrapped command and its args — put them after `--` so the child's own flags pass through verbatim.")],
         flags: [
             flag!("agent", "string", "Agent name for the roster (default: the command's basename)."),
@@ -322,6 +349,10 @@ pub fn register(r: &mut Registry) {
             flag!("id", "string", "Session id override (default conduct-<pid>-<unixts>)."),
             flag!("headless", "bool", "No controlling tty: never touch the real terminal (no raw-mode, no stdin shuttle), and mirror the pty's output to state/sessions/<id>.log (logPath on the record) instead of stdout."),
             flag!("spawned", "bool", "Mark the record as created by `aoide spawn` (spawned on the record), permanently. Set by spawn's own re-exec in both launch modes; reap's abandoned-shell sweep judges only records carrying it."),
+            flag!("task", "string", "MANAGED TASK WRAPPER MODE: the task's slug (also its mailbox name), stamped on this session's own record at registration — set by `spawn --task`'s re-exec, and exportable to the child as AOIDE_TASK. The child is enrolled as that mailbox's reader, so it shows what was sent TO the subagent."),
+            flag!("instructions-path", "string", "Absolute path of this run's write-once instruction sidecar (state/sessions/<id>.instructions.md), stamped on the record at registration and exported to the child as AOIDE_TASK_INSTRUCTIONS. Set by `spawn --instructions`'s re-exec, or given directly for a foreground run."),
+            flag!("report-to", "string", "The mailbox this run's exit report is addressed to (a legal mailbox name), for when the report must outlive the parent's session. Omitted: the parent session id when that is a legal mailbox name, else the role mailbox `conductor`; an id that is not a legal name is never rewritten into one."),
+            flag!("timeout", "int", "Wall-clock deadline in seconds for THIS foreground wrapper (omitted = no deadline). Never inactivity: quiet output does not shorten it, and continuous output does not extend it. On expiry the wrapper kills the direct child it spawned and reports outcome=timeout — never an exit code for its own kill. A `spawn --timeout` re-execs with the same flag, so both shapes are one wrapper."),
         ],
         gated: false,
         implemented: true,

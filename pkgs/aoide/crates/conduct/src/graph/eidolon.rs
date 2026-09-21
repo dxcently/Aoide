@@ -27,14 +27,27 @@
 //!     `/proc` (the codex P-CX-2b precedent for splitting pure core from
 //!     I/O: `codex_app.rs`'s own module doc).
 //!
+//! **The records this module owns are its own enrolments, and the `eidolon`
+//! label is not what makes one.** `agent:"eidolon"` is a label a caller may
+//! choose for a session of its own (`aoide spawn --task <slug> --agent eidolon
+//! -- eidolon run …`, `aoide conduct --agent eidolon -- …`), and such a
+//! wrapper's record is keyed by the operator's id and lives on conduct's
+//! lifecycle. Only a record shaped the way this module writes one
+//! ([`is_own_enrolment`]) may be inserted over, upserted or dropped here; a
+//! conduct-owned record is claimed and left exactly as it stands, which is
+//! what keeps a live managed run — its `task`/`instructionsPath`/`reportTo`
+//! facts, and its native child's `parentSessionId` edge — on the roster.
+//!
 //! Readiness (E2, folded in per the brief: "the state a record carries is
 //! written by the same reconciler in the same function"). Two rules, in this
 //! order:
 //!
 //!   * **The trace decides, when there is one** (P-EIDOLON slice E6,
-//!     `docs/architecture/EIDOLON-TRACE.md`'s "State rule"). eidolon mirrors
-//!     its journal as `<log>.jsonl`, one JSON record per line, and names it
-//!     from `meta.json.trace`; the LAST record the tail holds decides:
+//!     `docs/architecture/EIDOLON-TRACE.md`'s "State rule"). eidolon publishes
+//!     its journal as one JSON record per line — as a `<log>.jsonl` mirror an
+//!     installed generation writes, or through its own read-only export door —
+//!     and `meta.json` is what names the session; the LAST record the tail
+//!     holds decides:
 //!     `TurnSettled` → `idle`, `Cancelled` → `stopped` (the canonical
 //!     vocabulary's own "the turn ended by a stop" — there is no `cancel`
 //!     state to emit, `aoide_protocol::state::canonical_state`), `AskUser`
@@ -99,16 +112,19 @@ pub(crate) struct EidolonSession {
     /// No subcommand, or an explicit `tui` token, on the presence pid's own
     /// argv (`main.rs:313-320`) — read off the process table, not guessed.
     pub tui: bool,
-    /// The tail of the file `meta.json.trace` names, ALREADY READ by the
-    /// GATHER step through [`aoide_protocol::agents::eidolon_trace_tail`]
-    /// (the one trace reader) — this module's pure core never touches a file
+    /// The tail of the trace this session's presence resolves to, ALREADY READ
+    /// by the GATHER step through the harness CAPABILITY
+    /// [`aoide_protocol::agents::EIDOLON_PROFILE`]'s
+    /// `TranscriptSpec::locate` + `TranscriptSpec::trace` (the one locator and
+    /// the one trace reader) — this module's pure core never touches a file
     /// itself, the same split `tui`'s own resolution already holds.
     ///
-    /// `None` when the presence names no trace (an older eidolon) or names
-    /// one that is not there: the presence rule applies, unchanged. `Some`
-    /// (possibly EMPTY) whenever a trace really is the authority here — an
-    /// empty or undecidable trace must never fall back to `busy`, which is
-    /// exactly the distinction this `Option` carries.
+    /// `None` when no trace is reachable at all (an older eidolon with neither
+    /// a mirror nor a door) or when what is reachable is not a trace: the
+    /// presence rule applies, unchanged. `Some` (possibly EMPTY) whenever a
+    /// trace really is the authority here — an empty or undecidable trace must
+    /// never fall back to `busy`, which is exactly the distinction this
+    /// `Option` carries.
     pub trace: Option<Vec<String>>,
 }
 
@@ -142,8 +158,9 @@ pub(crate) enum ScanFailure {
     ProcessTableUnavailable,
 }
 
-/// One eidolon record the reconciler DROPPED on a pass — its presence stopped
-/// being observed (`Observed`, never `Unknown`), so the roster lost it. The
+/// One of this module's own presence enrolments that the reconciler DROPPED on
+/// a pass — its presence stopped being observed (`Observed`, never `Unknown`),
+/// so the roster lost it. The
 /// additive return [`sync_eidolon_sessions`] hands the ping-back
 /// (`graph/pingback.rs`, E5b): a child whose process went away with its turn
 /// still open is the one event its trace can no longer ever report, so the
@@ -160,6 +177,58 @@ pub(crate) struct DroppedEidolon {
     pub trace: Option<PathBuf>,
 }
 
+/// Is this roster record one of THIS module's own enrolments — the one and
+/// only kind of `agent:"eidolon"` record the reconcile may ever drop or
+/// overwrite?
+///
+/// **The agent label is not the ownership key.** `agent:"eidolon"` is what a
+/// caller may CHOOSE for a session it starts (`aoide spawn --task <slug>
+/// --agent eidolon -- eidolon run …`, `aoide conduct --agent eidolon -- …`),
+/// and such a wrapper's own record is a session, not a native presence: it is
+/// keyed by the id the operator gave it, its presence is conduct's, and its
+/// liveness is the wrapper pid. Treating the label as ownership deleted a live
+/// managed run one tick after a successful spawn — `session watch` then
+/// answered "no session matches", the native child lost the parent edge that
+/// named its wrapper, and the run had no record left for its exit report to be
+/// filed from.
+///
+/// The Codex precedent can key ownership on a field nothing else writes
+/// (`kind:"app"`, `codex_app.rs`'s `claimed`); eidolon's enrolment carries no
+/// such field, so ownership is read off the SHAPE only this module writes — a
+/// row keyed by a native presence id, carrying that presence's own pid and
+/// journal, with none of the facts a conduct-owned registration always writes
+/// ([`is_conduct_owned`]). Both directions of that test are the safe ones: a
+/// record this module cannot prove it wrote is never dropped (routine staleness
+/// cleanup elsewhere owns those), and only its own enrolments are ever removed.
+fn is_own_enrolment(rec: &SessionRecord) -> bool {
+    rec.agent == "eidolon" && !is_conduct_owned(rec)
+}
+
+/// A CONDUCT-OWNED record — `aoide conduct`/`aoide spawn`'s own registration,
+/// whether or not it is a managed task wrapper. `do_session_start` writes
+/// `conductable` and a non-empty `startedAt` for every one of them
+/// unconditionally, and adds `socket`, the run's `task`/`instructionsPath`/
+/// `reportTo`, the `outcome`/`exitCode`/`endedAt` end facts and the
+/// `headless`/`spawned` birth facts wherever the invocation carried them.
+/// Nothing in this module ever writes any of those, so their presence is
+/// positive evidence the record is a session with a lifecycle of its own —
+/// derived from the fields the recording paths already maintain, never from an
+/// id's spelling or a task-only special case (an ordinary `conduct` wrapper is
+/// no less a session than a `--task` one).
+fn is_conduct_owned(rec: &SessionRecord) -> bool {
+    !rec.started_at.is_empty()
+        || rec.conductable.is_some()
+        || rec.socket.as_deref().is_some_and(|p| !p.is_empty())
+        || rec.task.is_some()
+        || rec.instructions_path.is_some()
+        || rec.report_to.is_some()
+        || rec.outcome.is_some()
+        || rec.exit_code.is_some()
+        || rec.ended_at.is_some()
+        || rec.headless
+        || rec.spawned
+}
+
 /// Reconcile `agent:"eidolon"` records against a [`PresenceScan`] — the PURE
 /// CORE (fed fake scans and an injected ancestry walk in tests), mirroring
 /// [`super::codex_app::reconcile_codex_app_threads`] rule for rule:
@@ -170,10 +239,12 @@ pub(crate) struct DroppedEidolon {
 ///     upserted IN PLACE, change-only.
 ///   * A record whose presence is no longer desired (its socket stopped
 ///     answering) is REMOVED — only ever on an `Observed` pass, never on
-///     `Unknown`.
-///   * A native id already claimed by a non-eidolon record is left entirely
-///     alone: never inserted, overwritten, or removed here (`codex_app.rs`'s
-///     `claimed` set, same shape).
+///     `Unknown`, and only when the record really is one of THIS module's own
+///     enrolments ([`is_own_enrolment`]) — never by matching the agent label.
+///   * A native id already claimed by a tracked record the reconcile does not
+///     own (see [`is_own_enrolment`]) is left entirely alone: never inserted,
+///     overwritten, or removed here (`codex_app.rs`'s `claimed` set, same
+///     shape).
 ///
 /// `ancestry_of(pid)` is the self-first `/proc` ancestry walk
 /// ([`aoide_storage::attest::pid_ancestry`] in production) — injected so
@@ -198,11 +269,13 @@ pub(crate) fn reconcile_eidolon_sessions(
         PresenceScan::Observed(live) => live,
     };
 
-    // Native ids already claimed by a TRACKED, non-eidolon record — never
-    // ours to insert, overwrite, or remove.
+    // Native ids already claimed by a TRACKED record this reconciler does not
+    // own — never ours to insert, overwrite, or remove. `is_own_enrolment`
+    // rather than `agent != "eidolon"`: a conduct-owned wrapper labelled
+    // `eidolon` claims its own id exactly like any other session.
     let claimed: HashSet<String> = sessions
         .iter()
-        .filter(|s| s.agent != "eidolon")
+        .filter(|s| !is_own_enrolment(s))
         .map(|s| s.session_id.clone())
         .collect();
 
@@ -216,9 +289,10 @@ pub(crate) fn reconcile_eidolon_sessions(
 
     let mut changed = false;
 
-    // Drop `agent:"eidolon"` records whose presence is no longer desired.
+    // Drop THIS MODULE'S OWN enrolments whose presence is no longer desired —
+    // never a conduct-owned record that merely carries the `eidolon` label.
     let before = sessions.len();
-    sessions.retain(|s| s.agent != "eidolon" || desired.contains_key(s.session_id.as_str()));
+    sessions.retain(|s| !is_own_enrolment(s) || desired.contains_key(s.session_id.as_str()));
     if sessions.len() != before {
         changed = true;
     }
@@ -422,7 +496,11 @@ fn presence_root() -> PathBuf {
 /// reproduction of eidolon's own `Meta` (`presence.rs:29-51`), not a
 /// dependency on it. Field names match verbatim (no `#[serde(rename)]` on
 /// eidolon's own struct), so no remapping is needed; extra fields on disk
-/// (`repo`, `started_ms`) are simply ignored by `serde_json`.
+/// (`repo`, `started_ms`, and the `trace` path an installed generation
+/// publishes) are simply ignored by `serde_json`. That `trace` field is not
+/// reproduced here because the ONE reader of this file's paths is the harness
+/// CAPABILITY `TranscriptSpec::locate` ([`read_presence_trace`]) — a second
+/// parse beside it would be a second authority for the same fact.
 #[derive(Debug, serde::Deserialize)]
 struct PresenceMeta {
     id: String,
@@ -432,13 +510,6 @@ struct PresenceMeta {
     model: String,
     title: String,
     busy: bool,
-    /// `docs/architecture/EIDOLON-TRACE.md`'s one new presence field: the
-    /// absolute path of the session's own trace file. `#[serde(default)]`
-    /// because an OLDER eidolon simply does not write it — the whole
-    /// backward-compat story of this field is that its absence is ordinary,
-    /// not an error.
-    #[serde(default)]
-    trace: Option<String>,
 }
 
 /// Does the presence socket at `path` answer `{"op":"ping"}` with
@@ -564,6 +635,7 @@ fn eidolon_presence_sessions_with(process_table: impl Fn() -> Option<String>) ->
                 .iter()
                 .find(|p| p.pid == meta.pid)
                 .is_some_and(|p| is_tui_argv(&p.argv));
+            let trace = read_presence_trace(&meta);
             EidolonSession {
                 id: meta.id,
                 pid: meta.pid,
@@ -573,35 +645,44 @@ fn eidolon_presence_sessions_with(process_table: impl Fn() -> Option<String>) ->
                 title: meta.title,
                 busy: meta.busy,
                 tui,
-                trace: read_presence_trace(meta.trace.as_deref()),
+                trace,
             }
         })
         .collect();
     PresenceScan::Observed(sessions)
 }
 
-/// The trace tail a presence's own `meta.json.trace` names, read HERE (the
-/// gather's I/O) so the reconciler above stays pure over it — the same split
+/// The trace of one live session, read HERE (the gather's I/O) so the
+/// reconciler above stays pure over it — the same split
 /// [`self::process_table`]'s own `tui` resolution holds.
 ///
-/// `None` — the presence rule applies — when the field is absent or blank (an
-/// older eidolon), or the path names no readable TRACE file at all: the one
-/// reader is [`aoide_protocol::agents::eidolon_trace_tail`], which answers
-/// `None` for anything that is not a `.jsonl`, so a presence that points at
-/// its own `meta.json` or at a `.eid` journal is "no trace", not a stream of
-/// nonsense. `Some(vec![])` for a trace that exists and holds nothing yet:
-/// that IS the authority, and an empty trace must never fall back to `busy`
-/// (a headless run's `busy` is permanently false — the exact non-fact the
-/// trace exists to replace).
+/// The PATH comes from the harness CAPABILITY `TranscriptSpec::locate` — the
+/// same locator the reaper's transcript refresh and `aoide session trace` use,
+/// never a second one — and the lines from `TranscriptSpec::trace`. That is
+/// what makes a producer which publishes no mirror readable here at all: its
+/// presence still names `log`, and `locate` answers the journal itself once the
+/// producer's export door proves read-only. The presence's own `trace` field
+/// is read by that same locator (it parses `meta.json`), so a generation that
+/// names a mirror takes exactly the answer it always did — including a mirror
+/// that is fresher than the journal, which needs no probe and no spawn.
+///
+/// `None` — the presence rule applies — when no trace is reachable at all: an
+/// older eidolon with no mirror and no door, or a path that is not a readable
+/// trace. `Some(vec![])` for a trace that exists and holds nothing yet: that IS
+/// the authority, and an empty trace must never fall back to `busy` (a headless
+/// run's `busy` is permanently false — the exact non-fact the trace exists to
+/// replace).
 ///
 /// A read failure is not a scan failure: a trace that cannot be read right
 /// now says nothing about whether the session is live, so the pass carries on
 /// with `None` for that one session rather than voiding every observation
 /// (`PresenceScan::Unknown` is reserved for evidence Aoide genuinely cannot
 /// gather; a missing optional file is ordinary).
-fn read_presence_trace(trace: Option<&str>) -> Option<Vec<String>> {
-    let path = Path::new(trace?.trim());
-    aoide_protocol::agents::eidolon_trace_tail(path)
+fn read_presence_trace(meta: &PresenceMeta) -> Option<Vec<String>> {
+    let spec = &aoide_protocol::agents::EIDOLON_PROFILE.transcript;
+    let path = (spec.locate)(&meta.id, Some(&meta.cwd), Some(&meta.log))?;
+    let read_trace = spec.trace?;
+    read_trace(&path)
 }
 
 /// Guards [`audit_scan_unknown_once`] to one audit line per process, the
@@ -644,10 +725,12 @@ fn audit_scan_unknown_once(failure: &ScanFailure) {
 /// takes NO stage lock and writes NOTHING.
 ///
 /// Returns `(changed, dropped)`: the second half is ADDITIVE (E5b) and names
-/// every `agent:"eidolon"` record this pass removed from the roster — its id,
-/// petname, parent edge, agent and the trace the harness CAPABILITY resolves
-/// for it. The reconciler itself stays the pure core it always was (the drop
-/// is its `retain`); this wrapper simply remembers what that retain took, so
+/// every record this pass removed from the roster — always one of this
+/// module's own presence enrolments ([`is_own_enrolment`]), never a
+/// conduct-owned wrapper merely labelled `eidolon`: its id, petname, parent
+/// edge, agent and the trace the harness CAPABILITY resolves for it. The
+/// reconciler itself stays the pure core it always was (the drop is its
+/// `retain`); this wrapper simply remembers what that retain took, so
 /// the ping-back can report a child that died with its turn open — the one
 /// event the child's own trace can no longer ever record. Every existing
 /// caller's BEHAVIOUR is unchanged: the boolean means exactly what it did.
@@ -683,21 +766,24 @@ pub(crate) fn sync_eidolon_sessions() -> (bool, Vec<DroppedEidolon>) {
     })
 }
 
-/// Which `agent:"eidolon"` records the pass just removed — the difference
-/// between the roster the lock was taken over and the one the reconciler
-/// handed back, for the eidolon records only (a non-eidolon record is never
-/// this module's to drop, and `reconcile_eidolon_sessions` never touches one).
-/// The trace path is resolved HERE, after the drop, through the harness
-/// CAPABILITY (`TranscriptSpec::locate`) — the ONE locator, so a dropped
-/// child's tail is reached the same way a live child's is — with the record's
-/// own `logPath` as the hint: a clean exit removes the presence dir before
-/// the next tick, and the journal the presence named is then the only path
-/// that still reaches the `.jsonl` beside it.
+/// Which of THIS module's own enrolments the pass just removed — the
+/// difference between the roster the lock was taken over and the one the
+/// reconciler handed back, for the records the reconcile owns
+/// ([`is_own_enrolment`]) and never for a non-owned record: a conduct-owned
+/// wrapper carrying the `eidolon` label is a live session, and reporting it as
+/// a dropped presence would be a "died mid-turn" line about a running managed
+/// run, delivered to a parent that never earned it. The trace path is resolved
+/// HERE, after the drop, through the harness CAPABILITY
+/// (`TranscriptSpec::locate`) — the ONE locator, so a dropped child's tail is
+/// reached the same way a live child's is — with the record's own `logPath` as
+/// the hint: a clean exit removes the presence dir before the next tick, and
+/// the journal the presence named is then the only path that still reaches the
+/// `.jsonl` beside it.
 fn dropped_this_pass(before: &[SessionRecord], after: &[SessionRecord]) -> Vec<DroppedEidolon> {
     let live: HashSet<&str> = after.iter().map(|s| s.session_id.as_str()).collect();
     before
         .iter()
-        .filter(|s| s.agent == "eidolon" && !live.contains(s.session_id.as_str()))
+        .filter(|s| is_own_enrolment(s) && !live.contains(s.session_id.as_str()))
         .map(|s| DroppedEidolon {
             session_id: s.session_id.clone(),
             petname: s.petname.clone(),
@@ -714,6 +800,8 @@ fn dropped_this_pass(before: &[SessionRecord], after: &[SessionRecord]) -> Vec<D
 mod tests {
     use super::*;
     use crate::graph::testutil::{session, unique_stage, EnvVars};
+    use aoide_protocol::{Door, Invocation};
+    use std::collections::BTreeMap;
 
     fn presence(id: &str, pid: u32, cwd: &str, busy: bool, tui: bool) -> EidolonSession {
         EidolonSession {
@@ -754,7 +842,10 @@ mod tests {
         std::fs::write(&eid, b"").unwrap();
         std::fs::write(&jsonl, "{\"id\":0}\n").unwrap();
         let id = format!("fixture-dropped-{}", std::process::id());
-        let mut rec = crate::graph::testutil::session(&id, "/w", "working", "2026-09-17T00:00:00Z", Some("wrap-1"));
+        // A real enrolment's own shape — an EMPTY `startedAt`, no conduct
+        // facts (see `is_own_enrolment`): this is the record a pass really
+        // drops, and the lane's fixture has to be one.
+        let mut rec = crate::graph::testutil::session(&id, "/w", "working", "", Some("wrap-1"));
         rec.agent = "eidolon".to_string();
         rec.petname = Some("brave-otter".to_string());
         rec.log_path = Some(eid.to_str().unwrap().to_string());
@@ -1217,6 +1308,247 @@ mod tests {
         assert_eq!(out[0].agent, tracked.agent);
         assert_eq!(out[0].kind, tracked.kind);
         assert_eq!(out[0].pid, tracked.pid);
+    }
+
+    // ── the managed-task-wrapper ownership regression ──────────────────
+    //
+    // Consumer failure, 2026-09-21: `aoide spawn --task <slug> --agent eidolon
+    // -- eidolon run …` registered the run (registered:true, instructions
+    // 0600, child reader enrolled) and the wrapper was GONE seven seconds
+    // later — `session watch <wrapper>` answered "no session matches" while
+    // both the wrapper and its native child were alive. The wrapper is keyed
+    // by the operator's own `--id` and labelled with the operator's own
+    // `--agent eidolon`, so the old `retain` (every `agent:"eidolon"` record
+    // whose id is not a desired PRESENCE id) deleted a live managed run: its
+    // task/instructions/report facts went with it, its native child lost the
+    // parent edge that named it, and the run had no record left for the exit
+    // report to be filed from.
+
+    /// A managed task wrapper's own record, exactly as `conduct`'s
+    /// registration leaves one: the operator's id, the label the operator
+    /// chose (`eidolon`), and conduct's own facts — `conductable`, the
+    /// control socket, the wrapper's pid, the run's `task`/`instructionsPath`/
+    /// `reportTo`, its PTY transcript and its birth instant. Every field here
+    /// is one a recording path already maintains; none of them is written by
+    /// this module's presence enrolment.
+    fn eidolon_wrapper(id: &str, pid: u32, slug: &str) -> SessionRecord {
+        let mut rec = session(
+            id,
+            "/home/khoa/Aoide",
+            "working",
+            "2026-09-21T11:46:08Z",
+            Some("01a0bb02-eb4b-7a30-831f-c9df13d4eb0b"),
+        );
+        rec.agent = "eidolon".to_string();
+        rec.kind = Some("agent".to_string());
+        rec.window_address = String::new();
+        rec.conductable = Some(true);
+        rec.socket = Some(format!("/run/user/1000/aoide/session-{id}.sock"));
+        rec.pid = Some(pid);
+        rec.task = Some(slug.to_string());
+        rec.instructions_path = Some(format!("/home/khoa/.aoide/state/sessions/{id}.instructions.md"));
+        rec.report_to = Some("aoide-ops".to_string());
+        rec.log_path = Some(format!("/home/khoa/.aoide/state/sessions/{id}.log"));
+        rec.petname = Some("wary-ember".to_string());
+        rec
+    }
+
+    /// A native presence enrolment's own shape — what THIS module writes:
+    /// the presence's id, pid and journal, `kind:"agent"`, an EMPTY
+    /// `startedAt`, and none of conduct's wrapper facts.
+    fn native_enrolment(id: &str, pid: u32) -> SessionRecord {
+        let mut rec = session(id, "/home/khoa/Aoide", "working", "", None);
+        rec.agent = "eidolon".to_string();
+        rec.kind = Some("agent".to_string());
+        rec.window_address = String::new();
+        rec.pid = Some(pid);
+        rec.log_path = Some(format!("/home/khoa/.local/share/eidolon/sessions/{pid}.eid"));
+        rec.petname = Some("gone-otter".to_string());
+        rec
+    }
+
+    fn same_record(a: &SessionRecord, b: &SessionRecord, why: &str) {
+        assert_eq!(
+            serde_json::to_value(a).unwrap(),
+            serde_json::to_value(b).unwrap(),
+            "{why}"
+        );
+    }
+
+    /// The running case: the wrapper survives a scan that enrols its native
+    /// child, and that child's `parentSessionId` names the wrapper — the
+    /// first conducted ancestor up the presence pid's own chain.
+    #[test]
+    fn a_conduct_owned_wrapper_survives_and_keeps_its_native_childs_parent_edge() {
+        let wrapper = eidolon_wrapper("eidolon-runtime-build-20260921", 3334770, "eidolon-runtime-build");
+        let ancestry = |pid: u32| -> Vec<i32> {
+            assert_eq!(pid, 3334772, "walked from the presence's own pid");
+            vec![3334772, 3334770]
+        };
+        let (out, changed) = reconcile_eidolon_sessions(
+            vec![wrapper.clone()],
+            &PresenceScan::Observed(vec![presence(
+                "Aoide-07be",
+                3334772,
+                "/home/khoa/Aoide",
+                false,
+                false,
+            )]),
+            ancestry,
+        );
+        assert!(changed, "the native child is newly enrolled");
+        let kept = out
+            .iter()
+            .find(|s| s.session_id == wrapper.session_id)
+            .expect("a live managed run's wrapper record is never dropped by the presence sweep");
+        same_record(
+            kept,
+            &wrapper,
+            "the wrapper survives untouched: task, instructionsPath, reportTo, socket, pid and petname alike",
+        );
+        let child = out
+            .iter()
+            .find(|s| s.session_id == "Aoide-07be")
+            .expect("the native child is enrolled");
+        assert_eq!(
+            child.parent_session_id.as_deref(),
+            Some("eidolon-runtime-build-20260921"),
+            "the native child's parent edge names the wrapper, never None"
+        );
+    }
+
+    /// The completed case: a finished run whose presence is long gone keeps
+    /// its whole record — `task`, `outcome`, `endedAt`, the code — which is
+    /// exactly what `session watch` and the report lane read. Nothing on it
+    /// is this sweep's to change.
+    #[test]
+    fn a_completed_wrappers_record_survives_a_scan_with_nothing_left_observed() {
+        let mut wrapper =
+            eidolon_wrapper("eidolon-runtime-build-20260921", 3334770, "eidolon-runtime-build");
+        wrapper.state = "done".to_string();
+        wrapper.ended_at = Some("2026-09-21T12:06:08Z".to_string());
+        wrapper.outcome = Some("timeout".to_string());
+        let (out, changed) = reconcile_eidolon_sessions(
+            vec![wrapper.clone()],
+            &PresenceScan::Observed(Vec::new()),
+            no_ancestry,
+        );
+        assert_eq!(out.len(), 1, "a finished managed run is never dropped here");
+        same_record(
+            &out[0],
+            &wrapper,
+            "task, outcome, endedAt and petname all survive intact — the report lane reads exactly these",
+        );
+        assert!(
+            !changed,
+            "and nothing about it is a change this sweep made"
+        );
+    }
+
+    /// The removed-presence half of the same question: the ping-back lane is
+    /// handed the records this reconcile REMOVED, so a wrapper must never
+    /// appear there — that would be a "died mid-turn" line about a live
+    /// managed run's own record, sent to a parent that never earned it. The
+    /// ordinary native drop stays exactly as it was.
+    #[test]
+    fn a_conduct_owned_wrapper_is_never_a_dropped_presence_child() {
+        let wrapper =
+            eidolon_wrapper("eidolon-runtime-build-20260921", 3334770, "eidolon-runtime-build");
+        assert!(
+            dropped_this_pass(std::slice::from_ref(&wrapper), &[]).is_empty(),
+            "a conduct-owned wrapper is not a presence this sweep may report dropped"
+        );
+        let vanished = native_enrolment("Aoide-gone", 999_999);
+        let dropped = dropped_this_pass(std::slice::from_ref(&vanished), &[]);
+        assert_eq!(
+            dropped.len(),
+            1,
+            "a native enrolment whose presence is gone is still the drop this lane reports"
+        );
+        assert_eq!(dropped[0].session_id, "Aoide-gone");
+    }
+
+    /// The whole consumer path over real files and the real report lane: a
+    /// vanished native enrolment is cleaned up by a real
+    /// [`sync_eidolon_sessions`], the managed run's record survives it
+    /// untouched, and the daemon's exit-report lane still files exactly ONE
+    /// letter for that run — the cursor, not a retained record, is what makes
+    /// it one.
+    #[test]
+    fn a_managed_run_labelled_eidolon_survives_the_real_sync_and_is_reported_once() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR"]);
+        let root = unique_stage("eidolon-wrapper-sync");
+        for sub in ["stage", "state", "state/mail", "state/sessions", "run"] {
+            std::fs::create_dir_all(root.join(sub)).unwrap();
+        }
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", root.join("run"));
+
+        let mut wrapper =
+            eidolon_wrapper("eidolon-runtime-build-20260921", 3334770, "eidolon-runtime-build");
+        wrapper.state = "done".to_string();
+        wrapper.ended_at = Some("2026-09-21T12:06:08Z".to_string());
+        wrapper.exit_code = Some(7);
+        wrapper.outcome = Some("exit".to_string());
+        let log = root.join("state/sessions/eidolon-runtime-build-20260921.log");
+        std::fs::write(&log, "the run's own output\n").unwrap();
+        wrapper.log_path = Some(log.to_string_lossy().into_owned());
+
+        let vanished = native_enrolment("Aoide-gone", 999_999);
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                sessions: vec![wrapper.clone(), vanished.clone()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // No presence root at all: an `Observed(empty)` pass, the ordinary
+        // "every presence stopped answering" case.
+        let (changed, dropped) = sync_eidolon_sessions();
+        assert!(changed, "the vanished presence's own enrolment is what this pass removes");
+        assert_eq!(
+            dropped.iter().map(|d| d.session_id.as_str()).collect::<Vec<_>>(),
+            vec!["Aoide-gone"],
+            "only the native enrolment is reported dropped"
+        );
+        let roster: Vec<SessionRecord> = load_stage::<SessionsFile>(&sessions_path()).unwrap().sessions;
+        assert!(
+            !roster.iter().any(|r| r.session_id == "Aoide-gone"),
+            "a genuinely vanished native enrolment is still cleaned up"
+        );
+        let kept = roster
+            .iter()
+            .find(|r| r.session_id == wrapper.session_id)
+            .expect("the managed run's record survives the real sync");
+        same_record(kept, &wrapper, "and survives it byte for byte");
+
+        // The report lane reads the RECORD: a wrapper this sweep had dropped
+        // could never be reported at all. Retained, it files one letter —
+        // two passes through the lane, one letter.
+        let daemon = || Invocation {
+            path: vec!["session".to_string(), "reap".to_string()],
+            args: Vec::new(),
+            flags: BTreeMap::new(),
+            door: Door::Daemon,
+        };
+        let filed_letters = || {
+            aoide_storage::mail::read_base()
+                .unwrap()
+                .into_iter()
+                .filter(|e| e.envelope.header.to.name == "aoide-ops")
+                .count()
+        };
+        let first = crate::graph::taskreport::taskreport(&daemon());
+        assert_eq!(first.filed.len(), 1, "{first:?}");
+        assert_eq!(filed_letters(), 1, "exactly one letter for the run");
+        let second = crate::graph::taskreport::taskreport(&daemon());
+        assert_eq!(second.filed.len(), 0, "the cursor is what makes it once: {second:?}");
+        assert_eq!(filed_letters(), 1, "still exactly one letter");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     // ── discovery primitives ───────────────────────────────────────────

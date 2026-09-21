@@ -93,6 +93,14 @@
   `resolve_executable_on_path` returns the spelling it ASKED for while
   `read_dir` reports the spelling on disk, so one file can be two
   case-differing strings.
+- **`feed`'s identity question has ONE authority, and it is crate-visible
+  for that reason.** `path_identity` returns one opaque, comparable
+  `PathIdentity` (`(dev, ino)` on Unix, the native 128-bit id on Windows) and
+  propagates its errors — an unknown identity is never "the same file".
+  `Follower::poll` and `agents`'s eidolon reader (whose cached cursor belongs
+  to one journal and must not survive a replacement at the same path) both
+  ask it there; don't inline a second `(dev, ino)` read, and don't compare
+  len/mtime and call it identity.
 - **`feed::Follower::poll` MUST identify the PATH on every call, never only
   the open fd.** A producer restart under a `RuntimeDirectory=`-shaped tmpfs
   unlinks the file the fd still refers to; Linux keeps that deleted inode

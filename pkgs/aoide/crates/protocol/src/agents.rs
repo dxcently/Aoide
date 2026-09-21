@@ -10,6 +10,11 @@
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, TryRecvError};
+use std::sync::{Condvar, Mutex};
+use std::time::{Duration, Instant, SystemTime};
 
 /// The semantic class a hook event maps to — what the door's dispatch
 /// actually collapses to, with the harness's event NAMES kept inside the
@@ -68,21 +73,21 @@ pub struct TranscriptSpec {
     pub subagents_dir: fn(session_id: &str, cwd: Option<&str>) -> Option<PathBuf>,
     /// Find the sub-agent transcript in `dir` for a `sub:<tuid>` node key.
     pub find_subagent: fn(dir: &Path, tuid: &str) -> Option<PathBuf>,
-    /// The harness's own TRACE reader — `Some` only for a harness that
-    /// mirrors its journal as one JSON record per line and names that file
-    /// from its presence metadata (eidolon:
-    /// [`eidolon_trace_tail`], `docs/architecture/EIDOLON-TRACE.md`); `None`
-    /// for every harness whose only on-disk turn log is its transcript.
+    /// The harness's own TRACE reader — `Some` only for a harness that keeps
+    /// a per-record trace of its journal (eidolon: [`eidolon_trace_tail`],
+    /// `docs/architecture/EIDOLON-TRACE.md`); `None` for every harness whose
+    /// only on-disk turn log is its transcript.
     ///
     /// This is the CAPABILITY test a caller that needs a trace must make —
     /// `aoide session trace` is the first one — so no consumer ever names a
     /// harness by string (`if agent == "eidolon"` is exactly the scatter
     /// this table exists to avoid; see this crate's `AGENTS.md`). The
-    /// returned lines are whole JSONL lines off the END of the file, the
-    /// same shape every other `tail` here returns; `None` means the path is
-    /// not a trace file at all (the presence stand-in `locate` falls back
-    /// to), which a caller must be able to tell apart from a trace that is
-    /// merely empty right now.
+    /// returned lines are whole JSONL lines off the END of the trace —
+    /// whether that trace is a file the producer wrote or the producer's own
+    /// export door — the same shape every other `tail` here returns; `None`
+    /// means the path is not a trace at all (the presence stand-in `locate`
+    /// falls back to), which a caller must be able to tell apart from a trace
+    /// that is merely empty right now.
     pub trace: Option<fn(path: &Path) -> Option<Vec<String>>>,
 }
 
@@ -340,9 +345,12 @@ fn transcript_tail_bounded(path: &Path, budget: u64) -> Vec<String> {
 /// last 32 KiB as whole JSONL lines — enough for the freshest `say` +
 /// `custom-title`.
 fn transcript_tail(path: &Path) -> Vec<String> {
-    const TAIL: u64 = 32 * 1024;
-    transcript_tail_bounded(path, TAIL)
+    transcript_tail_bounded(path, TRANSCRIPT_TAIL_BYTES)
 }
+
+/// The transcript tail's own budget, named once because eidolon's journal arm
+/// reads the SAME window off the door's export rather than off a file.
+const TRANSCRIPT_TAIL_BYTES: u64 = 32 * 1024;
 
 /// The agent's latest words: the last matching assistant `text` block in the
 /// tail, cleaned to a single line (≤160 chars). None when there is no such
@@ -1508,32 +1516,39 @@ fn eidolon_hook_event(_: &str) -> HookClass {
 
 // ── eidolon: presence layout, and the trace ─────────────────────────────────
 //
-// Eidolon is written to disk twice. Its durable turn log
+// Eidolon's durable turn log
 // (`~/.local/share/eidolon/sessions/<epoch-ms>.eid`) is a bitcode-framed
-// binary journal (`core/src/session/log.rs:1-38`) — opened read-write by the
-// harness's own `log` subcommand, which repairs a torn tail in place, and
-// unparseable without eidolon's own decoder, so it is not a safe read target
-// here. Beside it, eidolon mirrors that same journal as ONE JSON RECORD PER
-// LINE in `<log>.jsonl` — the TRACE, whose shape and state rule are the
-// contract `docs/architecture/EIDOLON-TRACE.md` states (producer: eidolon;
-// reader: Aoide, and this file is the reader's half). And every launch
-// registers a swarm presence file:
+// binary journal (`core/src/session/log.rs:1-38`) — unparseable without
+// eidolon's own decoder, so it is not a safe read target here. Two
+// generations of producer publish it as records Aoide can read. The
+// installed one mirrors it beside itself as ONE JSON RECORD PER LINE in
+// `<log>.jsonl` and names that file from its presence metadata
+// (`presence.rs:33-53`, the `trace` field). The current one writes no mirror
+// at all and instead exposes the journal through its own read-only export
+// door, `eidolon log --json <journal> [--after <id>]` (`0432133` onward: an
+// earlier `log` opened the journal read-write and repaired a torn tail in
+// place, which is why the door is probed before it is ever run). Both
+// publish the same trace: one line per record, the shape and state rule
+// `docs/architecture/EIDOLON-TRACE.md` states (producer: eidolon; reader:
+// Aoide, and this file is the reader's half). And every launch registers a
+// swarm presence file:
 // `$XDG_RUNTIME_DIR/eidolon/<id>/meta.json` — a single flat object
-// (id/pid/log/cwd/repo/model/started_ms/title/busy + the trace's own path,
+// (id/pid/log/cwd/repo/model/started_ms/title/busy + the mirror's own path,
 // `presence.rs:33-53`, `swarm/src/lib.rs:16-31`). The id is deterministic
 // from `(cwd, log)` (`presence.rs:399-421`), never a timestamp, and that id
 // IS this profile's `session_id` — so `locate` below needs no search, no cwd
 // bucket, no directory scan: the id names its own file directly.
 //
-// Two trace-aware consequences for everything below. `locate` returns the
-// TRACE when `meta.json` names one (`"trace": "<path>"`, the one new
-// presence field) and the presence file itself otherwise — an older eidolon
-// still enrolled, still readable, just with nothing but metadata to show.
-// And `tail` routes on which of the two it was handed: a `.jsonl` takes the
-// ordinary line tail, `meta.json` keeps the compacting single-line read.
-// Every extractor then reads BOTH line shapes, discriminated by the one
-// structural fact that separates them — a trace line carries a top-level
-// `kind`, a presence line does not.
+// Two trace-aware consequences for everything below. `locate` answers
+// whichever of the three the producer actually offers, in order of
+// authority: a mirror that is still current, else the journal itself when
+// the export door proves read-only, else the presence file — an older
+// eidolon still enrolled, still readable, just with nothing but metadata to
+// show. And `tail` routes on what it was handed: a `.jsonl` takes the
+// ordinary line tail, a `.eid` the door's own export, `meta.json` the
+// compacting single-line read. Every extractor then reads ALL those line
+// shapes, discriminated by the one structural fact that separates them — a
+// trace line carries a top-level `kind`, a presence line does not.
 
 /// The last `Record` of a trace, in the shape a consumer renders or folds it
 /// from: the externally-tagged `kind`'s variant NAME plus that variant's
@@ -1636,17 +1651,27 @@ fn trace_content(payload: &Value) -> &[Value] {
 /// disagreed would be pointing at some OTHER session's file — never
 /// followed. `cwd` is accepted and unused for the same reason.
 ///
-/// The TRACE WINS when the presence file names one that exists: the trace is
-/// the whole run, record by record, where `meta.json` is a handful of facts
-/// about it. `meta.json` is returned instead — never a miss — for an older
-/// eidolon whose presence carries no `trace` field, or one whose trace file
-/// is not there (a torn-down or never-created trace): the presence file is
-/// still a real, readable description of the session, and the extractors
-/// below read either shape. When the presence file itself does not exist —
-/// eidolon removes its dir on a clean exit, so a run that settled and left
-/// between two reaper ticks looks exactly like one that never existed — the
-/// hint's own trace is the answer ([`eidolon_journal_trace`]: the `.jsonl`
-/// beside the hinted `.eid`, when it exists), and `None` otherwise.
+/// WHICH file is answered follows the producer's own generation, and the
+/// rule is evidence, not preference:
+///
+/// 1. A **mirror** — the `trace` field, else the journal's `.jsonl` sibling —
+///    when it exists and is still current. `mirror_is_fresh` says what
+///    "current" means, and it only ever says no on positive evidence.
+/// 2. The **journal** itself, when the presence names one that exists and the
+///    export door proves read-only ([`eidolon_pull_capable`]). This is the
+///    current generation's whole interface, and the ONE place Aoide execs
+///    another harness.
+/// 3. The presence `meta.json`, never a miss — an eidolon whose door is
+///    closed, whose journal is gone, or whose presence names neither: a
+///    real, readable description of the session, which the extractors below
+///    read as readily as a trace line. That degradation gets one audit line
+///    ([`audit_door_absent_once`]) because it is invisible in every
+///    consumer's own output.
+///
+/// When the presence file itself does not exist — eidolon removes its dir on
+/// a clean exit, so a run that settled and left between two reaper ticks
+/// looks exactly like one that never existed — the hint's own journal decides
+/// ([`eidolon_gone_journal_trace`]).
 fn eidolon_transcript_locate(
     session_id: &str,
     _cwd: Option<&str>,
@@ -1657,54 +1682,122 @@ fn eidolon_transcript_locate(
         .unwrap_or_else(std::env::temp_dir);
     let meta = root.join("eidolon").join(session_id).join("meta.json");
     if !meta.is_file() {
-        return eidolon_journal_trace(hinted);
+        return eidolon_gone_journal_trace(hinted);
     }
-    if let Some(trace) = eidolon_presence_trace(&meta) {
-        return Some(trace);
+    let paths = eidolon_presence_paths(&meta);
+    if let Some(mirror) = eidolon_mirror(&paths) {
+        if mirror_is_fresh(&mirror, paths.log.as_deref()) {
+            return Some(mirror);
+        }
+    }
+    if let Some(journal) = paths.log.as_deref().filter(|p| p.is_file()) {
+        if eidolon_pull_capable() {
+            return Some(journal.to_path_buf());
+        }
+        audit_door_absent_once();
     }
     Some(meta)
 }
 
-/// The trace beside a journal — `<stem>.jsonl` next to `<stem>.eid`, the
-/// contract's own layout (`docs/architecture/EIDOLON-TRACE.md`, "File") —
-/// for a session whose presence is GONE. Eidolon removes its presence dir on
-/// a clean exit, so a headless run that settled and exited between two
-/// reaper ticks has no `meta.json` left to name its trace; the roster
-/// record's own `logPath` (the `.eid` the presence named while it was alive)
-/// is the one path that still reaches it, and this is the only reader of it.
-/// `None` unless the hint is a `.eid` whose sibling exists: a hint of any
-/// other shape is never followed.
-fn eidolon_journal_trace(hinted: Option<&str>) -> Option<PathBuf> {
+/// The journal a hint names — `<stem>.eid` — as a trace, for a session whose
+/// presence is GONE. Eidolon removes its presence dir on a clean exit, so a
+/// headless run that settled and exited between two reaper ticks has no
+/// `meta.json` left to name its trace; the roster record's own `logPath`
+/// (the `.eid` the presence named while it was alive) is the one path that
+/// still reaches it, and this is the only reader of it. The mirror beside the
+/// journal is the answer while it is still current ([`mirror_is_fresh`], and
+/// a mirror whose journal is gone is current by definition — it is all that
+/// is left of that run); otherwise the journal itself, when the export door
+/// is there; otherwise nothing, never a frozen mirror read as live state. A
+/// hint of any other shape is never followed.
+fn eidolon_gone_journal_trace(hinted: Option<&str>) -> Option<PathBuf> {
     let journal = Path::new(hinted?.trim());
     if journal.extension().and_then(|e| e.to_str()) != Some("eid") {
         return None;
     }
-    let trace = journal.with_extension("jsonl");
-    trace.is_file().then_some(trace)
+    let mirror = journal.with_extension("jsonl");
+    if mirror.is_file() && mirror_is_fresh(&mirror, journal.is_file().then_some(journal)) {
+        return Some(mirror);
+    }
+    if journal.is_file() {
+        if eidolon_pull_capable() {
+            return Some(journal.to_path_buf());
+        }
+        audit_door_absent_once();
+    }
+    None
 }
 
-/// `meta.json`'s own `trace` field, when it names an EXISTING file: the one
-/// new presence field (`docs/architecture/EIDOLON-TRACE.md`, "meta.json"),
-/// absent on an older eidolon. Read with the same 4 KiB cap
-/// [`eidolon_meta_line`] uses — the field is one path — and parsed leniently:
-/// an unreadable, unparseable, blank, or non-string value is simply "no
-/// trace", because the caller has a complete fallback (the presence file
-/// itself) and must never fail a session's whole refresh on it.
-fn eidolon_presence_trace(meta_path: &Path) -> Option<PathBuf> {
+/// `meta.json`'s two path-valued fields, read in ONE 4 KiB parse: `log` is
+/// the session's journal (every generation writes it), `trace` the mirror an
+/// older one wrote beside it. The field is one path each, so the cap is
+/// generous headroom over every real recording (the longest fields are a log
+/// path, the mirror path, and a title, all well under a hundred bytes); an
+/// unreadable, unparseable, or truncated file reads as neither, because the
+/// caller has a complete fallback (the presence file itself) and must never
+/// fail a session's whole refresh on it.
+struct PresencePaths {
+    log: Option<PathBuf>,
+    trace: Option<PathBuf>,
+}
+
+fn eidolon_presence_paths(meta_path: &Path) -> PresencePaths {
     use std::io::Read;
     const CAP: u64 = 4096;
-    let f = std::fs::File::open(meta_path).ok()?;
+    let absent = PresencePaths { log: None, trace: None };
+    let Ok(f) = std::fs::File::open(meta_path) else {
+        return absent;
+    };
     let mut buf = Vec::new();
     if f.take(CAP).read_to_end(&mut buf).is_err() {
-        return None;
+        return absent;
     }
-    let value = serde_json::from_slice::<Value>(&buf).ok()?;
-    let trace = value.get("trace").and_then(Value::as_str)?.trim();
-    if trace.is_empty() {
-        return None;
+    let Ok(value) = serde_json::from_slice::<Value>(&buf) else {
+        return absent;
+    };
+    PresencePaths { log: presence_path(&value, "log"), trace: presence_path(&value, "trace") }
+}
+
+/// One path-valued presence field, trimmed. `None` for a missing, blank, or
+/// non-string value; whether the path EXISTS is each caller's own question,
+/// because the two callers ask it differently (a mirror must be a file, a
+/// journal must be a file, and neither fact is this function's to guess).
+fn presence_path(value: &Value, field: &str) -> Option<PathBuf> {
+    let text = value.get(field)?.as_str()?.trim();
+    (!text.is_empty()).then(|| PathBuf::from(text))
+}
+
+/// The mirror a presence names, whichever generation wrote it: its own
+/// `trace` field, else the journal's `.jsonl` sibling — the layout the
+/// installed generation wrote and never advertised beyond the field. A path
+/// is a mirror only if it is a FILE.
+fn eidolon_mirror(paths: &PresencePaths) -> Option<PathBuf> {
+    if let Some(trace) = paths.trace.as_deref().filter(|p| p.is_file()) {
+        return Some(trace.to_path_buf());
     }
-    let path = PathBuf::from(trace);
-    path.is_file().then_some(path)
+    paths.log.as_deref().map(|log| log.with_extension("jsonl")).filter(|p| p.is_file())
+}
+
+/// Is a mirror still the producer's CURRENT answer? Only positive evidence
+/// says no: a journal that exists, is readable, and is strictly newer than
+/// its mirror — a mirror the producer has stopped appending to, which would
+/// otherwise pin a finished turn as the session's live state forever. An
+/// absent journal is not evidence (the mirror is then all that is left of the
+/// run) and neither is an unreadable one, so both keep the mirror; a mirror
+/// whose own mtime cannot be read is never treated as current.
+fn mirror_is_fresh(mirror: &Path, journal: Option<&Path>) -> bool {
+    let Some(journal) = journal.filter(|p| p.is_file()) else {
+        return true;
+    };
+    let (Some(mirror_at), Some(journal_at)) = (modified_at(mirror), modified_at(journal)) else {
+        return false;
+    };
+    mirror_at >= journal_at
+}
+
+/// A file's mtime, or `None` when it cannot be read.
+fn modified_at(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
 }
 
 /// Read eidolon's presence `meta.json`, capped at 4 KiB, parse it as ONE
@@ -1743,32 +1836,684 @@ fn eidolon_meta_line(path: &Path) -> Vec<String> {
     vec![value.to_string()]
 }
 
-/// Eidolon's tail, routed on WHICH file [`eidolon_transcript_locate`] handed
-/// back: the trace (`<stem>.jsonl`, one record per line) takes the ordinary
-/// line tail every other profile uses — the shared [`transcript_tail`], same
-/// 32 KiB window, because a trace line is a JSONL line like any other's —
-/// while the presence `meta.json` keeps [`eidolon_meta_line`]'s compacting
-/// read (it is one pretty-printed object, not a stream of lines). The
-/// extension is the discriminator, not the caller: `locate` is the only
-/// thing that picks between the two files, and this function is the only
-/// reader of either.
-fn eidolon_transcript_tail(path: &Path) -> Vec<String> {
-    if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-        return transcript_tail(path);
+// ── eidolon: the door (the producer's own read-only export) ─────────────────
+//
+// Everything below exists for one sentence: the current producer publishes no
+// mirror, so the only way to read a journal is the export door IT owns —
+// `eidolon log --json <journal> [--after <id>]`, opened read-only since
+// `0432133` (before that, `log` opened the journal read-write and repaired a
+// torn tail in place, which is exactly why the door is PROVED before it is
+// ever run, and why a proof is pinned to the file it was made against).
+//
+// Aoide writes nothing: no mirror, no sidecar, no state file. It asks the
+// producer, through the producer. Four bounds keep that affordable and
+// survivable, one per reason:
+//   * [`PULL_WALL`] — the child's own wall clock. Polled with `try_wait`,
+//     killed and reaped past it, std-only on both targets: never `timeout(1)`,
+//     never libc, never a non-blocking fd (there is no portable readiness
+//     check, which is why the pipe is drained by a thread whose chunks go
+//     through a bounded channel — and why that thread is never joined).
+//   * [`TRACE_TAIL_BYTES`] — what Aoide retains of ONE journal, ever: the same
+//     single authority the mirror reader always used, and the reason a record
+//     larger than the window can never be retained whole.
+//   * [`MEMO_ENTRIES`]/[`MEMO_BYTES`] — the AGGREGATE the cache may hold, not
+//     just each window: one entry per session would otherwise accumulate
+//     without limit on a host with many sessions.
+//   * [`PULL_READERS`] — the AGGREGATE number of reader threads that may be
+//     outstanding, released only when a thread exits. An unjoined reader is
+//     bounded memory (64 KiB) but not bounded COUNT, and a bound that one
+//     timeout per tick can outrun is no bound at all.
+// `--after <last id>` is a fifth, smaller saving and NOT one of them: it
+// filters which records the producer prints, and the producer's own replay is
+// O(journal) whatever it prints — a tick's saving is the export's SIZE, never
+// the export's COST, and Aoide never assumes otherwise. That cost is why
+// [`PULL_WALL`] is a bound rather than a promise about journal size: a journal
+// whose replay outruns the budget degrades (audited) and the caller falls back,
+// and no claim is made here about how large a journal may be before that
+// happens — only that nothing waits on it without a limit.
+
+/// How long one export may run before it is killed and its output discarded.
+const PULL_WALL: Duration = Duration::from_secs(5);
+
+/// How often the wait loop asks the child whether it has exited.
+const PULL_POLL: Duration = Duration::from_millis(20);
+
+/// How long after the child exited the reader is given to reach EOF. Past it
+/// the output is not the whole export and is DISCARDED rather than inferred
+/// from — which is also what keeps the deadline bounded when a descendant of
+/// the child inherits the pipe and holds it open.
+const PULL_DRAIN_GRACE: Duration = Duration::from_secs(2);
+
+/// Chunks in flight between the reader thread and the wait loop (4 × 64 KiB) —
+/// the backpressure that stops a fast producer from queueing a whole journal
+/// in memory while the loop is asleep.
+const PULL_CHUNKS: usize = 4;
+
+/// How many reader threads may be OUTSTANDING at once. A slot is released when
+/// the thread itself exits — never when the pull returns — which is the only
+/// accounting that bounds the leak: a producer that leaves a descendant
+/// holding the child's stdout keeps its reader blocked past every deadline, and
+/// a per-pull bound would leak one more thread per tick forever. A pull that
+/// cannot take a slot inside [`PULL_DRAIN_GRACE`] degrades instead of adding a
+/// thread nobody can account for (audited; see [`PullFailure::ReadersBusy`]).
+///
+/// The number is generous on purpose: sixteen blocked readers is already far
+/// past any real load (one daemon reaps serially, and each CLI process has its
+/// own cap), so the cap only ever binds when readers are genuinely stuck rather
+/// than when the box is merely busy.
+const PULL_READERS: usize = 16;
+
+/// Free reader slots, and the condvar a pull waits on for one. The wait is
+/// bounded too: a cap that lets its waiter block forever is not a bound.
+static READER_SLOTS: Mutex<usize> = Mutex::new(PULL_READERS);
+static READER_FREED: Condvar = Condvar::new();
+
+/// One outstanding-reader slot, moved INTO the reader thread so it drops when
+/// that thread exits (EOF or a read error) and not a moment sooner.
+struct ReaderSlot;
+
+impl ReaderSlot {
+    /// A free slot, waiting up to [`PULL_DRAIN_GRACE`] for one. `None` means
+    /// every slot is held by a reader that has not exited.
+    fn acquire() -> Option<Self> {
+        let mut free = READER_SLOTS.lock().unwrap_or_else(|e| e.into_inner());
+        let give_up_at = Instant::now() + PULL_DRAIN_GRACE;
+        while *free == 0 {
+            let left = give_up_at.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return None;
+            }
+            let (guard, _) = READER_FREED
+                .wait_timeout(free, left)
+                .unwrap_or_else(|e| e.into_inner());
+            free = guard;
+        }
+        *free -= 1;
+        Some(ReaderSlot)
     }
-    eidolon_meta_line(path)
+}
+
+impl Drop for ReaderSlot {
+    fn drop(&mut self) {
+        let mut free = READER_SLOTS.lock().unwrap_or_else(|e| e.into_inner());
+        *free = (*free + 1).min(PULL_READERS);
+        READER_FREED.notify_one();
+    }
+}
+
+/// The journal windows the cache may hold, and the bytes they may hold
+/// together (8 MiB) — the aggregate bound [`MEMO_ENTRIES`]/[`MEMO_BYTES`]
+/// name above.
+const MEMO_ENTRIES: usize = 64;
+const MEMO_BYTES: usize = 8 * TRACE_TAIL_BYTES as usize;
+
+/// The producer, when one is installed and spawnable. The bare `eidolon` on
+/// `PATH` is the same resolution the profile's own `launch` argv and
+/// [`eidolon_native_send`] leave to `Command`; it is spelled out here only so
+/// the probe and the export are known to exec the same file, and so a
+/// capability claim can be pinned to it. `None` is a different fact from "an
+/// eidolon whose door is closed" — nothing is installed, so nothing degraded.
+fn eidolon_on_path() -> Option<PathBuf> {
+    crate::bin::resolve_executable_on_path("eidolon")
+}
+
+/// The program to exec: the installed producer, else the bare name (whose
+/// spawn failure is itself the probe's answer).
+fn eidolon_program() -> PathBuf {
+    eidolon_on_path().unwrap_or_else(|| PathBuf::from("eidolon"))
+}
+
+/// Ask the producer's own CLI whether its export door is the read-only one:
+/// `eidolon log --help` lists `--after` exactly in the generations whose `log`
+/// opens the journal read-only (`0432133` onward). A spawn failure, a non-zero
+/// exit, a deadline, output that never reached EOF, or a reader slot that could
+/// not be had all read as NOT capable — the fail-safe direction, which costs a
+/// legacy host nothing it would not have had from its mirror anyway.
+///
+/// NOTHING IS REMEMBERED, and that is the contract, not an omission. What Aoide
+/// resolves is a NAME on `PATH`, and on an installed system that name is a
+/// launcher: a small script whose own identity (inode, length, mtime) stays put
+/// while the runtime behind it — `$EIDOLON_BIN`, a rebuilt store path — is
+/// replaced under it. An answer remembered against the launcher's identity
+/// would therefore outlive the producer it was made about: a stale `true` could
+/// authorize a replaced, repairing `log`, and a stale `false` could hide a door
+/// that is there. So every pull probes again, immediately before the export it
+/// guards, through the same resolved program. The launcher's target can still
+/// change between those two spawns; this is not an atomic runtime identity
+/// check. An attempt Aoide could not make at all (no
+/// reader slot, no child) is likewise remembered nowhere, so the next call
+/// simply asks again.
+///
+/// The locator may probe too, so a pull can run `log --help` twice. A journal
+/// that has not grown skips the export probe through its memo; locating it can
+/// still probe the producer.
+fn eidolon_pull_capable() -> bool {
+    let program = eidolon_program();
+    match eidolon_export(&program, &["log".to_string(), "--help".to_string()]) {
+        ExportOutcome::Whole(out) => String::from_utf8_lossy(&out.bytes).contains("--after"),
+        // The producer answered, by refusing: fail-safe, and asked again next
+        // time like any other answer — nothing is cached.
+        ExportOutcome::Refused => false,
+        // Aoide could not even ask (every reader slot held, no child).
+        ExportOutcome::Unavailable => false,
+    }
+}
+
+/// One audit line for the one degradation a consumer cannot see for itself:
+/// an INSTALLED eidolon whose door is not the read-only export. Nothing is
+/// audited when no eidolon is installed at all — there the trace was never
+/// anything but the presence, and nothing changed.
+fn audit_door_absent_once() {
+    if eidolon_on_path().is_some() {
+        audit_pull_once(PullFailure::DoorAbsent);
+    }
+}
+
+/// Why a pull is unavailable or was discarded. Once per PROCESS per reason
+/// (`audit_scan_unknown_once`'s guard, same reasoning): a generation does not
+/// self-heal tick to tick, so a tick that keeps hitting one stays quiet after
+/// its first line rather than growing the log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PullFailure {
+    /// An eidolon is installed and a presence names a journal, but its `log`
+    /// is not the read-only export: the trace falls back to a mirror or to the
+    /// presence. Invisible in every consumer's output — the reason it is
+    /// audited at all.
+    DoorAbsent,
+    /// The export outlived [`PULL_WALL`], was killed and reaped, and its output
+    /// was discarded.
+    Deadline,
+    /// The export's output never reached EOF: it is not the whole export, so it
+    /// was discarded, never inferred from.
+    Unterminated,
+    /// Every reader slot is held by a thread that has not exited — a producer
+    /// leaving its stdout open somewhere. The pull refused to add another
+    /// thread rather than grow the leak; nothing was read.
+    ReadersBusy,
+}
+
+static AUDITED: [AtomicBool; 4] =
+    [AtomicBool::new(false), AtomicBool::new(false), AtomicBool::new(false), AtomicBool::new(false)];
+
+/// One line, at most once per process and reason. Silence is the failure mode
+/// this reader exists to end: a consumer quietly reading a generation behind is
+/// how trace-derived state was lost in the first place.
+fn audit_pull_once(failure: PullFailure) {
+    let slot = match failure {
+        PullFailure::DoorAbsent => 0,
+        PullFailure::Deadline => 1,
+        PullFailure::Unterminated => 2,
+        PullFailure::ReadersBusy => 3,
+    };
+    if AUDITED[slot].swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let (status, message) = match failure {
+        PullFailure::DoorAbsent => (
+            "degraded",
+            "eidolon trace: this eidolon's `log` is not the read-only export (its help lists no \
+             `--after`), so its journal is not readable through it — the trace falls back to the \
+             presence or to a mirror",
+        ),
+        PullFailure::Deadline => (
+            "discarded",
+            "eidolon trace: the export outlived its wall-clock budget and was killed; its output \
+             was discarded, never inferred from",
+        ),
+        PullFailure::Unterminated => (
+            "discarded",
+            "eidolon trace: the export's output never reached EOF; it was discarded, never \
+             inferred from",
+        ),
+        PullFailure::ReadersBusy => (
+            "degraded",
+            "eidolon trace: every export reader is still blocked on a producer that has not closed \
+             its output, so no further export was started; the trace falls back to the presence",
+        ),
+    };
+    let _ = crate::audit::audit(
+        &crate::default_audit_log(),
+        crate::Door::Daemon,
+        crate::EventClass::Audit,
+        "session.trace",
+        status,
+        message,
+    );
+}
+
+/// The last `cap` bytes of one export, and whether anything fell off the front
+/// (so the first line may have been cut). Every push goes through this, so the
+/// pull's own memory is bounded at every instant — including during a single
+/// record larger than the whole window, which is kept as its own tail and
+/// never whole.
+struct RollingWindow {
+    bytes: Vec<u8>,
+    cap: usize,
+    head_partial: bool,
+}
+
+impl RollingWindow {
+    fn new(cap: usize) -> Self {
+        Self { bytes: Vec::new(), cap, head_partial: false }
+    }
+
+    fn push(&mut self, chunk: &[u8]) {
+        if chunk.len() >= self.cap {
+            self.bytes.clear();
+            self.bytes.extend_from_slice(&chunk[chunk.len() - self.cap..]);
+            self.head_partial = true;
+            return;
+        }
+        let overflow = (self.bytes.len() + chunk.len()).saturating_sub(self.cap);
+        if overflow > 0 {
+            self.bytes.drain(..overflow);
+            self.head_partial = true;
+        }
+        self.bytes.extend_from_slice(chunk);
+    }
+
+    fn finish(self) -> Exported {
+        Exported { bytes: self.bytes, head_partial: self.head_partial }
+    }
+}
+
+/// What one export produced.
+#[derive(Clone)]
+struct Exported {
+    bytes: Vec<u8>,
+    /// The window cut a line at its head, so the first one is not whole.
+    head_partial: bool,
+}
+
+impl Exported {
+    /// This window with `fresh`'s WHOLE lines appended — a cursor-trusted
+    /// pull's delta riding the records already held, trimmed back to the one
+    /// cap. `fresh`'s own head is skipped when IT was cut: the delta starts at
+    /// a record boundary, so a cut there means one record larger than the whole
+    /// window, and half of it appended to a whole line is worth less than
+    /// nothing.
+    fn appended(&self, fresh: &Exported) -> Exported {
+        let mut window = RollingWindow::new(TRACE_TAIL_BYTES as usize);
+        window.bytes = self.bytes.clone();
+        window.head_partial = self.head_partial;
+        let start = if fresh.head_partial {
+            fresh.bytes.iter().position(|b| *b == b'\n').map_or(fresh.bytes.len(), |i| i + 1)
+        } else {
+            0
+        };
+        window.push(&fresh.bytes[start..]);
+        window.finish()
+    }
+}
+
+/// The whole lines in an export, at most `budget` bytes of it, with a leading
+/// fragment dropped — exactly the rule [`transcript_tail_bounded`] applies to a
+/// file, so a trace read through the door and one read off a mirror cannot
+/// disagree about what a tail is.
+fn exported_lines(exported: &Exported, budget: usize) -> Vec<String> {
+    let start = exported.bytes.len().saturating_sub(budget);
+    let drop_head = exported.head_partial || start > 0;
+    let text = String::from_utf8_lossy(&exported.bytes[start..]);
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    if drop_head && !lines.is_empty() {
+        lines.remove(0);
+    }
+    lines
+}
+
+/// The newest record id in an export — the last whole line's `id`, which is
+/// what the door's own `--after` takes. `None` when that line is a fragment,
+/// carries no id, or is not JSON: a cursor that cannot be derived is not
+/// advanced, and the next pull re-exports the journal rather than skipping
+/// records. (`--after` is an OUTPUT filter, positional in the producer's own
+/// implementation and documented there as the dense `#n` the text rendering
+/// prints; this reader therefore assumes nothing about it beyond that.)
+fn exported_last_id(exported: &Exported) -> Option<u64> {
+    let text = String::from_utf8_lossy(&exported.bytes);
+    let value: Value = serde_json::from_str(text.lines().next_back()?).ok()?;
+    value.get("id")?.as_u64()
+}
+
+/// What one export produced — or why there is none. The distinction matters
+/// in [`eidolon_pull_capable`]: refusal and inability to ask both prevent the
+/// guarded export. No capability answer is cached.
+enum ExportOutcome {
+    /// The child ran to completion and its whole output is here.
+    Whole(Exported),
+    /// The child ran and refused — a non-zero exit, or output that never
+    /// reached EOF. Discarded, never inferred from.
+    Refused,
+    /// No export could be started at all: every reader slot is held, or no
+    /// child could be spawned. This does not establish producer capability.
+    Unavailable,
+}
+
+/// Run the producer's export under the pull's bounds and hand back its output,
+/// or why there is none — never a partial read, and never a child that outlives
+/// [`PULL_WALL`] plus [`PULL_DRAIN_GRACE`].
+///
+/// The reader thread exists because a pipe must be drained WHILE the child
+/// runs: a producer that fills the 64 KiB pipe buffer blocks against itself if
+/// nobody reads it, and std offers no portable way to ask a pipe whether it has
+/// data. Its chunks go through a bounded channel, so the parent's memory stays
+/// bounded too. The thread is NEVER joined: after the child is killed and
+/// reaped the pipe closes and the thread ends by itself. In the one case where
+/// it does not (a descendant inherited the pipe) it holds its [`ReaderSlot`]
+/// until it finally exits — nothing but its own 64 KiB buffer, and at most
+/// [`PULL_READERS`] of them, since a pull that cannot take a slot starts no
+/// child at all.
+fn eidolon_export(program: &Path, args: &[String]) -> ExportOutcome {
+    use std::io::Read;
+
+    // The reader's slot comes FIRST: no child is started for a pull whose
+    // reader cannot be accounted for.
+    let Some(slot) = ReaderSlot::acquire() else {
+        audit_pull_once(PullFailure::ReadersBusy);
+        return ExportOutcome::Unavailable;
+    };
+    let Ok(mut child) = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return ExportOutcome::Unavailable;
+    };
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return ExportOutcome::Unavailable;
+    };
+    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(PULL_CHUNKS);
+    std::thread::spawn(move || {
+        let _slot = slot;
+        let mut stdout = stdout;
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            match stdout.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if tx.send(buf[..n].to_vec()).is_err() {
+                        // The wait loop is gone: stop reading and let the pipe
+                        // close with this thread's own end of it.
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    let mut window = RollingWindow::new(TRACE_TAIL_BYTES as usize);
+    let mut eof = false;
+    let deadline = Instant::now() + PULL_WALL;
+    loop {
+        while !eof {
+            match rx.try_recv() {
+                Ok(chunk) => window.push(&chunk),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => eof = true,
+            }
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                drain_until_eof(&rx, &mut window, &mut eof);
+                if !eof {
+                    audit_pull_once(PullFailure::Unterminated);
+                    return ExportOutcome::Refused;
+                }
+                if !status.success() {
+                    // The producer's own refusal — a journal it will not open, a
+                    // usage error. Ordinary, like a read error on an optional
+                    // file: no line, and never the partial output.
+                    return ExportOutcome::Refused;
+                }
+                return ExportOutcome::Whole(window.finish());
+            }
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    audit_pull_once(PullFailure::Deadline);
+                    return ExportOutcome::Refused;
+                }
+                std::thread::sleep(PULL_POLL);
+            }
+            Err(_) => {
+                // A wait that fails is not evidence about the producer, so it is
+                // not audited — but its output is still not the whole export.
+                let _ = child.kill();
+                let _ = child.wait();
+                return ExportOutcome::Refused;
+            }
+        }
+    }
+}
+
+/// Take whatever the reader still holds, up to [`PULL_DRAIN_GRACE`]: the rest
+/// of the pipe to EOF, or nothing (the caller then discards everything, since
+/// output that never reached EOF is not the whole export).
+fn drain_until_eof(rx: &mpsc::Receiver<Vec<u8>>, window: &mut RollingWindow, eof: &mut bool) {
+    let grace_end = Instant::now() + PULL_DRAIN_GRACE;
+    while !*eof {
+        let left = grace_end.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        match rx.recv_timeout(left) {
+            Ok(chunk) => window.push(&chunk),
+            Err(mpsc::RecvTimeoutError::Timeout) => break,
+            Err(mpsc::RecvTimeoutError::Disconnected) => *eof = true,
+        }
+    }
+}
+
+/// One journal's identity at one instant: what identifies the FILE (the
+/// platform's own handle-independent identity, [`crate::feed::path_identity`])
+/// plus its length and mtime. Identity is what decides whether a cached cursor
+/// may be reused at all — a same-path replacement is a NEW file even when it is
+/// the same length or longer, which no length comparison can see — while
+/// length and mtime decide only whether the SAME file merely grew. Those two
+/// are not an identity check and are never described as one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JournalStat {
+    identity: Option<crate::feed::PathIdentity>,
+    len: u64,
+    mtime: Option<SystemTime>,
+}
+
+impl JournalStat {
+    fn of(path: &Path) -> Option<Self> {
+        let meta = std::fs::metadata(path).ok()?;
+        if !meta.is_file() {
+            return None;
+        }
+        Some(Self {
+            identity: crate::feed::path_identity(path).ok(),
+            len: meta.len(),
+            mtime: meta.modified().ok(),
+        })
+    }
+
+    /// Did the file this describes merely GROW out of `older`? An unknown
+    /// identity is never "the same file" (`feed::Follower::poll`'s rule), and
+    /// an mtime that went backwards is a rewrite, not an append.
+    ///
+    /// What this decides, exactly: a cursor is reused only when the same file
+    /// (identity equal) is at least as long AND at least as old-or-newer
+    /// (mtime not backwards). Every demonstrable non-growth is therefore a
+    /// dropped cursor — a replacement at the same path (new identity), a
+    /// truncation, an in-place rewrite that shortens the file, and a rewrite
+    /// that moves its mtime backwards — and the pull then exports the journal
+    /// from the start instead of skipping records.
+    ///
+    /// A rewrite retaining identity and length with an unchanged or newer
+    /// mtime also passes this check. The retained cursor can then miss changed
+    /// records; this reader relies on the producer's append-only journal
+    /// contract. It does not inspect journal bytes to detect such rewrites.
+    fn grew_from(&self, older: &Self) -> bool {
+        let same_file = matches!(
+            (self.identity.as_ref(), older.identity.as_ref()),
+            (Some(now), Some(then)) if now == then
+        );
+        let only_grew = match (self.mtime, older.mtime) {
+            (Some(now), Some(then)) => now >= then && self.len >= older.len,
+            _ => false,
+        };
+        same_file && only_grew
+    }
+}
+
+/// One journal's cached read: what the door exported, where the next
+/// `--after` stands, and the `stat` that read belonged to.
+struct JournalMemo {
+    journal: PathBuf,
+    stat: JournalStat,
+    /// The newest record id this pull saw. An OUTPUT bound for the next
+    /// `--after` — never a delivery cursor (`state/stage/pingback.json`'s
+    /// `seen` is the at-most-once authority) and never a truth authority: it is
+    /// dropped whenever the file it came from cannot be identified.
+    last_id: Option<u64>,
+    exported: Exported,
+    /// The LRU stamp, for [`memo_store`]'s eviction.
+    used: u64,
+}
+
+static MEMOS: Mutex<Vec<JournalMemo>> = Mutex::new(Vec::new());
+static MEMO_USE: AtomicU64 = AtomicU64::new(0);
+
+/// Put one journal's read in the cache and trim the cache back inside BOTH of
+/// its caps — the entry count and the bytes all entries hold together. The
+/// oldest-used entries go first; an eviction costs a re-pull and never a wrong
+/// answer, which is what lets the policy be this blunt.
+fn memo_store(memos: &mut Vec<JournalMemo>, entry: JournalMemo) {
+    memos.push(entry);
+    while memos.len() > MEMO_ENTRIES
+        || memos.iter().map(|m| m.exported.bytes.len()).sum::<usize>() > MEMO_BYTES
+    {
+        let Some(oldest) = memos.iter().enumerate().min_by_key(|(_, m)| m.used).map(|(i, _)| i)
+        else {
+            break;
+        };
+        memos.remove(oldest);
+    }
+}
+
+/// The whole lines of a journal, read through the producer's export door and
+/// cut to the caller's own budget: `TRACE_TAIL_BYTES` for the trace,
+/// `TRANSCRIPT_TAIL_BYTES` for the transcript tail. One door, one retained
+/// window per journal, two budgets. `None` means the door is not there — the
+/// same taught refusal a missing mirror gets.
+fn eidolon_journal_lines(journal: &Path, budget: usize) -> Option<Vec<String>> {
+    Some(exported_lines(&eidolon_journal_export(journal)?, budget))
+}
+
+/// The one retained window for `journal`, read through the door and memoized.
+/// Never opens the journal itself: the door is the only read of a file Aoide
+/// cannot decode, and the capability probe is what makes running the door safe.
+///
+/// The memo exists so a reap tick's three readers (the state fold, the roster
+/// refresh, the ping-back gather) cost ONE export, and so a tick where nothing
+/// grew costs none at all. It holds the pull while it runs — bounded by
+/// [`PULL_WALL`], which is the whole reason that bound is a constant here.
+fn eidolon_journal_export(journal: &Path) -> Option<Exported> {
+    let stat = JournalStat::of(journal)?;
+    let mut memos = MEMOS.lock().unwrap_or_else(|e| e.into_inner());
+    let stamp = MEMO_USE.fetch_add(1, Ordering::Relaxed);
+    if let Some(hit) = memos.iter_mut().find(|m| m.journal == journal) {
+        if hit.stat == stat {
+            hit.used = stamp;
+            return Some(hit.exported.clone());
+        }
+    }
+    let previous: Option<(JournalStat, Option<u64>, Exported)> = memos
+        .iter()
+        .find(|m| m.journal == journal)
+        .map(|m| (m.stat.clone(), m.last_id, m.exported.clone()));
+    if !eidolon_pull_capable() {
+        // A window read through a door that is now closed is not evidence about
+        // the file, so it goes: the answer is the caller's fallback, not a
+        // frozen read of a generation that is no longer there.
+        memos.retain(|m| m.journal != journal);
+        return None;
+    }
+    // The cursor rides only a file that is provably the same one, and only when
+    // it merely grew. A replacement at the same path, a shrink, or a rewrite
+    // whose mtime moves backwards starts the export over.
+    let cursor = previous.as_ref().filter(|(before, _, _)| stat.grew_from(before));
+    let mut args = vec!["log".to_string(), "--json".to_string()];
+    if let Some(id) = cursor.and_then(|(_, last_id, _)| *last_id) {
+        args.push("--after".to_string());
+        args.push(id.to_string());
+    }
+    args.push(journal.to_string_lossy().into_owned());
+    let fresh = match eidolon_export(&eidolon_program(), &args) {
+        ExportOutcome::Whole(out) => out,
+        // A pull that fails — refused, or never run — advances nothing and
+        // leaves nothing behind.
+        ExportOutcome::Refused | ExportOutcome::Unavailable => {
+            memos.retain(|m| m.journal != journal);
+            return None;
+        }
+    };
+    let exported = match cursor {
+        Some((_, _, before)) => before.appended(&fresh),
+        None => fresh,
+    };
+    let last_id =
+        exported_last_id(&exported).or_else(|| cursor.and_then(|(_, last_id, _)| *last_id));
+    memos.retain(|m| m.journal != journal);
+    memo_store(
+        &mut memos,
+        JournalMemo {
+            journal: journal.to_path_buf(),
+            stat,
+            last_id,
+            exported: exported.clone(),
+            used: stamp,
+        },
+    );
+    Some(exported)
+}
+
+/// Eidolon's tail, routed on WHICH file [`eidolon_transcript_locate`] handed
+/// back: a trace (`<stem>.jsonl`) takes the ordinary line tail every other
+/// profile uses — the shared [`transcript_tail`], same 32 KiB window, because
+/// a trace line is a JSONL line like any other's — a journal (`.eid`) the
+/// door's own export, read under the same budget, while the presence
+/// `meta.json` keeps [`eidolon_meta_line`]'s compacting read (it is one
+/// pretty-printed object, not a stream of lines). The extension is the
+/// discriminator, not the caller: `locate` is the only thing that picks
+/// between the three, and this function is the only reader of any of them.
+/// A closed door is an empty tail here — never an error that voids the
+/// caller's whole pass — and the one audit line for it is written where the
+/// choice is made ([`eidolon_transcript_locate`]).
+fn eidolon_transcript_tail(path: &Path) -> Vec<String> {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("jsonl") => transcript_tail(path),
+        Some("eid") if path.is_file() => {
+            eidolon_journal_lines(path, TRANSCRIPT_TAIL_BYTES as usize).unwrap_or_default()
+        }
+        _ => eidolon_meta_line(path),
+    }
 }
 
 /// Read a session's trace as whole JSONL lines off its END — the reader
 /// [`TranscriptSpec::trace`] exposes, and the one `aoide session trace`
-/// renders. `None` unless the path IS an existing trace file: the presence
-/// stand-in `locate` returns for an eidolon with no trace (or any future
-/// harness whose profile carries no trace at all) is not one, and neither is
-/// a path a torn-down session already deleted. Saying so is what lets a
-/// caller teach the difference between "this harness keeps no trace" and
-/// "this trace is empty right now" instead of showing nothing and shrugging:
-/// a trace that EXISTS and holds no records yet is `Some(empty)`, never
-/// `None`.
+/// renders. `None` unless `path` is an EXISTING trace: the presence stand-in
+/// `locate` returns for an eidolon with no trace at all (or any future
+/// harness whose profile carries no trace) is not one, and neither is a path
+/// a torn-down session already deleted. Saying so is what lets a caller teach
+/// the difference between "this harness keeps no trace" and "this trace is
+/// empty right now" instead of showing nothing and shrugging: a trace that
+/// EXISTS and holds no records yet is `Some(empty)`, never `None`.
+///
+/// Two shapes name the same trace and both are whole lines: a `.jsonl` mirror
+/// the producer wrote (the installed generation), and a `.eid` journal, which
+/// arrives here only when [`eidolon_transcript_locate`] proved the producer's
+/// export door is the read-only one — this reader never opens a journal
+/// itself. A door that is not there is `None`, the same taught refusal a
+/// mirror that is not there gets.
 ///
 /// The budget is [`TRACE_TAIL_BYTES`] (1 MiB), not the transcript tail's
 /// 32 KiB: a trace record is a WHOLE assistant message including its
@@ -1777,12 +2522,17 @@ fn eidolon_transcript_tail(path: &Path) -> Vec<String> {
 /// `say`/`tool`, but not for `session trace`'s own `--tail N`, whose default
 /// is 50 records. One bounded line-tail implementation
 /// ([`transcript_tail_bounded`]) with two callers choosing different
-/// budgets, never a second reader.
+/// budgets, never a second reader — beside the door's own export, which
+/// carries the same one-line-per-record shape off the same producer.
 pub fn eidolon_trace_tail(path: &Path) -> Option<Vec<String>> {
-    if path.extension().and_then(|e| e.to_str()) != Some("jsonl") || !path.is_file() {
+    if !path.is_file() {
         return None;
     }
-    Some(transcript_tail_bounded(path, TRACE_TAIL_BYTES))
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("jsonl") => Some(transcript_tail_bounded(path, TRACE_TAIL_BYTES)),
+        Some("eid") => eidolon_journal_lines(path, TRACE_TAIL_BYTES as usize),
+        _ => None,
+    }
 }
 
 /// How far back [`eidolon_trace_tail`] reads: enough for `session trace`'s
@@ -2057,10 +2807,12 @@ fn eidolon_native_send(to: &str) -> Vec<String> {
 ///   on describing the OLD log).
 /// - `native_send: Some(eidolon_native_send)` — see its own doc: the one
 ///   profile where a message never needs the pty composer at all.
-/// - `transcript.locate` returns the TRACE when the presence file names one,
-///   else `meta.json`; `transcript.trace` is `Some(eidolon_trace_tail)` —
-///   the capability test `aoide session trace` makes, and the only reason no
-///   consumer needs to name this harness by string. Every extractor is
+/// - `transcript.locate` answers the producer's own best evidence: a mirror
+///   that is still current, else the journal itself when the export door is
+///   the read-only one, else `meta.json`; `transcript.trace` is
+///   `Some(eidolon_trace_tail)` — the capability test `aoide session trace`
+///   makes, and the only reason no consumer needs to name this harness by
+///   string. Every extractor is
 ///   `None` for a shape its file does not carry: `say`/`tool`/`context_tokens`
 ///   off a bare `meta.json` (a presence line holds no turn records), `title`
 ///   and `model` off either (`meta.json`'s own fields are the fallback).
@@ -2094,7 +2846,7 @@ pub static EIDOLON_PROFILE: AgentProfile = AgentProfile {
         context_tokens: eidolon_context_tokens,
         subagents_dir: eidolon_subagents_dir,
         find_subagent: eidolon_find_subagent,
-        // The one profile whose harness mirrors its journal as JSONL — see
+        // The one profile whose harness keeps a per-record trace — see
         // `eidolon_trace_tail`'s own doc, and `TranscriptSpec::trace`'s for
         // why the capability lives on the spec rather than a name compare at
         // the call site.
@@ -3147,6 +3899,9 @@ mod tests {
     const TRACE_CANCELLED: &str = r#"{"id":77,"parent":76,"ts_ms":1789626990000,"kind":"Cancelled"}"#;
     const TRACE_ASK_USER: &str = r#"{"id":40,"parent":39,"ts_ms":1789626500000,"kind":{"AskUser":{"call_id":"call_x","prompt":"Overwrite?","answer":null}}}"#;
     const TRACE_CONTEXT_SIZE: &str = r#"{"id":41,"parent":40,"ts_ms":1789626501000,"kind":{"ContextSize":{"tokens":134700}}}"#;
+    /// A record past the settled fixture's id 131 — what an appended journal
+    /// adds, and the id a `--after` cursor is expected to carry next.
+    const TRACE_LATER: &str = r#"{"id":132,"parent":131,"ts_ms":1789606500000,"kind":{"ContextSize":{"tokens":140000}}}"#;
 
     #[test]
     fn the_model_comes_from_the_last_session_start_or_model_changed() {
@@ -3267,6 +4022,10 @@ mod tests {
 
     #[test]
     fn the_trace_tail_reads_whole_lines_and_refuses_a_non_trace_path() {
+        // The `.eid` arm below consults the export probe, which reads `PATH`:
+        // it holds the crate's own PATH lock so a `bin`/`agents` test scoping
+        // `PATH` cannot race it (crates/AGENTS.md's one-mutex rule).
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("aoide_eidolon_trace_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -3423,22 +4182,33 @@ mod tests {
 
     #[test]
     fn eidolon_transcript_locate_follows_the_journal_hint_only_once_the_presence_is_gone() {
-        // No presence dir for this id under ANY runtime root (a clean exit
-        // removed it): the hinted `.eid`'s sibling `.jsonl` is the trace.
+        // A PATH with no `eidolon` on it, under the crate's shared lock: this
+        // test is about the MIRROR arm, and the answer must not depend on
+        // which generation of producer the host happens to have installed
+        // (a host with the export door would answer the journal itself).
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_path = std::env::var_os("PATH");
         let id = format!("fixture-gone-{}", std::process::id());
         let dir = std::env::temp_dir().join(format!("aoide_eidolon_journal_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("PATH", &dir);
         let eid = dir.join("1789660635924.eid");
         let jsonl = dir.join("1789660635924.jsonl");
         std::fs::write(&eid, b"").unwrap();
         let spec = &EIDOLON_PROFILE.transcript;
 
         // A journal with no trace beside it resolves to nothing — never the
-        // `.eid` itself, which is bitcode no extractor can read.
+        // `.eid` itself: with no export door on this `PATH` there is no reader
+        // for a journal at all, and bitcode is not something to guess at.
         assert_eq!((spec.locate)(&id, Some("/w"), Some(eid.to_str().unwrap())), None);
 
         std::fs::write(&jsonl, "{\"id\":0}\n").unwrap();
+        // The mirror arm turns on freshness, so the pair's mtimes are pinned
+        // rather than left to write order (the journal is the older of the
+        // two by construction).
+        set_mtime(&eid, an_hour_ago());
+        set_mtime(&jsonl, SystemTime::now());
         assert_eq!(
             (spec.locate)(&id, Some("/w"), Some(eid.to_str().unwrap())),
             Some(jsonl.clone()),
@@ -3451,13 +4221,20 @@ mod tests {
         assert_eq!((spec.locate)(&id, None, Some(dir.to_str().unwrap())), None);
         assert_eq!((spec.locate)(&id, None, None), None);
 
+        match saved_path {
+            Some(v) => std::env::set_var("PATH", v),
+            None => std::env::remove_var("PATH"),
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn eidolon_transcript_locate_keys_on_the_native_presence_id_not_cwd() {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOCK.lock().unwrap();
+        // Shares the crate's PATH/XDG lock: this test mutates
+        // `XDG_RUNTIME_DIR`, which the shim-based pull tests below also
+        // mutate, and one process-global variable gets ONE mutex
+        // (crates/AGENTS.md).
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var_os("XDG_RUNTIME_DIR");
         let root =
             std::env::temp_dir().join(format!("aoide_eidolon_runtime_{}", std::process::id()));
@@ -3562,6 +4339,810 @@ mod tests {
             Some(v) => std::env::set_var("PATH", v),
             None => std::env::remove_var("PATH"),
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── eidolon: the export door ────────────────────────────────────────────
+    //
+    // Every question below is about WHICH invocation happens and what the
+    // reader does with its answer, so each test drives a shim standing in for
+    // the producer: a real journal is bitcode Aoide may not read, and a real
+    // `eidolon` is a host fact no unit test may depend on. The shims are
+    // `#[cfg(unix)]` (a shell script plus its execute bit); on Windows the same
+    // questions are the resolver's own `command_suffixes` tie-break, and no
+    // second discovery path is invented here.
+
+    /// Run `body` with a scoped producer environment — see
+    /// [`scope_producer_env`]; the crate's shared PATH lock is held for the
+    /// whole scope, `bin::tests`' own shape.
+    #[cfg(unix)]
+    fn with_producer(dir: &Path, body: impl FnOnce()) {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = scope_producer_env(dir);
+        body();
+        unscope_producer_env(saved);
+    }
+
+    /// `PATH` with `dir/bin` FIRST (a shim named `eidolon` in it is what
+    /// resolves; the host's own `PATH` follows so the shim's own `cat`/`sleep`
+    /// work), the presence root at `dir` (a presence is
+    /// `dir/eidolon/<id>/meta.json`), and the audit log beside it. Returns what
+    /// [`unscope_producer_env`] puts back — split out because one test has to
+    /// hold the caller's lock across the whole thing.
+    #[cfg(unix)]
+    fn scope_producer_env(dir: &Path) -> Vec<(&'static str, Option<std::ffi::OsString>)> {
+        let names = ["PATH", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"];
+        let saved: Vec<(&'static str, Option<std::ffi::OsString>)> =
+            names.iter().map(|n| (*n, std::env::var_os(n))).collect();
+        let bindir = dir.join("bin");
+        let scoped = match std::env::var_os("PATH") {
+            Some(host) => std::env::join_paths(
+                std::iter::once(bindir).chain(std::env::split_paths(&host)),
+            )
+            .unwrap(),
+            None => bindir.into_os_string(),
+        };
+        std::env::set_var("PATH", scoped);
+        std::env::set_var("XDG_RUNTIME_DIR", dir);
+        std::env::set_var("AOIDE_AUDIT_LOG", dir.join("audit.log"));
+        saved
+    }
+
+    #[cfg(unix)]
+    fn unscope_producer_env(saved: Vec<(&'static str, Option<std::ffi::OsString>)>) {
+        for (name, value) in saved {
+            match value {
+                Some(v) => std::env::set_var(name, v),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn shim_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("aoide_eidolon_pull_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A script at `dir/bin/eidolon`, executable — the program the reader
+    /// resolves off the scoped `PATH` (never at `dir/eidolon`, which is the
+    /// presence ROOT the fixtures below write into).
+    #[cfg(unix)]
+    fn shim(dir: &Path, body: &str) -> PathBuf {
+        let bindir = dir.join("bin");
+        std::fs::create_dir_all(&bindir).unwrap();
+        let path = bindir.join("eidolon");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}")).unwrap();
+        crate::bin::mark_executable(&path);
+        path
+    }
+
+    /// A producer of the CURRENT generation: `log --help` advertises
+    /// `--after`, `log --json … ` prints `records`, and the same call with
+    /// `--after` prints `delta` (the test's own stand-in for the records the
+    /// door filters out). Every invocation is appended to `dir/calls`, one
+    /// line each — the evidence each test asserts on.
+    #[cfg(unix)]
+    fn capable_shim(dir: &Path, records: &Path, delta: &Path) -> PathBuf {
+        shim(
+            dir,
+            &format!(
+                "printf '%s\\n' \"$*\" >> '{calls}'\n\
+                 if [ \"$2\" = \"--help\" ]; then\n\
+                 printf 'Usage: eidolon log [OPTIONS] <SESSION>\\n      --after <AFTER>  Emit only records after this id\\n'\n\
+                 exit 0\n\
+                 fi\n\
+                 case \" $* \" in\n\
+                 *\" --after \"*) cat '{delta}' ;;\n\
+                 *) cat '{records}' ;;\n\
+                 esac\n",
+                calls = dir.join("calls").display(),
+                records = records.display(),
+                delta = delta.display(),
+            ),
+        )
+    }
+
+    /// A producer of the INSTALLED generation: `log --help` advertises no
+    /// `--after` (its `log` opened the journal read-write and repaired a torn
+    /// tail in place). It still answers an export, so a reader that ran it
+    /// anyway is caught both by the result and by the invocation log.
+    #[cfg(unix)]
+    fn legacy_shim(dir: &Path, records: &Path) -> PathBuf {
+        shim(
+            dir,
+            &format!(
+                "printf '%s\\n' \"$*\" >> '{calls}'\n\
+                 if [ \"$2\" = \"--help\" ]; then\n\
+                 printf 'Usage: eidolon log [OPTIONS] <SESSION>\\n'\n\
+                 exit 0\n\
+                 fi\n\
+                 cat '{records}'\n",
+                calls = dir.join("calls").display(),
+                records = records.display(),
+            ),
+        )
+    }
+
+    /// One live presence, `dir/eidolon/<id>/meta.json`, naming the journal and
+    /// (when given) its mirror.
+    #[cfg(unix)]
+    fn presence(dir: &Path, id: &str, log: &Path, trace: Option<&Path>) {
+        let presence = dir.join("eidolon").join(id);
+        std::fs::create_dir_all(&presence).unwrap();
+        let trace = trace
+            .map(|t| format!("{:?}", t.to_string_lossy()))
+            .unwrap_or_else(|| "null".to_string());
+        std::fs::write(
+            presence.join("meta.json"),
+            format!(
+                "{{\"id\":\"{id}\",\"pid\":1,\"log\":{:?},\"cwd\":\"/w\",\"repo\":null,\
+                 \"model\":\"fixture:model\",\"started_ms\":1,\"title\":\"fixture\",\"busy\":false,\
+                 \"trace\":{trace}}}",
+                log.to_string_lossy()
+            ),
+        )
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    fn calls_made(dir: &Path) -> Vec<String> {
+        std::fs::read_to_string(dir.join("calls"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Just the EXPORT invocations. Nothing about the producer is cached, so
+    /// every pull is preceded by a fresh `--help` probe; a count of the probe is
+    /// not a fact about the export, and the assertions below are about the
+    /// export.
+    #[cfg(unix)]
+    fn exports_made(dir: &Path) -> Vec<String> {
+        calls_made(dir).into_iter().filter(|c| c.contains("--json")).collect()
+    }
+
+    #[cfg(unix)]
+    fn audits_written(dir: &Path) -> Vec<String> {
+        std::fs::read_to_string(dir.join("audit.log"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Pin a file's mtime. The one portable way to make "this mirror is older
+    /// than its journal" a fact rather than a race with the filesystem's own
+    /// timestamp granularity.
+    #[cfg(unix)]
+    fn set_mtime(path: &Path, at: SystemTime) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(at)
+            .unwrap();
+    }
+
+    #[cfg(unix)]
+    fn an_hour_ago() -> SystemTime {
+        SystemTime::now() - Duration::from_secs(3600)
+    }
+
+    /// The property the whole phase exists for: a producer whose door is not
+    /// the read-only export is never run. Its `log` would open the journal
+    /// read-write and repair a torn tail in place — under a live writer.
+    #[test]
+    #[cfg(unix)]
+    fn eidolon_never_runs_a_producer_whose_door_is_not_the_read_only_export() {
+        let dir = shim_dir("legacy");
+        let records = dir.join("records.jsonl");
+        std::fs::write(&records, format!("{TRACE_SESSION_START}\n{TRACE_SETTLED}\n")).unwrap();
+        legacy_shim(&dir, &records);
+        let mirror = dir.join("1789603005561.jsonl");
+        std::fs::write(&mirror, format!("{TRACE_SETTLED}\n")).unwrap();
+        let journalled = dir.join("1789603005561.eid");
+        std::fs::write(&journalled, b"\x00\x01bitcode").unwrap();
+        // Pinned, not left to write order: a mirror is current only when its
+        // journal is not strictly newer, and two writes in the same tick are
+        // not a fact to build an assertion on.
+        set_mtime(&journalled, an_hour_ago());
+        set_mtime(&mirror, SystemTime::now());
+
+        with_producer(&dir, || {
+            let spec = &EIDOLON_PROFILE.transcript;
+            // A presence whose mirror is current is read from the MIRROR, and
+            // the producer is not consulted at all.
+            presence(&dir, "fixture-mirror", &journalled, Some(&mirror));
+            assert_eq!((spec.locate)("fixture-mirror", None, None), Some(mirror.clone()));
+            assert_eq!(
+                (spec.trace.expect("eidolon keeps a trace"))(&mirror),
+                Some(vec![TRACE_SETTLED.to_string()])
+            );
+            assert_eq!(calls_made(&dir), Vec::<String>::new(), "a current mirror needs no producer");
+
+            // A presence with no mirror, a journal that exists, and a door that
+            // is not a door: the presence file is the answer, never the journal
+            // — and the export is never run.
+            let bare = dir.join("1789603070000.eid");
+            std::fs::write(&bare, b"\x00\x01bitcode").unwrap();
+            presence(&dir, "fixture-nodoor", &bare, None);
+            assert_eq!(
+                (spec.locate)("fixture-nodoor", None, None),
+                Some(dir.join("eidolon").join("fixture-nodoor").join("meta.json"))
+            );
+            assert_eq!((spec.trace.expect("…"))(&bare), None);
+            assert_eq!((spec.tail)(&bare), Vec::<String>::new());
+
+            // The door is asked (and answers) — and `log --json` NEVER: that is
+            // the safety property, mechanically proven.
+            let calls = calls_made(&dir);
+            assert!(!calls.is_empty(), "the door was asked: {calls:?}");
+            assert!(
+                calls.iter().all(|c| c.contains("--help")),
+                "only the proof is ever run against this producer: {calls:?}"
+            );
+            assert_eq!(
+                exports_made(&dir),
+                Vec::<String>::new(),
+                "the repairing generation's log is never run"
+            );
+
+            // The degradation is on the record — at most once per PROCESS and
+            // reason, so a sibling test running the same closed-door fixture
+            // may hold the line instead; whichever log holds it, it is this one
+            // and this word.
+            let audits = audits_written(&dir);
+            assert!(audits.len() <= 1, "{audits:?}");
+            for line in &audits {
+                assert!(line.contains("\"command\":\"session.trace\""), "{line}");
+                assert!(line.contains("\"status\":\"degraded\""), "{line}");
+            }
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The current generation's whole interface: the journal, read through the
+    /// door, with a cursor that never leaves the file it was read from.
+    #[test]
+    #[cfg(unix)]
+    fn eidolon_pulls_the_journal_through_the_door_and_memoizes_it() {
+        use std::io::Write;
+        /// A record past the settled fixture's id 131 — what an append adds.
+        const TRACE_LATER: &str =
+            r#"{"id":132,"parent":131,"ts_ms":1789606500000,"kind":{"ContextSize":{"tokens":140000}}}"#;
+
+        let dir = shim_dir("capable");
+        let records = dir.join("records.jsonl");
+        std::fs::write(
+            &records,
+            format!("{TRACE_SESSION_START}\n{TRACE_USER_MESSAGE}\n{TRACE_ASSISTANT}\n{TRACE_SETTLED}\n"),
+        )
+        .unwrap();
+        let delta = dir.join("delta.jsonl");
+        std::fs::write(&delta, format!("{TRACE_LATER}\n")).unwrap();
+        capable_shim(&dir, &records, &delta);
+        let journal = dir.join("1789603005561.eid");
+        std::fs::write(&journal, b"\x00\x01bitcode").unwrap();
+
+        with_producer(&dir, || {
+            let spec = &EIDOLON_PROFILE.transcript;
+            assert_eq!((spec.locate)("fixture-capable", None, None), None, "no presence yet");
+            presence(&dir, "fixture-capable", &journal, None);
+            assert_eq!((spec.locate)("fixture-capable", None, None), Some(journal.clone()));
+
+            let read = (spec.trace.expect("eidolon keeps a trace"))(&journal)
+                .expect("the door is open");
+            assert_eq!(read.len(), 4, "{read:?}");
+            assert_eq!(read.last().map(String::as_str), Some(TRACE_SETTLED));
+
+            // ONE export — the capability proof is asked afresh each pull, so
+            // nothing is cached about the producer — and the first export
+            // carries no cursor.
+            let exports = exports_made(&dir);
+            assert_eq!(exports.len(), 1, "{exports:?}");
+            assert!(!exports[0].contains("--after"), "{exports:?}");
+
+            // An unchanged journal spawns NOTHING, for either reader.
+            assert_eq!((spec.trace.expect("…"))(&journal), Some(read.clone()));
+            let tail = (spec.tail)(&journal);
+            assert_eq!(tail.len(), 4, "{tail:?}");
+            assert_eq!(exports_made(&dir).len(), 1, "the memo answers both readers");
+
+            // An append moves the journal: the door is asked again, WITH the
+            // last id it printed, and the window holds the old records and the
+            // new one.
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(&journal)
+                .unwrap()
+                .write_all(b"\x00\x02more")
+                .unwrap();
+            let grown = (spec.trace.expect("…"))(&journal).expect("the door is still open");
+            assert_eq!(grown.len(), 5, "{grown:?}");
+            assert_eq!(grown.first().map(String::as_str), Some(TRACE_SESSION_START));
+            assert_eq!(grown.last().map(String::as_str), Some(TRACE_LATER));
+            let exports = exports_made(&dir);
+            assert_eq!(exports.len(), 2, "{exports:?}");
+            assert!(
+                exports[1].contains("--after 131"),
+                "the cursor is the last id the door printed: {exports:?}"
+            );
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A mirror the producer has stopped appending to is evidence, never
+    /// truth: it must not pin a finished turn as the session's live state.
+    #[test]
+    #[cfg(unix)]
+    fn eidolon_reads_through_the_door_when_its_mirror_is_stale() {
+        let dir = shim_dir("stale");
+        let records = dir.join("records.jsonl");
+        std::fs::write(&records, format!("{TRACE_SETTLED}\n")).unwrap();
+        let delta = dir.join("delta.jsonl");
+        std::fs::write(&delta, format!("{TRACE_LATER}\n")).unwrap();
+        capable_shim(&dir, &records, &delta);
+        let journal = dir.join("1789603005561.eid");
+        std::fs::write(&journal, b"\x00\x01bitcode").unwrap();
+        let mirror = dir.join("1789603005561.jsonl");
+        std::fs::write(&mirror, format!("{TRACE_ASSISTANT}\n")).unwrap();
+        set_mtime(&mirror, an_hour_ago());
+
+        with_producer(&dir, || {
+            let spec = &EIDOLON_PROFILE.transcript;
+            presence(&dir, "fixture-stale", &journal, Some(&mirror));
+            assert_eq!(
+                (spec.locate)("fixture-stale", None, None),
+                Some(journal.clone()),
+                "a mirror older than its journal is not the current answer"
+            );
+            assert_eq!(
+                (spec.trace.expect("…"))(&journal),
+                Some(vec![TRACE_SETTLED.to_string()]),
+                "the journal decides, not the frozen mirror"
+            );
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The same stale mirror against a producer whose door is closed: the
+    /// presence rule answers, and the frozen record never becomes state.
+    #[test]
+    #[cfg(unix)]
+    fn eidolon_falls_back_to_the_presence_when_a_stale_mirror_meets_a_closed_door() {
+        let dir = shim_dir("stale_legacy");
+        let records = dir.join("records.jsonl");
+        std::fs::write(&records, format!("{TRACE_SETTLED}\n")).unwrap();
+        legacy_shim(&dir, &records);
+        let journal = dir.join("1789603005561.eid");
+        std::fs::write(&journal, b"\x00\x01bitcode").unwrap();
+        let mirror = dir.join("1789603005561.jsonl");
+        std::fs::write(&mirror, format!("{TRACE_ASSISTANT}\n")).unwrap();
+        set_mtime(&mirror, an_hour_ago());
+
+        with_producer(&dir, || {
+            let spec = &EIDOLON_PROFILE.transcript;
+            presence(&dir, "fixture-stale-legacy", &journal, Some(&mirror));
+            let meta = dir.join("eidolon").join("fixture-stale-legacy").join("meta.json");
+            assert_eq!((spec.locate)("fixture-stale-legacy", None, None), Some(meta.clone()));
+            // The answer the caller folds is the presence's own line — the
+            // frozen mirror is never the located trace, and the door was not
+            // run to find that out.
+            let lines = (spec.tail)(&meta);
+            assert_eq!(lines.len(), 1, "the presence recompacts to one line");
+            assert!(!lines[0].contains("AssistantMessage"), "{lines:?}");
+            assert_eq!((spec.trace.expect("…"))(&meta), None);
+            assert!(
+                !calls_made(&dir).iter().any(|c| c.contains("--json")),
+                "a closed door is not opened to check: {:?}",
+                calls_made(&dir)
+            );
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The deadline holds: an export that outlives its budget is killed,
+    /// reaped, and its partial output discarded — and the wait itself is
+    /// bounded, never extended by joining a reader whose pipe is still open.
+    #[test]
+    #[cfg(unix)]
+    fn eidolon_kills_and_discards_an_export_that_outlives_its_budget() {
+        let dir = shim_dir("deadline");
+        shim(
+            &dir,
+            &format!(
+                "printf '%s\\n' \"$*\" >> '{calls}'\n\
+                 if [ \"$2\" = \"--help\" ]; then printf '      --after <AFTER>\\n'; exit 0; fi\n\
+                 printf '{{\"id\":0,\"kind\":\"Cancelled\"}}\\n'\n\
+                 exec sleep 30\n",
+                calls = dir.join("calls").display()
+            ),
+        );
+        let journal = dir.join("1789603005561.eid");
+        std::fs::write(&journal, b"\x00\x01bitcode").unwrap();
+
+        with_producer(&dir, || {
+            let started = Instant::now();
+            let read = (EIDOLON_PROFILE.transcript.trace.expect("…"))(&journal);
+            let elapsed = started.elapsed();
+            assert_eq!(read, None, "a killed export is not a read");
+            assert!(
+                elapsed >= PULL_WALL && elapsed < PULL_WALL + PULL_DRAIN_GRACE + Duration::from_secs(2),
+                "the budget holds and the wait is bounded: {elapsed:?}"
+            );
+            // Nothing is memoized for a failed pull: the next reader asks again.
+            let memos = MEMOS.lock().unwrap_or_else(|e| e.into_inner());
+            assert!(
+                memos.iter().all(|m| m.journal != journal),
+                "a failed pull leaves no window behind"
+            );
+            drop(memos);
+            let audits = audits_written(&dir);
+            assert_eq!(audits.len(), 1, "{audits:?}");
+            assert!(audits[0].contains("\"status\":\"discarded\""), "{audits:?}");
+            assert!(audits[0].contains("wall-clock budget"), "{audits:?}");
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Partial output is never inferred from: a producer that exits non-zero
+    /// after printing gives nothing, and leaves nothing cached. Its refusal is
+    /// ordinary — the same silence a read error on an optional file gets.
+    #[test]
+    #[cfg(unix)]
+    fn eidolon_discards_a_partial_export_and_memoizes_no_failure() {
+        let dir = shim_dir("refused");
+        let records = dir.join("records.jsonl");
+        std::fs::write(&records, format!("{TRACE_SETTLED}\n")).unwrap();
+        shim(
+            &dir,
+            &format!(
+                "printf '%s\\n' \"$*\" >> '{calls}'\n\
+                 if [ \"$2\" = \"--help\" ]; then printf '      --after <AFTER>\\n'; exit 0; fi\n\
+                 cat '{records}'\n\
+                 exit 3\n",
+                calls = dir.join("calls").display(),
+                records = records.display()
+            ),
+        );
+        let journal = dir.join("1789603005561.eid");
+        std::fs::write(&journal, b"\x00\x01bitcode").unwrap();
+
+        with_producer(&dir, || {
+            let spec = &EIDOLON_PROFILE.transcript;
+            assert_eq!((spec.trace.expect("…"))(&journal), None);
+            assert_eq!(exports_made(&dir).len(), 1, "one export");
+            // A failed pull is memoized as nothing: the next reader — a
+            // different one, with a different budget — asks the door again.
+            assert_eq!((spec.tail)(&journal), Vec::<String>::new());
+            assert_eq!(exports_made(&dir).len(), 2, "a failure is not memoized");
+            assert_eq!((spec.trace.expect("…"))(&journal), None);
+            assert_eq!(exports_made(&dir).len(), 3, "the door is asked again");
+            assert_eq!(audits_written(&dir), Vec::<String>::new(), "the producer's own refusal");
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// What Aoide retains of one journal is bounded, and a line the window cut
+    /// is dropped rather than handed on as a record.
+    #[test]
+    #[cfg(unix)]
+    fn eidolon_keeps_only_the_last_window_of_a_large_export() {
+        let dir = shim_dir("window");
+        let records = dir.join("records.jsonl");
+        let filler = format!("{}\n", r#"{"id":1,"parent":0,"ts_ms":1,"kind":{"ContextSize":{"tokens":1}}}"#);
+        std::fs::write(&records, format!("{}{TRACE_SETTLED}\n", filler.repeat(20_000))).unwrap();
+        let delta = dir.join("delta.jsonl");
+        std::fs::write(&delta, "").unwrap();
+        capable_shim(&dir, &records, &delta);
+        let journal = dir.join("1789603005561.eid");
+        std::fs::write(&journal, b"\x00\x01bitcode").unwrap();
+
+        with_producer(&dir, || {
+            let read = (EIDOLON_PROFILE.transcript.trace.expect("…"))(&journal).expect("a trace");
+            assert!(!read.is_empty());
+            assert!(read.len() < 20_001, "the window is a bound, not the whole export");
+            let retained: usize = read.iter().map(|l| l.len() + 1).sum();
+            assert!(retained <= TRACE_TAIL_BYTES as usize, "{retained} bytes retained");
+            for line in &read {
+                assert!(
+                    eidolon_trace_record(line).is_some(),
+                    "a cut line is dropped, never handed back: {line}"
+                );
+            }
+            assert_eq!(read.last().map(String::as_str), Some(TRACE_SETTLED));
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The cache is bounded in ENTRIES and in BYTES TOGETHER — a window cap
+    /// alone still lets one entry per session accumulate without limit.
+    #[test]
+    fn the_journal_cache_is_bounded_in_entries_and_in_bytes() {
+        let memo = |journal: &str, bytes: usize, used: u64| JournalMemo {
+            journal: PathBuf::from(journal),
+            stat: JournalStat { identity: None, len: 0, mtime: None },
+            last_id: None,
+            exported: Exported { bytes: vec![b'x'; bytes], head_partial: false },
+            used,
+        };
+
+        // Many small windows: the entry cap binds.
+        let mut memos: Vec<JournalMemo> = Vec::new();
+        for i in 0..(MEMO_ENTRIES + 20) as u64 {
+            memo_store(&mut memos, memo(&format!("/j/{i}"), 40 * 1024, i));
+        }
+        assert!(memos.len() <= MEMO_ENTRIES, "{} entries", memos.len());
+        assert!(
+            memos.iter().any(|m| m.journal == Path::new(&format!("/j/{}", MEMO_ENTRIES + 19))),
+            "the newest entry is never the one evicted"
+        );
+
+        // Few full-size windows: the byte cap binds first.
+        let mut memos: Vec<JournalMemo> = Vec::new();
+        for i in 0..(MEMO_BYTES / TRACE_TAIL_BYTES as usize + 2) as u64 {
+            memo_store(&mut memos, memo(&format!("/big/{i}"), TRACE_TAIL_BYTES as usize, i));
+        }
+        let bytes: usize = memos.iter().map(|m| m.exported.bytes.len()).sum();
+        assert!(bytes <= MEMO_BYTES, "{bytes} bytes held");
+        assert!(memos.len() < MEMO_ENTRIES, "the byte cap bound first: {}", memos.len());
+    }
+
+    /// A same-path replacement is a NEW file, and the cursor read from the old
+    /// one must not survive it — not even when the replacement is the same
+    /// length or longer, which no size comparison can see. An in-place shrink
+    /// is the same story.
+    #[test]
+    #[cfg(unix)]
+    fn eidolon_drops_its_cursor_when_the_journal_at_the_path_is_replaced() {
+        let dir = shim_dir("replaced");
+        let records = dir.join("records.jsonl");
+        std::fs::write(
+            &records,
+            format!("{TRACE_SESSION_START}\n{TRACE_USER_MESSAGE}\n{TRACE_ASSISTANT}\n{TRACE_SETTLED}\n"),
+        )
+        .unwrap();
+        let delta = dir.join("delta.jsonl");
+        std::fs::write(&delta, format!("{TRACE_LATER}\n")).unwrap();
+        capable_shim(&dir, &records, &delta);
+        let journal = dir.join("1789603005561.eid");
+        std::fs::write(&journal, b"\x00\x01bitcode").unwrap();
+
+        with_producer(&dir, || {
+            let read = (EIDOLON_PROFILE.transcript.trace.expect("…"))(&journal).expect("a trace");
+            assert_eq!(read.len(), 4);
+            assert_eq!(exports_made(&dir).len(), 1, "one export");
+
+            // Replaced by a file of the SAME LENGTH at the same path.
+            let replacement = dir.join("replacement.tmp");
+            std::fs::write(&replacement, b"\x01\x02bitcode").unwrap();
+            assert_eq!(
+                std::fs::metadata(&replacement).unwrap().len(),
+                b"\x00\x01bitcode".len() as u64
+            );
+            std::fs::rename(&replacement, &journal).unwrap();
+
+            let again = (EIDOLON_PROFILE.transcript.trace.expect("…"))(&journal).expect("a trace");
+            assert_eq!(again.len(), 4, "the window was REPLACED, not appended to: {again:?}");
+            assert_eq!(again.first().map(String::as_str), Some(TRACE_SESSION_START));
+            let exports = exports_made(&dir);
+            assert_eq!(exports.len(), 2, "{exports:?}");
+            assert!(
+                !exports[1].contains("--after"),
+                "a same-path replacement invalidates the cursor even when it did not shrink: {exports:?}"
+            );
+
+            // And an in-place shrink (same file, fewer bytes).
+            std::fs::write(&journal, b"tiny").unwrap();
+            let shrunk = (EIDOLON_PROFILE.transcript.trace.expect("…"))(&journal).expect("a trace");
+            assert_eq!(shrunk.len(), 4);
+            let exports = exports_made(&dir);
+            assert_eq!(exports.len(), 3, "{exports:?}");
+            assert!(!exports[2].contains("--after"), "{exports:?}");
+
+            // And the one remaining demonstrable non-growth: the SAME file,
+            // the SAME length, with its mtime moved backwards — a rewrite that
+            // kept the size. The cursor goes with it.
+            std::fs::write(&journal, b"\x00\x01bitcode").unwrap();
+            set_mtime(&journal, an_hour_ago());
+            let rewritten = (EIDOLON_PROFILE.transcript.trace.expect("…"))(&journal).expect("a trace");
+            assert_eq!(rewritten.len(), 4);
+            let exports = exports_made(&dir);
+            assert_eq!(exports.len(), 4, "{exports:?}");
+            assert!(
+                !exports[3].contains("--after"),
+                "an mtime that went backwards is a rewrite, not an append: {exports:?}"
+            );
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Every reader slot is held: no child is started at all, and the pull
+    /// degrades rather than leaking one more thread per tick forever.
+    #[test]
+    #[cfg(unix)]
+    fn eidolon_starts_no_export_when_every_reader_slot_is_held() {
+        let dir = shim_dir("slots");
+        let records = dir.join("records.jsonl");
+        std::fs::write(&records, format!("{TRACE_SETTLED}\n")).unwrap();
+        let delta = dir.join("delta.jsonl");
+        std::fs::write(&delta, format!("{TRACE_LATER}\n")).unwrap();
+        capable_shim(&dir, &records, &delta);
+        let journal = dir.join("1789603005561.eid");
+        std::fs::write(&journal, b"\x00\x01bitcode").unwrap();
+
+        // The lock is held for the WHOLE test: holding every reader slot would
+        // starve a sibling test's own pull, and a test that breaks its
+        // neighbours proves nothing about the cap.
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = scope_producer_env(&dir);
+
+        // Hold every slot that can be had: another test's reader may be a
+        // moment away from exiting, and the property here is what the pull does
+        // when NONE is free — not a count this test insists on.
+        let mut held: Vec<ReaderSlot> = Vec::new();
+        while let Some(slot) = ReaderSlot::acquire() {
+            held.push(slot);
+        }
+        assert!(!held.is_empty(), "at least one slot is always available");
+
+        let spec = &EIDOLON_PROFILE.transcript;
+        assert_eq!((spec.trace.expect("…"))(&journal), None);
+        assert_eq!(calls_made(&dir), Vec::<String>::new(), "no child was started");
+        let audits = audits_written(&dir);
+        assert_eq!(audits.len(), 1, "{audits:?}");
+        assert!(audits[0].contains("\"status\":\"degraded\""), "{audits:?}");
+        assert!(audits[0].contains("every export reader is still blocked"), "{audits:?}");
+
+        // Released, the cap lets the next pull through — the same accounting
+        // that bounds the leak.
+        drop(held);
+        assert_eq!(
+            (spec.trace.expect("…"))(&journal),
+            Some(vec![TRACE_SETTLED.to_string()])
+        );
+
+        unscope_producer_env(saved);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **The launcher is not the producer.** What Aoide resolves on `PATH` is a
+    /// name, and on an installed system that name is a small script whose own
+    /// identity stays put while the runtime behind it is replaced. A remembered
+    /// capability answer would therefore outlive the producer it was made
+    /// about: a stale `true` could run a replaced, repairing `log`, and a stale
+    /// `false` could hide a door that is there. Nothing is remembered — both
+    /// switch directions are proven here, and the REPAIRING generation's export
+    /// is never invoked in either.
+    #[test]
+    #[cfg(unix)]
+    fn eidolon_follows_the_launchers_target_in_both_directions() {
+        use std::io::Write;
+
+        let dir = shim_dir("launcher");
+        let mode = dir.join("mode");
+        let records = dir.join("records.jsonl");
+        std::fs::write(&records, format!("{TRACE_SETTLED}\n")).unwrap();
+        let delta = dir.join("delta.jsonl");
+        std::fs::write(&delta, format!("{TRACE_LATER}\n")).unwrap();
+        let old_records = dir.join("old-records.jsonl");
+        std::fs::write(&old_records, format!("{TRACE_ASSISTANT}\n")).unwrap();
+
+        // ONE program, two runtimes behind it: `bin/eidolon` reads the mode
+        // file, exactly as the installed launcher reads `$EIDOLON_BIN`. The
+        // legacy branch records its own invocations, so "the repairing export
+        // was never run" is an assertion rather than a hope.
+        shim(
+            &dir,
+            &format!(
+                "printf '%s\\n' \"$*\" >> '{calls}'\n\
+                 if [ \"$(cat '{mode}')\" = \"new\" ]; then\n\
+                 if [ \"$2\" = \"--help\" ]; then printf '      --after <AFTER>\\n'; exit 0; fi\n\
+                 case \" $* \" in *\" --after \"*) cat '{delta}' ;; *) cat '{records}' ;; esac\n\
+                 else\n\
+                 printf '%s\\n' \"$*\" >> '{old}'\n\
+                 if [ \"$2\" = \"--help\" ]; then printf 'Usage: eidolon log [OPTIONS] <SESSION>\\n'; exit 0; fi\n\
+                 cat '{old_records}'\n\
+                 fi\n",
+                calls = dir.join("calls").display(),
+                mode = mode.display(),
+                delta = delta.display(),
+                records = records.display(),
+                old = dir.join("old-calls").display(),
+                old_records = old_records.display(),
+            ),
+        );
+        let journal = dir.join("1789603005561.eid");
+        std::fs::write(&journal, b"\x00\x01bitcode").unwrap();
+        let meta = dir.join("eidolon").join("fixture-launcher").join("meta.json");
+        let old_calls = |dir: &Path| {
+            std::fs::read_to_string(dir.join("old-calls")).unwrap_or_default()
+        };
+
+        with_producer(&dir, || {
+            let spec = &EIDOLON_PROFILE.transcript;
+            presence(&dir, "fixture-launcher", &journal, None);
+
+            // LEGACY -> NEW: the closed door answers the presence, and the
+            // repairing export is never run.
+            std::fs::write(&mode, "old").unwrap();
+            assert_eq!((spec.locate)("fixture-launcher", None, None), Some(meta.clone()));
+            assert_eq!((spec.trace.expect("…"))(&journal), None);
+            assert!(
+                !old_calls(&dir).contains("--json"),
+                "a closed door is never opened to check: {}",
+                old_calls(&dir)
+            );
+
+            // Repointed at the new runtime: the SAME program now answers the
+            // journal, with no state carried across the switch.
+            std::fs::write(&mode, "new").unwrap();
+            assert_eq!((spec.locate)("fixture-launcher", None, None), Some(journal.clone()));
+            assert_eq!(
+                (spec.trace.expect("…"))(&journal),
+                Some(vec![TRACE_SETTLED.to_string()])
+            );
+
+            // NEW -> LEGACY: the journal grows (so no memo answers in its
+            // place), the runtime behind the same name goes back to the
+            // repairing generation, and the answer must follow it — with that
+            // generation's export still never run.
+            std::fs::write(&mode, "old").unwrap();
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(&journal)
+                .unwrap()
+                .write_all(b"\x00\x02more")
+                .unwrap();
+            assert_eq!((spec.trace.expect("…"))(&journal), None, "the door closed again");
+            assert_eq!((spec.locate)("fixture-launcher", None, None), Some(meta.clone()));
+            assert!(
+                !old_calls(&dir).contains("--json"),
+                "the repairing generation's export is NEVER invoked: {}",
+                old_calls(&dir)
+            );
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A session that settled and left leaves only its journal — readable when
+    /// the door is there, and never a stale mirror read as live state.
+    #[test]
+    #[cfg(unix)]
+    fn eidolon_reads_a_gone_presence_journal_through_the_door() {
+        let dir = shim_dir("gone");
+        let records = dir.join("records.jsonl");
+        std::fs::write(&records, format!("{TRACE_SETTLED}\n")).unwrap();
+        let delta = dir.join("delta.jsonl");
+        std::fs::write(&delta, "").unwrap();
+        capable_shim(&dir, &records, &delta);
+        let journal = dir.join("1789603005561.eid");
+        std::fs::write(&journal, b"\x00\x01bitcode").unwrap();
+
+        with_producer(&dir, || {
+            let spec = &EIDOLON_PROFILE.transcript;
+            let hint = Some(journal.to_str().unwrap());
+            assert_eq!((spec.locate)("fixture-gone-door", None, hint), Some(journal.clone()));
+            assert_eq!(
+                (spec.trace.expect("…"))(&journal),
+                Some(vec![TRACE_SETTLED.to_string()])
+            );
+
+            // A mirror left beside it, older than the journal, is not followed.
+            let mirror = journal.with_extension("jsonl");
+            std::fs::write(&mirror, format!("{TRACE_ASSISTANT}\n")).unwrap();
+            set_mtime(&mirror, an_hour_ago());
+            assert_eq!(
+                (spec.locate)("fixture-gone-door", None, hint),
+                Some(journal.clone()),
+                "a stale leftover mirror never becomes the session's state"
+            );
+        });
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

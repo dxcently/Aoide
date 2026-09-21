@@ -401,6 +401,102 @@ pub(in crate::graph) fn set_session_log_path(id: &str, path: &str) {
     });
 }
 
+/// Stamp a managed task wrapper run's two own task keys at registration
+/// (`task`, `instructionsPath`; `docs/Aoide-Wiki/concepts/orchestration/
+/// Managed-Task-Wrapper.md`, `CONTRACTS.md` §4). Called by the CHILD's own
+/// `conduct`, right after `do_session_start`, from the `--task` /
+/// `--instructions-path` flags `spawn` threaded through — one writer for
+/// these facts, so there is no parent/child race on the record, the same
+/// posture `logPath` has. Change-only and a silent no-op for an unknown id,
+/// exactly like [`set_session_log_path`]. No `restage_graph()`: neither key
+/// is rendered into the widget-facing `graph.json`, so stamping them must
+/// not churn it.
+pub(in crate::graph) fn stamp_task(
+    id: &str,
+    task: &str,
+    instructions_path: Option<&str>,
+    report_to: Option<&str>,
+) {
+    with_stage_lock(|| {
+        let mut file: SessionsFile = match load_stage(&sessions_path()) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        let mut changed = false;
+        for s in file.sessions.iter_mut().filter(|s| s.session_id == id) {
+            if s.task.as_deref() != Some(task) {
+                s.task = Some(task.to_string());
+                changed = true;
+            }
+            if let Some(path) = instructions_path {
+                if s.instructions_path.as_deref() != Some(path) {
+                    s.instructions_path = Some(path.to_string());
+                    changed = true;
+                }
+            }
+            if let Some(name) = report_to {
+                if s.report_to.as_deref() != Some(name) {
+                    s.report_to = Some(name.to_string());
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            if file.schema_version.is_empty() {
+                file.schema_version = STAGE_GRAPH_VERSION.to_string();
+            }
+            let _ = write_stage(&sessions_path(), &file);
+        }
+    });
+}
+
+/// Stamp a managed task run's END facts: the REAL `exitCode` when the
+/// caller's own exit path knows it, and always `endedAt`. `exit_code: None`
+/// means "no code to report" and writes nothing there — an absent
+/// `exitCode` is the honest answer for a killed/reaped run, and must never
+/// be flattened to `0`. Stamped by `conduct`'s own exit path (the code
+/// `conduct_multiplex` returned) and by `do_session_end`/the reaper (the
+/// `None` arm), change-only, no-op on an unknown id, no `restage_graph()`
+/// (same reasoning as [`stamp_task`]).
+pub(in crate::graph) fn stamp_session_exit(
+    id: &str,
+    exit_code: Option<i32>,
+    outcome: Option<&str>,
+    ended_at: &str,
+) {
+    with_stage_lock(|| {
+        let mut file: SessionsFile = match load_stage(&sessions_path()) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        let mut changed = false;
+        for s in file.sessions.iter_mut().filter(|s| s.session_id == id) {
+            if let Some(code) = exit_code {
+                if s.exit_code != Some(code) {
+                    s.exit_code = Some(code);
+                    changed = true;
+                }
+            }
+            if let Some(name) = outcome {
+                if s.outcome.as_deref() != Some(name) {
+                    s.outcome = Some(name.to_string());
+                    changed = true;
+                }
+            }
+            if s.ended_at.as_deref() != Some(ended_at) {
+                s.ended_at = Some(ended_at.to_string());
+                changed = true;
+            }
+        }
+        if changed {
+            if file.schema_version.is_empty() {
+                file.schema_version = STAGE_GRAPH_VERSION.to_string();
+            }
+            let _ = write_stage(&sessions_path(), &file);
+        }
+    });
+}
+
 /// Stamp `hookAncestry` — up to 8 ancestor pids of the hook-firing process,
 /// self-first — on a session record, ONCE, at its own SessionStart/self-heal
 /// registration (`session hook`'s two Start-shaped call sites in
@@ -1332,6 +1428,20 @@ fn do_session_end_inner(id: &str) -> Outcome {
                 ledger_session_exit(s, &now);
             }
             s.state = "done".to_string();
+            // A managed task run's end instant and its discriminated end are
+            // facts the `session watch` footer and the exit-report lane both
+            // read. Stamped only for a task record, and only where the child's
+            // own exit path (which knows the real outcome) has not already
+            // stamped them — an ordinary session's record is left exactly as it
+            // was. `stopped` is the honest arm here: this path saw no status.
+            if s.task.is_some() {
+                if s.ended_at.is_none() {
+                    s.ended_at = Some(now.clone());
+                }
+                if s.outcome.is_none() {
+                    s.outcome = Some("stopped".to_string());
+                }
+            }
         }
     }
     // Cascade: remove the session's sub-agent subtree. Task nodes carry no pid or

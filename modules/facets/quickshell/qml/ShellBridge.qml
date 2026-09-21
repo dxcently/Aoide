@@ -8,8 +8,9 @@
 // Protocol: newline-delimited JSON. Each command is a JSON object with a
 // "cmd" field and payload fields. The socket path is the shellbridge default:
 // $XDG_RUNTIME_DIR/aoide/shellbridge.sock (falls back to /run/user/<uid>/aoide/shellbridge.sock).
-// Every command is fire-and-forget except "sessionaction" and "projectaction",
-// which are answered with one JSON line on the same connection, which then closes.
+// Every command is fire-and-forget except "sessionaction", "projectaction" and
+// "sessiontrace", which are answered with one JSON line on the same connection,
+// which then closes.
 //
 // Communication discipline: this is the ONLY outbound channel from QML.
 // No MCP, no HTTP, no shell exec from QML — shellbridge is the gate.
@@ -133,6 +134,58 @@ QtObject {
         if (!conn) {
             if (callback)
                 callback({ ok: false, message: "shellbridge client unavailable" })
+            return
+        }
+        conn.start()
+    }
+
+    // ── The read-only trace query ──────────────────────────────────────────
+    // The ONE window onto a session's emitted output: what it has THOUGHT,
+    // SAID, called and got back, projected by `aoide session trace --json`'s
+    // `data.steps` (docs/architecture/EIDOLON-TRACE.md). Read-only — the daemon
+    // resolves, reads and answers; it writes nothing.
+    //
+    //   bridge.traceSession(id, 12, "line",   cb)   // a card face
+    //   bridge.traceSession(id, 24, "detail", cb)   // the Details page
+    //
+    // `cb` is called EXACTLY ONCE with the daemon's own answer:
+    // { ok: true, sessionId, clip, lines, trace, at, steps: [...], stepsOmitted }
+    // or { ok: false, sessionId, clip, lines, reason, message } — `message` is
+    // the CLI's own taught refusal verbatim ("no readable trace at …"), and
+    // `reason` its machine name (no-trace / no-presence / unknown-agent /
+    // remote-target / not-found / ambiguous / no-answer), so a caller can tell
+    // a refusal from a session that emitted nothing.
+    //
+    // Each step is { id, ts, kind, text, error, clipped } with `kind` in
+    // thinking / say / tool / result / settled / user / other — `text` is the
+    // harness's own emitted text (untrusted DATA: paint it PlainText), `ts` the
+    // record's own epoch ms, `clipped` true when the text is a kept prefix.
+    // `at` is when the daemon read it — a SNAPSHOT time, not a stream: this is
+    // a file read repeated by the caller's own cadence, and nothing here is a
+    // token stream.
+    //
+    // A query is BOUNDED by the daemon whatever this caller asks for (lines
+    // clamped, clip validated, the child killed at its wall clock), and it opens
+    // its own throwaway socket like sessionAction — one line out, one line back,
+    // then closed. The `lines`/`clip` sent here are normalised to what the wire
+    // accepts so a widget bug cannot produce a silently unanswered query; the
+    // daemon remains the authority.
+    function traceSession(sessionId, lines, clip, callback) {
+        var n = (typeof lines === "number" && lines > 0) ? Math.min(Math.floor(lines), 40) : 12
+        var conn = actionFactory.createObject(root, {
+            path: root.socketPath,
+            cb: callback || null,
+            wanted: {
+                cmd: "sessiontrace",
+                sessionId: "" + sessionId,
+                lines: n,
+                clip: ("" + clip) === "detail" ? "detail" : "line"
+            }
+        })
+        if (!conn) {
+            if (callback)
+                callback({ ok: false, reason: "no-client",
+                           message: "shellbridge client unavailable" })
             return
         }
         conn.start()

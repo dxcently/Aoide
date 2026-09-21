@@ -601,9 +601,18 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   record carries the literal `state:"unknown"` — `aoide_protocol::
   canonical_state` folds that to `"idle"`, its own "no evidence" arm, never
   a sixth state invented here. **The TRACE decides when there is one
-  (P-EIDOLON slice E6, `docs/architecture/EIDOLON-TRACE.md`):** eidolon
-  mirrors its journal as `<log>.jsonl`, one JSON record per line, and names
-  it from `meta.json.trace`. `read_presence_trace` (the gather's I/O,
+  (P-EIDOLON slice E6, `docs/architecture/EIDOLON-TRACE.md`):** a harness
+  publishes its journal as one JSON record per line — the installed eidolon
+  generation writes a `<log>.jsonl` mirror, and its own read-only export door
+  (`eidolon log --json <journal> [--after <id>]`) publishes the same records —
+  and Aoide resolves the path through the record's presence metadata, never by
+  guessing a filename. The capability is the profile's
+  (`TranscriptSpec::locate` → `TranscriptSpec::trace`), the reader is bounded (a
+  5 s wall clock on the export, one retained window per journal, a 64-entry /
+  8 MiB memo, at most sixteen outstanding readers), the capability proof is
+  re-asked before every export so nothing is cached, and the contract lives in
+  `docs/architecture/EIDOLON-TRACE.md`). `read_presence_trace` (the gather's
+  I/O,
   delegating to `aoide_protocol::agents::eidolon_trace_tail`, the ONE trace
   reader) reads that tail; `eidolon_state(busy, tui, trace)` then consults it
   FIRST and returns `eidolon_state_from_trace`'s fold outright when it is
@@ -683,11 +692,11 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   `session trace` joined the `session` family at P-EIDOLON slice E6, beside
   `session pending list`; the exact path set and its count live in `cli`'s
   golden snapshot, never here.
-- **`session trace <id> [--tail N] [--follow] [--json]` (P-EIDOLON slice
-  E6, `docs/architecture/EIDOLON-TRACE.md`)** — `graph/trace.rs::
-  session_trace`, the read surface over a harness's own TRACE: the whole run,
-  record by record, where every other session command reads the roster or
-  acts on a session. Human form is one line per record,
+- **`session trace <id> [--tail N] [--follow] [--json] [--clip line|detail]`
+  (P-EIDOLON slice E6, `docs/architecture/EIDOLON-TRACE.md`)** —
+  `graph/trace.rs::session_trace`, the read surface over a harness's own TRACE:
+  the whole run, record by record, where every other session command reads the
+  roster or acts on a session. Human form is one line per record,
   `#<id>  <hh:mm:ss local>  <kind>  <summary>` — an assistant message shows
   its thinking (dimmed, cut to 80) then its text then each `→ tool(name)`,
   a tool result shows its first line prefixed `!` when it errored, a settled
@@ -707,6 +716,47 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   has no registered profile is a taught error naming which — never an empty
   listing; a trace that EXISTS and holds no records yet is an honest `0
   record(s)`.
+- **The step projection (Phase B, `graph/trace.rs`) — the SAME window, as
+  steps.** `data.steps` (beside the untouched `data.lines`) is one object per
+  emitted content block, projected by `steps_of`/`steps_of_lines`: one step per
+  non-empty block of an `AssistantMessage`/`UserMessage` in the record's own
+  order, one for a `ToolResult`'s own output, one for a settled turn or any
+  other record's own salient text, none for a record that says nothing (a bare
+  `Cancelled`). `steps_of` returns a `Vec`, never one `Option<Step>`: a
+  single-step projector would silently drop all but one block of a
+  multi-block message. `render_line` RENDERS `steps_of(record, Clip::Line)`
+  (`render_steps`, the `→`/`!`/dim decoration applied at render time), so the
+  terminal line and the JSON cannot drift — this is also why nothing here is a
+  second reading of a payload. Bounded four ways, none of them the journal: the
+  `--tail` window, `MAX_BLOCKS_PER_RECORD` (a `+N more block(s)` note step names
+  the omission), `MAX_STEPS` for the whole projection (newest kept,
+  `stepsOmitted` reported), and `--clip` per step — `Clip::Line` is the
+  terminal's own 80/120 one-line spelling, `Clip::Detail` keeps the block's own
+  line breaks (≤ `DETAIL_MAX_LINES`) and a few hundred characters and adds a
+  `tool_use`'s arguments. Every cut is named in `Step::clipped`; an unknown
+  `--clip` word is a taught usage error, never a silent widening.
+- **The read-only trace QUERY over the bridge (`shellbridge.rs::SessionTrace`).**
+  `{"cmd":"sessiontrace","sessionId":…,"lines":N,"clip":"line|detail"}` re-execs
+  exactly `session trace <id> --tail N --clip … --json` through
+  `daemon::bin::core_bin()` (the `dispatch_usage_refresh`/
+  `dispatch_recheck_sessions` path) and answers ONE JSON line on the connection,
+  the `sessionaction` shape: `{ok, sessionId, clip, lines, trace, at, steps,
+  stepsOmitted}` or `{ok:false, …, reason, message}`, the CLI's own taught
+  refusal verbatim (`reason` is the CLI's own machine name, plus this door's
+  `no-answer`/`bad-request`). The gate refuses what it cannot answer honestly:
+  a blank/non-id-shaped `sessionId`, a non-numeric or `0` `lines`, an unknown
+  `clip` (refused, never widened); `lines` is clamped to `TRACE_LINES_MAX` from
+  above, and a line NAMING this verb that fails that gate is answered with the
+  refusal rather than dropped silently, because its caller is parked on a reply.
+  `run_core_bounded` holds the wall clock: a 10 s deadline (longer than the
+  producer pull's own 5 s, so it never fires on a legitimate slow export), the
+  child killed and reaped on expiry, both pipes read by SLOT-COUNTED reader
+  threads (`ReaderSlot`, `MAX_TRACE_READERS`) that are never joined — a reader
+  that blocks because a DESCENDANT inherited the pipe costs a slot, not the
+  deadline — and a 2 s EOF grace after the child exits, past which the read is
+  DISCARDED (`no-answer`) rather than answered from partially. Audits refuse,
+  never every poll: one line per second per card is not a human gesture, and the
+  audit line carries no argument values.
 - **The durable session ledger + resurrect (P-D8, `docs/architecture/
   AOIDED.md`'s "L5"):** `graph/doc.rs::ledger_session_exit` is the ONE
   shared call both `session_store.rs::do_session_end_inner` (a clean
@@ -1148,3 +1198,31 @@ though their CLI commands moved to `lyra` — `permit.rs` publishes summons
 through `herald`, and `conductor/ui.rs` reads the socket path `shellbridge`
 owns, so both are entangled with core
 (`docs/architecture/PACKAGE-LAYOUT.md`, "Charter exceptions").
+
+## Managed task runs (`spawn --task`, `session watch`)
+
+`spawn --task <slug> --instructions <text|@file|->` runs any agent command as a
+**managed task run**: the slug is also its mailbox name (`self/<slug>`), the
+instructions are stored once beside the run's PTY log and handed to the child as
+`AOIDE_TASK` / `AOIDE_TASK_INSTRUCTIONS`, and the run's end facts (`outcome`,
+`exitCode` for a real exit only, `endedAt`) land on its record. `aoide session
+watch <id>` is the read-only live view of such a run (instructions, the child's
+own unread queue, output, outcome; `--snapshot` for one bounded frame). The run's
+slug mailbox (`self/<slug>`) is the CHILD's inbox — only letters sent TO the
+subagent, read against the child's own cursor through the read-only
+`mail::unread_for` peek; the exit report goes to the REPORT mailbox
+(`--report-to`, else the parent's id when that is a legal mailbox name, else the
+role mailbox `conductor`) through the registered `mail send` implementation,
+then woken once through the mail-side doorbell. A finished run's record is
+retained against routine cleanup — filed or not — and the lane's cursor is
+`state/stage/taskreport.json`.
+
+Live mail attachment catches up from the opening frame's watermark, including
+letters arriving while the watcher attaches or before the mailbase exists.
+Watching never advances the child's read cursor.
+
+Nothing here reads or writes another module: the seam is the record
+(`task`/`instructionsPath`/`outcome`/`reportTo`/`exitCode`/`endedAt`), the
+sidecar beside the
+transcript, and the mailbox — see
+`docs/Aoide-Wiki/concepts/orchestration/Managed-Task-Wrapper.md`.

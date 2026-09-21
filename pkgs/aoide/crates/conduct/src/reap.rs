@@ -1048,6 +1048,22 @@ pub(crate) fn decay_stopped_sessions(
 /// correctness — only the sessions/hooks read-decide-write below needs the
 /// lock, and that still happens entirely inside it.
 pub fn reap(inv: &Invocation) -> Outcome {
+    // The managed task wrapper's exit-report lane, run FIRST and outside the
+    // stage lock `reap_inner` takes below: its trigger is a finished task
+    // record still on the roster, and `reap_inner`'s own prune sweeps every
+    // `done` record the moment it reaps anything — so reporting before that
+    // prune is what keeps a task's report from being lost to an unrelated
+    // reap in the same tick. Like the ping-back below, it is gated on
+    // `Door::Daemon` and its own work (a letter, one doorbell) never happens
+    // under a lock.
+    let task_report = crate::graph::taskreport(inv);
+    if !task_report.filed.is_empty() || !task_report.failed.is_empty() {
+        eprintln!(
+            "[aoide/reap] task reports: filed {}, deferred {}",
+            task_report.filed.len(),
+            task_report.failed.len()
+        );
+    }
     let (gathered_addrs, window_owners) = match live_windows() {
         Some((addrs, owners)) => (Some(addrs), Some(owners)),
         None => (None, None),
@@ -1639,6 +1655,18 @@ fn reap_inner(
     for s in s_file.sessions.iter_mut() {
         if dead.contains(s.session_id.as_str()) {
             s.state = "done".to_string();
+            // A managed task run reaped by liveness (never reaching its own
+            // exit path) still gets an end instant and the honest `stopped`
+            // outcome — but NO `exitCode`: there is no code to report, and an
+            // absent key is the answer a view may not read as success.
+            if s.task.is_some() {
+                if s.ended_at.is_none() {
+                    s.ended_at = Some(now.clone());
+                }
+                if s.outcome.is_none() {
+                    s.outcome = Some("stopped".to_string());
+                }
+            }
             // The ledger write (P-D8): every id `reaped` collected — the
             // liveness kill AND the dedup/pre-boot-ghost/orphaned-subagent
             // folds above that feed into this same set — leaves the roster

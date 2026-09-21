@@ -176,6 +176,11 @@ ShellRoot {
         next.push(Qt.formatTime(t, "hh:mm:ss") + "  " + line)
         while (next.length > 50) next.shift()
         canvas.actionLog = next
+        // The in-memory log dies with a reload and is only painted inside this
+        // canvas's own chrome — so the console line is what a headless run (and
+        // a capture's log) can read back. Same posture the reload note below
+        // already holds.
+        console.log("[aoide/widgetpreview] " + line)
     }
     function tail(s, n) {
         var t = ("" + s).replace(/\s+$/, "")
@@ -195,6 +200,12 @@ ShellRoot {
         property string hoveredSessionId: ""
         property int hoveredWorkspace: -1
     }
+
+    // The trace stub's own lever (see bridgeStub.traceSession) — "" answers
+    // honestly, "stale" answers a session that was NOT asked for, "double"
+    // answers twice. Read/written through the control file's `traceStub` key
+    // like every other control value, so a canvas run can pin either guard.
+    property string traceStub: ""
 
     // The stub bridge — every method the songbook widgets call today, each
     // only logging. Confirmed against `grep -rn 'bridge\.' song/songbook/*/
@@ -229,6 +240,72 @@ ShellRoot {
                            sessionId: "" + sessionId,
                            message: "preview canvas stub — nothing was sent" })
             })
+        }
+        // The trace query stub — same signature and callback contract as
+        // ShellBridge.traceSession, answering canned steps ASYNCHRONOUSLY
+        // (Qt.callLater, for the same reason sessionAction does) so a card's
+        // claim → paint path is exercised with no daemon behind it.
+        //
+        // The control file's `traceStub` key makes it answer the two guard
+        // cases the controller must survive:
+        //   "stale"  — the SESSION ID it answers is not the one asked for (a
+        //              recycled delegate): nothing may be painted, and the
+        //              one-flight latch must still be released.
+        //   "double" — a second, late answer arrives after the first (a reply
+        //              for a request that no longer owns the latch): dropped
+        //              whole, never merged into the painted steps.
+        function traceSession(sessionId, lines, clip, callback) {
+            // ONE log line per request, through `canvas.log` (which echoes to
+            // the console). The stub deliberately does NOT console.log this
+            // itself: two byte-identical lines per request made a reviewer
+            // count two pollers 3–5 ms apart where there is one — the counts
+            // below are what a headless run can trust.
+            canvas.log("bridge.traceSession " + JSON.stringify({
+                sessionId: "" + sessionId, lines: lines, clip: "" + clip,
+                traceStub: canvas.traceStub
+            }))
+            if (!callback) return
+            var mode = "" + canvas.traceStub
+            var wide = ("" + clip) === "detail"
+            var now = Date.now()
+            var steps = [
+                { id: "41", ts: now - 4200, kind: "user", error: false, clipped: false,
+                  text: "# Brief: the conductor card reads as nothing while an agent works" },
+                { id: "42", ts: now - 3800, kind: "thinking", error: false, clipped: wide,
+                  text: wide
+                      ? "The card reads say/tool only, and both are coarse: `say` folds four line breaks into one line, and the roster's `tool` is the reaper's own label. The trace already carries every emitted block, so the fix is a PROJECTION: one step per block, in the record's own order, bounded per record and per window — never invented, and never a second parser."
+                      : "The card reads say/tool only — the trace already carries every emitted block, so…" },
+                { id: "42", ts: now - 3700, kind: "say", error: false, clipped: false,
+                  text: "I will project the trace tail into steps and paint them in the voice lane." },
+                { id: "42", ts: now - 3600, kind: "tool", error: false, clipped: false,
+                  text: wide ? "read {\"path\":\"pkgs/aoide/crates/conduct/src/graph/trace.rs\"}"
+                             : "read" },
+                { id: "43", ts: now - 3400, kind: "result", error: false, clipped: wide,
+                  text: wide
+                      ? "fn render_line(record: &TraceRecord, dim: bool) -> String {\n    let mut line = format!(\"#{}  {}  {}\", record.id, hh_mm_ss_local(record.ts_ms), record.kind);\n    line\n}"
+                      : "fn render_line(record: &TraceRecord, dim: bool) -> String {" },
+                { id: "131", ts: now - 1000, kind: "settled", error: false, clipped: false,
+                  text: "end_turn · in 9570000 out 71900" }
+            ]
+            Qt.callLater(function () {
+                callback({ ok: true, stub: true,
+                           sessionId: mode === "stale" ? ("stale-" + sessionId) : ("" + sessionId),
+                           clip: "" + clip, lines: lines,
+                           trace: "/scratch/preview-run/qml/stub-trace.jsonl",
+                           at: now, stepsOmitted: wide ? 0 : 2,
+                           steps: mode === "stale" ? steps.slice(2) : steps })
+            })
+            if (mode === "double") {
+                Qt.callLater(function () {
+                    // A late SECOND answer for the same request: the controller
+                    // must drop it, not append it.
+                    callback({ ok: true, stub: true, sessionId: "" + sessionId,
+                               clip: "" + clip, lines: lines, trace: "second-answer.jsonl",
+                               at: now + 1, stepsOmitted: 0,
+                               steps: [{ id: "999", ts: now, kind: "say", error: false,
+                                         clipped: false, text: "LATE ANSWER — must never be painted" }] })
+                })
+            }
         }
     }
 
@@ -292,6 +369,16 @@ ShellRoot {
         if (doc.watch !== undefined && doc.watch instanceof Array) canvas.watchPaths = doc.watch
         if (doc.stage !== undefined && doc.stage !== null && typeof doc.stage === "object") canvas.stageMap = doc.stage
         if (doc.autoReload !== undefined) canvas.autoReload = !!doc.autoReload
+        // `traceStub` pins the trace stub's own guard cases, and `hoverSession`
+        // pre-seeds the shared "what is being looked at" id the same way a real
+        // pointer entering a card does (cardMouse.onEntered writes it) — the one
+        // lever a headless run has to put a card in its looked-at state.
+        if (doc.traceStub !== undefined) canvas.traceStub = "" + doc.traceStub
+        if (doc.hoverSession !== undefined) {
+            canvas.sharedStub.hoveredSessionId = "" + doc.hoverSession
+            canvas.sharedStub.tracedSessionId = "" + doc.hoverSession
+            canvas.log("control hoverSession=" + canvas.sharedStub.hoveredSessionId)
+        }
         canvas.applying = false
         canvas.errControl = ""
         canvas.syncFields()

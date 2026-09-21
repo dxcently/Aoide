@@ -370,6 +370,7 @@ mod tests {
             "session.reap",
             "session.start",
             "session.trace",
+            "session.watch",
             "context",
             "soundcheck",
             "spawn",

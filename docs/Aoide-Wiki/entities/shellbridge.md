@@ -55,6 +55,26 @@ gadget and the [[Terminal-Commander]] roster call on a row click — QML
 issues the socket command, never shells out. The command set is narrow (jump
 only; prune remains an open thread, see below).
 
+**The read-only trace query** (`{cmd:"sessiontrace", sessionId, lines, clip}`)
+is the one READ the socket answers: it re-execs the existing CLI —
+`aoide session trace <id> --tail N --clip line|detail --json`,
+[[Eidolon-Trace]] — and replies with one JSON line of STEPS (one object per
+emitted content block: thinking · say · tool · result · settled · user · other),
+or with the CLI's own taught refusal verbatim (`no-trace`, `no-presence`,
+`unknown-agent`, `remote-target`, `not-found`, `ambiguous`, plus this door's
+`no-answer`/`bad-request`). It writes nothing, resolves nothing itself, and is
+bounded by the door rather than by the caller: `lines` is defaulted to 12 and
+clamped to 40 from above, a nonsense `lines` or an unknown `clip` is refused
+(never silently widened — a line naming this verb that fails its own gate is
+still ANSWERED, because its caller is parked on a reply), and the re-exec'd
+child is killed and reaped at a 10 s wall clock with its pipes read by
+slot-counted reader threads, so a DESCENDANT holding a pipe open costs a slot
+rather than the deadline and a partial read is discarded, never answered from.
+The conductor card and its Details page are its only callers
+([[Widget-Bridge-Contract]]'s trace section: ONE selected target, ONE request in
+flight, stopped the moment nothing is looked at — a snapshot while viewed, never
+a token stream). Refusals are audited; a successful poll is not.
+
 **`hyprctl` must be on the service PATH, or every click fails silently.**
 Both the socket handler's `focus_window` and the window→session event
 listener shell out to `hyprctl`. A systemd user unit's default PATH is
@@ -126,8 +146,7 @@ invents IPC. Growing the command set (prune next) is an open thread, as is
 stamping `parentSessionId` at spawn time.
 
 **Authoritative window capture.** Alongside the socket accept loop, `lyra
-shellbridge --run` spawns a background thread that reads Hyprland's
-`socket2` event stream (`$XDG_RUNTIME_DIR/hypr/
+shellbridge --run` spawns a background thread that reads Hyprland's`socket2` event stream (`$XDG_RUNTIME_DIR/hypr/
 $HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`). On each window lifecycle
 event it keeps `sessions.json` authoritative: an `openwindow` (re-checked on
 `movewindow`/`movewindowv2`/`windowtitle`) resolves any tracked session

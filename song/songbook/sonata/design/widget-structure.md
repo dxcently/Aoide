@@ -412,6 +412,45 @@ is not.
 
 ---
 
+## 10½. Live state sources beyond the stage files: the trace seam
+
+A widget's data comes from the bridge — stage files it watches (`sessions.json`),
+and, for the one READ the bridge answers, `ShellBridge.traceSession`. The
+conductor card's voice/tool lanes are the worked example, and the discipline is
+the contract:
+
+- **What it is.** `bridge.traceSession(sessionId, lines, clip, cb)` sends
+  `{cmd:"sessiontrace"}`; the daemon re-execs `aoide session trace <id> --tail N
+  --clip … --json` and answers ONE line of STEPS (one object per emitted content
+  block: `thinking · say · tool · result · settled · user · other`), or the CLI's
+  own taught refusal verbatim (`no-trace`, `no-presence`, `unknown-agent`,
+  `remote-target`, `not-found`, `ambiguous`, plus the door's `no-answer` /
+  `bad-request`). Each step's `text` is the harness's own words — untrusted
+  DATA, painted `Text.PlainText`, never interpreted.
+- **It is a snapshot, not a stream.** Each answer carries its own `at` (when it
+  was read) and each step the record's own `ts`. Refreshing makes it *current
+  while looked at*; nothing here is token-by-token, and no caption may imply it.
+  The roster's `say`/`tool` still arrive on the reaper's ~12s cadence.
+- **One target, one request, stopped when not looked at** — the bounds are the
+  widget's, and they live at the widget ROOT (a plaque delegate is rebuilt on
+  every heartbeat): hover/focus/Details CLAIM the target, a claim is held only
+  while its owner is looking, and the one-flight latch is released only by that
+  request's own callback (guarded by sequence + sessionId, so a superseded,
+  duplicated or recycled answer is dropped whole). The poll's cadence is its
+  `interval` and nothing else — a `Timer` whose `running` depends on the latch,
+  with `triggeredOnStart`, re-fires on every restart and polls at event-loop
+  speed (measured, ~90k/s, before it was fixed).
+- **A card paints only what was read FOR IT** (`answerId` attribution), an
+  answer that FAILED clears the attribution and carries its own reason, and the
+  fallback — `say`, else the hook placeholder; `activity`/`tool` — stays
+  byte-identical for every harness that has no such trace.
+- **Bounded on both sides.** The widget asks for `lines: 12` (card) or 24
+  (Details) and `clip: line|detail`; the daemon clamps `lines` to 40 from above,
+  refuses a nonsense value or an unknown clip, and kills/reaps the child at a
+  10 s wall clock, so no cadence can make one answer unbounded.
+
+---
+
 ## 11. The glass is compositor-side
 
 The frosted depth that makes a popout read as a framed stele is NOT drawable

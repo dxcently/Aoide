@@ -1,12 +1,12 @@
-//! `session trace <id> [--tail N] [--follow] [--json]` — the run, step by
-//! step, off the TRACE one harness mirrors beside its journal
+//! `session trace <id> [--tail N] [--follow] [--json] [--clip line|detail]` —
+//! the run, step by step, from the harness's JSON records
 //! (`docs/architecture/EIDOLON-TRACE.md`: read side Aoide, write side
 //! eidolon).
 //!
 //! Every other harness's on-disk turn log is its TRANSCRIPT, and Aoide reads
 //! it to fill `say`/`tool`/`contextTokens` — a handful of fields, never a
-//! stream a caller can watch. eidolon mirrors its journal as ONE JSON RECORD
-//! PER LINE and names that file from its own presence metadata, so the whole
+//! stream a caller can watch. Eidolon exposes one JSON record per line through
+//! its read-only export or a legacy mirror, so the whole
 //! run is readable in order: `AssistantMessage` (thinking, text, tool calls),
 //! `ToolResult`, `TurnSettled`, `TurnBudget`/`TurnDeadline`, `AskUser`,
 //! `ExternalMessage`, `Cancelled`. This module renders that stream and
@@ -23,7 +23,9 @@
 //! refresh calls, so there is one answer to "which file is this session's"),
 //! and `<id>` resolves through `aoide_storage::addr::resolve` — the exact
 //! resolver `send --to` and bare `session`'s filter use. This module owns
-//! only the RENDERING (`render_line`) and the `--follow` loop.
+//! only the PROJECTION (`steps_of` / `steps_of_lines` — one step per emitted
+//! content block, which the human `render_line` renders from so the terminal
+//! line and `data.steps` cannot drift) and the `--follow` loop.
 //!
 //! **Read-only, no stage write, no daemon.** Nothing here mutates any file:
 //! it loads `sessions.json`, derives a name for the session, reads the trace
@@ -37,6 +39,20 @@
 //! other end gave up. `--json` in follow mode prints each NEW record line
 //! verbatim (the line already IS the wire shape) rather than an envelope per
 //! tick.
+//!
+//! **`--json` carries `data.steps`, and `data.lines` stays exactly what it
+//! was.** `lines` is the raw records, byte for byte (unchanged, and what a
+//! `--follow` tick prints); `steps` is the same window PROJECTED — one object
+//! per emitted content block, in the record's own order, `{ id, ts, kind,
+//! text, error, clipped }` with `kind` in `thinking · say · tool · result ·
+//! settled · user · other`. It is bounded by construction, never by the
+//! journal: the `--tail` window, [`MAX_BLOCKS_PER_RECORD`] blocks of any one
+//! record, [`MAX_STEPS`] steps of the whole projection (`stepsOmitted` names
+//! how many the last bound dropped), and `clip` characters per step.
+//! `--clip detail` widens each block's text (the block's own line breaks kept,
+//! up to `DETAIL_MAX_LINES`, a few hundred characters) and adds a `tool_use`'s
+//! arguments; `line` (the default, and the only spelling the human body and
+//! `--follow` use) is the terminal's own one-line clip.
 //!
 //! **A session with no trace is a TAUGHT error, never an empty listing** —
 //! three separate reasons, each named: the harness keeps no trace at all
@@ -66,11 +82,155 @@ const FOLLOW_POLL: Duration = Duration::from_millis(500);
 const THINKING_MAX: usize = 80;
 /// An `AssistantMessage`'s text block, and every other one-line field, clipped.
 const TEXT_MAX: usize = 120;
+/// How much of a thinking/text block, or of a tool result, [`Clip::Detail`]
+/// keeps — a few hundred characters per step, so emitted reasoning is USABLE
+/// in a details view instead of cut at [`THINKING_MAX`] everywhere.
+const DETAIL_THINKING_MAX: usize = 600;
+/// [`Clip::Detail`]'s text-block window (same reasoning as above).
+const DETAIL_TEXT_MAX: usize = 600;
+/// [`Clip::Detail`]'s tool-result window — the result's own first lines, which
+/// is the "output" a reader is looking for.
+const DETAIL_RESULT_MAX: usize = 600;
+/// [`Clip::Detail`]'s one-line rendering of a `tool_use`'s arguments — the
+/// name alone is all [`Clip::Line`] shows.
+const DETAIL_ARGS_MAX: usize = 240;
+/// Lines of its OWN text a [`Clip::Detail`] step keeps. `Clip::Line` flattens
+/// whitespace to one line; Detail keeps the line breaks (a thinking block's
+/// own paragraphing is part of what it says) up to this many.
+const DETAIL_MAX_LINES: usize = 12;
+/// Steps ONE record may project. A record's `content` array is the producer's
+/// to size, so a single hostile or pathological record can carry thousands of
+/// blocks; the projection is bounded here, and what it left out is NAMED
+/// (`clipped: true`) rather than silently dropped.
+const MAX_BLOCKS_PER_RECORD: usize = 32;
+/// Steps a WHOLE projection may carry, whatever `--tail` and the per-record
+/// bound allow (`--tail N` × blocks is still a lot of text). The newest steps
+/// are kept — the same end of the window `--tail` shows — and the count left
+/// out is reported (`stepsOmitted`), never silently dropped.
+const MAX_STEPS: usize = 200;
+
+/// How much of each emitted block a projection keeps.
+///
+/// Two named clips, deliberately not one truncation everywhere: [`Clip::Line`]
+/// is the terminal/roster spelling (a record is one line there), and
+/// [`Clip::Detail`] is a details view's — the same steps with each block's text
+/// kept whole enough to read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::graph) enum Clip {
+    /// One flat line per block, at [`THINKING_MAX`]/[`TEXT_MAX`].
+    Line,
+    /// The block's own line breaks (up to [`DETAIL_MAX_LINES`]) and a few
+    /// hundred characters, plus a `tool_use`'s arguments.
+    Detail,
+}
+
+impl Clip {
+    /// The wire/flag word for this clip — the ONE spelling `--clip`, the
+    /// shellbridge's `clip` field and the JSON's `clip` key all carry.
+    pub(in crate::graph) fn name(self) -> &'static str {
+        match self {
+            Self::Line => "line",
+            Self::Detail => "detail",
+        }
+    }
+
+    /// The clip a `--clip`/wire word names, or `None` for anything else — an
+    /// unknown word is refused by the caller, never silently widened to Detail.
+    pub(in crate::graph) fn parse(word: &str) -> Option<Self> {
+        match word.trim() {
+            "line" => Some(Self::Line),
+            "detail" => Some(Self::Detail),
+            _ => None,
+        }
+    }
+
+    fn thinking_max(self) -> usize {
+        match self {
+            Self::Line => THINKING_MAX,
+            Self::Detail => DETAIL_THINKING_MAX,
+        }
+    }
+
+    fn text_max(self) -> usize {
+        match self {
+            Self::Line => TEXT_MAX,
+            Self::Detail => DETAIL_TEXT_MAX,
+        }
+    }
+
+    fn result_max(self) -> usize {
+        match self {
+            Self::Line => TEXT_MAX,
+            Self::Detail => DETAIL_RESULT_MAX,
+        }
+    }
+}
+
+/// One emitted block of one record, projected: the step grammar
+/// `session trace --json`'s `data.steps` publishes and [`render_line`] renders
+/// from, so the machine projection and the terminal line cannot drift.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::graph) struct Step {
+    /// The record's own journal id (`#<id>`'s `<id>`), never a new counter.
+    pub id: String,
+    /// The record's own `ts_ms` (epoch milliseconds), `None` when it carried
+    /// no readable one — never a reading time substituted for it.
+    pub ts_ms: Option<i64>,
+    /// `thinking` · `say` · `tool` · `result` · `settled` · `user` · `other`.
+    /// A closed set: an unknown record kind is `other`, never rendered as
+    /// nothing.
+    pub kind: &'static str,
+    /// The block's own text, clipped per the requested [`Clip`] and with no
+    /// decoration — the `→ `/`! `/dim spelling is the renderer's and the
+    /// widget's, never baked into the data.
+    pub text: String,
+    /// A `ToolResult` whose `is_error` is true. False for every other kind.
+    pub error: bool,
+    /// The text is a KEPT PREFIX of what the record carried: the clip cut it,
+    /// or the record carried more blocks than [`MAX_BLOCKS_PER_RECORD`] and
+    /// this step is the note saying so. The honest truncation indicator — a
+    /// reader is never left thinking it saw the whole block.
+    pub clipped: bool,
+}
+
+impl Step {
+    /// This step's own JSON object — `{ id, ts, kind, text, error, clipped }`,
+    /// the shape `data.steps` carries.
+    fn json(&self) -> Value {
+        json!({
+            "id": self.id,
+            "ts": self.ts_ms,
+            "kind": self.kind,
+            "text": self.text,
+            "error": self.error,
+            "clipped": self.clipped,
+        })
+    }
+}
 
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn on_sigint(_signum: libc::c_int) {
     INTERRUPTED.store(true, Ordering::SeqCst);
+}
+
+/// Clip to `max` chars at a char boundary with a trailing ellipsis, reporting
+/// whether anything was cut — the honest indicator [`Step::clipped`] carries.
+/// Same arithmetic as [`one_line_clip`], which delegates here.
+fn clip_chars(s: &str, max: usize) -> (String, bool) {
+    if s.chars().count() <= max {
+        (s.to_string(), false)
+    } else {
+        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        (out, true)
+    }
+}
+
+/// [`one_line_clip`] with the cut reported.
+fn one_line_clipped(s: &str, max: usize) -> (String, bool) {
+    let flat = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    clip_chars(&flat, max)
 }
 
 /// One whitespace-flattened line, clipped at a char boundary with a trailing
@@ -79,13 +239,30 @@ extern "C" fn on_sigint(_signum: libc::c_int) {
 /// the SHARED copy is private to `protocol/agents`, and this is display-only
 /// text, not a second reading of any record.
 pub(in crate::graph) fn one_line_clip(s: &str, max: usize) -> String {
-    let flat = s.split_whitespace().collect::<Vec<_>>().join(" ");
-    if flat.chars().count() <= max {
-        flat
+    one_line_clipped(s, max).0
+}
+
+/// [`Clip::Detail`]'s clip: the text's OWN line breaks kept (up to
+/// [`DETAIL_MAX_LINES`] — a thinking block's paragraphing is part of what it
+/// says), then a character window of `max`, with the cut reported. The line
+/// bound comes first so a pathological one-character-per-line block cannot
+/// paint a thousand-line step.
+fn detail_clipped(s: &str, max: usize) -> (String, bool) {
+    let trimmed = s.trim_end();
+    let (kept, cut_lines) = if trimmed.lines().count() > DETAIL_MAX_LINES {
+        (trimmed.lines().take(DETAIL_MAX_LINES).collect::<Vec<_>>().join("\n"), true)
     } else {
-        let mut out: String = flat.chars().take(max.saturating_sub(1)).collect();
-        out.push('…');
-        out
+        (trimmed.to_string(), false)
+    };
+    let (out, cut_chars) = clip_chars(&kept, max);
+    (out, cut_lines || cut_chars)
+}
+
+/// One block's own text, clipped per `clip`.
+fn clip_block(text: &str, clip: Clip, max: usize) -> (String, bool) {
+    match clip {
+        Clip::Line => one_line_clipped(text, max),
+        Clip::Detail => detail_clipped(text, max),
     }
 }
 
@@ -93,13 +270,7 @@ pub(in crate::graph) fn one_line_clip(s: &str, max: usize) -> String {
 /// the text's own internal whitespace — the tool-result first line, where a
 /// tab or a column of spaces is part of what the result printed.
 pub(in crate::graph) fn clip_keep_ws(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
-        out.push('…');
-        out
-    }
+    clip_chars(s, max).0
 }
 
 /// One record's own timestamp as `hh:mm:ss` in LOCAL time — libc's
@@ -140,50 +311,114 @@ fn field(payload: Option<&Value>, key: &str, max: usize) -> String {
         .unwrap_or_default()
 }
 
-/// `AssistantMessage`: thinking cut to [`THINKING_MAX`] and (on a terminal)
-/// dimmed, then text cut to [`TEXT_MAX`], then `→ <tool name>` per `tool_use`
-/// — every block in the record's own order, joined. An empty block
-/// contributes nothing (never an empty dim wrapper).
-///
-/// `dim` is passed in rather than probed here so the render is a pure
-/// function of the record and one boolean — the caller decides, and a test
-/// pins both spellings.
-fn assistant_summary(payload: Option<&Value>, dim: bool) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    for block in content_blocks(payload) {
+/// `AssistantMessage`: one step per non-empty content block, in the record's
+/// OWN order — thinking, then text, then one per `tool_use` (the live sample
+/// holds all three in one record). An empty block contributes nothing (never
+/// an empty step). [`Clip::Detail`] additionally carries a `tool_use`'s
+/// arguments, one line — that is the "what did it reach for" a details view is
+/// looking at; [`Clip::Line`] stays the tool's NAME alone, its existing
+/// spelling.
+fn assistant_steps(record: &TraceRecord, clip: Clip) -> Vec<Step> {
+    let p = record.payload.as_ref();
+    let step = |kind: &'static str, text: String, clipped: bool| Step {
+        id: record.id.clone(),
+        ts_ms: record.ts_ms,
+        kind,
+        text,
+        error: false,
+        clipped,
+    };
+    let blocks = content_blocks(p);
+    let mut steps: Vec<Step> = Vec::new();
+    for block in blocks.iter().take(MAX_BLOCKS_PER_RECORD) {
         match block.get("type").and_then(Value::as_str) {
             Some("thinking") => {
-                let t = field(Some(block), "thinking", THINKING_MAX);
-                if !t.is_empty() {
-                    parts.push(if dim { format!("\u{1b}[2m{t}\u{1b}[0m") } else { t });
+                let raw = block.get("thinking").and_then(Value::as_str).unwrap_or("");
+                let (text, clipped) = clip_block(raw, clip, clip.thinking_max());
+                if !text.is_empty() {
+                    steps.push(step("thinking", text, clipped));
                 }
             }
             Some("text") => {
-                let t = field(Some(block), "text", TEXT_MAX);
-                if !t.is_empty() {
-                    parts.push(t);
+                let raw = block.get("text").and_then(Value::as_str).unwrap_or("");
+                let (text, clipped) = clip_block(raw, clip, clip.text_max());
+                if !text.is_empty() {
+                    steps.push(step("say", text, clipped));
                 }
             }
             Some("tool_use") => {
-                let name = field(Some(block), "name", TEXT_MAX);
-                if !name.is_empty() {
-                    parts.push(format!("→ {name}"));
+                let (name, name_clipped) = clip_block(
+                    block.get("name").and_then(Value::as_str).unwrap_or(""),
+                    Clip::Line,
+                    TEXT_MAX,
+                );
+                if name.is_empty() {
+                    continue;
                 }
+                let (text, clipped) = match clip {
+                    Clip::Line => (name, name_clipped),
+                    // `input` serialized compact (serde_json emits no
+                    // newlines), clipped — a hostile payload cannot make one
+                    // step unbounded.
+                    Clip::Detail => match block.get("input") {
+                        Some(v) if !v.is_null() && v != &json!({}) => {
+                            let (args, cut) = clip_chars(&v.to_string(), DETAIL_ARGS_MAX);
+                            (format!("{name} {args}"), name_clipped || cut)
+                        }
+                        _ => (name, name_clipped),
+                    },
+                };
+                steps.push(step("tool", text, clipped));
             }
             _ => {}
         }
     }
-    parts.join("  ")
+    if blocks.len() > MAX_BLOCKS_PER_RECORD {
+        steps.push(step(
+            "other",
+            format!(
+                "+{} more block(s) in this record, never projected",
+                blocks.len() - MAX_BLOCKS_PER_RECORD
+            ),
+            true,
+        ));
+    }
+    steps
 }
 
-/// `ToolResult`: the result's FIRST line cut to [`TEXT_MAX`], prefixed `!`
-/// when `is_error`. `content` is a string in eidolon's own sample shape; an
-/// array of blocks (a shape nothing forbids) falls back to its first `text`.
-pub(in crate::graph) fn tool_result_summary(payload: Option<&Value>, prefix: &str) -> String {
+/// `UserMessage`: one step per non-empty `text` block, in order.
+fn user_steps(record: &TraceRecord, clip: Clip) -> Vec<Step> {
+    let mut steps: Vec<Step> = Vec::new();
+    for block in content_blocks(record.payload.as_ref())
+        .iter()
+        .take(MAX_BLOCKS_PER_RECORD)
+    {
+        if block.get("type").and_then(Value::as_str) != Some("text") {
+            continue;
+        }
+        let raw = block.get("text").and_then(Value::as_str).unwrap_or("");
+        let (text, clipped) = clip_block(raw, clip, clip.text_max());
+        if !text.is_empty() {
+            steps.push(Step {
+                id: record.id.clone(),
+                ts_ms: record.ts_ms,
+                kind: "user",
+                text,
+                error: false,
+                clipped,
+            });
+        }
+    }
+    steps
+}
+
+/// A `ToolResult`'s own content: a plain string, or the first `text` of a
+/// block array (a shape nothing forbids).
+fn tool_result_raw(payload: Option<&Value>) -> String {
     let Some(p) = payload else {
         return String::new();
     };
-    let raw = match p.get("content") {
+    match p.get("content") {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Array(_)) => content_blocks(Some(p))
             .iter()
@@ -191,7 +426,32 @@ pub(in crate::graph) fn tool_result_summary(payload: Option<&Value>, prefix: &st
             .unwrap_or("")
             .to_string(),
         _ => String::new(),
-    };
+    }
+}
+
+/// `ToolResult`: the result's own output, clipped per `clip` — [`Clip::Line`]
+/// keeps its FIRST line only (the terminal's one-line spelling, unchanged),
+/// [`Clip::Detail`] keeps the first [`DETAIL_MAX_LINES`] lines of it.
+fn tool_result_text(payload: Option<&Value>, clip: Clip) -> (String, bool) {
+    match clip {
+        Clip::Detail => detail_clipped(&tool_result_raw(payload), clip.result_max()),
+        Clip::Line => {
+            let raw = tool_result_raw(payload);
+            let first = raw.lines().next().unwrap_or("").trim();
+            if first.is_empty() {
+                (String::new(), false)
+            } else {
+                clip_chars(first, clip.result_max())
+            }
+        }
+    }
+}
+
+/// `ToolResult`: the result's FIRST line cut to [`TEXT_MAX`], prefixed `!`
+/// when `is_error`. `content` is a string in eidolon's own sample shape; an
+/// array of blocks (a shape nothing forbids) falls back to its first `text`.
+pub(in crate::graph) fn tool_result_summary(payload: Option<&Value>, prefix: &str) -> String {
+    let raw = tool_result_raw(payload);
     let first = raw.lines().next().unwrap_or("").trim();
     if first.is_empty() {
         return String::new();
@@ -252,47 +512,153 @@ fn external_summary(payload: Option<&Value>) -> String {
     }
 }
 
-/// A `UserMessage`'s first text block — the first thing asked.
-fn user_summary(payload: Option<&Value>) -> String {
-    content_blocks(payload)
-        .iter()
-        .find(|b| b.get("type").and_then(Value::as_str) == Some("text"))
-        .and_then(|b| b.get("text").and_then(Value::as_str))
-        .map(|t| one_line_clip(t, TEXT_MAX))
-        .unwrap_or_default()
-}
-
-/// The one-line summary a record renders after its kind. Kinds the design
-/// doc names get their own arm; everything else (a `UserMessage`, a
-/// `SessionStart`, a newer eidolon's variant Aoide has never heard of)
-/// degrades to its own salient field where one is known and to the compact
-/// payload otherwise — never to nothing, so an unfamiliar record is still
-/// visible rather than silently blank.
-fn summary(record: &TraceRecord, dim: bool) -> String {
+/// The one-line summary a NON-message record renders after its kind — the
+/// [`Clip::Line`] spelling of its one salient field, and whether rendering it
+/// had to CUT that field. `AssistantMessage` / `UserMessage` / `ToolResult`
+/// never reach here: their text comes from the projector ([`steps_of`]), which
+/// is what keeps this line and `data.steps` from drifting. Kinds the design doc
+/// names get their own arm; everything else (a `SessionStart`, an `AskUser`, a
+/// newer eidolon's variant Aoide has never heard of) degrades to its own salient
+/// field where one is known and to the compact payload otherwise — never to
+/// nothing, so an unfamiliar record is still visible rather than silently blank.
+///
+/// The cut flag is decided from the FIELDS each arm reads (not from the
+/// rendered text): `AskUser` appends `(open)` after its prompt and
+/// `ExternalMessage`/`TurnSettled` compose two fields, so a text that merely
+/// "ends in an ellipsis" would miss a cut in the middle — the flag must be
+/// exact, because a machine consumer reads it.
+fn summary_text(record: &TraceRecord) -> (String, bool) {
     let p = record.payload.as_ref();
+    // Would `one_line_clip(field, TEXT_MAX)` cut this payload's own string?
+    let cut = |key: &str| -> bool {
+        p.and_then(|p| p.get(key))
+            .and_then(Value::as_str)
+            .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ").chars().count() > TEXT_MAX)
+            .unwrap_or(false)
+    };
     match record.kind.as_str() {
-        "AssistantMessage" => assistant_summary(p, dim),
         // `Cancelled`/`TurnDeadline` ride the same arm shape as the rest:
         // a unit variant carries no payload, so it renders the kind alone.
+        "TurnSettled" => (settled_summary(p), cut("stop_reason")),
+        "AskUser" => (ask_summary(p), cut("prompt")),
+        "ExternalMessage" => (external_summary(p), cut("from") || cut("text")),
+        "TurnBudget" => (numeric_field(p, "calls_left"), cut("calls_left")),
+        "TurnDeadline" => (numeric_field(p, "secs_left"), cut("secs_left")),
+        "ContextSize" => (numeric_field(p, "tokens"), cut("tokens")),
+        "PolicyVerdict" => (field(p, "outcome", TEXT_MAX), cut("outcome")),
+        "SessionStart" | "ModelChanged" => {
+            (prefixed_field(p, "model", "model=", TEXT_MAX), cut("model"))
+        }
+        // An unfamiliar kind: the compact payload itself, clipped — and the
+        // flag comes from the SAME clip, never an assumption.
+        _ => match p {
+            Some(p) => one_line_clipped(&p.to_string(), TEXT_MAX),
+            None => (String::new(), false),
+        },
+    }
+}
+
+/// The step `kind` a non-message record's single step carries: the kinds the
+/// design doc names get their own; everything else is `other`.
+fn other_kind(record_kind: &str) -> &'static str {
+    match record_kind {
+        "TurnSettled" => "settled",
+        _ => "other",
+    }
+}
+
+/// Project ONE record into the [`Step`]s it emits, in the record's own order:
+/// one step per non-empty content block of an `AssistantMessage`/`UserMessage`
+/// (a record holding thinking + text + tool_use yields three), one step for a
+/// `ToolResult`'s own output, one for a settled turn or any other record's own
+/// salient text, and NONE for a record that says nothing at all (a bare
+/// `Cancelled`). **A `Vec`, never one `Option<Step>`:** a single-step
+/// projector would silently drop all but one block of a multi-block message.
+///
+/// Bounded by construction, whatever the journal holds: at most
+/// [`MAX_BLOCKS_PER_RECORD`] steps from one record (plus the note naming what
+/// that left out), each clipped to `clip`, each cut NAMED in
+/// [`Step::clipped`]. The window itself is the caller's (`--tail`).
+fn steps_of(record: &TraceRecord, clip: Clip) -> Vec<Step> {
+    match record.kind.as_str() {
+        "AssistantMessage" => assistant_steps(record, clip),
+        "UserMessage" => user_steps(record, clip),
         "ToolResult" => {
-            let is_error = p
+            let error = record
+                .payload
+                .as_ref()
                 .and_then(|p| p.get("is_error"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
-            tool_result_summary(p, if is_error { "! " } else { "" })
+            let (text, clipped) = tool_result_text(record.payload.as_ref(), clip);
+            if text.is_empty() {
+                Vec::new()
+            } else {
+                vec![Step {
+                    id: record.id.clone(),
+                    ts_ms: record.ts_ms,
+                    kind: "result",
+                    text,
+                    error,
+                    clipped,
+                }]
+            }
         }
-        "TurnSettled" => settled_summary(p),
-        "AskUser" => ask_summary(p),
-        "ExternalMessage" => external_summary(p),
-        "TurnBudget" => numeric_field(p, "calls_left"),
-        "TurnDeadline" => numeric_field(p, "secs_left"),
-        "ContextSize" => numeric_field(p, "tokens"),
-        "PolicyVerdict" => field(p, "outcome", TEXT_MAX),
-        "SessionStart" | "ModelChanged" => prefixed_field(p, "model", "model=", TEXT_MAX),
-        "UserMessage" => user_summary(p),
-        _ => p.map(|p| one_line_clip(&p.to_string(), TEXT_MAX)).unwrap_or_default(),
+        _ => {
+            let (text, clipped) = summary_text(record);
+            if text.is_empty() {
+                Vec::new()
+            } else {
+                vec![Step {
+                    id: record.id.clone(),
+                    ts_ms: record.ts_ms,
+                    kind: other_kind(&record.kind),
+                    text,
+                    error: false,
+                    clipped,
+                }]
+            }
+        }
     }
 }
+
+/// Every step a RENDER WINDOW of raw trace lines projects, newest end kept and
+/// the count dropped reported — the ONE place a whole window becomes steps, so
+/// the JSON and the renderer cannot disagree about a record's blocks. A line
+/// that is not a readable record contributes no step (it still gets its own `?`
+/// line in the human render, and its raw line in `data.lines`).
+pub(in crate::graph) fn steps_of_lines(lines: &[&String], clip: Clip) -> (Vec<Step>, usize) {
+    let mut steps: Vec<Step> = Vec::new();
+    for line in lines {
+        if let Some(record) = eidolon_trace_record(line) {
+            steps.extend(steps_of(&record, clip));
+        }
+    }
+    let omitted = steps.len().saturating_sub(MAX_STEPS);
+    if omitted > 0 {
+        steps.drain(0..omitted);
+    }
+    (steps, omitted)
+}
+
+/// The one-line spelling of a step list: the per-kind decoration a human reads
+/// (`→ ` on a tool call, `! ` on an errored result, the terminal's dim wrap
+/// around thinking) applied at RENDER time, never baked into the data. An
+/// empty list renders an empty string, so the caller omits the column rather
+/// than printing a blank one.
+fn render_steps(steps: &[Step], dim: bool) -> String {
+    let parts: Vec<String> = steps
+        .iter()
+        .map(|s| match s.kind {
+            "tool" if !s.text.is_empty() => format!("→ {}", s.text),
+            "result" if s.error => format!("! {}", s.text),
+            "thinking" if dim => format!("\u{1b}[2m{}\u{1b}[0m", s.text),
+            _ => s.text.clone(),
+        })
+        .collect();
+    parts.join("  ")
+}
+
 
 /// `key=value` for one payload field, whichever of the two spellings the
 /// journal used — the sample contract writes numbers, and nothing about the
@@ -322,7 +688,9 @@ fn prefixed_field(payload: Option<&Value>, key: &str, prefix: &str, max: usize) 
 
 /// One record as the human line the design doc fixes:
 /// `#<id>  <hh:mm:ss>  <kind>  <summary>` — the summary omitted (never a
-/// trailing blank column) when the record has nothing to say.
+/// trailing blank column) when the record has nothing to say. The summary is
+/// the record's [`Clip::Line`] steps RENDERED, never a second reading of the
+/// payload: the terminal line and `data.steps` come from one projector.
 fn render_line(record: &TraceRecord, dim: bool) -> String {
     let mut line = format!(
         "#{}  {}  {}",
@@ -330,7 +698,7 @@ fn render_line(record: &TraceRecord, dim: bool) -> String {
         hh_mm_ss_local(record.ts_ms),
         record.kind
     );
-    let s = summary(record, dim);
+    let s = render_steps(&steps_of(record, Clip::Line), dim);
     if !s.is_empty() {
         line.push_str("  ");
         line.push_str(&s);
@@ -382,6 +750,31 @@ fn parse_tail(inv: &Invocation) -> Result<usize, Outcome> {
     }
 }
 
+/// `--clip line|detail` — how much of each emitted block `data.steps` carries.
+/// Absent is [`Clip::Line`] (the terminal spelling). An unknown word is a
+/// taught usage error, never a silent widening to the wider clip: a caller that
+/// meant `detail` and typed `detials` must not be handed a bounded-to-line
+/// answer as if it were a full one.
+fn parse_clip(inv: &Invocation) -> Result<Clip, Outcome> {
+    let Some(raw) = inv.flags.get("clip") else {
+        return Ok(Clip::Line);
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(Clip::Line);
+    }
+    Clip::parse(raw).ok_or_else(|| {
+        Outcome::usage(
+            "session.trace",
+            format!(
+                "`{raw}` is not a clip — --clip takes `line` (the terminal's one-line spelling) \
+                 or `detail` (each block's own line breaks, kept longer); omit it for `line`"
+            ),
+        )
+        .with_data(json!({ "reason": "bad-clip", "clip": raw }))
+    })
+}
+
 /// The session's name for the message line, through the canonical display
 /// grammar — the same render `session pending list` gives a target, falling
 /// back to the raw id when no record carries it.
@@ -413,6 +806,10 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     let target = args[0].trim().to_string();
     let tail = match parse_tail(inv) {
         Ok(n) => n,
+        Err(o) => return o,
+    };
+    let clip = match parse_clip(inv) {
+        Ok(c) => c,
         Err(o) => return o,
     };
     let json_mode = inv.flag_present("json");
@@ -504,10 +901,10 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
         return Outcome::error(
             cmd,
             format!(
-                "`{name}` runs `{agent}`, which keeps no trace — a trace is a file a harness \
-                 mirrors its journal into, one JSON record per line, and names from its own \
-                 presence metadata; `eidolon` is the one harness that does today \
-                 (docs/architecture/EIDOLON-TRACE.md)"
+                "`{name}` runs `{agent}`, which keeps no trace — a trace is one JSON record per \
+                 journal record, published by the harness itself (a mirror file, or its own \
+                 read-only export door), and resolved through the record's presence metadata; \
+                 `eidolon` is the one harness that does today (docs/architecture/EIDOLON-TRACE.md)"
             ),
         )
         .with_data(json!({
@@ -540,9 +937,9 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
         return Outcome::error(
             cmd,
             format!(
-                "`{name}` has no trace at {} — its presence metadata names no `trace` file \
-                 (an older eidolon, or a session that never wrote one), and a file that is not \
-                 a `.jsonl` trace is not one",
+                "`{name}` has no readable trace at {} — nothing on this host resolves one for it: \
+                 a producer that publishes its journal as records (a mirror file, or its own \
+                 read-only export door) and a presence that names it",
                 path.display()
             ),
         )
@@ -566,6 +963,12 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
         message.push('\n');
         message.push_str(&body.join("\n"));
     }
+    // The step projection is the SAME projector the human body renders from —
+    // one step per emitted block, in record order, each clipped to `--clip`
+    // (the human body stays the one-line `Clip::Line` spelling), bounded by
+    // the window, by blocks-per-record and by a whole-projection cap.
+    let (steps, omitted) = steps_of_lines(&shown, clip);
+    let steps: Vec<Value> = steps.iter().map(Step::json).collect();
     Outcome::ok(cmd, message)
         .with_data(json!({
             "sessionId": id,
@@ -573,6 +976,9 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
             "tail": tail,
             "records": body.len(),
             "lines": raw,
+            "clip": clip.name(),
+            "steps": steps,
+            "stepsOmitted": omitted,
         }))
 }
 
@@ -813,6 +1219,35 @@ mod tests {
         assert!(line.contains("\"x\":1"), "an unknown kind still shows its payload: {line}");
     }
 
+    /// A non-message record whose own salient text had to be cut says so — the
+    /// machine consumer must not be told "complete" while the reader sees an
+    /// ellipsis (the fallback arm the review flagged).
+    #[test]
+    fn a_clipped_fallback_summary_reports_itself_as_clipped() {
+        let long = "x".repeat(TEXT_MAX * 2);
+        let rec = eidolon_trace_record(
+            &json!({"id": 9, "ts_ms": 1, "kind": {"SomethingNew": {"blob": long}}}).to_string(),
+        )
+        .unwrap();
+        let steps = steps_of(&rec, Clip::Line);
+        assert_eq!(steps.len(), 1);
+        assert!(steps[0].text.ends_with('…'), "{:?}", steps[0].text);
+        assert!(steps[0].clipped, "a cut fallback summary must say so: {:?}", steps[0]);
+
+        // A short one is not flagged, and an `AskUser` prompt over the window —
+        // a named arm, through the same indicator — is.
+        let short = eidolon_trace_record(r#"{"id":9,"ts_ms":1,"kind":{"SomethingNew":{"x":1}}}"#).unwrap();
+        assert!(!steps_of(&short, Clip::Line)[0].clipped);
+        let ask = eidolon_trace_record(
+            &json!({"id": 9, "ts_ms": 1, "kind": {"AskUser": {"prompt": "y".repeat(TEXT_MAX * 2), "answer": null}}})
+                .to_string(),
+        )
+        .unwrap();
+        let ask_steps = steps_of(&ask, Clip::Line);
+        assert_eq!(ask_steps[0].kind, "other");
+        assert!(ask_steps[0].clipped, "{:?}", ask_steps[0]);
+    }
+
     #[test]
     fn an_unreadable_line_renders_as_a_flagged_line_never_dropped() {
         let line = render_any("{ not json", false);
@@ -917,8 +1352,8 @@ mod tests {
         let out = session_trace(&trace_invocation(&["Aoide-old"], &[]));
         assert_eq!(out.status, Status::Error, "msg: {}", out.message);
         assert_eq!(out.data.clone().unwrap()["reason"], "no-trace");
-        assert!(out.message.contains("names no `trace` file"), "{}", out.message);
-        assert!(out.message.contains("older eidolon"), "{}", out.message);
+        assert!(out.message.contains("no readable trace"), "{}", out.message);
+        assert!(out.message.contains("read-only export door"), "{}", out.message);
         let _ = std::fs::remove_dir_all(&root);
 
         // 2. A harness that keeps none by construction (claude's profile has
@@ -976,6 +1411,270 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // ── the step projection (B2.1) ───────────────────────────────────────
+
+    /// One `AssistantMessage` holding thinking + text + tool_use is THREE
+    /// steps, in the record's own block order — the regression a single-step
+    /// projector (`Option<Step>`) would hide completely.
+    #[test]
+    fn one_assistant_message_projects_a_step_per_block_in_order() {
+        let rec = eidolon_trace_record(ASSISTANT).unwrap();
+
+        let line = steps_of(&rec, Clip::Line);
+        let kinds: Vec<&str> = line.iter().map(|s| s.kind).collect();
+        assert_eq!(kinds, ["thinking", "say", "tool"], "{line:?}");
+        // Every step carries the RECORD's own id/ts, never a new counter.
+        assert!(line.iter().all(|s| s.id == "2" && s.ts_ms == Some(1789603009102)));
+        assert_eq!(line[1].text, "Let me read the slot catalog first.");
+        assert_eq!(line[2].text, "read", "the line clip shows the tool's name alone");
+        assert!(!line[2].error);
+        // The doc's own thinking sample is longer than the line window, so it
+        // is clipped — and says so.
+        assert!(line[0].clipped, "{line:?}");
+        assert!(line[0].text.ends_with('…'), "{line:?}");
+
+        // `Clip::Detail` adds the tool's arguments on the same step — the
+        // "what did it reach for" a details view is looking at.
+        let detail = steps_of(&rec, Clip::Detail);
+        assert_eq!(detail.len(), 3, "{detail:?}");
+        assert!(
+            detail[2].text.starts_with("read {") && detail[2].text.contains("slots.md"),
+            "{:?}",
+            detail[2].text
+        );
+        assert!(!detail[2].clipped, "a small input is not cut: {:?}", detail[2]);
+    }
+
+    /// `Clip::Detail` keeps strictly MORE of a long reasoning block than
+    /// `Clip::Line`, and keeps its own line breaks while `Line` flattens to one.
+    #[test]
+    fn detail_keeps_more_of_a_thinking_block_and_its_own_lines() {
+        let thinking = "first paragraph of the reasoning\nsecond paragraph, still reasoning\n".to_string()
+            + &"padding reasoning text ".repeat(60);
+        let rec = eidolon_trace_record(
+            &json!({
+                "id": 7, "ts_ms": 1789603009200i64,
+                "kind": {"AssistantMessage": {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": thinking},
+                ]}}
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let line = steps_of(&rec, Clip::Line);
+        let detail = steps_of(&rec, Clip::Detail);
+        assert_eq!(line.len(), 1);
+        assert_eq!(detail.len(), 1);
+        assert!(!line[0].text.contains('\n'), "the line clip flattens: {:?}", line[0].text);
+        assert!(detail[0].text.contains('\n'), "the detail clip keeps the block's own lines");
+        assert!(
+            detail[0].text.chars().count() > line[0].text.chars().count() * 3,
+            "detail must keep strictly more: {:?} vs {:?}",
+            line[0].text,
+            detail[0].text
+        );
+        assert!(detail[0].clipped, "the block is longer than DETAIL_THINKING_MAX");
+        assert!(detail[0].text.ends_with('…'));
+        // A detail step is still BOUNDED: the line count first, the char
+        // window second.
+        assert!(detail[0].text.lines().count() <= DETAIL_MAX_LINES);
+        assert!(detail[0].text.chars().count() <= DETAIL_THINKING_MAX);
+    }
+
+    #[test]
+    fn a_tool_result_step_carries_the_error_flag_and_both_clips() {
+        let ok = steps_of(&eidolon_trace_record(RESULT).unwrap(), Clip::Line);
+        assert_eq!(ok.len(), 1);
+        assert_eq!(ok[0].kind, "result");
+        assert!(!ok[0].error);
+        assert_eq!(ok[0].text, "1\t# Per-song widget slots", "first line only, no `!` prefix");
+        assert!(!ok[0].text.contains("catalog"));
+
+        let err = steps_of(&eidolon_trace_record(RESULT_ERR).unwrap(), Clip::Detail);
+        assert_eq!(err.len(), 1);
+        assert!(err[0].error, "is_error rides the step, not the text");
+        assert!(err[0].text.contains("ENOENT: no such file"), "{:?}", err[0].text);
+        assert!(
+            err[0].text.contains("more"),
+            "the detail clip keeps the result's second line: {:?}",
+            err[0].text
+        );
+        assert!(!err[0].text.starts_with('!'), "the decoration is the renderer's");
+    }
+
+    /// The same step list renders the human line — one projector, no drift.
+    #[test]
+    fn the_human_line_is_the_line_clip_rendered() {
+        let rec = eidolon_trace_record(ASSISTANT).unwrap();
+        let rendered = render_line(&rec, false);
+        let joined = render_steps(&steps_of(&rec, Clip::Line), false);
+        assert!(rendered.ends_with(&joined), "{rendered} !~ {joined}");
+        assert!(joined.contains("→ read"), "{joined}");
+        // A record that emits no step renders no summary column at all.
+        let cancelled = render_line(&eidolon_trace_record(CANCELLED).unwrap(), false);
+        assert!(cancelled.ends_with("Cancelled"), "{cancelled}");
+        assert!(steps_of(&eidolon_trace_record(CANCELLED).unwrap(), Clip::Line).is_empty());
+    }
+
+    /// A hostile/pathological record cannot make the projection unbounded: one
+    /// step per block up to the cap, then ONE note naming what was left out.
+    #[test]
+    fn a_record_with_many_blocks_projects_a_bounded_list_that_names_the_omission() {
+        let blocks: Vec<Value> = (0..MAX_BLOCKS_PER_RECORD + 18)
+            .map(|i| json!({"type": "text", "text": format!("block {i}")}))
+            .collect();
+        let rec = eidolon_trace_record(
+            &json!({"id": 9, "kind": {"AssistantMessage": {"role": "assistant", "content": blocks}}})
+                .to_string(),
+        )
+        .unwrap();
+
+        for clip in [Clip::Line, Clip::Detail] {
+            let steps = steps_of(&rec, clip);
+            assert_eq!(
+                steps.len(),
+                MAX_BLOCKS_PER_RECORD + 1,
+                "cap, plus the one note naming the omission"
+            );
+            let last = steps.last().unwrap();
+            assert_eq!(last.kind, "other");
+            assert!(last.clipped);
+            assert!(last.text.contains("+18 more block(s)"), "{}", last.text);
+        }
+    }
+
+    /// The whole-projection cap keeps the NEWEST steps and reports the count it
+    /// dropped — never a silent shortening of the window.
+    #[test]
+    fn the_whole_projection_is_capped_and_reports_what_it_dropped() {
+        let many: Vec<String> = (0..40)
+            .map(|i| {
+                let blocks: Vec<Value> = (0..MAX_BLOCKS_PER_RECORD)
+                    .map(|b| json!({"type": "text", "text": format!("r{i} block {b}")}))
+                    .collect();
+                json!({"id": i, "kind": {"AssistantMessage": {"content": blocks}}}).to_string()
+            })
+            .collect();
+        let refs: Vec<&String> = many.iter().collect();
+
+        let (steps, omitted) = steps_of_lines(&refs, Clip::Line);
+        assert_eq!(steps.len(), MAX_STEPS, "capped");
+        assert_eq!(omitted, 40 * MAX_BLOCKS_PER_RECORD - MAX_STEPS);
+        assert!(
+            steps.last().unwrap().text.contains("r39 block 31"),
+            "the newest end of the window is what is kept: {:?}",
+            steps.last()
+        );
+        assert!(!steps.iter().any(|s| s.text.starts_with("r0 ")));
+
+        // A malformed line contributes no step (it keeps its `?` human line and
+        // its raw line in `data.lines`), and a readable one after it still does.
+        let lines = vec!["{ not json".to_string(), START.to_string()];
+        let refs: Vec<&String> = lines.iter().collect();
+        let (steps, omitted) = steps_of_lines(&refs, Clip::Line);
+        assert_eq!(omitted, 0);
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].kind, "other");
+        assert!(steps[0].text.contains("model=ollama:deepseek-v4.1-flash"));
+    }
+
+    // ── the command's new envelope fields ────────────────────────────────
+
+    #[test]
+    fn json_carries_steps_beside_untouched_raw_lines_and_is_bounded_by_tail() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = fixture(
+            "trace-steps",
+            "Aoide-steps",
+            "eidolon",
+            &[START, USER, ASSISTANT, RESULT, SETTLED],
+            true,
+        );
+
+        let out = session_trace(&trace_invocation(&["Aoide-steps"], &[("json", "true")]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        // The window: the session start (one `other` step), the user message,
+        // 3 steps from the assistant message, 1 result, 1 settled.
+        assert_eq!(data["clip"], "line");
+        assert_eq!(data["stepsOmitted"], 0);
+        let steps = data["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), 7, "{steps:?}");
+        assert_eq!(steps[0]["kind"], "other");
+        assert_eq!(steps[1]["kind"], "user");
+        assert_eq!(steps[2]["kind"], "thinking");
+        assert_eq!(steps[3]["kind"], "say");
+        assert_eq!(steps[4]["kind"], "tool");
+        assert_eq!(steps[5]["kind"], "result");
+        assert_eq!(steps[6]["kind"], "settled");
+        assert_eq!(steps[2]["id"], "2", "the record's own id");
+        assert!(steps[2]["ts"].as_i64().unwrap() > 0);
+        assert_eq!(steps[5]["error"], false);
+        // `data.lines` is untouched — raw records, byte for byte.
+        let lines = data["lines"].as_array().unwrap();
+        assert_eq!(lines[0].as_str().unwrap(), START);
+        assert_eq!(lines[2].as_str().unwrap(), ASSISTANT);
+        let full_lines = data["lines"].clone();
+
+        // `--tail` bounds the steps the same way it bounds the records.
+        let out = session_trace(&trace_invocation(&["Aoide-steps"], &[("tail", "2"), ("json", "true")]));
+        let data = out.data.unwrap();
+        assert_eq!(data["records"], 2);
+        let steps = data["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), 2, "only the records inside the window project steps");
+        assert_eq!(steps[0]["kind"], "result");
+        assert_eq!(steps[1]["kind"], "settled");
+
+        // `--clip detail` widens the STEP texts and leaves `data.lines` alone.
+        let out = session_trace(&trace_invocation(
+            &["Aoide-steps"],
+            &[("clip", "detail"), ("json", "true")],
+        ));
+        let detail = out.data.clone().unwrap();
+        assert_eq!(detail["clip"], "detail");
+        assert_eq!(
+            detail["lines"], full_lines,
+            "the clip never touches the raw lines"
+        );
+        let tool = detail["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["kind"] == "tool")
+            .cloned()
+            .unwrap();
+        assert!(tool["text"].as_str().unwrap().contains("slots.md"), "{tool}");
+        // The human body stays the one-line spelling under either clip.
+        assert!(out.message.lines().skip(1).all(|l| !l.contains('\n')));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_unknown_clip_is_a_taught_usage_error_never_a_silent_widening() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = fixture("trace-badclip", "Aoide-clip", "eidolon", &[SETTLED], true);
+
+        for bad in ["detials", "line,detail", "true"] {
+            let out = session_trace(&trace_invocation(&["Aoide-clip"], &[("clip", bad)]));
+            assert_eq!(out.status, Status::Usage, "--clip {bad}: {}", out.message);
+            assert_eq!(out.data.clone().unwrap()["reason"], "bad-clip");
+            assert!(out.message.contains("is not a clip"), "{}", out.message);
+        }
+        // An explicit `line` and an absent flag are the same answer.
+        let plain = session_trace(&trace_invocation(&["Aoide-clip"], &[("json", "true")]));
+        let explicit = session_trace(&trace_invocation(
+            &["Aoide-clip"],
+            &[("clip", "line"), ("json", "true")],
+        ));
+        assert_eq!(plain.data.unwrap()["steps"], explicit.data.unwrap()["steps"]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn session_trace_registers_at_the_expected_path() {
         let mut r = aoide_protocol::registry::Registry::new();
@@ -986,7 +1685,7 @@ mod tests {
         assert_eq!(cmd.dotted(), "session.trace");
         assert!(cmd.implemented && !cmd.gated);
         assert!(cmd.args.iter().any(|a| a.name == "id" && a.required));
-        for f in ["tail", "follow", "json"] {
+        for f in ["tail", "clip", "follow", "json"] {
             assert!(cmd.flags.iter().any(|x| x.name == f), "missing --{f}: {:?}", cmd.flags);
         }
     }

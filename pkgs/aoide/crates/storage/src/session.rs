@@ -107,6 +107,15 @@ pub fn upsert_session(
             // `aoide conduct` session; every other fresh record starts without one.
             log_path: None,
             petname: Some(petname),
+            // A fresh registration is not a managed task wrapper run unless
+            // the child's own `conduct --task` stamped these moments later
+            // (`stamp_task`) — every ordinary session starts without them.
+            task: None,
+            instructions_path: None,
+            exit_code: None,
+            ended_at: None,
+            outcome: None,
+            report_to: None,
             hook_ancestry: Vec::new(),
             headless: false,
             // Stamped moments later by `stamp_spawned`, only when this

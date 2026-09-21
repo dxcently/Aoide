@@ -83,6 +83,10 @@ other crate in this workspace sits above.
   tightening) and identifies a file by its native 128-bit id — and there
   `0o600` is the only supported mode, so the group-shared broker feed
   (`aoide-secrets`' `0o640`) is refused by name rather than narrowed.
+  `path_identity` is crate-visible and returns one opaque, comparable
+  `PathIdentity`, because the identity question is not this module's alone:
+  `agents`'s eidolon reader asks it about a journal whose cached cursor must
+  never survive a replacement at the same path.
 - `dialog` — the code-entry dialog substrate: `DialogResult` (a dialog
   child's outcome — approved/dismissed/cancelled/cancelled-externally/
   spawn-error/infra-failure) and `run_entry_dialog` (the generic
@@ -127,17 +131,20 @@ other crate in this workspace sits above.
   it is the one profile so far with `native_send: Some(...)`, since a
   message to it never needs the pty composer a keystroke path would
   otherwise reach. `TranscriptSpec::trace` (`Option<fn(&Path) ->
-  Option<Vec<String>>>`) is the new HARNESS CAPABILITY on the same table —
-  `Some` only for a harness that mirrors its journal as one JSON record per
-  line and names that file from its own presence metadata (eidolon, via
-  `eidolon_trace_tail`); `None` for every harness whose only on-disk turn log
-  is its transcript. It is what lets a consumer that needs a trace test for
-  one without ever naming a harness by string (`if agent == "eidolon"` is
-  exactly the scatter this table exists to avoid) — `aoide session trace` is
-  its first caller. `eidolon_transcript_locate` returns that trace when the
-  presence names one that exists (else `meta.json`, the stand-in it always
-  returned), and `eidolon_transcript_tail` routes on the extension — so
-  every extractor reads either shape. `TraceRecord`/`eidolon_trace_record`
+  Option<Vec<String>>>`) is the HARNESS CAPABILITY on the same table —
+  `Some` only for a harness that keeps one JSON record per journal record and
+  can hand those lines to a caller that cannot decode the journal itself
+  (eidolon, via `eidolon_trace_tail`); `None` for every harness whose only
+  on-disk turn log is its transcript. It is what lets a consumer that needs a
+  trace test for one without ever naming a harness by string (`if agent ==
+  "eidolon"` is exactly the scatter this table exists to avoid) — `aoide
+  session trace` is its first caller. `eidolon_transcript_locate` answers the
+  producer generation that is actually installed: a mirror that is still
+  current, else the journal itself when the producer's own read-only export
+  door proves there (`eidolon log --json …`, probed per program identity,
+  never the repairing pre-`0432133` `log`), else `meta.json`, the stand-in it
+  always returned; `eidolon_transcript_tail` routes on the extension, so
+  every extractor reads every shape. `TraceRecord`/`eidolon_trace_record`
   parse ONE trace line into its variant name and payload, the shape
   `docs/architecture/EIDOLON-TRACE.md` fixes (eidolon owns it; Aoide reads
   it) — the same parse `conduct`'s state fold reads, never a second one.

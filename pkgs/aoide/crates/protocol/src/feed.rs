@@ -75,22 +75,36 @@ fn owner_only_mode(mode: u32) -> bool {
 
 // ── what identifies one file on this host ────────────────────────────────
 
+/// What identifies one file on this host: the `(dev, ino)` pair Unix answers
+/// out of `stat(2)`, the native 128-bit file id Windows answers out of a
+/// handle. Opaque and only ever compared for equality — `pub(crate)` because
+/// a reader outside this module asks the same question ([`crate::agents`]'s
+/// eidolon reader, whose cached cursor belongs to one file and must never
+/// survive a replacement at the same path). An unknown identity is never
+/// "the same file": the functions below propagate their errors instead.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PathIdentity(Identity);
+
+#[cfg(unix)]
+type Identity = (u64, u64);
+#[cfg(windows)]
+type Identity = feed_windows::FileId;
+
 /// The identity of an open handle, for [`Follower::poll`]'s comparison.
 /// Unix asks `(dev, ino)` out of the fd's own metadata — the same pair, and
 /// the same propagation of a failure, this module has always used. Windows
 /// has no such pair (`std::os::windows::fs::MetadataExt`'s file-index
 /// methods are unstable): identity comes from the handle through the native
-/// 128-bit file id. Both are only ever compared for equality, and both
-/// propagate their errors — an unknown identity is never "the same file".
+/// 128-bit file id.
 #[cfg(unix)]
-fn file_identity(file: &File) -> std::io::Result<(u64, u64)> {
+fn file_identity(file: &File) -> std::io::Result<PathIdentity> {
     let meta = file.metadata()?;
-    Ok((meta.dev(), meta.ino()))
+    Ok(PathIdentity((meta.dev(), meta.ino())))
 }
 
 #[cfg(windows)]
-fn file_identity(file: &File) -> std::io::Result<feed_windows::FileId> {
-    feed_windows::file_identity(file)
+fn file_identity(file: &File) -> std::io::Result<PathIdentity> {
+    Ok(PathIdentity(feed_windows::file_identity(file)?))
 }
 
 /// The identity of the file the PATH names right now. On Unix this is
@@ -99,14 +113,14 @@ fn file_identity(file: &File) -> std::io::Result<feed_windows::FileId> {
 /// on Unix ([`std::io::ErrorKind::NotFound`]) and no other failure is
 /// folded into it.
 #[cfg(unix)]
-fn path_identity(path: &Path) -> std::io::Result<(u64, u64)> {
+pub(crate) fn path_identity(path: &Path) -> std::io::Result<PathIdentity> {
     let meta = std::fs::metadata(path)?;
-    Ok((meta.dev(), meta.ino()))
+    Ok(PathIdentity((meta.dev(), meta.ino())))
 }
 
 #[cfg(windows)]
-fn path_identity(path: &Path) -> std::io::Result<feed_windows::FileId> {
-    feed_windows::path_identity(path)
+pub(crate) fn path_identity(path: &Path) -> std::io::Result<PathIdentity> {
+    Ok(PathIdentity(feed_windows::path_identity(path)?))
 }
 
 // ── the writer half ──────────────────────────────────────────────────────

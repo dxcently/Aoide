@@ -37,6 +37,35 @@ pub fn socket_path() -> PathBuf {
         .join("shellbridge.sock")
 }
 
+/// Records one `sessiontrace` answer carries when the wire names no `lines` —
+/// the last few turns, not a session's history.
+const TRACE_LINES_DEFAULT: usize = 12;
+/// Records a `sessiontrace` answer may carry, whatever the wire asks for: the
+/// clamp that keeps one answer small no matter what cadence a caller keeps.
+const TRACE_LINES_MAX: usize = 40;
+/// How long one `sessiontrace` answer may take. Deliberately longer than the
+/// producer pull's own five-second wall clock
+/// (`docs/architecture/EIDOLON-TRACE.md`), so this bound never fires on a
+/// legitimately slow export — only on a wedged one.
+const TRACE_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// How often the bounded runner re-checks a child that has not exited.
+const CHILD_POLL: std::time::Duration = std::time::Duration::from_millis(20);
+/// How long a child's pipes are given to reach EOF after the child itself
+/// exited. Past it the read is not the whole answer and is DISCARDED rather
+/// than inferred from — which is what keeps the wall clock bounded when a
+/// DESCENDANT of the child inherited a pipe and holds it open (the same
+/// discipline, and the same reason, as the producer pull's own
+/// `PULL_DRAIN_GRACE` in `protocol/src/agents.rs`).
+const CHILD_DRAIN_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+/// Chunks in flight between a reader thread and the wait loop (4 × 64 KiB) —
+/// the backpressure that stops a fast child from queueing a whole answer in
+/// memory while the loop is asleep.
+const READ_CHUNKS: usize = 4;
+/// Bytes the bounded runner will COLLECT from a child's own streams before
+/// abandoning the read: a last-resort ceiling for the ANSWER, above anything
+/// the CLI's own bounds (`--tail` window × clip) can produce.
+const MAX_ANSWER_BYTES: u64 = 4 * 1024 * 1024;
+
 /// One parsed inbound command from the socket wire (newline-delimited JSON).
 /// The wire shape is defined by ShellBridge.qml; the only command today is the
 /// session-jump `focuswindow`.
@@ -108,6 +137,27 @@ pub enum BridgeCommand {
     /// displays is never expired by dunst either), so this is how a timeout or
     /// a click closes a card. `"*"` clears the desk.
     HeraldDismiss { id: String },
+    /// `{ "cmd": "sessiontrace", "sessionId": "…", "lines": N, "clip":
+    /// "line|detail" }` — the conductor card's own READ-ONLY trace query: what
+    /// this one session has emitted (thinking, text, tool calls, tool results,
+    /// settled turns), projected by `session trace --json`'s `data.steps`.
+    ///
+    /// It re-execs the existing CLI — `aoide session trace <id> --tail N
+    /// --clip <clip> --json` — through the same `core_bin()` path
+    /// [`Self::RefreshUsage`]/[`Self::RecheckSessions`] take, and answers on
+    /// this connection the way [`Self::SessionAction`] does. Nothing is
+    /// written, nothing is resolved here: the CLI's own resolver, capability
+    /// refusal and projection are the whole answer, carried verbatim.
+    ///
+    /// Bounded by construction, whatever the caller's cadence: `lines` is
+    /// clamped to [`TRACE_LINES_MAX`] (absent → [`TRACE_LINES_DEFAULT`], a
+    /// non-number or `0` refused), `clip` defaults to `line` and an unknown
+    /// word is REFUSED rather than silently widened, and the child is killed
+    /// and reaped on [`TRACE_QUERY_TIMEOUT`]. `sessionId` is non-blank and
+    /// carries no whitespace/control characters, exactly like
+    /// [`Self::FocusSession`]'s — it becomes one argv element, never a shell
+    /// word.
+    SessionTrace { session_id: String, lines: usize, clip: String },
 }
 
 /// The six system actions the powermenu can request. A closed set — an unknown
@@ -251,6 +301,48 @@ pub fn parse_command(line: &str) -> Option<BridgeCommand> {
                 return None;
             }
             Some(BridgeCommand::HeraldDismiss { id })
+        }
+        "sessiontrace" => {
+            let session_id = v
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            // A blank or non-id-shaped session names nothing to read: refused,
+            // like `focussession`'s own blank id, never defaulted to "all".
+            if !safe_session_id(&session_id) {
+                return None;
+            }
+            // `lines` is clamped from ABOVE (a caller asking for more gets the
+            // bound, not a refusal); a nonsense value — a string, a float, a
+            // zero-length window — is refused, never quietly replaced by the
+            // default, because a caller that asked for something else must not
+            // be handed a window it did not ask for.
+            let lines = match v.get("lines") {
+                None | Some(Value::Null) => TRACE_LINES_DEFAULT,
+                Some(n) => match n.as_u64() {
+                    Some(0) | None => return None,
+                    Some(n) => n.min(TRACE_LINES_MAX as u64) as usize,
+                },
+            };
+            // An unknown clip is REFUSED rather than silently widened to
+            // `detail`: a caller that meant the wider window and mistyped it
+            // must not be handed the narrow one as though that were its ask.
+            let clip = match v.get("clip") {
+                None | Some(Value::Null) => "line",
+                Some(Value::String(s)) => match s.trim() {
+                    "line" => "line",
+                    "detail" => "detail",
+                    _ => return None,
+                },
+                Some(_) => return None,
+            };
+            Some(BridgeCommand::SessionTrace {
+                session_id,
+                lines,
+                clip: clip.to_string(),
+            })
         }
         _ => None,
     }
@@ -607,6 +699,347 @@ fn safe_session_id(s: &str) -> bool {
     !s.is_empty()
         && !s.starts_with('-')
         && s.chars().all(|c| !c.is_whitespace() && !c.is_control())
+}
+
+// ── the read-only trace query (`sessiontrace`) ────────────────────────────
+
+/// Now, in epoch milliseconds — the `at` a `sessiontrace` answer carries, so a
+/// reader can say WHEN the snapshot it is looking at was read instead of
+/// implying it is live. `0` (never a fabricated time) if the clock is before
+/// the epoch.
+fn epoch_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Read one child pipe to its end on its OWN thread, forwarding chunks to the
+/// wait loop. The thread is never JOINED: it ends by itself at EOF (or when the
+/// wait loop drops the receiver), and in the one case where it does not — a
+/// DESCENDANT inherited the pipe and holds it open — it holds its
+/// [`ReaderSlot`] until it finally exits. That is bounded memory (one 64 KiB
+/// chunk) but not bounded COUNT, which is why the slot exists.
+///
+/// This mirrors the producer pull's own reader
+/// (`protocol/src/agents.rs::eidolon_export`): a reader that is joined
+/// unconditionally defeats its caller's wall clock, because a descendant
+/// holding the pipe makes `read` block forever.
+fn pump_pipe<R: std::io::Read>(mut pipe: R, tx: std::sync::mpsc::SyncSender<Vec<u8>>) {
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        match pipe.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                if tx.send(buf[..n].to_vec()).is_err() {
+                    // The wait loop is gone: stop reading and let this thread's
+                    // own end of the pipe close with it.
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// Take everything a pipe has delivered so far into `sink`, without ever
+/// blocking: `eof` is set when the sender is gone (the reader thread ended),
+/// `over` when the read has passed [`MAX_ANSWER_BYTES`].
+fn collect_chunks(
+    rx: &std::sync::mpsc::Receiver<Vec<u8>>,
+    sink: &mut Vec<u8>,
+    eof: &mut bool,
+    over: &mut bool,
+) {
+    use std::sync::mpsc::TryRecvError;
+    loop {
+        match rx.try_recv() {
+            Ok(chunk) => {
+                if sink.len() + chunk.len() > MAX_ANSWER_BYTES as usize {
+                    *over = true;
+                } else {
+                    sink.extend_from_slice(&chunk);
+                }
+            }
+            Err(TryRecvError::Empty) => break,
+            Err(TryRecvError::Disconnected) => {
+                *eof = true;
+                break;
+            }
+        }
+    }
+}
+
+/// The reader threads a process may have outstanding at once. A reader thread
+/// normally ends the moment its pipe reaches EOF; a descendant that inherited
+/// the pipe keeps it open, and the thread then holds its slot until it exits.
+/// Above this cap a query is REFUSED without starting a child at all — a bound
+/// one timeout per tick could outrun is no bound (the same reasoning as the
+/// producer pull's own `PULL_READERS`).
+const MAX_TRACE_READERS: usize = 8;
+
+/// Slots free right now.
+static TRACE_READERS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(MAX_TRACE_READERS);
+
+/// Take one slot from `free` (which counts the slots still FREE) if any is
+/// left, without ever waiting. Pure over its own counter so the cap arithmetic
+/// is testable without racing the process-wide pool.
+fn take_slot(free: &std::sync::atomic::AtomicUsize, _cap: usize) -> bool {
+    use std::sync::atomic::Ordering;
+    free.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+        if n > 0 { Some(n - 1) } else { None }
+    })
+    .is_ok()
+}
+
+/// Hand one slot back.
+fn release_slot(free: &std::sync::atomic::AtomicUsize, cap: usize) {
+    use std::sync::atomic::Ordering;
+    let _ = free.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| Some((n + 1).min(cap)));
+}
+
+/// One outstanding-reader slot, moved INTO the reader thread so it drops when
+/// that thread exits and not a moment sooner. Acquire never waits: a refused
+/// query is answered honestly and the next tick tries again.
+struct ReaderSlot;
+
+impl ReaderSlot {
+    fn acquire() -> Option<Self> {
+        take_slot(&TRACE_READERS, MAX_TRACE_READERS).then_some(ReaderSlot)
+    }
+}
+
+impl Drop for ReaderSlot {
+    fn drop(&mut self) {
+        release_slot(&TRACE_READERS, MAX_TRACE_READERS);
+    }
+}
+
+/// Run `argv` through the core binary (`daemon::bin::core_bin()`, protocol's
+/// sibling resolver — never a bare `"aoide"` relying on PATH alone) with a
+/// WALL-CLOCK bound that actually holds. `Ok((exited_ok, stdout, stderr))`, or
+/// `Err(reason)` when no complete answer arrived: the child could not be
+/// spawned, it outlived `timeout` (killed and REAPED here — `wait`, so no
+/// zombie and no live child survives the bound), a DESCENDANT held its pipes
+/// open past [`CHILD_DRAIN_GRACE`], or the read passed [`MAX_ANSWER_BYTES`].
+/// A partial read is DISCARDED in every one of those cases, never parsed as if
+/// it were whole. No shell is involved anywhere: `argv` is passed to
+/// `Command::args` whole.
+fn run_core_bounded(
+    argv: &[String],
+    timeout: std::time::Duration,
+) -> Result<(bool, String, String), String> {
+    // The reader slots come FIRST: no child is started for a read whose pipes
+    // cannot be accounted for.
+    let Some(out_slot) = ReaderSlot::acquire() else {
+        return Err("too many trace reads are still open — not started".to_string());
+    };
+    let Some(err_slot) = ReaderSlot::acquire() else {
+        return Err("too many trace reads are still open — not started".to_string());
+    };
+    let mut child = std::process::Command::new(daemon::bin::core_bin())
+        .args(argv)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            // The first two argv elements only — always the command path,
+            // never a value.
+            format!(
+                "spawning `{} {}`: {e}",
+                argv.first().map(String::as_str).unwrap_or("aoide"),
+                argv.get(1).map(String::as_str).unwrap_or("")
+            )
+        })?;
+    let (out_tx, out_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(READ_CHUNKS);
+    let (err_tx, err_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(READ_CHUNKS);
+    match child.stdout.take() {
+        Some(pipe) => {
+            std::thread::spawn(move || {
+                let _slot = out_slot;
+                pump_pipe(pipe, out_tx);
+            });
+        }
+        None => drop(out_tx),
+    }
+    match child.stderr.take() {
+        Some(pipe) => {
+            std::thread::spawn(move || {
+                let _slot = err_slot;
+                pump_pipe(pipe, err_tx);
+            });
+        }
+        None => drop(err_tx),
+    }
+
+    let deadline = std::time::Instant::now() + timeout;
+    let mut out: Vec<u8> = Vec::new();
+    let mut err: Vec<u8> = Vec::new();
+    let (mut out_eof, mut err_eof) = (false, false);
+    let mut over = false;
+    let status = loop {
+        collect_chunks(&out_rx, &mut out, &mut out_eof, &mut over);
+        collect_chunks(&err_rx, &mut err, &mut err_eof, &mut over);
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                // The child is gone. Its pipes normally reach EOF at once; give
+                // them a short grace, then DISCARD rather than answer from a
+                // partial read (a descendant may still hold them open).
+                let grace_end = std::time::Instant::now() + CHILD_DRAIN_GRACE;
+                while !(out_eof && err_eof) {
+                    let left = grace_end.saturating_duration_since(std::time::Instant::now());
+                    if left.is_zero() {
+                        break;
+                    }
+                    std::thread::sleep(CHILD_POLL.min(left));
+                    collect_chunks(&out_rx, &mut out, &mut out_eof, &mut over);
+                    collect_chunks(&err_rx, &mut err, &mut err_eof, &mut over);
+                }
+                if !(out_eof && err_eof) {
+                    return Err(format!(
+                        "the child exited but its pipes stayed open ({}) — the partial read was \
+                         discarded",
+                        if out_eof { "stderr held by a descendant" } else { "a descendant holds stdout" }
+                    ));
+                }
+                break status;
+            }
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "no answer within {}s — the read was abandoned and the child killed",
+                        timeout.as_secs()
+                    ));
+                }
+                std::thread::sleep(CHILD_POLL);
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("the child could not be waited for — the read was abandoned".to_string());
+            }
+        }
+    };
+    if over {
+        return Err(format!(
+            "the answer passed the {MAX_ANSWER_BYTES}-byte read ceiling — discarded"
+        ));
+    }
+    Ok((
+        status.success(),
+        String::from_utf8_lossy(&out).into_owned(),
+        String::from_utf8_lossy(&err).into_owned(),
+    ))
+}
+
+/// Does this raw wire line NAMED the trace verb (whatever else was wrong with
+/// it)? The one question `handle_conn`'s refusal path asks of an unparseable
+/// line: a `sessiontrace` that failed its own gate must be answered, and every
+/// other unknown line keeps its plain drop-and-audit.
+fn wire_names_sessiontrace(line: &str) -> bool {
+    serde_json::from_str::<Value>(line.trim())
+        .ok()
+        .and_then(|v| v.get("cmd").and_then(Value::as_str).map(str::to_string))
+        .as_deref()
+        == Some("sessiontrace")
+}
+
+/// The ONE JSON line a `sessiontrace` refusal answers with: the CLI's own
+/// taught refusal carried verbatim (`message`), its machine `reason` beside it,
+/// and the shape that was asked for — never a session id echoed back that the
+/// CLI itself did not resolve to.
+fn trace_refusal(session_id: &str, clip: &str, lines: usize, reason: &str, message: &str) -> Value {
+    json!({
+        "ok": false,
+        "sessionId": session_id,
+        "clip": clip,
+        "lines": lines,
+        "reason": reason,
+        "message": message,
+    })
+}
+
+/// Dispatch ONE read-only trace query: re-exec the existing CLI
+/// (`aoide session trace <id> --tail N --clip <clip> --json`) and shape its
+/// own envelope into the ONE line the card reads — `{ok, sessionId, clip,
+/// lines, trace, at, steps, stepsOmitted}`, or a refusal
+/// ([`trace_refusal`]). Nothing is resolved, folded or re-parsed here: the
+/// CLI's resolver, capability refusal and projection ARE the answer, which is
+/// why this is a re-exec and not a second reader.
+///
+/// The child is bounded by [`TRACE_QUERY_TIMEOUT`]; a spawn failure or a
+/// timeout is an honest refusal (`no-answer`), never an empty step list — the
+/// card must be able to tell "nothing was emitted" from "nobody answered".
+fn dispatch_session_trace(session_id: &str, lines: usize, clip: &str) -> Value {
+    let argv: Vec<String> = vec![
+        "session".to_string(),
+        "trace".to_string(),
+        session_id.to_string(),
+        "--tail".to_string(),
+        lines.to_string(),
+        "--clip".to_string(),
+        clip.to_string(),
+        "--json".to_string(),
+    ];
+    let (stdout, stderr) = match run_core_bounded(&argv, TRACE_QUERY_TIMEOUT) {
+        Ok((_exited_ok, stdout, stderr)) => (stdout, stderr),
+        Err(reason) => return trace_refusal(session_id, clip, lines, "no-answer", &reason),
+    };
+    // `--json` puts its envelope on a DIFFERENT stream depending on where the
+    // command failed (stdout once dispatched, stderr for a usage error the
+    // parser refused first) — the same two-stream read
+    // [`session_action_reply`] holds, so a refusal is never mistaken for
+    // gibberish.
+    let Some((ok, message, data)) = outcome_envelope(&stdout).or_else(|| outcome_envelope(&stderr))
+    else {
+        let fallback = if !stderr.trim().is_empty() {
+            stderr.trim().to_string()
+        } else if !stdout.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            "`aoide session trace` printed no parseable answer".to_string()
+        };
+        return trace_refusal(session_id, clip, lines, "no-answer", &fallback);
+    };
+    if !ok {
+        let data = data.unwrap_or(Value::Null);
+        let reason = data
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or("refused");
+        // The CLI resolved `<id>` itself; when it named the session it
+        // resolved to (an ambiguous or remote target may), that is the
+        // identity the answer carries.
+        let resolved = data
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .unwrap_or(session_id);
+        return trace_refusal(resolved, clip, lines, reason, &message);
+    }
+    let data = data.unwrap_or(Value::Null);
+    let resolved = data
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .unwrap_or(session_id);
+    json!({
+        "ok": true,
+        "sessionId": resolved,
+        "clip": clip,
+        "lines": lines,
+        // The trace PATH, so a reader (or an operator) can see WHICH file the
+        // snapshot came off.
+        "trace": data.get("trace").cloned().unwrap_or(Value::Null),
+        // Read time, epoch ms — the age a reader is shown is this answer's
+        // own, never the time some earlier answer was painted.
+        "at": epoch_ms(),
+        "steps": data.get("steps").cloned().unwrap_or_else(|| json!([])),
+        // How many steps the projection's own caps dropped, so a bounded
+        // answer says so instead of looking complete.
+        "stepsOmitted": data.get("stepsOmitted").cloned().unwrap_or_else(|| json!(0)),
+    })
 }
 
 /// A wire value that becomes a bare argv token: a PROJECT NAME (`project`'s
@@ -1605,6 +2038,49 @@ fn handle_conn(stream: UnixStream) {
             Some(BridgeCommand::HeraldVerdict { id, verdict }) => {
                 dispatch_herald_verdict(id, verdict)
             }
+            // The read-only trace query: answered on this connection like
+            // `sessionaction` (the caller reads one line back), and run on its
+            // OWN thread because it re-execs the CLI — a bounded child
+            // ([`run_core_bounded`]) must never sit between the accept loop and
+            // the next connection. No reply channel means the query does not
+            // run at all, the same discipline the two action arms hold.
+            Some(BridgeCommand::SessionTrace { session_id, lines, clip }) => {
+                let Some(mut reply) = reply.take() else {
+                    let _ = daemon::audit(
+                        &daemon::default_audit_log(),
+                        daemon::Door::Daemon,
+                        daemon::EventClass::Audit,
+                        "shellbridge",
+                        "sessiontrace-noreply",
+                        "trace query: no reply channel; not dispatched",
+                    );
+                    return;
+                };
+                // A polled READ answers on the connection and audits only its
+                // REFUSALS: one line per second per card is not a human
+                // gesture, and the log's job is to hold what was refused (and
+                // why), never a tick-by-tick echo of what was looked at.
+                std::thread::spawn(move || {
+                    use std::io::Write;
+                    let answer = dispatch_session_trace(&session_id, lines, &clip);
+                    if answer.get("ok").and_then(Value::as_bool) != Some(true) {
+                        let reason = answer
+                            .get("reason")
+                            .and_then(Value::as_str)
+                            .unwrap_or("failed");
+                        let _ = daemon::audit(
+                            &daemon::default_audit_log(),
+                            daemon::Door::Daemon,
+                            daemon::EventClass::Audit,
+                            "shellbridge",
+                            "sessiontrace-refused",
+                            &format!("trace query clip={clip} lines={lines} refused: {reason}"),
+                        );
+                    }
+                    let _ = writeln!(reply, "{answer}");
+                });
+                return;
+            }
             None => {
                 let _ = daemon::audit(
                     &daemon::default_audit_log(),
@@ -1614,6 +2090,37 @@ fn handle_conn(stream: UnixStream) {
                     "unparseable",
                     &format!("dropped one unparseable or unknown command line ({} bytes)", line.len()),
                 );
+                // `sessiontrace` is the one verb whose caller is PARKED waiting
+                // for an answer, so a malformed one must not leave it there: a
+                // line that names this verb and fails its own gate is answered
+                // with the refusal instead of silence (the widget's own client
+                // normalises what it sends, so this is the door's honesty, not
+                // its fast path).
+                if wire_names_sessiontrace(&line) {
+                    if let Some(mut reply) = reply.take() {
+                        let answer = trace_refusal(
+                            "",
+                            "",
+                            0,
+                            "bad-request",
+                            "a sessiontrace line takes a non-blank sessionId, a positive integer \
+                             `lines` (clamped to 40 from above), and `clip` line|detail",
+                        );
+                        let _ = daemon::audit(
+                            &daemon::default_audit_log(),
+                            daemon::Door::Daemon,
+                            daemon::EventClass::Audit,
+                            "shellbridge",
+                            "sessiontrace-refused",
+                            "trace query refused: bad-request",
+                        );
+                        std::thread::spawn(move || {
+                            use std::io::Write;
+                            let _ = writeln!(reply, "{answer}");
+                        });
+                        return;
+                    }
+                }
             }
         }
     }
@@ -1838,6 +2345,290 @@ mod tests {
         // nowhere, the `{cmd:"powermenu"}` scar).
         assert_eq!(parse_command(r#"{"cmd":"refresh"}"#), None);
         assert_eq!(parse_command(r#"{"cmd":"usagerefresh"}"#), None);
+    }
+
+    // ── the read-only trace query (B2.2 / B3.2) ─────────────────────────
+
+    /// `sessiontrace` with and without `lines`; the id trimmed; `lines` clamped
+    /// from above (never refused for being too big); `clip` defaulted to
+    /// `line`.
+    #[test]
+    fn parse_command_accepts_a_sessiontrace_with_and_without_lines() {
+        assert_eq!(
+            parse_command(r#"{"cmd":"sessiontrace","sessionId":"Aoide-7d23"}"#),
+            Some(BridgeCommand::SessionTrace {
+                session_id: "Aoide-7d23".to_string(),
+                lines: TRACE_LINES_DEFAULT,
+                clip: "line".to_string(),
+            })
+        );
+        // Trimmed like `focussession`'s id, and an explicit clip is carried.
+        assert_eq!(
+            parse_command("{\"cmd\":\"sessiontrace\",\"sessionId\":\" Aoide-7d23 \",\"lines\":8,\"clip\":\"detail\"}\n"),
+            Some(BridgeCommand::SessionTrace {
+                session_id: "Aoide-7d23".to_string(),
+                lines: 8,
+                clip: "detail".to_string(),
+            })
+        );
+        // An explicit `null`/blank-shaped absence is the default, not a refusal.
+        assert_eq!(
+            parse_command(r#"{"cmd":"sessiontrace","sessionId":"s1","lines":null,"clip":null}"#),
+            Some(BridgeCommand::SessionTrace {
+                session_id: "s1".to_string(),
+                lines: TRACE_LINES_DEFAULT,
+                clip: "line".to_string(),
+            })
+        );
+        // Clamped from ABOVE: a caller asking for more gets the bound.
+        assert_eq!(
+            parse_command(r#"{"cmd":"sessiontrace","sessionId":"s1","lines":100000}"#),
+            Some(BridgeCommand::SessionTrace {
+                session_id: "s1".to_string(),
+                lines: TRACE_LINES_MAX,
+                clip: "line".to_string(),
+            })
+        );
+        // `lines` at the cap is itself.
+        assert_eq!(
+            parse_command(r#"{"cmd":"sessiontrace","sessionId":"s1","lines":40}"#),
+            Some(BridgeCommand::SessionTrace {
+                session_id: "s1".to_string(),
+                lines: TRACE_LINES_MAX,
+                clip: "line".to_string(),
+            })
+        );
+    }
+
+    /// A blank/non-id-shaped id, a nonsense `lines`, or an unknown `clip` is
+    /// refused (never defaulted, never silently widened), exactly like the
+    /// wire's other closed sets.
+    #[test]
+    fn parse_command_refuses_a_bad_sessiontrace() {
+        // A line that names the verb but fails its own gate is REFUSED by the
+        // parser (never defaulted), and `handle_conn` still answers it — the
+        // raw-line question that decision is made on is separate and pure.
+        assert!(wire_names_sessiontrace(
+            r#"{"cmd":"sessiontrace","sessionId":"s1","clip":"detials"}"#
+        ));
+        assert!(wire_names_sessiontrace(r#"{"cmd":"sessiontrace"}"#));
+        assert!(!wire_names_sessiontrace(r#"{"cmd":"focussession"}"#));
+        assert!(!wire_names_sessiontrace("{ not json"));
+        for line in [
+            r#"{"cmd":"sessiontrace"}"#,
+            r#"{"cmd":"sessiontrace","sessionId":""}"#,
+            r#"{"cmd":"sessiontrace","sessionId":"   "}"#,
+            r#"{"cmd":"sessiontrace","sessionId":"a b"}"#,
+            r#"{"cmd":"sessiontrace","sessionId":"-flag"}"#,
+            r#"{"cmd":"sessiontrace","sessionId":"s1","lines":0}"#,
+            r#"{"cmd":"sessiontrace","sessionId":"s1","lines":"8"}"#,
+            r#"{"cmd":"sessiontrace","sessionId":"s1","lines":-1}"#,
+            r#"{"cmd":"sessiontrace","sessionId":"s1","lines":1.5}"#,
+            r#"{"cmd":"sessiontrace","sessionId":"s1","clip":"detials"}"#,
+            r#"{"cmd":"sessiontrace","sessionId":"s1","clip":true}"#,
+            r#"{"cmd":"sessiontrace","sessionId":"s1","clip":""}"#,
+        ] {
+            assert_eq!(parse_command(line), None, "{line} must be refused");
+        }
+    }
+
+    /// One `sessiontrace` dispatch, end to end through a STUB core binary
+    /// (`AOIDE_CORE_BIN`): the argv the daemon builds is asserted by the stub
+    /// itself echoing its positional parameters, so this also pins that the
+    /// session id travels as ONE argv element with no shell involved.
+    #[test]
+    fn dispatch_session_trace_carries_the_clis_answer_verbatim() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_CORE_BIN"]);
+        let root = aoide_test_support::unique_tmp("shellbridge-trace-ok");
+        std::fs::create_dir_all(&root).unwrap();
+        let stub = root.join("stub-aoide");
+        // `$1 session $2 trace $3 <id> $4 --tail $5 N $6 --clip $7 <clip> $8 --json`
+        std::fs::write(
+            &stub,
+            r#"#!/bin/sh
+printf '{"status":"ok","command":"session.trace","message":"1 record(s)","data":{"sessionId":"%s","trace":"%s.jsonl","clip":"%s","steps":[{"id":"2","ts":1789603009102,"kind":"thinking","text":"argv: %s %s %s %s %s","error":false,"clipped":true}],"stepsOmitted":3}}\n' "$3" "$3" "$7" "$4" "$5" "$6" "$7" "$8"
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        std::env::set_var("AOIDE_CORE_BIN", &stub);
+
+        let answer = dispatch_session_trace("Aoide-7d23", 5, "detail");
+        assert_eq!(answer["ok"], true, "{answer}");
+        assert_eq!(answer["sessionId"], "Aoide-7d23");
+        assert_eq!(answer["clip"], "detail");
+        assert_eq!(answer["lines"], 5);
+        assert_eq!(answer["trace"], "Aoide-7d23.jsonl");
+        assert_eq!(answer["stepsOmitted"], 3, "the CLI's own bound is carried");
+        assert!(answer["at"].as_i64().unwrap_or(0) > 0, "the answer says when it was read");
+        let text = answer["steps"][0]["text"].as_str().unwrap();
+        assert_eq!(
+            text, "argv: --tail 5 --clip detail --json",
+            "the id is one argv element, the flags are separate ones, no shell: {text}"
+        );
+        assert_eq!(answer["steps"][0]["clipped"], true);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A refusal is the CLI's OWN taught refusal, verbatim, with its machine
+    /// `reason` beside it and no `steps` — so a card can tell a refusal from a
+    /// session that emitted nothing.
+    #[test]
+    fn dispatch_session_trace_passes_a_refusal_through_verbatim() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_CORE_BIN"]);
+        let root = aoide_test_support::unique_tmp("shellbridge-trace-refused");
+        std::fs::create_dir_all(&root).unwrap();
+        let stub = root.join("stub-aoide");
+        std::fs::write(
+            &stub,
+            r#"#!/bin/sh
+printf '{"status":"error","command":"session.trace","message":"`Aoide-x` has no readable trace at /x/none.jsonl","data":{"reason":"no-trace","sessionId":"Aoide-x"}}\n'
+exit 1
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        std::env::set_var("AOIDE_CORE_BIN", &stub);
+
+        let answer = dispatch_session_trace("Aoide-x", 12, "line");
+        assert_eq!(answer["ok"], false, "{answer}");
+        assert_eq!(answer["reason"], "no-trace");
+        assert_eq!(answer["sessionId"], "Aoide-x", "the CLI's own resolved identity");
+        assert!(answer["message"].as_str().unwrap().contains("no readable trace at"), "{answer}");
+        assert!(answer.get("steps").is_none(), "a refusal carries no step list");
+
+        // A binary that prints no envelope at all is an honest `no-answer`,
+        // never a silent empty step list.
+        std::fs::write(&stub, "#!/bin/sh\necho 'aoided must be running'\nexit 1\n").unwrap();
+        let answer = dispatch_session_trace("Aoide-x", 12, "line");
+        assert_eq!(answer["ok"], false);
+        assert_eq!(answer["reason"], "no-answer");
+        assert!(answer["message"].as_str().unwrap().contains("aoided must be running"), "{answer}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The wall-clock bound: a child that never exits is KILLED AND REAPED —
+    /// its own pid (the stub `exec`s the sleeper, so the pid it writes IS the
+    /// child) is gone from `/proc` afterwards, so no query leaves a process
+    /// behind.
+    #[test]
+    fn a_slow_child_is_killed_and_reaped_at_the_wall_clock_bound() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_CORE_BIN"]);
+        let root = aoide_test_support::unique_tmp("shellbridge-trace-timeout");
+        std::fs::create_dir_all(&root).unwrap();
+        let pidfile = root.join("child.pid");
+        let stub = root.join("stub-aoide");
+        std::fs::write(
+            &stub,
+            format!(
+                "#!/bin/sh\necho $$ > {}\nexec sleep 30\n",
+                pidfile.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        std::env::set_var("AOIDE_CORE_BIN", &stub);
+
+        let argv: Vec<String> = vec!["session".to_string(), "trace".to_string(), "s1".to_string()];
+        let started = std::time::Instant::now();
+        let out = run_core_bounded(&argv, std::time::Duration::from_millis(300));
+        assert!(
+            out.is_err(),
+            "a child that outlives the bound must not answer: {out:?}"
+        );
+        assert!(out.unwrap_err().contains("no answer within"));
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "the bound must be enforced by US, not waited out"
+        );
+
+        let pid: i32 = std::fs::read_to_string(&pidfile).unwrap().trim().parse().unwrap();
+        let gone = !std::path::Path::new(&format!("/proc/{pid}")).exists();
+        assert!(gone, "the timed-out child (pid {pid}) is still alive");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The failure mode the bound must survive, REPRODUCED: the direct child
+    /// exits at once but a DESCENDANT inherited its stdout and holds the pipe
+    /// open. An unconditional `join()` on the reader would block for the
+    /// descendant's whole lifetime, defeating the wall clock; here the read is
+    /// DISCARDED after the grace and the caller returns promptly.
+    #[test]
+    fn a_descendant_holding_the_pipe_open_never_defeats_the_bound() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_CORE_BIN"]);
+        let root = aoide_test_support::unique_tmp("shellbridge-trace-heldpipe");
+        std::fs::create_dir_all(&root).unwrap();
+        let pidfile = root.join("descendant.pid");
+        let stub = root.join("stub-aoide");
+        // The backgrounded `sleep` inherits this script's stdout (the pipe the
+        // runner is reading); the script itself exits immediately, so the pipe
+        // stays open with nobody writing to it.
+        std::fs::write(
+            &stub,
+            format!(
+                "#!/bin/sh\nsleep 30 &\necho $! > {}\necho 'partial output'\nexit 0\n",
+                pidfile.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        std::env::set_var("AOIDE_CORE_BIN", &stub);
+
+        let argv: Vec<String> = vec!["session".to_string(), "trace".to_string(), "s1".to_string()];
+        let started = std::time::Instant::now();
+        let out = run_core_bounded(&argv, std::time::Duration::from_millis(300));
+        let elapsed = started.elapsed();
+        assert!(
+            out.is_err(),
+            "a pipe still held open is not the whole answer: {out:?}"
+        );
+        let reason = out.unwrap_err();
+        assert!(reason.contains("stayed open"), "{reason}");
+        assert!(
+            elapsed < CHILD_DRAIN_GRACE + std::time::Duration::from_secs(3),
+            "the grace, not the descendant's lifetime, must set the clock (took {elapsed:?})"
+        );
+
+        // Clean up the descendant this test deliberately created.
+        if let Ok(text) = std::fs::read_to_string(&pidfile) {
+            if let Ok(pid) = text.trim().parse::<i32>() {
+                unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+            }
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The reader-slot cap, over its OWN counter (the process-wide pool is
+    /// shared with every other test in this binary, so exhausting it here would
+    /// refuse a concurrent dispatch): past the cap a read is refused without
+    /// starting a child, a returned slot is reusable, and a release can never
+    /// inflate the pool above the cap.
+    #[test]
+    fn reader_slots_are_capped_and_returned() {
+        let cap = 2usize;
+        let free = std::sync::atomic::AtomicUsize::new(cap);
+        assert!(take_slot(&free, cap));
+        assert!(take_slot(&free, cap));
+        assert!(!take_slot(&free, cap), "the cap must refuse, never wait");
+        release_slot(&free, cap);
+        assert!(take_slot(&free, cap), "a returned slot is reusable");
+        release_slot(&free, cap);
+        release_slot(&free, cap);
+        release_slot(&free, cap);
+        assert_eq!(
+            free.load(std::sync::atomic::Ordering::SeqCst),
+            cap,
+            "a release can never push the pool above its cap"
+        );
+        // And the real pool starts the way the constant says it does.
+        assert!(ReaderSlot::acquire().is_some());
     }
 
     #[test]

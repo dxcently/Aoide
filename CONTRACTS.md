@@ -1471,11 +1471,79 @@ agent session (no pty at all) never sets it. Absent means "no conduct-owned
 pty for this session" (the hook-only case); readers must tolerate both
 forms and round-trip fields they do not know.
 An `agent:"eidolon"` record — enrolled from the producer's presence tree by
-the reconcile in `conduct/src/graph/eidolon.rs`, never by `aoide conduct` —
+the reconcile in `conduct/src/graph/eidolon.rs`, never by `aoide conduct`, and
+never dropped by label: the reconcile removes only the enrolments it wrote
+itself, so a conduct-owned wrapper (`conduct`/`spawn`) labelled `eidolon` keeps
+its record, its task keys and its native child's parent edge —
 carries `logPath` too, with a different referent: the producer's own session
 journal exactly as its `meta.json` `log` names it, re-read on every pass,
 never a conduct-owned pty. It is the path a resume of that session hands
 back to the producer; nothing in Aoide reads or writes the file.
+
+**Additive in v0:** a session record MAY also carry an optional `task` (string)
+and `instructionsPath` (string) — a MANAGED TASK RUN's slug and the absolute
+path of its write-once instruction sidecar (`state/sessions/<sessionId>.instructions.md`,
+mode `0600`, beside the `logPath` transcript above and sharing its lifecycle).
+Stamped ONCE at registration by the run's own `conduct`, from the
+`spawn --task` / `--instructions` flags it re-execs with. The slug is also the
+run's MAILBOX name (`self/<slug>`, `docs/architecture/MAIL.md` — the slug is
+validated with the same name predicate `mail send` applies), and it outlives a
+respawn, so the RUN is identified by `sessionId`, never by the slug or a
+petname. The sidecar holds only the operator's own bytes: no credential, no
+token, no environment. The child reaches it by path — `AOIDE_TASK` and
+`AOIDE_TASK_INSTRUCTIONS` in its environment, `instructionsPath` on the record —
+and absent means "not a managed task run" (every legacy record and every
+ordinary session); readers must tolerate both forms and round-trip fields they
+do not know.
+
+**Additive in v0:** a session record MAY also carry an optional `exitCode`
+(integer) and `endedAt` (string, ISO-8601 UTC) — a managed task run's REAL end
+facts. `exitCode` is written from the child's own exit path
+(`ExitStatus::code()`) and is **ABSENT, never `0`, when there is no status to
+report**: a run killed or reaped has no exit code, so the key is simply not
+there and no consumer may read its absence as success. `endedAt` is stamped by
+that same exit path, and by `do_session_end`/the reaper for a run that never
+reached it (a kill or a liveness reap — no code, this instant only). Both are
+wrapper-run facts: an ordinary session's record carries neither.
+
+**Additive in v0:** a managed task run's exit report is filed by the daemon
+tick, and its delivery cursor is `state/stage/taskreport.json` (beside
+`state/stage/pingback.json`), keyed by the run's `sessionId` →
+`{endedAt, exitCode, outcome, msgid, mailbox, wake}`. The cursor advances only after the letter is
+in the mailbase, so a filing failure is retried on the next tick and a finished
+run whose report is not yet filed is retained against the sweep's prune
+(`prune_done`). Reads of it are read-only: no lock, no write, no cursor advance.
+
+**Additive in v0:** a session record MAY also carry an optional `outcome`
+(string, a CLOSED set) — a managed task run's discriminated end:
+`exit` (with `exitCode`), `signal` (the agent died by a signal; **no**
+`exitCode`), `timeout` (the wrapper's own wall-clock deadline fired),
+`stopped` (no status: reaped or killed outside the wrapper).
+`exitCode` is written ONLY for `exit`, so its absence is a fact rather than a
+missing measurement, and a kill is never dressed as a numeric code.
+`--timeout <secs>` (on `conduct` and, through the one argv builder, `spawn`) is
+the supervisor's clock — never inactivity — and on expiry the wrapper kills the
+direct child it spawned, keeping the post-kill status as `killedWith`
+(secondary evidence in the command envelope, never the child's result).
+
+**Additive in v0:** a session record MAY also carry an optional `reportTo`
+(string) — the mailbox a managed task run's exit report is addressed to
+(`spawn --report-to`/`conduct --report-to`, validated with the same name
+predicate as any mailbox). The report lane resolves the destination as
+`reportTo`, else the run's `parentSessionId` when THAT is a legal mailbox name,
+else the documented role mailbox `conductor`; a canonical id that is not a legal
+mailbox name is never rewritten into one, and a run with no parent and no
+`reportTo` is reported without a letter. The run's own slug mailbox
+(`self/<slug>`) carries only the letters sent TO the child — never the report —
+and the lane's cursor entry records the facts it used:
+`{endedAt, exitCode, outcome, msgid, mailbox, wake}`.
+
+**Additive in v0:** `aoide_storage::mail::unread_for(name, reader)` returns
+`(mark, entries)` for one reader and WRITES NOTHING — a reader-selected peek
+(no `save_cursors`, no mark created, no `read_for`/`mark`). It is the only
+reader-selected, entry-returning read in the mailbase and what `session watch`'s
+child-queue rail is rendered from, which is why watching a run consumes neither
+the child's nor the observer's unread state.
 
 **Additive in v0:** a session record MAY also carry an optional `petname`
 (string, `<word>-<word>`) — a human-readable display handle minted once, at
@@ -2031,27 +2099,44 @@ schema review here, never a second field beside this one.
 ### The session TRACE — **v0** (P-EIDOLON E6, `docs/architecture/EIDOLON-TRACE.md`)
 
 The one on-disk contract in this section Aoide READS and does not own: a
-harness's own trace file. `eidolon` — Aoide's on-box agent — mirrors its
-journal (`<stem>.eid`, bitcode, private to eidolon) as ONE JSON LINE PER
-RECORD and names that file from its own presence metadata. The producer is
-eidolon; the reader is Aoide. `docs/architecture/EIDOLON-TRACE.md` is the
-canonical prose statement; the two halves below are quoted from it verbatim,
-and a change to either is an edit THERE first.
+harness's own trace. `eidolon` — Aoide's on-box agent — publishes its journal
+(`<stem>.eid`, bitcode, private to eidolon) as one JSON line per record, in one
+of two producer generations: an INSTALLED one that mirrors the journal beside
+itself as `<stem>.jsonl` and names that file from its presence metadata, and the
+CURRENT one that writes no mirror at all and instead exports the journal on
+demand through its own read-only door, `eidolon log --json <journal> [--after
+<id>]`. Aoide serves both. The producer is eidolon; the reader is Aoide.
+`docs/architecture/EIDOLON-TRACE.md` is the canonical prose statement; the two
+halves below are quoted from it, and a change to either is an edit THERE first.
 
-**File.** `<sessions_dir>/<stem>.jsonl`, beside `<sessions_dir>/<stem>.eid`
-with the same stem (`~/.local/share/eidolon/sessions/1789603005561.jsonl`).
-Created with the journal, appended for the journal's life; `resume` reopens
-it for append. The journal is written first and is authoritative; the trace
-mirrors it. A trace write that fails is reported once on stderr and never
-fails the turn.
+**File (installed generation).** `<sessions_dir>/<stem>.jsonl`, beside
+`<sessions_dir>/<stem>.eid` with the same stem
+(`~/.local/share/eidolon/sessions/1789603005561.jsonl`). Created with the
+journal, appended for the journal's life; `resume` reopens it for append. The
+journal is written first and is authoritative; the mirror follows it. A mirror
+write that fails is reported once on stderr and never fails the turn. A mirror is
+read only while it is CURRENT: a journal that exists and is strictly newer is
+positive evidence the mirror stopped tracking the run, and a frozen mirror never
+becomes live state.
+
+**Door (current generation).** `eidolon log --json <stem>.eid [--after <id>]`,
+opened read-only (`Session::open_readonly`, upstream `0432133`), so a torn tail
+reads as absent rather than being repaired or truncating. `--after` emits only
+records with an id greater than the one given (ids are the dense `#n` the text
+rendering prints); a serialize error aborts mid-print with a non-zero exit, so a
+reader discards partial output. Before `0432133` `log` opened the journal
+read-write, which is why Aoide proves the generation first — `log --help`
+listing `--after` — before each export, without caching the answer. An
+unavailable or negative answer prevents that export. Probe and export are
+separate invocations; replacing the runtime between them can still race.
 
 `state/stage/sessions.json`'s own record for such a session does not carry
-the path — the trace is found through the producer's presence metadata at
-`$XDG_RUNTIME_DIR/eidolon/<id>/meta.json`, whose one added field is
-`"trace": "<absolute path>"`. Absent on an older eidolon; Aoide's
-`PresenceMeta` treats it as `Option`, and `aoide_protocol::agents::
-eidolon_transcript_locate` returns the `.jsonl` when it names one that
-exists, else `meta.json` as before. `aoide session trace` resolves a path
+any path — the trace is resolved through the producer's presence metadata at
+`$XDG_RUNTIME_DIR/eidolon/<id>/meta.json`, whose `log` field every generation
+writes and whose `trace` field the installed one adds. Aoide's presence parse
+yields both, and `aoide_protocol::agents::eidolon_transcript_locate` answers the
+mirror while it is current, else the journal when the door is there, else
+`meta.json` as before. `aoide session trace` resolves a path
 the same way, through `TranscriptSpec::locate` — never a path of its own.
 
 **Line.** `serde_json::to_string(&Record)` + `\n` — the record's own serde
@@ -2061,7 +2146,7 @@ designed, only exposed: externally tagged enum, snake_case content blocks.
 ```json
 {"id":0,"parent":null,"ts_ms":1789603005561,"kind":{"SessionStart":{"model":"ollama:deepseek-v4.1-flash","cwd":"/home/khoa/Aoide","system":null}}}
 {"id":1,"parent":0,"ts_ms":1789603005570,"kind":{"UserMessage":{"role":"user","content":[{"type":"text","text":"# Brief A: …"}]}}}
-{"id":2,"parent":1,"ts_ms":1789603009102,"kind":{"AssistantMessage":{"role":"assistant","content":[{"type":"thinking","thinking":"…","signature":"…"},{"type":"text","text":"Let me read the slot catalog first."},{"type":"tool_use","id":"call_8vr43zri","name":"read","input":{"path":"modules/facets/quickshell/qml/slots.md"}}]}}}
+{"id":2,"parent":1,"ts_ms":1789603009102,"kind":{"AssistantMessage":{"role":"assistant","content":[{"type":"thinking","thinking":"…","signature":"…"},{"type":"text","text":"Let me read the slot catalog first."},{"type":"tool_use","id":"call_8vr43zri","name":"read","input":"{\"path\":\"modules/facets/quickshell/qml/slots.md\"}"}]}}}
 {"id":3,"parent":2,"ts_ms":1789603009140,"kind":{"ToolResult":{"tool_use_id":"call_8vr43zri","content":"     1\t# Per-song widget slots — catalog\n…","is_error":false}}}
 {"id":120,"parent":119,"ts_ms":1789606380000,"kind":{"TurnBudget":{"calls_left":8}}}
 {"id":131,"parent":130,"ts_ms":1789606421000,"kind":{"TurnSettled":{"stop_reason":"end_turn","usage":{"input_tokens":9570000,"output_tokens":71900,"cache_creation_input_tokens":0,"cache_read_input_tokens":9430000}}}}
@@ -2087,7 +2172,7 @@ appears; the ones Aoide reads:
 | `AskUser{answer:null}` | state `awaiting` |
 | `TurnSettled` | state `idle`; stop reason + usage |
 | `Cancelled` | state `stopped` |
-| `TurnBudget{calls_left}` / `TurnDeadline{secs_left}` | the harness told it to wrap up (ping-back) |
+| `TurnBudget{calls_left}` | the harness told it to wrap up (ping-back) — `TurnDeadline{secs_left}`, if a journal still carries one, is a LEGACY record kind: nothing writes it |
 | `ContextSize{tokens}` | `context tokens` |
 | `PolicyVerdict{outcome}` | shown by `session trace` |
 | `ExternalMessage{from,text}` | what a steer said, and who |
@@ -2385,6 +2470,10 @@ over — and `silentAt` (absent until a silence line has been sent) is the
 record id that line was sent for; any new record re-arms it by removing the
 key. Both are opaque record ids, rendered as strings exactly as the trace's
 own `#<id>` is (the journal writes numbers; nothing promises it stays one).
+`seen` is also what a poll hands the door's own `--after` — the same id in the
+same role — while the door's cursor (process memory inside the protocol
+reader) stays an output bound: it is dropped whenever the journal behind it
+cannot be identified, and it is never a delivery authority.
 This file is written ONLY by `graph/pingback.rs`, and only inside the
 resident daemon: it is read, decided over and rewritten (atomically,
 temp-then-rename) inside one short `state/stage/.stage.lock` section BEFORE

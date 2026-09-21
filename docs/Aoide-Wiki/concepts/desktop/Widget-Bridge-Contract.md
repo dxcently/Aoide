@@ -198,6 +198,50 @@ is not resolved yet. The widget sends only the sessionId it already holds — ne
 a stale or empty address. (The bare `focuswindow` command remains for a window with
 no session id.)
 
+## The trace query — the one READ the bridge answers
+
+`{cmd:"sessiontrace", sessionId, lines, clip:"line"|"detail"}` asks for ONE
+session's emitted blocks: what it THOUGHT, SAID, called and got back. The daemon
+re-execs the existing CLI (`aoide session trace <id> --tail N --clip … --json`,
+[[Eidolon-Trace]]) and answers one JSON line:
+
+```json
+{"ok":true,"sessionId":"…","clip":"line","lines":12,"trace":"…jsonl",
+ "at":1789985394295,"steps":[…],"stepsOmitted":0}
+{"ok":false,"sessionId":"…","clip":"line","lines":12,
+ "reason":"no-trace","message":"`…` has no readable trace at …"}
+```
+
+Each step is `{ id, ts, kind, text, error, clipped }`, `kind` ∈ `thinking · say ·
+tool · result · settled · user · other`, `id`/`ts` the trace record's own and
+`clipped` true when the text is a kept prefix. `message` is the CLI's OWN taught
+refusal, carried verbatim (`reason ∈ no-trace · no-presence · unknown-agent ·
+remote-target · not-found · ambiguous`, plus the door's own `no-answer` /
+`bad-request`) — so a widget paints a reason instead of guessing at one.
+
+**It is a snapshot, never a stream, and the widget may not imply otherwise.**
+There is no token stream to subscribe to: each answer is a read of the harness's
+own trace tail, and its own `at`/`ts` say when. A card that wants it *current*
+refreshes on a bounded cadence, and the bounds are the widget's own:
+
+- **ONE selected target.** Hover, keyboard focus and the Details page all CLAIM
+  the one target and release it when they stop looking; the latch and the target
+  live at the widget root, not on a delegate — the roster is reassigned on every
+  heartbeat, so a per-card latch would be destroyed mid-flight and let two queries
+  overlap.
+- **ONE request in flight**, released only by that request's own callback, and
+  every answer guarded by sequence + sessionId: a late or superseded answer is
+  dropped whole, and a reply may never be painted on a card it was not read for.
+- **Stopped the moment it is not looked at** — hover-out, focus-out, Details
+  closed, the widget hidden, the card offscreen. The last answer stays painted
+  (with its own read time); a refused or absent trace falls back to `say`/`tool`,
+  which still arrive on the reaper's ~12 s cadence.
+
+The daemon side is bounded too, whatever the cadence: `lines` defaults to 12 and
+is clamped to 40 from above (a nonsense value or an unknown `clip` is refused,
+never widened), and the re-exec'd child is killed and reaped at a 10 s wall clock
+with a partial read discarded rather than answered from.
+
 ## The rules a widget is built by
 
 These are the render-surface corollary ([[Plugin-Architecture#The corollary
@@ -211,9 +255,9 @@ for Quickshell: render surfaces only]]) applied to the roster widgets:
 3. **One canonical file.** Watch `sessions.json`; treat `hooks.json`/`graph.json`
    as audit/derived.
 4. **Outbound is a narrow socket.** `focussession`/`focuswindow` jumps,
-   `send` injection, and acknowledged session actions (the session-menu's
-   `undying`/`project`/`kill`/`createproject`/`editproject` calls) — nothing
-   else leaves QML.
+   `send` injection, acknowledged session actions (the session-menu's
+   `undying`/`project`/`kill`/`createproject`/`editproject` calls), and the
+   read-only `sessiontrace` query above — nothing else leaves QML.
 5. **Colour only from [[livery]]**; hard corners; the music-glyph state contract
    (♪ working · 𝄐 awaiting · 𝄁 stopped · 𝄽 idle · 𝄂 done) is a hard contract.
 6. **Degrade.** An empty/missing stage file is an empty roster; off-Hyprland the

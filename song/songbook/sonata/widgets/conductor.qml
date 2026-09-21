@@ -102,6 +102,52 @@
 // ( ´▽｀ ) face) until they leave the file. Stale hooks never resurrect rows;
 // rebuild() is crash-free on partial/empty records — every stage field is
 // optional (additive-v0 contract).
+//
+// ── The trace (Phase B): what a session emitted, not just its last line ─────
+// The roster's `say`/`tool` are a handful of fields on a ~12s reap cadence, so
+// thinking, tool arguments and tool OUTPUT read as nothing on the card. The
+// card's two voice/tool lanes therefore take a SECOND source, read through the
+// one answered bridge verb (`sessiontrace` → `ShellBridge.traceSession` →
+// `aoide session trace --json`'s own `data.steps`): one step per emitted
+// content block, in the record's own order (thinking · say · tool · result ·
+// settled · user · other), each step's text the harness's own words —
+// untrusted DATA, painted PlainText, never interpreted.
+//
+//   VOICE lane  the last `say`, else the last `thinking` (kept dim-italic, the
+//               lane's own voice tone), else today's `say`/hook placeholder.
+//   HAND lane   the projection's newest `tool` (`▸ name` — the lane's caret
+//               idiom) or its newest `result` (`!` when it errored), else the
+//               hook `activity`/reaper `tool` pair exactly as before.
+//
+// The Details page (`SessionMenu.qml`, `d` / the [details] chip) opens the SAME
+// step list in the wider window the daemon is asked for there (`lines: 24`,
+// `clip: "detail"`), so reasoning and multi-line tool output are readable
+// instead of cut at a lane's one line.
+//
+// HONEST LIMITS, stated here because they are the contract this paints under:
+//  * It is a SNAPSHOT, refreshed while a card is looked at — never a token
+//    stream. Each answer carries its own read time; there is no stream to
+//    subscribe to, and the roster's `say`/`tool` still arrive on the reap.
+//  * The poll is bounded four ways: ONE selected target (hover/focus/Details
+//    CLAIM it; the latch and the target live at temple level, never on a
+//    delegate — a plaque is rebuilt on every heartbeat), ONE request in flight
+//    (released only by that request's own callback, gated by sequence +
+//    sessionId so a recycled delegate can paint nothing), a small lines × clip
+//    payload, and polling stopped the instant nothing is looked at. The timer's
+//    cadence is the interval ALONE — `running` must never depend on `inflight`,
+//    or the immediate trigger on each restart polls at event-loop speed.
+//  * An answer is painted only for the session it was READ for
+//    (`answerId`-attributed); a refusal or an absent trace shows its own reason
+//    in Details and leaves the card's lanes on their fallback — nothing is
+//    invented, and a failure never wears a fresh-looking read time.
+//  * If the harness writes no `thinking` blocks there is simply no reasoning
+//    line — the honest render of an empty projection.
+//
+// ── The trace controller (temple level) ────────────────────────────────────
+// `trace` below: the claims map, the one latch, the one Timer, and the
+// attribution helpers every viewer reads. `delegateSeq`/`claimReady` give each
+// plaque its own claim key, stamped at completion — a claim registered before
+// its token is final would be under a key nobody releases (a permanent poller).
 
 import QtQuick
 import Quickshell
@@ -127,7 +173,11 @@ Item {
         anchors.fill: parent
         z: 100
         source: Qt.resolvedUrl("SessionMenu.qml")
-        onLoaded: { item.livery = temple.livery; item.bridge = temple.bridge }
+        onLoaded: {
+            item.livery = temple.livery
+            item.bridge = temple.bridge
+            item.trace = temple.trace
+        }
     }
     function openSessionMenu(record, sourceItem, x, y, page) {
         if (!sessionMenu.item) return
@@ -149,11 +199,240 @@ Item {
         copiedId = (record && record.sessionId) || ""
         copiedBeat.restart()
     }
+    // ── TRACE — the ONE read-only trace query (Phase B) ─────────────────────
+    // What a session has THOUGHT, SAID, called and got back, read through the
+    // one answered bridge verb (`sessiontrace`, `ShellBridge.traceSession`) —
+    // `aoide session trace --json`'s own `data.steps`, projected daemon-side.
+    //
+    // LIVE means: the answer is refreshed while a card is being looked at, not
+    // a token-by-token stream. There is no stream to subscribe to — each answer
+    // is a read of the harness's own trace tail (a journal/export snapshot), and
+    // its own `at` says when it was read. The roster's `say`/`tool` still arrive
+    // on the reaper's ~12s cadence; nothing here changes that.
+    //
+    // Bounded four ways, all of them here: ONE card at a time (one selected
+    // target), ONE request in flight (the latch below), a small `lines` × clip
+    // payload, and polling stopped the instant nothing is being looked at.
+    //
+    // The latch lives at TEMPLE level, not on a plaque: the roster is
+    // reassigned on every heartbeat and every delegate is rebuilt, so a
+    // per-card latch would be destroyed mid-flight and let two queries overlap.
+    // A plaque or the Details page CLAIMS the target while it is looked at and
+    // RELEASES it when it is not; the claim map arbitrates (Details wins over a
+    // card face, newest claim breaks a tie), so hover/focus/Details can never
+    // race each other into two pollers.
+    property QtObject trace: QtObject {
+        id: traceFeed
+
+        // The claims, keyed by claimant (a claim exists ONLY while its owner is
+        // looking). `at` is a monotonic local counter, never a clock.
+        property var claims: ({})
+        property int claimSeq: 0
+        // The one selected target.
+        property string targetId: ""
+        property bool targetDetail: false
+        property bool watching: false
+        // The ANSWER, attributed to the session it was READ for: a card paints
+        // steps only when `answerId` is its own session, so no answer can ever
+        // be shown on the wrong card.
+        property string answerId: ""
+        property var steps: []
+        property real at: 0
+        property int omitted: 0
+        // A failure is attributed too, and carries its own reason.
+        property string errorId: ""
+        property string error: ""
+        // ONE request in flight. Set when a request is issued, cleared ONLY by
+        // that request's own callback — never by a hide/close/delegate rebuild,
+        // so a request already alive is never forgotten and never duplicated.
+        // `ShellBridge.replyTimeoutMs` is what guarantees the callback arrives
+        // even when the daemon is wedged.
+        property bool inflight: false
+        property int seq: 0
+        property int inflightSeq: 0
+        property string inflightId: ""
+        // A card face keeps the one-line spelling; the Details page asks the
+        // daemon for the wider window and the wider clip.
+        property int cardLines: 12
+        property int detailLines: 24
+        property string cardClip: "line"
+        property string detailClip: "detail"
+
+        function claim(key, sessionId, detail) {
+            var k = "" + key
+            var id = "" + (sessionId || "")
+            if (id === "") { traceFeed.release(k); return }
+            var next = {}
+            for (var p in traceFeed.claims) next[p] = traceFeed.claims[p]
+            traceFeed.claimSeq++
+            next[k] = { sessionId: id, detail: detail === true, at: traceFeed.claimSeq }
+            traceFeed.claims = next
+            traceFeed._recompute()
+        }
+
+        function release(key) {
+            var k = "" + key
+            var next = {}
+            var had = false
+            for (var p in traceFeed.claims)
+                if (p === k) had = true
+                else next[p] = traceFeed.claims[p]
+            if (!had) return
+            traceFeed.claims = next
+            traceFeed._recompute()
+        }
+
+        // Details beats a card face; among equals the newest claim wins. A
+        // target CHANGE drops whatever was painted for the old one — nothing
+        // already read belongs to a session it was not read for, and its `at`
+        // must never be shown as if it were the new one's.
+        function _recompute() {
+            var best = null
+            for (var p in traceFeed.claims) {
+                var c = traceFeed.claims[p]
+                if (best === null) { best = c; continue }
+                if (c.detail && !best.detail) { best = c; continue }
+                if (c.detail === best.detail && c.at > best.at) best = c
+            }
+            var id = best === null ? "" : best.sessionId
+            var detail = best === null ? false : best.detail
+            var previous = traceFeed.targetId
+            traceFeed.watching = best !== null
+            traceFeed.targetId = id
+            traceFeed.targetDetail = detail
+            if (id !== "" && id !== previous) {
+                traceFeed.answerId = ""
+                traceFeed.steps = []
+                traceFeed.at = 0
+                traceFeed.omitted = 0
+                traceFeed.errorId = ""
+                traceFeed.error = ""
+            }
+        }
+
+        // Issue ONE request for the current target. Never called while a
+        // request is alive; the timer's own `running` is gated on the same
+        // latch, so a slow daemon cannot stack queries.
+        function _request() {
+            if (traceFeed.inflight) return
+            var id = traceFeed.targetId
+            if (id === "" || !temple.bridge || !temple.bridge.traceSession) return
+            traceFeed.seq++
+            var seq = traceFeed.seq
+            var detail = traceFeed.targetDetail
+            traceFeed.inflight = true
+            traceFeed.inflightSeq = seq
+            traceFeed.inflightId = id
+            try {
+                temple.bridge.traceSession(
+                    id,
+                    detail ? traceFeed.detailLines : traceFeed.cardLines,
+                    detail ? traceFeed.detailClip : traceFeed.cardClip,
+                    function(reply) { traceFeed._answer(seq, id, reply) })
+            } catch (e) {
+                // A bridge that cannot even take the call (a stub without the
+                // verb) must not pin the latch: fail loudly and honestly.
+                traceFeed.inflight = false
+                traceFeed.answerId = ""
+                traceFeed.steps = []
+                traceFeed.errorId = id
+                traceFeed.error = "trace query unavailable: " + e
+            }
+        }
+
+        function _answer(seq, requestedId, reply) {
+            // Only the request that still OWNS the latch may consume an answer.
+            // `inflight` is cleared here, so a second callback for the same
+            // request (the same seq, a bridge that answered twice) finds no
+            // latch and is dropped whole — the seq alone cannot tell a
+            // duplicate from the original, because `inflightSeq` keeps its
+            // value after the first answer.
+            if (!traceFeed.inflight || seq !== traceFeed.inflightSeq) return
+            traceFeed.inflight = false
+            // The target moved on while this was in flight: paint nothing, and
+            // keep no attribution for it.
+            if (requestedId !== traceFeed.targetId) return
+            if (!reply || reply.ok !== true) {
+                traceFeed.answerId = ""
+                traceFeed.steps = []
+                traceFeed.at = 0
+                traceFeed.omitted = 0
+                traceFeed.errorId = requestedId
+                traceFeed.error = (reply && (reply.message || reply.reason))
+                    ? ("" + (reply.message || reply.reason))
+                    : "no reply from shellbridge"
+                return
+            }
+            traceFeed.errorId = ""
+            traceFeed.error = ""
+            traceFeed.answerId = "" + ((reply.sessionId !== undefined && reply.sessionId !== "")
+                                       ? reply.sessionId : requestedId)
+            traceFeed.steps = (reply.steps && reply.steps.length !== undefined) ? reply.steps : []
+            traceFeed.at = reply.at || 0
+            traceFeed.omitted = reply.stepsOmitted || 0
+        }
+
+        // ── what a viewer may paint (attribution, never position) ──────────
+        function stepsFor(sessionId) {
+            return ("" + (sessionId || "")) === traceFeed.answerId ? traceFeed.steps : []
+        }
+        function errorFor(sessionId) {
+            return ("" + (sessionId || "")) === traceFeed.errorId ? traceFeed.error : ""
+        }
+        function atFor(sessionId) {
+            return ("" + (sessionId || "")) === traceFeed.answerId ? traceFeed.at : 0
+        }
+        function omittedFor(sessionId) {
+            return ("" + (sessionId || "")) === traceFeed.answerId ? traceFeed.omitted : 0
+        }
+        function isTarget(sessionId) {
+            return traceFeed.targetId !== "" && traceFeed.targetId === ("" + (sessionId || ""))
+        }
+        // `hh:mm:ss` of the answer's own read time, "" when there is none — so
+        // a stamp is never invented for a card that has no answer.
+        function stampFor(sessionId) {
+            var ms = traceFeed.atFor(sessionId)
+            if (!ms) return ""
+            return Qt.formatTime(new Date(ms), "hh:mm:ss")
+        }
+        // The last step of ONE kind (the card face's tool/result lines) — ""
+        // text when the projection carries none.
+        function lastOf(sessionId, kind) {
+            var list = traceFeed.stepsFor(sessionId)
+            for (var i = list.length - 1; i >= 0; i--)
+                if (list[i] && list[i].kind === kind) return list[i]
+            return null
+        }
+        function lastStep(sessionId) {
+            var list = traceFeed.stepsFor(sessionId)
+            return list.length > 0 ? list[list.length - 1] : null
+        }
+
+        // The poll: paced by THIS interval, never by how fast an answer comes
+        // back. `running` deliberately does NOT depend on `inflight` — a timer
+        // that stops and restarts on every answer, with `triggeredOnStart`,
+        // re-fires on each restart and polls as fast as the event loop turns
+        // (measured: ~90k queries/second on the preview canvas). The latch is
+        // enforced in `_request` instead: a tick while a request is alive is a
+        // no-op, so the cadence is bounded by this one number whatever the
+        // daemon does.
+        property Timer poll: Timer {
+            interval: 1000
+            repeat: true
+            running: traceFeed.watching && traceFeed.targetId !== ""
+            triggeredOnStart: true
+            onTriggered: traceFeed._request()
+        }
+    }
+
     // plaque state that must outlive the plaques: the roster is reassigned on
     // every heartbeat and every delegate is rebuilt, so focus and the copy
     // chip's one-beat acknowledgement are keyed by session id up here
     property string focusedId: ""
     property string copiedId: ""
+    // One monotonic token per plaque delegate: its own trace claim key, so a
+    // rebuilt delegate never releases the claim its successor holds.
+    property int delegateSeq: 0
     property bool rebuilding: false
     Timer { id: copiedBeat; interval: 1200; onTriggered: temple.copiedId = "" }
     // Keyboard focus keeps its plaque in view: Tab-walking the playbill scrolls
@@ -1581,6 +1860,11 @@ Item {
             else if (temple.focusedId === id && !temple.rebuilding) temple.focusedId = ""
         }
         Component.onCompleted: {
+            claimToken = ++temple.delegateSeq
+            // The token is final only NOW, so the trace claim is gated on this
+            // flag: a claim registered before it (token 0) would be under a key
+            // nobody ever releases, and would leak a permanent poller.
+            claimReady = true
             if (card.s && card.s.sessionId && card.s.sessionId === temple.focusedId) card.forceActiveFocus()
         }
         Keys.onPressed: function(event) {
@@ -1680,27 +1964,104 @@ Item {
         // tool used to share this box (a "▸ tool" first line above the say);
         // it has its own row now (§3.5), so a long say gets all four lines back
         // and a tool popping in no longer pushes the words out of view.
+        // ── the VOICE lane's words ──────────────────────────────────────────
+        // TWO sources, the projection first: when the trace query has answered
+        // for THIS session, the lane shows the agent's own last emitted block —
+        // its reasoning (`thinking`, kept dim-italic) or its speech (`say`) —
+        // else nothing changes: the roster's `say`, else the hook placeholder.
+        // The projection is a read of the harness's own trace tail taken while
+        // this card is looked at (its `at` says when), never a stream.
+        readonly property var traceSteps: temple.trace ? temple.trace.stepsFor(s.sessionId) : []
+        readonly property var traceVoice: {
+            if (card.traceSteps.length === 0) return null
+            var said = temple.trace.lastOf(s.sessionId, "say")
+            return said !== null ? said : temple.trace.lastOf(s.sessionId, "thinking")
+        }
+        readonly property bool traceSaid: card.traceVoice !== null
+            && card.traceVoice.text !== ""
+        readonly property bool traceReasoning: card.traceSaid && card.traceVoice.kind === "thinking"
         readonly property string sayText: (s && s.say)
             ? ("" + s.say).replace(/\s+/g, " ") : ""
-        readonly property bool thinkSaid: sayText !== ""
-        readonly property string thinkText: thinkSaid
-            ? sayText
-            : (card.hooked ? ("ϟ " + card.cardLiveState) : "…")
+        readonly property bool thinkSaid: card.traceSaid || sayText !== ""
+        readonly property string thinkText: card.traceSaid
+            ? card.traceVoice.text
+            : (thinkSaid ? sayText : (card.hooked ? ("ϟ " + card.cardLiveState) : "…"))
 
-        // the tool lane — what the agent last reached for. TWO sources, and
-        // they disagree on purpose: `activity` is hook-set the instant a tool
-        // starts but is only ever its bare NAME ("Bash"), and is cleared when
-        // the turn settles; `tool` is read off the transcript by the reaper, so
-        // it carries the subject ("Bash: cargo test") and SURVIVES the settle,
-        // but can sit one reap (~12s) behind. Same call → take the rich label;
-        // a live tool the transcript hasn't caught up to → take the live name.
+        // ── the HAND lane's one line ────────────────────────────────────────
+        // THREE sources now, and the projection leads: the last emitted block
+        // when it is a tool call (`▸ name`, the lane's own caret idiom) or a
+        // result (`!` when it errored — the honest first line of the output),
+        // else the projected last tool, else the pair below. `activity` is
+        // hook-set the instant a tool starts but is only ever its bare NAME
+        // ("Bash"), and is cleared when the turn settles; `tool` is read off the
+        // transcript by the reaper, so it carries the subject ("Bash: cargo
+        // test") and SURVIVES the settle, but can sit one reap (~12s) behind.
+        // Same call → take the rich label; a live tool the transcript hasn't
+        // caught up to → take the live name.
         readonly property string liveTool: (s && s.activity) ? ("" + s.activity) : ""
         readonly property string lastTool: (s && s.tool) ? ("" + s.tool) : ""
+        readonly property string traceToolText: {
+            if (card.traceSteps.length === 0) return ""
+            var last = temple.trace.lastStep(s.sessionId)
+            if (last !== null && last.kind === "tool") return last.text
+            if (last !== null && last.kind === "result")
+                return (last.error ? "! " : "") + last.text
+            var tool = temple.trace.lastOf(s.sessionId, "tool")
+            return tool !== null ? tool.text : ""
+        }
         readonly property string toolText: {
+            if (card.traceToolText !== "") return card.traceToolText
             if (liveTool === "") return lastTool
             var a = liveTool.toLowerCase(), b = lastTool.toLowerCase()
             return (b === a || b.indexOf(a + ":") === 0) ? lastTool : liveTool
         }
+
+        // ── the trace claim ────────────────────────────────────────────────
+        // A card claims the ONE trace target while it is BEING LOOKED AT
+        // (hover or keyboard focus, on a visible card inside the playbill) and
+        // releases it the moment it is not, so polling stops on hover-out,
+        // focus-out, a hidden widget or an offscreen card — and never for a card
+        // nobody is looking at. The key is per-DELEGATE (`claimToken`), so a
+        // destroyed delegate can only ever release its own claim, never the one
+        // its rebuilt successor holds.
+        property bool claimReady: false
+        property int claimToken: 0
+        // The claim key is the DELEGATE's token ALONE, never the session id: a
+        // reused delegate that is handed a new `s` must re-register (or drop)
+        // the SAME key rather than leave a claim under the old session's key
+        // that nothing would ever release — the leak that turns into a
+        // permanent poller for a session nobody is looking at.
+        property string claimKey: "card:" + claimToken
+        Component.onDestruction: if (temple.trace) temple.trace.release(claimKey)
+        readonly property bool inPlaybill: {
+            if (!flick || !flick.visible || flick.height <= 0) return false
+            var p = card.mapToItem(flick.contentItem, 0, 0)
+            return (p.y + card.height) > flick.contentY && p.y < (flick.contentY + flick.height)
+        }
+        // "Looked at" is the card's own reveal (hover or keyboard focus) OR the
+        // temple's shared hover id — the cross-widget state `cardMouse.onEntered`
+        // writes and the terminals playbill already reads (shared.tracedSessionId
+        // / hoveredSessionId), so a card whose session IS the hovered one is
+        // being looked at even while its delegate is being rebuilt.
+        readonly property bool looked: card.revealed
+            || (temple.shared && s && ("" + (s.sessionId || "")) !== ""
+                && temple.shared.hoveredSessionId === ("" + s.sessionId))
+        readonly property bool tracing: temple.trace !== null && card.claimReady
+            && card.looked && temple.visible && card.inPlaybill
+        // ONE place that makes the registry match THIS card's state, called on
+        // every input that can change it: whether the card is looked at, its
+        // claim key/token, and which session its delegate now carries. A claim
+        // for a session this card no longer shows is a claim nobody would ever
+        // release, so `s` changing re-registers the same key with the new id
+        // (one target, never zero and never two).
+        function syncClaim() {
+            if (!temple.trace || !card.claimReady) return
+            if (card.tracing) temple.trace.claim(claimKey, s ? (s.sessionId || "") : "", false)
+            else temple.trace.release(claimKey)
+        }
+        onTracingChanged: card.syncClaim()
+        onClaimKeyChanged: card.syncClaim()
+        onSChanged: card.syncClaim()
 
         // ── the identity trinity — graph number · session id · agent name ────
         // noBadge reads s.no verbatim, stamped in rebuild(): a top-level int
@@ -2407,8 +2768,12 @@ Item {
                                  ? temple.faceMono : temple.faceSerif
                     font.italic: card.thinkSaid || !card.hooked
                     font.pixelSize: 10
+                    // a projected THINKING block is the agent's reasoning, not
+                    // its speech: the same serif italic, a shade dimmer — the
+                    // lane's own voice tone, never a new one.
                     color: (card.thinkSaid || card.hooked)
-                           ? temple.withA(temple.livery.paletteFg, 0.55)
+                           ? temple.withA(temple.livery.paletteFg,
+                                          card.traceReasoning ? 0.45 : 0.55)
                            : temple.withA(temple.livery.paletteFg, 0.25)
                 }
             }

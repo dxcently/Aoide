@@ -75,3 +75,69 @@ ThinkChiyo's `.ssh/config` now contains `Host Yomi`, targeting
 returns `yomi-strix`. Codex is available in the remote login shell and reports
 an existing ChatGPT login. The remaining app action is to enable `Yomi` under
 SSH connections and select `/home/khoa/Aoide`; no app handoff is claimed.
+
+## Managed wrapper consumer checkpoint, 0.0.25
+
+The User requested a checkpoint of the completed work and a patch-version bump.
+The managed wrapper accepts any executable with its normal headless arguments;
+process tracking, captured output, instructions, child mail and completion
+reporting do not require a harness trace adapter. Exact prompts, reasoning and
+tool-event streaming are optional. Linux is verified; native Windows supervision
+remains unfinished.
+
+Parent consumption found and corrected four integration defects: the native
+Eidolon sweep removed conduct-owned wrappers, live mail omitted letter bodies,
+timeouts displayed as ordinary stops, and a watcher started before the mailbase
+existed missed its first letter. Initial attachment also catches letters filed
+between the opening frame and attachment without replaying consumed mail.
+
+Two real Ollama `deepseek-v4.1-flash` tasks ran under private Aoide daemons using
+the new Eidolon producer. The final run lasted 75 seconds, retained its wrapper
+through native presence scans, rendered the first unread letter before the
+child read it, and completed with exit code 0. Two observer snapshots preserved
+the same unread letter; only the child's read drained it. The daemon filed the
+completion report and retained the finished record. Separate consumer probes
+covered detached runs, exit code 7 and a two-second timeout. The CLI uses its
+normal error exit status while preserving the child's exact exit code in the
+record. No Codex desktop wake is claimed: the report had no armed reader.
+
+The conduct suite passed 858 tests before the final attachment correction;
+the focused view suite then passed 10 tests, including the new startup-race
+case. The workspace all-target check passed. The exact source system build
+before the version bump passed. Evidence is retained locally under
+`/tmp/aoide-wrapper-consumer-20260921/`; private test daemons were stopped.
+
+Eidolon upstream `d9ff7002877469054e1ca29acae059da18e030f7` was built with harnox
+`cbff17589bc4dab5d43472104d47589b899b5c15`. Fresh run, resume, read-only export
+and real-provider tests passed. Its reader failed on a copy of an older agent
+journal at bitcode offset 420248, while the previous reader succeeded without
+changing the copy. The default producer was therefore restored to the previous
+binary. The new producer remains available explicitly as
+`~/.local/bin/eidolon-current-20260921`; the Aoide Nix package is a launcher and
+does not itself upgrade that external binary. Legacy journal compatibility is
+still required before making the candidate the default.
+
+HTTPS remains a design for end-to-end encrypted, signed immutable letters;
+SSH remains the current transport. The native Windows core port and AoideOS
+migration to the documented dxflake composition remain open lanes.
+
+The versioned 0.0.25 system build passed at
+`/nix/store/kjqdvrfynymcyhq9pnapc4ghvxm8g0pn-nixos-system-yomi-strix-26.11.20260907.dc5d91f`.
+Its package checks include 859 passing conduct tests. A final consumer test used
+that built release to wrap a silent `sleep` process under the unregistered
+`generic-headless` label: it remained visible with empty output, then recorded
+exit 0 and filed its completion report. This proves basic availability does not
+require a harness profile or a structured output stream. No system activation
+was performed.
+
+At 08:19:28 EDT the live user service was observed running the built 0.0.25
+`aoided`, and `/run/current-system` pointed to the tested `kjqdvr…` system.
+The parent agent did not initiate the activation. The corrected wrapper is now
+available through the live daemon as well as the private consumer fixtures.
+
+Independent Eidolon/DeepSeek review returned SHIP for the final Linux consumer
+corrections, including the parent's attachment-race delta. The reviewer also
+reproduced retained wrapper ownership, native-child ancestry, native-presence
+cleanup and exactly one completion report with a private synthetic presence
+socket. A separate bounded source review returned SHIP. Neither verdict claims
+Windows completion or producer legacy-journal compatibility.

@@ -192,19 +192,34 @@ the presence socket answering `{"op":"ping"}` with `{"ok":true}` inside a
 250ms budget: never a stat, never `/proc`. Unlike a desktop Codex thread this
 IS an agent session (`kind:"agent"`), so it is a normal dedup/staleness
 candidate and its `parentSessionId` is resolved here (the first conducted
-ancestor up the presence pid's own process chain).
+ancestor up the presence pid's own process chain). The sweep owns only the
+records it enrolled: `agent:"eidolon"` is a label a caller may choose for a
+conduct-owned wrapper of its own (`spawn --task … --agent eidolon -- eidolon
+run …`), so ownership is read off the record's own conduct facts (`conductable`,
+the control socket, the run's task keys) and only a real presence enrolment is
+ever dropped, upserted or enrolled over.
 
-**Its state comes from the trace, when there is one.** eidolon mirrors its
-journal as `<log>.jsonl` — one JSON record per line — and names that file
-from its own `meta.json`. The LAST record decides, and only the five
+**Its state comes from the trace, when there is one.** eidolon publishes its
+journal as one JSON record per line — as a `<log>.jsonl` mirror an installed
+generation writes, or through its own read-only export door — and the session's
+presence names the journal either way. Aoide resolves it through the same
+locator every other transcript reader uses (`TranscriptSpec::locate`, then
+`TranscriptSpec::trace`), so the state fold follows whichever generation is
+installed. The LAST record decides, and only the five
 canonical states are ever written: `TurnSettled` → `idle`, `Cancelled` →
 `stopped`, `AskUser` with `answer: null` → `awaiting`, anything else →
 `working` (a turn is open). Nothing falls back to the presence's `busy`
 while a trace exists — a headless run's `busy` is permanently false, which is
-the non-fact the trace replaces. With no trace at all (an older eidolon) the
+the non-fact the trace replaces. With no trace at all (an older eidolon with
+neither a mirror nor a door) the
 presence rule applies instead: a TUI owner's `busy` maps to `working`/`idle`,
 anything else carries the literal `"unknown"` rather than a guessed verdict,
 folded to `idle`.
+
+A mirror that the producer has stopped appending to is not a trace Aoide will
+read as live state: a journal strictly newer than its mirror is positive
+evidence, and the answer becomes the journal itself (when the door is there) or
+the presence rule — never the frozen record.
 
 The file, its line shape, the record table and the state rule are one
 contract — `docs/architecture/EIDOLON-TRACE.md`, restated at CONTRACTS.md §4.
@@ -478,3 +493,30 @@ an `aoide shell lock` command absent from the schema (open thread, see
 - [[Node-Federation]] — the wire half of key-verified identity (P-ID5)
 - [[Secrets-Broker]] — the origin gate, the credential's first policy consumer (P-ID4)
 - [[Node-Transport]] — the reaper backstop that collects a tunnel a killed session never closed
+
+## Managed task runs
+
+A managed task run (`aoide spawn --task <slug>`, see
+[Managed-Task-Wrapper.md](Managed-Task-Wrapper.md)) is an ordinary conducted
+session carrying two extra record keys of its own — `task` (the slug, which is
+also the CHILD's inbox name) and `instructionsPath` — plus the end facts
+`outcome` (`exit`/`signal`/`timeout`/`stopped`), `exitCode` (present only for a
+real exit), `endedAt`, and `reportTo` (the mailbox the run's report is addressed
+to). `exitCode` is ABSENT (never `0`) when the run was killed, signalled or
+reaped.
+
+- **`session watch <id> [--tail N] [--snapshot] [--json]`** — the read-only
+  live view of such a run: its instructions, its live output, the CHILD's own
+  unread queue (letters sent TO the subagent, read through a cursor-free peek),
+  and where it stands. Live is the default (it follows until
+  the run ends or Ctrl-C); `--snapshot` is the single bounded frame a door that
+  must return asks for. It writes nothing and advances no cursor, and its footer
+  reports `running`, `stopped — not running` or `exited <code> at <endedAt>` —
+  an exit is never rendered as task success.
+- A finished run's exit report is filed to its REPORT mailbox by the daemon tick
+  (`state/stage/taskreport.json` is its delivery cursor) — `--report-to`, else
+  the parent's id when that is a legal mailbox name, else the role mailbox
+  `conductor`. The run's own slug mailbox (`self/<slug>`) carries only the
+  letters sent TO the child; the report is never filed there. An unfiled run's
+  record, and a filed one, are both retained against the sweep's prune, so a
+  completed task stays resolvable.

@@ -59,6 +59,14 @@ mod resurrect;
 mod send;
 mod session_store;
 mod spawn;
+// The managed task wrapper's EXIT REPORT lane (`spawn --task`): the reaper
+// tick's own reader of a finished task record, filing one letter into the
+// task's mailbox through the registered `mail send` implementation, then
+// taking the mail-side doorbell once — see `graph/taskreport.rs`'s module doc
+// for its delivery semantics (single delivery in the normal path, every
+// filing failure retried, and the one crash window that can duplicate).
+mod taskreport;
+pub(crate) use self::taskreport::taskreport;
 #[cfg(test)]
 pub(crate) mod testutil;
 // `session trace <id> [--tail N] [--follow] [--json]` — the read surface
@@ -112,6 +120,12 @@ pub use self::pending::{pending_approve, pending_deny, pending_list};
 // (`docs/architecture/EIDOLON-TRACE.md`). Read-only, so it sits outside the
 // L4 dual-writer family entirely.
 pub use self::trace::session_trace;
+// `session watch <id> [--tail N] [--snapshot] [--json]` — the READ-ONLY live
+// view of a managed task run: instructions, output, its mailbox, and where it
+// stands. Read-only, so it sits outside the L4 dual-writer family entirely,
+// like `session trace` above.
+mod view;
+pub use self::view::session_watch;
 pub use self::permit::{answer_summons, session_permit, summons_card_id};
 pub use self::send::{pending_path, session_hook, session_send};
 pub use self::session_store::{session_bind, session_end, session_phase, session_start};

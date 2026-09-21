@@ -72,9 +72,13 @@ done, what remains…]" (`session/mod.rs:1470 budget_frame`) fires once, at
 call 120. A died at call 97, R1 at 110. Neither was ever told to wrap up,
 because the budget they actually ran out of — seconds — has no frame.
 
-*Eidolon:* `--deadline <secs>`: at `deadline − margin` inject the same
-`budget_frame` with seconds instead of calls; at `deadline` cancel exactly
-as SIGINT does. The kill becomes a settled turn with a report.
+*Eidolon:* SIGTERM handled as SIGINT (it landed; §2.1). The `--deadline
+<secs>` proposal that followed was dropped by the producer's own review: its
+wall-clock budget belongs to whoever launched the run, and on the re-landed
+SIGTERM parity `timeout -s INT` on the operator's side IS that budget. That
+wrapper is Unix-only — `CORE-POSIX.md`: Linux and native Windows are the
+primary targets — so it is an operator convenience, never presented as the
+portable mechanism, and never something Aoide adopts on a run's behalf.
 
 ### 2.3 The console is a preview — `crates/cli/src/term.rs:24 preview()`
 
@@ -145,10 +149,10 @@ one step from one:
 | `started` | `SessionStart` | session path, model, cwd, brief hash |
 | `tool_error` | `ToolResult` with non-zero/`Err` | tool, call id, first line of stderr (full, not preview) |
 | `retry_exhausted` | harnox `RetryPolicy` gives up | provider, attempts, last error |
-| `nudged` | `TurnBudget { calls_left }` | calls left (or seconds, with `--deadline`) |
+| `nudged` | `TurnBudget { calls_left }` | calls left |
 | `iteration_limit` | `agent.rs:1686` | calls spent |
 | `idle` | no record for N s | seconds since last record, last assistant text |
-| `deadline` | new: `--deadline` timer | seconds left |
+| `deadline` | LEGACY: `TurnDeadline { secs_left }` | seconds left — nothing writes it since `--deadline` was dropped |
 | `cancelled` | `Cancelled` (SIGINT, and SIGTERM once handled) | signal, records so far, files touched |
 | `settled` | `TurnSettled` | final assistant text, cost, files touched |
 
@@ -189,16 +193,21 @@ two agents the event is JSON and needs no model.
 
 ### 3.4 Minimal change set for `~/eidolon`
 
-1. SIGTERM handled as SIGINT (`main.rs:1991`, `:2102`).
-2. `--deadline <secs>`: seconds-based `budget_frame`, then cancel.
+1. SIGTERM handled as SIGINT (`main.rs:1991`, `:2102`). LANDED.
+2. `--deadline <secs>`: PROPOSED AND DROPPED by the producer's own review —
+   the launcher owns the wall clock (`timeout -s INT`), and a harness-side
+   seconds budget is not needed for a settled turn now that SIGTERM cancels.
 3. `--report-to <target>` emitting the table in §3.1; `Cancelled`/`settled`
    carry files touched and the last assistant text in full.
 4. `--full` on `run`/`log`; bare ids for `log`/`resume`.
 5. Delete or fix `~/.config/eidolon/tools/search.rn`.
 
-Until then, the operator-side protocol is: `timeout -s INT`, pid-file
+The operator-side protocol is: `timeout -s INT`, pid-file
 watchers, print the session path on launch, and `eidolon send --wake
---from orchestrator <id>` to steer — never `resume` alone for a runaway.
+--from orchestrator <id>` to steer — never `resume` alone for a runaway. The
+wrapper is Unix-only; a host without `timeout(1)` uses its own process
+supervision, and Aoide's own reads of a live run pass no deadline of their own
+(a trace read is bounded in Aoide, not in the harness it reads).
 
 ## 4. Jev and Verba Volantia
 

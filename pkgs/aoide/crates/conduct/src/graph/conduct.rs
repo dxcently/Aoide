@@ -13,13 +13,14 @@ use super::model::{
 use super::identity::peer_cred;
 use super::session_store::{
     do_session_end, do_session_start, set_session_log_path, stamp_headless, stamp_origin,
-    stamp_spawned,
+    stamp_session_exit, stamp_spawned, stamp_task,
 };
 use super::window::{discover_window_address, resolve_registration_parent};
 use aoide_protocol::Invocation;
 use aoide_protocol::output::Outcome;
 use aoide_storage::attest::is_node_origin;
 use aoide_storage::fs::{session_logs_dir, with_stage_lock};
+use aoide_storage::time::now_iso_utc;
 use serde_json::json;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixListener;
@@ -201,11 +202,37 @@ impl Drop for TtyRaw {
 /// (only a session leader without a ctty may do this — hence setsid FIRST); the
 /// slave is dup'd over fds 0/1/2 so the child's std streams ARE the pty; and the
 /// master + spare slave fd are closed in the child. All of this precedes exec.
+/// The managed-task context a `conduct` run carries into its own child: the
+/// task slug and the absolute path of the write-once instruction sidecar
+/// (`spawn --task`, `docs/Aoide-Wiki/concepts/orchestration/
+/// Managed-Task-Wrapper.md`). Both are exported into the CHILD's environment
+/// ([`CHILD_TASK_ENV`]/[`CHILD_TASK_INSTRUCTIONS_ENV`]) so the instructions
+/// are genuinely reachable by the agent itself, never a viewer-only sidecar;
+/// neither value is a secret, and nothing else about this process's
+/// environment is dumped anywhere.
+#[derive(Debug, Clone, Default)]
+pub(in crate::graph) struct TaskContext {
+    pub slug: String,
+    pub instructions_path: Option<String>,
+    /// The mailbox this run's exit report is addressed to (`--report-to`),
+    /// validated here with the same name predicate every mailbox name is.
+    pub report_to: Option<String>,
+}
+
+/// The environment convention a managed task's child (the agent itself)
+/// reads: `AOIDE_TASK` names its task slug and child inbox, while
+/// `AOIDE_TASK_INSTRUCTIONS` names the absolute path of its write-once
+/// instruction sidecar. Set beside the long-standing
+/// `AOIDE_SESSION_ID` export, nothing removed, nothing else added.
+const CHILD_TASK_ENV: &str = "AOIDE_TASK";
+const CHILD_TASK_INSTRUCTIONS_ENV: &str = "AOIDE_TASK_INSTRUCTIONS";
+
 fn spawn_on_pty(
     program: &str,
     args: &[String],
     session_id: &str,
     ws: Option<libc::winsize>,
+    task: Option<&TaskContext>,
 ) -> std::io::Result<(std::process::Child, OwnedFd)> {
     use std::os::unix::process::CommandExt;
 
@@ -234,6 +261,12 @@ fn spawn_on_pty(
     let master_fd = master;
     let mut cmd = std::process::Command::new(program);
     cmd.args(args).env("AOIDE_SESSION_ID", session_id);
+    if let Some(task) = task {
+        cmd.env(CHILD_TASK_ENV, &task.slug);
+        if let Some(path) = &task.instructions_path {
+            cmd.env(CHILD_TASK_INSTRUCTIONS_ENV, path);
+        }
+    }
     unsafe {
         cmd.pre_exec(move || {
             if libc::setsid() == -1 {
@@ -814,11 +847,99 @@ fn typed_capture_active(is_shell: bool, read_stdin: bool) -> bool {
     is_shell && read_stdin
 }
 
+/// The signal that killed a status, off `ExitStatusExt` (Unix). A status with
+/// no signal has `None` — that is the honest "no exit code" case.
+fn signal_number(status: &std::process::ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal()
+}
+
+/// A signal's conventional name, for the outcome vocabulary's `signal` field
+/// (`"TERM"`, `"KILL"`, …). An unmapped number keeps its number rather than
+/// guessing a name.
+fn signal_name(signo: i32) -> String {
+    match signo {
+        libc::SIGHUP => "HUP",
+        libc::SIGINT => "INT",
+        libc::SIGQUIT => "QUIT",
+        libc::SIGKILL => "KILL",
+        libc::SIGTERM => "TERM",
+        libc::SIGPIPE => "PIPE",
+        libc::SIGALRM => "ALRM",
+        libc::SIGSEGV => "SEGV",
+        libc::SIGABRT => "ABRT",
+        libc::SIGUSR1 => "USR1",
+        libc::SIGUSR2 => "USR2",
+        _ => return format!("signal {signo}"),
+    }
+    .to_string()
+}
+
+/// The wrapper's own END vocabulary — a CLOSED set, derived ONLY from the
+/// status THIS process observed and its own wall-clock deadline:
+/// `exit` (with a real code), `signal` (the agent died by a signal — no code,
+/// ever), `timeout` (the deadline fired), `stopped` (no status at all: reaped
+/// or killed outside the wrapper). Pure, so every row is a table test. Nothing
+/// here reads a harness trace, which is what makes the wrapper's
+/// error/timeout/completion reporting independent of the ping-back path.
+fn classify_end(
+    timed_out: bool,
+    status: Option<&std::process::ExitStatus>,
+) -> (String, Option<String>, Option<i32>) {
+    if timed_out {
+        // The wrapper's kill is the WRAPPER's act, not the child's exit: no
+        // exit code is claimed for it (the post-kill status travels
+        // separately, as `killedWith`).
+        return ("timeout".to_string(), None, None);
+    }
+    match status {
+        Some(st) => match signal_number(st) {
+            Some(signo) => ("signal".to_string(), Some(signal_name(signo)), None),
+            None => match st.code() {
+                Some(code) => ("exit".to_string(), None, Some(code)),
+                None => ("stopped".to_string(), None, None),
+            },
+        },
+        None => ("stopped".to_string(), None, None),
+    }
+}
+
+/// Whether the master reports ANY readable byte right now (a zero-timeout
+/// `poll`) — used to drain what a just-exited child already wrote before the
+/// loop stops.
+fn master_has_data(master: RawFd) -> bool {
+    let mut fds = [pollfd(master, libc::POLLIN)];
+    let rc = unsafe { libc::poll(fds.as_mut_ptr(), 1, 0) };
+    rc > 0 && (fds[0].revents & libc::POLLIN) != 0
+}
+
+/// Is every holder of the PTY slave gone? The master reports `POLLHUP` once
+/// the last slave fd closes and nothing else — which is exactly the "no
+/// descendant is holding the terminal" fact, recorded when a child exits while
+/// a descendant still owns the slave.
+fn pty_hung_up(master: RawFd) -> bool {
+    let mut fds = [pollfd(master, libc::POLLIN)];
+    let rc = unsafe { libc::poll(fds.as_mut_ptr(), 1, 0) };
+    rc > 0 && (fds[0].revents & libc::POLLHUP) != 0
+}
+
+/// Where the multiplex loop ended: whether the wrapper's own deadline fired,
+/// whether the DIRECT CHILD had already exited while a descendant still held
+/// the PTY slave (its own fact, never a timeout), and — for a deadline kill
+/// only — the post-kill status as SECONDARY evidence (`killedWith`), never
+/// presented as the child's result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MultiplexEnd {
+    timed_out: bool,
+    killed_with: Option<String>,
+    pty_held_after_exit: bool,
+}
+
 /// The single-thread `poll()` multiplexer. Shuttles: real stdin → master (you
 /// type normally), master → real stdout (you read normally), and each accepted
 /// injection connection → master (INJECTION). A pending SIGWINCH re-sizes the
-/// master. Returns the child's real exit code once the master hangs up (the
-/// child's slave closed) and the child is reaped.
+/// master. Returns HOW it ended ([`MultiplexEnd`]); the caller reads the
+/// child's real status off the cached `ExitStatus`.
 fn conduct_multiplex(
     master: RawFd,
     listener: Option<&UnixListener>,
@@ -827,7 +948,8 @@ fn conduct_multiplex(
     is_shell: bool,
     read_stdin: bool,
     sink: &mut OutputSink,
-) -> i32 {
+    deadline: Option<std::time::Instant>,
+) -> MultiplexEnd {
     use std::sync::atomic::Ordering;
     let stdin_fd = libc::STDIN_FILENO;
     let listener_fd = listener.map(|l| l.as_raw_fd());
@@ -840,9 +962,9 @@ fn conduct_multiplex(
     // Live cwd/command tick for a conducted SHELL. A `tail -f` (or any quiet TUI)
     // never produces I/O, so we can't hang the refresh off output — instead the
     // poll gets a ~1s timeout and the tick fires on the elapsed clock. Agents
-    // don't tick (state/activity come from hooks), so they keep the blocking poll.
+    // also wake to observe child exit when a descendant keeps the PTY open.
     let shell_pid = child.id() as i32;
-    let poll_timeout: libc::c_int = if is_shell { 1000 } else { -1 };
+    let poll_timeout: libc::c_int = 1000;
     let tick_period = std::time::Duration::from_millis(950);
     let mut last_tick = std::time::Instant::now();
     // The sudo-prompt TEXT-SCAN booster: the instant a `[sudo] password for`
@@ -864,7 +986,38 @@ fn conduct_multiplex(
         conduct_refresh_shell(id, master, shell_pid, false, typed); // stamp initial cwd/state now.
     }
 
+    let mut timed_out = false;
+    // The DIRECT CHILD's own exit governs completion, so a descendant holding
+    // the PTY slave open (the master never hangs up then) can no longer keep a
+    // finished run "running" — nor make the deadline fire on a child that
+    // exited long ago.
+    let mut child_exited = false;
+    let mut pty_held_after_exit = false;
     loop {
+        // Nothing left to read from a child that has already exited: stop.
+        // (Reached only after every readable byte was serviced, so a finished
+        // child's last output is never lost.)
+        if child_exited && !master_has_data(master) {
+            break;
+        }
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                if !child_exited {
+                    child_exited = true;
+                    pty_held_after_exit = !pty_hung_up(master);
+                }
+            }
+            _ => {}
+        }
+        // A6: the wrapper's own WALL-CLOCK deadline — but a child that has
+        // ALREADY exited is finished, never "timed out": the deadline is
+        // consulted only while the direct child is still running. Quiet output
+        // is never a trigger and continuous output is never a reprieve; only
+        // the clock decides.
+        if !child_exited && deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+            timed_out = true;
+            break;
+        }
         // Service a pending resize before blocking again.
         if WINCH.swap(false, Ordering::SeqCst) {
             if let Some(ws) = tty_winsize(stdin_fd) {
@@ -884,7 +1037,28 @@ fn conduct_multiplex(
             fds.push(pollfd(c, libc::POLLIN));
         }
 
-        let rc = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, poll_timeout) };
+        // Bounded wait: `min(remaining, poll_timeout)`, checked on both sides —
+        // a huge `--timeout` can neither overflow into a negative (blocking)
+        // wait nor spin, and a conducted shell's own ~1s tick still applies.
+        // Once the child has exited the wait is zero, so the loop only drains
+        // what is already there and stops.
+        let wait_ms: libc::c_int = if child_exited {
+            0
+        } else {
+            match deadline {
+                Some(d) => {
+                    let remaining = d.saturating_duration_since(std::time::Instant::now());
+                    let ms = remaining.as_millis().min(i32::MAX as u128) as i32;
+                    if poll_timeout < 0 {
+                        ms.max(1)
+                    } else {
+                        poll_timeout.min(ms.max(1))
+                    }
+                }
+                None => poll_timeout,
+            }
+        };
+        let rc = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, wait_ms) };
         if rc < 0 {
             let err = std::io::Error::last_os_error();
             if err.raw_os_error() == Some(libc::EINTR) {
@@ -1068,10 +1242,49 @@ fn conduct_multiplex(
             libc::close(c);
         }
     }
-    match child.wait() {
-        Ok(st) => st.code().unwrap_or(-1),
-        Err(_) => -1,
-    }
+    // A real exit status is read by the CALLER (`std::process::Child` caches
+    // it, so its own `wait` returns the same `ExitStatus` immediately) — this
+    // loop only reports HOW it ended. A deadline kill happens here, on the
+    // DIRECT child this process spawned: never a roster-resolved id, never an
+    // ancestry walk, so no unrelated session can ever be the target. The
+    // post-kill status is kept as `killedWith` — secondary evidence, never the
+    // result.
+    // A deadline kill targets the DIRECT child's OWN PROCESS GROUP: `setsid` in
+    // `spawn_on_pty`'s `pre_exec` already made that child a group leader, so
+    // `killpg(child_pid)` reaches it and whatever job is still in ITS group (an
+    // `sh -c 'sleep 300 &'` background job dies with the group), and can never
+    // reach an unrelated session — the same "never a roster id, never an
+    // ancestry walk" guarantee `Child::kill` carries. A descendant that called
+    // `setsid` for itself left the session BY ITS OWN ACT and is deliberately
+    // NOT signalled: the wrapper cleans up what it started, and the wiki says
+    // exactly that rather than promising arbitrary descendant cleanup. The
+    // post-kill status is kept as `killedWith` — secondary evidence, never the
+    // result.
+    let killed_with = if timed_out {
+        let pgid = child.id() as i32;
+        if unsafe { libc::killpg(pgid, libc::SIGKILL) } != 0 {
+            let _ = child.kill();
+        }
+        let give_up = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut seen: Option<std::process::ExitStatus> = None;
+        while std::time::Instant::now() < give_up {
+            match child.try_wait() {
+                Ok(Some(st)) => {
+                    seen = Some(st);
+                    break;
+                }
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+                Err(_) => break,
+            }
+        }
+        seen.map(|st| match signal_number(&st) {
+            Some(signo) => format!("signal({})", signal_name(signo)),
+            None => format!("exit({})", st.code().unwrap_or_default()),
+        })
+    } else {
+        None
+    };
+    MultiplexEnd { timed_out, killed_with, pty_held_after_exit }
 }
 
 /// `aoide conduct [--agent A] [--parent P] [--id I] -- <command …>` — the
@@ -1119,8 +1332,78 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         None
     });
 
+    // Managed task wrapper mode (`spawn --task <slug>`): the slug (also the
+    // task mailbox name) and the absolute path of the write-once instruction
+    // sidecar `spawn` already wrote. Read BEFORE the child is spawned,
+    // because both are exported into that child's own environment
+    // (`spawn_on_pty`'s `AOIDE_TASK`/`AOIDE_TASK_INSTRUCTIONS`) — the
+    // instructions must be genuinely reachable by the agent, not a
+    // viewer-only sidecar.
+    let report_to = inv
+        .flags
+        .get("report-to")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if let Some(name) = &report_to {
+        if !aoide_storage::node_store::valid_node_name(name) {
+            return Outcome::usage(
+                cmd,
+                format!(
+                    "--report-to `{name}` is not a legal mailbox name (^[a-z0-9][a-z0-9-]*$)"
+                ),
+            );
+        }
+    }
+    let task = inv
+        .flags
+        .get("task")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(|slug| TaskContext {
+            slug,
+            instructions_path: inv
+                .flags
+                .get("instructions-path")
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+            report_to,
+        });
+    // A6's deadline: a wall-clock instant computed BEFORE the child exists, so
+    // an unusable value refuses without spawning anything. Checked arithmetic —
+    // a `--timeout` too large to add to this instant is a taught usage error,
+    // never a panic and never a silently ignored deadline.
+    let timeout_secs = match inv.flags.get("timeout") {
+        None => None,
+        Some(raw) => match raw.trim().parse::<u64>() {
+            Ok(secs) if secs > 0 => Some(secs),
+            _ => {
+                return Outcome::usage(
+                    cmd,
+                    format!(
+                        "--timeout must be a positive whole number of seconds (got `{raw}`); \
+                         omit it for no deadline"
+                    ),
+                )
+            }
+        },
+    };
+    let deadline = match timeout_secs {
+        Some(secs) => match std::time::Instant::now()
+            .checked_add(std::time::Duration::from_secs(secs))
+        {
+            Some(at) => Some(at),
+            None => {
+                return Outcome::usage(
+                    cmd,
+                    format!("--timeout {secs} is too large to represent as a deadline"),
+                )
+            }
+        },
+        None => None,
+    };
+
     // Spawn FIRST: a failed exec must register no session (parity with `wrap`).
-    let (mut child, master) = match spawn_on_pty(&program, &inv.args[1..], &id, ws) {
+    let (mut child, master) = match spawn_on_pty(&program, &inv.args[1..], &id, ws, task.as_ref()) {
         Ok(v) => v,
         Err(e) => return Outcome::error(cmd, format!("failed to conduct `{program}`: {e}")),
     };
@@ -1181,7 +1464,10 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         } else {
             None
         },
-        None,
+        // A5: in task mode the session's NAME is the task's slug (a tracked
+        // regular identity — `kind` stays a normal session, never a `sub:`
+        // sub-agent card), so the roster and the DAG node read as the task.
+        task.as_ref().map(|t| t.slug.as_str()),
         // Record THIS conduct process's pid (not the PTY child's): conduct owns
         // the session lifecycle — the `do_session_end` at the bottom of this fn
         // always resolves the record on any NORMAL exit. Only conduct's own
@@ -1209,6 +1495,29 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     // `--windowed` is a spawn no less than the headless default.
     if inv.flag_present("spawned") {
         stamp_spawned(&id);
+    }
+    // Managed task wrapper: stamp the run's own two task keys (`task` =
+    // the slug AND its mailbox name, `instructionsPath` = the write-once
+    // sidecar the spawner wrote). One writer — this child — so there is no
+    // race with `spawn`, which has already returned by now.
+    if let Some(task) = &task {
+        stamp_task(&id, &task.slug, task.instructions_path.as_deref(), task.report_to.as_deref());
+        // A1: the CHILD is its task mailbox's own reader — enrolled by session
+        // id, idempotent and best-effort, so a direct `conduct --task` (never
+        // launched by `spawn`) still gets its reader. `enrol_reader` never
+        // moves an existing mark, so calling it on both paths is safe.
+        let _ = aoide_storage::mail::enrol_reader(&task.slug, &id);
+        // A4: a ROLE report mailbox (`--report-to <name>`) can carry a real
+        // reader and a real doorbell latch, so the parent is enrolled under it.
+        // Never under the parent's own id: that reader key IS the mailbox name,
+        // which the ringer never arms (and `enrol_reader` refuses
+        // `reader == name`) — a session-id mailbox is readable but not
+        // ringable, and the lane records that reason.
+        if let Some(name) = task.report_to.as_deref() {
+            if let Some(p) = parent.as_deref().filter(|p| *p != name) {
+                let _ = aoide_storage::mail::enrol_reader(name, p);
+            }
+        }
     }
     // Origin, LOCAL-CLASS ONLY (P-P3, `docs/architecture/PAIRING.md`
     // decision 7; tightened at LANE IDENTITY P-ID0, G16/G5): inherited
@@ -1266,7 +1575,14 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         Some(t)
     };
 
-    let exit_code = conduct_multiplex(
+    // `conduct_multiplex` already waited on the child, and
+    // `std::process::Child` CACHES that status — so this `wait` returns the
+    // SAME `ExitStatus` immediately rather than blocking or lying. It is how
+    // the REAL status is read here: `code()` is `None` for a SIGNAL death (the
+    // agent was killed), and that absence is the honest answer — a kill is
+    // never dressed as a numeric code on the record or in the report (plan
+    // §3.1: absent, never 0).
+    let end = conduct_multiplex(
         master_fd,
         listener.as_ref(),
         &mut child,
@@ -1274,34 +1590,77 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         captures_like_a_shell(&program),
         !headless,
         &mut sink,
+        deadline,
     );
+    // The child's REAL status, read off the cached `ExitStatus` (the
+    // multiplexer already waited, so this returns the same value at once), and
+    // the discriminated end: exit / signal / timeout / stopped. A signal death
+    // has NO exit code — the old `code().unwrap_or(-1)` collapse is gone.
+    let status = child.wait().ok();
+    let (outcome, signal, exit_code) = classify_end(end.timed_out, status.as_ref());
 
     // Restore tty, unlink socket, resolve the session — whatever happened.
     if let Some(t) = tty.as_mut() {
         t.restore();
     }
     let _ = std::fs::remove_file(&socket_path);
+    // A managed task run's END facts, stamped before the roster exit below so
+    // the record carries them the moment it goes `done`. The code is the one
+    // `conduct_multiplex` just returned — the child's REAL status, never an
+    // inference. `exitCode`/`endedAt` are wrapper-run facts, so an ordinary
+    // session's record is not touched.
+    if task.is_some() {
+        stamp_session_exit(&id, exit_code, Some(&outcome), &now_iso_utc());
+    }
     let _ = do_session_end(&id);
 
     let changed = vec![format!("session {id}: running → done")];
-    let data = json!({
+    // The end facts, as they actually are: `outcome` is the discriminator, and
+    // `exitCode`/`signal`/`timeoutSecs`/`killedWith` appear only where they are
+    // facts. No invented fields: an absent key means the fact does not exist.
+    let mut data = json!({
         "sessionId": id,
         "agent": agent,
-        "exitCode": exit_code,
+        "outcome": outcome,
         "conductable": conductable,
         "socket": socket_str,
     });
-    if exit_code == 0 {
-        Outcome::ok(cmd, format!("`{agent}` finished (conducted session `{id}`)"))
-            .changed(changed)
-            .with_data(data)
+    if let Some(code) = exit_code {
+        data["exitCode"] = json!(code);
+    }
+    if let Some(signo) = &signal {
+        data["signal"] = json!(signo);
+    }
+    if outcome == "timeout" {
+        data["timeoutSecs"] = json!(timeout_secs);
+        if let Some(killed) = &end.killed_with {
+            data["killedWith"] = json!(killed);
+        }
+    }
+    // The PTY outliving its child is its own fact (a descendant holding the
+    // slave after the agent exited), never a timeout and never a reason to
+    // pretend the run is still going.
+    if end.pty_held_after_exit {
+        data["ptyHeldAfterExit"] = json!(true);
+    }
+    let result = match (outcome.as_str(), exit_code) {
+        ("exit", Some(0)) => format!("`{agent}` finished (conducted session `{id}`)"),
+        ("exit", Some(code)) => format!("`{agent}` exited {code} (conducted session `{id}`)"),
+        ("signal", _) => format!(
+            "`{agent}` died by signal {} (conducted session `{id}`)",
+            signal.clone().unwrap_or_default()
+        ),
+        ("timeout", _) => format!(
+            "`{agent}` hit its --timeout of {}s and was killed (conducted session `{id}`)",
+            timeout_secs.unwrap_or_default()
+        ),
+        _ => format!("`{agent}` stopped without a status (conducted session `{id}`)"),
+    };
+    let outcome_ok = outcome == "exit" && exit_code == Some(0);
+    if outcome_ok {
+        Outcome::ok(cmd, result).changed(changed).with_data(data)
     } else {
-        Outcome::error(
-            cmd,
-            format!("`{agent}` exited {exit_code} (conducted session `{id}`)"),
-        )
-        .changed(changed)
-        .with_data(data)
+        Outcome::error(cmd, result).changed(changed).with_data(data)
     }
 }
 

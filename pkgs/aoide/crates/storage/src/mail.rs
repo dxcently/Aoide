@@ -874,6 +874,35 @@ pub fn read_base() -> Result<Vec<Entry>, String> {
     with_lock(read_entries_unlocked)
 }
 
+/// The letters `name` holds that are UNREAD BY `reader_session`, plus that
+/// reader's own mark — a PEEK. **Writes nothing**: no `save_cursors`, no mark
+/// created for a reader that has none (absent reads as `0`, the same floor
+/// `names_with_unread` uses), no `read_for`, no `mark`. The caller's own
+/// cursors are therefore untouched, and two observers watching one mailbox
+/// cannot consume each other's mail — the read-only half of the cursor
+/// contract, on the reader axis (`read_base` is cursor-free but reader-blind;
+/// `names_with_unread` is reader-aware but entry-blind; this is both).
+pub fn unread_for(name: &str, reader_session: Option<&str>) -> Result<(u64, Vec<Entry>), String> {
+    let name = name.to_string();
+    let reader_session = reader_session.map(|s| s.to_string());
+    with_lock(move || {
+        let entries = read_entries_unlocked()?;
+        let cursors = load_cursors()?;
+        let reader = reader_id(&name, reader_session.as_deref());
+        let mark = cursors
+            .get(&name)
+            .and_then(|cursor| cursor.get(&reader))
+            .map(|m| m.seq)
+            .unwrap_or(0);
+        let mut matched: Vec<Entry> = entries
+            .into_iter()
+            .filter(|e| e.envelope.header.to.name == name && e.seq > mark)
+            .collect();
+        matched.sort_by_key(|e| e.seq);
+        Ok((mark, matched))
+    })
+}
+
 /// `mail read --for <name> [--reread]`: entries filed to `name`, newest
 /// last, advancing ONLY the calling reader's mark under `name` to the
 /// highest `seq` returned (`--reread` widens what is PRINTED — every entry

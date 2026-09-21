@@ -290,6 +290,25 @@ into the live inbox.
   `adjective-noun` per session and change on every respawn; a role name
   (`rebuild-reports`, `conductor`) outlives the session that reads it.
   A brief says "report to `yomi-strix/conductor`", not to a petname.
+- **A managed task's mailbox name is its task slug.** `aoide spawn --task
+  <slug>` files the run's exit report to `self/<slug>`; the slug is validated
+  with the same name predicate every other mailbox name is, so it is always a
+  legal address and nothing new is addressed. A slug outlives a respawn, so one
+  mailbox can hold several runs' letters — the RUN is the sender's session id,
+  and a letter whose sender is not the run being watched is shown as an earlier
+  (or unrelated) run, never merged into that run's report. This adds no
+  addressing form, no store, and no delivery rule.
+- **A task run's two mailboxes stay apart.** `self/<slug>` is the CHILD's own
+  inbox: only the letters sent TO the subagent, read against the child's own
+  cursor. The wrapper's end-of-run report goes to a REPORT mailbox instead —
+  `--report-to <name>`, else the run's parent session id when that is a legal
+  mailbox name, else the documented role mailbox `conductor` (the role name the
+  addressing rule above names for the conductor). A canonical id that is not a
+  legal mailbox name is never rewritten into one, because two identities must
+  not collide on a name; a run with no parent and no `--report-to` is reported
+  without a letter. `mail::unread_for(name, reader)` is the corresponding
+  read-only PEEK — a reader-selected view that advances no cursor, which is what
+  lets an observer watch a mailbox without consuming anyone's mail.
 - The sender's node resolves everything else — `via` from the node
   record, the route from the mesh declaration. **The agent never sees a
   transport line.** `self/<name>` files locally and rings the doorbell;

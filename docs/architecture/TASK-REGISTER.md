@@ -964,6 +964,32 @@ Fields per entry: status · owner · depends on · evidence · next.
   `<stem>.jsonl`), passed from both the live and the dropped path.
   Verified protocol 154, conduct 812 (15 pingback tests), cli 42. Fires
   only once `aoided` runs this code AND eidolon is rebuilt from `trace`.
+- E5c MIGRATION (2026-09-21): the mirror generation is superseded. Upstream's
+  `48bdf24` review reverted the mirror and re-landed the journal's own
+  read-only export — `eidolon log --json <journal> [--after <id>]`, opened
+  `open_readonly` since `0432133` — and dropped `--deadline`/`TurnDeadline`
+  (SIGTERM parity plus the launcher's own `timeout -s INT` is the wall-clock
+  budget; that wrapper is Unix-only and is not Aoide's mechanism). Aoide's
+  reader follows: `protocol/src/agents.rs`'s `EIDOLON_PROFILE.transcript`
+  answers a mirror only while it is CURRENT (a strictly newer journal is
+  positive evidence it is frozen), else the journal when `eidolon log --help`
+  proves the read-only generation before each export (no capability answer is
+  cached; a runtime replacement between probe and export can still race),
+  else `meta.json`; the export runs under four bounds (5 s wall clock, a 1 MiB
+  retained window, a 64-entry/8 MiB memo, 16 reader slots released only when a
+  reader thread exits), discards rather than infers (deadline, non-zero exit,
+  output that never reached EOF, no reader slot), drops its cursor whenever the
+  journal cannot be identified (a same-path replacement included), and writes
+  one audit line per process per reason. `feed::path_identity` is the ONE
+  identity authority and is now crate-visible for that reader.
+  `conduct/src/graph/eidolon.rs::read_presence_trace` resolves the trace through
+  the same capability every other consumer uses (`TranscriptSpec::locate` +
+  `trace`), so a producer that publishes no mirror feeds the state fold too; the
+  presence rule is unchanged wherever no trace is reachable. Verified protocol
+  171, conduct eidolon 28 (unmodified), parallel. The `trace` docs
+  (`EIDOLON-TRACE.md`, CONTRACTS §4, Session-Graph, EIDOLON-HEADLESS-DISPATCH)
+  are restated for the two generations. Real-upstream (`d9ff700`) integration is
+  the next step; the installed runtime is untouched.
 - Conductor-state eval kit `evals/conductor-state/` (same commit): the
   per-node VV classifier's testing kit — `eidolon log` → features → one
   delexicalized state line → condition / decision / risk (the CIA leg at
@@ -2007,6 +2033,12 @@ project/parent inheritance across local/remote/app/subagents;
   source guards and Linux tests do not prove non-Linux runtime support.
 - Status: incomplete. Native Windows still encounters Unix-only APIs;
   non-Linux peer identity currently refuses daemon dispatch connections.
+- The managed task wrapper (`spawn --task`, `session watch`) is Linux-only for
+  the same reasons: its live view reads a conduct-owned PTY transcript, and both
+  its record writes and its delivery cursor ride the stage lock. Its earliest
+  honest Windows point is headless parity over a pipes-only transport, after
+  `CORE-POSIX.md`'s matrix prerequisites are met — no part of the wrapper claims
+  Windows support today.
 
 ## 29. HTTPS mesh with end-to-end encrypted letters
 
