@@ -156,6 +156,7 @@ file header rather than a shared cross-cutting blueprint:
 | window frames | active / inactive | `#a07414` Attic gold hairline / `#3f867e` bronze-verdigris teal (2px, rounding 0) |
 | the one blaze | ✎N live-sessions cell + DAG/TERMINALS trace | `hot` laurel leaf-green `#4e8b45` |
 | Conductor's Codex agent book | turning leaf and settled spread | printed page geometry in a fixed 24×18 box; both faces carry fine text strokes, and the loop meets on the same printed spread; Terminals uses its common state lamp and nameplate |
+| Conductor's Eidolon pulse | the native Conway strip | the eight-row toroidal world, middle four rows drawn, at 4 braille characters = 8 world columns in 3px cells — a fixed 24×12 badge in the SAME 35px identity lane, right-hugging the name 3px off it; the pet figure in every resting state, one generation per 250ms while working; a local cosmetic simulation of the turn, never a tool-call event stream |
 | wallpaper | baked field | deterministic bright-marble solid from `palette.bg` `#f2ebde` (wallpaper note null) |
 
 Every text element sits on a glass backing (bar sheet, frames, chips) — no bare
@@ -400,3 +401,26 @@ not yet ended) names that terminal, "Kill terminal <name>"; anything else reads
 - 2026-09-10: Conductor combines harness/model and recovery identity into one secondary line, reveals controls on hover, and omits duplicate harness-only labels.
 
 - 2026-09-10: Session cards gain shared right-click actions, multi-directory project editing, and visible bridge outcomes.
+
+- 2026-09-21: **The Eidolon pulse — the native Conway strip on the card.** An
+  eidolon card wears the TUI's own life field (`eidolon
+  crates/tui/src/life.rs`) ported cell for cell into the existing 35px identity
+  lane, as a fixed 24×12 badge right-hugging the name 3px off it — the Codex
+  book's own alignment, its own lane, no widening and no width guard: the
+  title's column (lamp + 35) is unchanged on every harness and at 360 and 260
+  alike. The world is the native eight rows with the middle four drawn, at four
+  braille characters = 8 world columns in 3px cells; the rules are the native
+  ones at that width (the life core is parameterised by the strip's character
+  count and the scratch conformance script runs the native suite at both
+  widths). Idle, awaiting, stopped and done show the pet figure standing still —
+  the same figure the working field seeds from, seeded CENTRED so the resting
+  pose sits in the middle of its 24×12 badge (6px left, 9px right at 3px cells;
+  the odd column goes to the right margin) rather than on its left edge — and
+  only a working card steps a
+  generation every 250ms; the timer is off at rest, hidden, clipped away or off
+  the window, and every state keeps the badge and the name's column. The field
+  is a local cosmetic simulation of the turn, never a read of its tool calls:
+  its ships come from the strip's own settle rule. A first pass widened the lane
+  to 105px for a 96px strip; the owner rejected it as taking too much space and
+  the compact badge replaced it outright. Verified visually in the isolated
+  `lyra preview` canvas at 360 and 260 against the codex, pi and claude rows.

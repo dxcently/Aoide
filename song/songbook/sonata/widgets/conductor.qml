@@ -58,7 +58,14 @@
 // identity row, pen confined to the box. A Codex session carries a small
 // illuminated book in a 24×18 box: pages turn while working, the open spread
 // rests on a hold, and the cover closes at idle/stopped/done. Its name keeps
-// the same reserved width in every state. The KAOMOJI
+// the same reserved width in every state. An EIDOLON session carries the
+// native pulse — the TUI's own Conway strip: eight world rows, the middle
+// four drawn, at four braille characters (8 world columns, 3px cells) in a
+// fixed 24×12 box that rides the SAME 35px identity lane as the book and the
+// π pen, so no card width and no state ever moves the name; idle/awaiting/
+// stopped/done show the pet figure standing still, only a working card steps
+// the world (250ms a generation). It is a local cosmetic simulation of the
+// turn, never a tool-call event stream. The KAOMOJI
 // TROUPE lives inside a fixed clipped box in the
 // ground row (116px main / 90px sub); its frames swap text, never geometry.
 // The thinking slot itself is a fixed-height reserved lane. Every free-
@@ -193,6 +200,263 @@ Item {
             MouseArea {
                 anchors.fill: parent
                 onClicked: function(mouse) { temple.openSessionMenu(plaque.s, detailsChip, mouse.x, mouse.y, "details") }
+            }
+        }
+    }
+
+    // ── the Eidolon pulse — the native TUI's own Conway strip, ported ───────
+    // The pulse the eidolon harness wears above its own prompt (eidolon's
+    // crates/tui/src/life.rs: an eight-row toroidal world shown as the middle
+    // four, drawn in braille cells that read as pixels, seeded with the figure
+    // the start screen's icon stands on), ported cell for cell into the card's
+    // reserved identity lane. Every resting state — idle, awaiting, stopped,
+    // done — shows that FIGURE standing still; only a working card steps the
+    // world, one generation every 250ms (the native cadence).
+    //
+    // HONESTY, because a screenshot cannot say it: this is a LOCAL COSMETIC
+    // SIMULATION of the turn, not a read of it. The card has no per-call event
+    // (an eidolon session's hook phase is always unknown, and the roster this
+    // widget reads carries tool/activity on a ~12s reap), so the ships in this
+    // field come from the strip's own settle rule — the native behaviour for a
+    // world that has stopped — and never from the turn's real traffic. Nothing
+    // here may be wired to `tool`/`activity` to make it look like a stream.
+    //
+    // Geometry is FIXED: four braille characters = 8 world columns × the
+    // middle four rows at 3px = 24×12, the size this card's own 35px lane can
+    // hold (the Codex book rides it in a 24×18 box). It is the native strip
+    // drawn at a narrower world — the SAME rules, world parameters the only
+    // difference — so nothing floats, the name never moves, and no state
+    // changes the footprint.
+    component EidolonPulse: Item {
+        id: pulse
+        required property var plaque
+        // The native world is 8 rows; the strip draws the middle four. The
+        // WIDTH is the lane's own budget: four braille characters = 8 world
+        // columns at 3px cells = 24×12 — the Codex book's footprint in this
+        // same lane — so the badge is a fixed box in every state and no card
+        // width ever moves it.
+        width: 24
+        height: 12
+        visible: pulse.plaque.lifeIdentity
+
+        // ── the life core — ported from life.rs, no paraphrase ──────────────
+        // ONE closure rather than a dozen flat functions, because a QML object
+        // body takes properties and functions but no bare JavaScript
+        // declaration ("JavaScript declaration outside Script element" —
+        // confirmed live on this rig): constants and rules have to share one
+        // function scope. Everything between the markers is plain JavaScript,
+        // so a scratch script can extract it from THIS file and assert the
+        // native rules against the shipping code rather than a copy.
+        //
+        // `tick` is the one departure in shape: it returns a NEW world instead
+        // of mutating in place (life.rs's `&mut self`), because a QML `var`
+        // property only re-evaluates on a new reference — which is what makes
+        // the Timer's assignment below repaint the canvas.
+        // life-core-begin
+        function lifeCore() {
+            var WORLD = 8                                    // rows in the world
+            var ROWS = 4                                     // rows drawn: a braille strip is four dots tall
+            var TOP = (WORLD - ROWS) / 2                     // 2 — the middle four are what is seen
+            var SHIP = [".#..#", "#....", "#...#", "####."]  // a lightweight spaceship heading left
+            var AGENT = [".#.", "###", ".#.", "#.#"]         // the figure from the start screen
+            var DOT = [[0x01, 0x02, 0x04, 0x40],             // braille dot bits, by column then row: 1-3
+                       [0x08, 0x10, 0x20, 0x80]]             // down the left, 4-6 the right, 7-8 the bottom
+            var BLANK = "\u2800"                             // the empty cell — what "thinned" counts against
+
+            function blank(cols) {
+                var cells = []
+                for (var i = 0; i < WORLD * cols; i++) cells.push(false)
+                return cells
+            }
+            // A bare world, nothing in it (life.rs's own World literal).
+            function field(cols) {
+                return { cols: cols, cells: blank(cols), prev: ["", ""], launches: 0 }
+            }
+            // The figure stands CENTRED in the strip, not at its left edge: the
+            // card's badge is a box, and an edge-hugging pet read as a stray
+            // mark in the lane (the native TUI seeds from the left because
+            // there it sits on the prompt's own line, beside the icon). One
+            // seed rule, so the pet pose and the field a turn opens on are the
+            // same figure in the same place. A 3-wide figure cannot be exactly
+            // centred in an 8-column world, so the odd column goes to the RIGHT
+            // margin: 6px left, 9px right at 3px cells. The world still wraps,
+            // the field is still all 8 columns, and no rule changed.
+            function agent(w) {
+                var x0 = Math.floor((w.cols - AGENT[0].length) / 2)
+                for (var y = 0; y < AGENT.length; y++)
+                    for (var x = 0; x < AGENT[y].length; x++)
+                        if (AGENT[y].charAt(x) === "#")
+                            w.cells[(TOP + y) * w.cols + (x0 + x) % w.cols] = true
+                return w
+            }
+            // A strip `cells` characters wide with the figure standing centred
+            // in it (see `agent`), ready for a turn to start from.
+            function newWorld(cells) { return agent(field((cells < 1 ? 1 : cells) * 2)) }
+            // A new turn: clear the strip and stand the agent in it again.
+            function restart(w) {
+                w.cells = blank(w.cols)
+                w.prev = ["", ""]
+                return agent(w)
+            }
+            // One ship — from the left heading right, or from the right heading
+            // left with its rows reversed, into whatever is already there.
+            function launch(w, fromLeft) {
+                var x0 = fromLeft ? 0 : w.cols - SHIP[0].length
+                for (var y = 0; y < SHIP.length; y++) {
+                    var row = fromLeft ? SHIP[y].split("").reverse().join("") : SHIP[y]
+                    for (var x = 0; x < row.length; x++)
+                        if (row.charAt(x) === "#") w.cells[(TOP + y) * w.cols + x0 + x] = true
+                }
+                w.launches++
+                return w
+            }
+            function call(w) { return launch(w, true) }      // a call going out
+            function result(w) { return launch(w, false) }   // its result coming back
+            // One generation: toroidal in both axes, survive on 2 or 3, born on
+            // exactly 3. On the eight-row world a ship's top row is its own
+            // bottom neighbour.
+            function step(cells, cols) {
+                var next = blank(cols)
+                for (var r = 0; r < WORLD; r++)
+                    for (var c = 0; c < cols; c++) {
+                        var n = 0
+                        for (var dr = -1; dr <= 1; dr++)
+                            for (var dc = -1; dc <= 1; dc++) {
+                                if (dr === 0 && dc === 0) continue
+                                if (cells[((r + dr + WORLD) % WORLD) * cols + (c + dc + cols) % cols]) n++
+                            }
+                        var alive = cells[r * cols + c]
+                        next[r * cols + c] = alive ? (n === 2 || n === 3) : n === 3
+                    }
+                return next
+            }
+            // The strip as the terminal draws it. The settle test compares the
+            // RENDERED strip, not the cells: a glider drifting through the rows
+            // the strip does not show keeps the world changing while the strip
+            // sits still, and a still strip is the thing to fix.
+            function braille(cells, cols) {
+                var out = ""
+                for (var c = 0; c < cols / 2; c++) {
+                    var bits = 0
+                    for (var dx = 0; dx < DOT.length; dx++)
+                        for (var r = 0; r < ROWS; r++)
+                            if (cells[(TOP + r) * cols + c * 2 + dx]) bits |= DOT[dx][r]
+                    out += String.fromCharCode(0x2800 + bits)
+                }
+                return out
+            }
+            // Live cells in a rendered strip.
+            function live(strip) {
+                var n = 0
+                for (var i = 0; i < strip.length; i++) if (strip.charAt(i) !== BLANK) n++
+                return n
+            }
+            // One generation. A strip that repeats itself has stopped, whether
+            // it is a still life or a two-beat; one thinned to nothing has
+            // died. Either way the figure stands up again with a ship, from the
+            // other edge each time: the agent alone settles in two generations,
+            // and a strip repeating the same two frames reads as frozen.
+            // `launches` is NOT reset by that restart — it is what picks the
+            // edge. The field therefore never dies, it changes hands.
+            function tick(w) {
+                var next = step(w.cells, w.cols)
+                var now = braille(next, w.cols)
+                var stuck = now === w.prev[0] || now === w.prev[1]
+                var out = { cols: w.cols, cells: next, prev: [w.prev[1], now], launches: w.launches }
+                if (stuck || live(now) < 3) {
+                    restart(out)
+                    launch(out, out.launches % 2 === 0)
+                }
+                return out
+            }
+            // The figure as a pair of braille cells, standing still — life.rs's
+            // own test handle for the resting pose. The canvas paints cells,
+            // and a fresh world renders to exactly this pair, so the pose at
+            // rest and the field's seed cannot drift apart.
+            function icon() { return braille(agent(field(4)).cells, 4) }
+
+            return { worldRows: WORLD, stripRows: ROWS, top: TOP,
+                     blank: blank, field: field, newWorld: newWorld,
+                     agent: agent, launch: launch, call: call, result: result,
+                     restart: restart, step: step, braille: braille, live: live,
+                     tick: tick, icon: icon }
+        }
+        // life-core-end
+
+        readonly property var life: lifeCore()
+        // FOUR braille characters = the 8 world columns the 35px lane can hold
+        // (3px cells → 24×12). The native rules are width-agnostic; only the
+        // world's own `cols` changes here, and the conformance check runs the
+        // full native suite at 12 characters as well as at this shipping width.
+        // `pet` is never stepped — it IS the resting pose, the figure at the
+        // very column the live field seeds from; `world` is that field.
+        readonly property var pet: pulse.life.newWorld(4)
+        property var world: pulse.life.newWorld(4)
+        readonly property var drawnWorld: pulse.plaque.lifeWorking ? pulse.world : pulse.pet
+
+        // The lamp's own colour rule, verbatim: the live state's hue, thinned
+        // at rest exactly as the lamp glyph is. No new colour, no literal.
+        readonly property color ink:
+            temple.withA(temple.lampColor(pulse.plaque.cardLiveState),
+                         pulse.plaque.cardResting ? 0.55 : 1.0)
+
+        // 250ms — the native tick (eidolon's app.rs). Off while the card is at
+        // rest, while the pulse is hidden, and while the box is clipped away or
+        // outside the window (the Codex book's own exposure machinery below),
+        // so a scrolled-out card or a shut dock costs nothing.
+        Timer {
+            interval: 250
+            repeat: true
+            running: pulse.visible && pulse.plaque.lifeWorking && pulse.exposed
+            onTriggered: pulse.world = pulse.life.tick(pulse.world)
+        }
+        // A turn that starts and a turn that stops both stand the figure up
+        // again — the native restart() (a turn opens on it, and a field that
+        // has settled is re-seeded by the rules themselves).
+        Connections {
+            target: pulse.plaque
+            function onLifeWorkingChanged() { pulse.world = pulse.life.newWorld(4) }
+        }
+
+        // Transform LISTS are fixed on this host and are not bindable, so the
+        // box discovers them at attachment and binds to each Translate's x/y
+        // (temple.markTransforms/markExposed — the Codex book's machinery, the
+        // same one the panel below uses).
+        readonly property var hostWindow: QsWindow.window
+        property var hostTransforms: []
+        property bool componentReady: false
+        Component.onCompleted: {
+            hostTransforms = temple.markTransforms(pulse)
+            componentReady = true
+        }
+        Component.onDestruction: componentReady = false
+        onParentChanged: if (componentReady && temple) hostTransforms = temple.markTransforms(pulse)
+        onHostWindowChanged: if (componentReady && temple) hostTransforms = temple.markTransforms(pulse)
+        readonly property bool exposed: componentReady && !!temple
+            && temple.markExposed(pulse, hostWindow, hostTransforms)
+
+        Canvas {
+            anchors.fill: parent
+            property var world: pulse.drawnWorld
+            property color ink: pulse.ink
+            property int dot: width / Math.max(1, world.cols)
+            onWorldChanged: requestPaint()
+            onInkChanged: requestPaint()
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.reset()
+                ctx.fillStyle = ink
+                var cells = world.cells, cols = world.cols, dot = width / cols
+                // Only the middle four rows are painted (life.rs's TOP..TOP+3);
+                // the whole wrapping world is what decides what they do. The
+                // cell divides the fixed box by the world's own width, so every
+                // dot lands on an integer pixel at any world width.
+                for (var r = 0; r < pulse.life.stripRows; r++)
+                    for (var c = 0; c < cols; c++)
+                        if (cells[(pulse.life.top + r) * cols + c])
+                            ctx.fillRect(c * dot, r * dot, dot, dot)
             }
         }
     }
@@ -1382,6 +1646,21 @@ Item {
             && card.agentName.toLowerCase() === "codex"
         readonly property bool codexLive: card.codexIdentity && card.cardWorking
             && !card.cardAwaiting
+        // The Eidolon harness's own pulse (EidolonPulse below): the native
+        // TUI's Conway strip, in the identity row's reserved lane. Identity
+        // comes from the record, never the title or model — the same idiom as
+        // the π pen, the moon and the Codex book above. Eidolon publishes no
+        // subagent tools of its own, but a wrapped thread is still an eidolon
+        // card and wears the same pulse, so the guard is the same kind set the
+        // book uses. A record with no `agent` gets no strip.
+        readonly property bool lifeIdentity: (card.sKind === "agent"
+            || card.sKind === "subagent" || card.sKind === "app")
+            && card.agentName.toLowerCase() === "eidolon"
+        // Working steps the field; every other state holds the pet figure.
+        readonly property bool lifeWorking: card.lifeIdentity && card.cardWorking
+        // The pulse sits INSIDE the identity row's existing reserved 35px lane
+        // — the same lane the π pen, the moon and the Codex book ride — so the
+        // name starts where it always did, at every card width, in every state.
 
         // troupe casting — hashed per session id, couriers from the packages
         // pool, everyone else from the general pool; resting states hold the
@@ -1579,6 +1858,17 @@ Item {
                     }
                 }
 
+                // the native pulse — the Eidolon harness's own badge, riding
+                // the SAME reserved 35px lane as the π pen, the moon and the
+                // Codex book (right-hugging the name, 3px off it), so the name
+                // starts where it always did and nothing shifts at any width.
+                EidolonPulse {
+                    plaque: card
+                    anchors.right: nameT.left
+                    anchors.rightMargin: 3
+                    anchors.verticalCenter: lampBox.verticalCenter
+                }
+
                 Text {                           // agent name — the card's name
                     id: nameT
                     // Every harness keeps the same reserved animation lane at rest.
@@ -1615,12 +1905,13 @@ Item {
                                                  // harness wears the π think-
                                                  // tag instead (piTag below),
                                                  // kimi the moon,
-                                                 // codex the book
+                                                 // codex the book,
+                                                 // eidolon the native pulse
                     id: hookTag
                     width: 13; height: 16
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
-                    visible: (card.hooked || card.sKind === "subagent") && card.cardWorking && !card.piThinking && !card.kimiIdentity && !card.codexIdentity
+                    visible: (card.hooked || card.sKind === "subagent") && card.cardWorking && !card.piThinking && !card.kimiIdentity && !card.codexIdentity && !card.lifeIdentity
                     anchors.right: nameT.left
                     anchors.rightMargin: 3
                     anchors.verticalCenter: lampBox.verticalCenter

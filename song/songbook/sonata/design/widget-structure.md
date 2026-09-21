@@ -323,13 +323,35 @@ the root.
 ## 9. Motion tiers
 
 Conductor's harness indicators sit 3px before the title in reserved boxes:
-13×16 for the glyph, moon, and π; 24×18 for the Codex book. Title position
+13×16 for the glyph, moon, and π; 24×18 for the Codex book; 24×12 for the
+Eidolon pulse. Title position
 and available width stay fixed across animation frames and resting states,
 and the boxes seat on the title's first line, so a wrapped title never
 drags them. Parent and subagent cards share their identified harness's
 motion, driven by the published live state. Working subagents need no
 independent hook badge to animate; unrecognized harnesses retain the common
 activity lamp. Spawn ancestry alone never starts an animation.
+
+An EIDOLON card carries the native pulse — the TUI's own Conway strip: the
+eight-row toroidal world with its middle four rows drawn, at four braille
+characters = 8 world columns in 3px cells, a FIXED 24×12 badge that rides the
+existing 35px identity lane exactly as the Codex book rides it — right-hugging
+the name, 3px off it, vertically centred on the lamp's box. No lane widens, no
+card width changes the geometry, and the title's own column (lamp + 35) is the
+same on every harness and at every width. The badge steps one generation every
+250ms while the card is working and shows the pet figure standing still in
+every resting state, so it is an identity mark and not a busy signal; the
+timer is off whenever the card is at rest, hidden, clipped away, or outside
+the window. The field is a local cosmetic simulation of the turn — its ships
+come from the strip's own settle rule, never from a tool call. The world is
+narrower than the native strip's 12 characters and the rules are the same ones
+at that width: the life core is parameterised by the strip's character count,
+and the conformance check runs the native suite at both widths. The figure is
+SEEDED CENTRED — a 3-wide figure in an 8-column world takes 6px left and 9px
+right, the odd column going to the right margin — so the resting pose sits in
+the middle of its box instead of on its edge, the pet pose and the field a turn
+opens on are that same figure in that same place, all 8 columns stay available
+to the working animation, and no rule changed.
 
 The ground row's troupe box (116px main / 90px sub in both temples) is the
 one reserved box that changes CONTENT on interaction: hover or keyboard
@@ -351,6 +373,7 @@ program.
 | staged deal | 560ms open / 200ms close, LINEAR master clock, per-item window `stag = 0.085` with `OutCubic` inside the window | powermenu |
 | attention pulse | 600ms × 2 `InOutQuad` (0.35↔1.0); 700ms × 2 for a card (0.8↔1.0) | urgent workspace, blocked sessions cell, critical notification |
 | flourish | 450–1500ms, looping while hovered, reset in `onStopped` | powermenu per-glyph |
+| life step | 250ms, a discrete generation — not a tween | the Eidolon pulse (the native TUI's own cadence) |
 
 Rules: a looping animation resets its property in `onStopped`; a pulse that
 can end mid-cycle uses `alwaysRunToEnd: true` so it settles opaque; motion
