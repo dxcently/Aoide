@@ -85,9 +85,14 @@
   away; `on_path` keeps its weaker `is_file` predicate on the same
   candidates. The sibling tier is the one deliberate exception: it asks for
   `EXE_SUFFIX` (`aoide.exe`/`lyra.exe`) with the bare name behind it, never
-  `PATHEXT`, so an `aoide.cmd` beside the build cannot shadow it; and an
+  `PATHEXT`, so an `aoide.cmd` beside the build cannot shadow it (and is not a
+  sibling at all when it is the only file there); and an
   `AOIDE_CORE_BIN`/`AOIDE_RICE_BIN` override still reaches `resolve`
-  trimmed and comes back untouched.
+  trimmed and comes back untouched. Windows tests compare the two surfaces'
+  paths by `std::fs::canonicalize` identity, never by string equality —
+  `resolve_executable_on_path` returns the spelling it ASKED for while
+  `read_dir` reports the spelling on disk, so one file can be two
+  case-differing strings.
 - **`feed::Follower::poll` MUST identify the PATH on every call, never only
   the open fd.** A producer restart under a `RuntimeDirectory=`-shaped tmpfs
   unlinks the file the fd still refers to; Linux keeps that deleted inode

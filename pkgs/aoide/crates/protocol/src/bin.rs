@@ -389,18 +389,31 @@ mod tests {
         }
     }
 
+    /// The same file, however this host spells it. On Windows
+    /// `resolve_executable_on_path` returns the spelling it ASKED for (the
+    /// lowercased candidate) while `read_dir` reports the spelling on disk, so
+    /// two strings naming one file can differ in case — identity is compared
+    /// through `canonicalize`. Both sides must resolve: an absent fixture is a
+    /// failed assertion, never a literal-equality pass.
+    #[cfg(windows)]
+    fn same_file(actual: &Path, expected: &Path) -> bool {
+        std::fs::canonicalize(actual).unwrap() == std::fs::canonicalize(expected).unwrap()
+    }
+
     /// One row per tier decision the resolver has to make. No real env,
     /// no real filesystem, no real exec anywhere in this table —
     /// `resolve` takes every input as a plain argument, and `sibling` is the
     /// sibling's FILE NAME (`aoide` on unix, `aoide.exe` on Windows), which
-    /// the sibling tier only ever supplies after finding it.
+    /// the sibling tier only ever supplies after finding it. `expect` is
+    /// spelled through `Path::join` wherever the tier returns a JOINED path
+    /// (this host's separator) and as a plain literal otherwise.
     struct Case {
         label: &'static str,
         env_value: Option<&'static str>,
         exe_dir: Option<&'static str>,
         sibling: Option<&'static str>,
         name: &'static str,
-        expect: &'static str,
+        expect: String,
     }
 
     #[test]
@@ -412,7 +425,7 @@ mod tests {
                 exe_dir: Some("/usr/bin"),
                 sibling: Some("aoide"),
                 name: "aoide",
-                expect: "/opt/custom/aoide",
+                expect: "/opt/custom/aoide".into(),
             },
             Case {
                 label: "env wins over the bare-name fallback too",
@@ -420,7 +433,7 @@ mod tests {
                 exe_dir: None,
                 sibling: None,
                 name: "lyra",
-                expect: "/opt/custom/lyra",
+                expect: "/opt/custom/lyra".into(),
             },
             Case {
                 label: "a blank env value is treated as unset",
@@ -428,7 +441,7 @@ mod tests {
                 exe_dir: Some("/usr/bin"),
                 sibling: Some("aoide"),
                 name: "aoide",
-                expect: "/usr/bin/aoide",
+                expect: Path::new("/usr/bin").join("aoide").to_string_lossy().into_owned(),
             },
             Case {
                 label: "sibling used only when it actually exists",
@@ -436,7 +449,7 @@ mod tests {
                 exe_dir: Some("/usr/bin"),
                 sibling: Some("lyra"),
                 name: "lyra",
-                expect: "/usr/bin/lyra",
+                expect: Path::new("/usr/bin").join("lyra").to_string_lossy().into_owned(),
             },
             Case {
                 label: "the sibling's own file name is what comes back (aoide.exe, not aoide)",
@@ -444,7 +457,7 @@ mod tests {
                 exe_dir: Some("/usr/bin"),
                 sibling: Some("aoide.exe"),
                 name: "aoide",
-                expect: "/usr/bin/aoide.exe",
+                expect: Path::new("/usr/bin").join("aoide.exe").to_string_lossy().into_owned(),
             },
             Case {
                 label: "sibling absent falls through to the bare name",
@@ -452,7 +465,7 @@ mod tests {
                 exe_dir: Some("/usr/bin"),
                 sibling: None,
                 name: "lyra",
-                expect: "lyra",
+                expect: "lyra".into(),
             },
             Case {
                 label: "no exe dir at all falls through to the bare name",
@@ -460,7 +473,7 @@ mod tests {
                 exe_dir: None,
                 sibling: None,
                 name: "aoide",
-                expect: "aoide",
+                expect: "aoide".into(),
             },
         ];
 
@@ -627,7 +640,8 @@ mod tests {
         std::env::set_var("PATH", &dir);
         std::env::set_var("PATHEXT", ".EXE;.PS1");
 
-        assert_eq!(resolve_executable_on_path("real-plugin"), Some(dir.join("real-plugin.exe")));
+        let resolved = resolve_executable_on_path("real-plugin").expect("real-plugin.exe is spawnable");
+        assert!(same_file(&resolved, &dir.join("real-plugin.exe")), "{resolved:?}");
         assert_eq!(
             resolve_executable_on_path("plain-file"),
             None,
@@ -668,21 +682,28 @@ mod tests {
         std::env::set_var("PATH", std::env::join_paths([&first, &second]).unwrap());
 
         std::env::set_var("PATHEXT", ".EXE;.CMD;.PS1");
+        let resolved = resolve_executable_on_path("aoide-deploy").expect("a plugin is on PATH");
         assert_eq!(
-            resolve_executable_on_path("aoide-deploy"),
-            Some(first.join("AOIDE-Deploy.cmd")),
+            resolved.parent(),
+            Some(first.as_path()),
             "the first PATH directory wins even when its suffix ranks later"
         );
-        assert_eq!(
-            discover_external("aoide"),
-            vec![("deploy".to_string(), first.join("AOIDE-Deploy.cmd"))],
-            "one entry per logical name, suffix and case folded away"
-        );
+        assert!(same_file(&resolved, &first.join("AOIDE-Deploy.cmd")), "{resolved:?}");
+
+        let discovered = discover_external("aoide");
+        assert_eq!(discovered.len(), 1, "{discovered:?}");
+        assert_eq!(discovered[0].0, "deploy", "one entry per logical name, suffix and case folded away");
+        assert!(same_file(&discovered[0].1, &first.join("AOIDE-Deploy.cmd")), "{:?}", discovered[0].1);
 
         // Drop the winner: the next directory, then the suffix order, decides.
         std::fs::remove_file(first.join("AOIDE-Deploy.cmd")).unwrap();
-        assert_eq!(resolve_executable_on_path("aoide-deploy"), Some(second.join("aoide-deploy.exe")));
-        assert_eq!(discover_external("aoide"), vec![("deploy".to_string(), second.join("aoide-deploy.exe"))]);
+        let resolved = resolve_executable_on_path("aoide-deploy").expect("the next directory still holds it");
+        assert_eq!(resolved.parent(), Some(second.as_path()), "the next PATH directory answers once the first is gone");
+        assert!(same_file(&resolved, &second.join("aoide-deploy.exe")), "{resolved:?}");
+        let discovered = discover_external("aoide");
+        assert_eq!(discovered.len(), 1, "{discovered:?}");
+        assert_eq!(discovered[0].0, "deploy");
+        assert!(same_file(&discovered[0].1, &second.join("aoide-deploy.exe")), "{:?}", discovered[0].1);
 
         // A host whose PATHEXT names nothing this crate can run refuses.
         std::env::set_var("PATHEXT", ".PS1");
@@ -720,8 +741,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Windows: the sibling tier is `EXE_SUFFIX`, not the plugin rule — an
-    /// `aoide.cmd` beside the real `aoide.exe` must not shadow it.
+    /// Windows: the sibling tier is `EXE_SUFFIX`, not the plugin rule — a
+    /// `.cmd` is not a sibling's name at all, and an `aoide.exe` beside one
+    /// still wins.
     #[cfg(windows)]
     #[test]
     fn windows_sibling_resolution_names_the_exe_not_a_cmd_beside_it() {
@@ -732,12 +754,20 @@ mod tests {
         std::fs::write(dir.join("lyra.exe"), "").unwrap();
 
         assert_eq!(sibling_in(&dir, "lyra"), Some("lyra.exe".to_string()));
-        assert_eq!(sibling_in(&dir, "aoide"), Some("aoide.cmd".to_string()), "the only sibling present is the one used");
+        assert_eq!(
+            sibling_in(&dir, "aoide"),
+            None,
+            "`aoide.cmd` is not the sibling's name — this tier asks for EXE_SUFFIX, never PATHEXT"
+        );
         assert_eq!(
             resolve(None, Some(&dir), sibling_in(&dir, "lyra").as_deref(), "lyra"),
             dir.join("lyra.exe").to_string_lossy()
         );
         assert_eq!(sibling_in(&dir, "conductor"), None, "no sibling at all still falls through to the bare name");
+
+        // The exe beside the cmd is the one used.
+        std::fs::write(dir.join("aoide.exe"), "").unwrap();
+        assert_eq!(sibling_in(&dir, "aoide"), Some("aoide.exe".to_string()));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
