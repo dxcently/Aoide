@@ -121,3 +121,11 @@ requirement were explained; no Windows deployment or runtime test occurred.
   All 158 protocol tests passed on Linux; the Windows module and actual test
   harness compile to metadata, with a failing canary proving test bodies were
   checked. Native Windows execution and the whole core build remain unverified.
+- `0526b70`: native Windows feed permissions and file identity passed separate
+  final review. Owner-only ACLs are attached at creation and verified on the
+  handle before payload writes; unsupported sharing modes refuse. EOF writes
+  use the documented Win32 operation. Linux protocol tests pass (160), and
+  the Windows protocol library plus the isolated feed test harness compile.
+  Neither native ACL behavior nor concurrent append behavior has run on
+  ThinkChiyo. Unrelated Unix-only protocol test fixtures still block the full
+  Windows test target. The full native core port remains incomplete.
