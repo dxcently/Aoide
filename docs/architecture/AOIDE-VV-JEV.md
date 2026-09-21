@@ -116,9 +116,9 @@ a node runtime; upstream JEV is hosted, so "JEV" here means Aoide's own reimplem
 **No performance claim is available**, and the honest statement is narrower than
 "unbenchmarked": a small scoring head does not make a large backbone cheap, so no cheap
 CPU numbers may be implied for either lane. CPU-only operation is a required acceptance
-target, not a fallback. The consumer eval hardware/OS matrix is **Linux and Windows**,
-**macOS later**; whether Windows runs native or under WSL is **unresolved**, and **no
-Windows compatibility claim** is made.
+target, not a fallback. The consumer eval hardware/OS matrix is **Linux and native
+Windows**, **macOS later**. Aoide core must not require WSL; native Windows runtime
+compatibility and CPU measurements remain unverified.
 
 Before any number is quoted, record together, on that hardware: model and backbone identity
 plus **parameter count and on-disk weight size** (and whether the backbone is frozen);
@@ -150,4 +150,4 @@ drift-verdict input to `choose()`.
 **Unresolved, user-owned, no recommendation made here:** the closed surface for `aoide do`
 and whether an accepted verdict prints the bound command or executes it through `aoided`;
 JEV lane order (offline rule-vs-model probe first, or the candle port first); the parked
-mid-turn ping-back ruling; whether Windows runs native or under WSL; the acceptance budgets.
+mid-turn ping-back ruling; the acceptance budgets.

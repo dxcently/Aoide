@@ -81,3 +81,13 @@ labels; see [AOIDE-VV-JEV](../../architecture/AOIDE-VV-JEV.md).
 - Mail export remains queued. No rebuild, deployment, daemon restart or
   push was performed; installed hosts do not acquire `0.0.24` from these
   local commits.
+
+## Native Windows ruling
+
+The User resolved the Windows question: Aoide core must run natively;
+WSL is not required. Linux and native Windows remain primary, macOS later.
+The current architecture and task register now require native platform
+bindings preserving shared contracts, rather than a compatibility-layer
+dependency. This supersedes the open question recorded earlier in this log.
+A separate Eidolon architect is mapping the source blockers and ordered
+implementation slices. No Windows build or runtime verification is claimed.

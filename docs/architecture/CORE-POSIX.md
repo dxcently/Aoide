@@ -8,15 +8,13 @@
 
 ## Targets
 
-**Linux and Windows are the two primary targets; macOS is later**, and
-expected to be the cheapest of them because the Unix-family work this page
-tracks is a shared POSIX/BSD surface. This page sets no order BETWEEN the two
-primaries: Linux is simply the one with evidence so far (the source and the
-suite that have actually been run), and whether "Windows" means the native
-toolchain or WSL is an open question this page does not answer either — no
-native-before-WSL assumption is made here. **No row below is a Windows claim,
-and no `cfg(target_os)` arm below is a Windows path**: they are Unix-family
-guards, and they neither build nor measure anything on a Windows target.
+**Linux and native Windows are the primary targets; macOS is later.**
+Aoide core must run on Windows without WSL, MSYS or Cygwin. Shared logic
+retains the same core contracts; Windows implementations must preserve
+their identity, policy, process and storage guarantees using native APIs.
+POSIX compatibility guides the Unix implementation and later macOS work;
+it does not establish native Windows support. Only Linux has runtime
+evidence here. The Unix guards below are not Windows implementations.
 
 Native Windows lacks `std::os::unix`, which core currently uses for
 `std::os::unix::net::{UnixStream, UnixListener}` (the sockets),
@@ -25,7 +23,8 @@ Native Windows lacks `std::os::unix`, which core currently uses for
 `std::os::unix::ffi::OsStrExt`, `std::os::unix::process`. Each is a compile
 blocker on that target before any question of syscall semantics is reached;
 the `libc` shapes the rows below name (`sockaddr_un`, `flock`,
-`SO_PEERCRED`, `pidfd_*`) sit behind that. No Windows port is proposed here.
+`SO_PEERCRED`, `pidfd_*`) sit behind that. Replacing these platform bindings
+is required work, not an optional WSL deployment path.
 
 ## What is portable, what is a capability
 

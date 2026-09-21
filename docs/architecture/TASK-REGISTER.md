@@ -1999,8 +1999,9 @@ project/parent inheritance across local/remote/app/subagents;
 
 ## 28. Core portability: Linux and Windows, macOS later
 
-- Requirement: POSIX-compatible core; Linux and Windows are the primary
-  targets, with macOS later. Native Windows versus WSL remains unresolved.
+- Requirement: POSIX-compatible shared design; Linux and native Windows are
+  the primary targets, with macOS later. Windows requires no WSL, MSYS or
+  Cygwin; native platform bindings preserve the same core contracts.
 - The shared liveness probe and socket-address layout are repaired.
   `docs/architecture/CORE-POSIX.md` owns the remaining capability matrix;
   source guards and Linux tests do not prove non-Linux runtime support.
