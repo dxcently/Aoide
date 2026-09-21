@@ -181,28 +181,55 @@ fn set_fd_nonblocking(fd: RawFd, nonblocking: bool) {
     }
 }
 
-/// Build a `sockaddr_un` for `path` — `Err` if the path is too long for
-/// `sun_path` (the same hard cap `AF_UNIX` addresses have always had, no
-/// different from what `UnixStream::connect` would itself refuse).
+/// Build a `sockaddr_un` for `path`, with the `socklen_t` the kernel reads
+/// alongside it. Both target-dependent numbers are read off the struct: the
+/// cap is `sun_path`'s own width (108 on Linux, 104 on the BSDs, 126 on
+/// Haiku, 1023 on AIX), and the length is
+/// `offsetof(sockaddr_un, sun_path)` + the path + its terminating NUL
+/// (`SUN_LEN`) — never a remembered 108 or `size_of::<sa_family_t>()`. A NUL
+/// in the path is refused and an empty path is the zero-length (unnamed)
+/// address: the same answers `std::os::unix::net::SocketAddr::from_pathname`
+/// gives, which the tests assert against `std` rather than restate.
+///
+/// BSD's `sockaddr_un` also opens with a `sun_len` byte. It is left zero, as
+/// `std`'s own builder leaves it on those targets (`sun_len` appears nowhere
+/// in std's source — it sets `sun_family` and nothing else), so this follows
+/// the standard library's convention instead of inventing an ABI value for a
+/// target with no runner here. `offset_of!` still accounts for the byte when
+/// the struct has it.
 fn unix_sockaddr(path: &Path) -> io::Result<(libc::sockaddr_un, libc::socklen_t)> {
     let bytes = path.as_os_str().as_bytes();
-    // SAFETY-ADJACENT (not unsafe, just a real constraint): `sun_path` is a
-    // fixed-size buffer; this crate's own callers (short, fixed socket
-    // paths — `socket::socket_path`'s own doc) never come close, but a
-    // caller-supplied path is still checked rather than silently truncated.
-    if bytes.len() >= 108 {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "path too long for a unix socket address"));
+
+    // A NUL in the path would end the kernel's view of the name there — a
+    // connect to an address the caller never named. Refuse, as `std` does.
+    if bytes.contains(&0) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "paths may not contain interior null bytes"));
     }
-    // SAFETY: `sockaddr_un` is a plain-old-data C struct — zero-initializing
-    // it (a valid bit pattern for every field) and then writing only the
-    // fields below is the standard idiom for building one from Rust.
+
+    // SAFETY: `sockaddr_un` is plain-old-data — all zeros is a valid value,
+    // and writing only the fields below is the standard way to build one.
     let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+
+    // This target's OWN `sun_path` width: a remembered 108 would pass a
+    // 105..107-byte path onto a 104-byte BSD struct, zero-filled.
+    if bytes.len() >= addr.sun_path.len() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "path must be shorter than SUN_LEN"));
+    }
+
     addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
     for (dst, &src) in addr.sun_path.iter_mut().zip(bytes.iter()) {
         *dst = src as libc::c_char;
     }
-    let len = (std::mem::size_of::<libc::sa_family_t>() + bytes.len() + 1) as libc::socklen_t;
-    Ok((addr, len))
+    // The terminating zero is already in place: the struct was zeroed above
+    // and only `bytes.len()` bytes of `sun_path` were written over.
+
+    // The real offset of the field, whether or not the struct opens with
+    // BSD's `sun_len` — plus the path and its NUL, or alone for the empty
+    // path, which is the zero-length (unnamed) address.
+    let path_offset = std::mem::offset_of!(libc::sockaddr_un, sun_path);
+    let len = if bytes.is_empty() { path_offset } else { path_offset + bytes.len() + 1 };
+
+    Ok((addr, len as libc::socklen_t))
 }
 
 /// Short sleep between retries of the raw `connect(2)` syscall itself,
@@ -1349,6 +1376,100 @@ mod tests {
         let long = "/tmp/".to_string() + &"x".repeat(200);
         let err = unix_sockaddr(Path::new(&long)).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    /// This target's own `sun_path` capacity — read off the struct in the
+    /// test too, so the same assertions cover a 104-byte BSD/Haiku-width
+    /// buffer, not only this runner's 108.
+    fn sun_path_capacity() -> usize {
+        // SAFETY: `sockaddr_un` is POD; an all-zero one is a valid value.
+        unsafe { std::mem::zeroed::<libc::sockaddr_un>() }.sun_path.len()
+    }
+
+    /// The cap is the struct's own `sun_path` width, and the ACCEPTED
+    /// maximum is that width minus the terminating zero: one byte under is
+    /// taken (path bytes intact, terminator present), exactly the width is
+    /// the clean `InvalidInput` refusal. `std`'s `SocketAddr::from_pathname`
+    /// is asserted alongside so this is the shared contract, not a private
+    /// restatement of it.
+    #[test]
+    fn unix_sockaddr_accepts_sun_path_minus_one_and_rejects_the_width() {
+        let cap = sun_path_capacity();
+        let offset = std::mem::offset_of!(libc::sockaddr_un, sun_path);
+        assert_eq!(cap + offset, std::mem::size_of::<libc::sockaddr_un>(), "sun_path is the struct's last field");
+
+        let max = "x".repeat(cap - 1);
+        let (addr, len) = unix_sockaddr(Path::new(&max)).unwrap();
+        assert_eq!(len as usize, offset + cap, "the accepted maximum fills sun_path and its terminator");
+        let written: Vec<u8> = addr.sun_path.iter().map(|&c| c as u8).collect();
+        assert_eq!(&written[..cap - 1], max.as_bytes(), "the accepted maximum's bytes must land verbatim");
+        assert_eq!(written[cap - 1], 0, "the terminating zero must be in place at the cap");
+        assert!(std::os::unix::net::SocketAddr::from_pathname(&max).is_ok());
+
+        let at_cap = "x".repeat(cap);
+        assert_eq!(unix_sockaddr(Path::new(&at_cap)).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        assert!(std::os::unix::net::SocketAddr::from_pathname(&at_cap).is_err());
+    }
+
+    /// The length handed to `connect(2)` is `offsetof(sun_path)` + the path
+    /// + its terminating NUL, and the bytes in the buffer are the caller's
+    /// path followed by zeros — checked both directly and by round-tripping
+    /// the same path through `std`, which reads the buffer back the way the
+    /// kernel does.
+    #[test]
+    fn unix_sockaddr_reports_offset_plus_path_plus_terminator() {
+        let path = Path::new("/tmp/aoide-secrets-test.sock");
+        let bytes = path.as_os_str().as_bytes();
+        let offset = std::mem::offset_of!(libc::sockaddr_un, sun_path);
+
+        let (addr, len) = unix_sockaddr(path).unwrap();
+        assert_eq!(len as usize, offset + bytes.len() + 1);
+        assert_eq!(addr.sun_family, libc::AF_UNIX as libc::sa_family_t);
+        let written: Vec<u8> = addr.sun_path.iter().map(|&c| c as u8).collect();
+        assert_eq!(&written[..bytes.len()], bytes);
+        assert_eq!(written[bytes.len()], 0, "the terminating zero must follow the path");
+        assert!(written[bytes.len() + 1..].iter().all(|&b| b == 0), "nothing but the terminator follows the path");
+        assert_eq!(std::os::unix::net::SocketAddr::from_pathname(path).unwrap().as_pathname(), Some(path));
+    }
+
+    /// A NUL anywhere in the path is refused (never a silently truncated
+    /// address), and an EMPTY path is the zero-length address rather than an
+    /// error — in both cases the same answer `std`'s own
+    /// `SocketAddr::from_pathname` gives for the same input.
+    #[test]
+    fn unix_sockaddr_null_and_empty_paths_match_std() {
+        let nul = Path::new("a\u{0}b");
+        let ours = unix_sockaddr(nul).unwrap_err();
+        let theirs = std::os::unix::net::SocketAddr::from_pathname(nul).unwrap_err();
+        assert_eq!(ours.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(theirs.kind(), io::ErrorKind::InvalidInput);
+
+        let (addr, len) = unix_sockaddr(Path::new("")).unwrap();
+        assert_eq!(len as usize, std::mem::offset_of!(libc::sockaddr_un, sun_path), "the empty path is the zero-length address");
+        assert_eq!(addr.sun_path[0], 0);
+        assert!(std::os::unix::net::SocketAddr::from_pathname("").unwrap().as_pathname().is_none());
+    }
+
+    /// Not only arithmetic: a real listener actually binds at a path exactly
+    /// `sun_path.len() - 1` bytes long, and `connect_bounded` actually
+    /// reaches it — the boundary accepted, over a real socket.
+    #[test]
+    fn connect_bounded_reaches_a_max_length_pathname() {
+        let cap = sun_path_capacity();
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let base = format!("{}/aoide-cap-{}-{}", std::env::temp_dir().display(), std::process::id(), nanos);
+        assert!(base.len() < cap - 1, "temp dir too long to build a max-length pathname ({base})");
+        let mut name = base;
+        while name.len() < cap - 1 {
+            name.push('x');
+        }
+        let sock = Path::new(&name).to_path_buf();
+        assert_eq!(sock.as_os_str().as_bytes().len(), cap - 1);
+
+        let _listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        let stream = connect_bounded(&sock, Duration::from_secs(5)).unwrap();
+        drop(stream);
+        std::fs::remove_file(&sock).ok();
     }
 
     /// The ordinary case: a real listener at a real path connects well

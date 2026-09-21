@@ -2009,6 +2009,22 @@ No env override, unlike `AOIDE_SECRETS_BACKEND_TIMEOUT`/
 `AOIDE_SECRETS_PARK_TIMEOUT` — a fixed defensive bound, not a tuned
 operational one, until real evidence says otherwise.
 
+**The address it connects to is built by `client::unix_sockaddr`, from this
+target's own struct (socket correctness fix).** The cap is `sun_path`'s own
+width — 108 on Linux, 104 on the BSDs, 126 on Haiku, 1023 on AIX — because a
+hardcoded 108 would let a 105..107-byte path onto a 104-byte BSD struct and
+hand the kernel a zero-filled name: a connect to a path nobody named. The
+length is `offsetof(sockaddr_un, sun_path)` + the path + its terminating NUL
+(`SUN_LEN` — not `size_of::<sa_family_t>()` + path + 1, one byte short
+wherever `sa_family_t` is a single byte). A NUL in the path is refused, and an
+empty path is the zero-length (unnamed) address. Those are the same answers
+`std::os::unix::net::SocketAddr::from_pathname` gives for the same input — the
+tests assert the agreement against `std` itself — and BSD's leading `sun_len`
+byte is left zero, which is what `std`'s own builder does on those targets
+(see `docs/architecture/CORE-POSIX.md`'s unix-socket row for the widths and
+their libc-source provenance). Only the Linux arm is run here: no non-Linux
+target std exists on this machine.
+
 **A silent `AOIDE_SECRETS_EVENTS` mismatch is a live footgun, the same
 shape as the `AOIDE_SECRETS_SOCKET` notes just above (task #76 item 6a).**
 The broker unit resolves `events_path` from ITS OWN environment at `serve`

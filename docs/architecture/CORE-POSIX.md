@@ -6,6 +6,27 @@
 > not a claim that core runs on a POSIX host today: the Linux source and the
 > Linux test suite are what has actually been run (see "Evidence and limits").
 
+## Targets
+
+**Linux and Windows are the two primary targets; macOS is later**, and
+expected to be the cheapest of them because the Unix-family work this page
+tracks is a shared POSIX/BSD surface. This page sets no order BETWEEN the two
+primaries: Linux is simply the one with evidence so far (the source and the
+suite that have actually been run), and whether "Windows" means the native
+toolchain or WSL is an open question this page does not answer either — no
+native-before-WSL assumption is made here. **No row below is a Windows claim,
+and no `cfg(target_os)` arm below is a Windows path**: they are Unix-family
+guards, and they neither build nor measure anything on a Windows target.
+
+Native Windows lacks `std::os::unix`, which core currently uses for
+`std::os::unix::net::{UnixStream, UnixListener}` (the sockets),
+`std::os::unix::fs::PermissionsExt`/`fs::symlink` (the modes and links),
+`std::os::unix::io::AsRawFd` (the raw fds the lock and pidfd paths need),
+`std::os::unix::ffi::OsStrExt`, `std::os::unix::process`. Each is a compile
+blocker on that target before any question of syscall semantics is reached;
+the `libc` shapes the rows below name (`sockaddr_un`, `flock`,
+`SO_PEERCRED`, `pidfd_*`) sit behind that. No Windows port is proposed here.
+
 ## What is portable, what is a capability
 
 The repo's own rule (root `AGENTS.md`): a portable capability is written
@@ -32,7 +53,7 @@ Two classes follow from that, and every row below is one of them:
 | lock probe | `protocol/src/dialog.rs::probe_locker_running` | required; **remaining `/proc` scan** for the locker's `comm`, and an unreadable `/proc` answers "not running" (`probe_loginctl_locked` is systemd-logind only) |
 | boot epoch | `conduct/src/reap.rs::boot_epoch` (`/proc/stat` `btime`, reused by `server/src/daemon.rs`) | required; **remaining** — off Linux `boot_epoch` is `None`, so the pre-boot reap signal and the boot-epoch-guarded auto-resume never fire |
 | runtime dir | `conduct/src/graph/conduct.rs::conduct_socket_path`/`channel_socket_path`, `conduct/src/shellbridge.rs`, `storage/src/tunnel.rs::runtime_dir` | required; **remaining** — a hardcoded `/run/user/1000` fallback (logind-shaped, and wrong for any uid ≠ 1000), and no `sun_path` budget check on the bind side |
-| unix socket addressing | `secrets/src/client.rs::unix_sockaddr` | required; **remaining** — a hand-built `sockaddr_un` capping at a hardcoded 108 and computing the length from `size_of::<sa_family_t>()`. Per libc 0.2.189, `sun_path` is `[c_char; 104]` and `sa_family_t` is `u8` on BSD (with a `sun_len` field Linux lacks), so outside Linux a 105..107-byte path passes that guard and is zero-filled, and the computed length is one byte short |
+| unix socket addressing | `secrets/src/client.rs::unix_sockaddr` | required; capacity and field offset come from the target's `sockaddr_un`. Embedded NULs are refused; empty paths and unused fields follow Rust's `SocketAddr::from_pathname` convention, including leaving BSD `sun_len` zero. Linux boundary and real-socket tests pass; other platform layouts remain unverified at runtime. |
 | shell resolution | `conduct/src/graph/resurrect.rs::passwd_login_shell` | required; **remaining** — a `getent passwd` shell-out (glibc/nss; its absence falls back to `/bin/sh`) |
 | `ps` invocation | `conduct/src/graph/codex_app.rs::process_table` | required, **named dependency** — `ps -axo pid=,ppid=,command=` works on Linux/macOS/FreeBSD; POSIX.1 only mandates `ps -e -f -o <format>`, so a strict/`BusyBox` `ps` may reject it |
 | stage/state lock | `storage/src/fs.rs`, `storage/src/outbox.rs`, `conduct/src/graph/codex_app.rs::lock_is_held` | required, **non-POSIX primitive by design** — `flock(2)` is BSD/XSI, not POSIX.1 (POSIX offers `fcntl(F_SETLK)`, per-process and dropped when any fd to the file closes). The guarantees here — the lock surviving a `fork`/`setsid` into a detached child, and `lock_is_held` as a liveness probe that never creates the file — rest on open-file-description semantics |
@@ -46,10 +67,20 @@ Two classes follow from that, and every row below is one of them:
   **unverified at runtime**. Nothing here was executed on a non-Linux host,
   and no POSIX conformance claim follows from a `cfg` branch — `cfg(unix)` is
   not evidence of POSIX (the tree already contains `cfg(unix)` branches whose
-  *semantics* are Linux: `SO_PEERCRED`, `flock`).
+  *semantics* are Linux: `SO_PEERCRED`, `flock`). Windows — native or WSL — was
+  not attempted at all, and the `cfg(target_os)` arms above are Unix-family
+  guards: they neither build nor measure anything on a Windows target.
 - **Per-OS claims above** (which targets define `libc::ucred`, the `sun_path`
   width, `sa_family_t`'s width, `getpeereid`'s signature) were read from the
   workspace's libc 0.2.189 source, not from documentation.
+- **Where a standard-library convention exists, it is followed rather than a
+  second ABI opinion invented.** The unix-socket row's `sun_len` answer is
+  `std`'s: the toolchain's own std source tree
+  (`rust-lib-src/std/src/os/unix/net/addr.rs`, byte-identical to
+  `rust-lang/rust` 1.97.1, sha256 `07465ce6…`) sets `sun_family` and nothing
+  else, and the string `sun_len` occurs zero times in the whole of std's
+  `src/` — so nothing here fills that byte, and nothing needs a per-target
+  list to decide whether to.
 - **Test-runner gap**: non-Linux behavior has no runner. Tests asserting
   `/proc` facts, `/run/user/1000` paths, and Linux-only peer-credential reads
   are either Linux-gated (they vanish elsewhere) or red elsewhere, so the

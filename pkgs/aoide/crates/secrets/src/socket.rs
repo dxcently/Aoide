@@ -18,8 +18,11 @@
 //! existed.
 //!
 //! **SUN_LEN hazard** (every caller, this crate's own tests included): a
-//! unix socket path is capped at ~108 bytes on Linux
-//! (`sockaddr_un.sun_path`). A caller that needs a GUARANTEED-short path
+//! unix socket path is capped by `sockaddr_un.sun_path`'s own width — 108 on
+//! Linux, 104 on the BSDs, 126 on Haiku — which `client::unix_sockaddr`
+//! reads off the struct and enforces (a NUL in the path and an over-long
+//! path are refused there; an empty path is the zero-length, unnamed
+//! address). A caller that needs a GUARANTEED-short path
 //! (this crate's own end-to-end test, `tests/e2e.rs`) passes
 //! `AOIDE_SECRETS_SOCKET` — or, for a direct `broker::serve`/
 //! `client::resolve` call, an explicit `/tmp`-direct path — rather than

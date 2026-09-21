@@ -863,6 +863,24 @@
   module connects through `connect_bounded`, never a bare
   `UnixStream::connect` — that would silently reopen this exact gap for
   just that one op.
+- **`client::unix_sockaddr` is the ONE address builder, and every number in
+  it comes off the target's own struct (socket correctness fix).** The cap is
+  `sun_path`'s own width — 108 on Linux, 104 on the BSDs, 126 on Haiku, 1023
+  on AIX — so a 105..107-byte path on a 104-byte BSD struct is refused
+  instead of being handed to the kernel zero-filled (a connect to a path
+  nobody named). The length is `offsetof(sockaddr_un, sun_path)` + the path +
+  its terminating NUL (`SUN_LEN`); `size_of::<sa_family_t>()` is the number
+  NOT to use, since it is 2 on Linux only coincidentally (BSD's is one byte).
+  A NUL in the path is refused and an empty path is the zero-length (unnamed)
+  address. All three are the answers
+  `std::os::unix::net::SocketAddr::from_pathname` gives for the same input,
+  and the tests assert the agreement AGAINST `std` instead of restating it,
+  so they follow this target's own widths. BSD's leading `sun_len` byte stays
+  zero, exactly as `std`'s own builder leaves it there (`sun_len` occurs
+  nowhere in std's source) — the standard library's convention, not an
+  invented ABI value, and no truncating cast to a one-byte field. A second
+  address-building site is this defect coming back: a new caller connects
+  through `connect_bounded`, not its own `sockaddr_un`.
 
 ## Extension points
 
