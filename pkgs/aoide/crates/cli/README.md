@@ -15,7 +15,14 @@ correspondence").
   `aoide_protocol::door::run`'s shared skeleton with core's own `special`
   hook (`mcp serve --stdio`, `a2a serve`, `secrets serve`, `secrets exec`,
   `secrets enroll`, `secrets watch`, `events tail`, `pair watch`
-  (P-P5), `conductor`, `guide`/`schema` raw output).
+  (P-P5), `conductor`, `guide`/`schema` raw output). `dispatch` is also the
+  one seam where every door's audit line is written, so it owns the rule
+  that a line's message is not automatically the command's outcome text:
+  the pairing ceremony (`pair`, `pair.reject`, `pair.watch`, and
+  `mesh.pair`, which embeds each pair leg's own text) logs the operation
+  and the status with the free text withheld — a confirmation or reply
+  code rides that text, and the conductor's LOG panel reads this log back.
+  Human and `--json` output are untouched by that rule.
 - `registry` — the golden command-path snapshot test; its golden list
   is the source of truth for the path set and its count (this prose
   deliberately states no number).

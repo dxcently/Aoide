@@ -66,25 +66,80 @@ pub fn dispatch(inv: &Invocation) -> Outcome {
     };
 
     // Wire the audit-log append as a real code path for every dispatch.
+    // The logged text is [`audit_message`]'s, not the outcome's own: one
+    // family of commands carries a ceremony secret in its human wording, and
+    // `$AOIDE_ROOT/log` is read back (the conductor's LOG panel tails it).
+    let status = match outcome.status {
+        crate::output::Status::Ok => "ok",
+        crate::output::Status::Error => "error",
+        crate::output::Status::Usage => "usage",
+        crate::output::Status::NotImplemented => "not-implemented",
+    };
     let log = audit_log_path(inv);
     let _ = daemon::audit(
         &log,
         inv.door,
         daemon::EventClass::Audit,
         &cmd,
-        match outcome.status {
-            crate::output::Status::Ok => "ok",
-            crate::output::Status::Error => "error",
-            crate::output::Status::Usage => "usage",
-            crate::output::Status::NotImplemented => "not-implemented",
-        },
-        &outcome.message,
+        status,
+        &audit_message(&inv.path, &cmd, status, &outcome.message),
     );
 
     // Mark gated commands so both doors surface the gate uniformly.
     match meta {
         Some(m) if m.gated => outcome.gated(true),
         _ => outcome,
+    }
+}
+
+/// Is this command path part of the pairing ceremony — `pair` (the one
+/// command the family is named after), a subcommand of it (`pair.reject`,
+/// `pair.watch`), or the wrapper that drives the same legs (`mesh.pair`)?
+///
+/// **Matched on the path's own segments, never on the message.** A secret
+/// rides whatever wording a handler happens to choose, so the withholding
+/// must not depend on reading what was said. A `NNN-NNN` scan is the
+/// fragile version of this: it catches a SAS only in exactly that spelling
+/// (the operator's own `740 729` is a code
+/// `aoide_client::commands::code_matches` accepts, and a shape-based rule
+/// would have to guess at spacing), it says nothing about a malformed
+/// or partial entry, and it does not describe at all the id or name an
+/// operator typed — which the refusals echo back verbatim. Worse, it makes
+/// the guarantee a hostage to wording: any future envelope that prints the
+/// code differently leaks silently, and nothing test-fails. Keyed on the
+/// path, the rule holds for text nobody has written yet.
+fn is_pair_ceremony(path: &[String]) -> bool {
+    path.iter().any(|segment| segment == "pair")
+}
+
+/// The audit MESSAGE one dispatch writes.
+///
+/// Every other command audits its outcome verbatim — this crate's whole
+/// record of what happened. The pairing ceremony does not, because its
+/// envelopes carry ceremony secrets **in free text**: the requester's own SAS
+/// (`aoide_client::commands`'s "confirmation code {sas}" arms), the approver's
+/// reply SAS on its own commit, and whatever the operator typed at this door —
+/// an id or a name, which the refusals echo back verbatim. `$AOIDE_ROOT/log`
+/// is read back — the conductor's own LOG panel tails it
+/// (`conductor/src/app.rs`'s `reload_log` → `eventview::read_history` on
+/// `aoide_protocol::default_audit_log`) — so a code written here is a code
+/// published on someone's screen.
+///
+/// The line therefore keeps the operation and the status (which the record's
+/// own `command`/`status` fields carry anyway, so a reader loses nothing) and
+/// drops the free text wholesale. This is the LOG's copy, never the door's:
+/// `Outcome.message`/`--json`/human output are untouched, because the two
+/// operators still have to read their codes to each other off their own
+/// screens — the same "only the stored copy is bounded" posture
+/// `aoide_protocol::audit`'s message clamp takes, one field over.
+fn audit_message(path: &[String], cmd: &str, status: &str, message: &str) -> String {
+    if is_pair_ceremony(path) {
+        format!(
+            "{cmd} {status} — pairing ceremony: message withheld from the audit log \
+             (it can carry a confirmation or reply code)"
+        )
+    } else {
+        message.to_string()
     }
 }
 
@@ -175,6 +230,147 @@ mod tests {
         match saved {
             Some(v) => std::env::set_var("PATH", v),
             None => std::env::remove_var("PATH"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn dotted(path: &[&str]) -> (Vec<String>, String) {
+        let segs: Vec<String> = path.iter().map(|s| s.to_string()).collect();
+        let cmd = segs.join(".");
+        (segs, cmd)
+    }
+
+    /// The pairing ceremony's audit copy keeps the operation and the status
+    /// and drops the text — the text is where the SAS rides
+    /// (`client::commands`'s "confirmation code {sas}" envelopes, the
+    /// approver's reply SAS). Every path segment spelling of the family is
+    /// covered, `mesh.pair` included: its report embeds each leg's own
+    /// outcome text verbatim (`aoide_client::mesh::classify`'s `detail`), so it
+    /// inherits the same leak and the same withholding.
+    #[test]
+    fn pair_ceremony_audit_text_withholds_the_outcome_message() {
+        let sentinel = "839-035";
+        for path in [&["pair"][..], &["pair", "reject"], &["pair", "watch"], &["mesh", "pair"]] {
+            let (segs, cmd) = dotted(path);
+            let human = format!(
+                "pairing request sent to `osaka` (http://box:8710/) — confirmation code {sentinel} — \
+                 read this aloud (or otherwise out-of-band) to osaka's operator"
+            );
+            let audited = audit_message(&segs, &cmd, "ok", &human);
+            assert!(!audited.contains(sentinel), "{cmd}: the audit copy must not carry the code: {audited}");
+            assert!(!audited.contains("confirmation code"), "{cmd}: no fragment of the text either: {audited}");
+            assert!(audited.contains(&cmd), "{cmd}: the operation stays named: {audited}");
+            assert!(audited.contains("ok"), "{cmd}: the status stays named: {audited}");
+        }
+    }
+
+    /// "Even when malformed": the withholding is keyed on the command path,
+    /// so a mistyped code the gate itself would still accept (`code_matches`
+    /// strips whitespace, so `740 729` is `740-729`), a code-shaped id echoed
+    /// back in a refusal, or a message carrying nothing at all, all leave the
+    /// log in the SAME shape. Nothing in this path parses the message.
+    #[test]
+    fn pair_ceremony_audit_text_does_not_depend_on_the_message_shape() {
+        let (segs, cmd) = dotted(&["pair"]);
+        let texts = [
+            "code mismatch — try 1 of 3; 2 more before this request is auto-denied",
+            "no pending pairing request with id `740 729` (unknown, already resolved, or expired)",
+            "pairing request sent to `osaka` — confirmation code 740729 — read this aloud",
+            "",
+        ];
+        let first = audit_message(&segs, &cmd, "error", texts[0]);
+        for text in texts {
+            let audited = audit_message(&segs, &cmd, "error", text);
+            assert_eq!(audited, first, "the audit copy must not vary with the message: {text:?}");
+            assert!(!audited.contains("740"), "{audited}");
+        }
+    }
+
+    /// The withholding is the pairing ceremony's alone — every other command
+    /// still audits exactly what it reported, byte for byte (`session prune`'s
+    /// own test in `conductor_integration.rs` pins the same seam end to end).
+    #[test]
+    fn ordinary_commands_audit_their_outcome_message_verbatim() {
+        let (segs, cmd) = dotted(&["session", "prune"]);
+        let message = "pruned 2 done sessions from /tmp/dusk";
+        assert_eq!(audit_message(&segs, &cmd, "ok", message), message);
+    }
+
+    /// End-to-end through the real dispatcher, over a real log file: the
+    /// pair family's line loses what the operator typed while the RETURNED
+    /// outcome still prints it (the human ceremony is untouched), and an
+    /// ordinary command's line keeps its text — the control that proves the
+    /// assertion above is reading a log that really was written.
+    #[test]
+    fn dispatch_withholds_typed_pair_input_from_the_log_and_keeps_the_human_outcome() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("aoide_cli_pair_audit_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        std::env::set_var("AOIDE_STATE_DIR", dir.join("state"));
+        std::env::set_var("AOIDE_STAGE_DIR", dir.join("stage"));
+        let log = dir.join("log");
+
+        // A refused `pair reject <target>`: the target is TYPED input, and
+        // the taught unknown-id error echoes it back. No pending state is
+        // read or written outside this tempdir — nothing here dials anyone.
+        let sentinel = "839-035";
+        let pair_out = dispatch(&Invocation {
+            path: vec!["pair".to_string(), "reject".to_string()],
+            args: vec![sentinel.to_string()],
+            flags: BTreeMap::from([("audit-log".to_string(), log.to_string_lossy().into_owned())]),
+            door: Door::Cli,
+        });
+        assert_eq!(pair_out.status, Status::Error, "{}", pair_out.message);
+        assert!(
+            pair_out.message.contains(sentinel),
+            "the human outcome keeps what was typed at the door: {}",
+            pair_out.message
+        );
+
+        let guide_out = dispatch(&Invocation {
+            path: vec!["guide".to_string()],
+            args: vec![],
+            flags: BTreeMap::from([("audit-log".to_string(), log.to_string_lossy().into_owned())]),
+            door: Door::Cli,
+        });
+
+        let contents = std::fs::read_to_string(&log).expect("dispatch wrote the audit log");
+        let records: Vec<serde_json::Value> = contents
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("one JSON-lines record per dispatch"))
+            .collect();
+        let pair_record = records
+            .iter()
+            .find(|r| r["command"] == "pair.reject")
+            .unwrap_or_else(|| panic!("no pair.reject record in:\n{contents}"));
+        assert_eq!(pair_record["status"], "error");
+        let audited = pair_record["message"].as_str().unwrap();
+        assert!(
+            !audited.contains(sentinel),
+            "the pair family's audit line must not carry the typed code: {audited}"
+        );
+        assert!(audited.contains("pair.reject") && audited.contains("error"), "{audited}");
+
+        let guide_record = records
+            .iter()
+            .find(|r| r["command"] == "guide")
+            .unwrap_or_else(|| panic!("no guide record in:\n{contents}"));
+        assert_eq!(
+            guide_record["message"].as_str().unwrap(),
+            guide_out.message,
+            "an ordinary command's audit line is its own message, verbatim"
+        );
+
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

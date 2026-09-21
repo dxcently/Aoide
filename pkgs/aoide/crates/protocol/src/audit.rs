@@ -120,8 +120,8 @@ pub fn now_secs() -> u64 {
 }
 
 /// The audit log records that an operation happened, not what it printed.
-/// A command's `Outcome` message is both its human output and (via
-/// `dispatch.rs`'s generic per-dispatch audit call) its audit payload, so a
+/// Except for pairing ceremonies, whose dispatcher withholds the human
+/// message, a command's `Outcome` message is also its audit payload, so a
 /// command that renders content as its message — `aoide mail show`'s whole
 /// letter, `mail read`'s every printed entry — would otherwise leave an
 /// unbounded second copy sitting in `~/.aoide/log`, one the mailbase's own

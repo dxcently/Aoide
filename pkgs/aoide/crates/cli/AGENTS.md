@@ -18,6 +18,16 @@
 - **Nix-independent.** No nix shell-outs, no NixOS assumption, anywhere in
   this crate or what it depends on (root `AGENTS.md`, "core is
   nix-independent"). Only `lyra` may be nix-dependent.
+- **The audit copy of an outcome is not the outcome.** `dispatch` writes one
+  line per dispatch for both doors, and its message is deliberately NOT
+  always `Outcome.message`: the pairing ceremony's text carries a
+  confirmation/reply code (and whatever an operator typed at that door), and
+  `$AOIDE_ROOT/log` is read back (the conductor's LOG panel tails it). Keep
+  `audit_message` keyed on the command PATH, never on the message's shape —
+  no `NNN-NNN` scan, no "looks like a code" guess: a malformed or re-spaced
+  code must be withheld exactly like a well-formed one, and a typed id is no
+  different. Never redact by mutating `Outcome.message`; only the stored copy
+  is withheld.
 
 ## Extension points
 
