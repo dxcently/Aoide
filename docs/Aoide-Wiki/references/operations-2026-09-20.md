@@ -91,3 +91,33 @@ bindings preserving shared contracts, rather than a compatibility-layer
 dependency. This supersedes the open question recorded earlier in this log.
 A separate Eidolon architect is mapping the source blockers and ordered
 implementation slices. No Windows build or runtime verification is claimed.
+
+## Native Windows and encrypted HTTPS continuation
+
+The User resumed native Windows implementation and HTTPS planning, requiring
+end-to-end encrypted letters whose signed contents and destinations cannot be
+modified by relays. This supersedes the earlier HTTPS planning deferral.
+The User named ThinkChiyo as the native Windows deployment/test machine.
+It resolves to `192.168.1.205`; SSH and WinRM were unreachable, and the User
+confirmed SSH was never configured. ThinkChiyo is not exposed by this task's
+connected-project tools. ChatGPT Remote setup and the matching-project handoff
+requirement were explained; no Windows deployment or runtime test occurred.
+
+- `c149c38`: unsupported writer-lock probes report unknown. The regression
+  exercises gather through reconciliation; 816 conduct tests pass and an
+  independent reviewer accepted the change.
+- `9ddaedd`: HTTPS/E2E proposal independently reviewed and corrected. Immutable
+  origin bindings, opaque relay spooling, recipient-key verification,
+  rotation/revocation, namespaced deduplication and receipt recovery are explicit.
+  HPKE is the proposed first mail profile; exact library/suite/encoding remains
+  a gate. Recipient-key forward secrecy is not claimed. No encryption code,
+  listener, credential or transport cutover was introduced.
+- An isolated official Rust 1.97.1 compiler and matching Linux/Windows GNU
+  standard libraries were checksum-verified under `/tmp/aoide-native-e2e`.
+  The first Windows protocol check reached eight real Unix-specific source
+  errors. This is compile infrastructure, not a successful core build or a
+  native runtime result.
+- `bd40525`: native Windows executable resolution is independently reviewed.
+  All 158 protocol tests passed on Linux; the Windows module and actual test
+  harness compile to metadata, with a failing canary proving test bodies were
+  checked. Native Windows execution and the whole core build remain unverified.

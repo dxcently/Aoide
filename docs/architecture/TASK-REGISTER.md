@@ -2007,3 +2007,14 @@ project/parent inheritance across local/remote/app/subagents;
   source guards and Linux tests do not prove non-Linux runtime support.
 - Status: incomplete. Native Windows still encounters Unix-only APIs;
   non-Linux peer identity currently refuses daemon dispatch connections.
+
+## 29. HTTPS mesh with end-to-end encrypted letters
+
+- Requirement: HTTPS mail carries encrypted payloads from the first slice.
+  Origin-bound letter contents and destinations are immutable to relays;
+  forwarding authority permits only separately authenticated transit records.
+- [HTTPS-MESH-API.md](HTTPS-MESH-API.md) owns the proposed verification,
+  key-binding, revocation, receipt recovery and migration contracts.
+- Status: reviewed proposal; transport implementation and encryption-library
+  profile remain unfinished. HTTPS has no plaintext fallback. Existing SSH
+  delivery remains in service until parity and recovery are demonstrated.
