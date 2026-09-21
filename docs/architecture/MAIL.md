@@ -376,6 +376,14 @@ door's audit name whitelist gains both names so they never log as bare
   cannot sign as the destination, so it cannot make an origin stop
   retrying.
 
+**Lane and payload.** Everything above is the wire as implemented today: an
+origin-signed envelope whose `text` is plaintext, carried by the loopback/SSH
+transport. [HTTPS-MESH-API.md](HTTPS-MESH-API.md) designs an HTTPS lane on which
+the mail payload is end-to-end encrypted, with the envelope described here as the
+sealed inner plaintext; that container, its key bindings and its hop/destination
+verification split are a proposal, not this wire, and nothing here changes until
+that design lands.
+
 ## Outbox
 
 `$AOIDE_STATE_DIR/outbox/<node>/`:
