@@ -70,6 +70,24 @@
   `crates/cli/src/dispatch.rs`'s `an_unregistered_path_on_a_non_cli_door_is_
   still_unknown_command` test (mirrored in `aoide-lyra`) is the tripwire
   that catches a future violation of this.
+- **`bin`'s platform rule has one home: `command_suffixes`**, read by the
+  pure `candidate_names`/`strip_spawnable_suffix`/`strip_command_prefix` —
+  pure so a Linux `cargo test` proves the Windows rule, and unix's list is
+  the single empty suffix, so every probe keeps reducing to today's
+  `dir.join(name)`. A `PATHEXT` extension is spawnable only WITH a runner:
+  `.exe`/`.com` (the Windows loader) and `.bat`/`.cmd` (std's Windows spawn
+  runs those as `cmd.exe /c <script>` — rustc 1.97.1
+  `sys/process/windows.rs`'s `is_batch_file`). Adding a script type std has
+  no runner for would report a name executable that `Command` cannot start.
+- **`bin`'s duplicate rule is one rule, shared** — the first `PATH`
+  directory wins, then the earliest `PATHEXT` suffix inside it — and every
+  surface exposes the LOGICAL name, suffix (and, on Windows, case) folded
+  away; `on_path` keeps its weaker `is_file` predicate on the same
+  candidates. The sibling tier is the one deliberate exception: it asks for
+  `EXE_SUFFIX` (`aoide.exe`/`lyra.exe`) with the bare name behind it, never
+  `PATHEXT`, so an `aoide.cmd` beside the build cannot shadow it; and an
+  `AOIDE_CORE_BIN`/`AOIDE_RICE_BIN` override still reaches `resolve`
+  trimmed and comes back untouched.
 - **`feed::Follower::poll` MUST stat the PATH on every call, never only the
   open fd.** A producer restart under a `RuntimeDirectory=`-shaped tmpfs
   unlinks the file the fd still refers to; Linux keeps that deleted inode

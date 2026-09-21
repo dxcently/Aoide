@@ -147,7 +147,17 @@ other crate in this workspace sits above.
   same-named file as "found." `discover_external` walks all of `PATH` for
   every `<bin_name>-<name>` executable, sorted by name — the one PATH-scan
   `door::run`'s external-command probe and `registry::Schema`'s additive
-  `external` key (CONTRACTS.md §3) both build on.
+  `external` key (CONTRACTS.md §3) both build on. On Windows the sibling is
+  `aoide.exe`/`lyra.exe` (`EXE_SUFFIX`, deliberately NOT `PATHEXT`, so an
+  `aoide.cmd` beside the build never shadows it) and the executable-bit
+  question becomes the shell's own: a candidate name is tried as given, else
+  with each `PATHEXT` entry in that variable's order, restricted to the
+  extensions this crate can actually run — `.exe`/`.com` natively, `.bat`/
+  `.cmd` because std's own `Command` runs those through `cmd.exe /c`. Every
+  surface strips that suffix, so `aoide-deploy.exe` IS the external command
+  `deploy`, and all three agree on which duplicate wins (first `PATH`
+  directory, then `PATHEXT` order). Unix is untouched: one identity
+  candidate, the execute bit, byte-for-byte.
 - `pick` — the interactive prompt substrate (ONBOARD.md's "Prompt substrate"
   section, P-I1): `interactive`, the [`Door::Cli`] + tty gate a caller checks
   BEFORE opening any prompt at all, and five entry points a caller reaches
