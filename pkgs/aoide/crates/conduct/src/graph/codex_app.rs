@@ -13,8 +13,7 @@
 //! probe over `~/.codex/thread-writer-locks/*.lock`
 //! ([`lock_is_held`], never `/proc`), and ownership resolution from ONE
 //! parsed `ps -axo pid=,ppid=,command=` table keyed on the app-server argv
-//! ([`codex_app_servers`], [`lock_holder`]) — the same primitives on every
-//! OS, with exactly one `cfg(target_os = "linux")` extra
+//! ([`codex_app_servers`], [`lock_holder`]) on Unix, with a Linux ownership check
 //! ([`holder_via_proc_fd`]): an app-server owns a lock only when its own
 //! `/proc/<pid>/fd` table holds it — the sole evidence, for one server or
 //! many, never a shortcut and never a tie-break reserved for the
@@ -341,13 +340,12 @@ pub(crate) fn lock_is_held(path: &Path) -> Option<bool> {
     Some(!acquired)
 }
 
-/// No unix file locks on this platform: codex desktop association needs
-/// unix file locks and a POSIX process table, and this platform has
-/// neither. No probe, no enrolment, no code: this platform never has
-/// anything held.
+/// Unsupported on this platform: no probe runs, so the honest answer is
+/// unknown (`None`), never a positive release that would read as an
+/// all-released gather and drop enrolled records.
 #[cfg(not(unix))]
 pub(crate) fn lock_is_held(_path: &Path) -> Option<bool> {
-    Some(false)
+    None
 }
 
 /// The whole system's process table, `ps -axo pid=,ppid=,command=` — the
@@ -488,11 +486,8 @@ fn holder_via_proc_fd(candidates: &[u32], lock: &Path) -> Result<Option<u32>, ()
     }
 }
 
-/// No positive ownership evidence is available on this platform (codex
-/// desktop association needs unix file locks and a POSIX process table,
-/// and this platform has neither), so no desktop thread is ever enrolled
-/// here. Always `Ok(None)`, never `Err`: the platform has no failure mode
-/// to report, only nothing to find.
+/// The `/proc/<pid>/fd` ownership probe is unavailable here, so this probe
+/// supplies no positive ownership evidence.
 #[cfg(not(target_os = "linux"))]
 fn holder_via_proc_fd(_candidates: &[u32], _lock: &Path) -> Result<Option<u32>, ()> {
     Ok(None)
@@ -1727,6 +1722,64 @@ mod tests {
         }
         drop(held);
         std::fs::remove_dir_all(home).ok();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_unusable_lock_probe_reads_unknown_and_spares_enrolled_app_records() {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("skipping: running as root, permissions cannot make a file unreadable");
+            return;
+        }
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["CODEX_HOME", "HOME"]);
+        let home = unique_stage("codex-probe-unusable");
+        let locks_dir = home.join("thread-writer-locks");
+        std::fs::create_dir_all(&locks_dir).unwrap();
+        let lock = locks_dir.join("01a-unreadable.lock");
+        std::fs::write(&lock, b"").unwrap();
+        std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o000)).unwrap();
+        std::env::set_var("CODEX_HOME", &home);
+
+        // A probe with no answer at all — the shape every non-unix build's
+        // `lock_is_held` has, and the shape an unreadable lock file takes
+        // here. It must surface as `Unknown`, never as a positively
+        // released lock: an all-released gather is `Observed(empty)`, which
+        // would delete the already-enrolled record below.
+        let table_consulted = std::cell::Cell::new(false);
+        let scan = codex_app_threads_with(&BTreeMap::new(), || {
+            table_consulted.set(true);
+            Some(String::new())
+        });
+        assert!(
+            matches!(
+                &scan,
+                ThreadScan::Unknown(ScanFailure::LockProbeUnavailable)
+            ),
+            "an unusable lock probe is Unknown, never a positively released lock"
+        );
+        assert!(
+            !table_consulted.get(),
+            "an unusable probe gives up before the process table is ever read"
+        );
+
+        let (enrolled, _) = reconcile_codex_app_threads(
+            vec![],
+            &ThreadScan::Observed(vec![thread("01a-unreadable", "/home/khoa/Aoide", 111)]),
+        );
+        assert_eq!(enrolled.len(), 1);
+        let (after, changed) = reconcile_codex_app_threads(enrolled.clone(), &scan);
+        assert!(!changed, "an unusable probe must never churn the roster");
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].session_id, "01a-unreadable");
+        assert_eq!(
+            after[0].petname, enrolled[0].petname,
+            "an already-enrolled app record keeps its identity under an unusable probe"
+        );
+
+        std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::remove_dir_all(&home).ok();
     }
 
     #[test]

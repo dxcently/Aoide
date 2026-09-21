@@ -437,11 +437,14 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   `resolve_pending_session_windows` sweep to fill — this module has no
   compositor access.
 
-  Discovery (P-CX-2) is two portable primitives, the same on every OS.
-  `lock_is_held` try-flocks (`LOCK_EX|LOCK_NB`) each
-  `~/.codex/thread-writer-locks/*.lock` — the flock itself is the liveness
-  signal, `/proc` is never consulted, and the probe opens `O_RDONLY` only so
-  it can never bring a missing lock file into existence. `codex_app_servers`
+  Discovery (P-CX-2) is one Unix lock probe and one parsed `ps` table, with
+  no per-OS second path; where the probe is not implemented it answers
+  "unknown" rather than "not held" for a listed lock, leaving enrolled
+  records alone for that scan. `lock_is_held` try-flocks
+  (`LOCK_EX|LOCK_NB`) each `~/.codex/thread-writer-locks/*.lock` — the flock
+  itself is the liveness signal, `/proc` is never consulted, and the probe
+  opens `O_RDONLY` only so it can never bring a missing lock file into
+  existence. `codex_app_servers`
   parses ONE `ps -axo pid=,ppid=,command=` table, read only once at least one
   lock comes back held, keyed on the app-server argv (`argv0`'s basename
   `codex` plus a bare `app-server` token) — never the "ChatGPT" brand, a
