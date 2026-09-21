@@ -3509,6 +3509,17 @@ limitation, not fixed here.
 
 ### Secrets wire — the machine-consumer contract (P-V4c, parking P-N2)
 
+`secrets status --json` reads policy metadata through the broker's
+`{"op":"status"}` request. A successful wire reply contains `ok`, the
+broker's `home`, and `secrets` rows with `name`, `backend`, `requireTotp`,
+`consumers`, `automation` (`enabled`, `consumers`), `sharedWith`, `remote`,
+and `allowRemoteOrigin`. Backend keys, values, templates, and credential
+probes are excluded. The CLI adds `broker: "answered"` and the socket path;
+a failed request reports an error with `broker: "unreachable"`, never a
+successful empty inventory or a local-file fallback. This is the CLI-only
+operator read surface, with the same socket access boundary as `pending`;
+it changes no grant, custody, or secret availability state.
+
 Promoted out of "living in the crate only" (the promotion criterion this
 section states below) because P-V4c makes it explicit: the unix-socket
 JSON-lines wire is a FIRST-CLASS API, not merely `secrets exec`'s private

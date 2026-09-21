@@ -1,6 +1,7 @@
 //! `aoide secrets` — the secrets broker's CLI surface (Workstream SECRETS,
-//! P-V2, P-V3, P-V4c, P-V4e, P-N1, P-N2, P-N3, P-G2). Registers SIXTEEN
-//! commands:
+//! P-V2, P-V3, P-V4c, P-V4e, P-N1, P-N2, P-N3, P-G2). Registers this
+//! crate's full `secrets.*` command surface — the golden list in
+//! `crates/cli/src/registry.rs` is the authority for which commands exist:
 //!
 //! - `serve` — the long-running broker, special-cased at the entry point
 //!   exactly like `a2a serve`/`conductor` (`cli`'s `run_cli`): this
@@ -124,6 +125,17 @@
 //! golden 81 -> 82 (the count moved between those landings for reasons
 //! outside this crate — `crates/cli/src/registry.rs`'s own golden note is
 //! the full chain).
+//! - `status` — `secrets status`: every registered secret's value-free
+//!   policy metadata, read by the BROKER over the socket op `status`
+//!   ([`crate::client::status`], [`crate::broker::handle_status`]).
+//!   Operator-side exactly like `pending`/`put`/`exec`: CLI-only via
+//!   [`require_cli`], deliberately NOT [`require_admin_identity`] (it reads
+//!   nothing locally and writes nothing anywhere — the broker owns the
+//!   read). NO value, NO backend `key`, NO backend probe of any kind, and
+//!   **no direct-home fallback**: an unreachable broker (or an older broker
+//!   that does not know the op) is an explicit error, never a locally
+//!   fabricated or empty inventory. See `README.md`'s "Status" section for
+//!   the reported shape and why the two `broker` values mean what they mean.
 //! - `watch` — a foreground, line-mode broker-event narrator + prompt
 //!   surface (`crate::watch`'s own module doc has the full mechanism).
 //!   [`handle_secrets_watch`] only gates the door (CLI-only, same
@@ -396,6 +408,16 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_secrets_allow_remote_origin,
         examples: ["secrets allow-remote-origin db-prod on", "secrets allow-remote-origin db-prod off"],
+    ));
+    r.insert(cmd!(
+        path: ["secrets", "status"],
+        summary: "List every registered secret's value-free policy metadata (name, backend, requireTotp, consumers, automation, sharedWith, remote, allowRemoteOrigin) as read by the BROKER over the socket. Never a backend key, never a value, never a backend probe. Operator-side like pending/put/exec: CLI-only, but NOT an admin/euid command — it writes nothing. An unreachable broker (or an older broker without this op) is an explicit error, never an empty inventory: there is no direct-home fallback.",
+        args: [],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: handle_secrets_status,
+        examples: ["secrets status", "secrets status --json"],
     ));
 }
 
@@ -818,6 +840,79 @@ fn handle_secrets_allow_remote_origin(inv: &Invocation) -> Outcome {
     })
 }
 
+/// `secrets status` — the value-free inventory READ, over the socket, by the
+/// SAME operator-side gate as `pending`/`approve`/`dismiss`: CLI-only via
+/// [`require_cli`], deliberately NOT [`require_admin_identity`], because
+/// this handler reads no local file at all — the broker owns the read
+/// (`broker::handle_status`), and the operator uid that runs the CLI is
+/// usually not the uid that could read the secrets home anyway (this
+/// crate's `AGENTS.md`: a client-side peek would break the uid boundary
+/// outright).
+///
+/// **No direct-home fallback, deliberately** — the shape `add`/`rm`/`grant`
+/// take over `client::AdminError::NoSocket` (a WRITE, where falling back to
+/// the same file the daemon would have written is the point) has no
+/// counterpart here: what this command reports is the BROKER's view, and a
+/// locally-read `policy.json` is a different store's contents (a different
+/// uid's home, a different `AOIDE_SECRETS_HOME`) masquerading as that view.
+/// So a failed socket is reported as a failure, honestly labelled
+/// `"broker":"unreachable"`, with the taught reason as the outcome's
+/// message — never a zero-row success.
+///
+/// The `--json` data is exactly the shape `README.md`'s "Status" section
+/// documents: `broker` (`"answered"` carries the inventory, anything else
+/// carries none), `home`/`socket` (the paths this read was about),
+/// `secrets[]`. Nothing else is added — no `key`, no templates, no values,
+/// no probe results, no verdict about whether a resolve would succeed.
+fn handle_secrets_status(inv: &Invocation) -> Outcome {
+    let cmd = "secrets.status";
+    if let Some(hint) = require_cli(inv, cmd) {
+        return hint;
+    }
+    let socket = crate::socket::socket_path();
+    match crate::client::status(&socket) {
+        Ok(report) => {
+            let rows: Vec<serde_json::Value> = report
+                .secrets
+                .iter()
+                .map(|s| {
+                    json!({
+                        "name": s.name,
+                        "backend": s.backend,
+                        "requireTotp": s.require_totp,
+                        "consumers": s.consumers,
+                        "automation": {
+                            "enabled": s.automation.enabled,
+                            "consumers": s.automation.consumers,
+                        },
+                        "sharedWith": s.shared_with,
+                        "remote": s.remote,
+                        "allowRemoteOrigin": s.allow_remote_origin,
+                    })
+                })
+                .collect();
+            Outcome::ok(cmd, format!("{} secret(s)", report.secrets.len())).with_data(json!({
+                "broker": "answered",
+                // The home the BROKER read — echoed back by it, never
+                // re-derived here (a client whose own `AOIDE_SECRETS_HOME`
+                // resolves elsewhere must not relabel the broker's rows).
+                "home": report.home,
+                "socket": socket.to_string_lossy(),
+                "secrets": rows,
+            }))
+        }
+        Err(e) => Outcome::error(cmd, e).with_data(json!({
+            "broker": "unreachable",
+            // No inventory was read, so this is THIS process's own resolved
+            // home — the path the answer would have been about — and never a
+            // claim about the broker's.
+            "home": home::secrets_home().to_string_lossy(),
+            "socket": socket.to_string_lossy(),
+            "secrets": [],
+        })),
+    }
+}
+
 /// `secrets pending` (P-N2) — CLI-only via the SAME [`require_cli`] gate as
 /// `put`/`exec`, but deliberately **NOT** [`require_admin_identity`]: this
 /// is the operator-side socket surface (task requirement — "like put/exec,
@@ -1115,6 +1210,7 @@ mod tests {
                 "secrets.watch",
                 "secrets.migrate",
                 "secrets.allow-remote-origin",
+                "secrets.status",
             ]
         );
         for c in r.commands() {
@@ -2202,6 +2298,307 @@ mod tests {
         // `broker::serve` loops forever accepting connections — detached
         // rather than joined, the same posture `tests/e2e.rs`'s own broker
         // threads already take (module doc precedent there).
+    }
+
+    // ── `secrets status` (the value-free inventory seam) ────────────────
+
+    /// Run `f` with a REAL `broker::serve` bound to a scratch home + socket
+    /// (the `add_over_a_real_broker_socket...` pattern above), this process's
+    /// `AOIDE_SECRETS_SOCKET` pointed at it, and — deliberately — its
+    /// `AOIDE_SECRETS_HOME` pointed somewhere ELSE, so any test here can
+    /// prove the reported home came from the BROKER rather than from local
+    /// resolution. The broker's own mirrored aoide audit log is redirected
+    /// into the scratch home too, so nothing here can touch the real
+    /// `~/Aoide/log`. `f` receives the BROKER's home.
+    fn with_real_broker<T>(tag: &str, f: impl FnOnce(&std::path::Path) -> T) -> T {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_home = std::env::var("AOIDE_SECRETS_HOME").ok();
+        let saved_socket = std::env::var("AOIDE_SECRETS_SOCKET").ok();
+        let saved_log = std::env::var("AOIDE_AUDIT_LOG").ok();
+
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos();
+        let broker_home = std::path::PathBuf::from(format!("/tmp/as-{tag}-home-{}-{nanos}", std::process::id()));
+        let client_home = std::path::PathBuf::from(format!("/tmp/as-{tag}-other-{}-{nanos}", std::process::id()));
+        // Short and directly under /tmp: `AF_UNIX`'s 108-byte `sun_path` cap
+        // (`unix_sockaddr`'s own doc), the same reason `with_secrets_home`
+        // pins a fixed literal path.
+        let socket_path = std::path::PathBuf::from(format!("/tmp/as-{tag}-{}-{nanos}.sock", std::process::id()));
+        std::fs::create_dir_all(&broker_home).unwrap();
+        std::fs::create_dir_all(&client_home).unwrap();
+        std::env::set_var("AOIDE_AUDIT_LOG", broker_home.join("mirrored-aoide-log"));
+
+        let home_for_thread = broker_home.clone();
+        let sock_for_thread = socket_path.clone();
+        let _broker_thread = std::thread::spawn(move || {
+            let _ = crate::broker::serve(&home_for_thread, &sock_for_thread);
+        });
+        let mut connected = false;
+        for _ in 0..50 {
+            if std::os::unix::net::UnixStream::connect(&socket_path).is_ok() {
+                connected = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(connected, "broker did not bind {} in time", socket_path.display());
+
+        std::env::set_var("AOIDE_SECRETS_SOCKET", &socket_path);
+        std::env::set_var("AOIDE_SECRETS_HOME", &client_home);
+
+        let result = f(&broker_home);
+
+        match saved_socket {
+            Some(v) => std::env::set_var("AOIDE_SECRETS_SOCKET", v),
+            None => std::env::remove_var("AOIDE_SECRETS_SOCKET"),
+        }
+        match saved_home {
+            Some(v) => std::env::set_var("AOIDE_SECRETS_HOME", v),
+            None => std::env::remove_var("AOIDE_SECRETS_HOME"),
+        }
+        match saved_log {
+            Some(v) => std::env::set_var("AOIDE_AUDIT_LOG", v),
+            None => std::env::remove_var("AOIDE_AUDIT_LOG"),
+        }
+        std::fs::remove_dir_all(&broker_home).ok();
+        std::fs::remove_dir_all(&client_home).ok();
+        std::fs::remove_file(&socket_path).ok();
+        result
+    }
+
+    /// Run `f` under `env_lock` with `AOIDE_SECRETS_HOME` set to a fresh
+    /// scratch dir and `AOIDE_SECRETS_SOCKET` set to a scratch SOCKET PATH
+    /// that nothing ever binds (`f` receives both, and may bind the socket
+    /// itself or point it elsewhere). For the socket-side failure cases,
+    /// which need a different socket per test rather than
+    /// `with_secrets_home`'s one shared absent path.
+    fn with_scratch_paths<T>(tag: &str, f: impl FnOnce(&std::path::Path, &std::path::Path) -> T) -> T {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_home = std::env::var("AOIDE_SECRETS_HOME").ok();
+        let saved_socket = std::env::var("AOIDE_SECRETS_SOCKET").ok();
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos();
+        let home = std::path::PathBuf::from(format!("/tmp/as-cmd-{tag}-home-{}-{nanos}", std::process::id()));
+        // Deliberately short and directly under /tmp — `AF_UNIX`'s 108-byte
+        // `sun_path` limit (`unix_sockaddr`'s own doc).
+        let socket_path = std::path::PathBuf::from(format!("/tmp/as-{tag}-{}-{nanos}.sock", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var("AOIDE_SECRETS_HOME", &home);
+        std::env::set_var("AOIDE_SECRETS_SOCKET", &socket_path);
+
+        let result = f(&home, &socket_path);
+
+        match saved_socket {
+            Some(v) => std::env::set_var("AOIDE_SECRETS_SOCKET", v),
+            None => std::env::remove_var("AOIDE_SECRETS_SOCKET"),
+        }
+        match saved_home {
+            Some(v) => std::env::set_var("AOIDE_SECRETS_HOME", v),
+            None => std::env::remove_var("AOIDE_SECRETS_HOME"),
+        }
+        std::fs::remove_dir_all(&home).ok();
+        std::fs::remove_file(&socket_path).ok();
+        result
+    }
+
+    /// The operator door gate: `status` is CLI-only, exactly like
+    /// `pending`/`put`/`exec` — every other door gets the usage hint, and
+    /// the gate fires BEFORE any socket traffic (these doors run with the
+    /// scratch socket absent, so a handler that tried to connect anyway
+    /// would report the connection failure instead of the usage hint).
+    #[test]
+    fn status_is_cli_only_and_every_other_door_gets_the_usage_hint() {
+        with_scratch_paths("status-door", |_home, _socket| {
+            for door in [Door::Mcp, Door::A2a, Door::Daemon] {
+                let out = handle_secrets_status(&inv(door, &["secrets", "status"], &[], &[]));
+                assert_eq!(out.status, Status::Usage, "status over {door:?}: {out:?}");
+                assert!(out.data.is_none(), "a refused door must carry no data: {out:?}");
+            }
+        });
+    }
+
+    /// A missing socket is reported HONESTLY: an error outcome, `broker:
+    /// "unreachable"`, the taught broker-not-running reason, and NO
+    /// inventory — even though a `policy.json` with a real row sits in THIS
+    /// process's own resolved home, which is the tempting local fallback
+    /// this seam deliberately does not take (that file belongs to a
+    /// different uid's store; reporting it as the broker's inventory would
+    /// be a quiet lie).
+    #[test]
+    fn status_over_a_missing_socket_is_an_honest_error_never_a_local_file_read() {
+        with_scratch_paths("status-nosocket", |home, socket| {
+            crate::store::save_policies(home, &[crate::policy::Policy::new("local-not-the-brokers", "file", "k")]).unwrap();
+
+            let out = handle_secrets_status(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
+            assert_eq!(out.status, Status::Error, "{out:?}");
+            assert!(out.message.contains("broker doesn't look like it's running"), "{}", out.message);
+            assert_eq!(
+                out.data,
+                Some(json!({
+                    "broker": "unreachable",
+                    "home": home.to_string_lossy(),
+                    "socket": socket.to_string_lossy(),
+                    "secrets": [],
+                })),
+                "{out:?}"
+            );
+        });
+    }
+
+    /// A socket this uid may not open (`EACCES` — the exact condition
+    /// `client::describe_connect_error` teaches a fix for) is likewise an
+    /// honest `unreachable`, with the group-membership hint rather than the
+    /// broker-not-running one. Distinct from "missing" on purpose: the crate
+    /// already separates them, and status must not collapse them.
+    #[test]
+    fn status_over_a_socket_this_uid_may_not_open_is_a_taught_refusal() {
+        use std::os::unix::fs::PermissionsExt;
+        with_scratch_paths("status-eacces", |_home, socket| {
+            let _listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
+            // Owner-only bits stripped: connecting to an `AF_UNIX` socket
+            // requires write permission ON the socket file, so even its own
+            // owner is refused — the deployed shape is `0660` +
+            // `aoide-secrets-access`, and this is the "not in the group yet"
+            // half of it.
+            std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+            let out = handle_secrets_status(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
+            assert_eq!(out.status, Status::Error, "{out:?}");
+            assert!(out.message.contains("aoide-secrets-access"), "{}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["broker"], "unreachable", "{out:?}");
+        });
+    }
+
+    /// An OLDER broker that does not know this op (`{"ok":false,"error":
+    /// "unknown op `status`"}`) is an explicit failure — never an empty
+    /// successful inventory. A hand-rolled one-shot listener stands in for
+    /// that broker.
+    #[test]
+    fn status_over_a_broker_that_does_not_know_the_op_is_an_explicit_failure() {
+        use std::io::{BufRead, Write};
+        with_scratch_paths("status-oldbroker", |_home, socket| {
+            let listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
+            let sock_for_thread = socket.to_path_buf();
+            let handle = std::thread::spawn(move || {
+                if let Ok((stream, _)) = listener.accept() {
+                    let mut request = String::new();
+                    let _ = std::io::BufReader::new(&stream).read_line(&mut request);
+                    assert!(request.contains("\"status\""), "the client sent {request:?}");
+                    let mut w = &stream;
+                    let _ = w.write_all(b"{\"ok\":false,\"error\":\"unknown op `status`\"}\n");
+                }
+            });
+
+            let out = handle_secrets_status(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
+            assert_eq!(out.status, Status::Error, "{out:?}");
+            assert!(out.message.contains("unknown op"), "{}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["broker"], "unreachable", "{out:?}");
+            assert_eq!(out.data.as_ref().unwrap()["secrets"], json!([]), "{out:?}");
+            handle.join().ok();
+            std::fs::remove_file(&sock_for_thread).ok();
+        });
+    }
+
+    /// A broker with no policies at all: an honest EMPTY inventory, over an
+    /// `Ok` outcome, with the broker's own home echoed back.
+    #[test]
+    fn status_over_a_fresh_broker_reports_an_empty_inventory() {
+        with_real_broker("status-empty", |broker_home| {
+            let out = handle_secrets_status(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
+            assert_eq!(out.status, Status::Ok, "{out:?}");
+            assert_eq!(out.message, "0 secret(s)");
+            let data = out.data.unwrap();
+            assert_eq!(data["broker"], "answered");
+            assert_eq!(data["home"], broker_home.to_string_lossy().as_ref(), "the BROKER's home, not this process's");
+            assert_ne!(data["home"], home::secrets_home().to_string_lossy().as_ref());
+            assert_eq!(data["secrets"], json!([]));
+        });
+    }
+
+    /// The answered shape, asserted WHOLE: exactly the four documented
+    /// top-level keys (`broker`/`home`/`socket`/`secrets`) and exactly the
+    /// eight documented row keys, with the policy's backend `key` — which
+    /// `policy.json` does carry — provably absent from the serialized data,
+    /// along with the `socket` this process actually spoke to.
+    #[test]
+    fn status_reports_the_brokers_inventory_as_the_documented_value_free_shape() {
+        with_real_broker("status-shape", |broker_home| {
+            let mut policy = crate::policy::Policy::new("db-prod", "age", "SENTINEL-BACKEND-KEY");
+            policy.require_totp = true;
+            policy.consumers = vec!["m".to_string()];
+            policy.automation.enabled = true;
+            policy.automation.consumers = vec!["cron".to_string()];
+            policy.shared_with = vec!["osaka".to_string()];
+            policy.allow_remote_origin = true;
+            crate::store::save_policies(broker_home, &[policy]).unwrap();
+
+            let out = handle_secrets_status(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
+            assert_eq!(out.status, Status::Ok, "{out:?}");
+            assert_eq!(out.message, "1 secret(s)");
+
+            let data = out.data.unwrap();
+            let mut top_keys: Vec<&String> = data.as_object().unwrap().keys().collect();
+            top_keys.sort();
+            assert_eq!(top_keys, vec!["broker", "home", "secrets", "socket"], "{data}");
+            assert_eq!(data["broker"], "answered");
+            assert_eq!(data["home"], broker_home.to_string_lossy().as_ref());
+            assert_eq!(data["socket"], crate::socket::socket_path().to_string_lossy().as_ref());
+
+            let row = &data["secrets"][0];
+            let mut row_keys: Vec<&String> = row.as_object().unwrap().keys().collect();
+            row_keys.sort();
+            assert_eq!(
+                row_keys,
+                vec![
+                    "allowRemoteOrigin",
+                    "automation",
+                    "backend",
+                    "consumers",
+                    "name",
+                    "remote",
+                    "requireTotp",
+                    "sharedWith",
+                ],
+                "{row}"
+            );
+            assert_eq!(
+                row,
+                &json!({
+                    "name": "db-prod",
+                    "backend": "age",
+                    "requireTotp": true,
+                    "consumers": ["m"],
+                    "automation": {"enabled": true, "consumers": ["cron"]},
+                    "sharedWith": ["osaka"],
+                    "remote": false,
+                    "allowRemoteOrigin": true,
+                })
+            );
+            let serialized = data.to_string();
+            assert!(!serialized.contains("SENTINEL-BACKEND-KEY"), "the backend key leaked into status: {serialized}");
+        });
+    }
+
+    /// A `policy.json` the BROKER cannot parse is an explicit refusal whose
+    /// text never echoes the file: the sentinel a hand-edit could park in a
+    /// wrong-typed field (which `serde_json`'s own diagnostic would quote)
+    /// appears in neither the message nor the data.
+    #[test]
+    fn status_refuses_a_corrupt_broker_policy_file_without_echoing_it() {
+        with_real_broker("status-corrupt", |broker_home| {
+            std::fs::write(
+                crate::store::policy_path(broker_home),
+                br#"[{"name":"SENTINEL-CREDENTIAL","requireTotp":"nope"}]"#,
+            )
+            .unwrap();
+
+            let out = handle_secrets_status(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
+            assert_eq!(out.status, Status::Error, "{out:?}");
+            assert!(!out.message.contains("SENTINEL-CREDENTIAL"), "{}", out.message);
+            assert!(out.message.contains("policy.json"), "{}", out.message);
+            let data = out.data.unwrap();
+            assert_eq!(data["broker"], "unreachable", "{data}");
+            assert_eq!(data["secrets"], json!([]), "{data}");
+            assert!(!data.to_string().contains("SENTINEL-CREDENTIAL"), "{data}");
+        });
     }
 
     /// Bounce-fix item 2's own discipline (P-V2 review), extended to

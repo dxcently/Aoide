@@ -272,6 +272,12 @@ mod tests {
         // `session.start`. Read-only — no stage write, no daemon, no lock —
         // so it sits outside the L4 dual-writer family entirely. Net: 81 + 1
         // = 82.
+        //
+        // `secrets status` — the secrets broker's value-free inventory seam
+        // (`aoide_secrets::commands::handle_secrets_status`, wire op
+        // `status`): one row per registered policy, policy METADATA only,
+        // read by the broker over the socket. Sort slot: between
+        // `secrets.set-totp` and `secrets.watch`.
         let mut expected: Vec<&str> = vec![
             "a2a.serve",
             "adapter.melete",
@@ -345,6 +351,7 @@ mod tests {
             "secrets.rm",
             "secrets.serve",
             "secrets.set-totp",
+            "secrets.status",
             "secrets.watch",
             "send",
             "session",

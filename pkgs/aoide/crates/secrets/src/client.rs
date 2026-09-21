@@ -150,6 +150,20 @@ fn describe_connect_error(socket_path: &Path, err: &io::Error, reinvoke: &str) -
 /// the same tolerant-parsing way if that changes.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// The bound on the WHOLE `secrets status` round trip — the read half set
+/// via `UnixStream::set_read_timeout`/`set_write_timeout` before the request
+/// is written, on top of the [`CONNECT_TIMEOUT`] bound every op here already
+/// carries. Unlike `resolve`/`put`/`pending`/`approve`/`dismiss` (which
+/// deliberately leave the read unbounded — an interactive human is expected
+/// to wait for those), `status` is a plain, read-only inventory question
+/// with no human in the loop and no legitimate reason to take long: it
+/// reads one `policy.json` the broker already has on disk, runs no backend,
+/// and parks on nothing. A broker that cannot answer within this window
+/// (a wedged/overloaded daemon, a half-open connection) is reported as an
+/// honest failure instead of hanging the caller forever. Fixed, no env
+/// override — same posture [`CONNECT_TIMEOUT`] documents.
+const STATUS_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Put `fd` into (or out of) non-blocking mode — same `fcntl(F_GETFL)`/
 /// `fcntl(F_SETFL)` idiom `backend::set_nonblocking` already uses for a
 /// backend child's output pipes, applied here to a socket fd instead.
@@ -904,6 +918,188 @@ pub fn dismiss(socket_path: &Path, id: &str) -> Result<(), String> {
             .unwrap_or("the secrets broker denied the request")
             .to_string())
     }
+}
+
+/// One secret's value-free metadata row, as `secrets status` reports it —
+/// the wire's own `status` row, parsed field by field into this crate's own
+/// type rather than passed through as a `serde_json::Value`. That
+/// parsing is the point, not ceremony: every field below is a NAMED,
+/// value-free policy fact, so a reply carrying anything else (an older or
+/// future broker's `key`, a backend's `has`/`get` template, a value) simply
+/// has nowhere to land here and can never reach a caller's `--json` — the
+/// same "a `serde_json::Value` read at the use site, never a named field a
+/// value could land on" discipline this crate's `AGENTS.md` holds for
+/// `resolve`'s reply, applied in reverse (nothing here is ever a value, so
+/// the type is a plain struct; the invariant it protects is that no extra
+/// wire field is forwarded).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusSecret {
+    /// The secret's policy nickname.
+    pub name: String,
+    /// The named backend the policy routes this secret's value through.
+    pub backend: String,
+    /// The policy's `requireTotp` bit (an access-gate fact — NOT whether an
+    /// enrollment exists on this host, and never a TOTP byte).
+    pub require_totp: bool,
+    /// The policy's `consumers[]` allow-list (empty means "any consumer").
+    pub consumers: Vec<String>,
+    /// The automation gate's pair of facts.
+    pub automation: StatusAutomation,
+    /// Hosts the secret is shared to (empty until the mesh phase lands).
+    pub shared_with: Vec<String>,
+    /// Whether the secret may ever be released over a NON-LOCAL entry point.
+    pub remote: bool,
+    /// Whether a positively remote-origin caller may resolve it.
+    pub allow_remote_origin: bool,
+}
+
+/// [`StatusSecret`]'s automation half — whether listed consumers may skip a
+/// fresh TOTP code, and who is listed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusAutomation {
+    pub enabled: bool,
+    pub consumers: Vec<String>,
+}
+
+/// What ONE `status` reply said: the home the BROKER read `policy.json`
+/// from (echoed back by the broker, never re-derived here — see [`status`])
+/// and the inventory it found there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusReport {
+    pub home: String,
+    pub secrets: Vec<StatusSecret>,
+}
+
+/// Pull a required string field off one `status` row, or a taught error
+/// naming the row and the missing field — the same "a malformed reply is an
+/// `Err`, never a silent default" discipline [`pending`]'s own parsing
+/// holds.
+fn row_str(row: &Value, field: &str, what: &str) -> Result<String, String> {
+    row.get(field)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| format!("the secrets broker's status reply had no `{field}` for {what}"))
+}
+
+/// [`row_str`]'s boolean half.
+fn row_bool(row: &Value, field: &str, what: &str) -> Result<bool, String> {
+    row.get(field)
+        .and_then(Value::as_bool)
+        .ok_or_else(|| format!("the secrets broker's status reply had no `{field}` for {what}"))
+}
+
+/// [`row_str`]'s list half — every element must be a string; anything else
+/// is a malformed reply, not a list this function quietly shortens.
+fn row_str_list(row: &Value, field: &str, what: &str) -> Result<Vec<String>, String> {
+    let items = row
+        .get(field)
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("the secrets broker's status reply had no `{field}` array for {what}"))?;
+    items
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .map(str::to_string)
+                .ok_or_else(|| format!("the secrets broker's status reply had a non-string entry in `{field}` for {what}"))
+        })
+        .collect()
+}
+
+/// Parse ONE `status` row. `what` names the row in every error, so a
+/// malformed reply says WHICH secret it choked on.
+fn parse_status_secret(row: &Value) -> Result<StatusSecret, String> {
+    let name = row_str(row, "name", "a status row")?;
+    let what = format!("secret `{name}`");
+    let automation = match row.get("automation") {
+        Some(a) => StatusAutomation {
+            enabled: row_bool(a, "enabled", &format!("{what}'s automation"))?,
+            consumers: row_str_list(a, "consumers", &format!("{what}'s automation"))?,
+        },
+        None => return Err(format!("the secrets broker's status reply had no `automation` for {what}")),
+    };
+    Ok(StatusSecret {
+        name,
+        backend: row_str(row, "backend", &what)?,
+        require_totp: row_bool(row, "requireTotp", &what)?,
+        consumers: row_str_list(row, "consumers", &what)?,
+        automation,
+        shared_with: row_str_list(row, "sharedWith", &what)?,
+        remote: row_bool(row, "remote", &what)?,
+        allow_remote_origin: row_bool(row, "allowRemoteOrigin", &what)?,
+    })
+}
+
+/// Connect to `socket_path`, send ONE `status` request, read ONE reply line,
+/// and return the broker's value-free policy inventory — the read side of
+/// `secrets status` (the CLI-only operator surface `commands::
+/// handle_secrets_status` wraps).
+///
+/// **The broker does the reading, never this process.** A client-side peek
+/// at `policy.json` would break the uid boundary outright (the operator
+/// running this CLI usually cannot read the broker's home at all —
+/// `AGENTS.md`'s own "the client doesn't run as the secrets uid" note), so
+/// there is NO direct-home fallback here: an unreachable broker is an
+/// `Err`, never a locally-fabricated inventory. When the broker DOES answer,
+/// `home` is the path the BROKER resolved and read (`AOIDE_SECRETS_HOME` is
+/// each process's own — a client whose env points elsewhere must never
+/// relabel the broker's rows as its own home's contents), echoed in the
+/// reply for exactly that reason.
+///
+/// Both socket timeouts are finite ([`STATUS_TIMEOUT`]): a wedged broker is
+/// an honest error within seconds, never a hang.
+pub fn status(socket_path: &Path) -> Result<StatusReport, String> {
+    let mut stream = connect_bounded(socket_path, CONNECT_TIMEOUT)
+        .map_err(|e| describe_connect_error(socket_path, &e, "aoide secrets status"))?;
+    stream
+        .set_read_timeout(Some(STATUS_TIMEOUT))
+        .map_err(|e| format!("setting a read timeout on the secrets broker connection at {}: {e}", socket_path.display()))?;
+    stream.set_write_timeout(Some(STATUS_TIMEOUT)).map_err(|e| {
+        format!("setting a write timeout on the secrets broker connection at {}: {e}", socket_path.display())
+    })?;
+
+    let line = json!({ "op": "status" }).to_string() + "\n";
+    stream
+        .write_all(line.as_bytes())
+        .map_err(|e| format!("writing to the secrets broker: {e}"))?;
+
+    let mut reader = BufReader::new(stream);
+    let mut reply_line = String::new();
+    reader.read_line(&mut reply_line).map_err(|e| match e.kind() {
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => format!(
+            "the secrets broker at {} did not answer `status` within {:?} — reporting that instead of hanging",
+            socket_path.display(),
+            STATUS_TIMEOUT
+        ),
+        _ => format!("reading from the secrets broker: {e}"),
+    })?;
+    if reply_line.trim().is_empty() {
+        return Err("the secrets broker closed the connection with no reply".to_string());
+    }
+    let reply: Value = serde_json::from_str(reply_line.trim())
+        .map_err(|e| format!("the secrets broker sent an unparseable reply: {e}"))?;
+
+    // `{"ok":false}` is the broker's own refusal — an OLDER broker that does
+    // not know this op at all ("unknown op `status`"), a `policy.json` that
+    // would not load, a peer-cred refusal. All of them are reported as what
+    // they are; none of them is ever read as "the inventory is empty".
+    if reply.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err(reply
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("the secrets broker denied the request")
+            .to_string());
+    }
+    let home = reply
+        .get("home")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "the secrets broker's status reply had no `home`".to_string())?
+        .to_string();
+    let rows = reply
+        .get("secrets")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "the secrets broker's status reply had no `secrets` array".to_string())?;
+    let secrets = rows.iter().map(parse_status_secret).collect::<Result<Vec<_>, String>>()?;
+    Ok(StatusReport { home, secrets })
 }
 
 /// Is stdin a terminal? `libc::isatty` on fd 0 — the branch point between
@@ -1800,5 +1996,118 @@ mod tests {
         drop(broker_thread);
         std::fs::remove_file(&socket_path).ok();
         std::fs::remove_dir_all(&home).ok();
+    }
+
+    // ── `secrets status` (the value-free inventory op) ───────────────────
+
+    /// Bind a one-shot listener at a scratch socket path that answers
+    /// exactly ONE connection with `reply` — the same hand-rolled-fake-broker
+    /// idiom this module's connect tests already use, extended to a reply.
+    /// `None` for a broker that accepts and then never answers at all (the
+    /// read-timeout fixture). The thread is detached: the test process
+    /// exiting tears it down.
+    fn one_shot_broker(tag: &str, reply: Option<&str>) -> std::path::PathBuf {
+        let socket_path = std::path::PathBuf::from(format!(
+            "/tmp/as-{tag}-{}-{}.sock",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos()
+        ));
+        let listener = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
+        let reply = reply.map(str::to_string);
+        std::thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                // Consume the request line first — the client is BLOCKED
+                // writing/reading, so an accept-then-close would look like
+                // a different failure than the one under test.
+                let mut request = String::new();
+                let _ = std::io::BufReader::new(&stream).read_line(&mut request);
+                match reply {
+                    Some(body) => {
+                        let mut w = &stream;
+                        let _ = w.write_all(format!("{body}\n").as_bytes());
+                    }
+                    // The silent case: hold the connection open, answer
+                    // nothing. Long enough to outlast any bounded read.
+                    None => std::thread::sleep(Duration::from_secs(60)),
+                }
+            }
+        });
+        socket_path
+    }
+
+    /// The happy path: the typed parse keeps exactly the eight documented
+    /// value-free fields — and DROPS everything else a reply might carry.
+    /// The fixture row deliberately also carries a backend `key` and a
+    /// `value`, the two things this op must never forward: a
+    /// `serde_json::Value` pass-through would leak both straight into a
+    /// caller's `--json`, while this parse has nowhere to put them. `home`
+    /// is the BROKER's, taken verbatim from the reply (never re-derived from
+    /// this process's own env).
+    #[test]
+    fn status_keeps_only_the_documented_value_free_fields_and_drops_the_rest() {
+        let sock = one_shot_broker(
+            "status-ok",
+            Some(
+                r#"{"ok":true,"home":"/var/lib/aoide-secrets","secrets":[{"name":"db-prod","backend":"age","key":"some/backend/key","value":"hunter2","requireTotp":true,"consumers":["m"],"automation":{"enabled":true,"consumers":["cron"]},"sharedWith":["osaka"],"remote":false,"allowRemoteOrigin":true}]}"#,
+            ),
+        );
+        let report = status(&sock).unwrap();
+        assert_eq!(report.home, "/var/lib/aoide-secrets");
+        assert_eq!(
+            report.secrets,
+            vec![StatusSecret {
+                name: "db-prod".to_string(),
+                backend: "age".to_string(),
+                require_totp: true,
+                consumers: vec!["m".to_string()],
+                automation: StatusAutomation { enabled: true, consumers: vec!["cron".to_string()] },
+                shared_with: vec!["osaka".to_string()],
+                remote: false,
+                allow_remote_origin: true,
+            }]
+        );
+        std::fs::remove_file(&sock).ok();
+    }
+
+    /// An older broker that does not know this op answers `{"ok":false,
+    /// "error":"unknown op `status`"}` — an explicit `Err`, never an empty
+    /// inventory.
+    #[test]
+    fn status_reports_an_old_broker_that_does_not_know_the_op_as_an_err() {
+        let sock = one_shot_broker("status-unknown-op", Some(r#"{"ok":false,"error":"unknown op `status`"}"#));
+        let err = status(&sock).unwrap_err();
+        assert!(err.contains("unknown op"), "{err}");
+        std::fs::remove_file(&sock).ok();
+    }
+
+    /// A malformed row (a field missing, or of the wrong type) is a taught
+    /// `Err` naming the field and the secret — never a defaulted value.
+    #[test]
+    fn status_reports_a_malformed_row_as_a_taught_err() {
+        let sock = one_shot_broker(
+            "status-malformed",
+            Some(
+                r#"{"ok":true,"home":"/h","secrets":[{"name":"db-prod","backend":"age","requireTotp":"yes","consumers":[],"automation":{"enabled":false,"consumers":[]},"sharedWith":[],"remote":false,"allowRemoteOrigin":false}]}"#,
+            ),
+        );
+        let err = status(&sock).unwrap_err();
+        assert!(err.contains("requireTotp") && err.contains("db-prod"), "{err}");
+        std::fs::remove_file(&sock).ok();
+    }
+
+    /// **The bound, proven:** a broker that accepts the connection and never
+    /// answers must not hang this call — the read timeout
+    /// ([`STATUS_TIMEOUT`]) fires and the caller gets the taught "did not
+    /// answer" error, well inside a generous wall-clock budget.
+    #[test]
+    fn status_gives_up_on_a_broker_that_never_answers() {
+        let sock = one_shot_broker("status-silent", None);
+        let started = std::time::Instant::now();
+        let err = status(&sock).unwrap_err();
+        let elapsed = started.elapsed();
+        assert!(err.contains("did not answer"), "{err}");
+        assert!(elapsed >= STATUS_TIMEOUT, "must actually wait out its own bound, took {elapsed:?}");
+        assert!(elapsed < STATUS_TIMEOUT + Duration::from_secs(5), "must not overrun the bound, took {elapsed:?}");
+        std::fs::remove_file(&sock).ok();
     }
 }

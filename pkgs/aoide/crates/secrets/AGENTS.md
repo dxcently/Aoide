@@ -60,6 +60,20 @@
   as the secrets uid — it can't see the backing store at all). Don't add a
   client-side existence check "to save a round trip"; the whole point is
   that only the broker is allowed to know.
+- **`secrets status` READS THROUGH THE BROKER, reports facts only, and has
+  NO direct-home fallback.** `client::status` never peeks at `policy.json`
+  itself (the uid-boundary rule just above, applied to a READ): the broker's
+  `status` op does the reading, and an unreachable broker — or an older
+  broker that does not know the op — is an explicit error, NEVER an empty
+  inventory. The row is built field by field (`broker::status_row`), so the
+  policy's backend `key` is not on the wire and a future `Policy` field
+  cannot leak here by default; no value, no template, no presence probe
+  (`has_value`'s own absent-vs-unreadable collapse is why), no
+  `locked`/`available` verdict, and `status` runs NO backend template and
+  takes no lock. A `policy.json` that fails to PARSE is refused with a
+  generic message that never quotes the file — `serde_json`'s diagnostics
+  do quote the offending value, so echoing them would put file content on
+  the wire (`broker::status_load_error`).
 - **The `put` overwrite refusal is a MACHINE-READABLE flag
   (`"exists":true`), never inferred from `error` text** (P-67). Don't add a
   new `put` denial reason whose message text a caller (or this crate's own
@@ -849,6 +863,18 @@
   fixed by RFC 6238's default and this crate's whole TOTP surface) would
   get its own module beside `sha1`/`hmac`, same zero-dependency rule, same
   RFC-vector-as-test-suite discipline.
+- **The `status` op is where a new value-free FACT lands** (a new policy
+  field, a new inventory question a surface needs). Three rules come with
+  the seam: the fact is read broker-side (`handle_status`) and parsed into
+  a NAMED field on `client::StatusSecret` — never passed through as a
+  `serde_json::Value`, which is what keeps an unknown field from riding into
+  a caller's `--json`; the row stays a hand-written `json!` in
+  `broker::status_row`, so a new `Policy` field is a deliberate addition and
+  never an accidental one; and anything that would need a value, a backend
+  template, or a positive "this resolve would succeed" verdict does NOT
+  belong here (`resolve_gate` reaches granted only by fetching the value —
+  `status` reports policy facts and stops). A new reader that wants the
+  inventory goes through `client::status`, never its own socket write.
 - **`secrets enroll` + real TOTP verification LANDED at P-V3** —
   `broker::verify_totp_gate` wires `totp::verify`/`replay::ReplayLedger`
   into `resolve_gate`'s `requireTotp` branch, and `store::

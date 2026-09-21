@@ -44,7 +44,7 @@
 //! are still read fresh from disk every time; the lock only serializes the
 //! section, it never remembers what it read.
 //!
-//! Wire (`resolve`/`put`/`pending`/`approve`/`dismiss`):
+//! Wire (`resolve`/`put`/`pending`/`status`/`approve`/`dismiss`):
 //! ```text
 //! -> {"op":"resolve","secret":"<name>","consumer":"<consumer>","totp":"<code>"?,"argv0":"<cmd>"?,"wait":<bool>?}
 //! <- {"ok":true,"value":"<value>"}                    (granted — immediately, or after a park completes)
@@ -64,6 +64,17 @@
 //!
 //! -> {"op":"pending"}
 //! <- {"ok":true,"pending":[{"id":"<id>","secret":"<name>","consumer":"<consumer>","requestedAt":<unix-seconds>,"peerUid":<uid-or-null>},...]}
+//!
+//! -> {"op":"status"}
+//! <- {"ok":true,"home":"<the secrets home the broker read>","secrets":[{"name":"<name>","backend":"<backend>","requireTotp":<bool>,"consumers":[...],"automation":{"enabled":<bool>,"consumers":[...]},"sharedWith":[...],"remote":<bool>,"allowRemoteOrigin":<bool>},...]}
+//!                                                       (read-only inventory —
+//!                                                       policy METADATA only:
+//!                                                       no backend `key`, no
+//!                                                       value, no backend
+//!                                                       probe, no state change)
+//! <- {"ok":false,"error":"<value-free message>"}        (a `policy.json` that
+//!                                                       did not load — never
+//!                                                       an empty inventory)
 //!
 //! -> {"op":"approve","id":"<id>","totp":"<code>"}
 //! <- {"ok":true}                                      (code valid — the
@@ -343,8 +354,8 @@ fn bind_socket(socket_path: &Path) -> std::io::Result<UnixListener> {
     Ok(listener)
 }
 
-/// Bind `socket_path` and serve `resolve`/`put`/`pending`/`approve`/
-/// `dismiss` requests forever. Creates `secrets_home` if absent and locks
+/// Bind `socket_path` and serve `resolve`/`put`/`pending`/`status`/
+/// `approve`/`dismiss` requests forever. Creates `secrets_home` if absent and locks
 /// it down to `0700` (bounce-fix item 3, P-V2 review — `create_dir_all`
 /// alone honors the process umask, which would leave `policy.json`/
 /// `backends.json` world-readable). **Seeds `backends.json` with the
@@ -517,6 +528,7 @@ fn handle_line(
         Some("resolve") => handle_resolve(secrets_home, events_path, &req, parked, interim_out, peer),
         Some("put") => handle_put(secrets_home, events_path, &req, peer),
         Some("pending") => handle_pending(parked),
+        Some("status") => handle_status(secrets_home),
         Some("approve") => handle_approve(secrets_home, events_path, parked, &req, peer),
         Some("dismiss") => handle_dismiss(secrets_home, events_path, parked, &req, peer),
         Some("admin") => handle_admin(secrets_home, &req, peer),
@@ -773,6 +785,88 @@ fn handle_pending(parked: &ParkRegistry) -> Value {
         })
         .collect();
     json!({"ok": true, "pending": pending})
+}
+
+/// `status` — the read-only, value-free inventory: every registered policy's
+/// metadata, straight out of `policy.json`. Mirrors `pending` in shape and
+/// posture: it reads ONE existing file, writes nothing, takes no lock, runs
+/// no backend, touches no value, and audits nothing (there is no state
+/// change to record — the same reason `pending` audits nothing). The rows
+/// are built by [`status_row`], never by serializing [`crate::policy::
+/// Policy`] itself, which is what keeps the backend `key` off the wire.
+///
+/// Deliberately NOT a `pending`-style operator-only gate at the wire: the
+/// socket's own `0660` + access-group membership is the boundary
+/// (`bind_socket`'s doc — any group member can already resolve a
+/// standing-grant secret and list parked asks), while the CLI half of this
+/// op carries the same CLI-only door gate `pending`/`put`/`exec` do.
+///
+/// A `policy.json` that will not load is an EXPLICIT refusal
+/// ([`status_load_error`]), never an empty inventory: reporting "no secrets"
+/// because the file was unreadable is exactly the silent lie this seam must
+/// not tell.
+fn handle_status(secrets_home: &Path) -> Value {
+    match crate::store::load_policies(secrets_home) {
+        Ok(policies) => json!({
+            "ok": true,
+            // The home the BROKER actually read (its own `AOIDE_SECRETS_HOME`
+            // / default), echoed so a client reporting this inventory can
+            // never attribute the rows to a home of its own resolving.
+            "home": secrets_home.to_string_lossy(),
+            "secrets": policies.iter().map(status_row).collect::<Vec<Value>>(),
+        }),
+        Err(e) => json!({"ok": false, "error": status_load_error(secrets_home, &e)}),
+    }
+}
+
+/// One policy as a `status` row — FIELD BY FIELD with `json!`, never
+/// `serde_json::to_value(&Policy)`. Two reasons, both load-bearing: the
+/// policy's backend `key` is an identifier this seam does not report at all,
+/// and routing the policy through a generic serializer is the shape that
+/// would silently widen the moment a field is added to `Policy` (the type
+/// whose one invariant is that a value can never be a field — `policy.rs`'s
+/// own note). An exhaustive, hand-written row means a new `Policy` field
+/// cannot leak here by default.
+fn status_row(policy: &crate::policy::Policy) -> Value {
+    json!({
+        "name": policy.name,
+        "backend": policy.backend,
+        "requireTotp": policy.require_totp,
+        "consumers": policy.consumers,
+        "automation": {
+            "enabled": policy.automation.enabled,
+            "consumers": policy.automation.consumers,
+        },
+        "sharedWith": policy.shared_with,
+        "remote": policy.remote,
+        "allowRemoteOrigin": policy.allow_remote_origin,
+    })
+}
+
+/// [`handle_status`]'s failure text — SAFE BY CONSTRUCTION, because a
+/// `policy.json` that fails to PARSE can carry anything a human hand-edited
+/// into it, in the wrong field. `serde_json`'s own diagnostics quote the
+/// offending value ("invalid type: string \"hunter2\", expected a bool…"),
+/// so echoing the underlying error would put file CONTENT on the wire and
+/// into a caller's `--json` — the exact leak this function exists to
+/// prevent. The parse case therefore reports only the file's path and what
+/// to do, never the parser's message.
+///
+/// Every OTHER failure kind (a `PermissionDenied` read, say) keeps the
+/// crate's existing diagnosis ([`crate::home::describe_home_file_error`],
+/// the poisoned-file case) — an OS error names its own kind and never
+/// quotes file content, so there is nothing to redact there.
+fn status_load_error(secrets_home: &Path, err: &std::io::Error) -> String {
+    let file = crate::store::policy_path(secrets_home);
+    if err.kind() == std::io::ErrorKind::InvalidData {
+        return format!(
+            "{} exists but is not valid policy JSON — refusing to report a secret inventory from a file that \
+             did not parse (its contents are deliberately not echoed here). Fix or restore it, or remove it to \
+             mean `no secrets`, then re-run `aoide secrets status`.",
+            file.display()
+        );
+    }
+    crate::home::describe_home_file_error(secrets_home, &file, err)
 }
 
 /// Re-run the `exists` + `consumer authorized` half of the policy gate
@@ -2512,6 +2606,114 @@ mod tests {
         let reply = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"explode"}"#, &ParkRegistry::new(), &mut Vec::new(), None);
         assert_eq!(reply["ok"], false);
         assert!(reply["error"].as_str().unwrap().contains("unknown op"));
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// `status` on a home that has never had a secret registered: an honest
+    /// EMPTY inventory over `{"ok":true}` (a missing `policy.json` is not an
+    /// error — `store::load_policies`'s own doc), with the broker's own home
+    /// echoed back and no state written anywhere.
+    #[test]
+    fn status_of_a_fresh_home_is_an_empty_inventory_not_an_error() {
+        let home = tmp_home("status-fresh");
+        let reply = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"status"}"#, &ParkRegistry::new(), &mut Vec::new(), None);
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["home"].as_str().unwrap(), home.to_string_lossy());
+        assert_eq!(reply["secrets"].as_array().unwrap().len(), 0);
+        assert!(!home.join("policy.json").exists(), "status must not create the policy file");
+        assert!(!home.join("audit.log").exists(), "status is read-only — it audits nothing");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// The row shape: every value-free policy fact present, and the backend
+    /// `key` — which the policy does carry — deliberately absent, alongside
+    /// anything value-shaped. A second policy proves rows are per-policy and
+    /// keep `policy.json`'s own order.
+    #[test]
+    fn status_reports_policy_metadata_field_by_field_and_never_the_backend_key() {
+        let home = tmp_home("status-rows");
+        let mut first = Policy::new("db-prod", "age", "SENTINEL-BACKEND-KEY");
+        first.require_totp = true;
+        first.consumers = vec!["m".to_string()];
+        first.automation.enabled = true;
+        first.automation.consumers = vec!["cron".to_string()];
+        first.shared_with = vec!["osaka".to_string()];
+        first.allow_remote_origin = true;
+        seed(&home, &[first, Policy::new("plain", "file", "SENTINEL-OTHER-KEY")]);
+
+        let reply = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"status"}"#, &ParkRegistry::new(), &mut Vec::new(), None);
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["home"].as_str().unwrap(), home.to_string_lossy());
+        let rows = reply["secrets"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0],
+            json!({
+                "name": "db-prod",
+                "backend": "age",
+                "requireTotp": true,
+                "consumers": ["m"],
+                "automation": {"enabled": true, "consumers": ["cron"]},
+                "sharedWith": ["osaka"],
+                "remote": false,
+                "allowRemoteOrigin": true,
+            })
+        );
+        assert_eq!(rows[1]["name"], "plain");
+        let serialized = reply.to_string();
+        assert!(!serialized.contains("SENTINEL-BACKEND-KEY"), "the backend key must never ride the status wire: {serialized}");
+        assert!(!serialized.contains("SENTINEL-OTHER-KEY"), "the backend key must never ride the status wire: {serialized}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// `status` runs NO backend template, ever — not `get`, not `has`, not
+    /// anything else. Both templates are boobytrapped with marker files
+    /// here; a read-only metadata op must leave every one of them absent.
+    /// (This is the property that makes it safe to call while a `put` holds
+    /// the backend lock, and the reason it needs no such lock at all.)
+    #[test]
+    fn status_runs_no_backend_template_at_all() {
+        let home = tmp_home("status-no-probe");
+        let get_marker = home.join("get-ran");
+        let has_marker = home.join("has-ran");
+        std::fs::write(
+            crate::backend::backends_path(&home),
+            serde_json::to_vec(&json!({
+                "scratch": {
+                    "get": format!("touch {} && printf %s {{name}}", get_marker.display()),
+                    "has": format!("touch {} && test -f /dev/null", has_marker.display()),
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        crate::store::save_policies(&home, &[Policy::new("t", "scratch", "k")]).unwrap();
+
+        let reply = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"status"}"#, &ParkRegistry::new(), &mut Vec::new(), None);
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["secrets"][0]["backend"], "scratch");
+        assert!(!get_marker.exists(), "status ran a `get` template");
+        assert!(!has_marker.exists(), "status ran a `has` template");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A `policy.json` that will not parse is an EXPLICIT refusal, and its
+    /// contents — which a hand-edit can put anything into, in the wrong
+    /// field — never come back on the wire. `SENTINEL` stands in for one:
+    /// `serde_json`'s own diagnostic would quote it ("invalid type: string
+    /// \"SENTINEL\"…"), which is exactly why the refusal is generic.
+    #[test]
+    fn status_refuses_a_corrupt_policy_file_without_echoing_its_contents() {
+        let home = tmp_home("status-corrupt");
+        std::fs::write(crate::store::policy_path(&home), br#"[{"name":"SENTINEL-CREDENTIAL","requireTotp":"nope"}]"#).unwrap();
+
+        let reply = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"status"}"#, &ParkRegistry::new(), &mut Vec::new(), None);
+        assert_eq!(reply["ok"], false, "{reply}");
+        assert!(reply.get("secrets").is_none(), "a refused status must carry no inventory key at all: {reply}");
+        let error = reply["error"].as_str().unwrap();
+        assert!(!error.contains("SENTINEL-CREDENTIAL"), "the refusal echoed file content: {error}");
+        assert!(error.contains("policy.json"), "{error}");
+        assert!(error.contains("aoide secrets status"), "the refusal must teach the retry: {error}");
         std::fs::remove_dir_all(&home).ok();
     }
 

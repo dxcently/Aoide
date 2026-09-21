@@ -286,6 +286,19 @@ below) into something richer.
 -> {"op":"pending"}
 <- {"ok":true,"pending":[{"id":"<id>","secret":"<name>","consumer":"<consumer>","requestedAt":<unix-seconds>,"peerUid":<uid-or-null>,"reason":"<text>"|null,"origin":{"username":<string-or-null>,"pid":<int-or-null>,"comm":<string-or-null>,"hostname":<string-or-null>}},...]}
 
+-> {"op":"status"}
+<- {"ok":true,"home":"<the secrets home the broker read>","secrets":[{"name":"<name>","backend":"<backend>","requireTotp":<bool>,"consumers":[...],"automation":{"enabled":<bool>,"consumers":[...]},"sharedWith":[...],"remote":<bool>,"allowRemoteOrigin":<bool>},...]}
+                                                      (read-only inventory —
+                                                      one row per policy in
+                                                      `policy.json`, policy
+                                                      METADATA only: no backend
+                                                      `key`, no value, no
+                                                      backend probe, no state
+                                                      change, nothing audited)
+<- {"ok":false,"error":"<value-free message>"}        (a `policy.json` that
+                                                      did not load — never an
+                                                      empty inventory)
+
 -> {"op":"approve","id":"<id>","totp":"<code>"}
 <- {"ok":true}                                      (code valid — the VALUE
                                                       releases down the
@@ -1534,6 +1547,104 @@ primitive to serialize two of them racing the SAME secret concurrently —
 run those against a secret you know isn't being written by another
 `aoide secrets` invocation at the same time.
 
+## Status (`secrets status`)
+
+`aoide secrets status [--json]` answers the one question an operator (or a
+surface painting a secrets panel) can ask without a credential: **what
+secrets exist, and what are their policies?** It is the read seam the
+broker never had — `resolve` reads a VALUE by name, `pending` lists parked
+asks, and nothing enumerated `policy.json`. The command is operator-side
+over the socket exactly like `put`/`exec`/`pending` (`commands::
+handle_secrets_status`: CLI-only via `require_cli`, deliberately NOT the
+`require_admin_identity` euid guard — it writes nothing, and the operator
+uid that runs it is usually not the uid that could read the secrets home
+anyway).
+
+**The broker does the reading, always.** The CLI sends ONE `{"op":"status"}`
+line and reports what comes back (`client::status`): there is **no
+direct-home fallback**, unlike the admin mutations' `AdminError::NoSocket`
+path. That fallback is right for a WRITE (the same file the daemon would
+have written), and wrong here — a locally-read `policy.json` is a different
+uid's home, masquerading as the broker's view of its own store. So an
+unreachable broker is reported as unreachable, never replaced by a local
+read.
+
+**What it reports, field by field:**
+
+```json
+{
+  "broker": "answered",
+  "home": "/var/lib/aoide-secrets",
+  "socket": "/run/aoide-secrets/secrets.sock",
+  "secrets": [
+    {
+      "name": "db-prod",
+      "backend": "age",
+      "requireTotp": true,
+      "consumers": ["m"],
+      "automation": { "enabled": true, "consumers": ["cron"] },
+      "sharedWith": [],
+      "remote": false,
+      "allowRemoteOrigin": false
+    }
+  ]
+}
+```
+
+- `broker` is about the SEAM, not the process: **`answered`** means the
+  broker returned a readable inventory, and it is the only value that
+  carries one. Every other failure is **`unreachable`** — nothing listening
+  at the socket path, a socket this session's uid may not open (`EACCES`:
+  not in `aoide-secrets-access` yet), an older broker that does not know
+  this op (`{"ok":false,"error":"unknown op `status`"}`), or a
+  `policy.json` that would not load. The outcome is an ERROR in every one of
+  those cases (exit code 1), with the taught reason as the message; an old
+  broker is never mistaken for "no secrets". Read `broker` (or the outcome
+  status) — never the `secrets` array alone.
+- `home`/`socket` name the paths the read was about. When the broker
+  answered, `home` is the home **the broker** resolved and read, echoed back
+  in the reply (a client whose own `AOIDE_SECRETS_HOME` resolves elsewhere
+  must not relabel the broker's rows); in the unreachable case it is this
+  process's own resolved home — the path the answer would have been about,
+  since there is no broker left to ask. `socket` is always the path this
+  process actually spoke to.
+- `secrets[]` is one row per policy in the broker's `policy.json`, in that
+  file's own order, built field by field from `policy::Policy`
+  (`broker::status_row`) — never by serializing the policy struct, so the
+  backend `key` (which the policy does carry) is not on the wire at all, and
+  a future `Policy` field cannot leak here by default.
+
+**What it deliberately does NOT report, and why.** No value, ever. No
+backend `key` (`--key` is a world-readable argv value on `secrets add`, but
+this seam is not the place to start printing identifiers). No backend
+`has`/`get` template, no presence probe: `has_value` is a `bool` that
+cannot tell "no value stored" from "cannot tell" (`backend.rs`'s own
+limitation), so a status built on it would print `absent` for a secret whose
+ciphertext exists but whose `age.key` is unreadable — the exact
+put-gate/overwrite hazard, inverted. `status` reads metadata, runs NO
+backend template of any kind, takes no lock, and audits nothing (there is no
+state change to record, the same reason `pending` audits nothing). And no
+"available"/"locked" verdict: a positive "a resolve would succeed" is only
+reachable by running the gate, which needs the value (`broker::
+resolve_gate`); an invented state is the one thing this seam must not
+print.
+
+**Failure of the read itself is explicit, too.** A `policy.json` that
+exists but does not parse is a refusal, not an empty inventory
+(`broker::status_load_error`) — and its text never quotes the file, because
+`serde_json`'s own diagnostic does ("invalid type: string \"…\"" would put
+whatever a hand-edit parked in a wrong-typed field straight onto the wire).
+Every other read error keeps the crate's existing diagnosis
+(`home::describe_home_file_error`, the poisoned-file case).
+
+**Timeouts are finite.** Unlike `resolve`/`put`/`pending`/`approve`/
+`dismiss` (which leave the read unbounded — an interactive human is expected
+to wait), `status` is a plain read-only question with no human and no
+legitimate reason to take long: `client::status` sets both a read and a
+write timeout (`STATUS_TIMEOUT`, 5s) on top of the connect bound every op
+carries, so a wedged broker is an honest error within seconds instead of a
+hang.
+
 ## Deployment (P-V4)
 
 The secrets design's target topology: the broker runs as its OWN system user
@@ -2078,7 +2189,13 @@ Daemon/socket/CLI (P-V2, extended P-V3):
   validates/burns but BEFORE any fetch — a revoked-mid-park consumer denies
   both the approver's reply and the original parked caller's reply, and the
   ask is removed either way) — `handle_approve` calls it right after
-  `take`. `audit_park`/`audit_approve`/`audit_dismiss` are the matching
+  `take`. `handle_status` is the read-only inventory op — one row per
+  policy in `policy.json`, built by `status_row` (field by field, so the
+  backend `key` and any future `Policy` field stay off the wire), with
+  `status_load_error` refusing a `policy.json` that will not parse WITHOUT
+  echoing it (`serde_json`'s own diagnostics quote the offending value).
+  It takes no lock, runs no backend, and audits nothing.
+  `audit_park`/`audit_approve`/`audit_dismiss` are the matching
   name-only audit functions, same two-destination shape as `audit_resolve`/
   `audit_put`; the dismissed-caller message no longer claims "by an
   operator" (P-N2c honesty fix — any group member reaching the socket can
@@ -2120,8 +2237,15 @@ Daemon/socket/CLI (P-V2, extended P-V3):
   (id/secret/consumer/requestedAt, no value field at all) is `pending`'s
   return type; `approve`/`dismiss` return `Result<(), String>` — neither
   arm of either can carry a value, since the wire replies they read never
-  have one.
-- `commands` — `register(&mut Registry)`: FOURTEEN commands, ALL CLI-only.
+  have one. `status` is the read side of that operator surface: one
+  `{"op":"status"}` round trip returning `StatusReport`/`StatusSecret`
+  (typed field by field, so a reply carrying a `key` or a value has nowhere
+  to land), with BOTH socket timeouts finite (`STATUS_TIMEOUT`, 5s) and NO
+  direct-home fallback — an unreachable broker is an `Err`, never a
+  locally-read `policy.json`.
+- `commands` — `register(&mut Registry)`: this crate's `secrets.*` surface,
+  ALL CLI-only (the golden list in `crates/cli/src/registry.rs` is the
+  authority for which commands exist).
   `serve`/`exec`/`enroll` are door-hint handlers (the real work happens in
   `cli`'s `special` hook, same pattern as `a2a serve`/`conductor`); `add`/
   `rm`/`grant`/`revoke`/`set-totp`/`automate`/`expose` are policy-CRUD
@@ -2152,6 +2276,10 @@ Daemon/socket/CLI (P-V2, extended P-V3):
   `require_admin_identity`-gated, since they never touch `policy.json`,
   only the broker's in-memory `ParkRegistry` over the socket, the same
   operator-side-but-not-admin-side distinction `put`/`exec` already draw.
+  `status` joins that same operator-side group (CLI-only via `require_cli`,
+  NOT `require_admin_identity`-gated): the value-free inventory read, over
+  the broker's own `status` op, with no direct-home fallback and no
+  locally-fabricated rows.
 
 - `admin` (task #79) — the ONE module holding every admin command's actual
   mutation logic (`add`/`rm`/`grant`/`revoke`/`set_totp`/`expose`/
