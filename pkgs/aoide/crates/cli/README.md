@@ -39,6 +39,13 @@ correspondence").
 - `a2a`/`mcp`/`daemon`/`graph`/`output` — thin root-level wiring over the
   matching domain crate for the two binaries' entry points.
 
+## Test fixtures
+
+The graph-residency integration tests run the resident daemon in an owned
+child process with a fixed environment. Fixture teardown kills and waits for
+the child before restoring the test environment; lifecycle tests cover normal
+teardown and readiness failure.
+
 ## What it consumes
 
 `aoide-protocol`, `aoide-storage`, `aoide-conduct`, `aoide-client`,

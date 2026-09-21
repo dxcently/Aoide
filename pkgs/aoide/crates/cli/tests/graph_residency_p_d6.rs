@@ -20,6 +20,7 @@ use aoide_server::daemon::{run_loop, serve_daemon};
 use std::collections::BTreeMap;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Mirrors `aoide_conduct::graph::testutil::unique_stage`'s own SUN_LEN
@@ -65,30 +66,149 @@ fn start_daemon(tag: &str) -> PathBuf {
     socket_path
 }
 
-/// Like [`start_daemon`] but the RESIDENT `run_loop` (not the bare
-/// `serve_daemon` accept-loop-only entry point) — the tick loop, and
-/// therefore the #69 hand-edit watcher's `sweep`/feed-append, only exist on
-/// this path (task #92's own regression tests need to observe the feed a
-/// tick actually writes to, which `serve_daemon` alone never produces).
-/// Callers MUST set `$AOIDE_STAGE_DIR` before calling this — `run_loop`
-/// resolves `stage_roster()` (and therefore the watcher's startup baseline)
-/// on its own thread before the accept loop even starts, but that thread
-/// shares this process's env, so the ordering that matters is "env var set
-/// on any thread before `run_loop`'s own resolve line runs," which setting
-/// it before spawning trivially guarantees. Returns `(socket_path,
-/// events_path)`.
-fn start_run_loop(tag: &str) -> (PathBuf, PathBuf) {
-    let socket_path = unique_dir(tag).with_extension("sock");
-    let events_path = unique_dir(&format!("{tag}-events")).with_extension("jsonl");
-    let log_path = unique_dir(&format!("{tag}-log"));
-    let sp = socket_path.clone();
-    let ep = events_path.clone();
-    std::thread::spawn(move || {
-        let _ = run_loop(sp, ep, log_path, registry(), dispatch);
-    });
-    let probe = connect_retrying(&socket_path);
-    drop(probe);
-    (socket_path, events_path)
+// ── The resident-`run_loop` fixture: its OWN PROCESS, never a bare thread ───
+//
+// `run_loop`'s ~1s tick loop has no shutdown API, so an in-process fixture
+// thread could never be stopped: it outlived its test and kept re-reading the
+// process-global `$AOIDE_STAGE_DIR` on every tick, so after that test released
+// `aoide_test_support::env_lock`/`EnvSaver` the leaked loop resolved — and
+// wrote — whichever stage dir a LATER test had installed, outside that test's
+// lock (the observed `graph.json: No such file or directory` write failure).
+// A child process pins its env at spawn and dies on command, which is the fix.
+
+/// Name of the single test this file re-execs itself to run as its resident
+/// `run_loop`, and the marker that selects it — `#[ignore]`'d so an ordinary
+/// suite run never enters the loop in its own harness. The child entry no-ops
+/// unless [`CHILD_MARKER_ENV`] is set, so only the parent's own spawn reaches it.
+const RUN_LOOP_CHILD_TEST: &str = "run_loop_child_process";
+const CHILD_MARKER_ENV: &str = "AOIDE_P_D6_RUN_LOOP_CHILD";
+
+/// The child's own `run_loop` arguments, resolved from the env the parent
+/// fixed at spawn (never from the parent's later mutations).
+const CHILD_SOCKET_ENV: &str = "AOIDE_P_D6_CHILD_SOCKET";
+const CHILD_EVENTS_ENV: &str = "AOIDE_P_D6_CHILD_EVENTS";
+const CHILD_LOG_ENV: &str = "AOIDE_P_D6_CHILD_LOG";
+const CHILD_PID_FILE_ENV: &str = "AOIDE_P_D6_CHILD_PID_FILE";
+
+/// The resident-`run_loop` fixture, owned: re-execs THIS test binary as the
+/// resident daemon (`run_loop(.., registry(), dispatch)` — the pair
+/// `bin/aoided.rs` injects), waits until it is accepting, and kills + waits on
+/// drop, before the caller's own cleanup. Callers MUST already have
+/// `$AOIDE_STAGE_DIR` set: it is handed to the child and left in this
+/// process's env, since the routed client half reads it here.
+struct RunLoopGuard {
+    child: std::process::Child,
+    socket_path: PathBuf,
+    events_path: PathBuf,
+}
+
+impl RunLoopGuard {
+    fn start(tag: &str, stage_dir: &Path) -> Self {
+        let socket_path = unique_dir(tag).with_extension("sock");
+        Self::spawn(tag, stage_dir, &socket_path, None)
+    }
+
+    /// [`start`](Self::start) with the socket path and a pid file named by the
+    /// caller — used by the readiness-panic regression, which occupies the
+    /// socket path to make the child fail to bind and needs the child's own
+    /// pid to assert it was reaped.
+    fn start_with_pid_file(tag: &str, stage_dir: &Path, socket_path: &Path, pid_file: &Path) -> Self {
+        Self::spawn(tag, stage_dir, socket_path, Some(pid_file))
+    }
+
+    fn spawn(tag: &str, stage_dir: &Path, socket_path: &Path, pid_file: Option<&Path>) -> Self {
+        let socket_path = socket_path.to_path_buf();
+        let events_path = unique_dir(&format!("{tag}-events")).with_extension("jsonl");
+        let log_path = unique_dir(&format!("{tag}-log"));
+        std::fs::create_dir_all(stage_dir).expect("the fixture must stage its own dir");
+
+        // The routed CLIENT half of a test reads this process's env.
+        std::env::set_var("AOIDE_DAEMON_SOCKET", &socket_path);
+
+        let mut cmd = Command::new(std::env::current_exe().expect("the test binary's own path"));
+        cmd.arg("--exact")
+            .arg("--include-ignored")
+            .arg(RUN_LOOP_CHILD_TEST)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .env(CHILD_MARKER_ENV, "1")
+            .env(CHILD_SOCKET_ENV, &socket_path)
+            .env(CHILD_EVENTS_ENV, &events_path)
+            .env(CHILD_LOG_ENV, &log_path)
+            .env("AOIDE_STAGE_DIR", stage_dir)
+            .env("AOIDE_DAEMON_SOCKET", &socket_path);
+        if let Some(pid_file) = pid_file {
+            cmd.env(CHILD_PID_FILE_ENV, pid_file);
+        }
+        let child = cmd.spawn().expect("spawning the resident run_loop child");
+
+        // Own the child BEFORE the readiness wait, so a child that never binds
+        // is killed + reaped by the guard on the panic path, not leaked.
+        let mut guard = RunLoopGuard { child, socket_path, events_path };
+        match guard.wait_accepting() {
+            Ok(()) => guard,
+            Err(e) => panic!("the resident run_loop child never became accepting: {e}"),
+        }
+    }
+
+    /// Wait (bounded, same shape as [`connect_retrying`]) until the child's
+    /// socket accepts a connection.
+    fn wait_accepting(&mut self) -> Result<(), std::io::Error> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match UnixStream::connect(&self.socket_path) {
+                Ok(_) => return Ok(()),
+                Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    /// Is the resident child still alive? Asserted around the routed calls so
+    /// an isolation failure can never let a test pass against the direct
+    /// fallback while believing it exercised the daemon.
+    fn child_is_alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
+}
+
+impl Drop for RunLoopGuard {
+    fn drop(&mut self) {
+        // Kill + WAIT: the child must be gone, and reaped, before the caller
+        // removes the files it was writing.
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        std::fs::remove_file(&self.socket_path).ok();
+        std::fs::remove_file(&self.events_path).ok();
+    }
+}
+
+/// The child entry described on [`RUN_LOOP_CHILD_TEST`]: runs the SAME
+/// resident `run_loop` a real `aoided` runs (`registry()`/`dispatch` — this
+/// crate's own bin injects the identical pair), against the paths/env the
+/// parent fixed at spawn. No-op (and so safe to list as an ordinary ignored
+/// test) unless [`CHILD_MARKER_ENV`] is set.
+#[test]
+#[ignore = "fixture entry: the parent re-execs the test binary with --exact to run the resident run_loop; it never returns"]
+fn run_loop_child_process() {
+    if std::env::var_os(CHILD_MARKER_ENV).is_none() {
+        return;
+    }
+    // Record our own pid before entering the loop (a test may occupy the
+    // socket path to prove the readiness-panic path still reaps us).
+    if let Some(pid_file) = std::env::var_os(CHILD_PID_FILE_ENV) {
+        let _ = std::fs::write(pid_file, format!("{}\n", std::process::id()));
+        // Never bind: stay a live, accepting-never child so the parent's
+        // readiness wait times out and its panic path is exercised.
+        loop {
+            std::thread::sleep(Duration::from_secs(60));
+        }
+    }
+    let socket = PathBuf::from(std::env::var(CHILD_SOCKET_ENV).expect("child socket path"));
+    let events = PathBuf::from(std::env::var(CHILD_EVENTS_ENV).expect("child events path"));
+    let log = PathBuf::from(std::env::var(CHILD_LOG_ENV).expect("child log path"));
+    let _ = run_loop(socket, events, log, registry(), dispatch);
 }
 
 /// Read every JSON line currently in the daemon's own events feed whose
@@ -314,13 +434,25 @@ fn dispatched_session_start_produces_no_false_hand_edit_event() {
 
     let dir = unique_dir("hand-edit-stage");
     std::fs::create_dir_all(&dir).unwrap();
-    // Set BEFORE starting the daemon (`start_run_loop`'s own doc): its
+    // Set BEFORE the daemon starts ([`RunLoopGuard`]'s own doc): its
     // `stage_roster()`-seeded baseline must resolve against THIS directory,
-    // not whatever `AOIDE_STAGE_DIR` happened to hold before.
+    // not whatever `AOIDE_STAGE_DIR` happened to hold before — and the
+    // resident loop must live in a process `RunLoopGuard` can actually stop.
     std::env::set_var("AOIDE_STAGE_DIR", &dir);
 
-    let (daemon_socket, events_path) = start_run_loop("hand-edit");
-    std::env::set_var("AOIDE_DAEMON_SOCKET", &daemon_socket);
+    let mut daemon = RunLoopGuard::start("hand-edit", &dir);
+    let daemon_socket = daemon.socket_path.clone();
+    let events_path = daemon.events_path.clone();
+    assert!(
+        daemon_socket.exists(),
+        "the resident child must have bound its socket before the routed call: {daemon_socket:?}"
+    );
+    assert!(daemon.child_is_alive(), "the resident run_loop child must be up before the routed call");
+
+    // The routed door itself must be the one the client resolves — asserted,
+    // not assumed, so this test can never quietly fall back to the direct
+    // write and still pass.
+    assert_eq!(aoide_client::daemon::socket_path(), daemon_socket);
 
     // Routed `session start` — the write happens on the daemon's own
     // accept thread (same as `routed_session_start_...` above), exactly the
@@ -328,6 +460,10 @@ fn dispatched_session_start_produces_no_false_hand_edit_event() {
     let outcome = dispatch(&session_start_inv("pd92-hand-edit"));
     assert_eq!(outcome.status, aoide_protocol::output::Status::Ok, "{outcome:?}");
     assert!(dir.join("sessions.json").exists(), "the routed dispatch must have written sessions.json");
+    assert!(
+        daemon.child_is_alive(),
+        "the resident run_loop child died mid-test — the routed call did not exercise it"
+    );
 
     // Several tick cycles' worth of headroom (~1s cadence) — long enough
     // that a stale-baseline false positive would reliably have landed in
@@ -359,9 +495,83 @@ fn dispatched_session_start_produces_no_false_hand_edit_event() {
     }
     assert!(fired, "a genuine out-of-band edit made after the dispatch must still fire a hand-edit event");
 
+    // Stop the resident loop BEFORE removing anything it writes to — the
+    // guard kills and WAITS, so no tick can land in the tree below.
+    drop(daemon);
     std::fs::remove_dir_all(&dir).ok();
-    std::fs::remove_file(&daemon_socket).ok();
-    std::fs::remove_file(&events_path).ok();
+}
+
+/// Lifecycle proof for [`RunLoopGuard`]: its Drop KILLS and WAITS on the
+/// resident child — the pid it owned is a live process before the drop and an
+/// absent one after it (`kill(pid, 0)` → ESRCH), so a fixture run can never
+/// leave a ticking daemon behind for the next test to trip over. Without this
+/// the isolation could regress silently into exactly the leak it replaces.
+#[test]
+fn run_loop_guard_reaps_the_resident_child_it_owns() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _saver = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET"]);
+
+    let dir = unique_dir("guard-reap-stage");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::env::set_var("AOIDE_STAGE_DIR", &dir);
+
+    let daemon = RunLoopGuard::start("guard-reap", &dir);
+    let pid = daemon.child.id();
+    assert!(pid_is_alive(pid), "the owned child must be a live process while the guard holds it");
+
+    drop(daemon);
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while pid_is_alive(pid) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!pid_is_alive(pid), "RunLoopGuard's Drop must reap the resident child (pid {pid})");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The readiness-panic half of the lifecycle: `RunLoopGuard` is constructed
+/// BEFORE the accepting wait, so when the child never becomes accepting
+/// (`start_with_pid_file`'s child stays alive without binding) and `start`
+/// panics, the guard still owns the child as the panic unwinds and its Drop
+/// kills + waits on it. The pid is asserted exactly: absent by the time
+/// `start` has unwound.
+#[test]
+fn run_loop_guard_reaps_the_child_even_when_readiness_panics() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _saver = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET"]);
+
+    let dir = unique_dir("guard-readiness-stage");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::env::set_var("AOIDE_STAGE_DIR", &dir);
+
+    let socket = unique_dir("guard-readiness").with_extension("sock");
+    let pid_file = unique_dir("guard-readiness-pid");
+
+    let dir_for_child = dir.clone();
+    let socket_for_child = socket.clone();
+    let pid_file_for_child = pid_file.clone();
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        RunLoopGuard::start_with_pid_file("guard-readiness", &dir_for_child, &socket_for_child, &pid_file_for_child)
+    }));
+    assert!(panicked.is_err(), "the guard must panic when the child never becomes accepting");
+
+    let child_pid: u32 = std::fs::read_to_string(&pid_file)
+        .expect("the child must record its own pid before the readiness wait times out")
+        .trim()
+        .parse()
+        .expect("the recorded pid must parse");
+    assert!(
+        !pid_is_alive(child_pid),
+        "the readiness panic must still reap the run_loop child it spawned (pid {child_pid})"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::remove_file(&socket).ok();
+    std::fs::remove_file(&pid_file).ok();
+}
+
+/// Use the core's POSIX liveness probe for the fixture's owned child.
+fn pid_is_alive(pid: u32) -> bool {
+    aoide_storage::fs::pid_is_alive(pid)
 }
 
 fn grant_exempt_inv(id: &str, state: &str) -> Invocation {
