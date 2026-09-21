@@ -982,6 +982,13 @@ Fields per entry: status · owner · depends on · evidence · next.
   other nodes' ledgers, the broker executes, a MAIL letter records) is a
   chart, not a lane: https://claude.ai/code/artifact/f2304e5c-0c94-435f-9fe9-570320a4e549
 
+- Integration preparation: `docs/architecture/AOIDE-VV-JEV.md` records the
+  `aoide do` shell-out boundary and JEV's separate drift/completion duties.
+  `evals/oversight-readiness/` supplies synthetic prose-brief cases, not
+  production labels or a runtime. CPU-only Linux/Windows measurements are
+  required; macOS follows later. Model runtimes and adopted weights remain
+  unbuilt.
+
 ## 13. Ownership graph (project inheritance, lineage, sanitized spawn ancestry)
 
 User requirement via root, 2026-09-12 (seq 291/292; explicitly authorized,
@@ -1989,3 +1996,13 @@ project/parent inheritance across local/remote/app/subagents;
   variant, never the reviewed line).
 - Checkpoint report must list: completed fixes, actual UI/build evidence,
   shipped SHA, outstanding deferred work.
+
+## 28. Core portability: Linux and Windows, macOS later
+
+- Requirement: POSIX-compatible core; Linux and Windows are the primary
+  targets, with macOS later. Native Windows versus WSL remains unresolved.
+- The shared liveness probe and socket-address layout are repaired.
+  `docs/architecture/CORE-POSIX.md` owns the remaining capability matrix;
+  source guards and Linux tests do not prove non-Linux runtime support.
+- Status: incomplete. Native Windows still encounters Unix-only APIs;
+  non-Linux peer identity currently refuses daemon dispatch connections.
