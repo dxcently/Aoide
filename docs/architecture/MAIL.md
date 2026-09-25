@@ -684,6 +684,96 @@ a terminal escape in a letter is the reader's terminal's problem to
 render inertly, which every modern one does, and the `--json` form
 carries the exact bytes for the reader that wants them.
 
+## Export
+
+`aoide mail export [--dir <path>]` writes the mailbase out as Markdown,
+one note per thread, so the correspondence is searchable from Mneme (register
+§30) — before and after the vault share reaches this box. The default is
+`$AOIDE_ROOT/state/mail-export/`, the ordinary `state_dir()` resolution, so
+the default stays on this box until that share exists; `--dir` goes wherever
+the caller says, created if it is missing.
+
+**Read-only on the mailbase.** It is a projection of `base.jsonl` through
+`read_base`, and advances no cursor, marks nothing, removes nothing, rings
+nothing; a first touch of an unmigrated box runs the same one-shot migrations
+every mail command runs (mailbase and cursor shape), which may mint the
+identity key. Only `type=letter` entries export — a `receipt` or any other
+kind is delivery bookkeeping, not correspondence.
+
+A structured letter with a `threadId` groups by that id, so every copy and
+every reply of one conversation lands in one note; a legacy or unstructured
+letter — or a structured one with no `threadId` — is its own thread, keyed by
+its msgid, the same anchor a legacy reply uses. Letters sit in `seq` order,
+and the note is named after the thread key — its first 16 characters when the
+key is 64 lowercase hex, else `x` plus the first 16 hex of its sha256: a
+stable name, so a re-run overwrites the same file instead of accumulating one
+per run, and never the empty stem that would name the hidden `.md`. Two keys
+that would name one note refuse the whole run, before anything is written.
+
+```
+---
+type: mail-thread
+thread: "<the full thread key>"
+subject: "<the earliest letter's subject, or (no subject)>"
+node: "<this box>"
+participants: ["<node>/<name>", …]
+first: "<received_at>"
+last: "<received_at>"
+letters: <count>
+---
+
+# <subject>
+
+## <received_at> · <from> → <to list>
+cc: …
+
+<the letter body, fenced>
+```
+
+- **A letter's text only ever rides inside a fence** one backtick longer than
+  the longest backtick run in it (three at minimum) — the adaptive fence
+  "Reading" gives `mail read`, so no body can close its own fence and write
+  markdown. A structured letter contributes its decoded `body`; the encoded
+  container the envelope text carries (`AOIDE-LETTER/1` and its JSON) never
+  reaches the page, and an invalid or legacy body is fenced verbatim.
+- **Everything outside a fence is clamped or quoted.** `received_at` and the
+  free-form half of `header.from`/`header.to` (peer-supplied attribution, not
+  a grammar-checked name) are stripped of CR, LF and ESC, and every
+  frontmatter value a letter or this box's own name supplies — `thread`,
+  `subject`, `node`, `participants`, `first`, `last` — is written as a
+  double-quoted YAML scalar, so a letter cannot end the frontmatter block or
+  forge a heading either. Two values are unquoted, both of them this box's
+  own: `type: mail-thread` and `letters: <count>`.
+- **Declared recipients win.** The `→` list and the `cc:` line are a
+  structured letter's own To and Cc as the sender wrote them; the envelope
+  header names only the ONE copy that reached this box. A legacy letter shows
+  its envelope's `to`. `participants` is the sorted union of every letter's
+  sender attribution and recipient addresses in the thread.
+- **One send is one letter.** A `--to`/`--cc` send files one copy per
+  mailbox, and each copy is sealed separately: its own `sig` and `msgid`, its
+  own `minted_at` and `received_at`. Those copies collapse into ONE block —
+  the To list and `cc:` line written once, the block's `received_at` the
+  earliest copy's — so `letters:` counts letters, not mailboxes, and a send
+  to three mailboxes is one letter. Copies are matched on what they share and
+  what they are, the signed text, the sender, and the mailbox each copy
+  reached; never a timestamp, which two copies of one send can straddle. A
+  copy joins only the block directly above it — the one holding the letter
+  before it — and only when all three hold: its `seq` is exactly the next one
+  after that block's last copy, that block carries the same signed text and
+  sender, and that block has not already taken its mailbox. Anything filed in
+  between — a receipt, another thread's letter — leaves a gap and ends the
+  block, so the same words sent twice to the same mailbox stay two letters,
+  not one, and two sends whose single copies land in different mailboxes stay
+  two as well. A fan-out whose copies are separated in `seq` by concurrent
+  filing renders as more than one block: an over-split is accepted, an
+  over-merge is not. Two sends whose copies DO sit back to back are one
+  block — nothing in either envelope tells them from one fan-out, and what
+  they render is identical.
+- **Idempotent.** Each note is written atomically (a temp file in the same
+  directory, then a rename), and a note whose bytes already match is not
+  written at all: a second run reports `0 written, N unchanged` and leaves
+  every inode and mtime alone, so running this on a timer costs nothing.
+
 ## Status and the nodelist view
 
 `aoide mesh` is the nodelist command (FTS-5000: "the nodelist defines the
@@ -814,6 +904,7 @@ aoide mail mark --for <name>                            advance a cursor without
 aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, per entry
 aoide mail route <node>                                  dry-run the four steps
 aoide mail rm --older-than <Nd|Nh>                       prune the base, never seen.jsonl
+aoide mail export [--dir <path>]                         one Markdown note per thread (read-only)
 aoide mail ring --for <name> [--from <session-id>]       the doorbell, by hand; --from excludes that reader
 aoide mesh                          nodelist view: + status, role, key source, liveness
 aoide node allow <node> message off                      quarantine this box's door, now (existing command)

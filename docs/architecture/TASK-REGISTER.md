@@ -2075,8 +2075,31 @@ project/parent inheritance across local/remote/app/subagents;
 - Target: the `magi` vault (`~/Magi`, synced by syncthing) is not present on
   yomi, where syncthing is inactive. Until the User enables that share, the
   default export directory lives under `state/`.
-- Status: queued, not started; next Aoide-core lane after cleanup.
-- Owner: unassigned. Depends on: nothing.
+- Status: LANDED on main (merge of `eidolon/mail-export`, head `a081939`) —
+  `6a7799f` landed it, `bf3caa2` refused colliding note
+  names and qualified the read-only claim, `6ba0c61` made one block per send
+  (`letters:` counts letters, not mailbox copies), and `a081939` gates the join
+  on `seq` adjacency beside the shared signed text, the sender and the mailbox
+  tie-break, so one send's copies merge only while they land back to back.
+  One Markdown note per thread, `--dir` (default `state/mail-export/`),
+  READ-ONLY on the mailbase: no cursor advance, no mark, no removal, no ring —
+  beyond the same one-shot migrations every mail command runs (mailbase and
+  cursor shape) on a first touch, which may mint the identity key. A thread key
+  that is not 64 lowercase hex names its note by `x` plus the first 16 hex of
+  its sha256; two keys that would name one note refuse the whole run before any
+  write. Tests (`aoide-client`):
+  `mail_export_groups_a_thread_and_gives_everything_else_its_own_note`,
+  `mail_export_skips_receipts`, `mail_export_leaves_every_reader_cursor_where_it_was`,
+  `mail_export_rewrites_nothing_when_the_note_already_matches`,
+  `mail_export_fences_a_body_that_carries_its_own_fence`,
+  `mail_export_gives_a_non_hex_key_the_x_prefixed_stem`,
+  `mail_export_never_names_a_note_dot_md`,
+  `mail_export_refuses_two_threads_that_share_a_stem`,
+  `mail_export_keeps_two_sends_of_the_same_words_apart`,
+  `mail_export_keeps_two_fanouts_of_the_same_words_apart`,
+  `mail_export_joins_only_copies_that_are_adjacent_in_seq`, the renamed
+  `register_mail_wires_all_ten_commands`, and `aoide-cli`'s golden snapshot.
+- Owner: Eidolon executor. Depends on: nothing.
 
 ## 31. Mesh SSH keys are unrestricted
 

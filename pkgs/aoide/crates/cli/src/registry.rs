@@ -258,6 +258,11 @@ mod tests {
         // must let the already-spooled letters move. Sorts between
         // `mail.outbox` and `mail.outbox.rm` (`retry` > `rm`). Net: 87.
         //
+        // Mail export (register §30) adds `mail.export` (+1) — the mailbase's
+        // one OUTBOUND projection, one Markdown note per thread under
+        // `state/mail-export/` (`aoide_client::mail_export`). Sorts between
+        // `mail` and `mail.mark`, the same family, giving this list 98 paths.
+        //
         // Bumped by 1 for `project.edit` (multi-root projects) — the
         // exact-replacement editor for a project's root list, the
         // `project edit` that `records.rs`'s `Project.auto_resume` doc
@@ -298,6 +303,7 @@ mod tests {
             "hooks.install",
             "identity",
             "mail",
+            "mail.export",
             "mail.mark",
             "mail.outbox",
             "mail.outbox.retry",
