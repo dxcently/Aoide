@@ -1,0 +1,217 @@
+//! `aoide mail export` — one Markdown note per mail THREAD
+//! (`docs/architecture/MAIL.md` "Export"). A read-only projection of the
+//! mailbase ([`aoide_storage::mail::read_base`]): it reads, groups, renders,
+//! and writes notes under its OWN directory, and advances no cursor, marks
+//! nothing, removes nothing, rings nothing.
+//!
+//! Letter text is untrusted data (root `AGENTS.md` house rule 4). Every byte
+//! of a letter reaches a note through exactly one of two doors: inside a
+//! fence one backtick longer than any backtick run in the text ([`fence`]),
+//! or through the header-line clamps ([`single_line`], [`yaml_quote`]) that
+//! every free-form field interpolated OUTSIDE a fence passes through —
+//! `header.from.name` is attribution text a peer supplies, and can carry CR,
+//! LF and ESC.
+
+use aoide_storage::letter;
+use aoide_storage::mail::{Address, Entry, ENTRY_TYPE_LETTER};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
+/// What one export did — the handler's summary line, and its `--json` form.
+pub(crate) struct Report {
+    pub threads: usize,
+    pub written: usize,
+    pub unchanged: usize,
+    pub dir: PathBuf,
+}
+
+/// One thread's letters, in `seq` order, under the key they group by.
+struct Thread {
+    key: String,
+    letters: Vec<Entry>,
+}
+
+/// `$AOIDE_STATE_DIR/mail-export/` — the ordinary `state_dir()` resolution
+/// (`AOIDE_STATE_DIR` when absolute, else `AOIDE_ROOT/state`), like every
+/// other state path. Register §30 gives the export a directory under `state/`
+/// until the User's Mneme vault is reachable from this box.
+fn default_dir() -> PathBuf {
+    aoide_storage::fs::state_dir().join("mail-export")
+}
+
+/// A structured letter (`letter::decode` succeeds) with a `threadId` groups by
+/// that id; a legacy or unstructured letter — or a structured one with no
+/// `threadId` — is its own thread, keyed by its msgid. Both keys are hex by
+/// construction (`mail::seal`'s msgid, `LetterContent::validate`'s threadId).
+fn thread_key(entry: &Entry) -> String {
+    match letter::decode(&entry.envelope.text).and_then(|c| c.thread_id) {
+        Some(id) => id,
+        None => entry.envelope.msgid.clone(),
+    }
+}
+
+/// `<first 16 hex of the thread key>.md` — stable, so a re-run overwrites the
+/// same file. The filter is the traversal guard: the key is hex by
+/// construction, and a hand-corrupted one then cannot name a path outside the
+/// export directory.
+fn note_name(key: &str) -> String {
+    let stem: String = key.chars().take(16).filter(char::is_ascii_hexdigit).collect();
+    format!("{stem}.md")
+}
+
+/// Every `letter` entry, grouped. Receipts and any other kind are skipped: they
+/// are delivery bookkeeping, not correspondence. A `BTreeMap`, so notes are
+/// written in key order rather than base order.
+fn threads(entries: Vec<Entry>) -> Vec<Thread> {
+    let mut grouped: BTreeMap<String, Vec<Entry>> = BTreeMap::new();
+    for entry in entries {
+        if entry.kind == ENTRY_TYPE_LETTER {
+            grouped.entry(thread_key(&entry)).or_default().push(entry);
+        }
+    }
+    grouped
+        .into_iter()
+        .map(|(key, mut letters)| {
+            letters.sort_by_key(|e| e.seq);
+            Thread { key, letters }
+        })
+        .collect()
+}
+
+/// MAIL.md "Reading"'s free-form clamp — CR, LF and ESC out — for anything
+/// rendered outside a fence.
+fn single_line(s: &str) -> String {
+    s.chars().filter(|c| !matches!(c, '\r' | '\n' | '\x1b')).collect()
+}
+
+/// A double-quoted YAML scalar: a frontmatter value can be any byte a peer
+/// sent, and an unquoted one carrying a newline or `---` would end the block.
+fn yaml_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\x{:02x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// `node/name`, the box's own address grammar.
+fn address(a: &Address) -> String {
+    format!("{}/{}", single_line(&a.node), single_line(&a.name))
+}
+
+/// The addresses a letter names as its recipients, for both the per-letter `→`
+/// list and the thread's `participants`: a structured letter's own To and Cc as
+/// the sender declared them (its envelope header names only the ONE copy that
+/// reached this box), else the envelope's own `to`.
+fn recipients(entry: &Entry) -> (Vec<String>, Vec<String>) {
+    match letter::decode(&entry.envelope.text) {
+        Some(content) => (content.to.iter().map(address).collect(), content.cc.iter().map(address).collect()),
+        None => (vec![address(&entry.envelope.header.to)], Vec::new()),
+    }
+}
+
+/// A fence one backtick longer than the longest backtick run in `body` (three
+/// at minimum): no letter can close its own fence and write markdown outside it
+/// — MAIL.md "Reading"'s adaptive fence, applied to the note.
+fn fence(body: &str) -> String {
+    let mut longest = 0;
+    let mut run = 0;
+    for c in body.chars() {
+        run = if c == '`' { run + 1 } else { 0 };
+        longest = longest.max(run);
+    }
+    "`".repeat(longest.max(2) + 1)
+}
+
+/// One thread as one note: frontmatter, heading, then a block per letter in
+/// `seq` order.
+fn note(thread: &Thread, node: &str) -> String {
+    let subject = thread
+        .letters
+        .first()
+        .and_then(|e| letter::decode(&e.envelope.text))
+        .map(|c| c.subject)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "(no subject)".to_string());
+    let mut participants = BTreeSet::new();
+    for entry in &thread.letters {
+        participants.insert(address(&entry.envelope.header.from));
+        let (to, cc) = recipients(entry);
+        participants.extend(to);
+        participants.extend(cc);
+    }
+    let first = thread.letters.first().map(|e| e.received_at.as_str()).unwrap_or_default();
+    let last = thread.letters.last().map(|e| e.received_at.as_str()).unwrap_or_default();
+    let quoted: Vec<String> = participants.iter().map(|p| yaml_quote(p)).collect();
+
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str("type: mail-thread\n");
+    out.push_str(&format!("thread: {}\n", yaml_quote(&thread.key)));
+    out.push_str(&format!("subject: {}\n", yaml_quote(&subject)));
+    out.push_str(&format!("node: {}\n", yaml_quote(node)));
+    out.push_str(&format!("participants: [{}]\n", quoted.join(", ")));
+    out.push_str(&format!("first: {}\n", yaml_quote(first)));
+    out.push_str(&format!("last: {}\n", yaml_quote(last)));
+    out.push_str(&format!("letters: {}\n", thread.letters.len()));
+    out.push_str("---\n");
+    out.push_str(&format!("\n# {}\n", single_line(&subject)));
+
+    for entry in &thread.letters {
+        let (to, cc) = recipients(entry);
+        let (from, at) = (address(&entry.envelope.header.from), single_line(&entry.received_at));
+        out.push_str(&format!("\n## {at} · {from} → {}\n", to.join(", ")));
+        if !cc.is_empty() {
+            out.push_str(&format!("cc: {}\n", cc.join(", ")));
+        }
+        // A structured letter's decoded body: its subject, To and Cc are
+        // already lifted into the frontmatter and this heading, and the
+        // container's JSON escaping would hide the words from a search index.
+        // A legacy or invalid body is the envelope's text verbatim — MAIL.md's
+        // "invalid structured content displays verbatim".
+        let decoded = letter::decode(&entry.envelope.text);
+        let body = decoded.as_ref().map(|c| c.body.as_str()).unwrap_or(&entry.envelope.text);
+        let fence = fence(body);
+        out.push_str(&format!("\n{fence}\n{body}\n{fence}\n"));
+    }
+    out
+}
+
+/// Write one note per thread into `dir` (default [`default_dir`]).
+///
+/// Each note lands atomically ([`aoide_storage::fs::atomic_write`]: a temp file
+/// in the same directory, then a rename), and a note whose bytes are already
+/// what this run would write is not written at all — a second run leaves every
+/// file's inode and mtime alone, which is what makes this safe to run on a
+/// timer.
+pub(crate) fn export(dir: Option<&Path>) -> Result<Report, String> {
+    let dir = dir.map(Path::to_path_buf).unwrap_or_else(default_dir);
+    let entries = aoide_storage::mail::read_base().map_err(|e| format!("state/mail: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("state/mail-export: {}: {e}", dir.display()))?;
+    let node = aoide_storage::display::local_host_name();
+    let mut report = Report { threads: 0, written: 0, unchanged: 0, dir };
+    for thread in threads(entries) {
+        let note = note(&thread, &node);
+        let path = report.dir.join(note_name(&thread.key));
+        report.threads += 1;
+        match std::fs::read(&path) {
+            Ok(old) if old == note.as_bytes() => report.unchanged += 1,
+            _ => {
+                aoide_storage::fs::atomic_write(&path, &note)
+                    .map_err(|e| format!("state/mail-export: {}: {e}", path.display()))?;
+                report.written += 1;
+            }
+        }
+    }
+    Ok(report)
+}

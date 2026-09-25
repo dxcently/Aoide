@@ -432,14 +432,25 @@ never the inbound/serve half (that's `aoide-server`).
   why this is the one deliberate exception to that module's "never closes
   a tunnel itself" default, and why it doesn't generalize to any other
   caller.
+- `mail_export` (register §30, `docs/architecture/MAIL.md` "Export") — the
+  mailbase's one outbound projection, and `mail_wire`'s mirror image:
+  `export(dir)` reads the base ONCE (`aoide_storage::mail::read_base`),
+  groups every `letter` entry by thread key (a structured letter's
+  `threadId`, else its msgid), skips receipts and every other kind, renders
+  one Markdown note per thread into `--dir` (default
+  `state_dir()/mail-export/`), and writes only notes whose bytes changed, via
+  `aoide_storage::fs::atomic_write`. It touches NO cursor, mark, `seen.jsonl`
+  line or doorbell latch, and never writes INTO the mailbase itself. The
+  fenced/clamped rendering rules are invariants, not style — see
+  `AGENTS.md`.
 - `commands` — this crate's CLI commands:
   `node add/remove/pull/status/hub/allow/spawn/discover`,
   `aoide pair` + `pair.reject`/`pair.watch` (P-P2, P-PV2, task #135 P3',
-  CONTRACTS.md §6/§7 — **`register_mail`'s eight commands (`mail
-  send/read/show/mark/rm/outbox/outbox.rm`, P-M1/P-M2, `docs/architecture/
-  MAIL.md`) moved here from `aoide-storage` at P-M2, because
-  `handle_mail_send`'s non-self branch now dials out and only this crate
-  may hold that dial:** `handle_mail_send` mints and spools an outbound
+  CONTRACTS.md §6/§7 — **`register_mail`'s ten commands (`mail`, `mail
+  send/read/show/mark/rm/outbox/outbox.rm/outbox.retry/export`, P-M1/P-M2,
+  `docs/architecture/MAIL.md`) moved here from `aoide-storage` at P-M2,
+  because `handle_mail_send`'s non-self branch now dials out and only this
+  crate may hold that dial:** `handle_mail_send` mints and spools an outbound
   letter through `aoide_storage::mail`/`outbox` exactly as before, then —
   new at P-M2, for a non-self `to` — makes ONE best-effort call into
   `mail_wire::drain_node` before returning; the spool's own success (the
@@ -502,7 +513,11 @@ never the inbound/serve half (that's `aoide-server`).
   does; nothing parked is a clean no-op, not an error. Neither `outbox`
   nor `outbox rm` WRITES to the
   mailbase (`aoide_storage::mail`) — `handle_mail_outbox`'s own delivery
-  projection still reads it (above) —
+  projection still reads it (above) — `handle_mail_export` (`mail export
+  [--dir <path>]`, register §30) is the mailbase's other read: one Markdown
+  note per thread, `state/mail-export/` by default, advancing no cursor and
+  writing no note whose bytes already match (see the `mail_export` module
+  bullet and MAIL.md "Export") —
   `handle_node_allow` (`node allow <name> <cap> on|off`, P-P3, `docs/
   architecture/PAIRING.md` decision 5) is a thin wire around
   `aoide_storage::node_store::set_node_allow` — idempotent, refuses an

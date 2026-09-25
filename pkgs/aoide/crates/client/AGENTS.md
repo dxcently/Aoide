@@ -649,6 +649,23 @@
   background daemon's schedule) leak into a command that already
   succeeded at its own job; the drain's result is data for the projection,
   not a verdict on the spool.
+- **`mail_export` is READ-ONLY on the mailbase and clamps everything that
+  leaves a fence (register §30).** It reads `base.jsonl` once
+  (`mail::read_base`), groups and renders, and writes notes under
+  `--dir`/`state/mail-export/` — never a cursor, a mark, a `seen.jsonl` line
+  or a doorbell latch. Two rules are load-bearing and neither may be
+  "simplified": a letter's text rides ONLY inside `fence(text)`, one backtick
+  longer than the longest backtick run in the text (a fixed triple fence lets
+  a letter close it and inject markdown), and every
+  free-form string rendered OUTSIDE a fence — `received_at`, and the
+  peer-supplied `header.from`/`header.to` attribution text, which is not
+  grammar-validated the way a structured letter's addresses are — goes
+  through `single_line` (CR, LF, ESC out) or `yaml_quote` (a double-quoted
+  YAML scalar). Frontmatter is the sharp edge: an unquoted value carrying a
+  newline ends the block. A note whose bytes already match is NOT rewritten
+  (the mtime/inode signal a timer-driven run depends on), and the note's name
+  is derived from hex-filtered key characters so a corrupted thread key can
+  never name a path outside the export directory.
 
 ## Extension points
 

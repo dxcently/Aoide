@@ -684,6 +684,66 @@ a terminal escape in a letter is the reader's terminal's problem to
 render inertly, which every modern one does, and the `--json` form
 carries the exact bytes for the reader that wants them.
 
+## Export
+
+`aoide mail export [--dir <path>]` writes the mailbase out as Markdown,
+one note per thread, so the correspondence is searchable from Mneme (register
+§30) — before and after the vault share reaches this box. The default is
+`$AOIDE_ROOT/state/mail-export/`, the ordinary `state_dir()` resolution, so
+the default stays on this box until that share exists; `--dir` goes wherever
+the caller says, created if it is missing.
+
+**Read-only on the mailbase.** It is a projection of `base.jsonl` through
+`read_base` and nothing else: no cursor advances, nothing is marked, nothing
+is removed, nothing rings. Only `type=letter` entries export — a `receipt` or
+any other kind is delivery bookkeeping, not correspondence.
+
+A structured letter with a `threadId` groups by that id, so every copy and
+every reply of one conversation lands in one note; a legacy or unstructured
+letter — or a structured one with no `threadId` — is its own thread, keyed by
+its msgid, the same anchor a legacy reply uses. Letters sit in `seq` order,
+and the note is `<first 16 hex of the thread key>.md`: a stable name, so a
+re-run overwrites the same file instead of accumulating one per run.
+
+```
+---
+type: mail-thread
+thread: "<the full thread key>"
+subject: "<the earliest letter's subject, or (no subject)>"
+node: "<this box>"
+participants: ["<node>/<name>", …]
+first: "<received_at>"    last: "<received_at>"    letters: <count>
+---
+
+# <subject>
+
+## <received_at> · <from> → <to list>
+cc: …
+
+<the letter body, fenced>
+```
+
+- **A letter's text only ever rides inside a fence** one backtick longer than
+  the longest backtick run in it (three at minimum) — the adaptive fence
+  "Reading" gives `mail read`, so no body can close its own fence and write
+  markdown. A structured letter contributes its decoded `body`; the encoded
+  container the envelope text carries (`AOIDE-LETTER/1` and its JSON) never
+  reaches the page, and an invalid or legacy body is fenced verbatim.
+- **Everything outside a fence is clamped or quoted.** `received_at` and the
+  free-form half of `header.from`/`header.to` (peer-supplied attribution, not
+  a grammar-checked name) are stripped of CR, LF and ESC, and every scalar in
+  the frontmatter is written as a double-quoted YAML scalar — so a letter
+  cannot end the frontmatter block or forge a heading either.
+- **Declared recipients win.** The `→` list and the `cc:` line are a
+  structured letter's own To and Cc as the sender wrote them; the envelope
+  header names only the ONE copy that reached this box. A legacy letter shows
+  its envelope's `to`. `participants` is the sorted union of every letter's
+  sender attribution and recipient addresses in the thread.
+- **Idempotent.** Each note is written atomically (a temp file in the same
+  directory, then a rename), and a note whose bytes already match is not
+  written at all: a second run reports `0 written, N unchanged` and leaves
+  every inode and mtime alone, so running this on a timer costs nothing.
+
 ## Status and the nodelist view
 
 `aoide mesh` is the nodelist command (FTS-5000: "the nodelist defines the
@@ -814,6 +874,7 @@ aoide mail mark --for <name>                            advance a cursor without
 aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, per entry
 aoide mail route <node>                                  dry-run the four steps
 aoide mail rm --older-than <Nd|Nh>                       prune the base, never seen.jsonl
+aoide mail export [--dir <path>]                         one Markdown note per thread (read-only)
 aoide mail ring --for <name> [--from <session-id>]       the doorbell, by hand; --from excludes that reader
 aoide mesh                          nodelist view: + status, role, key source, liveness
 aoide node allow <node> message off                      quarantine this box's door, now (existing command)

@@ -46,6 +46,12 @@
 //! the wire half, and tears its own tunnel down before it returns
 //! (`tunnel`'s "every tunnel stays open" default is deliberately NOT this
 //! module's rule).
+//!
+//! `mail_export` (register §30, `docs/architecture/MAIL.md` "Export") is the
+//! mailbase's one outbound projection: every mail thread as one Markdown
+//! note under `state/mail-export/`. Read-only on the store — `mail_wire`'s
+//! dial and `mail_export`'s write are the two opposite edges of the same
+//! mailbase, and neither may reach into the other's half.
 
 pub mod adapter;
 pub mod commands;
@@ -53,6 +59,7 @@ pub mod context;
 pub mod daemon;
 pub mod discover;
 mod letter_send;
+mod mail_export;
 pub mod mail_wire;
 pub mod mcp_client;
 pub mod mesh;

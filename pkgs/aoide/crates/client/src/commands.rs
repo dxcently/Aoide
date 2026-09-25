@@ -3707,8 +3707,8 @@ pub fn register_post_graph(r: &mut Registry) {
 
 // ── `aoide mail` (messaging plan P-M1/P-M2, docs/architecture/MAIL.md) ─────
 
-/// `aoide mail[.send|.read|.show|.mark|.rm|.outbox|.outbox.rm|.outbox.retry]`
-/// commands.
+/// `aoide mail[.send|.read|.show|.mark|.rm|.outbox|.outbox.rm|.outbox.retry|
+/// .export]` commands.
 /// Registered here, in `aoide-client`, rather than in `aoide-storage` where
 /// the store itself ([`aoide_storage::mail`]/[`aoide_storage::outbox`])
 /// lives: from P-M2 on, `mail send` can dial another node ([`crate::
@@ -3820,6 +3820,16 @@ pub fn register_mail(r: &mut Registry) {
         implemented: true,
         handler: handle_mail_outbox_retry,
         examples: ["mail outbox retry <msgid>", "mail outbox retry --refused", "mail outbox retry --refused yomi-strix"],
+    ));
+    r.insert(cmd!(
+        path: ["mail", "export"],
+        summary: "Write every mail THREAD as one Markdown note under --dir. READ-ONLY on the mailbase: no cursor advances, nothing is marked, removed or rung. Only `letter` entries export (receipts are skipped); a structured letter with a threadId joins its thread and anything else is its own thread keyed by its msgid. A re-run rewrites only notes whose bytes changed.",
+        args: [],
+        flags: [flag!("dir", "string", "Directory to write the notes into, created if missing (default: $AOIDE_ROOT/state/mail-export/, the ordinary state_dir() resolution).")],
+        gated: false,
+        implemented: true,
+        handler: handle_mail_export,
+        examples: ["mail export", "mail export --dir ~/Magi/aoide-mail"],
     ));
 }
 
@@ -4244,6 +4254,26 @@ fn handle_mail_rm(inv: &Invocation) -> Outcome {
             .changed(vec![format!("state/mail/base.jsonl: {n} entries pruned")])
             .with_data(json!({ "pruned": n })),
         Err(e) => Outcome::error(cmd, format!("state/mail: {e}")),
+    }
+}
+
+/// `aoide mail export [--dir <path>] [--json]` — one Markdown note per thread,
+/// read-only on the mailbase (register §30).
+fn handle_mail_export(inv: &Invocation) -> Outcome {
+    let cmd = "mail.export";
+    let dir = inv.flags.get("dir").map(|s| s.trim()).filter(|s| !s.is_empty()).map(std::path::PathBuf::from);
+    match crate::mail_export::export(dir.as_deref()) {
+        Ok(r) => Outcome::ok(
+            cmd,
+            format!("exported {} threads ({} written, {} unchanged) to {}", r.threads, r.written, r.unchanged, r.dir.display()),
+        )
+        .with_data(json!({
+            "threads": r.threads,
+            "written": r.written,
+            "unchanged": r.unchanged,
+            "dir": r.dir.display().to_string(),
+        })),
+        Err(e) => Outcome::error(cmd, e),
     }
 }
 
@@ -7011,11 +7041,11 @@ mod tests {
     }
 
     #[test]
-    fn register_mail_wires_all_nine_commands() {
+    fn register_mail_wires_all_ten_commands() {
         let mut r = Registry::new();
         register_mail(&mut r);
         let paths: Vec<String> = r.commands().map(|c| c.dotted()).collect();
-        for want in ["mail", "mail.send", "mail.read", "mail.show", "mail.mark", "mail.rm", "mail.outbox", "mail.outbox.rm", "mail.outbox.retry"] {
+        for want in ["mail", "mail.send", "mail.read", "mail.show", "mail.mark", "mail.rm", "mail.outbox", "mail.outbox.rm", "mail.outbox.retry", "mail.export"] {
             assert!(paths.contains(&want.to_string()), "missing {want}");
         }
     }
@@ -7766,6 +7796,211 @@ mod tests {
         let out = handle_mail_rm(&mail_inv_with_flags(&["mail", "rm"], &[], &[("older-than", "30d")]));
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
         assert_eq!(out.data.unwrap()["pruned"], 0, "the letter just sent is nowhere near 30 days old");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ── `aoide mail export` (register §30) — one Markdown note per thread. ──
+
+    /// The default export directory an isolated root resolves to
+    /// (`state_dir()/mail-export`).
+    fn export_dir(root: &std::path::Path) -> std::path::PathBuf {
+        root.join("state").join("mail-export")
+    }
+
+    /// Run the export and hand back its `data`; `None` omits `--dir`, so the
+    /// invocation takes the `state_dir()` default.
+    fn run_export(dir: Option<&std::path::Path>) -> Value {
+        let inv = match dir {
+            Some(d) => mail_inv_with_flags(&["mail", "export"], &[], &[("dir", d.to_str().unwrap())]),
+            None => mail_inv(&["mail", "export"], &[]),
+        };
+        let out = handle_mail_export(&inv);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        out.data.unwrap()
+    }
+
+    #[test]
+    fn mail_export_groups_a_thread_and_gives_everything_else_its_own_note() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-group");
+        let local = aoide_storage::display::local_host_name();
+
+        let thread = "a".repeat(64);
+        for body in ["the first word", "the second word"] {
+            let out = handle_mail_send(&mail_inv_with_flags(
+                &["mail", "send"],
+                &[body],
+                &[("to", "self/conductor"), ("subject", "Review 世界"), ("thread", &thread)],
+            ));
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        }
+        // A legacy letter — plain text, so no structured content and no
+        // threadId: its msgid is its thread key.
+        let legacy = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["plain words"], &[("to", "self/conductor")]))
+            .data
+            .unwrap()["envelope"]["msgid"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        // A structured letter carrying NO threadId is its own thread too.
+        let encoded = aoide_storage::letter::LetterContent {
+            subject: "Orphan".into(),
+            to: vec![aoide_storage::mail::Address { node: local.clone(), name: "conductor".into() }],
+            cc: vec![],
+            body: "no thread id".into(),
+            thread_id: None,
+            reply_to: None,
+        }
+        .encode()
+        .unwrap();
+        let orphan = aoide_storage::mail::file_letter("tester", "conductor", &encoded).unwrap().envelope.msgid;
+
+        let data = run_export(None);
+        assert_eq!(data["threads"], 3, "the shared thread, the legacy letter, the threadless structured letter");
+        assert_eq!(data["written"], 3);
+        assert_eq!(data["unchanged"], 0);
+        let dir = export_dir(&root);
+        assert_eq!(data["dir"], dir.to_str().unwrap(), "--dir absent resolves through state_dir()");
+
+        let grouped = std::fs::read_to_string(dir.join(format!("{}.md", &thread[..16]))).unwrap();
+        assert!(grouped.contains("type: mail-thread"));
+        assert!(grouped.contains(&format!("thread: \"{thread}\"")));
+        assert!(grouped.contains("subject: \"Review 世界\""), "{grouped}");
+        assert!(grouped.contains("letters: 2"));
+        assert!(grouped.contains("# Review 世界"));
+        assert_eq!(grouped.matches("the first word").count(), 1);
+        assert_eq!(grouped.matches("the second word").count(), 1);
+        assert!(grouped.contains(&format!("→ {local}/conductor")), "a structured letter's own To, never its envelope copy:\n{grouped}");
+
+        for (key, phrase) in [(&legacy, "plain words"), (&orphan, "# Orphan")] {
+            let own = std::fs::read_to_string(dir.join(format!("{}.md", &key[..16]))).unwrap();
+            assert!(own.contains("letters: 1"), "{own}");
+            assert!(own.contains(phrase), "{key} must land in its own note:\n{own}");
+        }
+        assert!(!std::fs::read_to_string(dir.join(format!("{}.md", &legacy[..16]))).unwrap().contains("Orphan"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mail_export_skips_receipts() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-receipts");
+
+        handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["correspondence"], &[("to", "self/conductor")]));
+        aoide_storage::mail::file_receipt("sender", "conductor", "receipt-only words").unwrap();
+
+        let data = run_export(None);
+        assert_eq!(data["threads"], 1, "a receipt is delivery bookkeeping, not a thread");
+
+        let dir = export_dir(&root);
+        let files: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(files.len(), 1, "{files:?}");
+        let note = std::fs::read_to_string(dir.join(&files[0])).unwrap();
+        assert!(note.contains("correspondence"));
+        assert!(!note.contains("receipt-only words"), "{note}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mail_export_leaves_every_reader_cursor_where_it_was() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-cursors");
+
+        for body in ["one", "two"] {
+            handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &[body], &[("to", "self/conductor")]));
+        }
+
+        let reader = Some("reader-a");
+        aoide_storage::mail::read_for("conductor", false, reader).unwrap();
+        assert_eq!(
+            aoide_storage::mail::unread_for("conductor", reader).unwrap().0,
+            2,
+            "reader-a is caught up before the export runs"
+        );
+
+        let data = run_export(Some(&root.join("export")));
+        assert_eq!(data["written"], 2, "two legacy letters are two threads");
+        assert_eq!(
+            aoide_storage::mail::unread_for("conductor", reader).unwrap().0,
+            2,
+            "the export advanced the reader's own mark"
+        );
+        let (mark, unread) = aoide_storage::mail::unread_for("conductor", Some("reader-b")).unwrap();
+        assert_eq!((mark, unread.len()), (0, 2), "nor did it consume anyone else's mail");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mail_export_rewrites_nothing_when_the_note_already_matches() {
+        use std::os::unix::fs::MetadataExt;
+
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-idempotent");
+        let thread = "b".repeat(64);
+        handle_mail_send(&mail_inv_with_flags(
+            &["mail", "send"],
+            &["one"],
+            &[("to", "self/conductor"), ("subject", "Steady"), ("thread", &thread)],
+        ));
+
+        let dir = root.join("export");
+        let first = run_export(Some(&dir));
+        assert_eq!(
+            (first["threads"].as_u64(), first["written"].as_u64(), first["unchanged"].as_u64()),
+            (Some(1), Some(1), Some(0))
+        );
+
+        let path = dir.join(format!("{}.md", &thread[..16]));
+        let bytes = std::fs::read(&path).unwrap();
+        let before = std::fs::metadata(&path).unwrap();
+
+        let second = run_export(Some(&dir));
+        assert_eq!(
+            (second["threads"].as_u64(), second["written"].as_u64(), second["unchanged"].as_u64()),
+            (Some(1), Some(0), Some(1))
+        );
+
+        let after = std::fs::metadata(&path).unwrap();
+        assert_eq!(after.ino(), before.ino(), "an unchanged note must not be re-created");
+        assert_eq!(after.modified().unwrap(), before.modified().unwrap(), "nor rewritten");
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mail_export_fences_a_body_that_carries_its_own_fence() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-fence");
+        let local = aoide_storage::display::local_host_name();
+
+        let thread = "c".repeat(64);
+        let body = "before\n```\n## not a heading\n```\nafter";
+        handle_mail_send(&mail_inv_with_flags(
+            &["mail", "send"],
+            &[body],
+            &[("to", "self/conductor"), ("cc", "self/scribe"), ("subject", "Fence"), ("thread", &thread)],
+        ));
+
+        let data = run_export(Some(&root.join("export")));
+        assert_eq!(data["threads"], 1, "the To and Cc copies of one send share its threadId");
+
+        let note = std::fs::read_to_string(root.join("export").join(format!("{}.md", &thread[..16]))).unwrap();
+        let fenced = format!("````\n{body}\n````\n");
+        assert_eq!(
+            note.matches(&fenced).count(),
+            2,
+            "each copy's body rides verbatim inside a fence longer than its longest backtick run:\n{note}"
+        );
+        assert_eq!(note.matches("## not a heading").count(), 2, "the body's own heading stays inside the fence");
+        assert!(note.contains(&format!("cc: {local}/scribe")), "the Cc line rides outside the fence:\n{note}");
 
         let _ = std::fs::remove_dir_all(&root);
     }
