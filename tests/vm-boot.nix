@@ -7,8 +7,9 @@
 # Exercises the module tree (same assembly as mkHost), the aoide
 # package, greeter wiring, the aoided user service, and the graph commands —
 # without real hardware or external network access.  shellbridge is NOT
-# exercised: its module gates on the quickshell facet (it exists to feed the
-# quickshell UI), and this VM disables that facet — see the trims below.
+# exercised: its module gates on the quickshell + lyra enable facts (it
+# exists to feed the painted shell), and this VM disables the facet that sets
+# them — see the trims below.
 #
 # Wired in flake.nix as:
 #   checks.<system>.vm-boot = import ./tests/vm-boot.nix { inherit pkgs inputs lib; };
@@ -24,8 +25,8 @@
 #     NixOS Wayland closure; its autostart (`quickshell -c shell.qml`) cannot
 #     render on the virtual GPU.  The compositor facet is KEPT because it wires
 #     the ly greeter + programs.hyprland.  This also removes shellbridge.service
-#     entirely: shellbridge.nix gates on this facet, so the test neither
-#     starts nor asserts it.
+#     entirely: shellbridge.nix gates on the quickshell + lyra facts this
+#     facet sets, so the test neither starts nor asserts it.
 #
 #   ly: will attempt to spawn Hyprland on the virtual GPU and loop.
 #     Mitigation: the test asserts the unit exists and is enabled rather than
@@ -256,10 +257,10 @@ pkgs.testers.runNixOSTest {
 
     # ── 4. User service: aoided ──────────────────────────────────────────────
     # shellbridge.service does not exist in this VM at all: shellbridge.nix
-    # gates the whole module on the quickshell facet (it exists to feed the
-    # quickshell UI), and this VM disables that facet — so only aoided is
-    # started and asserted here, and the stage files shellbridge would seed
-    # are not expected either.
+    # gates the whole module on the quickshell + lyra enable facts (it exists
+    # to feed the painted shell), and this VM disables the facet that sets
+    # them — so only aoided is started and asserted here, and the stage files
+    # shellbridge would seed are not expected either.
     # Enable linger so the user slice persists, then start it explicitly.
     machine.succeed("loginctl enable-linger khoa")
 

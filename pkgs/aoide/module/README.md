@@ -21,8 +21,10 @@ package build from the same one-line input.
   (`AOIDE_TERMINAL`, `AOIDE_ROOT`, `AOIDE_FLAKE_ROOT`), portable and
   nixpkgs-only. The unit's `wantedBy`/`after`/`partOf` anchor to
   `aoide.sessionTarget` — the seam a paint-dependent value enters
-  through, since this file may not read a facet option directly.
-  `modules/nucleus/aoided.nix` sets that option and carries the
+  through, since this file may not read a lane's option directly. The lane
+  that brings a graphical session up sets that option (the quickshell facet
+  today, `modules/facets/quickshell/default.nix`), so this bundle never
+  learns which lane it was. `modules/nucleus/aoided.nix` carries the
   lyra-gated `AOIDE_SONG_TEMPLATES` variable plus every door
   (mcp/a2a/pair-watch), the discovery firewall carve, and the usage
   poller — all still AoideOS-side deployment.

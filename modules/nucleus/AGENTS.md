@@ -14,14 +14,24 @@ covers only what's specific to nucleus.
   `aoide.surfaces`) is a decision that touches root `AGENTS.md` house rule 5
   too — don't add a fourth namespace without updating both.
 - **Core options live in the core flake; nucleus declares only the paint
-  half.** `enable`/`root`/`checkout`/`auditLog`/`terminal`/`user` are
+  half.** `enable`/`root`/`checkout`/`auditLog`/`terminal`/`user`/
+  `sessionTarget` are
   `pkgs/aoide/module/options.nix`'s contract now, pulled in by nucleus's
   own `imports = [ inputs.aoide.nixosModules.default ]` line. A new CORE
   option (portable, cargo-buildable, no `modules/`/`song/` reach) is added
-  there, never here; a new PAINT option (livery, arrangement, surfaces, a
-  facet toggle) is added here, never there. A core door toggle whose unit
+  there, never here; a new PAINT option (livery, arrangement, surfaces, an
+  enable fact, a lane toggle) is added here, never there. A core door toggle whose unit
   has not migrated yet (`mcp`, `a2a`, `usage`, `secrets`, `pairing`) stays
   here beside its unit — core, not paint, just not yet relocated.
+- **Nucleus reads FACTS, never a lane's option.** The enable facts
+  (`aoide.{quickshell,lyra,stylix,compositor,greeter}.enable`,
+  `aoide.quickshell.config`) are declared here, each defaulting `false`; the
+  lane that owns one sets it `mkDefault true`. A nucleus file that needs to
+  know "is there a shell / a session here" reads the fact — never
+  `aoide.facets.*`, never a lane's own option. `aoide.sessionTarget` is the
+  same rule from the other side: it is core-declared
+  (`pkgs/aoide/module/options.nix`) and a painting lane sets it, so the unit
+  that anchors on it need not know which lane did.
 - **Nix authors runtime config; it never owns it (`config.nix`, task #135
   P-C).** A CORE command's configuration lives in the portable runtime file
   (`$AOIDE_ROOT/config.toml`, CONTRACTS.md §4) because core is
@@ -56,5 +66,5 @@ covers only what's specific to nucleus.
 ## Docs update required in the same commit
 
 - This `README.md` when a new nucleus file or option namespace is added.
-- `CONTRACTS.md` (livery schema) when `options.nix`'s option contract
-  changes shape.
+- `CONTRACTS.md` — the livery schema when `options.nix`'s livery contract
+  changes shape, §0 when the enable facts or `aoide.quickshell.config` do.

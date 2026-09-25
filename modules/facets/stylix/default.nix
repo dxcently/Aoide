@@ -210,8 +210,18 @@ in
   # evals clean whether stylix rides or not (mkIf alone still leaves a
   # definition on the undeclared path). On the real host mkHost always adds the
   # stylix module, so this is present.
+  #
+  # The enable fact (declared once in modules/nucleus/options.nix) rides
+  # OUTSIDE that optionalAttrs on purpose: it says what this lane IS — "the
+  # theme here is baked at build time and painted by nix" — which stays true
+  # whether or not THIS eval can derive the `stylix` tree. It is a fact, not
+  # this facet's own option: no module reads another module (root AGENTS.md
+  # house rule 5). `mkDefault`, so a host that flips it off still wins.
   config = lib.mkIf cfg.enable (
-    lib.optionalAttrs stylixPresent {
+    {
+      aoide.stylix.enable = lib.mkDefault true;
+    }
+    // lib.optionalAttrs stylixPresent {
       stylix = {
         enable = true;
         polarity = lib.mkDefault "light";

@@ -261,6 +261,18 @@ in
   # ── Config: only wired when the facet is enabled ──────────────────────────
   config = lib.mkIf cfg.enable {
 
+    # ── What this lane brings into existence ────────────────────────────────
+    # The cross-lane facts (declared once in modules/nucleus/options.nix) this
+    # lane owns: a compositor is started here, and the display-manager greeter
+    # comes up here (its unit lives in this file, gated on this facet). They are
+    # FACTS, not this facet's own option — no module reads another module (root
+    # AGENTS.md house rule 5), so a lane that needs a session but not THIS
+    # compositor reads `aoide.compositor.enable`/`aoide.greeter.enable` instead
+    # of reaching in here. `mkDefault`, so a host that flips either off still
+    # wins.
+    aoide.compositor.enable = lib.mkDefault true;
+    aoide.greeter.enable = lib.mkDefault true;
+
     # ── Enable Hyprland via NixOS programs.hyprland ────────────────────────
     # programs.hyprland.enable installs Hyprland, sets up the session
     # entry, and configures the NixOS service layer. The flake input

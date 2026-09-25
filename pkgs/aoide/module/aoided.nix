@@ -71,12 +71,11 @@ lib.mkIf config.aoide.enable {
     description = "Aoide orchestrator daemon — neutral event stream + policy + audit";
 
     # `aoide.sessionTarget` (options.nix) is the seam a paint-dependent
-    # anchor enters through — this module may not read
-    # `config.aoide.facets.quickshell.enable` directly (root AGENTS.md
-    # house rule 5, no module reads another module). Default
-    # `"default.target"`: headless, with linger on, the daemon and its
-    # doors come up at boot and stay resident. A painting host (AoideOS,
-    # `modules/nucleus/aoided.nix`) sets `aoide.sessionTarget` to
+    # anchor enters through — this module may not read a painting lane's
+    # own enable flag (root AGENTS.md house rule 5, no module reads another
+    # module). Default `"default.target"`: headless, with linger on, the
+    # daemon and its doors come up at boot and stay resident. The lane that
+    # brings a graphical session up sets `aoide.sessionTarget` to
     # `"graphical-session.target"` instead, so the unit starts when the
     # compositor is up and PartOf ties its lifetime to that session —
     # anchoring to `default.target` there would leave no graphical-session

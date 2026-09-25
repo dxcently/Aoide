@@ -56,6 +56,38 @@ module reaching into another module; a capability that only exists inside one
 consumer; an effect with no inverse. When a design choice is open, take the one
 that can be deleted.
 
+### Enable facts — how a lane reaches nucleus
+
+A lane cannot be read (first rule above), so the one question every layer has to
+ask — *is there a shell / a session on this host?* — is answered by a FACT that
+nucleus declares once, in `modules/nucleus/options.nix`, each defaulting
+`false`:
+
+| Fact | What it means | Set by |
+|---|---|---|
+| `aoide.quickshell.enable` | a Quickshell shell surface exists here | the lane that renders one (`facets/quickshell` today) |
+| `aoide.quickshell.config` (`nullOr str`, `null`) | the directory a shell runs; `null` is the bare case — package installed, no shell service | whoever supplies one: a lane, or the host |
+| `aoide.lyra.enable` | the paint/rice binary is installed (`pkgs.aoide.rice`) | the lane that paints (`facets/quickshell` today) |
+| `aoide.stylix.enable` | the theme is baked at build time, painted by nix | the Stylix lane (`facets/stylix` today) |
+| `aoide.compositor.enable` | a Wayland compositor is started here | the compositor lane (`facets/compositor` today) |
+| `aoide.greeter.enable` | a display-manager greeter comes up on this host's tty | the compositor lane (`facets/compositor` today) |
+
+The lane that owns a fact sets it `mkDefault true` while it is on, so a host
+that flips it back off still wins. Every reader then reads the FACT — never the
+owning lane's own option, and never through one lane to reach another. That is
+the one place house rule 5 must hold in both directions at once: nucleus
+plumbing (`modules/nucleus/secrets.nix`) and sibling lanes alike need to know
+whether a session exists, and neither may name the lane that made one. A lane
+reading a fact is reading nucleus's own declaration rather than another
+module's internals; which of these names a *facet* may read is whatever root
+`AGENTS.md` rule 5's list currently enumerates.
+
+`aoide.sessionTarget` is the same seam answering a different question — *which
+target does `aoided` anchor to?* It is declared in the core half
+(`pkgs/aoide/module/options.nix`), defaults to `default.target`, and a painting
+lane sets it to `graphical-session.target`; the unit that reads it never learns
+which lane did.
+
 ### The corollary for Quickshell: render surfaces only
 
 **Quickshell paints; it never *is* the capability.** Every QML file in

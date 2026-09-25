@@ -14,11 +14,12 @@
 # Ladder rung (a) HELD (docs/architecture/ONBOARD.md "The vars-file
 # generator" / P-I3 brief): a bare `lib.evalModules` over the module tree
 # evaluates cleanly with no fight from `pkgs`/`config`-referencing
-# option constructions (`aoide.lyra.enable`'s `config.aoide.facets.
-# quickshell.enable` default, `aoide.auditLog`'s `"/home/${config.aoide.
-# user}/…"` default, three `melete`/`mneme` dendrite path defaults — nine
-# entries total, verified by grepping the raw doc-list output for `config\.`/
-# `pkgs\.`/`/nix/store` before committing to this rung). The heavier
+# option constructions (ten `default` fields reference `config` — the core
+# half's `aoide.root`/`checkout`/`auditLog`, with `"/home/${config.aoide.
+# user}/…"` and `${config.aoide.root}` paths, plus the `melete`/`mneme`
+# dendrite path defaults — and none references `pkgs` or a store path;
+# verified by grepping the raw doc-list output for `config\.`/`pkgs\.`/
+# `/nix/store` before committing to this rung). The heavier
 # `nixosSystem` fallback (rung (b)) was never needed. `pkgs` is the one thing
 # a real `nixosSystem` supplies as a module arg automatically that a bare
 # `evalModules` does not — supplied here via `specialArgs`, the flake's own

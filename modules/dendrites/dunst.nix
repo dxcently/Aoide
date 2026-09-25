@@ -68,9 +68,9 @@
 # (pkgs.aoide.rice — a SEPARATE, droppable output as of P-A8's multi-output
 # split); that push is this whole module's reason to exist, so a config that
 # leaves dunst on but turns lyra off would otherwise script an exec against a
-# binary no longer in the closure. Unlike shellbridge (gated on the
-# quickshell facet), dunst carries no facet dependency of its own — it is
-# gated here directly on the lyra flag instead.
+# binary no longer in the closure. Unlike shellbridge (gated on the shell
+# and lyra enable facts), dunst carries no shell dependency of its own — it
+# is gated here directly on the lyra flag instead.
 {
   config,
   lib,

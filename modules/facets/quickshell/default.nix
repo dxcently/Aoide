@@ -277,6 +277,27 @@ in
   # ── Config: only wired when the facet is enabled ───────────────────────────
   config = lib.mkIf cfg.enable {
 
+    # ── What this lane brings into existence ────────────────────────────────
+    # The cross-lane facts (declared once in modules/nucleus/options.nix) this
+    # lane owns. They are FACTS, not this facet's own option: no module reads
+    # another module (root AGENTS.md house rule 5), so anything that needs to
+    # know "is there a shell here" reads `aoide.quickshell.enable` instead of
+    # reaching in here. `mkDefault`, so a host that explicitly flips either off
+    # still wins. `aoide.lyra.enable` rides along because this shell is what
+    # lyra paints, and this lane is what knows that.
+    aoide.quickshell.enable = lib.mkDefault true;
+    aoide.lyra.enable = lib.mkDefault true;
+
+    # `aoide.sessionTarget` is the anchor rather than a fact: the core
+    # `aoided` unit is `wantedBy` the target named here, and PartOf ties its
+    # lifetime to it. A painting host names the graphical session, so the
+    # daemon comes up with the compositor instead of at boot — a manually
+    # started daemon left on `default.target` takes an immediate stop through
+    # PartOf, and BindsTo drags the a2a/mcp doors down with it (found live on
+    # sakaki). Not `mkDefault`: exactly one answer is right on this host, and
+    # a second one is a conflict worth failing on.
+    aoide.sessionTarget = "graphical-session.target";
+
     # ── Surface-ownership registry ──────────────────────────────────────────
     # Declare every Quickshell-owned surface. Stylix reads this registry and
     # stands down for these surfaces (concepts/Notes).

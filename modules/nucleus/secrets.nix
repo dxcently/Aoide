@@ -86,11 +86,12 @@ lib.mkMerge [
     # Same shape as qrencode above: a hand-invoked command (`watch --popup`,
     # crates/secrets/src/watch.rs) feature-detects a PATH binary
     # (`zenity_available`) and prints a taught install hint when absent — not a
-    # Cargo dependency, not on the broker unit's `path`. Gated on the
-    # quickshell facet because the popup is a desktop surface: a headless box
-    # (sakaki) enables the broker but has no display for a dialog, and
-    # ungated zenity would drag GTK into its closure.
-    ++ lib.optional config.aoide.facets.quickshell.enable pkgs.zenity;
+    # Cargo dependency, not on the broker unit's `path`. Gated on this host
+    # having a graphical session (`aoide.sessionTarget` — the fact a painting
+    # lane sets, never that lane's own option) because the popup is a desktop
+    # surface: a headless box (sakaki) enables the broker but has no display
+    # for a dialog, and ungated zenity would drag GTK into its closure.
+    ++ lib.optional (config.aoide.sessionTarget == "graphical-session.target") pkgs.zenity;
 
     # ── The broker's own uid + the two groups it needs ───────────────────────
     # `aoide-secrets` (the service's own group, home-dir ownership) is separate
@@ -240,9 +241,12 @@ lib.mkMerge [
   # is a desktop surface belonging to the logged-in operator, not the
   # secrets-uid broker).
   #
-  # Gated on `config.aoide.facets.quickshell.enable` — the SAME condition
-  # `environment.systemPackages`'s `pkgs.zenity` entry above already uses: a
-  # headless box (sakaki) enables `aoide.secrets` for its A2A door's own
+  # Gated on the host having a graphical session — `aoide.sessionTarget ==
+  # "graphical-session.target"`, the SAME condition
+  # `environment.systemPackages`'s `pkgs.zenity` entry above already uses. It
+  # is the fact a painting lane sets (`aoide.sessionTarget`), never a lane's
+  # own option: no module reads another module (house rule 5). A headless box
+  # (sakaki) enables `aoide.secrets` for its A2A door's own
   # bearer-token resolve but has no display for a dialog, and ungated zenity
   # would drag GTK into that box's closure for nothing this unit could ever
   # show. `secrets watch --popup` itself feature-detects BOTH dialog binaries
@@ -261,7 +265,11 @@ lib.mkMerge [
   # before the broker has bound its socket is a normal, harmless race, not a
   # failure to guard against.
   (lib.mkIf
-    (config.aoide.enable && config.aoide.secrets.enable && config.aoide.facets.quickshell.enable)
+    (
+      config.aoide.enable
+      && config.aoide.secrets.enable
+      && config.aoide.sessionTarget == "graphical-session.target"
+    )
     {
       systemd.user.services.aoide-secrets-watch = {
         description = "Aoide secrets popup watcher — surfaces parked TOTP asks as a dialog";
@@ -283,12 +291,18 @@ lib.mkMerge [
         # `lyra secrets ask` spawns it by bare name, so the unit that spawns
         # lyra must carry it — the live gap that let the first unit-spawned
         # dialog fail silently (lyra resolved via AOIDE_RICE_BIN, its
-        # quickshell ENOENT'd, the ask just stayed parked). Same package the
-        # quickshell facet installs; this whole block is gated on that facet.
+        # quickshell ENOENT'd, the ask just stayed parked). Gated on the same
+        # flag as `AOIDE_RICE_BIN` below, and for the same reason: a unit can
+        # only spawn lyra when the lyra fact put the binary on this host, and
+        # a host without lyra takes the zenity path and has no use for
+        # quickshell in its closure — the pair-watch unit's own pattern
+        # (`aoided.nix`).
         path = [
           pkgs.zenity
-          inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default
-        ];
+        ]
+        ++
+          lib.optional config.aoide.lyra.enable
+            inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
         serviceConfig = {
           Type = "simple";

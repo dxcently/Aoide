@@ -12,7 +12,6 @@
 # it wires no behaviour, so an empty config evaluates cleanly.
 {
   lib,
-  config,
   inputs,
   ...
 }:
@@ -584,6 +583,75 @@ in
       '';
     };
 
+    # ── Enable facts — the cross-lane seam ─────────────────────────────────
+    # What a paint lane brings into existence, declared ONCE. No module reads
+    # another module (root AGENTS.md house rule 5), so a cross-lane question —
+    # "does this host paint", "is there a shell here" — is never answered by
+    # reading the lane's own option. The lane that owns the thing sets its own
+    # fact `mkDefault true` when it is on (the lane that owns this fact is the
+    # one whose name it carries); core plumbing and other lanes read the fact.
+    # Each defaults to `false`: a host with no paint lane is headless.
+    # `aoide.lyra.enable` below — declared beside the package it installs — is
+    # the fifth fact in this family, same rule.
+    quickshell = {
+      enable = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          A Quickshell shell surface exists on this host. Set `mkDefault true`
+          by the lane that renders it. This is the FACT, not that lane's own
+          option: a host whose shell is painted by something else leaves it
+          false while still having a graphical session.
+        '';
+      };
+
+      config = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          The directory the shell runs: a store path or a host-owned config
+          directory, as a string. `null` (the default) is the bare case — the
+          quickshell package is installed and no shell service runs. Set by
+          the lane that supplies a config, read by the lane that installs the
+          package, so neither has to know the other by name. A lane that runs
+          a shell with no config to give leaves this null and keeps its own
+          service wiring.
+        '';
+      };
+    };
+
+    stylix.enable = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        A Stylix baked-theme fan-out exists on this host — the theme is
+        derived at build time and painted by nix. Set `mkDefault true` by the
+        lane that bakes it; a host that themes itself entirely at runtime
+        leaves it false.
+      '';
+    };
+
+    compositor.enable = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        A Wayland compositor is started by a lane on this host. Set
+        `mkDefault true` by the lane that starts it — a consumer that needs a
+        session but not a specific compositor reads this rather than naming
+        that lane.
+      '';
+    };
+
+    greeter.enable = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        A display-manager greeter comes up on this host's tty. Set
+        `mkDefault true` by the lane that brings it up. A host with no greeter
+        boots to the tty it lands on.
+      '';
+    };
+
     # ── Agent control plane ────────────────────────────────────────────────
     mcp.enable = mkOption {
       type = types.bool;
@@ -720,11 +788,12 @@ in
           (the same six-boxes-plus-dash surface `lyra secrets ask` renders),
           `zenity --entry` otherwise. Off by default, same house policy as
           the MCP façade/A2A door/usage poller/secrets broker: the unit is
-          desktop-facet-gated exactly like `aoide-secrets-watch`
-          (`aoide.a2a.enable && aoide.facets.quickshell.enable`), but this
+          graphical-session-gated exactly like `aoide-secrets-watch`
+          (`aoide.a2a.enable && aoide.sessionTarget ==
+          "graphical-session.target"`), but this
           flag is the deliberate opt-in ON TOP of that gate — a host with
-          a2a and the quickshell facet both on does NOT get the popup
-          unless it also sets this. It lives in the `a2a` family because it
+          a2a on and a graphical session does NOT get the popup unless it
+          also sets this. It lives in the `a2a` family because it
           is meaningless without the door (`aoide.a2a.enable` is part of
           its gate). See `modules/nucleus/aoided.nix` for the unit and
           CONTRACTS.md §6's "Pairing events feed" subsection for the
@@ -797,19 +866,19 @@ in
     lyra = {
       enable = mkOption {
         type = types.bool;
-        default = config.aoide.facets.quickshell.enable;
-        defaultText = literalExpression "config.aoide.facets.quickshell.enable";
+        default = false;
         description = ''
           Install the `lyra` paint/rice binary — `pkgs.aoide.rice`, the
           separate output P-A8 split off the combined aoide/aoided/lyra
-          derivation so a headless closure never has to carry it. Defaults
-          to whether the quickshell facet is enabled (lyra exists to paint a
-          shell, so a graphical host wants it and a headless one doesn't by
-          default), but is independently overridable: an explicit flag,
-          not only the facet inference, for a future aoide config that wants
-          lyra without quickshell (or vice versa). Every unit that execs
-          `lyra` (shellbridge, the dunst herald feed) gates on this flag too,
-          so flipping it off never leaves a unit pointed at a missing binary.
+          derivation so a headless closure never has to carry it. The fifth
+          of options.nix's enable facts: set `mkDefault true` by the lane
+          that paints, which is the one that knows its shell needs the
+          binary. Independently overridable — an explicit flag, not only the
+          lane's inference, for a host that wants lyra without a shell (an
+          operator's own `lyra rice compose`) or a shell without lyra. Every
+          unit that execs `lyra` (shellbridge, the dunst herald feed) gates
+          on this flag too, so flipping it off never leaves a unit pointed
+          at a missing binary.
         '';
       };
     };

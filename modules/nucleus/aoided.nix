@@ -2,13 +2,13 @@
 #
 # `pkgs/aoide/module/aoided.nix` owns the tmpfiles rules, the core session
 # variables, and the `aoided.service` unit itself (portable, nixpkgs-only).
-# This file carries only what is paint-dependent: `aoide.sessionTarget`
-# (the seam the core unit anchors through — core may not read a facet
-# option directly, root AGENTS.md house rule 5) and the lyra-gated
-# `AOIDE_SONG_TEMPLATES` session variable. Below that, the doors (mcp, a2a,
-# pair-watch), the discovery-advertisement firewall carve, and the usage
-# widget poller — core *binaries* in a still-AoideOS *deployment*
-# (migration brief §2.6 item 4).
+# This file carries only what is paint-dependent: the lyra-gated
+# `AOIDE_SONG_TEMPLATES` session variable. `aoide.sessionTarget` — the seam
+# the core unit anchors through — is NOT set here: the lane that brings a
+# graphical session up sets it, so this file reads no lane's option (root
+# AGENTS.md house rule 5). Below that, the doors (mcp, a2a, pair-watch), the
+# discovery-advertisement firewall carve, and the usage widget poller — core
+# *binaries* in a still-AoideOS *deployment* (migration brief §2.6 item 4).
 {
   config,
   lib,
@@ -18,16 +18,6 @@
 }:
 
 lib.mkIf config.aoide.enable {
-
-  # ── aoided anchoring seam (paint-dependent, options.nix owns the option) ──
-  # On a painting box, start when the graphical session is ready (compositor
-  # up — the daemon serves the shell, and partOf ties its lifetime to the
-  # session). Headless (quickshell facet off) there is no graphical-session
-  # target to anchor to — PartOf then propagates an immediate stop to a
-  # manually started daemon, and BindsTo drags the a2a/mcp doors down with
-  # it (found live on sakaki). `aoide.sessionTarget` defaults to
-  # `default.target`; only flip it here, where the facet is actually known.
-  aoide.sessionTarget = lib.mkIf config.aoide.facets.quickshell.enable "graphical-session.target";
 
   # ── AoideOS-only session variable ────────────────────────────────────────
   # `AOIDE_SONG_TEMPLATES` (L-C3, task #107) is paint data (the shipped
@@ -159,15 +149,17 @@ lib.mkIf config.aoide.enable {
   # carried by the opt-in flag itself: no host gets this popup without
   # asking for it. Never flipped on here; deployment flips are the User's.
   #
-  # Deliberately NOT gated on `aoide.facets.quickshell.enable`, unlike its
-  # sibling `aoide-secrets-watch`. What this unit needs is a graphical
-  # session and A DIALOG BINARY, and the facet is neither: it is Aoide's own
-  # shell (bar, dock, notifications). A host whose desktop is painted by
+  # Deliberately NOT gated on "a graphical session exists" (the condition its
+  # sibling `aoide-secrets-watch` gates on, `aoide.sessionTarget ==
+  # "graphical-session.target"`). What this unit needs is a graphical session
+  # AND A DIALOG BINARY, and the session target is neither — it is the anchor
+  # one painting lane happened to pick. A host whose desktop is painted by
   # something else — osaka, running core Aoide beside dxflake's own Hyprland
-  # and Stylix — has the session and gets zenity from the `path` below, and
-  # `pair_watch` itself only refuses when NEITHER `lyra` nor `zenity`
-  # resolves. Gating on the facet would have made the popup structurally
-  # unreachable there for a reason that has nothing to do with pairing.
+  # and Stylix — has the session but no such anchor, gets zenity from the
+  # `path` below, and `pair_watch` itself only refuses when NEITHER `lyra`
+  # nor `zenity` resolves. Gating on the session target would have made the
+  # popup structurally unreachable there for a reason that has nothing to do
+  # with pairing.
   systemd.user.services.aoide-pair-watch =
     lib.mkIf (config.aoide.a2a.enable && config.aoide.a2a.pairingPopup)
       {
