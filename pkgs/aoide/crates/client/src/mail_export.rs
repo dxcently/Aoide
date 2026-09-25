@@ -2,7 +2,9 @@
 //! SEND (`docs/architecture/MAIL.md` "Export"). A read-only projection of the
 //! mailbase ([`aoide_storage::mail::read_base`]): it reads, groups, renders,
 //! and writes notes under its OWN directory, and advances no cursor, marks
-//! nothing, removes nothing, rings nothing.
+//! nothing, removes nothing, rings nothing — nothing beyond the same one-shot
+//! migrations every mail command runs (mailbase and cursor shape) on a first
+//! touch of an unmigrated box, which may mint the identity key.
 //!
 //! Letter text is untrusted data (root `AGENTS.md` house rule 4). Every byte
 //! of a letter reaches a note through exactly one of two doors: inside a
@@ -51,13 +53,14 @@ fn thread_key(entry: &Entry) -> String {
     }
 }
 
-/// The note's file stem, 17 characters either way and always `[0-9a-z]`. A key
-/// that is exactly 64 lowercase hex — what both of [`thread_key`]'s paths mint
-/// (`mail::seal`'s msgid, `LetterContent::validate`'s threadId) — keeps its
-/// first 16 characters. Anything else gets `x` plus the first 16 hex of its
-/// sha256, so the stem can never shorten toward the empty one that would name
-/// the hidden file `.md`, and no key, hex or hand-corrupted, can name a path
-/// outside the export directory. Stable, so a re-run overwrites the same file.
+/// The note's file stem, always `[0-9a-z]`: 16 characters for a key that is
+/// exactly 64 lowercase hex, 17 otherwise. Such a key — what both of
+/// [`thread_key`]'s paths mint (`mail::seal`'s msgid,
+/// `LetterContent::validate`'s threadId) — keeps its first 16 characters;
+/// anything else gets `x` plus the first 16 hex of its sha256, so the stem can
+/// never shorten toward the empty one that would name the hidden file `.md`,
+/// and no key, hex or hand-corrupted, can name a path outside the export
+/// directory. Stable, so a re-run overwrites the same file.
 ///
 /// Distinct keys can still land on one stem; [`stems`] refuses that run.
 fn note_stem(key: &str) -> String {
@@ -148,36 +151,43 @@ fn fence(body: &str) -> String {
     "`".repeat(longest.max(2) + 1)
 }
 
-/// One thread's entries as the blocks the note renders, in first-appearance
-/// order: the fan-out copies of ONE send collapse into a single block, every
-/// other entry is a block of its own.
+/// One thread's entries as the blocks the note renders, in `seq` order: the
+/// fan-out copies of ONE send collapse into a single block, every other entry
+/// is a block of its own.
 ///
 /// A `--to`/`--cc` send files one copy per mailbox (`letter_send::send` loops
 /// the scalar handler once per recipient), and each copy is sealed on its
 /// own: its own `header.to`, its own `sig` and `msgid`, its own `minted_at`
 /// and `received_at`. No timestamp and no id is shared across the copies —
 /// two copies of one send can even straddle a second boundary — so the key is
-/// the signed content they DO share: `(envelope.text, header.from)`. The
-/// copy's own mailbox is the tie-break that keeps two separate sends of the
-/// same words apart, since a send addresses each mailbox at most once
-/// ([`aoide_storage::letter::deduplicate_recipients`]): a copy joins the
-/// newest block of its key unless that block has already taken this mailbox.
-/// One To+Cc fan-out is one block; the same words sent twice to the same
-/// mailbox are two.
+/// the signed content they DO share: `(envelope.text, header.from)`, plus the
+/// copy's own mailbox, which a send addresses at most once
+/// ([`aoide_storage::letter::deduplicate_recipients`]).
+///
+/// A copy joins ONLY the block directly above it — the one holding the letter
+/// before it — and only when ALL of these hold: its `seq` is exactly the next
+/// one after that block's last copy, the block carries the same signed text
+/// and sender, and the block has not already taken this mailbox. Anything
+/// filed in between — a receipt, another thread's letter — leaves a gap and
+/// ends the block, so a fan-out whose copies are separated in `seq` renders as
+/// more than one block: an over-split is accepted, an over-merge is not. One
+/// To+Cc fan-out is one block; the same words sent twice to the same mailbox
+/// are two; and two sends whose single copies land in different mailboxes are
+/// two whenever anything was filed between the arrivals. Two sends whose
+/// surviving copies DO sit back to back are one block — inseparable from one
+/// fan-out by any evidence a note carries, and identical in what they render.
 fn blocks(letters: &[Entry]) -> Vec<Vec<&Entry>> {
     let mut blocks: Vec<Vec<&Entry>> = Vec::new();
     for entry in letters {
-        let mut joined = false;
-        if let Some(block) = blocks.iter_mut().rev().find(|b| {
-            b[0].envelope.text == entry.envelope.text
-                && b[0].envelope.header.from == entry.envelope.header.from
-        }) {
-            if !block.iter().any(|e| e.envelope.header.to == entry.envelope.header.to) {
-                block.push(entry);
-                joined = true;
-            }
-        }
-        if !joined {
+        let joins = blocks.last().is_some_and(|block| {
+            block.last().is_some_and(|last| last.seq + 1 == entry.seq)
+                && block[0].envelope.text == entry.envelope.text
+                && block[0].envelope.header.from == entry.envelope.header.from
+                && !block.iter().any(|e| e.envelope.header.to == entry.envelope.header.to)
+        });
+        if joins {
+            blocks.last_mut().expect("the block the copy is adjacent to").push(entry);
+        } else {
             blocks.push(vec![entry]);
         }
     }
@@ -245,15 +255,18 @@ fn note(thread: &Thread, node: &str) -> String {
 /// Two distinct keys can collide (two 64-hex keys sharing their first 16
 /// characters, or two sha256 prefixes agreeing), and the alternative to
 /// refusing is one thread's note silently overwriting another's, which no
-/// re-run ever recovers.
-fn stems(threads: &[Thread]) -> Result<Vec<String>, String> {
+/// re-run ever recovers. `dir` is where the notes WOULD land, and the refusal
+/// names it whatever the caller passed — never a literal default the run is
+/// not using.
+fn stems(threads: &[Thread], dir: &Path) -> Result<Vec<String>, String> {
     let mut taken: BTreeMap<String, &str> = BTreeMap::new();
     let mut stems = Vec::with_capacity(threads.len());
     for thread in threads {
         let stem = note_stem(&thread.key);
         if let Some(other) = taken.get(&stem) {
             return Err(format!(
-                "state/mail-export: thread keys {other} and {} both name {stem}.md; nothing written",
+                "{}: thread keys {other} and {} both name {stem}.md; nothing written",
+                dir.display(),
                 thread.key
             ));
         }
@@ -276,8 +289,8 @@ pub(crate) fn export(dir: Option<&Path>) -> Result<Report, String> {
     let entries = aoide_storage::mail::read_base().map_err(|e| format!("state/mail: {e}"))?;
     let node = aoide_storage::display::local_host_name();
     let threads = threads(entries);
-    let names = stems(&threads)?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("state/mail-export: {}: {e}", dir.display()))?;
+    let names = stems(&threads, &dir)?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let mut report = Report { threads: 0, written: 0, unchanged: 0, dir };
     for (thread, stem) in threads.iter().zip(&names) {
         let note = note(thread, &node);
@@ -287,7 +300,7 @@ pub(crate) fn export(dir: Option<&Path>) -> Result<Report, String> {
             Ok(old) if old == note.as_bytes() => report.unchanged += 1,
             _ => {
                 aoide_storage::fs::atomic_write(&path, &note)
-                    .map_err(|e| format!("state/mail-export: {}: {e}", path.display()))?;
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
                 report.written += 1;
             }
         }

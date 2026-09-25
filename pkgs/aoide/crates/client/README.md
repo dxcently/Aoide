@@ -442,12 +442,16 @@ never the inbound/serve half (that's `aoide-server`).
   `aoide_storage::fs::atomic_write`. Within a thread the fan-out copies of one
   send — one per mailbox, each sealed separately — collapse into ONE block,
   matched on their signed text and sender plus the mailbox each copy reached,
-  never on a timestamp, so `letters:` counts sends, not copies, and the same
-  words sent twice to the same mailbox stay two letters. No cursor, mark,
-  removal or ring; a first
-  touch of an unmigrated box runs the same one-shot mailbase migration every
-  mail command runs (which may mint the identity key). A key that is 64
-  lowercase hex names its note by its first 16 characters, anything else by
+  never on a timestamp, so `letters:` counts sends, not copies; and a copy
+  joins only the block directly above it, only when its `seq` is exactly the
+  next one after that block's last copy, so an entry filed in between ends the
+  block: the same words sent twice to the same mailbox stay two letters, two
+  sends whose single copies land in different mailboxes stay two, and a fan-out
+  split by concurrent filing renders as more blocks (an over-split is accepted,
+  an over-merge is not). No cursor, mark, removal or ring; a first touch of an
+  unmigrated box runs the same one-shot migrations every mail command runs
+  (mailbase and cursor shape), which may mint the identity key. A key that is
+  64 lowercase hex names its note by its first 16 characters, anything else by
   `x` plus the first 16 hex of its sha256, and two keys that would name one
   note refuse the whole run before the first write. The fenced/clamped
   rendering rules are invariants, not style — see `AGENTS.md`.

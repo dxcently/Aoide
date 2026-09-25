@@ -695,10 +695,10 @@ the caller says, created if it is missing.
 
 **Read-only on the mailbase.** It is a projection of `base.jsonl` through
 `read_base`, and advances no cursor, marks nothing, removes nothing, rings
-nothing; a first touch of an unmigrated box runs the same one-shot mailbase
-migration every mail command runs (which may mint the identity key). Only
-`type=letter` entries export — a `receipt` or any other kind is delivery
-bookkeeping, not correspondence.
+nothing; a first touch of an unmigrated box runs the same one-shot migrations
+every mail command runs (mailbase and cursor shape), which may mint the
+identity key. Only `type=letter` entries export — a `receipt` or any other
+kind is delivery bookkeeping, not correspondence.
 
 A structured letter with a `threadId` groups by that id, so every copy and
 every reply of one conversation lands in one note; a legacy or unstructured
@@ -757,8 +757,18 @@ cc: …
   to three mailboxes is one letter. Copies are matched on what they share and
   what they are, the signed text, the sender, and the mailbox each copy
   reached; never a timestamp, which two copies of one send can straddle. A
-  copy joins the block above it unless that block already holds its mailbox,
-  so the same words sent twice to the same mailbox stay two letters, not one.
+  copy joins only the block directly above it — the one holding the letter
+  before it — and only when all three hold: its `seq` is exactly the next one
+  after that block's last copy, that block carries the same signed text and
+  sender, and that block has not already taken its mailbox. Anything filed in
+  between — a receipt, another thread's letter — leaves a gap and ends the
+  block, so the same words sent twice to the same mailbox stay two letters,
+  not one, and two sends whose single copies land in different mailboxes stay
+  two as well. A fan-out whose copies are separated in `seq` by concurrent
+  filing renders as more than one block: an over-split is accepted, an
+  over-merge is not. Two sends whose copies DO sit back to back are one
+  block — nothing in either envelope tells them from one fan-out, and what
+  they render is identical.
 - **Idempotent.** Each note is written atomically (a temp file in the same
   directory, then a rename), and a note whose bytes already match is not
   written at all: a second run reports `0 written, N unchanged` and leaves

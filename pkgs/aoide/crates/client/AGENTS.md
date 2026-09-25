@@ -653,13 +653,14 @@
   leaves a fence (register §30).** It reads `base.jsonl` once
   (`mail::read_base`), groups and renders, and writes notes under
   `--dir`/`state/mail-export/` — no cursor, mark, removal or ring; a first
-  touch of an unmigrated box runs the same one-shot mailbase migration every
-  mail command runs (which may mint the identity key). Two rules about what
-  LEAVES a fence are load-bearing and neither may be "simplified": a letter's
-  text rides ONLY inside `fence(text)`, one backtick longer than the longest
-  backtick run in the text (a fixed triple fence lets a letter close it and
-  inject markdown), and every free-form string rendered OUTSIDE that fence —
-  `received_at`, and the peer-supplied `header.from`/`header.to` attribution
+  touch of an unmigrated box runs the same one-shot migrations every mail
+  command runs (mailbase and cursor shape), which may mint the identity key.
+  Two rules about what LEAVES a fence are load-bearing and neither may be
+  "simplified": a letter's text rides ONLY inside `fence(text)`, one backtick
+  longer than the longest backtick run in the text (a fixed triple fence lets
+  a letter close it and inject markdown), and every free-form string rendered
+  OUTSIDE that fence — `received_at`, and the peer-supplied
+  `header.from`/`header.to` attribution
   text, which is not grammar-validated the way a structured letter's addresses
   are — goes through `single_line` (CR, LF, ESC out) or `yaml_quote` (a
   double-quoted YAML scalar). Frontmatter is the sharp edge: an unquoted value
@@ -669,14 +670,23 @@
   `received_at`), so copies are collapsed on their signed text and sender plus
   the mailbox each copy reached — NEVER on a timestamp, which two copies of
   one send can straddle. The mailbox is the tie-break that keeps two separate
-  sends of the same words apart: a copy joins the block above it unless that
-  block already holds its mailbox. `letters:` counts blocks. A note whose bytes
-  already match is NOT rewritten (the mtime/inode signal a timer-driven run
-  depends on), and the note's name is a 64-lowercase-hex key's first 16
-  characters, or `x` plus the first 16 hex of the sha256 of anything else, so
-  no key — hex or hand-corrupted —
-  can name a path outside the export directory or the hidden `.md`. Two keys
-  that would name one note refuse the whole run, before the first write.
+  sends of the same words apart, and `seq` adjacency is what makes a block a
+  send: **a copy joins the block directly above it — the one holding the letter
+  before it — only when ALL of: its `seq` is exactly the next one after that
+  block's last copy, the block carries the same signed text and sender, and the
+  block has not already taken this mailbox.** Anything filed in between (a
+  receipt, another thread's letter) leaves a gap and ends the block, so two
+  sends of the same words whose single copies land in different mailboxes are
+  two letters, and a fan-out whose copies are separated in `seq` renders as
+  more than one block — an over-split is accepted, an over-merge is not. Two
+  sends whose copies DO sit back to back are one block: indistinguishable from
+  one fan-out, and identical in what they render. `letters:` counts blocks. A
+  note whose bytes already match is NOT rewritten (the mtime/inode signal a
+  timer-driven run depends on), and the note's name is a 64-lowercase-hex key's
+  first 16 characters, or `x` plus the first 16 hex of the sha256 of anything
+  else, so no key — hex or hand-corrupted — can name a path outside the export
+  directory or the hidden `.md`. Two keys that would name one note refuse the
+  whole run, before the first write.
 
 ## Extension points
 

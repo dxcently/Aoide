@@ -3823,7 +3823,7 @@ pub fn register_mail(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["mail", "export"],
-        summary: "Write every mail THREAD as one Markdown note under --dir. READ-ONLY on the mailbase: no cursor advances, nothing is marked, removed or rung. Only `letter` entries export (receipts are skipped); a structured letter with a threadId joins its thread and anything else is its own thread keyed by its msgid. A re-run rewrites only notes whose bytes changed.",
+        summary: "Write every mail THREAD as one Markdown note under --dir. READ-ONLY on the mailbase: no cursor advances, nothing is marked, removed or rung. Only `letter` entries export (receipts are skipped); a structured letter with a threadId joins its thread, anything else is its own thread keyed by its msgid. `letters:` counts SENDS, not mailbox copies: a send's fan-out copies collapse into one block while they land back to back. The note is named by the thread key's first 16 characters when it is 64 lowercase hex, else `x` plus the first 16 hex of its sha256; two keys that would name one note refuse the whole run before anything is written. A re-run rewrites only notes whose bytes changed.",
         args: [],
         flags: [flag!("dir", "string", "Directory to write the notes into, created if missing (default: $AOIDE_ROOT/state/mail-export/, the ordinary state_dir() resolution).")],
         gated: false,
@@ -7923,6 +7923,11 @@ mod tests {
         let dir = root.join("export");
         let out = handle_mail_export(&mail_inv_with_flags(&["mail", "export"], &[], &[("dir", dir.to_str().unwrap())]));
         assert_eq!(out.status, aoide_protocol::output::Status::Error, "a collision must refuse the run");
+        assert!(
+            out.message.starts_with(dir.to_str().unwrap()),
+            "the refusal names the directory this run would write, not a default it is not using: {}",
+            out.message
+        );
         assert!(out.message.contains(&first) && out.message.contains(&second), "the refusal names both keys: {}", out.message);
         assert!(note_names(&dir).is_empty(), "a refused export writes nothing: {:?}", note_names(&dir));
         assert!(!dir.join(format!("{}.md", &first[..16])).exists());
@@ -8178,6 +8183,48 @@ mod tests {
         let note = std::fs::read_to_string(root.join("export").join(format!("{}.md", &thread[..16]))).unwrap();
         assert!(note.contains("letters: 2"), "two fan-outs are two letters, four copies:\n{note}");
         assert_eq!(note.matches("\n```\ntwice\n```\n").count(), 2, "{note}");
+        assert_eq!(note.matches(" · ").count(), 2, "two headings, one per letter:\n{note}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mail_export_joins_only_copies_that_are_adjacent_in_seq() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-adjacent");
+        let local = aoide_storage::display::local_host_name();
+        let thread = "f".repeat(64);
+
+        // TWO sends of ONE identical text, each declaring the same To/Cc and
+        // each losing every copy but one: send 1's copy to conductor files
+        // and its copy to scribe is lost; send 2's copy to scribe files and
+        // its copy to conductor is lost. Hand-built envelopes are the only
+        // way to that shape — the writer files every copy it declares — and
+        // nothing inside either envelope tells it from a copy of the other:
+        // they share the bytes, the sender and their separate seals, exactly
+        // as two copies of one fan-out do. What separates them is the receipt
+        // filed between them, so the later copy has no block to join.
+        let content = aoide_storage::letter::LetterContent {
+            subject: "Fan".into(),
+            to: vec![aoide_storage::mail::Address { node: local.clone(), name: "conductor".into() }],
+            cc: vec![aoide_storage::mail::Address { node: local.clone(), name: "scribe".into() }],
+            body: "threeway".into(),
+            thread_id: Some(thread.clone()),
+            reply_to: None,
+        }
+        .encode()
+        .unwrap();
+        aoide_storage::mail::file_letter("tester", "conductor", &content).unwrap();
+        aoide_storage::mail::file_receipt("postmaster", "conductor", "not correspondence").unwrap();
+        aoide_storage::mail::file_letter("tester", "scribe", &content).unwrap();
+
+        let data = run_export(Some(&root.join("export")));
+        assert_eq!(data["threads"], 1, "one threadId, two sends");
+
+        let note = std::fs::read_to_string(root.join("export").join(format!("{}.md", &thread[..16]))).unwrap();
+        assert!(!note.contains("not correspondence"), "a receipt is bookkeeping, not correspondence:\n{note}");
+        assert!(note.contains("letters: 2"), "two sends of the same words are two letters:\n{note}");
+        assert_eq!(note.matches("\n```\nthreeway\n```\n").count(), 2, "each send renders its own block:\n{note}");
         assert_eq!(note.matches(" · ").count(), 2, "two headings, one per letter:\n{note}");
 
         let _ = std::fs::remove_dir_all(&root);
