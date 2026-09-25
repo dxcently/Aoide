@@ -16,7 +16,28 @@ what those checks actually test.
   `songbookManifest` sha256, as plain diffable text. Evaluation evidence only —
   it builds and activates nothing. Every phase-5 slice runs it at its parent
   commit and at HEAD and puts both columns in the commit body.
+- `selection/` — `tests/selection/run.sh` executes the constructor's schema
+  (`lib/composition.nix`) case by case: `cases.nix` holds one attribute per
+  case, the runner evaluates each on its own, and a negative case has to fail
+  with a message the runner greps for, so a vague error is a failing test
+  rather than a passing one. The fixture registry, aggregations, users and
+  override records sit beside it; several of them `throw` on import, which is
+  how "an unselected file stays unread" is proved instead of asserted. `lib`
+  comes from this flake's own lock, so the schema is tested against the lib
+  every host evaluates with. Portable: `nix eval` plus bash, no VM, no host
+  path.
+- `templates/` — `tests/templates/run.sh` assembles a whole tree out of
+  `templates/`, parses every template, resolves two hosts against the real
+  constructor, and checks that the files nobody selected stayed unread. It
+  keeps `templates/` from drifting away from the constructor.
 - `distrobox.md` — manual container-based portability suite; not a gate.
+
+`selection/` and `templates/` shell out to `nix eval` (and `getFlake` a
+nixpkgs rev), so they run where an evaluation can: a developer's shell, and
+each phase-5 slice's gate. They are deliberately NOT `checks.*` — a check is a
+build, and a build sandbox has no nix daemon and no network (`nix eval` inside
+one fails creating `/nix/var/nix/profiles`), so a nested evaluation is not
+something a check can do.
 
 A top-level `tests/` is not a Rust convention — this is not where `cargo
 test` looks. It is the NixOS one (`nixos/tests/`), extended here to any

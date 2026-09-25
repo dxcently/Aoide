@@ -187,6 +187,19 @@ would reintroduce a circular import decision. Platform settings are deferred
 modules until selection is complete. Constructors are small explicit functions
 using Nix module APIs; they are not a second module language or custom loader.
 
+The constructor is `lib/composition.nix`, a function of `{ lib }`, exported by
+the flake as `lib.composition` — a consumer assembles hosts through it by name
+instead of reaching into this tree for a file. It knows no vocabulary of its
+own: a host record's fields ride in through two hooks, both identity by default.
+`selectionModules` are extra modules for the selection passes, which is how a
+field the constructor has never heard of — a song selection is the first — is
+declared once and read by the gate step. `extraModulesFor` is a function of the
+resolved selection returning platform modules, which is how a gate-pass answer
+becomes an import without a gate-pass body import. With both left at their
+defaults the module list is exactly the one the constructor assembles without
+them, and `tests/selection` covers each hook beside the selection cases it must
+not disturb.
+
 The evaluation boundary, stated exactly. `modules/aggregations/default.nix`
 names directories without importing them. An aggregation body is imported if and
 only if the host or one of its users selected it — the union of both, so a body

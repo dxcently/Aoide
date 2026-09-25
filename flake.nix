@@ -69,6 +69,14 @@
       # feeds the `packages` output, the auto-generated `pkg-<name>` checks, and
       # the host + vm overlays (lib/mkHost.nix, tests/vm-boot.nix).
       pkgsWalk = import ./lib/pkgs.nix { inherit lib; };
+
+      # The selection constructor (docs/architecture/NIX-COMPOSITION.md
+      # "Selection before platform evaluation"): selection resolves in an
+      # ordinary `evalModules` pass that knows nothing about NixOS, and the
+      # platform import list is assembled from the result. Exported as
+      # `lib.composition` below — tests/selection exercises it, and dxflake
+      # migrates onto it rather than onto a copy of its own.
+      composition = import ./lib/composition.nix { inherit lib; };
     in
     {
       # ── NixOS configurations ───────────────────────────────────────────────
@@ -145,6 +153,14 @@
       aoideOptions = import ./lib/options.nix {
         inherit lib inputs;
         pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      };
+
+      # ── Library ────────────────────────────────────────────────────────────
+      # The one public seam for assembling a host's module list. A consumer
+      # that wants the constructor imports it from here by name instead of
+      # reaching into `lib/composition.nix` through the source tree.
+      lib = {
+        inherit composition;
       };
 
       # ── Checks ─────────────────────────────────────────────────────────────
