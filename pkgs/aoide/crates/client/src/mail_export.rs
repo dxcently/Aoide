@@ -14,6 +14,7 @@
 
 use aoide_storage::letter;
 use aoide_storage::mail::{Address, Entry, ENTRY_TYPE_LETTER};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -50,13 +51,27 @@ fn thread_key(entry: &Entry) -> String {
     }
 }
 
-/// `<first 16 hex of the thread key>.md` — stable, so a re-run overwrites the
-/// same file. The filter is the traversal guard: the key is hex by
-/// construction, and a hand-corrupted one then cannot name a path outside the
-/// export directory.
-fn note_name(key: &str) -> String {
-    let stem: String = key.chars().take(16).filter(char::is_ascii_hexdigit).collect();
-    format!("{stem}.md")
+/// The note's file stem, 17 characters either way and always `[0-9a-z]`. A key
+/// that is exactly 64 lowercase hex — what both of [`thread_key`]'s paths mint
+/// (`mail::seal`'s msgid, `LetterContent::validate`'s threadId) — keeps its
+/// first 16 characters. Anything else gets `x` plus the first 16 hex of its
+/// sha256, so the stem can never shorten toward the empty one that would name
+/// the hidden file `.md`, and no key, hex or hand-corrupted, can name a path
+/// outside the export directory. Stable, so a re-run overwrites the same file.
+///
+/// Distinct keys can still land on one stem; [`stems`] refuses that run.
+fn note_stem(key: &str) -> String {
+    let hex = |b: u8| b.is_ascii_digit() || (b'a'..=b'f').contains(&b);
+    if key.len() == 64 && key.bytes().all(hex) {
+        return key[..16].to_string();
+    }
+    let digest = Sha256::digest(key.as_bytes());
+    let mut stem = String::with_capacity(17);
+    stem.push('x');
+    for byte in &digest[..8] {
+        stem.push_str(&format!("{byte:02x}"));
+    }
+    stem
 }
 
 /// Every `letter` entry, grouped. Receipts and any other kind are skipped: they
@@ -187,22 +202,47 @@ fn note(thread: &Thread, node: &str) -> String {
     out
 }
 
+/// One file stem per thread, in the same order — or the whole run refused.
+/// Two distinct keys can collide (two 64-hex keys sharing their first 16
+/// characters, or two sha256 prefixes agreeing), and the alternative to
+/// refusing is one thread's note silently overwriting another's, which no
+/// re-run ever recovers.
+fn stems(threads: &[Thread]) -> Result<Vec<String>, String> {
+    let mut taken: BTreeMap<String, &str> = BTreeMap::new();
+    let mut stems = Vec::with_capacity(threads.len());
+    for thread in threads {
+        let stem = note_stem(&thread.key);
+        if let Some(other) = taken.get(&stem) {
+            return Err(format!(
+                "state/mail-export: thread keys {other} and {} both name {stem}.md; nothing written",
+                thread.key
+            ));
+        }
+        taken.insert(stem.clone(), &thread.key);
+        stems.push(stem);
+    }
+    Ok(stems)
+}
+
 /// Write one note per thread into `dir` (default [`default_dir`]).
 ///
 /// Each note lands atomically ([`aoide_storage::fs::atomic_write`]: a temp file
 /// in the same directory, then a rename), and a note whose bytes are already
 /// what this run would write is not written at all — a second run leaves every
 /// file's inode and mtime alone, which is what makes this safe to run on a
-/// timer.
+/// timer. Two threads naming one file refuse the run ([`stems`]) before the
+/// first byte is written.
 pub(crate) fn export(dir: Option<&Path>) -> Result<Report, String> {
     let dir = dir.map(Path::to_path_buf).unwrap_or_else(default_dir);
     let entries = aoide_storage::mail::read_base().map_err(|e| format!("state/mail: {e}"))?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("state/mail-export: {}: {e}", dir.display()))?;
     let node = aoide_storage::display::local_host_name();
+    let threads = threads(entries);
+    let names = stems(&threads)?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("state/mail-export: {}: {e}", dir.display()))?;
     let mut report = Report { threads: 0, written: 0, unchanged: 0, dir };
-    for thread in threads(entries) {
-        let note = note(&thread, &node);
-        let path = report.dir.join(note_name(&thread.key));
+    for (thread, stem) in threads.iter().zip(&names) {
+        let note = note(thread, &node);
+        let path = report.dir.join(format!("{stem}.md"));
         report.threads += 1;
         match std::fs::read(&path) {
             Ok(old) if old == note.as_bytes() => report.unchanged += 1,

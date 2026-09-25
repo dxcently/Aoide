@@ -439,10 +439,13 @@ never the inbound/serve half (that's `aoide-server`).
   `threadId`, else its msgid), skips receipts and every other kind, renders
   one Markdown note per thread into `--dir` (default
   `state_dir()/mail-export/`), and writes only notes whose bytes changed, via
-  `aoide_storage::fs::atomic_write`. It touches NO cursor, mark, `seen.jsonl`
-  line or doorbell latch, and never writes INTO the mailbase itself. The
-  fenced/clamped rendering rules are invariants, not style — see
-  `AGENTS.md`.
+  `aoide_storage::fs::atomic_write`. No cursor, mark, removal or ring; a first
+  touch of an unmigrated box runs the same one-shot mailbase migration every
+  mail command runs (which may mint the identity key). A key that is 64
+  lowercase hex names its note by its first 16 characters, anything else by
+  `x` plus the first 16 hex of its sha256, and two keys that would name one
+  note refuse the whole run before the first write. The fenced/clamped
+  rendering rules are invariants, not style — see `AGENTS.md`.
 - `commands` — this crate's CLI commands:
   `node add/remove/pull/status/hub/allow/spawn/discover`,
   `aoide pair` + `pair.reject`/`pair.watch` (P-P2, P-PV2, task #135 P3',

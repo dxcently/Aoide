@@ -7820,6 +7820,116 @@ mod tests {
         out.data.unwrap()
     }
 
+    /// Every note name in `dir`, sorted — empty when the export wrote nothing.
+    fn note_names(dir: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = match std::fs::read_dir(dir) {
+            Ok(entries) => entries.map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect(),
+            Err(_) => Vec::new(),
+        };
+        names.sort();
+        names
+    }
+
+    /// Append one hand-built `letter` line straight to `base.jsonl` — the only
+    /// way to reach the export with a key no supported writer mints: nothing
+    /// validates a `msgid` on read (`mail::read_entries_unlocked` skips
+    /// malformed lines and checks nothing else), so a torn or hand-edited base
+    /// is the boundary the note naming has to hold at.
+    fn file_raw_letter(seq: u64, msgid: &str, text: &str) {
+        let local = aoide_storage::display::local_host_name();
+        let header = aoide_storage::mail::Header {
+            version: aoide_storage::mail::ENVELOPE_VERSION.to_string(),
+            from: aoide_storage::mail::Address { node: local.clone(), name: "peer".into() },
+            to: aoide_storage::mail::Address { node: local.clone(), name: "conductor".into() },
+            kind: aoide_storage::mail::ENTRY_TYPE_LETTER.into(),
+            minted_at: "2026-01-01T00:00:00Z".into(),
+            origin_mesh: String::new(),
+        };
+        let row = aoide_storage::mail::Entry {
+            seq,
+            received_at: "2026-01-01T00:00:00Z".into(),
+            kind: aoide_storage::mail::ENTRY_TYPE_LETTER.into(),
+            via: "self".into(),
+            envelope: aoide_storage::mail::Envelope {
+                header,
+                text: text.into(),
+                sig: String::new(),
+                msgid: msgid.into(),
+            },
+        };
+        let path = aoide_storage::mail::base_path();
+        std::fs::create_dir_all(aoide_storage::mail::mail_dir()).unwrap();
+        let mut base = std::fs::read_to_string(&path).unwrap_or_default();
+        base.push_str(&serde_json::to_string(&row).unwrap());
+        base.push('\n');
+        std::fs::write(&path, base).unwrap();
+    }
+
+    #[test]
+    fn mail_export_gives_a_non_hex_key_the_x_prefixed_stem() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-non-hex");
+        file_raw_letter(1, "z", "non-hex key body");
+
+        let data = run_export(None);
+        assert_eq!(data["threads"], 1, "one letter is one thread");
+
+        let dir = export_dir(&root);
+        let names = note_names(&dir);
+        assert_eq!(names.len(), 1, "{names:?}");
+        let stem = names[0].strip_suffix(".md").expect("a note is a .md file");
+        assert!(stem.starts_with('x') && stem.len() == 17, "a key that is not hex names its note by hash: {names:?}");
+        assert!(std::fs::read_to_string(dir.join(&names[0])).unwrap().contains("non-hex key body"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mail_export_never_names_a_note_dot_md() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-empty-key");
+        file_raw_letter(1, "", "empty key body");
+
+        let data = run_export(None);
+        assert_eq!(data["threads"], 1, "one letter is one thread");
+
+        let dir = export_dir(&root);
+        let names = note_names(&dir);
+        assert!(!names.iter().any(|n| n == ".md"), "an empty key must never name the hidden `.md`: {names:?}");
+        assert_eq!(names.len(), 1, "{names:?}");
+        assert!(std::fs::read_to_string(dir.join(&names[0])).unwrap().contains("empty key body"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mail_export_refuses_two_threads_that_share_a_stem() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-collision");
+
+        // Two distinct 64-hex thread ids whose first 16 characters agree: two
+        // threads, one note name.
+        let first = "a".repeat(64);
+        let second = format!("{}{}", "a".repeat(16), "b".repeat(48));
+        for thread in [&first, &second] {
+            let out = handle_mail_send(&mail_inv_with_flags(
+                &["mail", "send"],
+                &["collide"],
+                &[("to", "self/conductor"), ("thread", thread)],
+            ));
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        }
+
+        let dir = root.join("export");
+        let out = handle_mail_export(&mail_inv_with_flags(&["mail", "export"], &[], &[("dir", dir.to_str().unwrap())]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "a collision must refuse the run");
+        assert!(out.message.contains(&first) && out.message.contains(&second), "the refusal names both keys: {}", out.message);
+        assert!(note_names(&dir).is_empty(), "a refused export writes nothing: {:?}", note_names(&dir));
+        assert!(!dir.join(format!("{}.md", &first[..16])).exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn mail_export_groups_a_thread_and_gives_everything_else_its_own_note() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -7917,20 +8027,26 @@ mod tests {
         }
 
         let reader = Some("reader-a");
-        aoide_storage::mail::read_for("conductor", false, reader).unwrap();
+        // reader-a is enrolled and left UNREAD. A reader caught up to the max
+        // seq would pass this test even if the export marked it — there would
+        // be nothing left to advance — so the mark starts at zero.
+        let cursors = aoide_storage::mail::cursors_path();
+        std::fs::write(&cursors, r#"{"conductor":{"reader-a":{"seq":0}}}"#).unwrap();
+        let before = std::fs::read(&cursors).unwrap();
         assert_eq!(
-            aoide_storage::mail::unread_for("conductor", reader).unwrap().0,
+            aoide_storage::mail::unread_for("conductor", reader).unwrap().1.len(),
             2,
-            "reader-a is caught up before the export runs"
+            "reader-a is two letters behind before the export runs"
         );
 
         let data = run_export(Some(&root.join("export")));
         assert_eq!(data["written"], 2, "two legacy letters are two threads");
         assert_eq!(
-            aoide_storage::mail::unread_for("conductor", reader).unwrap().0,
+            aoide_storage::mail::unread_for("conductor", reader).unwrap().1.len(),
             2,
             "the export advanced the reader's own mark"
         );
+        assert_eq!(std::fs::read(&cursors).unwrap(), before, "the export rewrote cursors.json");
         let (mark, unread) = aoide_storage::mail::unread_for("conductor", Some("reader-b")).unwrap();
         assert_eq!((mark, unread.len()), (0, 2), "nor did it consume anyone else's mail");
 

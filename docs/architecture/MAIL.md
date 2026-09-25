@@ -694,16 +694,21 @@ the default stays on this box until that share exists; `--dir` goes wherever
 the caller says, created if it is missing.
 
 **Read-only on the mailbase.** It is a projection of `base.jsonl` through
-`read_base` and nothing else: no cursor advances, nothing is marked, nothing
-is removed, nothing rings. Only `type=letter` entries export — a `receipt` or
-any other kind is delivery bookkeeping, not correspondence.
+`read_base`, and advances no cursor, marks nothing, removes nothing, rings
+nothing; a first touch of an unmigrated box runs the same one-shot mailbase
+migration every mail command runs (which may mint the identity key). Only
+`type=letter` entries export — a `receipt` or any other kind is delivery
+bookkeeping, not correspondence.
 
 A structured letter with a `threadId` groups by that id, so every copy and
 every reply of one conversation lands in one note; a legacy or unstructured
 letter — or a structured one with no `threadId` — is its own thread, keyed by
 its msgid, the same anchor a legacy reply uses. Letters sit in `seq` order,
-and the note is `<first 16 hex of the thread key>.md`: a stable name, so a
-re-run overwrites the same file instead of accumulating one per run.
+and the note is named after the thread key — its first 16 characters when the
+key is 64 lowercase hex, else `x` plus the first 16 hex of its sha256: a
+stable name, so a re-run overwrites the same file instead of accumulating one
+per run, and never the empty stem that would name the hidden `.md`. Two keys
+that would name one note refuse the whole run, before anything is written.
 
 ```
 ---
@@ -712,7 +717,9 @@ thread: "<the full thread key>"
 subject: "<the earliest letter's subject, or (no subject)>"
 node: "<this box>"
 participants: ["<node>/<name>", …]
-first: "<received_at>"    last: "<received_at>"    letters: <count>
+first: "<received_at>"
+last: "<received_at>"
+letters: <count>
 ---
 
 # <subject>
@@ -731,9 +738,12 @@ cc: …
   reaches the page, and an invalid or legacy body is fenced verbatim.
 - **Everything outside a fence is clamped or quoted.** `received_at` and the
   free-form half of `header.from`/`header.to` (peer-supplied attribution, not
-  a grammar-checked name) are stripped of CR, LF and ESC, and every scalar in
-  the frontmatter is written as a double-quoted YAML scalar — so a letter
-  cannot end the frontmatter block or forge a heading either.
+  a grammar-checked name) are stripped of CR, LF and ESC, and every
+  frontmatter value a letter or this box's own name supplies — `thread`,
+  `subject`, `node`, `participants`, `first`, `last` — is written as a
+  double-quoted YAML scalar, so a letter cannot end the frontmatter block or
+  forge a heading either. Two values are unquoted, both of them this box's
+  own: `type: mail-thread` and `letters: <count>`.
 - **Declared recipients win.** The `→` list and the `cc:` line are a
   structured letter's own To and Cc as the sender wrote them; the envelope
   header names only the ONE copy that reached this box. A legacy letter shows

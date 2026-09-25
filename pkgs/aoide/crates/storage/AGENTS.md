@@ -772,9 +772,9 @@
   watch`) live in `aoide-client` instead — this crate exposes the
   `pairing`/`node_store` library only, since the ceremony needs outbound
   HTTP transport this crate never holds. `mail`'s commands (`mail
-  send|read|show|mark|rm|outbox|outbox rm|outbox retry`) moved there too at P-M2, for
-  the same reason — a command whose handler needs to DIAL another node
-  belongs in `aoide-client`, never here, regardless of which crate owns
+  send|read|show|mark|rm|outbox|outbox rm|outbox retry|export`) live there
+  too, for the same reason — a command whose handler needs to DIAL another
+  node belongs in `aoide-client`, never here, regardless of which crate owns
   the state it reads or writes.
 
 ## Docs update required in the same commit
