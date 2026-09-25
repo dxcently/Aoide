@@ -2050,11 +2050,22 @@ project/parent inheritance across local/remote/app/subagents;
 - Requirement: HTTPS mail carries encrypted payloads from the first slice.
   Origin-bound letter contents and destinations are immutable to relays;
   forwarding authority permits only separately authenticated transit records.
+- Use case (User, 2026-09-25): reach an Aoide machine outside the LAN from
+  networks where a VPN cannot run and only HTTPS on 443 passes. Doors stay
+  loopback-only, so no home machine accepts inbound HTTPS: every node
+  connects OUT to a relay. The relay is therefore not optional, and because
+  it is not trusted with content, sealed E2E letters are what make it safe.
+- Consequence for phasing: the proposal's H1 (direct HTTPS edges) needs an
+  inbound listener on a home machine and does not serve this use case; the
+  first useful slice is outbound-only nodes plus a relay (today's H4 shape).
+  Re-phasing is a proposal amendment, not yet made.
 - [HTTPS-MESH-API.md](HTTPS-MESH-API.md) owns the proposed verification,
   key-binding, revocation, receipt recovery and migration contracts.
 - Status: reviewed proposal; transport implementation and encryption-library
   profile remain unfinished. HTTPS has no plaintext fallback. Existing SSH
   delivery remains in service until parity and recovery are demonstrated.
+- Open: where the relay runs (an always-on host with a public 443 that is
+  not a home machine).
 
 ## 30. Mail export (letters → one Mneme note per thread)
 
@@ -2066,3 +2077,14 @@ project/parent inheritance across local/remote/app/subagents;
   default export directory lives under `state/`.
 - Status: queued, not started; next Aoide-core lane after cleanup.
 - Owner: unassigned. Depends on: nothing.
+
+## 31. Mesh SSH keys are unrestricted
+
+- Finding (2026-09-25): every mesh key in yomi's `~/.ssh/authorized_keys`
+  (`sakaki-to-yomi-strix` old and new, `thinkchiyo-to-yomi`, and a key
+  labelled `osaka-to-sakaki` present on yomi) carries no options, so each
+  grants a full shell as the User rather than mail delivery.
+- Fix: `restrict,command="<aoide door entry>"` on each mesh key, the entry
+  point to be read from the SSH transport path; stale or mislabelled keys
+  removed on the User's word. The same audit runs on every host.
+- Status: not started. Owner: unassigned. Keys are the User's to change.
