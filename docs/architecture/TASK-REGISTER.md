@@ -2064,5 +2064,13 @@ project/parent inheritance across local/remote/app/subagents;
 - Target: the `magi` vault (`~/Magi`, synced by syncthing) is not present on
   yomi, where syncthing is inactive. Until the User enables that share, the
   default export directory lives under `state/`.
-- Status: queued, not started; next Aoide-core lane after cleanup.
-- Owner: unassigned. Depends on: nothing.
+- Status: LANDED on branch `eidolon/mail-export` at
+  `6a7799fc9c442ed25bd35834a7dd5d73b0fb08b1` — one Markdown note per thread,
+  `--dir` (default `state/mail-export/`), READ-ONLY on the mailbase: no
+  cursor, no mark, no removal, no ring. Tests (`aoide-client`, beside the
+  existing mail tests): `mail_export_groups_a_thread_and_gives_everything_else_its_own_note`,
+  `mail_export_skips_receipts`, `mail_export_leaves_every_reader_cursor_where_it_was`,
+  `mail_export_rewrites_nothing_when_the_note_already_matches`,
+  `mail_export_fences_a_body_that_carries_its_own_fence`, the renamed
+  `register_mail_wires_all_ten_commands`, and `aoide-cli`'s golden snapshot.
+- Owner: Eidolon executor. Depends on: nothing.
