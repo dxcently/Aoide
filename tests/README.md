@@ -1,13 +1,21 @@
 # tests/ — non-cargo testing
 
 Test content that isn't cargo's: whole-system and whole-artifact checks that
-need a Nix build to even exist. `lib/` holds build/eval machinery
+need Nix — a build, or an evaluation of the whole configuration — to even
+exist. `lib/` holds build/eval machinery
 (`checks.nix`, `mkHost.nix`, `pkgs.nix`, `walk.nix`); this directory holds
 what those checks actually test.
 
 - `vm-boot.nix` — headless NixOS boot test, wired as `checks.<system>.vm-boot`.
 - `portability.nix` — asserts `packages.aoide-static` is genuinely free of
   nix, wired as `checks.<system>.portability` (`lib/checks.nix` Check 8).
+- `inventory.sh` — `tests/inventory.sh <flakeref> <host>`, the per-host
+  evaluation inventory for the phase-5 gates: systemPackages names, the three
+  service namespaces, home-manager activation entries, normal users and their
+  groups, the toplevel drvPath, the `aoideOptions` names, and the
+  `songbookManifest` sha256, as plain diffable text. Evaluation evidence only —
+  it builds and activates nothing. Every phase-5 slice runs it at its parent
+  commit and at HEAD and puts both columns in the commit body.
 - `distrobox.md` — manual container-based portability suite; not a gate.
 
 A top-level `tests/` is not a Rust convention — this is not where `cargo
