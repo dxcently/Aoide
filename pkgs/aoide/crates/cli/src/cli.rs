@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn a_partial_path_lists_its_subgroup_instead_of_crying_unknown() {
         // `project` (ex-`graph project`) has no bare command of its own, only
-        // the four children below — `project` alone must list the group.
+        // the five children below — `project` alone must list the group.
         let err = parse(&argv(&["project"]), Door::Cli).unwrap_err();
         assert_eq!(err.status, Status::Usage);
         assert!(
@@ -286,7 +286,13 @@ mod tests {
             "names it a group: {}",
             err.message
         );
-        for command in ["project add", "project edit", "project remove", "project list"] {
+        for command in [
+            "project add",
+            "project edit",
+            "project remove",
+            "project list",
+            "project lead",
+        ] {
             assert!(err.message.contains(command), "lists {command}: {}", err.message);
         }
         assert!(err.message.contains("aoide --help"), "{}", err.message);
