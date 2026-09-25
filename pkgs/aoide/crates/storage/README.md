@@ -421,6 +421,19 @@ by decision — no embedded database yet
   the pre-rename `state/carry.json`, idempotent by construction (a cheap
   `exists()` check, no process-wide `Once` needed for a single file) —
   narrated, never a clobber of a fresher `undying.json`.
+- `remote_children` — the remote-children ledger (remote sub-agents lane,
+  P-RSA): `state/stage/remote-children.json` (CONTRACTS.md §4), one row per
+  child THIS node spawned on another node over its A2A door — the
+  caller-side mirror of `records::RemoteParent`, keyed by the child's
+  verified identity `(key, sessionId)`. `append_remote_child` is idempotent
+  on that identity; `retain_remote_children` is the prune pass's drop;
+  `advance_lines_after` moves one child's ping-back pull cursor forward only
+  (a replayed pull never rewinds it). All three run inside one short
+  `fs::with_stage_lock` section, `load_remote_children` tolerates a
+  missing/corrupt file as empty, and the write is atomic — the same
+  discipline `undying` holds. `valid_claimed_session_id` is the ONE predicate
+  for an `aoide/from` claim (1..=128 bytes of `[A-Za-z0-9._:-]`, no `/`),
+  shared by the client that signs the claim and the door that honours it.
 - `manifest` — a project's own `.aoide/project.json` (v0, command-defrag
   lane U1): host-local SESSION SPECS (`{host, dir, agent, command?}`, `dir`
   always PROJECT-RELATIVE, never a session id or timestamp), so `resurrect`

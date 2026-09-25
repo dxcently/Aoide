@@ -1765,6 +1765,7 @@ mod tests {
             state: "running".into(),
             started_at: "s1".into(),
             parent_session_id: None,
+            remote_parent: None,
             conductable: None,
             socket: None,
             title: None,

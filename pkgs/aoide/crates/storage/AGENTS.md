@@ -55,6 +55,25 @@
   turn this into a periodic or unconditional re-sync; a second boot with
   both a old-path leftover and a populated new path should leave the new
   path exactly as it is.
+- **`remoteParent` and `parentSessionId` are two edges, never one field
+  (remote sub-agents lane, P-RSA).** `SessionRecord.parent_session_id` is a
+  LOCAL id and every reader treats it as one (autogate grant, sibling rule,
+  project grouping, `graph link`'s cycle check, `taskreport`'s mailbox) —
+  never put a qualified or foreign value in it, and never "unify" the two by
+  making `remoteParent` a string inside it: a foreign value would dangle at
+  best and match a same-named local session at worst. `remoteParent` has
+  exactly one writer (the A2A door) and is stamped on the CHILD's own
+  record, so registration (`session::upsert_session`, and thus
+  `session_conduct`) must keep writing `remote_parent: None`, never reading
+  it from env or argv. `records::RemoteParent` deliberately carries no
+  `extra` map: the door is its only writer, so there is no foreign writer to
+  round-trip for (unlike `SessionRecord`, whose writer is shellbridge).
+- **A `state/stage/` ledger with a cursor moves the cursor FORWARD ONLY, and
+  writes both inside one `with_stage_lock` section.** `remote_children::
+  advance_lines_after` and `retain_remote_children` are the shape: mutate
+  in-memory, write once, return whether anything changed; a no-op result
+  never rewrites the file (so an idle tick does not churn the tree), and a
+  replayed pull can never rewind a cursor and re-deliver a line.
 - **`fs::migrate_root_once` is `pub` and deliberately NOT wired into any
   path getter (L-C2, lyra-carrier lane, task #107) — don't "fix" this by
   hanging it off `fs::root`'s no-override fallback the way

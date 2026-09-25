@@ -158,6 +158,32 @@ pub struct RestoreSnapshot {
     pub typed: Option<String>,
 }
 
+/// A REMOTE parent: the session that spawned this one ACROSS machines — the
+/// field on the CHILD's own record that names a parent living on another
+/// node (CONTRACTS.md §4). The receiving node's A2A door is its only writer.
+///
+/// Deliberately a separate field from [`SessionRecord::parent_session_id`],
+/// never a qualified string in it: every reader of `parentSessionId` treats
+/// it as a LOCAL id (the autogate grant in `conduct/graph/send.rs`, the
+/// grouping in `graph/model.rs`, the cycle check in `graph link`, the report
+/// mailbox in `taskreport.rs`), so a foreign value there would either dangle
+/// or — worse — match a same-named local session and grant local autogate.
+///
+/// `key` is the authoritative identity (`docs/architecture/PAIRING.md`'s
+/// "Identity IS the key"): the ed25519 pubkey the door verified the request
+/// against. `node` is only the display LABEL the door knew at stamp time, so
+/// a reader shows the current `nodes.json` name for `key` when it has one and
+/// falls back to `node`, and a local rename never orphans the link.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteParent {
+    #[serde(default)]
+    pub node: String,
+    #[serde(default)]
+    pub key: String,
+    #[serde(rename = "sessionId", default)]
+    pub session_id: String,
+}
+
 /// One session record (`state/stage/sessions.json`, written by shellbridge).
 /// `parentSessionId` is the optional additive spawned-by edge; `extra`
 /// round-trips any fields this version does not know about.
@@ -187,6 +213,13 @@ pub struct SessionRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub parent_session_id: Option<String>,
+    /// The remote half of "who spawned this": present only on a session the
+    /// A2A door stamped, never a locally-registered one. Additive/v0-safe,
+    /// same `skip_serializing_if` discipline as every other field here — a
+    /// record with no `remoteParent` serialises byte-identical to before
+    /// this field existed.
+    #[serde(rename = "remoteParent", default, skip_serializing_if = "Option::is_none")]
+    pub remote_parent: Option<RemoteParent>,
     /// Conductor-channel additive fields (v0-safe; absent on a legacy record).
     /// `conductable` marks a session spawned under `aoide conduct` (it owns a
     /// PTY + control socket); `socket` is that per-session injection socket
@@ -1020,6 +1053,70 @@ mod tests {
         // A record with no pid serialises WITHOUT the key (additive/v0-safe).
         assert!(back.get("pid").is_none());
     }
+    #[test]
+    fn session_record_remote_parent_round_trips_and_stays_absent_when_unset() {
+        // Remote sub-agents lane (P-RSA): `remoteParent` serialises as the
+        // `{node,key,sessionId}` object the A2A door stamps, and is skipped
+        // (skip_serializing_if) when None — the same additive/v0-safe wire
+        // contract every other v0-safe field on this struct holds.
+        let mut rec = SessionRecord {
+            session_id: "a2a-1".into(),
+            ..Default::default()
+        };
+        rec.remote_parent = Some(RemoteParent {
+            node: "yomi-strix".into(),
+            key: "ab".repeat(32),
+            session_id: "conduct-17991-1790312541".into(),
+        });
+        let json = serde_json::to_string(&rec).unwrap();
+        assert!(json.contains("\"remoteParent\":{"), "serialised: {json}");
+        assert!(json.contains("\"node\":\"yomi-strix\""), "serialised: {json}");
+        assert!(
+            json.contains("\"sessionId\":\"conduct-17991-1790312541\""),
+            "serialised: {json}"
+        );
+        let back: SessionRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.remote_parent, rec.remote_parent);
+
+        // A record with no remoteParent omits the key entirely (no null
+        // noise), and a legacy record predating the field parses to `None` —
+        // one serialises byte-identical to before this field existed.
+        let bare = SessionRecord {
+            session_id: "s".into(),
+            ..Default::default()
+        };
+        let bare_json = serde_json::to_string(&bare).unwrap();
+        assert!(!bare_json.contains("remoteParent"), "serialised: {bare_json}");
+        let legacy: SessionRecord =
+            serde_json::from_str(r#"{ "sessionId": "s", "windowAddress": "0x1" }"#).unwrap();
+        assert_eq!(legacy.remote_parent, None);
+
+        // `remoteParent` never stands in for the LOCAL edge: a record the
+        // door stamped carries it and no `parentSessionId` (the child's own
+        // node never writes a local parent for a remote spawn).
+        assert!(back.parent_session_id.is_none());
+    }
+
+    #[test]
+    fn remote_parent_round_trips_unknown_fields_beside_it() {
+        // The same shellbridge-grows-fields tolerance `session_records_
+        // round_trip_unknown_fields` pins, now with the new field present: a
+        // rewrite must not drop an unknown key on the RECORD. `remoteParent`
+        // itself carries no `extra` map — it has exactly one writer (the
+        // door, in this repo), so there is no foreign writer to round-trip
+        // for, the same closed shape `RestoreSnapshot` holds.
+        let raw = r#"{ "sessionId": "a2a-1", "agent": "a2a",
+                       "remoteParent": { "node": "yomi-strix", "key": "ab", "sessionId": "p1" },
+                       "futureField": 42 }"#;
+        let rec: SessionRecord = serde_json::from_str(raw).unwrap();
+        let back = serde_json::to_value(&rec).unwrap();
+        assert_eq!(back["futureField"], 42);
+        assert_eq!(back["remoteParent"]["node"], "yomi-strix");
+        assert_eq!(back["remoteParent"]["key"], "ab");
+        assert_eq!(back["remoteParent"]["sessionId"], "p1");
+        assert_eq!(back["remoteParent"].as_object().unwrap().len(), 3);
+    }
+
     #[test]
     fn session_record_log_path_round_trips_and_stays_absent_when_unset() {
         // serde: `logPath` serialises as a string when set, and is skipped

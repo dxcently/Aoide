@@ -1427,6 +1427,24 @@ by `aoide graph link` (cycle-checked), cleared by `aoide session prune` when the
 parent is removed. Absent means "no spawned-by edge"; readers must tolerate
 both forms, and rewriters must round-trip fields they do not know.
 
+**`remoteParent` — the SAME edge across machines, deliberately a SECOND
+field.** A session record MAY carry an optional `remoteParent` object,
+`{node, key, sessionId}`: the session that spawned it on ANOTHER node.
+`parentSessionId` stays local-only and is never given a qualified or foreign
+value — every reader of it (the autogate grant and sibling rule in
+`conduct/graph/send.rs`, the grouping in `graph/model.rs`, `graph link`'s
+cycle check, `taskreport`'s mailbox) treats it as a local id, so a foreign
+value there would dangle at best and match a same-named local session at
+worst, which would grant local autogate to a stranger. `key` is the
+authoritative identity — the ed25519 pubkey the receiving door verified the
+request against (`docs/architecture/PAIRING.md`, "Identity IS the key") — and
+`node` is only the display label the door knew at stamp time: a reader prefers
+the current `nodes.json` name for `key`, so a local rename never orphans the
+link. Additive/v0-safe like every optional field above — absent on every
+locally-registered record and every record predating this field, and a record
+without it serialises byte-identical to before. Its caller-side mirror is
+`state/stage/remote-children.json`, below.
+
 **Additive in v0:** a session record MAY also carry an optional `contextTokens`
 (integer) — the input-side token count (`input_tokens +
 cache_creation_input_tokens + cache_read_input_tokens`) of the freshest
@@ -2481,6 +2499,42 @@ the delivery — so a line is delivered at most once, and a crash between the
 claim and the write loses a line rather than duplicating one. A child whose
 eidolon record leaves the roster drops out of this file on the same pass.
 There is no command that reads or edits it: it is a cursor, not a queue.
+
+### `state/stage/remote-children.json` — **v0**
+
+The caller-side half of `remoteParent` (above): the children THIS node
+spawned on OTHER nodes over their A2A door. The child's own node records who
+its parent is on the child's record; this file records, on the parent's own
+node, which children that parent asked for — and carries the ping-back pull
+cursor each of them is up to.
+
+```json
+{
+  "schemaVersion": "0",
+  "children": [
+    { "parentSessionId": "conduct-17991-1790312541", "node": "sakaki",
+      "key": "<ed25519 pubkey hex>", "sessionId": "a2a-4411-1790",
+      "spawnedAt": "2026-09-25T04:00:00Z", "linesAfter": 0 }
+  ]
+}
+```
+
+`parentSessionId` is this node's OWN local parent — the session that asked
+for the spawn — so the child stays attributable after a restart; `key`
+(identity) and `sessionId` name the child, and `node` is only the display
+label known at spawn time. An entry is keyed by the child's identity
+`(key, sessionId)`, and an append for a child already present is a no-op, so
+a re-acked spawn never doubles a row. `linesAfter` is the remote ping-back
+cursor: the highest event `seq` already delivered to `parentSessionId`. It
+only ever moves forward — a replayed pull can never rewind it — which makes
+the delivery at-most-once in the same direction `pingback.json`'s own cursor
+holds: a crash between the two loses a line, never duplicates one.
+
+Written only through `aoide_storage::remote_children`, inside one short
+`state/stage/.stage.lock` section and atomically (temp-then-rename); a missing
+or corrupt file reads as empty. Like `remoteParent` it is attribution, never a
+grant: a same-uid process can write it, and the door gates only on the key
+comparison it makes itself against the verifying node.
 
 ### `state/stage/mesh.json` — **v0**
 

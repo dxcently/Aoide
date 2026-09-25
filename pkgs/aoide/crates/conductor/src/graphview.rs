@@ -1269,6 +1269,7 @@ mod tests {
             state: state.into(),
             started_at: id.into(),
             parent_session_id: parent.map(str::to_string),
+            remote_parent: None,
             conductable: None,
             socket: None,
             title: None,

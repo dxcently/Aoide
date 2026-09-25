@@ -88,6 +88,11 @@ pub fn upsert_session(
             state: "idle".to_string(),
             started_at: now.to_string(),
             parent_session_id: parent.map(str::to_string),
+            // A remote parent is stamped by the A2A door on its own record
+            // write, never by registration (`remote_children`'s module doc) —
+            // a locally-registered session, including one the door launched,
+            // is born without one.
+            remote_parent: None,
             conductable,
             socket: socket.map(str::to_string),
             title: title.map(str::to_string),

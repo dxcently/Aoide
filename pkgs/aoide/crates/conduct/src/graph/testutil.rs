@@ -42,6 +42,7 @@ pub(crate) fn session(
         state: state.into(),
         started_at: started.into(),
         parent_session_id: parent.map(str::to_string),
+        remote_parent: None,
         conductable: None,
         socket: None,
         title: None,

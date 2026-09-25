@@ -1103,7 +1103,10 @@ project/parent inheritance across local/remote/app/subagents;
   tree edits are not placed; designer asked for the rule + the working
   animation (fixed footprint, parent and nested children) proven on the
   synthetic fixture; daemon deploy + placement are the User's gates) → S-D remote owner
-  qualification (design + `link` refusal) → E3. Brief DONE (Opus,
+  qualification (design + `link` refusal; the DESIGN half is ruled and
+  landed in the remote sub-agents lane, §32: `remoteParent` is a second
+  field beside a local-only `parentSessionId`, so no foreign owner is ever
+  written into it; the `link` refusal half stays open there) → E3. Brief DONE (Opus,
   scratch `p-ownership-brief.md`): R1 accepted as ruled (rung 2 above rung
   3; `session project` pins a mis-grouped row), Q2 `effectiveProject` on
   graph.json NOT published yet, Q3 `node spawn --project` deferred (A2A
@@ -2111,3 +2114,37 @@ project/parent inheritance across local/remote/app/subagents;
   point to be read from the SSH transport path; stale or mislabelled keys
   removed on the User's word. The same audit runs on every host.
 - Status: not started. Owner: unassigned. Keys are the User's to change.
+
+## 32. Remote sub-agents (parent link, ping-back, watch across nodes)
+
+- Requirement (User, 2026-09-25): any harness agent run through Aoide is a
+  watched process whose output is visible and steerable, with no harness
+  integrated into Aoide. Agents spawned this way are detected as the spawning
+  session's sub-agents, including across machines through its a2a channel.
+- Rulings (User, 2026-09-25): Q1, Q3, Q4, Q5, Q6 at the brief's defaults; Q2
+  WIDENED — a signed, `verified` node whose grant includes `read` may read
+  `ANY` session's watch frame on the far node, so the remote-parent key match
+  is not required to READ. It is still required to steer without pending and
+  for ping-back history, and unsigned/bearer/address rungs are refused.
+  Both machines show the link: the child's node shows `remoteParent` and
+  `↑ <node>/<parent>`, the parent's node shows the remote child and that
+  child's own local descendants as a nested subtree.
+- Shape, as ruled: `remoteParent {node,key,sessionId}` on the child's record —
+  a SECOND field, `parentSessionId` stays local-only (§13's rule, never a
+  foreign owner in it); `state/stage/remote-children.json` as the caller-side
+  ledger; `metadata["aoide/from"]` as the signed caller claim; and the
+  ping-back PULLED over the A2A door (never mail, never a child-side push),
+  so only the direction the spawn already proved is used.
+- Status: S1 LANDED on `eidolon/remote-sub` (`remoteParent` +
+  `records::RemoteParent`, `aoide-storage::remote_children`,
+  `valid_claimed_session_id`); S2–S10 open, in the brief's order (S4 and S5
+  may run in parallel after S3; cargo builds serialize).
+- Tests (`aoide-storage`, S1):
+  `session_record_remote_parent_round_trips_and_stays_absent_when_unset`,
+  `remote_parent_round_trips_unknown_fields_beside_it`,
+  `append_is_idempotent_on_the_verified_child_identity`,
+  `a_missing_or_corrupt_ledger_reads_as_empty`,
+  `retain_drops_exactly_the_rejected_rows`,
+  `advance_lines_after_is_forward_only_and_ignores_an_unknown_child`,
+  `valid_claimed_session_id_admits_exactly_the_contract_shape`.
+- Owner: Eidolon executor. Depends on: §13's S-D design half, ruled here.
