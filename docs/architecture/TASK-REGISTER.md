@@ -308,6 +308,23 @@ Fields per entry: status · owner · depends on · evidence · next.
   the tree's packages), yomi-strix holds because its host modules define no
   order-sensitive list. `lib/walk.nix` survives for the songbook until
   slice 2. Evaluated only; nothing built or activated.
+- Phase 5 (NIX-COMPOSITION migration, branch `eidolon/phase5`): the design
+  brief lives in the orchestrator scratchpad, `p-aoideos-phase5-brief.md`,
+  read-only. S0 `1590ca3` (`tests/inventory.sh`, the G1-G7 per-host inventory:
+  evaluation evidence, nothing built or activated) and S1 `53bdb6c` (dxflake's
+  selection constructor ported into `lib/composition.nix` and exported as
+  `lib.composition`, `tests/selection`, `tests/templates`, `templates/`)
+  LANDED. Baseline from the S0 body, yomi-strix: systemPackages 206,
+  systemd.services 72 / user 20 / HM 5, 14 activation names, `aoideOptions`
+  157, `songbookManifest` `18abdc96…cb0`, toplevel `13nxcg…`; the §1.10
+  baseline `9699964` reproduces `kvx7y8b5…` and differs from HEAD in the
+  drvPath alone, which is the mail-export merge. This fixup: the gate-pass case
+  now witnesses the gate pass, the hook's catalogue reach and its position in
+  the module list are pinned, the inventory widens to timers/sockets/paths/
+  tmpfiles and HM `home.file`/`xdg.configFile`, the constructor is exported as
+  a function of `{ lib }`, the template text says Aoide's mechanism instead of
+  dxflake's, and `evidence` is qualified as runtime-only. Activation is still
+  the User's own gate.
 - Next: root rules on the brief (Q1 `lib/pkgs.nix` stays, Q2 keep the
   vacuous check until (f), Q3 walk order, Q4 re-express `_`, Q6 skip a song
   without `rice.nix`, Q7 slice 3 in (b)); the User answers Q5 (does the

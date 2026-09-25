@@ -195,10 +195,12 @@ own: a host record's fields ride in through two hooks, both identity by default.
 field the constructor has never heard of — a song selection is the first — is
 declared once and read by the gate step. `extraModulesFor` is a function of the
 resolved selection returning platform modules, which is how a gate-pass answer
-becomes an import without a gate-pass body import. With both left at their
-defaults the module list is exactly the one the constructor assembles without
-them, and `tests/selection` covers each hook beside the selection cases it must
-not disturb.
+becomes an import without a gate-pass body import. That selection is the whole
+resolved one, catalogue values included, so the hook can reach a body nothing
+selected — which is why a caller passes selected paths only, never the
+catalogue. With both left at their defaults the module list is exactly the one
+the constructor assembles without them, and `tests/selection` covers each hook
+beside the selection cases it must not disturb.
 
 The evaluation boundary, stated exactly. `modules/aggregations/default.nix`
 names directories without importing them. An aggregation body is imported if and
@@ -658,7 +660,8 @@ implementation proof, not just this Nix layout.
 
 Recorded on dxflake. All four hosts — chiyo, osaka, sakaki and yomi-strix —
 evaluate to byte-identical system derivations before and after the migration.
-`tests/selection/run.sh` passes 39 of 39, including cases proving that an
+`tests/selection/run.sh` passes 49 of 49 — 41 cases ported from dxflake's
+suite plus 8 for the constructor's hooks — including cases proving that an
 aggregation body which throws on import stays unread when nothing selects it,
 that an unselected provider file stays unread, and that an unmatched override
 record whose overlay and module both throw is never called — with the

@@ -54,24 +54,51 @@ printf '# aoide evaluation inventory — nixosConfigurations.%s\n' "$HOST"
 
 # G1 — environment.systemPackages: the sorted `name` multiset (versions
 # included; duplicates kept, that is the point of a multiset). Non-derivation
-# entries stringify.
+# entries stringify. An entry with no `name` keeps its outPath basename instead
+# of collapsing into one "unnamed" line, so two nameless entries stay two.
 pkgs=$(nixeval --raw "$CFG.environment.systemPackages" --apply \
-  'ps: builtins.concatStringsSep "\n" (builtins.sort builtins.lessThan (map (p: if builtins.isAttrs p then p.name or "unnamed" else builtins.toString p) ps))')
+  'ps: builtins.concatStringsSep "\n" (builtins.sort builtins.lessThan (map (p: if builtins.isAttrs p then p.name or (builtins.baseNameOf (toString p)) else builtins.toString p) ps))')
 list 'G1 environment.systemPackages' "$pkgs"
 
-# G2 — the three service namespaces: system, system-user, and home-manager's
-# own user units (HM writes these as files, so they are NOT the same set as
-# systemd.user.services).
+# G2 — the unit namespaces a slice can add or drop: system, system-user, and
+# home-manager's own user units (HM writes these as files, so they are NOT the
+# same set as systemd.user.services). Timers, sockets and paths are measured
+# beside services because a desktop distro's slices add them, and a unit kind
+# no measure reads is a delta only the opaque drvPath would show.
 system_services=$(nixeval --raw "$CFG.systemd.services" --apply "$ATTR_NAMES")
 list 'G2 systemd.services' "$system_services"
+system_timers=$(nixeval --raw "$CFG.systemd.timers" --apply "$ATTR_NAMES")
+list 'G2 systemd.timers' "$system_timers"
+system_sockets=$(nixeval --raw "$CFG.systemd.sockets" --apply "$ATTR_NAMES")
+list 'G2 systemd.sockets' "$system_sockets"
+system_paths=$(nixeval --raw "$CFG.systemd.paths" --apply "$ATTR_NAMES")
+list 'G2 systemd.paths' "$system_paths"
 user_services=$(nixeval --raw "$CFG.systemd.user.services" --apply "$ATTR_NAMES")
 list 'G2 systemd.user.services' "$user_services"
+user_timers=$(nixeval --raw "$CFG.systemd.user.timers" --apply "$ATTR_NAMES")
+list 'G2 systemd.user.timers' "$user_timers"
+user_sockets=$(nixeval --raw "$CFG.systemd.user.sockets" --apply "$ATTR_NAMES")
+list 'G2 systemd.user.sockets' "$user_sockets"
+user_paths=$(nixeval --raw "$CFG.systemd.user.paths" --apply "$ATTR_NAMES")
+list 'G2 systemd.user.paths' "$user_paths"
 hm_user_services=$(nixeval --raw "$CFG.home-manager.users" --apply "$(hm_leaf systemd.user.services)")
 list 'G2 home-manager systemd.user.services' "$hm_user_services"
 
-# G3 — home-manager activation entries (the switch's whole side-effect surface).
+# G2 — tmpfiles rules, in DECLARED order: a later rule wins where two touch the
+# same path, so sorting them (as the name measures above do) would hide a
+# precedence change. One rule per line, so the count is the list length.
+tmpfiles=$(nixeval --raw "$CFG.systemd.tmpfiles.rules" --apply 'rs: builtins.concatStringsSep "\n" rs')
+list 'G2 systemd.tmpfiles.rules' "$tmpfiles"
+
+# G3 — home-manager activation entries (the switch's whole side-effect surface),
+# plus the two file trees an activation entry may only seed: every target path
+# HM writes into the home, which a slice that moves a file changes.
 hm_activation=$(nixeval --raw "$CFG.home-manager.users" --apply "$(hm_leaf home.activation)")
 list 'G3 home-manager home.activation' "$hm_activation"
+hm_home_file=$(nixeval --raw "$CFG.home-manager.users" --apply "$(hm_leaf home.file)")
+list 'G3 home-manager home.file targets' "$hm_home_file"
+hm_xdg_config=$(nixeval --raw "$CFG.home-manager.users" --apply "$(hm_leaf xdg.configFile)")
+list 'G3 home-manager xdg.configFile targets' "$hm_xdg_config"
 
 # G4 — normal users and the extra groups each is in (`users.groups` names the
 # groups themselves; membership is extraGroups).

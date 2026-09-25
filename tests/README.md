@@ -10,12 +10,17 @@ what those checks actually test.
 - `portability.nix` — asserts `packages.aoide-static` is genuinely free of
   nix, wired as `checks.<system>.portability` (`lib/checks.nix` Check 8).
 - `inventory.sh` — `tests/inventory.sh <flakeref> <host>`, the per-host
-  evaluation inventory for the phase-5 gates: systemPackages names, the three
-  service namespaces, home-manager activation entries, normal users and their
-  groups, the toplevel drvPath, the `aoideOptions` names, and the
-  `songbookManifest` sha256, as plain diffable text. Evaluation evidence only —
-  it builds and activates nothing. Every phase-5 slice runs it at its parent
-  commit and at HEAD and puts both columns in the commit body.
+  evaluation inventory for the phase-5 gates: systemPackages names (an entry
+  with no `name` keeps its outPath basename), the systemd unit namespaces
+  (services, timers, sockets and paths, system and system-user, plus
+  home-manager's own user services and the tmpfiles rules in declared order),
+  home-manager activation entries with the `home.file`/`xdg.configFile` targets
+  they seed, normal users and their groups, the toplevel drvPath, the
+  `aoideOptions` names, and the `songbookManifest` sha256, as plain diffable
+  text. Evaluation evidence only — it builds and activates nothing. Every
+  phase-5 slice runs it at its parent commit and at HEAD and puts both columns
+  in the commit body; a slice that predicts a drvPath delta names it, because
+  G5 is opaque and the named measures are the only ones that say what moved.
 - `selection/` — `tests/selection/run.sh` executes the constructor's schema
   (`lib/composition.nix`) case by case: `cases.nix` holds one attribute per
   case, the runner evaluates each on its own, and a negative case has to fail

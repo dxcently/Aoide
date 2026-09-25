@@ -59,8 +59,10 @@ overrideStrayHost                   throws  confined to unknown host(s): gamma
 overrideCarriesNothing              throws  carries nothing to apply
 selectionModuleFieldIsVisible       ok      "sonata"
 selectionModuleFieldIsUnknownWithoutIt throws does not exist
-selectionModuleDrivesTheGatePass    ok      "workstation"
+selectionModuleDrivesTheGatePass    ok      "workstation:notifications,systemonly"
 extraModulesForLandsOnlyWhenSelected ok     "1:0"
+extraModulesForCanReachTheCatalogue throws  landmine/default.nix was imported
+extraModulesForKeepsItsPosition     ok      "allhosts,hook"
 hookDefaultsChangeNothing           ok      "same:true"
 mkHostPassesTheModulesThrough       ok      "same:true"
 EOF

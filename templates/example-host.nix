@@ -1,8 +1,8 @@
 # example-host.nix — a machine.
 #
 # Copy to:  hosts/<host>/default.nix, beside a generated hardware.nix
-# Then:     add "<host>" to the host list in flake.nix. That is the only edit
-#           flake.nix ever takes.
+# Then:     nothing — hosts are discovered, so no list in flake.nix names this
+#           one and flake.nix is never edited to add a machine.
 # Replace:  <host>, the selection, the user, and everything under `nixos`.
 #           `./hardware.nix` is a placeholder — generate your own with
 #           `nixos-generate-config`; the hardware in this tree's hosts is

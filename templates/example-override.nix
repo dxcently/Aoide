@@ -36,7 +36,7 @@
   # ── Host filter (optional) ───────────────────────────────────────────────
   # Confine the record to named hosts. OMIT IT and the record reaches every
   # host that selected a target, which is the usual thing to want. Names are
-  # checked against the host list in flake.nix, so a typo fails loudly.
+  # checked against the discovered hosts, so a typo fails loudly.
   hosts = [ "examplehost" ];
 
   # ── A package fix (optional) ─────────────────────────────────────────────

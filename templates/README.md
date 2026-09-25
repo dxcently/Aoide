@@ -9,6 +9,11 @@ template does not enable it** — a dendrite goes live when the catalogue names 
 record goes live when it sits in `modules/overrides/` *and* a host selected one
 of the capabilities it targets.
 
+The destination tree these files describe — discovered hosts,
+`modules/aggregations/`, `modules/overrides/`, `users/`, and the registry form
+of `modules/default.nix` — arrives in later slices of the phase-5 migration;
+until then nothing here may be copied over a live file.
+
 Read `../AGENTS.md` for where things live and `../docs/architecture/NIX-COMPOSITION.md`
 for why. Verify a copy with `../tests/selection/run.sh`; verify the templates
 themselves with `../tests/templates/run.sh`, which assembles a whole tree out of
@@ -23,11 +28,11 @@ files nobody selected stayed unread.
 | a capability with several | `example-default-provider-registry.nix` | `modules/dendrites/<name>/default.nix` | one catalogue line naming the **directory** |
 | one of those implementations | `example-provider.nix` | `modules/dendrites/<name>/<provider>.nix` | one line in that directory's `default.nix` |
 | a group of capabilities | `example-aggregation.nix` | `modules/aggregations/<group>/default.nix` | nothing — discovery finds it; select it from a host |
-| a machine | `example-host.nix` | `hosts/<host>/default.nix` | add `"<host>"` to the host list in `flake.nix` |
+| a machine | `example-host.nix` | `hosts/<host>/default.nix` | nothing — hosts are discovered; no `flake.nix` edit |
 | a headless machine | `example-host-headless.nix` | `hosts/<host>/default.nix` | same |
 | a person | `example-user.nix` | `users/<name>.nix` | attach from each host that wants them |
 | something every host gets | `example-nucleus-module.nix` | `modules/nucleus/<topic>.nix` | one import line in `modules/nucleus/default.nix` |
-| a package nixpkgs lacks | `example-package.nix` | `pkgs/<name>/default.nix` | `pkgs.callPackage` it from the lane that wants it |
+| a package nixpkgs lacks | `example-package.nix` | `pkgs/<name>/default.nix` | nothing — the package overlay provides `pkgs.<name>` |
 | a fix a capability needs everywhere | `example-override.nix` | `modules/overrides/<name>.nix` | nothing — discovery finds it; it applies where a target was selected |
 | a whole new tree | `example-default-registry.nix`, `example-default-aggregations.nix`, `example-default-overrides.nix` | `modules/default.nix`, `modules/aggregations/default.nix`, `modules/overrides/default.nix` | these three are the floor everything else plugs into |
 

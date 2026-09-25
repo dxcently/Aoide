@@ -43,6 +43,21 @@ let
     in
     builtins.deepSeq (builtins.toJSON inv) (builtins.deepSeq lanes { inherit selection inv lanes; });
 
+  # A module list's identity, element for element, short of the values it holds.
+  # `==` is no instrument here: Nix counts two distinct function objects as
+  # unequal, so a list carrying a lane function never compares equal to a copy
+  # of itself. What is left is each element's type, and for an attrset its
+  # attribute names.
+  fingerprint =
+    l:
+    map (
+      m:
+      if builtins.isAttrs m then
+        "${builtins.typeOf m}{${builtins.concatStringsSep "," (builtins.attrNames m)}}"
+      else
+        builtins.typeOf m
+    ) l;
+
   # ── The constructor's two hooks ────────────────────────────────────────────
   # `mkNixosModules` is the platform pass as a function: the same module list
   # and specialArgs `mkNixosHost` hands `nixosSystem`, without a package set in
@@ -380,6 +395,17 @@ let
 
   bad = name: { ${name} = ./badrecords + "/${name}.nix"; };
 
+  # The constructor's registry plus one record that matches a selected target,
+  # for the case that witnesses WHERE the hook's modules land: the record's
+  # `nixos` half and the hook's module define the same list option, and a list
+  # option's definitions merge in module-list order, so the merged order is the
+  # position.
+  registryWithOverrides = registry // {
+    overrides = {
+      allhosts = ./overrides/allhosts.nix;
+    };
+  };
+
   applyOverrides =
     {
       mod,
@@ -560,13 +586,17 @@ selectionCases
     (mkModules { hostModules = [ { hostRecord.tag = "sonata"; } ]; }).selection.hostRecord.tag;
 
   # The gate step is what decides which aggregation BODIES the select step
-  # imports, so a hook module driving it is observable as a body that was read:
-  # the aggregation is named in the resolved inventory.
+  # imports. A hook module that enables an aggregation is therefore observable
+  # as work done in the gate pass only: the body's own MEMBERSHIP is what the
+  # resolved inventory shows, and a body the gate pass never selected is never
+  # imported, so a hook handed to the select pass alone contributes nothing
+  # here. `notifications` and `systemonly` are exactly what
+  # `aggregations/workstation` writes into the selection.
   selectionModuleDrivesTheGatePass =
     let
       r = mkModules { selectionModules = [ { aggregation.workstation.enable = true; } ]; };
     in
-    builtins.concatStringsSep "," r.inventory.aggregation;
+    "${builtins.concatStringsSep "," r.inventory.aggregation}:${builtins.concatStringsSep "," (builtins.attrNames r.inventory.dendrites)}";
 
   # `extraModulesFor` is handed the RESOLVED selection, and what it returns
   # lands in the platform pass — once, for the host that selected the capability
@@ -593,9 +623,57 @@ selectionCases
     in
     "${toString selected}:${toString unselected}";
 
+  # The hook's argument is the WHOLE resolved selection — `selection.catalogue`
+  # included, and a catalogue path is a body the hook can `import` itself. That
+  # is deliberate: narrowing it would take the resolved selectors out of a
+  # caller's reach. The discipline is the caller's, so it is pinned here: an
+  # unselected catalogue path imported from the hook throws in the pass that
+  # hands the hook its argument, which is where a caller notices.
+  extraModulesForCanReachTheCatalogue =
+    (mkModules { extraModulesFor = sel: [ (import sel.catalogue.landmine) ]; }).modules;
+
+  # Position, not just presence. The hook's modules sit with `extraModules` —
+  # after the constructor's own imports, before the override records and before
+  # the host's own module — so a record or the host can still outrank them. A
+  # list option both the hook's module and a matched record's `nixos` half
+  # define merges in module-list order (a later module's definition reads
+  # first), which is what makes the merged order a witness of the position
+  # rather than of the hook merely being present.
+  extraModulesForKeepsItsPosition =
+    let
+      # The platform vocabulary the fixture lanes write into. A real caller's
+      # own modules declare it; the constructor knows none of it.
+      vocabulary = {
+        options.fixture.marks = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [ ];
+        };
+        options.fixture.systemonly = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+        };
+        options.nixpkgs.overlays = lib.mkOption {
+          type = lib.types.listOf lib.types.anything;
+          default = [ ];
+        };
+      };
+      hook = {
+        config.fixture.marks = [ "hook" ];
+      };
+      r = mkModules {
+        registry = registryWithOverrides;
+        hostModules = [ { dendrites.systemonly.enable = true; } ];
+        extraModules = [ vocabulary ];
+        extraModulesFor = _: [ hook ];
+      };
+    in
+    builtins.concatStringsSep "," (lib.evalModules { inherit (r) modules; }).config.fixture.marks;
+
   # With both hooks left out, the module list and the resolved inventory are the
   # ones the constructor assembled before the hooks existed — which is what
-  # makes every expectation above dxflake's, unchanged.
+  # makes every expectation above dxflake's, unchanged. The module list is
+  # compared element for element, not by count: a same-length list with a
+  # different member is a change, and the fingerprint says which.
   hookDefaultsChangeNothing =
     let
       mod = {
@@ -608,13 +686,14 @@ selectionCases
         extraModulesFor = _: [ ];
       };
     in
-    "${if builtins.length base.modules == builtins.length spelled.modules then "same" else "differ"}:${
+    "${if fingerprint base.modules == fingerprint spelled.modules then "same" else "differ"}:${
       lib.boolToString (builtins.toJSON base.inventory == builtins.toJSON spelled.inventory)
     }";
 
   # `mkNixosHost` is `mkNixosModules` plus `nixosSystem` and nothing else: the
   # stub here hands back exactly what it was given, so the two paths can be
-  # compared instead of assumed equal.
+  # compared instead of assumed equal — the module list element for element (an
+  # equal count would not notice a swap), and the specialArgs as JSON.
   mkHostPassesTheModulesThrough =
     let
       mod = {
@@ -632,12 +711,7 @@ selectionCases
       };
       direct = mkModules { hostModules = [ mod ]; };
     in
-    "${
-      if builtins.length viaHost.system.modules == builtins.length direct.modules then
-        "same"
-      else
-        "differ"
-    }:${
+    "${if fingerprint viaHost.system.modules == fingerprint direct.modules then "same" else "differ"}:${
       lib.boolToString (builtins.toJSON viaHost.system.specialArgs == builtins.toJSON direct.specialArgs)
     }";
 }

@@ -36,7 +36,11 @@
 #                      set and the gate step can read.
 #   extraModulesFor  — a function of the resolved selection returning platform
 #                      modules, which is how a gate-pass choice becomes an
-#                      import without a gate-pass body import.
+#                      import without a gate-pass body import. Its argument is
+#                      the whole selection, catalogue values included, so a hook
+#                      CAN import a body nothing selected: pass selected paths
+#                      only. That discipline is the caller's, and
+#                      tests/selection pins it.
 #
 # Both default to the identity, and with them at their defaults the module list
 # is exactly the one this constructor has always assembled.

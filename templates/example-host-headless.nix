@@ -1,7 +1,7 @@
 # example-host-headless.nix — a machine with no graphical session and no home lane.
 #
 # Copy to:  hosts/<host>/default.nix
-# Then:     add "<host>" to the host list in flake.nix.
+# Then:     nothing — hosts are discovered; no `flake.nix` edit adds one.
 # Replace:  as example-host.nix.
 #
 # The same interface, answered differently. Read it beside example-host.nix:

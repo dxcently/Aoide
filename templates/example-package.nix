@@ -1,21 +1,15 @@
 # example-package.nix — a package this tree builds itself.
 #
 # Copy to:  pkgs/<name>/default.nix
-# Then:     reach it from a lane. pkgs/ is for builds nixpkgs does not have —
-#           not a second copy of nixpkgs. If `pkgs.<name>` already exists, use
-#           it and delete this file.
+# Then:     nothing. Every `pkgs/<name>/default.nix` is discovered and injected
+#           into the host overlay, so a lane reaches it as `pkgs.<name>` — by
+#           name, never by path. pkgs/ is for builds nixpkgs does not have —
+#           not a second copy of nixpkgs; a name that shadows a stock attribute
+#           is an error, so if `pkgs.<name>` already exists, use it and delete
+#           this file.
 # Replace:  <name>, the source, and the hashes. The hashes below are
 #           PLACEHOLDERS: build once with `lib.fakeHash`, and Nix prints the
 #           real one in the mismatch error.
-#
-# Two ways to reach it, and the difference matters:
-#
-#   1. Directly from the lane that wants it — the honest default for something
-#      only one capability uses:
-#        environment.systemPackages = [ (pkgs.callPackage ../../pkgs/<name> { }) ];
-#
-#   2. Through an overlay in flake.nix, when several lanes want it and
-#      `pkgs.<name>` reading naturally is worth the indirection.
 {
   lib,
   rustPlatform,
