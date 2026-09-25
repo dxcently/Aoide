@@ -749,6 +749,16 @@ cc: …
   header names only the ONE copy that reached this box. A legacy letter shows
   its envelope's `to`. `participants` is the sorted union of every letter's
   sender attribution and recipient addresses in the thread.
+- **One send is one letter.** A `--to`/`--cc` send files one copy per
+  mailbox, and each copy is sealed separately: its own `sig` and `msgid`, its
+  own `minted_at` and `received_at`. Those copies collapse into ONE block —
+  the To list and `cc:` line written once, the block's `received_at` the
+  earliest copy's — so `letters:` counts letters, not mailboxes, and a send
+  to three mailboxes is one letter. Copies are matched on what they share and
+  what they are, the signed text, the sender, and the mailbox each copy
+  reached; never a timestamp, which two copies of one send can straddle. A
+  copy joins the block above it unless that block already holds its mailbox,
+  so the same words sent twice to the same mailbox stay two letters, not one.
 - **Idempotent.** Each note is written atomically (a temp file in the same
   directory, then a rename), and a note whose bytes already match is not
   written at all: a second run reports `0 written, N unchanged` and leaves

@@ -439,7 +439,12 @@ never the inbound/serve half (that's `aoide-server`).
   `threadId`, else its msgid), skips receipts and every other kind, renders
   one Markdown note per thread into `--dir` (default
   `state_dir()/mail-export/`), and writes only notes whose bytes changed, via
-  `aoide_storage::fs::atomic_write`. No cursor, mark, removal or ring; a first
+  `aoide_storage::fs::atomic_write`. Within a thread the fan-out copies of one
+  send — one per mailbox, each sealed separately — collapse into ONE block,
+  matched on their signed text and sender plus the mailbox each copy reached,
+  never on a timestamp, so `letters:` counts sends, not copies, and the same
+  words sent twice to the same mailbox stay two letters. No cursor, mark,
+  removal or ring; a first
   touch of an unmigrated box runs the same one-shot mailbase migration every
   mail command runs (which may mint the identity key). A key that is 64
   lowercase hex names its note by its first 16 characters, anything else by
@@ -518,7 +523,9 @@ never the inbound/serve half (that's `aoide-server`).
   mailbase (`aoide_storage::mail`) — `handle_mail_outbox`'s own delivery
   projection still reads it (above) — `handle_mail_export` (`mail export
   [--dir <path>]`, register §30) is the mailbase's other read: one Markdown
-  note per thread, `state/mail-export/` by default, advancing no cursor and
+  note per thread, one block per send (the To/Cc copies of one send collapse
+  into a single block, so a `letters:` count is a count of letters, not of
+  mailboxes), `state/mail-export/` by default, advancing no cursor and
   writing no note whose bytes already match (see the `mail_export` module
   bullet and MAIL.md "Export") —
   `handle_node_allow` (`node allow <name> <cap> on|off`, P-P3, `docs/

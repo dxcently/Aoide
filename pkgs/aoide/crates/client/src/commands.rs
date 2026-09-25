@@ -8112,11 +8112,73 @@ mod tests {
         let fenced = format!("````\n{body}\n````\n");
         assert_eq!(
             note.matches(&fenced).count(),
-            2,
-            "each copy's body rides verbatim inside a fence longer than its longest backtick run:\n{note}"
+            1,
+            "one send is one letter: the To and Cc copies collapse into ONE block, so the body rides verbatim in the page once:\n{note}"
         );
-        assert_eq!(note.matches("## not a heading").count(), 2, "the body's own heading stays inside the fence");
+        assert_eq!(note.matches("## not a heading").count(), 1, "the body's own heading stays inside the fence");
+        assert_eq!(note.matches(" · ").count(), 1, "and there is exactly one letter heading:\n{note}");
+        assert!(note.contains("letters: 1"), "the frontmatter counts letters, not copies:\n{note}");
         assert!(note.contains(&format!("cc: {local}/scribe")), "the Cc line rides outside the fence:\n{note}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mail_export_keeps_two_sends_of_the_same_words_apart() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-same-words");
+        let thread = "d".repeat(64);
+
+        // The same words, the same recipient, the same thread, twice. Both
+        // sends are sealed separately — different minted_at, different
+        // msgid — but the signed text and the sender are identical, and the
+        // copy's mailbox is the mailbox the first block already took: two
+        // letters, two blocks.
+        for _ in 0..2 {
+            let out = handle_mail_send(&mail_inv_with_flags(
+                &["mail", "send"],
+                &["ok"],
+                &[("to", "self/conductor"), ("subject", "Same"), ("thread", &thread)],
+            ));
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        }
+
+        let data = run_export(Some(&root.join("export")));
+        assert_eq!(data["threads"], 1);
+
+        let note = std::fs::read_to_string(root.join("export").join(format!("{}.md", &thread[..16]))).unwrap();
+        assert!(note.contains("letters: 2"), "two sends are two letters:\n{note}");
+        assert_eq!(note.matches("\n```\nok\n```\n").count(), 2, "and neither send is swallowed by the other:\n{note}");
+        assert_eq!(note.matches(" · ").count(), 2, "two headings, one per letter:\n{note}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mail_export_keeps_two_fanouts_of_the_same_words_apart() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-same-fanout");
+        let thread = "e".repeat(64);
+
+        // One send to two mailboxes, then the same send again: entry order is
+        // conductor, scribe, conductor, scribe — the repeat of a mailbox is
+        // what separates the two letters.
+        for _ in 0..2 {
+            let out = handle_mail_send(&mail_inv_with_flags(
+                &["mail", "send"],
+                &["twice"],
+                &[("to", "self/conductor"), ("cc", "self/scribe"), ("subject", "Fan"), ("thread", &thread)],
+            ));
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        }
+
+        let data = run_export(Some(&root.join("export")));
+        assert_eq!(data["threads"], 1);
+
+        let note = std::fs::read_to_string(root.join("export").join(format!("{}.md", &thread[..16]))).unwrap();
+        assert!(note.contains("letters: 2"), "two fan-outs are two letters, four copies:\n{note}");
+        assert_eq!(note.matches("\n```\ntwice\n```\n").count(), 2, "{note}");
+        assert_eq!(note.matches(" · ").count(), 2, "two headings, one per letter:\n{note}");
 
         let _ = std::fs::remove_dir_all(&root);
     }

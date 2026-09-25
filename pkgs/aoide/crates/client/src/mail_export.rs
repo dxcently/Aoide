@@ -1,5 +1,5 @@
-//! `aoide mail export` — one Markdown note per mail THREAD
-//! (`docs/architecture/MAIL.md` "Export"). A read-only projection of the
+//! `aoide mail export` — one Markdown note per mail THREAD, one block per
+//! SEND (`docs/architecture/MAIL.md` "Export"). A read-only projection of the
 //! mailbase ([`aoide_storage::mail::read_base`]): it reads, groups, renders,
 //! and writes notes under its OWN directory, and advances no cursor, marks
 //! nothing, removes nothing, rings nothing.
@@ -148,7 +148,43 @@ fn fence(body: &str) -> String {
     "`".repeat(longest.max(2) + 1)
 }
 
-/// One thread as one note: frontmatter, heading, then a block per letter in
+/// One thread's entries as the blocks the note renders, in first-appearance
+/// order: the fan-out copies of ONE send collapse into a single block, every
+/// other entry is a block of its own.
+///
+/// A `--to`/`--cc` send files one copy per mailbox (`letter_send::send` loops
+/// the scalar handler once per recipient), and each copy is sealed on its
+/// own: its own `header.to`, its own `sig` and `msgid`, its own `minted_at`
+/// and `received_at`. No timestamp and no id is shared across the copies —
+/// two copies of one send can even straddle a second boundary — so the key is
+/// the signed content they DO share: `(envelope.text, header.from)`. The
+/// copy's own mailbox is the tie-break that keeps two separate sends of the
+/// same words apart, since a send addresses each mailbox at most once
+/// ([`aoide_storage::letter::deduplicate_recipients`]): a copy joins the
+/// newest block of its key unless that block has already taken this mailbox.
+/// One To+Cc fan-out is one block; the same words sent twice to the same
+/// mailbox are two.
+fn blocks(letters: &[Entry]) -> Vec<Vec<&Entry>> {
+    let mut blocks: Vec<Vec<&Entry>> = Vec::new();
+    for entry in letters {
+        let mut joined = false;
+        if let Some(block) = blocks.iter_mut().rev().find(|b| {
+            b[0].envelope.text == entry.envelope.text
+                && b[0].envelope.header.from == entry.envelope.header.from
+        }) {
+            if !block.iter().any(|e| e.envelope.header.to == entry.envelope.header.to) {
+                block.push(entry);
+                joined = true;
+            }
+        }
+        if !joined {
+            blocks.push(vec![entry]);
+        }
+    }
+    blocks
+}
+
+/// One thread as one note: frontmatter, heading, then a block per send in
 /// `seq` order.
 fn note(thread: &Thread, node: &str) -> String {
     let subject = thread
@@ -170,6 +206,7 @@ fn note(thread: &Thread, node: &str) -> String {
     let quoted: Vec<String> = participants.iter().map(|p| yaml_quote(p)).collect();
 
     let mut out = String::new();
+    let blocks = blocks(&thread.letters);
     out.push_str("---\n");
     out.push_str("type: mail-thread\n");
     out.push_str(&format!("thread: {}\n", yaml_quote(&thread.key)));
@@ -178,13 +215,15 @@ fn note(thread: &Thread, node: &str) -> String {
     out.push_str(&format!("participants: [{}]\n", quoted.join(", ")));
     out.push_str(&format!("first: {}\n", yaml_quote(first)));
     out.push_str(&format!("last: {}\n", yaml_quote(last)));
-    out.push_str(&format!("letters: {}\n", thread.letters.len()));
+    out.push_str(&format!("letters: {}\n", blocks.len()));
     out.push_str("---\n");
     out.push_str(&format!("\n# {}\n", single_line(&subject)));
 
-    for entry in &thread.letters {
-        let (to, cc) = recipients(entry);
-        let (from, at) = (address(&entry.envelope.header.from), single_line(&entry.received_at));
+    for block in &blocks {
+        let head = block[0];
+        let (to, cc) = recipients(head);
+        let from = address(&head.envelope.header.from);
+        let at = single_line(block.iter().map(|e| e.received_at.as_str()).min().unwrap_or_default());
         out.push_str(&format!("\n## {at} · {from} → {}\n", to.join(", ")));
         if !cc.is_empty() {
             out.push_str(&format!("cc: {}\n", cc.join(", ")));
@@ -194,8 +233,8 @@ fn note(thread: &Thread, node: &str) -> String {
         // container's JSON escaping would hide the words from a search index.
         // A legacy or invalid body is the envelope's text verbatim — MAIL.md's
         // "invalid structured content displays verbatim".
-        let decoded = letter::decode(&entry.envelope.text);
-        let body = decoded.as_ref().map(|c| c.body.as_str()).unwrap_or(&entry.envelope.text);
+        let decoded = letter::decode(&head.envelope.text);
+        let body = decoded.as_ref().map(|c| c.body.as_str()).unwrap_or(&head.envelope.text);
         let fence = fence(body);
         out.push_str(&format!("\n{fence}\n{body}\n{fence}\n"));
     }
