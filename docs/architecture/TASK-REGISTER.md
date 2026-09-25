@@ -2,7 +2,8 @@
 
 The canonical shared register for Aoide/AoideOS work. Root
 (codex-integration) orchestrates and reviews; the Fable session coordinates
-implementation; Opus designs; Sonnet builds and reviews. One owner per slice,
+implementation; executors, reviewers and read-only architects run as Eidolon
+`ollama:deepseek-v4.1-flash` instances, one per role. One owner per slice,
 no duplicate executors. This file is a ledger: it records current state and is
 updated in place as work moves; history lives in the commit log and
 `docs/Aoide-Wiki/ingest/log.md`.
@@ -13,10 +14,11 @@ Fields per entry: status · owner · depends on · evidence · next.
 
 - Status: implementation and combined build COMPLETE; isolated pre-activation
   acceptance of build 2 PASSED (2026-09-10, third run; runs 1–2 failed on the
-  brief's own shell wrapper, not the build). Live desktop acceptance PENDING
-  the User's activation. Not released; the interactive doorbell is not fixed.
+  brief's own shell wrapper, not the build). Activated: yomi runs aoided
+  0.0.25, which carries this lane. Live desktop acceptance on the real roster
+  PENDING.
 - Owner: Fable (integration); root reviews.
-- Depends on: the User activating the built system.
+- Depends on: nothing.
 - Evidence: commits through 61afea2 on `main` (pushed); `cargo test` conduct
   597 / storage 402 / cli 42 green, workspace check clean; toplevel build
   `/nix/store/8qbyy7xynz3i9hpa7jlm8xh1j4b8ci2z-nixos-system-yomi-strix-26.11.20260907.dc5d91f`
@@ -40,8 +42,8 @@ Fields per entry: status · owner · depends on · evidence · next.
   exit 0, not activated; its `sw/bin/aoide` carries the P-CX code (the
   `codex-app-unsupported` string present, the deleted "owner ambiguous"
   line absent). Live runtime unchanged.
-- Next: the User activates build 3 (build 2 = QoL only; build 3 = QoL +
-  desktop Codex); then desktop acceptance on the real roster.
+- Next: desktop acceptance on the real roster — kill from a card,
+  `sessionAction` reply and timeout, create and edit a project.
 
 ## 2. Desktop Codex / ChatGPT window association
 
@@ -76,8 +78,9 @@ Fields per entry: status · owner · depends on · evidence · next.
   app-server is a child of the Electron main, `~/.codex/ipc/ipc.sock` has no
   holder, thread→window bindings are opaque, so exact-task navigation is
   never claimed and no codex profile is registered.
-- Next: build 3 carries P-CX-1/2/3 + 2b; the live check with the app open on
-  two threads after activation is the User's gate.
+- Next: the live check with the app open on two threads, against the
+  activated 0.0.25 runtime (which carries P-CX-1/2/3/2b/4), is the User's
+  gate.
 - Portability (root, seq 190): strict fd evidence fixed the misownership
   but leaves desktop-thread discovery Linux-only. Non-Linux detection is
   UNRESOLVED and registered as such; the cross-OS requirement is not met.
@@ -235,8 +238,8 @@ Fields per entry: status · owner · depends on · evidence · next.
 - Backlog from review: `reap.rs::sweep_orphan_sockets` sweeps only
   `session-*.sock`; a SIGKILLed MCP subprocess leaves `channel-<id>.sock`
   behind (harmless: connect refuses, unlink-then-bind on restart).
-- Next: nothing while paused. When resumed: the end-to-end wake per the
-  runbook, tool-busy and GUI cases, onboarding docs for the flag.
+- Next: the human end-to-end wake with a mail send per the runbook, the
+  tool-busy and GUI cases, onboarding docs for the flag.
 ## 4. Lyra / AoideOS architecture migration (phased workstream)
 
 - Status: phase (a) COMPLETE (slices 1-3 and 5 landed, below); phase (b)
@@ -962,8 +965,9 @@ Fields per entry: status · owner · depends on · evidence · next.
   settled headless run was never reported — `eidolon_transcript_locate`
   now falls back to the record's `logPath` (`<stem>.eid` → sibling
   `<stem>.jsonl`), passed from both the live and the dropped path.
-  Verified protocol 154, conduct 812 (15 pingback tests), cli 42. Fires
-  only once `aoided` runs this code AND eidolon is rebuilt from `trace`.
+  Verified protocol 154, conduct 812 (15 pingback tests), cli 42. Armed on
+  the live runtime — aoided 0.0.25 runs this code and the installed eidolon
+  answers `eidolon log` — but no live delivery to a real parent is proved.
 - E5c MIGRATION (2026-09-21): the mirror generation is superseded. Upstream's
   `48bdf24` review reverted the mirror and re-landed the journal's own
   read-only export — `eidolon log --json <journal> [--after <id>]`, opened
@@ -1410,8 +1414,9 @@ project/parent inheritance across local/remote/app/subagents;
   `systemctl --user restart aoided.service` on the User's word the same day,
   roster intact). Bug, backlog; until fixed every test brief sets the
   isolated env on EVERY invocation and never calls bare `aoided`.
-- Deployed runtime on yomi-strix: aoided 0.0.22 (store `vvvwpzkq…`), predates
-  everything above. Staged ≠ proved ≠ deployed until activation.
+- Deployed runtime on yomi-strix: aoided 0.0.25 (store `biwp6gbf…`), system
+  generation 219. Staged ≠ proved ≠ deployed until activation, and
+  deployed ≠ accepted until the live check runs.
 - USER PRIORITY 2026-09-12 (seq 281/283, supersedes the refactor-first
   reading): (1) Osaka development working — root's `chiyo_config_fix`
   enables dxflake Osaka's existing `aoide.openai` dendrite (ChatGPT/Codex)
@@ -2050,3 +2055,14 @@ project/parent inheritance across local/remote/app/subagents;
 - Status: reviewed proposal; transport implementation and encryption-library
   profile remain unfinished. HTTPS has no plaintext fallback. Existing SSH
   delivery remains in service until parity and recovery are demonstrated.
+
+## 30. Mail export (letters → one Mneme note per thread)
+
+- Requirement: `aoide mail export` writes each mail thread as one note, so the
+  mailbase is searchable from Mneme, which already has `embed_text`,
+  `similar_notes` and `semantic_centroid`.
+- Target: the `magi` vault (`~/Magi`, synced by syncthing) is not present on
+  yomi, where syncthing is inactive. Until the User enables that share, the
+  default export directory lives under `state/`.
+- Status: queued, not started; next Aoide-core lane after cleanup.
+- Owner: unassigned. Depends on: nothing.
