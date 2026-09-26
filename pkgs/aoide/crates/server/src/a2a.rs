@@ -55,8 +55,9 @@ use aoide_conduct::graph::{
 use aoide_protocol::output::Status;
 use aoide_protocol::registry::{Command, Registry};
 use aoide_protocol::wire::{
-    AgentCapabilities, AgentCard, AgentSkill, Artifact, JsonRpcResponse, Part, Task, TaskStatus,
-    TaskStatusUpdateEvent, FRAME_ARTIFACT_ID, FRAME_KEY, OUTPUT_READ_REFUSED_CODE,
+    AgentCapabilities, AgentCard, AgentSkill, Artifact, JsonRpcResponse, Message, Part, Task,
+    TaskStatus, TaskStatusUpdateEvent, FRAME_ARTIFACT_ID, FRAME_KEY, HISTORY_MESSAGE_ID,
+    LINES_AFTER_KEY, OUTPUT_READ_REFUSED_CODE,
 };
 use aoide_protocol::{audit, Door, EventClass, Invocation};
 use aoide_storage::records::RemoteParent;
@@ -715,6 +716,18 @@ const FRAME_MAX_BYTES: usize = 256 * 1024;
 const OUTPUT_READ_REFUSED: &str = "output read refused: reading a session's output needs a signed, \
      verified node whose allows include `read` on this host";
 
+/// What a refused ping-back HISTORY read says (CONTRACTS.md §6, P-RSA S8).
+/// The same code as [`OUTPUT_READ_REFUSED`] — §4.4 of the lane brief names no
+/// code of its own for this arm, and both refusals are the same family: an
+/// output read this caller is not admitted to. The TEXT is its own, because
+/// the reason is not the same and an operator deserves to read which one it
+/// was: this caller may well hold `read`, and still not be the parent this
+/// child was spawned for. Like every refusal here it says NOTHING about the
+/// session asked for — the same words whether the id exists or not — so the
+/// gate stays no existence oracle.
+const HISTORY_READ_REFUSED: &str = "output read refused: a session's ping-back history is readable \
+     only with `read` on this host AND the key this node stamped on the child's record for the \
+     parent that spawned it";
 /// The output-read gate (CONTRACTS.md §6, P-RSA S6). True only when all three
 /// hold:
 /// - `read_ok` — the door's own bearer gate ([`token_authorized`]), the same
@@ -746,6 +759,35 @@ fn output_read_admitted(
 /// Pure.
 fn node_may_read(node: &aoide_storage::node_store::Node) -> bool {
     node.verified && node.allows.iter().any(|a| a == "read")
+}
+
+/// The ping-back HISTORY gate (CONTRACTS.md §6, P-RSA S8): the output gate
+/// AND the target's own stamped `remoteParent.key` equal to the key that
+/// verified the caller's signature.
+///
+/// History is the one read the 2026-09-25 ruling does NOT widen, because these
+/// events belong to a parent: a signed, `read`-holding node may watch any
+/// session's FRAME (above), but only the node that spawned this child — the
+/// one whose key this door stamped on the child's record when it admitted the
+/// spawn — may read what the child published for it. The comparison is the
+/// key, never the stored `node` label, for [`remote_parent_match`]'s own
+/// reason: a name follows a rename, a key is the identity.
+///
+/// A `None` on either side is `false`, never a wildcard: an unsigned caller
+/// (or a weaker rung, which has no proof and so no key) matches nothing, and a
+/// session with no `remoteParent` — a local session — has nothing to match.
+/// Pure, so the whole table is provable without a socket or a stage file.
+fn history_admitted(
+    read_ok: bool,
+    signed: Option<SignedCaller<'_>>,
+    nodes: &[aoide_storage::node_store::Node],
+    target: Option<&RemoteParent>,
+) -> bool {
+    let Some(caller) = signed else {
+        return false;
+    };
+    output_read_admitted(read_ok, resolved_caller(nodes, signed))
+        && target.is_some_and(|t| !t.key.is_empty() && t.key == caller.key)
 }
 
 /// The caller as the frame gate judges it: the CURRENT record for the name
@@ -781,6 +823,18 @@ fn frame_tail(params: &Value) -> Option<u64> {
     let asked = params.get("metadata")?.get(FRAME_KEY)?;
     let tail = asked.get("tail").and_then(Value::as_u64).unwrap_or(FRAME_TAIL_DEFAULT);
     Some(tail.min(FRAME_TAIL_MAX).max(1))
+}
+
+/// The ping-back cursor a `tasks/get` request carries: `Some(seq)` when
+/// `params.metadata["aoide/linesAfter"]` is present at all, `None` for a
+/// request that asks for no history. Same two rules as [`frame_tail`], for the
+/// same reasons: `params.metadata` only, and a value whose shape is not what
+/// the writer sends (a missing, null or non-numeric one) reads as the START of
+/// the ring — `0` — rather than a refusal. A wrong cursor costs the caller
+/// duplicate lines it can recognize by `seq`; refusing it would cost a parent
+/// its child's history over one bad integer type.
+fn lines_after(params: &Value) -> Option<u64> {
+    Some(params.get("metadata")?.get(LINES_AFTER_KEY)?.as_u64().unwrap_or(0))
 }
 
 /// The watch frame as the wire artifact, inside the door's own caps.
@@ -826,17 +880,50 @@ fn frame_artifact(frame: aoide_conduct::graph::Frame) -> Artifact {
     }
 }
 
-/// `tasks/get` with a frame asked for: the gate FIRST (so a refusal never
+/// The ping-back history as the wire `message`: the ring read after the
+/// caller's cursor, under the part's `data` — `{events, gap, last}`, the ONE
+/// shape `aoide_storage::pingback_remote::RingRead` serialises, so the door
+/// and the puller that reads it back cannot drift. `history[0]` and nothing
+/// else: the A2A envelope's own list carries ONE message here, because one
+/// request is one cursor.
+fn history_message(task_id: &str, after: u64) -> Message {
+    let read = aoide_storage::pingback_remote::events_for(task_id, after);
+    let mut part = Part { kind: "data".to_string(), text: None, extra: Default::default() };
+    part.extra.insert(
+        "data".to_string(),
+        serde_json::to_value(&read).expect("a RingRead always serializes"),
+    );
+    Message {
+        role: "agent".to_string(),
+        parts: vec![part],
+        message_id: Some(HISTORY_MESSAGE_ID.to_string()),
+        context_id: None,
+        metadata: None,
+    }
+}
+
+/// `tasks/get` with output asked for: the gate FIRST (so a refusal never
 /// depends on whether the id exists), then the SAME status read
-/// [`task_get`] answers, plus the frame as one artifact.
+/// [`task_get`] answers, plus whichever of the two optional fields the request
+/// asked for — the watch frame (`aoide/frame`) and the ping-back history
+/// (`aoide/linesAfter`).
+///
+/// **Two gates, one request.** The frame needs [`output_read_admitted`]; the
+/// history needs that AND [`history_admitted`]'s key match. A request that
+/// asks for history is judged by the stricter of the two — asking for both is
+/// asking for the history, and answering such a request with a frame and a
+/// SILENTLY missing ring would be the one thing this door never does. A
+/// caller carrying `read` but a foreign key still gets the FRAME it asks for
+/// on its own, which is what the 2026-09-25 ruling admits it to.
 ///
 /// A session with no frame to read — an unknown id, a `sub:` card that keeps
 /// no PTY of its own, a record that keeps no conduct-owned PTY — answers with
 /// the watch's own taught refusal under `-32001`, the same code the unknown-id
 /// status read already uses; the message names the reason.
-fn task_get_frame(
+fn task_get_outputs(
     task_id: &str,
-    tail: u64,
+    frame: Option<u64>,
+    history: Option<u64>,
     read_ok: bool,
     signed_caller: Option<SignedCaller<'_>>,
 ) -> Result<Value, (i64, String)> {
@@ -844,13 +931,21 @@ fn task_get_frame(
     if !output_read_admitted(read_ok, resolved_caller(&nodes, signed_caller)) {
         return Err((OUTPUT_READ_REFUSED_CODE, OUTPUT_READ_REFUSED.to_string()));
     }
+    if history.is_some() && !history_admitted(read_ok, signed_caller, &nodes, session_remote_parent(task_id).as_ref()) {
+        return Err((OUTPUT_READ_REFUSED_CODE, HISTORY_READ_REFUSED.to_string()));
+    }
     let path = sessions_path();
     let sf: SessionsFile =
         load_stage(&path).map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
     let mut task = build_task(&sf.sessions, task_id)?;
-    let frame = aoide_conduct::graph::watch_frame(task_id, tail as usize)
-        .map_err(|o| (-32001_i64, o.message))?;
-    task.artifacts = Some(vec![frame_artifact(frame)]);
+    if let Some(tail) = frame {
+        let frame = aoide_conduct::graph::watch_frame(task_id, tail as usize)
+            .map_err(|o| (-32001_i64, o.message))?;
+        task.artifacts = Some(vec![frame_artifact(frame)]);
+    }
+    if let Some(after) = history {
+        task.history = Some(vec![history_message(task_id, after)]);
+    }
     Ok(serde_json::to_value(&task).expect("Task always serializes"))
 }
 
@@ -2889,9 +2984,9 @@ fn handle_jsonrpc(req: &Value, ctx: &RequestCtx) -> Value {
             let task_id = params.get("id").and_then(Value::as_str).unwrap_or("");
             // `metadata["aoide/frame"]` asks for the watch frame (CONTRACTS.md
             // §6, P-RSA S6); a request without it is the untouched status read.
-            match frame_tail(&params) {
-                Some(tail) => task_get_frame(task_id, tail, read_ok, ctx.signed_caller),
-                None => task_get(task_id),
+            match (frame_tail(&params), lines_after(&params)) {
+                (None, None) => task_get(task_id),
+                (frame, history) => task_get_outputs(task_id, frame, history, read_ok, ctx.signed_caller),
             }
         }
         "message/send" => message_send(
@@ -3756,13 +3851,15 @@ fn route(
                 // A frame read gets its OWN label, off the same already-parsed
                 // body: an operator scanning the audit log sees which
                 // `tasks/get` calls read a session's output, and which were
-                // only status polls (CONTRACTS.md §6, P-RSA S6).
-                let frame_asked = parsed
-                    .as_ref()
-                    .and_then(|v| v.get("params"))
-                    .and_then(frame_tail)
-                    .is_some();
+                // only status polls (CONTRACTS.md §6, P-RSA S6). A history
+                // read gets its own too (S8), and it wins the tie when a
+                // request asks for both — the stricter read is the one worth
+                // naming.
+                let parsed_params = parsed.as_ref().and_then(|v| v.get("params"));
+                let history_asked = parsed_params.and_then(lines_after).is_some();
+                let frame_asked = parsed_params.and_then(frame_tail).is_some();
                 let label = match parsed_method.as_deref() {
+                    Some("tasks/get") if history_asked => "tasks/get.history",
                     Some("tasks/get") if frame_asked => "tasks/get.frame",
                     Some("tasks/get") => "tasks/get",
                     Some("message/send") => "message/send",

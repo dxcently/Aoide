@@ -141,6 +141,7 @@ pub mod outbox;
 pub mod pairing;
 pub mod node_store;
 pub mod petname;
+pub mod pingback_remote;
 pub mod records;
 pub mod remote_children;
 pub mod sealed_id;

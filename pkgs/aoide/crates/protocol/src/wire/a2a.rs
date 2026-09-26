@@ -171,6 +171,20 @@ pub const FRAME_KEY: &str = "aoide/frame";
 /// finds the frame by identity rather than by position.
 pub const FRAME_ARTIFACT_ID: &str = "frame";
 
+/// The `tasks/get` `params.metadata` key that asks for a session's ping-back
+/// history (CONTRACTS.md §6; P-RSA S8). Its value is the `seq` the caller has
+/// already seen — a number, the child's own monotonic event counter — and the
+/// answer is the events after it. Read by the door that serves the ring and
+/// written by the parent's node that pulls it, one const on both sides, the
+/// same discipline [`FRAME_KEY`] sets.
+pub const LINES_AFTER_KEY: &str = "aoide/linesAfter";
+
+/// The `messageId` the ping-back history rides under, inside
+/// [`Task::history`] — named once so the reader finds the events by identity
+/// rather than by position, exactly as [`FRAME_ARTIFACT_ID`] does for the
+/// frame.
+pub const HISTORY_MESSAGE_ID: &str = "pingback";
+
 /// The code a REFUSED output read answers with — the `tasks/get` frame arm's
 /// own, minted by the door that serves the frame and read by the far box that
 /// asked for it (CONTRACTS.md §6; P-RSA S6/S7). Its own number rather than

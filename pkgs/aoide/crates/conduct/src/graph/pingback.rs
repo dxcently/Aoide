@@ -43,6 +43,19 @@
 //! in a parent's composer. A child whose record is gone drops out of the file
 //! on the same pass.
 //!
+//! **The event and the line are two things.** [`choose_event`] decides WHICH
+//! [`PingEvent`] a child's new records amount to; [`render_line`] turns that
+//! event into the one local line and needs nothing but the event and the tag.
+//! Everything the line shows that is not the event — the tag — is applied by
+//! whoever renders, so an event names no node and carries no presentation. The
+//! same split is what lets a child whose parent sits on ANOTHER node publish
+//! the event instead of a line: `remoteParent` on the record means the claim
+//! SPOOLS the event to `state/stage/pingback-remote.json` (whose parent pulls it
+//! over the A2A door, CONTRACTS.md §4/§6) and this module never calls
+//! [`deliver`] for it. That is also why every string in a `PingEvent` is
+//! already cleaned HERE, at the sender: the far renderer is another node's
+//! code, and the text it renders must be safe before it leaves.
+//!
 //! **Never a shell parent.** A line submitted into a bare shell would RUN as a
 //! command, so a target whose `agent` is `""`/`"shell"` (or names no
 //! registered harness profile) is skipped and counted, never injected into.
@@ -75,6 +88,64 @@ const SILENCE_MS: i64 = 10 * 60 * 1000;
 /// "failing" — below this, tool errors ride an existing line at most.
 const ERROR_RUN: u64 = 3;
 
+/// What one child's new records amount to — the decision, split from the line
+/// it renders as (`render_line`) so the SAME decision can be spooled to a
+/// remote parent's ring instead of delivered here (CONTRACTS.md §4, P-RSA
+/// S8).
+///
+/// Closed, and every field already CLEANED: each string passed `clean`/
+/// `str_field`/`numeric_field` on the way in, so a renderer — including
+/// another node's — never sanitizes again, and an event kind nobody knows is
+/// simply not deserializable. Numbers stay numbers (`calls`, `mins`) rather
+/// than pre-rendered segments, so the presentation lives in exactly one place,
+/// [`render_line`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PingEvent {
+    /// The turn ended by itself: `stop` is the harness's own `stop_reason`
+    /// (`None` when it wrote none), and `errors` counts the
+    /// `ToolResult{is_error:true}` records among the new ones.
+    Settled {
+        stop: Option<String>,
+        calls: Option<u64>,
+        mins: Option<i64>,
+        say: Option<String>,
+        errors: u64,
+    },
+    /// The turn was cancelled outright.
+    Cancelled { calls: Option<u64>, mins: Option<i64>, say: Option<String>, errors: u64 },
+    /// The process went away with its turn still open.
+    DiedMidTurn { calls: Option<u64>, say: Option<String>, errors: u64 },
+    /// A prompt is open and nothing has answered it.
+    Asking { prompt: String, errors: u64 },
+    /// The harness told the child to wrap up: exactly one of the two bounds is
+    /// present, as the record's own kind decides.
+    WrappingUp { calls_left: Option<String>, secs_left: Option<String>, errors: u64 },
+    /// A run of tool errors ending the new records.
+    Failing { run: u64, tool: Option<String> },
+    /// An open turn, ten minutes quiet. `mins` is whole minutes; `last` is
+    /// what the child last did or said, which the line quotes one way and not
+    /// the other.
+    Silent { mins: i64, last: Option<Last> },
+    /// The child ENDED — claimed once per child, from the record's own `done`
+    /// plus its `outcome`/`exitCode`, and only for a child whose parent is on
+    /// another node (Q5's ruled default: a local parent hears the run's own
+    /// report, never this). It is the one event every agent kind publishes,
+    /// which is why a remote child of ANY harness spools one when it ends.
+    Exited { code: Option<i32>, outcome: Option<String> },
+}
+
+/// What a `Silent` event's trailing `last:` names: the child SAID something
+/// (the line quotes it) or it DID something (the tool label, bare). Kept
+/// apart at the event level rather than baked into a quoted string, so the
+/// renderer — on either node — is the one that decides the quotes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Last {
+    Said(String),
+    Did(String),
+}
+
 /// `state/stage/pingback.json` — the per-child cursor. One map, keyed by the
 /// child's own native session id (the eidolon presence id, verbatim).
 pub(crate) fn pingback_path() -> PathBuf {
@@ -85,12 +156,25 @@ pub(crate) fn pingback_path() -> PathBuf {
 /// (delivered or merely passed over), `silentAt` the record id a silence line
 /// was already sent for. `silentAt` is re-armed (absent) by any new record, so
 /// a child that speaks and goes quiet again gets its next silence line.
+/// `exited` is the one-shot latch for [`PingEvent::Exited`] — claimed once per
+/// child, and it must be a latch of its own because a child that keeps no trace
+/// (the non-eidolon harness `exited` exists for) has no `seen` to advance past
+/// the end of its own record.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct CursorEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     seen: Option<String>,
     #[serde(rename = "silentAt", default, skip_serializing_if = "Option::is_none")]
     silent_at: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    exited: bool,
+}
+
+/// The `serde` skip for a latch: a `false` field is never written, so every
+/// cursor entry without an exit in it stays byte-identical to what it was
+/// before this field existed.
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// The whole cursor file. A `BTreeMap` so the file's own key order is stable
@@ -128,6 +212,25 @@ struct Child {
     /// tick — the "died mid-turn" row, and the reason its cursor entry leaves
     /// the file on this same pass.
     dropped_mid_turn: bool,
+    /// The record carries `remoteParent`: this child's parent is on ANOTHER
+    /// node, so its events spool to the ring instead of being delivered here
+    /// (CONTRACTS.md §4, P-RSA S8).
+    remote: bool,
+    /// The record's own end facts, present only once it says `done` — the one
+    /// signal every agent kind publishes, and the whole input of
+    /// [`PingEvent::Exited`].
+    ended: Option<Ended>,
+}
+
+/// A roster record's own end: its `outcome` (a closed set: `exit`, `signal`,
+/// `timeout`, `stopped`) and the `exitCode` that is present only beside
+/// `exit`. Both absent is a real end too — an ordinary session that simply
+/// stopped — so the event carries the two as they are rather than inventing a
+/// status for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Ended {
+    code: Option<i32>,
+    outcome: Option<String>,
 }
 
 /// One decided delivery: which parent, and the one line to write.
@@ -135,6 +238,42 @@ struct Child {
 struct ChildClaim {
     parent: String,
     line: String,
+}
+
+/// One decided event for a child whose parent is elsewhere: the child whose
+/// ring it goes on (its own session id — the id the parent pulls with), and
+/// the event. Never a delivery: this node's `deliver` is only ever the LOCAL
+/// parent's transport, and the far parent's own daemon does its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SpoolClaim {
+    child: String,
+    event: PingEvent,
+}
+
+/// What one tick's claim section decided: the lines to deliver here, and the
+/// events to spool for a parent on another node.
+#[derive(Debug, Clone, Default)]
+struct Claimed {
+    lines: Vec<ChildClaim>,
+    spool: Vec<SpoolClaim>,
+}
+
+/// Is this roster record one the ping-back tracks? Every `agent:"eidolon"`
+/// record (the trace rows, exactly as before) and every child stamped
+/// `remoteParent` — the latter whatever its harness, because its own exit is
+/// the one event it can always publish (P-RSA S8). What the predicate decides
+/// is also what the cursor file RETAINS an entry for, so a remote child's
+/// `exited` latch survives the tick that claimed it.
+fn tracks(rec: &SessionRecord) -> bool {
+    rec.agent == "eidolon" || rec.remote_parent.is_some()
+}
+
+/// A record's end facts, `None` until its state folds to `done`. The fold is
+/// [`canonical_state`] — the same one the roster and the delivery skips use —
+/// so "ended" means the same thing here as everywhere else.
+fn ended_of(rec: &SessionRecord) -> Option<Ended> {
+    (canonical_state(&rec.state) == "done")
+        .then(|| Ended { code: rec.exit_code, outcome: rec.outcome.clone() })
 }
 
 /// The ping-back's whole pass, run from `reap.rs`'s post-lock collector block
@@ -154,12 +293,17 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
 
     // ── gather (no lock, no socket) ─────────────────────────────────────
     let mut children: Vec<Child> = Vec::new();
-    let mut eidolon_ids: HashSet<String> = HashSet::new();
-    for rec in roster.iter().filter(|r| r.agent == "eidolon") {
-        eidolon_ids.insert(rec.session_id.clone());
-        let Some(parent) = rec.parent_session_id.clone().filter(|p| !p.is_empty()) else {
-            continue; // top-level: nobody to tell
-        };
+    let mut tracked_ids: HashSet<String> = HashSet::new();
+    for rec in roster.iter().filter(|r| tracks(r)) {
+        tracked_ids.insert(rec.session_id.clone());
+        let remote = rec.remote_parent.is_some();
+        // A child with no local parent has nobody HERE to tell — but a remote
+        // child's parent is told over its ring, so that one is gathered all
+        // the same.
+        let parent = rec.parent_session_id.clone().filter(|p| !p.is_empty()).unwrap_or_default();
+        if parent.is_empty() && !remote {
+            continue;
+        }
         children.push(Child {
             id: rec.session_id.clone(),
             petname: rec.petname.clone(),
@@ -167,6 +311,8 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
             parent,
             lines: locate_trace(&rec.agent, &rec.session_id, &rec.cwd, rec.log_path.as_deref()),
             dropped_mid_turn: false,
+            remote,
+            ended: ended_of(rec),
         });
     }
     for drop in dropped {
@@ -183,6 +329,8 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
                 .as_deref()
                 .and_then(|path| read_trace(&drop.agent, path)),
             dropped_mid_turn: true,
+            remote: false,
+            ended: None,
         });
     }
 
@@ -191,7 +339,7 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
     // the claim IS the write, so no second tick can decide over the old
     // cursor between this tick's decision and its file.
     let claims = aoide_storage::fs::with_stage_lock(|| {
-        let (claims, old_cursor, new_cursor) = claim_locked(&children, &eidolon_ids, now_ms);
+        let (claims, old_cursor, new_cursor) = claim_locked(&children, &tracked_ids, now_ms);
         if new_cursor != old_cursor {
             match serde_json::to_string(&new_cursor) {
                 Ok(body) => {
@@ -205,8 +353,8 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
         claims
     });
 
-    // ── deliver (no lock held) ──────────────────────────────────────────
-    for claim in claims {
+    // ── deliver here, spool there (no lock held) ────────────────────────
+    for claim in claims.lines {
         match deliver(&claim.line, &claim.parent, &roster, inv) {
             Ok(()) => {
                 eprintln!("[aoide/reap] ping-back → {}: {}", claim.parent, claim.line);
@@ -215,44 +363,73 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
             Err(reason) => report.skipped.push((claim.parent, reason)),
         }
     }
+    // A remote child's parent pulls its events off this node's door, so this
+    // tick's job ends at the ring: the claim was written, the event lands
+    // after — a crash in between loses an event, the same direction the
+    // delivery above loses a line.
+    for claim in claims.spool {
+        match serde_json::to_value(&claim.event) {
+            Ok(event) => match aoide_storage::pingback_remote::spool_event(&claim.child, event) {
+                Some(seq) => eprintln!(
+                    "[aoide/reap] ping-back spooled seq {seq} for {} (parent on another node)",
+                    claim.child
+                ),
+                None => report.skipped.push((claim.child, "spool-failed".to_string())),
+            },
+            Err(e) => {
+                eprintln!("[aoide/reap] ping-back event encode failed: {e}");
+                report.skipped.push((claim.child, "encode-failed".to_string()));
+            }
+        }
+    }
     report
 }
 
 /// The claim section's whole body — run ONLY inside the stage lock.
 ///
-/// Entry lifetime: an entry survives only while its child is still an
-/// `agent:"eidolon"` roster record (so a child whose record is gone — dropped
-/// by the sync above, or reaped as stale — leaves the file on this same
+/// Entry lifetime: an entry survives only while its child is still a roster
+/// record this module tracks ([`tracks`] — so a child whose record is gone,
+/// dropped by the sync above or reaped as stale, leaves the file on this same
 /// pass), and a child that yielded nothing to examine keeps whatever it had.
+/// A remote child whose record is still there keeps its entry even when it has
+/// no trace at all: that entry IS its `exited` latch.
 fn claim_locked(
     children: &[Child],
-    eidolon_ids: &HashSet<String>,
+    tracked_ids: &HashSet<String>,
     now_ms: i64,
-) -> (Vec<ChildClaim>, CursorFile, CursorFile) {
+) -> (Claimed, CursorFile, CursorFile) {
     let old = read_cursor();
     let mut next: CursorFile = BTreeMap::new();
     for (id, entry) in &old {
-        if eidolon_ids.contains(id) {
+        if tracked_ids.contains(id) {
             next.insert(id.clone(), entry.clone());
         }
     }
 
-    let mut claims: Vec<ChildClaim> = Vec::new();
+    let mut claimed = Claimed::default();
     for child in children {
         let entry = next.get(&child.id).cloned().unwrap_or_default();
-        let (line, updated) = decide(child, &entry, now_ms);
-        if let Some(line) = line {
-            claims.push(ChildClaim { parent: child.parent.clone(), line });
+        let (event, updated) = decide(child, &entry, now_ms);
+        if let Some(event) = event {
+            // Where an event GOES is the child's own record's business: a
+            // remote parent has no local transport, and this node's `deliver`
+            // is that transport.
+            if child.remote {
+                claimed.spool.push(SpoolClaim { child: child.id.clone(), event });
+            } else {
+                let tag = child_tag(child.petname.as_deref(), &child.id);
+                claimed.lines.push(ChildClaim { parent: child.parent.clone(), line: render_line(&tag, &event) });
+            }
         }
         // A child whose record is gone — the `died mid-turn` row, whose only
         // input is the sync's own dropped set — leaves the file on this same
         // pass: an entry naming a session nothing is tracking would only ever
         // re-decide a stale window.
-        if updated.seen.is_some() && eidolon_ids.contains(&child.id) {
+        if (updated.seen.is_some() || updated.exited) && tracked_ids.contains(&child.id) {
             next.insert(child.id.clone(), updated);
         }
     }
-    (claims, old, next)
+    (claimed, old, next)
 }
 
 /// Read the cursor file; any unreadable/unparseable content reads as an EMPTY
@@ -265,23 +442,52 @@ fn read_cursor() -> CursorFile {
         .unwrap_or_default()
 }
 
-/// One child's whole decision: the line to deliver (or none) and its own next
+/// One child's whole decision: the event to publish (or none) and its own next
 /// cursor entry. Pure over the already-read tail, so every row of the line
 /// grammar is a table test.
-fn decide(child: &Child, entry: &CursorEntry, now_ms: i64) -> (Option<String>, CursorEntry) {
-    let Some(lines) = &child.lines else {
-        return (None, entry.clone());
-    };
+fn decide(child: &Child, entry: &CursorEntry, now_ms: i64) -> (Option<PingEvent>, CursorEntry) {
+    let lines: &[String] = child.lines.as_deref().unwrap_or(&[]);
     let tail: Vec<TraceRecord> = lines.iter().filter_map(|l| eidolon_trace_record(l)).collect();
-    let Some(last) = tail.last() else {
-        return (None, entry.clone());
+    let (event, silent_at) = if tail.is_empty() {
+        // No readable record: nothing is examined and any existing cursor
+        // entry is left exactly as it was.
+        (None, entry.silent_at.clone())
+    } else {
+        choose_event(
+            child,
+            lines,
+            &tail,
+            split_new(&tail, entry.seen.as_deref()),
+            entry.silent_at.as_deref(),
+            now_ms,
+        )
     };
-    let new = split_new(&tail, entry.seen.as_deref());
-    let (line, silent_at) = choose(child, lines, &tail, new, entry.silent_at.as_deref(), now_ms);
+    // The child's own end is the LAST thing a parent hears, never the first:
+    // an event the tail still holds is delivered (or spooled) first, and the
+    // exit — which a remote parent's pull stops at — follows on a later tick.
+    let (event, exited) = match (event, exit_event(child, entry)) {
+        (Some(event), _) => (Some(event), entry.exited),
+        (None, Some(event)) => (Some(event), true),
+        (None, None) => (None, entry.exited),
+    };
     (
-        line,
-        CursorEntry { seen: Some(last.id.clone()), silent_at },
+        event,
+        CursorEntry { seen: tail.last().map(|r| r.id.clone()).or_else(|| entry.seen.clone()), silent_at, exited },
     )
+}
+
+/// The `Exited` event a child still owes, given its cursor: only for a child
+/// whose parent is on another node (Q5's ruled default — a local parent hears
+/// the run's own report instead), only once its record says `done`, and only
+/// until the cursor's own latch has claimed it. A record that stays on the
+/// roster after its run ended would otherwise re-decide the same exit every
+/// twelve seconds, which is exactly what the latch is for.
+fn exit_event(child: &Child, entry: &CursorEntry) -> Option<PingEvent> {
+    if !child.remote || entry.exited {
+        return None;
+    }
+    let ended = child.ended.as_ref()?;
+    Some(PingEvent::Exited { code: ended.code, outcome: ended.outcome.clone() })
 }
 
 /// The records after `seen` IN THE TAIL — everything in the tail when `seen`
@@ -298,8 +504,11 @@ fn split_new<'a>(tail: &'a [TraceRecord], seen: Option<&str>) -> &'a [TraceRecor
     }
 }
 
-/// Choose the highest-priority new event and render its ONE line, returning it
-/// beside the silence latch to persist. The table is the design doc's:
+/// Choose the highest-priority new event, returning it beside the silence
+/// latch to persist. The table is the design doc's — `exited` (P-RSA S8) is
+/// the one row that comes from the RECORD rather than the trace, so it sits
+/// after every trace row and takes the place of a silence line for a child
+/// that has ended:
 ///
 /// | priority | event | line |
 /// |---|---|---|
@@ -307,64 +516,48 @@ fn split_new<'a>(tail: &'a [TraceRecord], seen: Option<&str>) -> &'a [TraceRecor
 /// | 2 | `AskUser{answer:null}` | `asking: "…"` |
 /// | 3 | `TurnBudget{calls_left}` / `TurnDeadline{secs_left}` | `wrapping up · <n> calls left` |
 /// | 4 | three or more `ToolResult{is_error:true}` in a row, ending the new records | `failing · <k> tool errors in a row · last: <tool label>` |
-/// | 5 | no new record, turn open, ten minutes quiet | `silent <M> min · last: …` |
+/// | 5 | the record says `done` (remote child only, latched) | `exited · exit <code>` / `exited · <outcome>` |
+/// | 6 | no new record, turn open, ten minutes quiet | `silent <M> min · last: …` |
 ///
 /// A `ToolResult{is_error:true}` among the new records rides any priority-1..3
 /// line as ` · <k> tool errors`; tool errors alone below three in a row are
 /// never a line of their own.
-fn choose(
+fn choose_event(
     child: &Child,
     lines: &[String],
     tail: &[TraceRecord],
     new: &[TraceRecord],
     silent_at: Option<&str>,
     now_ms: i64,
-) -> (Option<String>, Option<String>) {
-    let tag = child_tag(child.petname.as_deref(), &child.id);
+) -> (Option<PingEvent>, Option<String>) {
     let errors = new.iter().filter(|r| is_error(r)).count() as u64;
-    let errors_note = |k: u64| if k == 0 { String::new() } else { format!(" · {k} tool errors") };
     let last_id = tail.last().map(|r| r.id.clone());
 
     // Priority 1: the turn's own end — settled or cancelled, whichever new
     // record is LAST (the most recent truth wins).
     if let Some(rec) = new.iter().rev().find(|r| r.kind == "TurnSettled" || r.kind == "Cancelled") {
-        let head = if rec.kind == "TurnSettled" {
+        let calls = calls_in_turn(tail);
+        let mins = mins_in_turn(tail);
+        let say = say_of(&child.agent, lines);
+        let event = if rec.kind == "TurnSettled" {
             let stop = str_field(rec.payload.as_ref(), "stop_reason");
-            if stop.is_empty() {
-                format!("{tag} settled")
-            } else {
-                format!("{tag} settled {}", quote_inline(&stop))
-            }
+            PingEvent::Settled { stop: (!stop.is_empty()).then_some(stop), calls, mins, say, errors }
         } else {
-            format!("{tag} cancelled")
+            PingEvent::Cancelled { calls, mins, say, errors }
         };
-        let mut line = head;
-        if let Some(calls) = calls_segment(tail) {
-            line.push_str(&format!(" · {calls}"));
-        }
-        if let Some(mins) = mins_segment(tail) {
-            line.push_str(&format!(" · {mins}"));
-        }
-        if let Some(say) = say_of(&child.agent, lines) {
-            line.push_str(&format!(" · last: \"{}\"", quote(&say)));
-        }
-        line.push_str(&errors_note(errors));
-        return (Some(line), None);
+        return (Some(event), None);
     }
 
     // Priority 1, the third shape: the process went away with the turn still
     // open (its trace says so) — the one row that needs the sync's own
     // additive return.
     if child.dropped_mid_turn && turn_open(lines) {
-        let mut line = format!("{tag} died mid-turn");
-        if let Some(calls) = calls_segment(tail) {
-            line.push_str(&format!(" · {calls}"));
-        }
-        if let Some(say) = say_of(&child.agent, lines) {
-            line.push_str(&format!(" · last: \"{}\"", quote(&say)));
-        }
-        line.push_str(&errors_note(errors));
-        return (Some(line), None);
+        let event = PingEvent::DiedMidTurn {
+            calls: calls_in_turn(tail),
+            say: say_of(&child.agent, lines),
+            errors,
+        };
+        return (Some(event), None);
     }
 
     // Priority 2: a prompt is open and nothing has answered it.
@@ -374,9 +567,7 @@ fn choose(
         .find(|r| r.kind == "AskUser" && !answered(r))
     {
         let prompt = str_field(rec.payload.as_ref(), "prompt");
-        let mut line = format!("{tag} asking: \"{}\"", quote(&prompt));
-        line.push_str(&errors_note(errors));
-        return (Some(line), None);
+        return (Some(PingEvent::Asking { prompt, errors }), None);
     }
 
     // Priority 3: the harness told it to wrap up.
@@ -385,27 +576,18 @@ fn choose(
         .rev()
         .find(|r| r.kind == "TurnBudget" || r.kind == "TurnDeadline")
     {
-        let seg = if rec.kind == "TurnBudget" {
-            numeric_field(rec.payload.as_ref(), "calls_left").map(|n| format!("{n} calls left"))
+        let (calls_left, secs_left) = if rec.kind == "TurnBudget" {
+            (numeric_field(rec.payload.as_ref(), "calls_left"), None)
         } else {
-            numeric_field(rec.payload.as_ref(), "secs_left").map(|n| format!("{n} s left"))
+            (None, numeric_field(rec.payload.as_ref(), "secs_left"))
         };
-        let mut line = format!("{tag} wrapping up");
-        if let Some(seg) = seg {
-            line.push_str(&format!(" · {seg}"));
-        }
-        line.push_str(&errors_note(errors));
-        return (Some(line), None);
+        return (Some(PingEvent::WrappingUp { calls_left, secs_left, errors }), None);
     }
 
     // Priority 4: a run of tool errors, ending the new records.
     let run = trailing_error_run(new);
     if run >= ERROR_RUN {
-        let mut line = format!("{tag} failing · {run} tool errors in a row");
-        if let Some(label) = last_tool_label(tail) {
-            line.push_str(&format!(" · last: {label}"));
-        }
-        return (Some(line), None);
+        return (Some(PingEvent::Failing { run, tool: last_tool_label(tail) }), None);
     }
 
     // Priority 5: silence on an open turn — latched, one line per silence,
@@ -415,17 +597,110 @@ fn choose(
         if let (Some(last_id), Some(ts)) = (last_id, tail.last().and_then(|r| r.ts_ms)) {
             let quiet_ms = now_ms - ts;
             if quiet_ms >= SILENCE_MS && silent_at != Some(last_id.as_str()) {
-                let mins = quiet_ms / 60_000;
-                let mut line = format!("{tag} silent {mins} min");
-                if let Some(last) = last_tool_or_say(child, tail, lines) {
-                    line.push_str(&format!(" · last: {last}"));
-                }
-                return (Some(line), Some(last_id));
+                let last = last_tool_or_say(child, tail, lines);
+                return (Some(PingEvent::Silent { mins: quiet_ms / 60_000, last }), Some(last_id));
             }
         }
     }
 
     (None, silent_at.map(str::to_string))
+}
+
+// ── the line ────────────────────────────────────────────────────────────
+
+/// The event as ONE line. `tag` is the renderer's own — `[eidolon <petname>]`
+/// here, the parent's ledger tag on the node that pulled the event — so an
+/// event never names a box and this function needs nothing but the event.
+/// Every segment is rebuilt from the event's own values, in the one order the
+/// table above sets; nothing is parsed back out of a string.
+fn render_line(tag: &str, event: &PingEvent) -> String {
+    match event {
+        PingEvent::Settled { stop, calls, mins, say, errors } => {
+            let mut line = match stop {
+                Some(stop) => format!("{tag} settled {}", quote(stop)),
+                None => format!("{tag} settled"),
+            };
+            line.push_str(&turn_tail(*calls, *mins, say, *errors));
+            line
+        }
+        PingEvent::Cancelled { calls, mins, say, errors } => {
+            let mut line = format!("{tag} cancelled");
+            line.push_str(&turn_tail(*calls, *mins, say, *errors));
+            line
+        }
+        PingEvent::DiedMidTurn { calls, say, errors } => {
+            let mut line = format!("{tag} died mid-turn");
+            line.push_str(&turn_tail(*calls, None, say, *errors));
+            line
+        }
+        PingEvent::Asking { prompt, errors } => {
+            format!("{tag} asking: \"{}\"{}", quote(prompt), errors_note(*errors))
+        }
+        PingEvent::WrappingUp { calls_left, secs_left, errors } => {
+            let mut line = format!("{tag} wrapping up");
+            if let Some(left) = calls_left {
+                line.push_str(&format!(" · {left} calls left"));
+            }
+            if let Some(left) = secs_left {
+                line.push_str(&format!(" · {left} s left"));
+            }
+            line.push_str(&errors_note(*errors));
+            line
+        }
+        PingEvent::Failing { run, tool } => {
+            let mut line = format!("{tag} failing · {run} tool errors in a row");
+            if let Some(label) = tool {
+                line.push_str(&format!(" · last: {label}"));
+            }
+            line
+        }
+        PingEvent::Silent { mins, last } => {
+            let mut line = format!("{tag} silent {mins} min");
+            match last {
+                Some(Last::Said(say)) => line.push_str(&format!(" · last: \"{}\"", quote(say))),
+                Some(Last::Did(label)) => line.push_str(&format!(" · last: {label}")),
+                None => {}
+            }
+            line
+        }
+        PingEvent::Exited { code, outcome } => {
+            let mut line = format!("{tag} exited");
+            if let Some(code) = code {
+                line.push_str(&format!(" · exit {code}"));
+            } else if let Some(outcome) = outcome.as_ref().filter(|o| !o.is_empty()) {
+                line.push_str(&format!(" · {outcome}"));
+            }
+            line
+        }
+    }
+}
+
+/// The trailing segments a turn's-end line shares, in the one order they have
+/// always had: the call count, the elapsed minutes, the last thing said, then
+/// the tool errors riding along.
+fn turn_tail(calls: Option<u64>, mins: Option<i64>, say: &Option<String>, errors: u64) -> String {
+    let mut tail = String::new();
+    if let Some(calls) = calls {
+        tail.push_str(&format!(" · {calls} calls"));
+    }
+    if let Some(mins) = mins {
+        tail.push_str(&format!(" · {mins} min"));
+    }
+    if let Some(say) = say {
+        tail.push_str(&format!(" · last: \"{}\"", quote(say)));
+    }
+    tail.push_str(&errors_note(errors));
+    tail
+}
+
+/// ` · <k> tool errors`, or nothing at all — a run of tool errors rides a
+/// higher-priority line this way, and says nothing when there is none.
+fn errors_note(k: u64) -> String {
+    if k == 0 {
+        String::new()
+    } else {
+        format!(" · {k} tool errors")
+    }
 }
 
 // ── gathering ───────────────────────────────────────────────────────────
@@ -484,12 +759,6 @@ fn quote(s: &str) -> String {
     } else {
         clipped
     }
-}
-
-/// One field of a record's payload as one clipped line — the stop reason, a
-/// prompt: a field READ, never a second formatter for the record.
-fn quote_inline(s: &str) -> String {
-    quote(s)
 }
 
 /// A payload string field, [`clean`]ed; empty when absent/blank.
@@ -551,22 +820,21 @@ fn turn_open_index(tail: &[TraceRecord]) -> Option<usize> {
         .rposition(|r| r.kind == "UserMessage" || r.kind == "ExternalMessage")
 }
 
-/// `<N> calls` — `tool_use` blocks since the turn's opening record, when that
-/// record is in the tail; `None` (segment omitted) when the window has lost
-/// it.
-fn calls_segment(tail: &[TraceRecord]) -> Option<String> {
+/// How many `tool_use` blocks the turn has run — since the turn's opening
+/// record, when that record is in the tail; `None` (segment omitted) when the
+/// window has lost it.
+fn calls_in_turn(tail: &[TraceRecord]) -> Option<u64> {
     let start = turn_open_index(tail)?;
-    let calls: u64 = tail[start + 1..].iter().map(tool_uses).sum();
-    Some(format!("{calls} calls"))
+    Some(tail[start + 1..].iter().map(tool_uses).sum())
 }
 
-/// `<M> min` — whole minutes from that same opening record's `ts_ms` to the
-/// tail's last record, when both carry one.
-fn mins_segment(tail: &[TraceRecord]) -> Option<String> {
+/// How many whole minutes the turn has run, from that same opening record's
+/// `ts_ms` to the tail's last record, when both carry one.
+fn mins_in_turn(tail: &[TraceRecord]) -> Option<i64> {
     let start = turn_open_index(tail)?;
     let from = tail.get(start)?.ts_ms?;
     let to = tail.last()?.ts_ms?;
-    Some(format!("{} min", (to - from).max(0) / 60_000))
+    Some((to - from).max(0) / 60_000)
 }
 
 /// The turn is still OPEN — the same fold the state rule uses
@@ -599,14 +867,16 @@ fn last_tool_label(tail: &[TraceRecord]) -> Option<String> {
 }
 
 /// What the child last DID or SAID — whichever of the two the tail holds most
-/// recently, for the silence line.
-fn last_tool_or_say(child: &Child, tail: &[TraceRecord], lines: &[String]) -> Option<String> {
+/// recently, for the silence line. The two are told apart at the event level
+/// ([`Last`]) rather than pre-formatted, so the quotes around a say are the
+/// renderer's business on either node.
+fn last_tool_or_say(child: &Child, tail: &[TraceRecord], lines: &[String]) -> Option<Last> {
     let tool = tail.iter().rposition(|r| r.kind == "ToolResult");
     let spoke = tail.iter().rposition(|r| r.kind == "AssistantMessage");
     match (tool, spoke) {
-        (Some(t), Some(s)) if s > t => say_of(&child.agent, lines).map(|s| format!("\"{}\"", quote(&s))),
-        (Some(_), _) => last_tool_label(tail),
-        (None, Some(_)) => say_of(&child.agent, lines).map(|s| format!("\"{}\"", quote(&s))),
+        (Some(t), Some(s)) if s > t => say_of(&child.agent, lines).map(Last::Said),
+        (Some(_), _) => last_tool_label(tail).map(Last::Did),
+        (None, Some(_)) => say_of(&child.agent, lines).map(Last::Said),
         (None, None) => None,
     }
 }
@@ -728,7 +998,8 @@ mod tests {
     }
 
     /// A child as the gather would hand it over: petname `brave-otter`, agent
-    /// `eidolon`, parent `wrap-1`, and the given trace body.
+    /// `eidolon`, parent `wrap-1`, and the given trace body — a LOCAL child
+    /// (its parent is on this node), still running.
     fn child_of(body: &[&str]) -> Child {
         Child {
             id: "user-0001".to_string(),
@@ -737,7 +1008,27 @@ mod tests {
             parent: "wrap-1".to_string(),
             lines: Some(lines(body)),
             dropped_mid_turn: false,
+            remote: false,
+            ended: None,
         }
+    }
+
+    /// [`super::decide`], with the one line its event renders as — the tag is
+    /// the child's own, exactly as the claim section builds it. The tests read
+    /// LINES (that is the grammar they pin), so the seam underneath becoming
+    /// an event changes nothing they assert.
+    fn decide(child: &Child, entry: &CursorEntry, now: i64) -> (Option<String>, CursorEntry) {
+        let (event, entry) = super::decide(child, entry, now);
+        let line = event.map(|e| render_line(&child_tag(child.petname.as_deref(), &child.id), &e));
+        (line, entry)
+    }
+
+    /// [`super::decide`]'s event itself, for the tests that are about the
+    /// event (its split from the line, its wire shape).
+    fn event_of(body: &[&str], seen_id: Option<&str>) -> Option<PingEvent> {
+        let child = child_of(body);
+        let entry = CursorEntry { seen: seen_id.map(str::to_string), ..Default::default() };
+        super::decide(&child, &entry, last_ts(body)).0
     }
 
     /// Decide one body with `seen` already past `seen_id` — the pure seam the
@@ -750,7 +1041,7 @@ mod tests {
 
     fn plan_at(body: &[&str], seen_id: Option<&str>, now: i64) -> (Option<String>, CursorEntry) {
         let child = child_of(body);
-        let entry = CursorEntry { seen: seen_id.map(str::to_string), silent_at: None };
+        let entry = CursorEntry { seen: seen_id.map(str::to_string), ..Default::default() };
         decide(&child, &entry, now)
     }
 
@@ -844,7 +1135,7 @@ mod tests {
         silent_death.dropped_mid_turn = true;
         let (line, _) = decide(
             &silent_death,
-            &CursorEntry { seen: Some("131".to_string()), silent_at: None },
+            &CursorEntry { seen: Some("131".to_string()), ..Default::default() },
             now_ms(),
         );
         assert_eq!(line, None, "a closed turn's death is not a line");
@@ -950,7 +1241,7 @@ mod tests {
         );
         let (line, _) = decide(
             &child_of(&[USER, old.as_str()]),
-            &CursorEntry { seen: Some("9".into()), silent_at: None },
+            &CursorEntry { seen: Some("9".into()), ..Default::default() },
             now_ms(),
         );
         let line = line.unwrap();
@@ -999,14 +1290,14 @@ mod tests {
         let seen = "7";
 
         // First quiet pass: the line, and the latch.
-        let (line, entry) = decide(&child, &CursorEntry { seen: Some(seen.into()), silent_at: None }, now_ms());
+        let (line, entry) = decide(&child, &CursorEntry { seen: Some(seen.into()), ..Default::default() }, now_ms());
         assert!(line.unwrap().contains("silent 20 min"));
         assert_eq!(entry.silent_at.as_deref(), Some("7"));
 
         // Second quiet pass, same tail, latch set: nothing.
         let (line, entry2) = decide(
             &child,
-            &CursorEntry { seen: Some(seen.into()), silent_at: entry.silent_at.clone() },
+            &CursorEntry { seen: Some(seen.into()), silent_at: entry.silent_at.clone(), ..Default::default() },
             now_ms(),
         );
         assert_eq!(line, None, "one line per silence");
@@ -1017,7 +1308,7 @@ mod tests {
         let revived = child_of(&[USER, old.as_str(), SETTLED]);
         let (line, entry3) = decide(
             &revived,
-            &CursorEntry { seen: Some(seen.into()), silent_at: Some("7".into()) },
+            &CursorEntry { seen: Some(seen.into()), silent_at: Some("7".into()), ..Default::default() },
             now_ms(),
         );
         assert!(line.unwrap().contains("settled"));
@@ -1031,7 +1322,7 @@ mod tests {
         );
         let (line, _) = decide(
             &child_of(&[USER, fresh.as_str()]),
-            &CursorEntry { seen: Some("8".into()), silent_at: None },
+            &CursorEntry { seen: Some("8".into()), ..Default::default() },
             now_ms(),
         );
         assert_eq!(line, None, "one quiet minute is not silence");
@@ -1136,6 +1427,53 @@ mod tests {
     fn advance_trace(root: &Path, id: &str, body: &[&str]) {
         let trace = root.join("sessions").join(format!("{id}.jsonl"));
         std::fs::write(&trace, format!("{}\n", body.join("\n"))).unwrap();
+    }
+
+    /// A `remoteParent` stamp as the A2A door writes one: the key that
+    /// verified the spawn, the parent's node, and the parent's own session id
+    /// on that node.
+    fn remote_stamp() -> aoide_storage::records::RemoteParent {
+        aoide_storage::records::RemoteParent {
+            node: "sakaki".to_string(),
+            key: "aa".repeat(32),
+            session_id: "conduct-17991-1790312541".to_string(),
+            extra: Default::default(),
+        }
+    }
+
+    /// Stamp a roster child `remoteParent` and clear its local parent edge —
+    /// exactly the shape the door leaves behind (`stamp_spawn_provenance`
+    /// writes the stamp and never a `parentSessionId`, which is local-only).
+    /// Nothing else about the record moves.
+    fn make_remote(id: &str) {
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = file.sessions.iter_mut().find(|r| r.session_id == id).unwrap();
+        rec.remote_parent = Some(remote_stamp());
+        rec.parent_session_id = None;
+        write_stage(&sessions_path(), &file).unwrap();
+    }
+
+    /// A roster child whose parent is on another node, of any harness: the
+    /// non-eidolon shape has no trace at all and exists here for `Exited`.
+    fn remote_child_record(id: &str, agent: &str, state: &str) {
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap_or_default();
+        let mut rec = session(id, "/w", state, "2026-09-12T00:00:00Z", None);
+        rec.agent = agent.to_string();
+        rec.remote_parent = Some(remote_stamp());
+        file.sessions.push(rec);
+        file.schema_version = "0".to_string();
+        write_stage(&sessions_path(), &file).unwrap();
+    }
+
+    /// Rewrite one roster record's own end, as the child's exit path and the
+    /// reaper stamp it.
+    fn end_record(id: &str, state: &str, code: Option<i32>, outcome: Option<&str>) {
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = file.sessions.iter_mut().find(|r| r.session_id == id).unwrap();
+        rec.state = state.to_string();
+        rec.exit_code = code;
+        rec.outcome = outcome.map(str::to_string);
+        write_stage(&sessions_path(), &file).unwrap();
     }
 
     #[test]
@@ -1401,6 +1739,153 @@ mod tests {
         assert!(cursor.is_empty(), "every entry without a roster record is gone: {cursor:?}");
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ── P-RSA S8: a remote parent's events ──────────────────────────────
+
+    #[test]
+    fn a_remote_parent_child_spools_its_events_and_never_delivers() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+        ]);
+        let root = setup("pingback-remote-spool");
+        // A live, reachable LOCAL parent — a delivery WOULD land here, which is
+        // what makes "never delivers" a real claim rather than an accident of
+        // an unreachable target.
+        let listener = headless_parent("wrap-1", "claude");
+        child_fixture(&root, "user-0001", "wrap-1", &[USER, ASSISTANT, SETTLED]);
+        make_remote("user-0001");
+
+        let report = pingback(&daemon_inv(), &[]);
+        assert!(report.delivered.is_empty(), "a remote parent is never delivered to from here: {report:?}");
+        assert!(report.skipped.is_empty(), "{report:?}");
+        listener.set_nonblocking(true).unwrap();
+        assert!(listener.accept().is_err(), "not one byte was written to the local parent");
+
+        // The event took the line's place on the ring, whole: the same
+        // decision the local parent would have read as a line.
+        let read = aoide_storage::pingback_remote::events_for("user-0001", 0);
+        assert_eq!(read.events.len(), 1, "{read:?}");
+        assert_eq!(read.events[0].seq, 1);
+        assert!(!read.gap, "a fresh cursor sees every event the child published");
+        let event = &read.events[0].event;
+        assert_eq!(event["settled"]["stop"], serde_json::json!("end_turn"), "{event}");
+        assert_eq!(event["settled"]["say"], serde_json::json!("Let me read the slot catalog first."), "{event}");
+        assert_eq!(event["settled"]["calls"], serde_json::json!(1));
+
+        // The cursor is the same at-most-once cursor: a second pass over the
+        // same tail publishes nothing, and the ring is not appended to.
+        let cursor: CursorFile = serde_json::from_str(&std::fs::read_to_string(pingback_path()).unwrap()).unwrap();
+        assert_eq!(cursor.get("user-0001").and_then(|e| e.seen.clone()).as_deref(), Some("131"));
+        let again = pingback(&daemon_inv(), &[]);
+        assert_eq!(again, PingbackReport::default(), "at-most-once: the second pass is silent");
+        assert_eq!(aoide_storage::pingback_remote::events_for("user-0001", 0).events.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_exited_event_fires_once_when_a_remote_child_ends() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+        ]);
+        let root = setup("pingback-remote-exit");
+        // A non-eidolon harness: no trace to read, ever. Its exit is the one
+        // event this module can still publish for it.
+        remote_child_record("a2a-4411-1790", "a2a", "working");
+        // A LOCAL child that ends the same way — nobody spools for it (Q5's
+        // ruled default: the local parent hears the run's own report).
+        remote_child_record("local-sess", "claude", "done");
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        file.sessions.iter_mut().find(|r| r.session_id == "local-sess").unwrap().remote_parent = None;
+        write_stage(&sessions_path(), &file).unwrap();
+
+        let report = pingback(&daemon_inv(), &[]);
+        assert!(
+            aoide_storage::pingback_remote::events_for("a2a-4411-1790", 0).events.is_empty(),
+            "a running child owes nothing yet"
+        );
+        assert_eq!(report, PingbackReport::default(), "{report:?}");
+
+        end_record("a2a-4411-1790", "done", Some(7), Some("exit"));
+        end_record("local-sess", "done", Some(7), Some("exit"));
+        let report = pingback(&daemon_inv(), &[]);
+        assert!(report.delivered.is_empty(), "{report:?}");
+        let read = aoide_storage::pingback_remote::events_for("a2a-4411-1790", 0);
+        assert_eq!(read.events.len(), 1, "{read:?}");
+        assert_eq!(
+            read.events[0].event,
+            serde_json::json!({ "exited": { "code": 7, "outcome": "exit" } })
+        );
+        assert!(
+            aoide_storage::pingback_remote::events_for("local-sess", 0).events.is_empty(),
+            "a local child's end is its report's business, never an event"
+        );
+
+        // ONCE. The record stays on the roster after its run ended, so the
+        // latch — not the roster's own lifetime — is what stops the repeat.
+        let again = pingback(&daemon_inv(), &[]);
+        assert_eq!(again, PingbackReport::default(), "{again:?}");
+        assert_eq!(
+            aoide_storage::pingback_remote::events_for("a2a-4411-1790", 0).events.len(),
+            1,
+            "exited is claimed once per child"
+        );
+        let cursor: CursorFile = serde_json::from_str(&std::fs::read_to_string(pingback_path()).unwrap()).unwrap();
+        let entry = cursor.get("a2a-4411-1790").expect("the child keeps its entry");
+        assert!(entry.exited, "the latch is what was written: {entry:?}");
+        assert_eq!(entry.seen, None, "a child with no trace has no `seen` to hold it");
+
+        // The line the puller will render for it, from the event alone.
+        assert_eq!(
+            render_line("[sakaki/conduct-17991]", &PingEvent::Exited { code: Some(7), outcome: Some("exit".into()) }),
+            "[sakaki/conduct-17991] exited · exit 7"
+        );
+        assert_eq!(
+            render_line(
+                "[sakaki/conduct-17991]",
+                &PingEvent::Exited { code: None, outcome: Some("signal".into()) }
+            ),
+            "[sakaki/conduct-17991] exited · signal"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_spooled_event_is_already_clean_and_still_renders_through_the_guard() {
+        // The child authored BOTH fragments: a prompt that would read as a
+        // command at a prompt, with a control character in it.
+        let hostile = "{\"id\":9,\"parent\":8,\"ts_ms\":1000,\"kind\":{\"AskUser\":{\"prompt\":\"/compact\\u0007 now\\r!rm -rf /\",\"answer\":null}}}";
+        let event = event_of(&[USER, hostile], Some("1")).expect("an open prompt is an event");
+        let json = serde_json::to_value(&event).unwrap();
+
+        // The sender cleaned: no control character reaches the ring at all, so
+        // no receiver has to trust the far node for that.
+        let text = serde_json::to_string(&json).unwrap();
+        assert!(!text.chars().any(char::is_control), "{text:?}");
+        assert!(
+            json["asking"]["prompt"].as_str().unwrap().starts_with('/'),
+            "cleaning is not the guard — the leading `/` is still there to be neutralized: {json}"
+        );
+
+        // ...and the renderer neutralizes it, exactly as the local line always
+        // has: a leading space turns a command into text.
+        let line = render_line("[eidolon brave-otter]", &event);
+        assert_eq!(line, "[eidolon brave-otter] asking: \" /compact now!rm -rf /\"", "{line:?}");
+        assert!(!line.chars().any(char::is_control), "{line:?}");
     }
 
     #[test]
