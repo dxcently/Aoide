@@ -2140,8 +2140,15 @@ project/parent inheritance across local/remote/app/subagents;
   `valid_claimed_session_id`); S2 LANDED (the signed `aoide/from` claim on
   spawn and inject, `node spawn --parent`, the caller-side ledger write on
   the ack; a live `--parent` beats the attestation, the env is never read);
-  S3–S10 open, in the brief's order (S4 and S5
-  may run in parallel after S3; cargo builds serialize).
+  S3 LANDED — the door honours the claim on the SIGNATURE rung only
+  (`claimed_remote_parent`, pure; a weaker rung ignores it and writes one
+  `ignored-unsigned-from` audit line; a signed caller's malformed claim is
+  `-32602`) and stamps `remoteParent` from the RESOLVED node's name and
+  pubkey through `do_spawn` → `stamp_spawn_provenance` →
+  `conduct::graph::stamp_remote_parent` (one registration retry loop, two
+  change-once stamps; `parentSessionId` stays `None`; no env var exists for
+  it, and `resurrect` carries none); S4–S10 open, in the brief's order (S4
+  and S5 may run in parallel after S3; cargo builds serialize).
 - Tests (`aoide-storage`, S1):
   `session_record_remote_parent_round_trips_and_stays_absent_when_unset`,
   `remote_parent_round_trips_unknown_fields_beside_it`,
@@ -2150,4 +2157,16 @@ project/parent inheritance across local/remote/app/subagents;
   `retain_drops_exactly_the_rejected_rows`,
   `advance_lines_after_is_forward_only_and_ignores_an_unknown_child`,
   `valid_claimed_session_id_admits_exactly_the_contract_shape`.
+- Tests (`aoide-server`, S3): `claimed_remote_parent_is_honoured_on_the_
+  signature_rung_only`, `the_remote_parent_is_built_from_the_resolved_node_
+  not_the_header_name`, `a_signed_callers_malformed_from_claim_is_refused_
+  with_minus_32602` (which also pins the unsigned ignore + its audit line),
+  `the_from_claim_is_read_only_off_message_metadata`,
+  `the_clients_from_claim_round_trips_through_the_inbound_parser`,
+  `parse_message_send_params_extracts_all_four_fields_together`,
+  `stamp_spawn_provenance_lands_the_origin_and_the_remote_parent_on_a_
+  registered_record`; the pre-existing
+  `a2a_spawn_clears_the_daemons_own_session_id_from_the_child` still pins
+  the child's env. `aoide-conduct`'s S3 test:
+  `stamp_remote_parent_is_change_only_and_leaves_parent_session_id_none`.
 - Owner: Eidolon executor. Depends on: §13's S-D design half, ruled here.

@@ -686,7 +686,7 @@ pub(in crate::graph) fn stamp_spawned(id: &str) {
 ///     REFUSES a `node:*` shape from that env read, because inherited env
 ///     is exactly what a same-uid process can set on itself before invoking
 ///     `aoide conduct` directly.
-///   - `aoide-server`'s `a2a::do_spawn` (`stamp_spawn_origin`), for a
+///   - `aoide-server`'s `a2a::do_spawn` (`stamp_spawn_provenance`), for a
 ///     `node:<name>` origin — called directly on the just-spawned session's
 ///     record from the DOOR that authenticated the node name, never
 ///     threaded through the child's env at all. This is the only place a
@@ -711,6 +711,63 @@ pub fn stamp_origin(id: &str, origin: &str) {
             .find(|s| s.session_id == id && s.origin.as_deref() != Some(origin))
         {
             s.origin = Some(origin.to_string());
+            if file.schema_version.is_empty() {
+                file.schema_version = STAGE_GRAPH_VERSION.to_string();
+            }
+            let _ = write_stage(&sessions_path(), &file);
+        }
+    });
+}
+
+/// Stamp `remoteParent` on a just-registered session record — the CHILD's own
+/// node recording which session on ANOTHER node asked for it
+/// (`docs/architecture/CONTRACTS.md` §4's `remoteParent`, the a2a door's
+/// counterpart to the caller-side `remote-children.json` ledger).
+///
+/// `pub` (crosses the crate boundary) with ONE caller by construction, the same
+/// shape [`stamp_origin`] just above holds: `aoide-server`'s `a2a::do_spawn`
+/// (`stamp_spawn_provenance`), on the record it just spawned, from the door
+/// where the caller's signature was verified and the node's KEY is
+/// authenticated. There is deliberately no env var and no `conduct`/`spawn`
+/// flag for it — `session_conduct` reads none, and `resurrect` carries none
+/// forward — because an ambient value is exactly the unauthenticated shape
+/// `origin`'s own refusal above closes (`AOIDE_SESSION_ORIGIN`); a name or id
+/// taken from a request's headers or body would be the same mistake one layer
+/// out, so the door builds this value from the RESOLVED node record, never
+/// from wire bytes ([`stamp_origin`]'s "stamp from the authority that just
+/// authenticated the fact").
+///
+/// Change-only and a silent no-op for an unknown id or an empty `sessionId` —
+/// inherited from [`stamp_origin`], not re-derived. Like [`stamp_seal`], this
+/// is NOT an immutability guard: a later call with a genuinely DIFFERENT parent
+/// still overwrites, since the guard compares against the value already on the
+/// record, not against "has this ever been set". In practice the id is minted
+/// once per spawn and this door is the only writer, so it behaves as a birth
+/// fact — a property of the call site, not an invariant this function
+/// enforces. No `restage_graph()`: this stamps the RECORD fact, and a reader
+/// that wants it rendered restages on its own pass rather than paying a
+/// widget-document churn on every spawn (the cost `origin`/`hookAncestry`
+/// avoid the same way).
+///
+/// **The field is attribution, never a gate** (`origin`'s own posture):
+/// `sessions.json` stays a plain, same-uid-writable file, so nothing may key a
+/// security decision on `remoteParent` as read off disk. The gate is the key
+/// comparison the DOOR makes against the verifying node's pubkey.
+pub fn stamp_remote_parent(id: &str, parent: &aoide_storage::records::RemoteParent) {
+    if parent.session_id.is_empty() {
+        return;
+    }
+    with_stage_lock(|| {
+        let mut file: SessionsFile = match load_stage(&sessions_path()) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        if let Some(s) = file
+            .sessions
+            .iter_mut()
+            .find(|s| s.session_id == id && s.remote_parent.as_ref() != Some(parent))
+        {
+            s.remote_parent = Some(parent.clone());
             if file.schema_version.is_empty() {
                 file.schema_version = STAGE_GRAPH_VERSION.to_string();
             }
@@ -2791,6 +2848,87 @@ mod tests {
         stamp_origin("no-such-session", "node:ghost");
         let s3: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert_eq!(s3.sessions.iter().find(|r| r.session_id == "local-1").unwrap().origin, None);
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn stamp_remote_parent_is_change_only_and_leaves_parent_session_id_none() {
+        // P-RSA S3: the child's own node records who asked for it on ANOTHER
+        // node. `parentSessionId` stays local-only (CONTRACTS.md §4) — the
+        // door never writes a foreign id there, and neither does this stamp —
+        // and a locally-registered record carries no `remoteParent` at all,
+        // because nothing in this crate can mint one: no env var, no
+        // `conduct`/`spawn` flag, no `resurrect` carry.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("stamp-remote-parent");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        do_session_start("a2a-child-1", Some("a2a"), Some("/w"), None, None, None, None, None, None);
+        let born: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = born.sessions.iter().find(|r| r.session_id == "a2a-child-1").unwrap();
+        assert!(rec.remote_parent.is_none(), "registration alone never mints a remoteParent");
+
+        let parent = aoide_storage::records::RemoteParent {
+            node: "yomi-strix".to_string(),
+            key: "ab".repeat(32),
+            session_id: "conduct-17991-1790312541".to_string(),
+        };
+        stamp_remote_parent("a2a-child-1", &parent);
+
+        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = after.sessions.iter().find(|r| r.session_id == "a2a-child-1").unwrap();
+        assert_eq!(rec.remote_parent.as_ref(), Some(&parent));
+        assert_eq!(
+            rec.parent_session_id, None,
+            "a remote parent is NEVER written as a local parentSessionId — every reader of that field treats it as a local id"
+        );
+
+        // Change-only: re-stamping the SAME parent writes no bytes at all
+        // (the guard is the value comparison `stamp_origin` uses, not a
+        // "has this been set" flag).
+        let bytes_before = std::fs::read(sessions_path()).unwrap();
+        stamp_remote_parent("a2a-child-1", &parent);
+        assert_eq!(
+            std::fs::read(sessions_path()).unwrap(),
+            bytes_before,
+            "a same-value re-stamp must not rewrite the stage file"
+        );
+
+        // A genuinely DIFFERENT parent still overwrites — this is NOT an
+        // immutability guard, the contract `stamp_seal` documents. Same-uid
+        // attribution, never a gate: the key comparison the DOOR makes is the
+        // gate, not this file.
+        let other = aoide_storage::records::RemoteParent {
+            node: "sakaki".to_string(),
+            key: "cd".repeat(32),
+            session_id: "conduct-2".to_string(),
+        };
+        stamp_remote_parent("a2a-child-1", &other);
+        let after2: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert_eq!(
+            after2.sessions.iter().find(|r| r.session_id == "a2a-child-1").unwrap().remote_parent.as_ref(),
+            Some(&other)
+        );
+
+        // An unknown id and an empty `sessionId` are silent no-ops, the shape
+        // `stamp_origin` inherits from an empty origin.
+        stamp_remote_parent("no-such-session", &other);
+        stamp_remote_parent(
+            "a2a-child-1",
+            &aoide_storage::records::RemoteParent { node: "sakaki".to_string(), key: String::new(), session_id: String::new() },
+        );
+        let after3: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert_eq!(
+            after3.sessions.iter().find(|r| r.session_id == "a2a-child-1").unwrap().remote_parent.as_ref(),
+            Some(&other),
+            "an empty sessionId is not a parent"
+        );
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),

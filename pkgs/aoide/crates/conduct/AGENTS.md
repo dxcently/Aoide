@@ -1535,7 +1535,7 @@
   and is the ONE writer function, with THREE call sites today — but the
   invariant that matters is narrower than "exactly two callers": **a
   `node:*` shape may be stamped from exactly ONE place, `aoide-server`'s
-  `a2a::do_spawn` (`stamp_spawn_origin`)**, called DIRECTLY on the
+  `a2a::do_spawn` (`stamp_spawn_provenance`)**, called DIRECTLY on the
   just-spawned record — polling for the record's registration the same way
   `spawn_inject_prompt` already does — from the door where the node name IS
   authenticated. Every OTHER call site may stamp a LOCAL-CLASS value but
@@ -1575,6 +1575,30 @@
   What P-ID0 closes is narrower and real: every
   record-STAMP path this codebase drives now refuses a `node:*` shape it
   didn't mint itself at the door — env AND the unsealed ledger both.
+- **`SessionRecord.remoteParent` is stamped from `aoide-server`'s A2A door
+  ONLY (remote sub-agents P-RSA S3, CONTRACTS.md §4) — there is no local
+  path, and adding one is the mistake this bullet exists to prevent.**
+  `session_store.rs::stamp_remote_parent` is `pub` (crosses the crate
+  boundary) with exactly one caller, `a2a::do_spawn` via
+  `stamp_spawn_provenance`, and the value it stamps is built from the node
+  record the request's signature resolved to (`name`, `pubkey`) plus the
+  claim the caller signed — never a name or key taken from a header or the
+  request body (CONTRACTS.md §6's rung table). Do NOT add a `conduct`/
+  `spawn` flag, an env read, or a `resurrect` carry for it: an ambient value
+  is exactly the unauthenticated shape the `node:*` refusal above closes one
+  field over, and the absence IS the invariant — the test
+  (`stamp_remote_parent_is_change_only_and_leaves_parent_session_id_none`)
+  pins it, so don't "fix" the missing path by adding one. Change-only, like
+  `stamp_origin`/`stamp_seal` (a same-value re-stamp writes nothing; a
+  genuinely different value overwrites, since the guard is the value already
+  on the record, not a "has this ever been set" flag) — and it never touches
+  `parentSessionId`, which stays LOCAL-only: every reader of that field (the
+  autogate grant and sibling rule in `graph/send.rs`, `graph/model.rs`'s
+  grouping, `graph link`'s cycle check, `taskreport`'s mailbox) treats it as
+  a local id, so a foreign value there would dangle at best and grant local
+  autogate to a stranger at worst. Attribution, never a gate: the file is
+  same-uid-writable, so the key comparison the DOOR makes is what a consumer
+  may trust, not this field as read off disk.
 - **`SessionRecord.seal`/`sealedIssuedAt` are STAMPED from `aoide-server`
   only, but VERIFIED from inside this crate (LANE IDENTITY P-ID1/P-ID2).**
   `session_store.rs::stamp_seal` is `pub` (crosses the crate boundary) the

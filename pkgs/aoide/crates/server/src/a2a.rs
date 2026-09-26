@@ -59,6 +59,7 @@ use aoide_protocol::wire::{
     TaskStatusUpdateEvent,
 };
 use aoide_protocol::{audit, Door, EventClass, Invocation};
+use aoide_storage::records::RemoteParent;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -797,14 +798,84 @@ fn spawn_requested(message: &Value, params: &Value) -> bool {
 }
 
 /// Parse one `message/send` `params` object into (prompt text, contextId,
-/// spawn_asked) — pure, so the parsing itself is unit-testable independent of
-/// [`decide_send_action`] and the I/O that follows it.
-fn parse_message_send_params(params: &Value) -> (String, Option<String>, bool) {
+/// spawn_asked, claimed parent session id) — pure, so the parsing itself is
+/// unit-testable independent of [`decide_send_action`] and the I/O that
+/// follows it.
+///
+/// The fourth field is the caller's own session id, off
+/// `message.metadata["aoide/from"]`
+/// (`aoide_protocol::wire::FROM_SESSION_KEY`) — ONLY there, never the
+/// top-level `params.metadata` fallback [`spawn_requested`] also accepts, as
+/// CONTRACTS.md §6 states: this is a claim about WHO is calling, and the
+/// client's outbound builder writes it in that one place. An empty or
+/// non-string value is not a third state — it reads as "no claim". WHETHER a
+/// claim may be honoured is [`claimed_remote_parent`]'s question, one layer
+/// down, never this parser's.
+fn parse_message_send_params(params: &Value) -> (String, Option<String>, bool, Option<String>) {
     let message = params.get("message").cloned().unwrap_or(Value::Null);
     let prompt = extract_prompt_text(&message);
     let context_id = extract_context_id(&message, params);
     let spawn_asked = spawn_requested(&message, params);
-    (prompt, context_id, spawn_asked)
+    let claimed_from = message
+        .get("metadata")
+        .and_then(|m| m.get(aoide_protocol::wire::FROM_SESSION_KEY))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    (prompt, context_id, spawn_asked, claimed_from)
+}
+
+/// The remote parent to stamp on a spawn, or `Ok(None)` when there is nothing
+/// the door may stamp (P-RSA S3, CONTRACTS.md §4/§6).
+///
+/// Two inputs only — the resolved caller and the wire claim — because the
+/// value must be built from what this door AUTHENTICATED, never from wire
+/// bytes: `node` and `key` come off the resolved [`aoide_storage::node_store::Node`]
+/// record, `sessionId` off the claim. A name taken from `X-Aoide-Node` or from
+/// the body would be exactly the forgery the key check exists to stop.
+///
+/// **Honoured on the SIGNATURE rung only** (a `verified` node's stored pubkey
+/// verified this request's signature — `verify_signed_request`, one layer up).
+/// Every weaker shape — no resolution, the token rung, the address rung —
+/// ignores the claim entirely and returns `Ok(None)`: it can never reach the
+/// stamp, and the caller audits the ignore rather than refusing, since an
+/// unsigned caller has no claim to make. Pure, so that rung table is provable
+/// against plain `Node` fixtures without a real spawn.
+///
+/// A claim that IS honoured is validated
+/// ([`aoide_storage::remote_children::valid_claimed_session_id`], the same
+/// predicate the client refuses its own unruly claim with) and a bad value is
+/// `-32602` — never silently dropped, per CONTRACTS.md §6.
+fn claimed_remote_parent(
+    resolved: Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)>,
+    claim: Option<&str>,
+) -> Result<Option<RemoteParent>, (i64, String)> {
+    let Some(claim) = claim else {
+        return Ok(None);
+    };
+    let Some((node, aoide_storage::node_store::NodeRung::Signature)) = resolved else {
+        return Ok(None);
+    };
+    if !aoide_storage::remote_children::valid_claimed_session_id(claim) {
+        return Err((
+            -32602,
+            format!(
+                "invalid params: metadata[\"{}\"] must be 1..={} characters of [A-Za-z0-9._:-] \
+                 (a session id) with no `/`",
+                aoide_protocol::wire::FROM_SESSION_KEY,
+                aoide_storage::remote_children::CLAIMED_SESSION_ID_MAX,
+            ),
+        ));
+    }
+    Ok(Some(RemoteParent {
+        node: node.name.clone(),
+        // Never empty on this rung: `verify_signed_request` resolves only a
+        // record whose stored, non-empty pubkey verified the signature, so the
+        // rung cannot exist without one. The fallback is here because the
+        // field is `Option`, not because a keyless stamp is reachable.
+        key: node.pubkey.clone().unwrap_or_default(),
+        session_id: claim.to_string(),
+    }))
 }
 
 fn unix_ts_now() -> u64 {
@@ -1017,13 +1088,21 @@ fn spawn_inject_prompt(id: &str, prompt: &str) {
 /// name, so a dropped stamp shows up rather than vanishing quietly. No
 /// unbounded retry: a spawn that never registers at all (a failed exec, a
 /// missing agent binary) must not spin this thread forever.
-fn stamp_spawn_origin(id: &str, origin: &str) {
+///
+/// `remote_parent` (P-RSA S3) rides the SAME retry loop — one registration
+/// wait, two change-once stamps (`aoide_conduct::graph::stamp_origin` and
+/// `stamp_remote_parent`), never a second poll. `None` (no claim, or a claim
+/// this door may not honour) stamps nothing, which is the whole pre-S3 shape.
+fn stamp_spawn_provenance(id: &str, origin: &str, remote_parent: Option<RemoteParent>) {
     for _ in 0..300 {
         let registered = load_stage(&sessions_path())
             .map(|f: SessionsFile| f.sessions.iter().any(|s| s.session_id == id))
             .unwrap_or(false);
         if registered {
             aoide_conduct::graph::stamp_origin(id, origin);
+            if let Some(parent) = &remote_parent {
+                aoide_conduct::graph::stamp_remote_parent(id, parent);
+            }
             return;
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -1103,7 +1182,7 @@ fn spawn_child_command(
         // G16/G5 — reversed from the pre-P-ID0 shape): threading a `node:*`
         // origin through inherited env was unauthenticated, since any
         // same-uid process can set that same var on itself before invoking
-        // `aoide conduct` directly. `stamp_spawn_origin` below stamps the
+        // `aoide conduct` directly. `stamp_spawn_provenance` below stamps the
         // record from THIS door instead, once the child registers. Cleared
         // explicitly in case `a2a serve`'s own env ever carried one.
         .env_remove("AOIDE_SESSION_ORIGIN")
@@ -1120,6 +1199,11 @@ fn spawn_child_command(
         // only this door, the one place a daemon's ambient env reaches an
         // unrelated freshly-spawned session, clears it.
         .env_remove("AOIDE_SESSION_ID")
+        // No `remoteParent` var either, and none to add: the child's remote
+        // parent is stamped onto the RECORD by `stamp_spawn_provenance` below,
+        // from the resolution this door authenticated — a value the child
+        // could read out of its own env is exactly the forgeable shape
+        // `AOIDE_SESSION_ORIGIN` above stopped being (P-RSA S3).
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -1197,11 +1281,17 @@ fn resolve_bounded_spawn_cwd(
 /// gate already proved before calling this (P-P3, PAIRING.md decision 6) —
 /// never optional at this call site, since the gate refuses outright
 /// otherwise. Stamped directly onto the spawned record as `origin =
-/// "node:<name>"` by [`stamp_spawn_origin`] below (LANE IDENTITY P-ID0,
+/// "node:<name>"` by [`stamp_spawn_provenance`] below (LANE IDENTITY P-ID0,
 /// G16/G5 — this door is the authenticated writer, not the child's env; see
 /// that function's doc) and folded into this call's own audit line, so the
 /// spawned session's provenance is visible both in the audit log and on the
 /// record itself, end to end.
+///
+/// `remote_parent` (P-RSA S3) is the caller's own claim, already validated and
+/// built from THIS resolution by [`claimed_remote_parent`] — `None` for a
+/// spawn with no claim. It rides the same stamp, landing as the child's
+/// `remoteParent`; `parentSessionId` is never touched by this door, since every
+/// reader of that field treats it as a LOCAL id (CONTRACTS.md §4).
 ///
 /// **Bounded liveness check (task #103).** `cmd.spawn()` below only proves
 /// the wrapper process itself launched — a caller was previously handed a
@@ -1219,6 +1309,7 @@ fn do_spawn(
     audit_log: &Path,
     node_name: &str,
     spawn_cwd: &str,
+    remote_parent: Option<RemoteParent>,
 ) -> Result<Value, (i64, String)> {
     let id = format!("a2a-{}-{}", std::process::id(), unix_ts_now());
     let aoide_bin = std::env::current_exe()
@@ -1285,13 +1376,13 @@ fn do_spawn(
             std::thread::spawn(move || {
                 let _ = child.wait();
             });
-            // Stamp the record's origin from THIS door, off the handler
+            // Stamp the record's provenance from THIS door, off the handler
             // thread so a slow-to-register child never adds latency to the
-            // RPC response — see `stamp_spawn_origin`'s doc comment.
+            // RPC response — see `stamp_spawn_provenance`'s doc comment.
             {
                 let id = id.clone();
                 let origin = origin.clone();
-                std::thread::spawn(move || stamp_spawn_origin(&id, &origin));
+                std::thread::spawn(move || stamp_spawn_provenance(&id, &origin, remote_parent));
             }
             // Best-effort first-turn injection — see the doc comment above.
             spawn_inject_prompt(&id, prompt);
@@ -1441,7 +1532,7 @@ fn message_send(
     presented_token: Option<&str>,
     signed_node_name: Option<&str>,
 ) -> Result<Value, (i64, String)> {
-    let (prompt, context_id, spawn_asked) = parse_message_send_params(params);
+    let (prompt, context_id, spawn_asked, claimed_from) = parse_message_send_params(params);
     let token_configured = !expected_token.is_empty();
     let token_state = classify_token(expected_token, presented_token);
 
@@ -1491,6 +1582,45 @@ fn message_send(
             .find(|p| p.name == name)
             .map(|p| (p, aoide_storage::node_store::NodeRung::Signature)),
         None => aoide_storage::node_store::resolve_node(&nodes, addr, presented_token),
+    };
+
+    // The caller's `aoide/from` claim (P-RSA S3), turned into the child's
+    // `remoteParent` — or refused. Honoured on the SIGNATURE rung only
+    // (`claimed_remote_parent`'s own doc carries the table); every weaker rung
+    // ignores it and gets one audit line, because an unsigned caller has no
+    // claim to make and a refusal there would be a new oracle where today
+    // there is only silence. `-32602` for a signed caller's malformed claim,
+    // never a silent drop: the value is inside the signature's own body
+    // digest, so a caller that signed it meant it.
+    let remote_parent = match claimed_remote_parent(resolved_node, claimed_from.as_deref()) {
+        Ok(parent) => {
+            if claimed_from.is_some() && parent.is_none() {
+                let _ = audit(
+                    audit_log,
+                    Door::A2a,
+                    EventClass::Audit,
+                    "a2a.message/send",
+                    "ignored-unsigned-from",
+                    &format!(
+                        "ignored metadata[\"{}\"] — a remote parent may only be claimed by a \
+                         request this door verified by a node's key (no signature rung on this request)",
+                        aoide_protocol::wire::FROM_SESSION_KEY,
+                    ),
+                );
+            }
+            parent
+        }
+        Err((code, msg)) => {
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                "a2a.message/send",
+                "error",
+                &msg,
+            );
+            return Err((code, msg));
+        }
     };
 
     // Autogate signals — computed AFTER `resolved_node` (P-S6) so the new
@@ -1566,7 +1696,7 @@ fn message_send(
         SendAction::Spawn { agent_cmd } => {
             if spawn_admitted(resolved_node) {
                 let node = resolved_node.expect("spawn_admitted only returns true when resolved_node is Some").0;
-                do_spawn(&agent_cmd, &prompt, audit_log, &node.name, spawn_cwd)
+                do_spawn(&agent_cmd, &prompt, audit_log, &node.name, spawn_cwd, remote_parent)
             } else {
                 let (code, msg) = spawn_refusal(resolved_node);
                 let _ = audit(
@@ -4083,25 +4213,172 @@ mod tests {
     }
 
     #[test]
-    fn parse_message_send_params_extracts_all_three_fields_together() {
+    fn parse_message_send_params_extracts_all_four_fields_together() {
         let params = json!({
             "message": {
                 "role": "user",
                 "parts": [{ "kind": "text", "text": "do the thing" }],
                 "contextId": "sess-9",
-                "metadata": { "aoide/spawn": true },
+                "metadata": { "aoide/spawn": true, "aoide/from": "conduct-1-2" },
             }
         });
-        let (prompt, context_id, spawn_asked) = parse_message_send_params(&params);
+        let (prompt, context_id, spawn_asked, claimed_from) = parse_message_send_params(&params);
         assert_eq!(prompt, "do the thing");
         assert_eq!(context_id.as_deref(), Some("sess-9"));
         assert!(spawn_asked);
+        assert_eq!(claimed_from.as_deref(), Some("conduct-1-2"));
 
         // A minimal params with no `message` at all is tolerated, not a panic.
-        let (prompt2, context_id2, spawn_asked2) = parse_message_send_params(&json!({}));
+        let (prompt2, context_id2, spawn_asked2, claimed_from2) = parse_message_send_params(&json!({}));
         assert_eq!(prompt2, "");
         assert_eq!(context_id2, None);
         assert!(!spawn_asked2);
+        assert_eq!(claimed_from2, None);
+    }
+
+    /// The claim is read off `message.metadata` ONLY (CONTRACTS.md §6): a
+    /// top-level `params.metadata` copy — which `aoide/spawn` does accept —
+    /// is not a second spelling for WHO is calling, and an empty or
+    /// non-string value is not a third state.
+    #[test]
+    fn the_from_claim_is_read_only_off_message_metadata() {
+        let top_level_only = json!({ "metadata": { "aoide/from": "conduct-1-2" } });
+        assert_eq!(parse_message_send_params(&top_level_only).3, None);
+
+        let on_message = json!({ "message": { "metadata": { "aoide/from": "conduct-1-2" } } });
+        assert_eq!(parse_message_send_params(&on_message).3.as_deref(), Some("conduct-1-2"));
+
+        // Both present: the message's own value wins, the params copy is
+        // never read.
+        let both = json!({
+            "message": { "metadata": { "aoide/from": "from-message" } },
+            "metadata": { "aoide/from": "from-params" },
+        });
+        assert_eq!(parse_message_send_params(&both).3.as_deref(), Some("from-message"));
+
+        for empty_or_not_a_string in [json!(""), json!(7), json!(null), json!(true)] {
+            let params = json!({ "message": { "metadata": { "aoide/from": empty_or_not_a_string } } });
+            assert_eq!(parse_message_send_params(&params).3, None, "no third state: {empty_or_not_a_string}");
+        }
+    }
+
+    /// P-RSA S3: the claim is honoured on the SIGNATURE rung ONLY. Fed the
+    /// exact `(node, rung)` pairs `message_send`'s own resolution can build
+    /// (real crypto is `verify_signed_request`'s suite above), so the whole
+    /// rung table is provable against fixtures — no disk, no wire, no spawn.
+    #[test]
+    fn claimed_remote_parent_is_honoured_on_the_signature_rung_only() {
+        let mut node = fixture_node("yomi-strix", "http://10.0.0.9:8710/", false);
+        node.verified = true;
+        node.pubkey = Some("ab".repeat(32));
+
+        for rung in [
+            aoide_storage::node_store::NodeRung::Token,
+            aoide_storage::node_store::NodeRung::Addr,
+        ] {
+            assert_eq!(
+                claimed_remote_parent(Some((&node, rung)), Some("conduct-1-2")),
+                Ok(None),
+                "a weaker rung ignores the claim entirely — it can never reach a stamp"
+            );
+        }
+        assert_eq!(
+            claimed_remote_parent(None, Some("conduct-1-2")),
+            Ok(None),
+            "no resolution at all: nothing to attribute the claim to"
+        );
+        assert_eq!(
+            claimed_remote_parent(Some((&node, aoide_storage::node_store::NodeRung::Signature)), None),
+            Ok(None),
+            "no claim on the wire: nothing stamped, the whole pre-S3 shape"
+        );
+
+        // The one honoured shape: the resolved record's name and key, the
+        // claim for the session id, nothing else.
+        assert_eq!(
+            claimed_remote_parent(Some((&node, aoide_storage::node_store::NodeRung::Signature)), Some("conduct-1-2")),
+            Ok(Some(RemoteParent {
+                node: "yomi-strix".to_string(),
+                key: "ab".repeat(32),
+                session_id: "conduct-1-2".to_string(),
+            }))
+        );
+
+        // A malformed claim from a signed caller is refused, never dropped
+        // (CONTRACTS.md §6) — the same predicate the client refuses its own
+        // unruly claim with, `valid_claimed_session_id`'s table being that
+        // predicate's own unit test.
+        for bad in ["", "a/b", "spaces not allowed", "😀"] {
+            let err = claimed_remote_parent(
+                Some((&node, aoide_storage::node_store::NodeRung::Signature)),
+                Some(bad),
+            )
+            .unwrap_err();
+            assert_eq!(err.0, -32602, "malformed claim `{bad}`");
+            assert!(err.1.contains("aoide/from"), "the refusal names the key: {}", err.1);
+        }
+
+        // ...but a weaker rung never gets that far: the claim is ignored, so
+        // even a malformed one is not an error there.
+        assert_eq!(
+            claimed_remote_parent(Some((&node, aoide_storage::node_store::NodeRung::Token)), Some("a/b")),
+            Ok(None),
+            "an unsigned caller's bad claim is silence, not -32602 — there is no claim to validate"
+        );
+    }
+
+    /// P-RSA S3: the value stamped is the RESOLVED record's, key-authenticated
+    /// by `verify_signed_request` — never the `X-Aoide-Node` label the request
+    /// carried. Same real-crypto round trip as the P-P4/P-P5b tests, driven
+    /// with a header naming a node that does not exist while the signature
+    /// belongs to `yomi-strix`'s key.
+    #[test]
+    fn the_remote_parent_is_built_from_the_resolved_node_not_the_header_name() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-remote-parent-resolved-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::env::set_var("AOIDE_STATE_DIR", &root);
+
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read", "spawn"]);
+        let body =
+            aoide_client::wire::build_message_send_body("status check please", "mid-rp-1", None, Some("conduct-1-2"));
+        let body_bytes = serde_json::to_vec(&body).unwrap();
+        let now = 1_800_000_000_i64;
+        // The header names a node this box has never paired with; the
+        // signature is the one registered key's.
+        let req = signed_request(&kp, "sakaki-impostor", "/", &body_bytes, now, &unique_nonce("rp-resolved"));
+
+        let signed_node_name = match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, .. } => resolved,
+            other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
+        };
+        assert_eq!(
+            signed_node_name, "yomi-strix",
+            "the KEY selects the record; the header label is a tie-break among records sharing a key, never a name"
+        );
+
+        // `message_send`'s own two-line resolution, verbatim.
+        let nodes = aoide_storage::node_store::load_nodes();
+        let resolved = nodes
+            .iter()
+            .find(|p| p.name == signed_node_name)
+            .map(|p| (p, aoide_storage::node_store::NodeRung::Signature));
+        let stamped = claimed_remote_parent(resolved, parse_message_send_params(&body["params"]).3.as_deref())
+            .unwrap()
+            .expect("a verified signature plus a valid claim stamps a parent");
+        assert_eq!(stamped.node, "yomi-strix", "never the header's `sakaki-impostor`");
+        assert_eq!(stamped.key, kp.info().pubkey_hex, "the verifying key, not a wire string");
+        assert_eq!(stamped.session_id, "conduct-1-2");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
     }
 
     /// The outbound builder (`aoide-client`) round-tripped through the
@@ -4110,10 +4387,23 @@ mod tests {
     #[test]
     fn build_message_send_body_round_trips_through_the_inbound_parser() {
         let body = aoide_client::wire::build_message_send_body("hello there", "mid-123", None, None);
-        let (prompt, ctx, spawn) = parse_message_send_params(&body["params"]);
+        let (prompt, ctx, spawn, claimed_from) = parse_message_send_params(&body["params"]);
         assert_eq!(prompt, "hello there");
         assert_eq!(ctx, None);
         assert!(!spawn);
+        assert_eq!(claimed_from, None, "no `--parent` claim on this body");
+    }
+
+    /// P-RSA S3: the claim the CLIENT signs (`aoide/from`) is the one the
+    /// server's parser reads, through the same real body builder —
+    /// `aoide_client::wire::build_message_send_body`'s fourth parameter and
+    /// `parse_message_send_params`' fourth field are one wire key, proven end
+    /// to end rather than assumed.
+    #[test]
+    fn the_clients_from_claim_round_trips_through_the_inbound_parser() {
+        let body = aoide_client::wire::build_message_send_body("hello there", "mid-789", None, Some("conduct-1-2"));
+        let (_, _, _, claimed_from) = parse_message_send_params(&body["params"]);
+        assert_eq!(claimed_from.as_deref(), Some("conduct-1-2"));
     }
 
     /// P-P5b (`node spawn`): the exact body `handle_node_spawn`
@@ -4127,7 +4417,7 @@ mod tests {
     #[test]
     fn build_message_send_body_routes_to_the_spawn_arm_exactly_as_do_spawn_expects() {
         let body = aoide_client::wire::build_message_send_body("status check please", "mid-456", None, None);
-        let (prompt, ctx, spawn_asked) = parse_message_send_params(&body["params"]);
+        let (prompt, ctx, spawn_asked, _) = parse_message_send_params(&body["params"]);
         assert_eq!(prompt, "status check please");
         assert_eq!(ctx, None, "no contextId — the Spawn signal `decide_send_action` reads");
         assert!(!spawn_asked, "spawn is signaled by the ABSENT contextId, not the metadata flag — `node spawn` never sets it");
@@ -4211,7 +4501,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&stage);
     }
 
-    /// LANE IDENTITY P-ID0 (G16/G5): `stamp_spawn_origin` is the record-layer
+    /// LANE IDENTITY P-ID0 (G16/G5): `stamp_spawn_provenance` is the record-layer
     /// authority `do_spawn` now calls directly, rather than threading a
     /// `node:*` value through the child's own env — proven up to, but never
     /// through, `do_spawn`'s real process spawn, same documented boundary
@@ -4219,8 +4509,13 @@ mod tests {
     /// boundary` draws above: the record here is written directly (as
     /// `session_conduct`'s own registration would, once the child comes up),
     /// so the retry loop finds it on its very first poll.
+    ///
+    /// P-RSA S3 extends it to the second of the two stamps the one retry loop
+    /// carries: `None` leaves the record's `remoteParent` absent (the whole
+    /// pre-S3 shape), and `Some` lands it on the SAME pass as the origin —
+    /// never a second poll, never a second thread.
     #[test]
-    fn stamp_spawn_origin_lands_a_node_origin_on_an_already_registered_record() {
+    fn stamp_spawn_provenance_lands_the_origin_and_the_remote_parent_on_a_registered_record() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
         let stage = std::env::temp_dir().join(format!(
@@ -4233,15 +4528,39 @@ mod tests {
 
         let sf = SessionsFile {
             schema_version: "0".to_string(),
-            sessions: vec![fixture_session("a2a-spawned-1", "working", None)],
+            sessions: vec![
+                fixture_session("a2a-spawned-1", "working", None),
+                fixture_session("a2a-spawned-2", "working", None),
+            ],
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        stamp_spawn_origin("a2a-spawned-1", "node:yomi-strix");
+        stamp_spawn_provenance("a2a-spawned-1", "node:yomi-strix", None);
+        stamp_spawn_provenance(
+            "a2a-spawned-2",
+            "node:yomi-strix",
+            Some(RemoteParent {
+                node: "yomi-strix".to_string(),
+                key: "ab".repeat(32),
+                session_id: "conduct-17991-1790312541".to_string(),
+            }),
+        );
 
         let after: SessionsFile = load_stage(&sessions_path()).unwrap();
         let rec = after.sessions.iter().find(|s| s.session_id == "a2a-spawned-1").unwrap();
         assert_eq!(rec.origin.as_deref(), Some("node:yomi-strix"));
+        assert!(rec.remote_parent.is_none(), "no claim → nothing stamped, byte-identical to the pre-S3 shape");
+
+        let rec2 = after.sessions.iter().find(|s| s.session_id == "a2a-spawned-2").unwrap();
+        assert_eq!(rec2.origin.as_deref(), Some("node:yomi-strix"));
+        let rp = rec2.remote_parent.as_ref().expect("the claim landed on the same registration pass");
+        assert_eq!(rp.node, "yomi-strix");
+        assert_eq!(rp.key, "ab".repeat(32));
+        assert_eq!(rp.session_id, "conduct-17991-1790312541");
+        assert_eq!(
+            rec2.parent_session_id, None,
+            "the door never writes a foreign id into the LOCAL parentSessionId (CONTRACTS.md §4)"
+        );
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
@@ -5989,6 +6308,92 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.0, -32006, "genuinely signed and paired, but `spawn` was revoked from allows");
         assert!(err.1.contains("node allow"), "taught error must name the exact fix: {}", err.1);
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
+    /// P-RSA S3: a signed caller's MALFORMED claim is `-32602`, refused before
+    /// any spawn admission is even consulted — the claim is inside the body
+    /// digest, so a caller that signed it meant it, and a silent drop would
+    /// hide a client bug. Driven through the REAL `message_send` on a refusal
+    /// branch only (this file's documented discipline: no test here may reach
+    /// `do_spawn`'s real process spawn, which on the admitted path would
+    /// exec the TEST binary as an agent).
+    #[test]
+    fn a_signed_callers_malformed_from_claim_is_refused_with_minus_32602() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-from-claim-bad-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+
+        // Genuinely signed, verified, spawn-allowed: nothing but the claim is
+        // wrong, so the -32602 below is the claim's own doing.
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read", "spawn"]);
+        let body =
+            aoide_client::wire::build_message_send_body("status check please", "mid-bad-1", None, Some("not/a/session"));
+        let body_bytes = serde_json::to_vec(&body).unwrap();
+        let now = 1_800_000_000_i64;
+        let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("bad-from"));
+        let signed_node_name = match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, .. } => resolved,
+            other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
+        };
+
+        let audit_log = root.join("log");
+        let err = message_send(
+            &body["params"],
+            &audit_log,
+            "claude",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            Some(signed_node_name.as_str()),
+        )
+        .unwrap_err();
+        assert_eq!(err.0, -32602, "a signed caller's malformed claim is invalid params, never a silent drop");
+        assert!(err.1.contains("aoide/from"), "the refusal names the key: {}", err.1);
+        // ...and the same malformed value UNSIGNED is not an error at all —
+        // there is no claim to validate off a weaker rung. Loopback with no
+        // token resolves no node, so the spawn arm refuses: the refusal is
+        // -32006, provably not -32602.
+        let unsigned = message_send(
+            &body["params"],
+            &audit_log,
+            "claude",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(unsigned.0, -32006, "an unsigned caller's bad claim is ignored, not validated: {}", unsigned.1);
+
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(
+            log.contains("\"status\":\"ignored-unsigned-from\""),
+            "the ignore is audited, one line, by name: {log}"
+        );
+        assert!(
+            !log.contains("\"status\":\"ok\""),
+            "neither call ever spawned: {log}"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_state {

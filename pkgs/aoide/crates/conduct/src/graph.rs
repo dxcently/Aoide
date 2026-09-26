@@ -135,6 +135,12 @@ pub use self::session_store::{session_bind, session_end, session_phase, session_
 // child's own (forgeable) env. `stamp_origin`'s own doc comment names both
 // legitimate callers.
 pub use self::session_store::stamp_origin;
+// The remote sub-agents lane (P-RSA S3): the SAME writer posture one field
+// over — `aoide-server`'s `a2a::do_spawn` stamps the child's `remoteParent`
+// from the resolved node record (never a header or body name), and no other
+// crate/flag/env path may write it. `stamp_remote_parent`'s own doc has the
+// full argument.
+pub use self::session_store::stamp_remote_parent;
 // LANE IDENTITY P-ID1: `aoide-server`'s daemon `dispatch` handler is the one
 // legitimate caller — it stamps a just-minted sealed credential directly
 // onto the record it just registered a pid for, the same "stamp from the

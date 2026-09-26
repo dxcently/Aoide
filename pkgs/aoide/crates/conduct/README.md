@@ -927,7 +927,7 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   `aoide-server`'s A2A door spawned on behalf of an identified, paired node.
   It has exactly two legitimate STAMP callers: `aoide-server`'s
   `a2a::do_spawn` calls it DIRECTLY on the just-spawned record
-  (`stamp_spawn_origin`, polling for the record's registration the same way
+  (`stamp_spawn_provenance`, polling for the record's registration the same way
   `spawn_inject_prompt` already does), from the door where the node name is
   actually authenticated — the only place a `node:*` value may originate.
   `graph/conduct.rs::session_conduct` calls it for a LOCAL-CLASS value off
@@ -965,6 +965,21 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   unbuilt axis — CONTRACTS.md's identity-lane accounting). What P-ID0
   closes: every record-STAMP path this codebase drives refuses a `node:*`
   shape it didn't mint itself at the door — env AND ledger both.
+- **Remote parent (remote sub-agents P-RSA S3, CONTRACTS.md §4):**
+  `session_store.rs::stamp_remote_parent` is the ONE stamp function for
+  `SessionRecord.remoteParent` (`pub`, crossing the crate boundary), and its
+  single caller is the door where the caller's key was verified —
+  `aoide-server`'s `a2a::do_spawn`, through the same
+  `stamp_spawn_provenance` retry loop `stamp_origin` rides, so one
+  registration wait carries both stamps. The value is built there from the
+  RESOLVED node record (`name`, `pubkey`) plus the caller's signed
+  `metadata["aoide/from"]` claim, never from a header or body string. There
+  is deliberately NO local path: no env var and no `conduct`/`spawn` flag
+  for it (`session_conduct` reads none — nothing to refuse, since there is
+  nothing to read), and `resurrect` carries none forward. Change-only like
+  its two siblings, and `parentSessionId` is never written by it: that field
+  stays a LOCAL edge every reader treats as a local id. Attribution, never a
+  gate — the door's key comparison is the gate.
 - **Sealed session credential (LANE IDENTITY P-ID1/P-ID2) — minted by
   `aoide-server`'s daemon, verified and consumed inside this crate.**
   `session_store.rs::stamp_seal` is `SessionRecord.seal`/`sealedIssuedAt`'s

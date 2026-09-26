@@ -1526,9 +1526,16 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     // here is unauthenticated and must never be trusted — that shape now
     // comes ONLY from `aoide-server::a2a::do_spawn` stamping the record
     // directly at the door where the node name IS authenticated
-    // (`stamp_spawn_origin` in `crates/server/src/a2a.rs`), never threaded
+    // (`stamp_spawn_provenance` in `crates/server/src/a2a.rs`), never threaded
     // through this env var. A taught refusal, not a panic: a hostile
     // `AOIDE_SESSION_ORIGIN=node:X` simply fails to stamp.
+    //
+    // `remoteParent` has no counterpart read here AT ALL (P-RSA S3): no env
+    // var, no `--parent`-shaped flag, nothing for this function to refuse —
+    // the door is its only writer, and a local `conduct`/`spawn` cannot even
+    // name one. That absence is the invariant (CONTRACTS.md §4's
+    // `remoteParent` paragraph, `stamp_remote_parent`'s own doc), pinned by
+    // a test rather than guarded by dead code.
     if let Ok(origin) = std::env::var("AOIDE_SESSION_ORIGIN") {
         if is_node_origin(&origin) {
             eprintln!(

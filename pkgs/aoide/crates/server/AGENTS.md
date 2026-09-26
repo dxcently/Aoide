@@ -351,6 +351,39 @@
   process spawn this precedent exists to avoid inside a `cargo test`
   binary (`std::env::current_exe()` there is the TEST binary, not a real
   `aoide`).
+- **The `metadata["aoide/from"]` parent claim is honoured on the Signature
+  rung ONLY, and the value is built from the RESOLVED record, never from wire
+  bytes (P-RSA S3, CONTRACTS.md §4/§6).** `parse_message_send_params`' fourth
+  field reads `message.metadata[aoide_protocol::wire::FROM_SESSION_KEY]` and
+  nothing else — never the top-level `params.metadata` fallback `aoide/spawn`
+  also accepts, because this is a claim about WHO is calling and the client's
+  outbound builder writes it in that one place; an empty or non-string value is
+  "no claim", not a third state. `claimed_remote_parent` is the whole decision,
+  pure over exactly two inputs: the `(node, rung)` pair `message_send`'s own
+  resolution produced and the claim string. Three invariants live there and
+  none may be relaxed: (1) a weaker rung — no resolution, `NodeRung::Token`,
+  `NodeRung::Addr` — IGNORES the claim and yields nothing, because a spawn
+  already requires the Signature rung and a claim from an unauthenticated
+  caller has nobody to attribute it to; the ignore is audited once
+  (`a2a.message/send`/`status:"ignored-unsigned-from"`) and must NOT become a
+  refusal — a distinct error there would be a new oracle where today there is
+  silence. (2) A signed caller's malformed claim is `-32602`, never a silent
+  drop: the value rode inside the body the caller signed, so a bad one is a
+  client bug worth surfacing, and `valid_claimed_session_id` is the SAME
+  predicate the client refuses its own claim with (never a second spelling).
+  (3) `node`/`key` come off the resolved `Node` record — the key that actually
+  verified this request — with the claim supplying `sessionId` alone; a name
+  read off `X-Aoide-Node` or the body would be exactly the forgery the key
+  check exists to stop, so never thread a wire string into this value. The
+  stamp is `do_spawn`'s `remote_parent` argument → `stamp_spawn_provenance`,
+  which spends the ONE registration retry loop on both its stamps
+  (`stamp_origin`, then `stamp_remote_parent`) — never a second poll, never a
+  second thread — and the child gets NO env var for it (`spawn_child_command`
+  clears `AOIDE_SESSION_ID`/`AOIDE_SESSION_ORIGIN` and adds nothing back),
+  the same reason `node:*` origin stopped riding env at P-ID0. This door never
+  writes `parentSessionId`: every reader of that field treats it as a LOCAL id,
+  so a foreign value there would dangle or grant local autogate
+  (CONTRACTS.md §4).
   `verify_signed_request`'s canonical string now reads `&req.method` (the
   request's own OBSERVED method), not a hardcoded `"POST"` literal (P-P5b,
   closing a P-P4 review finding) — a genuine behavior no-op today (every

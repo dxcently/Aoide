@@ -368,7 +368,9 @@ seeing a stale "haunting" session.
 ## Session identity — origin and the sealed credential
 
 Two additive record fields carry a session's provenance (LANE IDENTITY,
-task #63); both are consumed internally and get no `graph.json` projection:
+task #63), plus a third for the SAME question across machines (the remote
+sub-agents lane's `remoteParent`, below); `origin` and the sealed credential
+are consumed internally and get no `graph.json` projection:
 
 - **`origin`** (string, write-once) — `"node:<name>"` for a session the A2A
   door spawned on behalf of an identified, paired node, a local-class value
@@ -384,6 +386,22 @@ task #63); both are consumed internally and get no `graph.json` projection:
   gate**: `sessions.json` and `state/session-ledger.jsonl` stay plain
   same-uid-writable files, so no security decision keys on `origin` as read
   off disk. The authenticated form is the seal.
+- **`remoteParent`** (object, `{node, key, sessionId}`) — the SAME spawned-by
+  edge across machines, deliberately a SECOND field. `parentSessionId` stays
+  LOCAL-only: every reader of it (the autogate grant and sibling rule in
+  `graph/send.rs`, `graph/model.rs`'s grouping, `graph link`'s cycle check,
+  `taskreport`'s mailbox) treats it as a local id, so a foreign value there
+  would dangle at best and match a same-named local session at worst — which
+  would hand local autogate to a stranger. The **receiving A2A door** is its
+  only writer: `stamp_remote_parent` lands it on the just-registered child
+  from the node record the caller's own signature verified (so `key` is the
+  identity and `node` only the label the door knew at stamp time), plus the
+  caller's session id off the signed `metadata["aoide/from"]` claim. Never a
+  name from a header or the body, and never through the child's env — a local
+  `conduct`/`spawn` cannot name one at all, and `resurrect` carries none
+  forward. Change-only, like `origin`. Same attribution posture as `origin`:
+  `sessions.json` stays a plain, same-uid-writable file, so the gate is the
+  key comparison the door makes, never this field as read off disk.
 - **`seal` + `sealedIssuedAt`** — the sealed session credential, sharing
   one lifecycle (always both or neither). `aoided` mints an ed25519 keypair
   once per process and holds it in memory only, never on disk — a separate

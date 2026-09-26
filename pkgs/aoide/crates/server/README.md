@@ -362,7 +362,7 @@ the inbound half of the two-door contract (the outbound half is
   is failing to sign); a `Signature`-resolved node missing the `spawn`
   capability gets the exact `node allow` fix; every other shape gets the
   original "pair first, then allow" message. The resolved node's name also
-  threads two ways past the gate: `do_spawn` calls `stamp_spawn_origin`
+  threads two ways past the gate: `do_spawn` calls `stamp_spawn_provenance`
   (LANE IDENTITY P-ID0, G16/G5, review round 1) to stamp
   `SessionRecord.origin = "node:<name>"` DIRECTLY on the just-spawned record
   once it registers — this door is the ONLY place a `node:*` value may
@@ -372,7 +372,12 @@ the inbound half of the two-door contract (the outbound half is
   env read, and a third path, `graph/resurrect.rs::origin_to_carry`,
   refuses it again when reading a revived session's own ledger entry back —
   `state/session-ledger.jsonl` is unsealed, so a same-uid process could
-  otherwise forge the shape there too). `stamp_spawn_origin` polls for the
+  otherwise forge the shape there too). The same stamp carries the caller's
+  `remoteParent` when it presented a valid `metadata["aoide/from"]` claim
+  (P-RSA S3) — one registration wait, two change-once stamps, and the value is
+  built from this resolved record's `name`/`pubkey`, never from a header or
+  body string (`claimed_remote_parent` in `a2a.rs` carries the rung rule and
+  the `-32602`). `stamp_spawn_provenance` polls for the
   record's registration on the same best-effort budget
   `spawn_inject_prompt` uses (~3s); a disclosed behavior change from the
   pre-P-ID0 synchronous env write — a child that registers slower than that

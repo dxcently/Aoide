@@ -1445,6 +1445,23 @@ locally-registered record and every record predating this field, and a record
 without it serialises byte-identical to before. Its caller-side mirror is
 `state/stage/remote-children.json`, below.
 
+**Who may write it, and with what.** Exactly one writer, the receiving A2A
+door: `a2a::do_spawn` stamps it through
+`aoide_conduct::graph::stamp_remote_parent` (one retry loop, alongside the
+`origin` stamp — `a2a::stamp_spawn_provenance`), and builds the value from the
+node record the request's own signature resolved to, never from a header or a
+body string. `node`/`key` are that record's, `sessionId` is the caller's
+`metadata["aoide/from"]` claim (§6, below). Nothing else mints one: there is no
+env var and no `conduct`/`spawn` flag for it (`session_conduct` reads none, and
+refuses nothing because there is nothing to read), and `resurrect` never
+carries it forward. Like `origin`, the field is **attribution, not
+authentication** — `sessions.json` stays a plain, same-uid-writable file, so no
+security decision keys on `remoteParent` as read off disk; the gate is the key
+comparison the door makes against the verifying node's pubkey. It is
+change-only as a stamp, exactly like `origin`/`seal` (a same-value re-stamp
+writes nothing; a genuinely different value overwrites, since the guard is the
+value already on the record, not a "has this ever been set" flag).
+
 **Additive in v0:** a session record MAY also carry an optional `contextTokens`
 (integer) — the input-side token count (`input_tokens +
 cache_creation_input_tokens + cache_read_input_tokens`) of the freshest
@@ -4714,6 +4731,25 @@ predicate both sides read); it rides INSIDE the signed body, so the claim is
 covered by the body digest along with the prompt. Absent means "claims no
 parent" — an empty or non-string value is not a third state.
 
+**The claim is honoured on the SIGNATURE rung only, and the door stamps what
+it can prove.** `message_send` turns the claim into the spawned child's
+`remoteParent` (above, §4) via the pure `claimed_remote_parent`, which sees
+exactly two things: the `(node, rung)` pair its own resolution produced and the
+claim string. A request this door did not verify against a `verified` node's
+stored pubkey — unsigned, bearer-token, or a bare address match — ignores the
+claim entirely and writes one audit line
+(`a2a.message/send`/`status:"ignored-unsigned-from"`), rather than a refusal:
+an unauthenticated caller has no claim to make, and a distinct error there
+would be a new oracle where today there is silence. A claim from a genuinely
+signed caller is validated with `valid_claimed_session_id` and a malformed one
+is refused `-32602` — never silently dropped, since the value was inside the
+body the caller signed. The value passed to `do_spawn` is built from the
+RESOLVED node record's `name` and `pubkey` (the key that verified the request)
+with the claim as `sessionId` alone: no name or key from a header or the body
+ever reaches the stamp, so a paired node can only ever name parents inside its
+own namespace. The child itself gets no such value in its environment — the
+door stamps the record, exactly as it does for `node:*` `origin`.
+
 **The command a spawn runs is `aoide.a2a.spawnAgent`** — a nix option, off
 (`""`) by default, resolved once at `a2a serve` launch (`--spawn-agent` flag →
 `AOIDE_A2A_SPAWN_AGENT` env, set by the `aoide-a2a` systemd unit → the
@@ -5386,7 +5422,10 @@ behind the same NAT/proxy as the real node). **Signature**
 rung a PAIRED node earns by completing the ceremony (`aoide pair`) and
 signing every request with the identity that ceremony verified —
 strictly stronger than `token_file`'s bare replayable shared secret, and
-the ONLY rung Spawn accepts (`a2a.rs::spawn_admitted`). A verified
+the ONLY rung Spawn accepts (`a2a.rs::spawn_admitted`) — and the only rung on
+which a `metadata["aoide/from"]` parent claim is honoured at all (the
+`remoteParent` stamp; that paragraph above carries the rule and the audit
+line). A verified
 signature also outranks loopback for the Inject gate: an ssh `-L` forward
 (or any other loopback-terminating proxy) delivers a tunneled node's
 packets from its own end's sshd, so `classify_origin` sees loopback for
