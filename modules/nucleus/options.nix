@@ -423,7 +423,10 @@ in
         The songs built into this system: the `rice.nix` files imported, the
         widgets copied into the deployed shell tree, the packages installed and
         the folders the machine songbook is seeded with. Derived from the host
-        record's song selection; a host record never sets it.
+        record's song selection — and CLOSED UNDER BORROWS (CONTRACTS.md §5): a
+        song whose records borrow another song's slots builds the lender in too,
+        because the borrower's slots resolve to `songs/<owner>/<file>` on disk.
+        A host record never sets it.
       '';
     };
 

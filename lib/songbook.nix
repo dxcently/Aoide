@@ -74,16 +74,27 @@ let
     let
       dir = songs.${name} or null;
       shelf = if dir == null then null else dir + "/_widgets";
-      fn = if shelf == null || !(builtins.pathExists shelf) then null else import shelf;
+      entry =
+        if shelf == null || !(builtins.pathExists (shelf + "/default.nix")) then
+          null
+        else
+          shelf + "/default.nix";
+      fn = if entry == null then null else import entry;
       offered = {
         inherit lib borrow;
         song = songLib;
       };
+      required = lib.attrNames (lib.filterAttrs (_: hasDefault: !hasDefault) (builtins.functionArgs fn));
+      unoffered = lib.subtractLists (lib.attrNames offered) required;
     in
     if dir == null then
       throw "borrow: song '${name}' is not in the songbook; discovered: ${lib.concatStringsSep ", " songNames}"
     else if fn == null then
-      throw "borrow: song '${name}' has no _widgets/ shelf to borrow from"
+      throw "borrow: song '${name}' has no _widgets/ shelf to borrow from (no ${toString shelf}/default.nix)"
+    else if !(builtins.isFunction fn) then
+      throw "borrow: song '${name}'s _widgets/default.nix is not a function; a shelf is `{ lib, song, borrow, ... }: { <slot> = <record>; }`"
+    else if unoffered != [ ] then
+      throw "borrow: song '${name}'s _widgets/default.nix wants ${lib.concatStringsSep ", " unoffered}, which a shelf is not handed; it receives ${lib.concatStringsSep ", " (lib.attrNames offered)}"
     else
       fn (lib.intersectAttrs (builtins.functionArgs fn) offered);
 
@@ -221,20 +232,24 @@ let
   # Every `.nix` under a song that is neither `<song>/rice.nix` nor part of the
   # song's `_widgets/` shelf. Such a file would join the module merge silently
   # and could set arbitrary host options, so it is a build failure rather than a
-  # convention (`checks.song-shape`).
+  # convention (`checks.song-shape`). Written with `builtins.readDir` recursion,
+  # not `lib.filesystem`: the check is the replacement for a walker that is gone,
+  # and a check that needed one would not survive it.
   #
-  # Written with `builtins.readDir` recursion, not `lib.filesystem`: the check
-  # is the replacement for a walker that is gone, and a check that needed one
-  # would not survive it. `_widgets/` is pruned by NAME, so a shelf's own
-  # default.nix and its per-slot records are never strays.
-  # `rice.nix` at the SONG ROOT is the song's module — the one `.nix` a song may
-  # hold outside its `_widgets/` shelf — and the exclusion is by (depth, name),
-  # not by name alone: a nested `design/rice.nix` is still a stray.
-  listNix =
+  # ── One walk, two questions ─────────────────────────────────────────────────
+  # Every `.nix` under one song. Two callers want different views of that list,
+  # so the differences are knobs rather than a second recursion:
+  #
+  #   `pruneShelf`  skip `_widgets/` (a shelf is score, not a module — the strays
+  #                 check is about modules, and the shelf's own files are its own)
+  #   `rootRice`    this directory IS the song root, so `rice.nix` here is the
+  #                 song's module and not a stray — while a nested `rice.nix` is.
+  walkNix =
     {
       prefix,
       dir,
-      root ? false,
+      pruneShelf ? false,
+      rootRice ? false,
     }:
     let
       entries = builtins.readDir dir;
@@ -242,28 +257,27 @@ let
     lib.concatMap (
       entry:
       let
-        path = dir + "/${entry}";
+        isDir = entries.${entry} == "directory";
       in
-      if entries.${entry} == "directory" then
-        (
-          if entry == "_widgets" then
-            [ ]
-          else
-            listNix {
-              prefix = "${prefix}/${entry}";
-              dir = path;
-            }
-        )
+      if isDir && pruneShelf && entry == "_widgets" then
+        [ ]
+      else if isDir then
+        walkNix {
+          prefix = "${prefix}/${entry}";
+          dir = dir + "/${entry}";
+          inherit pruneShelf;
+        }
       else
-        lib.optional (lib.hasSuffix ".nix" entry && !(root && entry == "rice.nix")) "${prefix}/${entry}"
+        lib.optional (lib.hasSuffix ".nix" entry && !(rootRice && entry == "rice.nix")) "${prefix}/${entry}"
     ) (builtins.attrNames entries);
 
   strayNixFiles = lib.concatMap (
     name:
-    listNix {
+    walkNix {
       prefix = name;
-      dir = songbook + "/${name}";
-      root = true;
+      dir = songs.${name};
+      pruneShelf = true;
+      rootRice = true;
     }
   ) songNames;
 
@@ -273,23 +287,8 @@ let
   # `rice.nix` reaching for `lib/song.nix` or another song's `_widgets/`, which
   # is exactly what the injected `song`/`borrow` replaced. Scanned by reading the
   # text, and `_widgets/` is NOT pruned here (the shelf is where those escapes
-  # lived), so this is the one walk that sees every `.nix` in a song.
-  walkNix =
-    { prefix, dir }:
-    let
-      entries = builtins.readDir dir;
-    in
-    lib.concatMap (
-      entry:
-      if entries.${entry} == "directory" then
-        walkNix {
-          prefix = "${prefix}/${entry}";
-          dir = dir + "/${entry}";
-        }
-      else
-        lib.optional (lib.hasSuffix ".nix" entry) "${prefix}/${entry}"
-    ) (builtins.attrNames entries);
-
+  # lived), so this is the one walk that sees every `.nix` in a song — through
+  # the knobs the walk above already has.
   escapingNixFiles = lib.concatMap (
     name:
     lib.filter (rel: lib.hasInfix "../" (builtins.readFile (songbook + "/${rel}"))) (walkNix {
@@ -381,8 +380,39 @@ let
         )
       );
 
-  # The songs a host builds in: what it performs, plus what it can stage live.
-  builtIn = sel: lib.unique (lib.optional (sel.declared != null) sel.declared ++ sel.available);
+  # ── The built-in set, closed under borrows ──────────────────────────────────
+  # What a host performs, what it can stage live, and — for every song in that
+  # set — the songs its widget records BORROW from, to a fixpoint. A borrow is a
+  # slot whose body lives in another song's `widgets/` (CONTRACTS.md §5), so a
+  # lender that is not itself built in leaves the borrower's manifest naming a
+  # directory that is not on disk: the deployed `songs/<owner>/<file>` does not
+  # exist, and the slot renders nothing. The closure is not a new concept — it is
+  # exactly what the host writing `song.available = [ … ]` would say — and it is
+  # the same set the runtime resolves against (`StagingEngine`'s `entry.owner`),
+  # so the widget copy, the shipped templates, `packagesFor`, the machine
+  # songbook seed and `builtin.json` all agree by construction. A lender becomes
+  # stageable on that host, which is intended.
+  #
+  # Sorted the way the songbook's own discovery sorts, so neither what a case
+  # prints nor what a manifest is filtered by depends on which song was declared.
+  builtIn =
+    sel:
+    let
+      close =
+        names:
+        let
+          lenders = lib.unique (
+            lib.concatMap (
+              name: map (slot: songMeta.${name}.manifest.${slot}.owner) (lib.attrNames songMeta.${name}.manifest)
+            ) names
+          );
+          next = lib.unique (names ++ lenders);
+        in
+        if next == names then names else close next;
+    in
+    builtins.sort builtins.lessThan (
+      close (lib.unique (lib.optional (sel.declared != null) sel.declared ++ sel.available))
+    );
 
   # The modules a built-in song contributes: its `rice.nix`, and nothing else.
   # An unselected song's file is never imported, which is what makes a

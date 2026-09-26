@@ -26,7 +26,11 @@ modules/dendrites/lyra/
   folders plus `builtin.json` (`{ declared, songs, packages }`), and
   `home.activation.aoideSeedSongbook` copies each one into the machine's own
   songbook **only when it is absent** — a rebuild never rewrites what the machine
-  has. Guarded on that fact; the lane sets it `mkDefault true`.
+  has. That set is CLOSED UNDER BORROWS (`lib/songbook.nix`'s `builtIn`): a
+  selected song's records name their slot bodies by `owner`, so the lenders ship
+  and seed beside it, which is what makes every manifest record resolve to a
+  directory that exists on the host. Guarded on that fact; the lane sets it
+  `mkDefault true`.
 - **`shellbridge.nix` — the bridge.** The bidirectional seam between the daemon
   / agents and the live desktop: OUT as atomic JSON under `state/stage/`, IN as
   unix-socket commands, and the only consumer of Hyprland's IPC (QML never

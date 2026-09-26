@@ -169,7 +169,7 @@ let
         if strayNixFiles != [ ] then
           "stray .nix outside rice.nix/_widgets/: ${builtins.toString strayNixFiles}"
         else if escapingNixFiles != [ ] then
-          "a song reaches outside its own folder (a `../` path literal, CONTRACTS.md §5): ${builtins.toString escapingNixFiles}"
+          "a song's `.nix` TEXT carries a `../` path literal (CONTRACTS.md §5): ${builtins.toString escapingNixFiles}"
         else
           "no rice.nix or no livery.json in: ${builtins.toString incomplete}"
       }";

@@ -4813,10 +4813,22 @@ arrive as ARGUMENTS, injected at the two sites that evaluate a song:
   composition that dresses a slot with another song's body borrows it BY NAME —
   `borrow "sonata" // { inherit (borrow "fugue") bar herald; }`. An unknown name,
   or a song with no `_widgets/` shelf, throws a message naming the discovered set.
-- **A `../` path literal in any `.nix` under a song folder is a contract
-  violation**, not a style question: it is what makes a song un-shippable to a
-  machine whose songbook is not this checkout — which is what
-  `pkgs/lyra-songbook`, `aoideSeedSongbook` and the offline generator all assume.
+- **A borrow JOINS the built-in set.** The songs a host builds in are closed
+  under the owners its records name: a host that declares quodlibet alone builds
+  in `fugue` and `sonata` as well, because quodlibet's records borrow slots from
+  both. That is not a convenience — a record names its body by `owner`, the
+  deployed tree resolves `songs/<owner>/<file>`, and a lender that is not on disk
+  makes the borrower's slot render nothing. So the widget copy, the shipped
+  templates, the packages installed, the machine songbook seed and
+  `builtin.json` all carry the lenders, and a lender becomes stageable on that
+  host. There is no separate field for it: the closure is what
+  `song.declared ∪ song.available` would have said if the host had written the
+  lenders out by hand.
+- **A `.nix` under a song folder carries no `../` path literal.** The rule is
+  about the TEXT, and that is what `checks.song-shape` scans
+  (`escapingNixFiles`): the escape SHAPE the injected arguments replaced, caught
+  whether or not it would resolve — including one written inside a comment, which
+  is the price of a scan that does not have to evaluate a song to judge it.
 - **Signatures.** A `rice.nix` declares `{ lib, config, song, borrow, ... }:`;
   a shelf's `default.nix` declares `{ lib, song, borrow, ... }:`. Both keep
   `...`: a file that wants only one of the two names it (`{ borrow, ... }:`),
@@ -4835,9 +4847,9 @@ the check.
 `checks.song-shape` structurally asserts three things about every discovered
 song: it carries its `rice.nix` and its `livery.json`; it holds no `.nix` outside
 `rice.nix` and its `_widgets/` shelf (`strayNixFiles`, which would join the
-module merge silently and could set arbitrary host options); and **nothing in it
-names a path outside its own folder** (`escapingNixFiles` — any `.nix` whose text
-carries a `../`, per "The shelf, and the two injected arguments" above). The
+module merge silently and could set arbitrary host options); and no `.nix` in it
+has text carrying a `../` path literal (`escapingNixFiles` — a scan of the text,
+not a resolution, per "The shelf, and the two injected arguments" above). The
 **full** "only defines `aoide.livery`" invariant is a documented convention here
 (isolated per-module option-diffing is disproportionate for v0; see the
 `TODO(song-shape v1)` in `lib/checks.nix`).

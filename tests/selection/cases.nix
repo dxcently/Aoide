@@ -809,4 +809,43 @@ selectionCases
 
   songEscapeClean = builtins.concatStringsSep "," songbook.escapingNixFiles;
   songEscapeFound = builtins.concatStringsSep "," songbookEscape.escapingNixFiles;
+
+  # ── A borrow joins the built-in set (CONTRACTS.md §5) ──────────────────────
+  # `borrower` dresses every slot with `lender`'s body, so a host performing
+  # `borrower` and nothing else still builds the lender in — otherwise the
+  # deployed `songs/lender/slotA.qml` would not exist and the slot would render
+  # nothing. Two readings: the set itself, and the property it exists for — every
+  # owner a built-in song's manifest names is itself in the set.
+  songbookBorrow = import ../../lib/songbook.nix {
+    inherit lib;
+    songbook = ./songbook-borrow;
+  };
+
+  songBorrowClosure = builtins.concatStringsSep " " (
+    songbookBorrow.builtIn {
+      declared = "borrower";
+      available = [ ];
+    }
+  );
+
+  songBorrowOwnersResolve =
+    let
+      built = songbookBorrow.builtIn {
+        declared = "borrower";
+        available = [ ];
+      };
+      owners = lib.unique (
+        lib.concatMap (
+          name:
+          map (slot: songbookBorrow.songMeta.${name}.manifest.${slot}.owner) (
+            lib.attrNames songbookBorrow.songMeta.${name}.manifest
+          )
+        ) built
+      );
+      unresolvable = lib.subtractLists built owners;
+    in
+    if unresolvable == [ ] then
+      "all-resolve"
+    else
+      "unresolvable: ${builtins.concatStringsSep "," unresolvable}";
 }
