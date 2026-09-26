@@ -1116,6 +1116,16 @@ fn handle_secrets_migrate(inv: &Invocation) -> Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── the POSIX-shell fixture class (gated, with the reason) ───────────
+    //
+    // Every test below carrying `#[cfg(unix)]` drives the backend TEMPLATE
+    // mechanism with a POSIX fixture: an `sh -c` command line, or a
+    // `#!/bin/sh` shim script on `PATH`. The mechanism itself is portable and
+    // HAS a native arm — `sh -c` on Unix, `cmd /C` on native Windows
+    // (`backend::run_backend_command`'s own doc) — so these gates name the
+    // FIXTURE, never the code under test. The Windows arm of the same path is
+    // exercised natively by `backend::tests::a_native_windows_template_*`.
     use crate::store;
     use aoide_protocol::output::Status;
     use std::collections::BTreeMap;
@@ -1129,6 +1139,15 @@ mod tests {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
+        // Pinned at creation, the way the crate creates its own home
+        // (`store::save_policies`: `create_dir_all` then `secure_dir`). A bare
+        // `create_dir_all` is not the same object: on an elevated Windows
+        // token a new directory's DEFAULT OWNER is `BUILTIN\Administrators`
+        // (`S-1-5-32-544`), and every same-user check this crate makes
+        // (`home::admin_identity_check`, `owner_of`) then reads a home this
+        // process does not own — which is exactly why the crate pins at
+        // creation rather than tightening later.
+        crate::home::secure_dir(&dir).unwrap();
         std::env::set_var("AOIDE_SECRETS_HOME", &dir);
         // Task #79: `admin_dispatch` tries the REAL socket
         // `crate::socket::socket_path()` resolves to FIRST — which, unlike
@@ -1583,6 +1602,9 @@ mod tests {
     /// REAL broker + socket round trip, the same shape as `tests/e2e.rs`'s
     /// own requireTotp coverage, but seeded through the actual CLI handler
     /// under test here rather than a hand-built `Policy`.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn require_totp_on_add_births_a_gated_policy_denied_without_a_code() {
         with_secrets_home("require-totp-add-e2e", |home| {
@@ -1612,7 +1634,7 @@ mod tests {
 
             let mut connected = false;
             for _ in 0..50 {
-                if std::os::unix::net::UnixStream::connect(&socket_path).is_ok() {
+                if crate::test_net::UnixStream::connect(&socket_path).is_ok() {
                     connected = true;
                     break;
                 }
@@ -1640,25 +1662,26 @@ mod tests {
     /// bare `format!("policy.json: {e}")`. Skipped under a root test
     /// runner (root reads `0000` files fine, so the denial this test
     /// depends on wouldn't happen).
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn a_policy_json_this_euid_cannot_read_gets_the_chown_reference_hint() {
-        if home::effective_uid() == 0 {
+        if home::running_as_root() {
             return;
         }
         with_secrets_home("poisoned", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
             assert_eq!(handle_secrets_add(&add).status, Status::Ok);
-
-            use std::os::unix::fs::PermissionsExt;
             let path = store::policy_path(home);
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+            crate::home::set_mode(&path, 0o000).unwrap();
 
             let rm = inv(Door::Cli, &["secrets", "rm"], &["t"], &[]);
             let out = handle_secrets_rm(&rm);
 
             // Restore before any assertion could early-return and leave the
             // tempdir's cleanup unable to remove an unreadable file.
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+            crate::home::set_mode(&path, 0o600).unwrap();
 
             assert_eq!(out.status, Status::Error, "{out:?}");
             assert!(out.message.to_lowercase().contains("permission denied"), "{}", out.message);
@@ -1981,9 +2004,12 @@ mod tests {
     /// `home.rs`'s own pure unit tests. Skipped under a root test runner
     /// (root would own `/` too, so the mismatch this test depends on
     /// wouldn't exist).
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn automate_and_expose_refuse_a_mismatched_euid_before_touching_policy_json() {
-        if home::effective_uid() == 0 {
+        if home::running_as_root() {
             return;
         }
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2106,6 +2132,9 @@ mod tests {
         });
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn migrate_to_the_same_backend_is_an_idempotent_no_op() {
         with_secrets_home("migrate-noop", |home| {
@@ -2124,6 +2153,9 @@ mod tests {
         });
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn migrate_with_no_stored_value_under_the_source_is_a_clean_refusal() {
         with_secrets_home("migrate-missing-value", |home| {
@@ -2189,9 +2221,12 @@ mod tests {
 
     /// Same discipline as `automate`/`expose` above: an admin-identity
     /// mismatch refuses BEFORE `policy.json` is ever touched.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn migrate_refuses_a_mismatched_euid_before_touching_policy_json() {
-        if home::effective_uid() == 0 {
+        if home::running_as_root() {
             return;
         }
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2226,6 +2261,9 @@ mod tests {
     /// absent path), but this test makes the CONTRACT explicit — `add`
     /// reports `path: "direct"` in its `Outcome::data`, not merely "it
     /// worked somehow".
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn add_falls_back_to_the_direct_write_path_and_reports_it_when_no_socket_is_listening() {
         with_secrets_home("fallback-reports-direct", |_home| {
@@ -2265,7 +2303,7 @@ mod tests {
         });
         let mut connected = false;
         for _ in 0..50 {
-            if std::os::unix::net::UnixStream::connect(&socket_path).is_ok() {
+            if crate::test_net::UnixStream::connect(&socket_path).is_ok() {
                 connected = true;
                 break;
             }
@@ -2334,7 +2372,7 @@ mod tests {
         });
         let mut connected = false;
         for _ in 0..50 {
-            if std::os::unix::net::UnixStream::connect(&socket_path).is_ok() {
+            if crate::test_net::UnixStream::connect(&socket_path).is_ok() {
                 connected = true;
                 break;
             }
@@ -2448,17 +2486,19 @@ mod tests {
     /// honest `unreachable`, with the group-membership hint rather than the
     /// broker-not-running one. Distinct from "missing" on purpose: the crate
     /// already separates them, and status must not collapse them.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn status_over_a_socket_this_uid_may_not_open_is_a_taught_refusal() {
-        use std::os::unix::fs::PermissionsExt;
         with_scratch_paths("status-eacces", |_home, socket| {
-            let _listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
+            let _listener = crate::test_net::UnixListener::bind(socket).unwrap();
             // Owner-only bits stripped: connecting to an `AF_UNIX` socket
             // requires write permission ON the socket file, so even its own
             // owner is refused — the deployed shape is `0660` +
             // `aoide-secrets-access`, and this is the "not in the group yet"
             // half of it.
-            std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o000)).unwrap();
+            crate::home::set_mode(socket, 0o000).unwrap();
 
             let out = handle_secrets_status(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
             assert_eq!(out.status, Status::Error, "{out:?}");
@@ -2475,7 +2515,7 @@ mod tests {
     fn status_over_a_broker_that_does_not_know_the_op_is_an_explicit_failure() {
         use std::io::{BufRead, Write};
         with_scratch_paths("status-oldbroker", |_home, socket| {
-            let listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
+            let listener = crate::test_net::UnixListener::bind(socket).unwrap();
             let sock_for_thread = socket.to_path_buf();
             let handle = std::thread::spawn(move || {
                 if let Ok((stream, _)) = listener.accept() {
@@ -2603,6 +2643,9 @@ mod tests {
 
     /// Bounce-fix item 2's own discipline (P-V2 review), extended to
     /// `migrate`: CLI-only, and a gated call never mutates `policy.json`.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn migrate_is_cli_only_a_non_cli_door_never_mutates_policy_json() {
         with_secrets_home("migrate-door-gate", |home| {

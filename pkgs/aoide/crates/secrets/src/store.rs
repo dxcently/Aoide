@@ -208,14 +208,13 @@ mod tests {
     /// the process umask happens to be.
     #[test]
     fn save_policies_locks_down_the_home_dir_and_the_file() {
-        use std::os::unix::fs::PermissionsExt;
         let home = tmp_home("perms");
         save_policies(&home, &[Policy::new("t", "pass", "x")]).unwrap();
 
-        let dir_mode = std::fs::metadata(&home).unwrap().permissions().mode() & 0o777;
+        let dir_mode = crate::home::mode_of(&home);
         assert_eq!(dir_mode, 0o700, "secrets home must be 0700, got {dir_mode:o}");
 
-        let file_mode = std::fs::metadata(policy_path(&home)).unwrap().permissions().mode() & 0o777;
+        let file_mode = crate::home::mode_of(&policy_path(&home));
         assert_eq!(file_mode, 0o600, "policy.json must be 0600, got {file_mode:o}");
 
         std::fs::remove_dir_all(&home).ok();
@@ -242,10 +241,9 @@ mod tests {
 
     #[test]
     fn totp_secret_is_locked_to_0600() {
-        use std::os::unix::fs::PermissionsExt;
         let home = tmp_home("totp-perms");
         save_totp_secret(&home, b"x").unwrap();
-        let mode = std::fs::metadata(totp_secret_path(&home)).unwrap().permissions().mode() & 0o777;
+        let mode = crate::home::mode_of(&totp_secret_path(&home));
         assert_eq!(mode, 0o600, "totp.secret must be 0600, got {mode:o}");
         std::fs::remove_dir_all(&home).ok();
     }
@@ -289,10 +287,9 @@ mod tests {
 
     #[test]
     fn replay_ledger_is_locked_to_0600() {
-        use std::os::unix::fs::PermissionsExt;
         let home = tmp_home("ledger-perms");
         save_replay_ledger(&home, &ReplayLedger::new()).unwrap();
-        let mode = std::fs::metadata(replay_ledger_path(&home)).unwrap().permissions().mode() & 0o777;
+        let mode = crate::home::mode_of(&replay_ledger_path(&home));
         assert_eq!(mode, 0o600, "totp-replay.json must be 0600, got {mode:o}");
         std::fs::remove_dir_all(&home).ok();
     }

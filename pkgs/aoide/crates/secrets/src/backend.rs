@@ -196,7 +196,9 @@
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Stdio;
@@ -285,12 +287,23 @@ fn resolve_backend(secrets_home: &Path, name: &str) -> Result<Backend, String> {
     Ok(builtin_backend_defaults(name).unwrap_or_else(|| stored.clone()))
 }
 
-/// Single-quote shell-escape `s`: wrap in `'...'`, escaping any embedded
-/// `'` as `'\''` (close the quote, emit an escaped literal quote, reopen
-/// the quote — the standard POSIX technique). The result is always safe
-/// to splice into an `sh -c` command line as ONE argument, regardless of
-/// what `s` contains (whitespace, quotes, `$`, backticks, `;` — none of
-/// it is interpreted once single-quoted).
+/// Quote `s` for substitution into a template, in the quoting THIS host's
+/// command interpreter reads — the substitution half of the same seam
+/// `run_backend_command`'s `sh -c`/`cmd /C` choice sits on.
+///
+/// **Unix**: `sh`'s single quotes: wrap in `'...'`, escaping an embedded `'`
+/// as `'\''` (close, escaped literal, reopen). The result is always safe to
+/// splice into an `sh -c` line as ONE argument, whatever `s` contains
+/// (whitespace, quotes, `$`, backticks, `;` — none of it is interpreted).
+///
+/// **Native Windows**: `cmd`'s double quotes, an embedded `"` doubled. Stated
+/// rather than papered over: `cmd` still expands `%NAME%` INSIDE double
+/// quotes, so quoting cannot make a run carrying `%` literal. Nothing on this
+/// path substitutes a SECRET VALUE — the two placeholders take the operator's
+/// stored `key` name and the secrets-home path — so what could be rewritten
+/// is operator-authored text, and the template author who writes `%` sees it
+/// happen.
+#[cfg(unix)]
 fn shell_single_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('\'');
@@ -310,6 +323,23 @@ fn shell_single_quote(s: &str) -> String {
 /// module doc for why this is not a sequential two-pass `.replace()`. Both
 /// substitutions are shell-single-quote-escaped ([`shell_single_quote`]);
 /// neither placeholder may be pre-quoted by the template author.
+#[cfg(windows)]
+fn shell_single_quote(s: &str) -> String {
+    // A bare run is correct whenever it carries nothing `cmd` would split or
+    // rewrite — the ordinary shape of a backend key — and a bare run is also
+    // what the shipped-style Windows templates read (`echo {name}` prints the
+    // key with no quoting to argue with). Anything else gets `cmd`'s only
+    // quoting character, doubled inside: stated rather than implied, `cmd`
+    // still expands `%NAME%` inside double quotes.
+    let bare = !s.is_empty()
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || "-_./\\:@".contains(c));
+    if bare {
+        s.to_string()
+    } else {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    }
+}
+
 fn expand_template(template: &str, secrets_home: &Path, key: &str) -> String {
     let home_q = shell_single_quote(&secrets_home.to_string_lossy());
     let key_q = shell_single_quote(key);
@@ -387,6 +417,7 @@ const BACKEND_POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// modest fixed size) would otherwise block on the CHILD side waiting for
 /// a reader that only shows up once the process has already exited — a
 /// self-inflicted deadlock this crate's own timeout must not introduce.
+#[cfg(unix)]
 fn set_nonblocking(fd: std::os::fd::RawFd) {
     // SAFETY: `fd` is a pipe fd this process just created via `Stdio::
     // piped()` and still owns; `fcntl(F_GETFL)`/`fcntl(F_SETFL)` are
@@ -405,6 +436,7 @@ fn set_nonblocking(fd: std::os::fd::RawFd) {
 /// tolerant way. This is best-effort output CAPTURE for the eventual
 /// success/error message, not the mechanism that decides success or
 /// failure — the child's own exit status is.
+#[cfg(unix)]
 fn drain_nonblocking<R: Read>(reader: &mut R, buf: &mut Vec<u8>) {
     let mut chunk = [0u8; 4096];
     loop {
@@ -428,6 +460,18 @@ fn drain_nonblocking<R: Read>(reader: &mut R, buf: &mut Vec<u8>) {
 /// (a killed child's own status tells us nothing new; the taught timeout
 /// error is already decided by the time this runs), but the reap itself is
 /// NOT optional: skipping it leaves a zombie behind.
+///
+/// **Native Windows kills the child alone, by name.** There is no process
+/// group to address: Windows' answer to "kill this tree" is a JOB OBJECT
+/// (`CreateJobObject`/`AssignProcessToJobObject`/`TerminateJobObject`), which
+/// this crate does not build — it would be a new Win32 surface inside
+/// `secrets`, whose whole Windows story is "reach for `aoide-protocol`"
+/// (this crate links no `windows-sys`). So the guarantee here is the NARROWER
+/// one, stated rather than silently assumed: the backend child itself is
+/// killed and reaped, and anything IT forked may outlive the timeout. A
+/// template that forks is a template whose Windows timeout leaves orphans;
+/// that is the degradation, and it is this function's whole Windows arm.
+#[cfg(unix)]
 fn kill_process_group(child: &mut std::process::Child) {
     let pid = child.id() as libc::pid_t;
     // SAFETY: `pid` is this process's own child, spawned moments ago as its
@@ -436,6 +480,13 @@ fn kill_process_group(child: &mut std::process::Child) {
     unsafe {
         libc::kill(-pid, libc::SIGKILL);
     }
+    let _ = child.wait();
+}
+
+/// See the Unix arm above for what this does NOT cover on native Windows.
+#[cfg(windows)]
+fn kill_process_group(child: &mut std::process::Child) {
+    let _ = child.kill();
     let _ = child.wait();
 }
 
@@ -473,23 +524,47 @@ fn wait_bounded(
     mut stdout_pipe: Option<std::process::ChildStdout>,
     mut stderr_pipe: Option<std::process::ChildStderr>,
 ) -> Result<(std::process::ExitStatus, Vec<u8>, Vec<u8>), WaitOutcome> {
-    if let Some(ref out) = stdout_pipe {
-        set_nonblocking(out.as_raw_fd());
+    #[cfg(unix)]
+    {
+        if let Some(ref out) = stdout_pipe {
+            set_nonblocking(out.as_raw_fd());
+        }
+        if let Some(ref err) = stderr_pipe {
+            set_nonblocking(err.as_raw_fd());
+        }
     }
-    if let Some(ref err) = stderr_pipe {
-        set_nonblocking(err.as_raw_fd());
-    }
+    // Native Windows has no `fcntl` for a pipe handle, so the drain does not
+    // happen on this thread at all: each pipe gets a reader thread that runs
+    // to EOF and appends into its own buffer. The wait loop below is the
+    // Unix one verbatim — same `try_wait` poll, same deadline, same kill and
+    // reap — and the buffers are read out at the end. **What that guarantees
+    // is the same, and one step stronger**: the child can never block on a
+    // full pipe buffer, because a reader is always parked on it (the Unix
+    // arm polls and can be a tick late), and the final drain is implicit
+    // because the reader has already run to EOF. What it costs is a thread
+    // per pipe, and what it does NOT promise is that a reader thread ends:
+    // a descendant holding the write end open keeps it blocked in `read`
+    // after this function returns, which is the same "orphan" shape
+    // `kill_process_group`'s own Windows note names.
+    #[cfg(windows)]
+    let (stdout_sink, stderr_sink) = (
+        stdout_pipe.take().map(pipe_reader_thread),
+        stderr_pipe.take().map(pipe_reader_thread),
+    );
 
     let mut stdout_buf = Vec::new();
     let mut stderr_buf = Vec::new();
     let deadline = Instant::now() + backend_timeout();
 
     let status = loop {
-        if let Some(ref mut out) = stdout_pipe {
-            drain_nonblocking(out, &mut stdout_buf);
-        }
-        if let Some(ref mut err) = stderr_pipe {
-            drain_nonblocking(err, &mut stderr_buf);
+        #[cfg(unix)]
+        {
+            if let Some(ref mut out) = stdout_pipe {
+                drain_nonblocking(out, &mut stdout_buf);
+            }
+            if let Some(ref mut err) = stderr_pipe {
+                drain_nonblocking(err, &mut stderr_buf);
+            }
         }
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -503,15 +578,68 @@ fn wait_bounded(
             Err(e) => return Err(WaitOutcome::WaitFailed(e)),
         }
     };
-    // One final drain — output written between the last poll and the
-    // process actually exiting would otherwise be lost.
-    if let Some(ref mut out) = stdout_pipe {
-        drain_nonblocking(out, &mut stdout_buf);
+    #[cfg(unix)]
+    {
+        // One final drain — output written between the last poll and the
+        // process actually exiting would otherwise be lost.
+        if let Some(ref mut out) = stdout_pipe {
+            drain_nonblocking(out, &mut stdout_buf);
+        }
+        if let Some(ref mut err) = stderr_pipe {
+            drain_nonblocking(err, &mut stderr_buf);
+        }
     }
-    if let Some(ref mut err) = stderr_pipe {
-        drain_nonblocking(err, &mut stderr_buf);
+    #[cfg(windows)]
+    {
+        if let Some(sink) = stdout_sink {
+            stdout_buf = sink.take();
+        }
+        if let Some(sink) = stderr_sink {
+            stderr_buf = sink.take();
+        }
     }
     Ok((status, stdout_buf, stderr_buf))
+}
+
+/// A pipe read to EOF on its own thread, for the native-Windows arm of
+/// [`wait_bounded`] — the shape `std`'s own `wait_with_output` uses, minus
+/// the unbounded wait. The buffer is shared, so the caller can read whatever
+/// has arrived even if the thread is still parked in `read` (which is what a
+/// descendant holding the write end open leaves it doing).
+#[cfg(windows)]
+fn pipe_reader_thread<R: Read + Send + 'static>(mut pipe: R) -> PipeBytes {
+    let sink = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let writer = std::sync::Arc::clone(&sink);
+    std::thread::spawn(move || {
+        let mut chunk = [0u8; 4096];
+        loop {
+            match pipe.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => match writer.lock() {
+                    Ok(mut buf) => buf.extend_from_slice(&chunk[..n]),
+                    Err(_) => break,
+                },
+                Err(_) => break,
+            }
+        }
+    });
+    PipeBytes(sink)
+}
+
+/// What a pipe-reading thread has collected so far — `take` is "read the
+/// buffer out", never "join the thread", so a thread still parked in `read`
+/// cannot hang this.
+#[cfg(windows)]
+struct PipeBytes(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+#[cfg(windows)]
+impl PipeBytes {
+    fn take(self) -> Vec<u8> {
+        match self.0.lock() {
+            Ok(mut buf) => std::mem::take(&mut *buf),
+            Err(poisoned) => std::mem::take(&mut *poisoned.into_inner()),
+        }
+    }
 }
 
 /// The taught error for a backend shell-out that outran
@@ -559,13 +687,49 @@ fn backend_timeout_error(backend_name: &str, op: &str) -> String {
 /// [`backend_timeout_error`] — never a zombie left behind, never the
 /// template text in the error.
 fn run_backend_command(backend_name: &str, op: &str, command: &str, stdin_data: Option<&str>) -> Result<Vec<u8>, String> {
-    let mut cmd = std::process::Command::new("sh");
-    cmd.arg("-c").arg(command);
+    // **The built-in presets are POSIX command lines, and native Windows has
+    // no `sh`** — `FILE_BACKEND_GET`/`AGE_BACKEND_GET` open with `cat`/`age`,
+    // which `cmd` reports as an unrecognized command. Running one and
+    // returning its exit status would be an obscure failure of a KNOWN cause,
+    // so it is refused BY NAME here, at the last moment before anything
+    // spawns — after every other taught error of this path has had its say (a
+    // missing `age` identity, an unknown backend) — and never under `cmd`.
+    // **Only the BUILT-IN presets**: a host-shaped template an operator
+    // configured (any other backend name) runs under `cmd /C` as usual.
+    #[cfg(windows)]
+    if let Some(builtin) = builtin_backend_defaults(backend_name) {
+        return Err(format!(
+            "backend `{backend_name}` ({op}) is a built-in POSIX-shell preset (`{}`), and native Windows has no \
+             built-in backend yet — configure a host-shaped template for `{backend_name}` (any backend whose \
+             templates are written for this host's command interpreter runs as usual)",
+            // The template text is the backend's own documentation and names
+            // no secret: showing it is what makes the refusal actionable.
+            builtin.get
+        ));
+    }
+    // The template is a COMMAND LINE, so it is handed to this host's own
+    // command interpreter: `sh -c` on Unix, `cmd /C` on native Windows (which
+    // has no `sh`, and where refusing every backend would make every
+    // non-`file` backend unusable). The contract is the same either way — one
+    // command line, its stdout captured, bounded by [`backend_timeout`] — and
+    // what differs is the template LANGUAGE, a per-host configuration fact
+    // rather than a difference in this function: the shipped presets
+    // (`pass`/`gopass`/`bw`/`sops`) are POSIX tools, and a Windows host writes
+    // its own templates against `cmd`.
+    // The command line goes to this host's interpreter through the ONE seam
+    // both template-running crates share (`aoide_protocol::host_shell`) — and
+    // that seam is also where the Windows arm's verbatim hand-over (and the
+    // measured `arg`-vs-`raw_arg` evidence behind it) is documented. The
+    // separator is the template author's, though: cmd's builtins refuse a
+    // MIXED path (`type C:\a\b/file` is "The syntax of the command is
+    // incorrect.", measured), so a Windows template joins with `\`.
+    let mut cmd = aoide_protocol::host_shell::command(command);
     cmd.stdin(if stdin_data.is_some() { Stdio::piped() } else { Stdio::null() });
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
     // New process group, pgid == this child's own pid — see
     // `kill_process_group`'s doc for why a timeout kill needs this.
+    #[cfg(unix)]
     cmd.process_group(0);
 
     let mut child = cmd
@@ -644,8 +808,16 @@ pub fn fetch_value(secrets_home: &Path, backend_name: &str, key: &str) -> Result
     let command = expand_template(&backend.get, secrets_home, key);
 
     let mut stdout = run_backend_command(backend_name, "get", &command, None)?;
+    // Exactly ONE trailing line ending, in this host's own spelling: `\n` on
+    // Unix, and `\r\n` from a `cmd /C` child on native Windows — leaving the
+    // `\r` would put a stray carriage return at the end of every value a
+    // Windows template returns.
     if stdout.last() == Some(&b'\n') {
         stdout.pop();
+        #[cfg(windows)]
+        if stdout.last() == Some(&b'\r') {
+            stdout.pop();
+        }
     }
     String::from_utf8(stdout).map_err(|_| format!("backend `{backend_name}` produced non-UTF-8 output"))
 }
@@ -1117,6 +1289,7 @@ fn run_age_keygen(args: &[&str]) -> Result<std::process::Output, String> {
     cmd.stderr(Stdio::piped());
     // Same process-group-leader + kill-the-whole-group discipline
     // `run_backend_command` holds — see `kill_process_group`'s doc.
+    #[cfg(unix)]
     cmd.process_group(0);
 
     let mut child = cmd.spawn().map_err(|e| describe_missing_age_keygen(&e))?;
@@ -1137,6 +1310,16 @@ fn run_age_keygen(args: &[&str]) -> Result<std::process::Output, String> {
 mod tests {
     use super::*;
 
+    // ── the POSIX-shell fixture class (gated, with the reason) ───────────
+    //
+    // Every test below carrying `#[cfg(unix)]` drives the backend TEMPLATE
+    // mechanism with a POSIX fixture: an `sh -c` command line, or a
+    // `#!/bin/sh` shim script on `PATH`. The mechanism itself is portable and
+    // HAS a native arm — `sh -c` on Unix, `cmd /C` on native Windows
+    // (`backend::run_backend_command`'s own doc) — so these gates name the
+    // FIXTURE, never the code under test. The Windows arm of the same path is
+    // exercised natively by `backend::tests::a_native_windows_template_*`.
+
     fn tmp_home(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "aoide-secrets-backend-test-{tag}-{}-{}",
@@ -1155,6 +1338,9 @@ mod tests {
         std::fs::write(backends_path(home), serde_json::to_vec(&doc).unwrap()).unwrap();
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn trims_exactly_one_trailing_newline() {
         let home = tmp_home("trim");
@@ -1163,6 +1349,9 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn no_trailing_newline_is_untouched() {
         let home = tmp_home("notrim");
@@ -1173,6 +1362,9 @@ mod tests {
 
     /// Only ONE trailing newline is trimmed — a double newline proves the
     /// module doc's "exactly one", not a blanket `trim_end`.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn a_double_trailing_newline_leaves_one_behind() {
         let home = tmp_home("doubletrim");
@@ -1181,6 +1373,9 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn key_substitutes_into_name_not_the_backend_name() {
         let home = tmp_home("key");
@@ -1228,6 +1423,9 @@ mod tests {
 
     // ── bounce-fix item 4: the key is shell-escaped, not raw-substituted ─
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn key_with_a_space_round_trips_through_shell_quoting() {
         let home = tmp_home("space");
@@ -1236,6 +1434,9 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn key_with_an_embedded_single_quote_round_trips_through_shell_quoting() {
         let home = tmp_home("quote");
@@ -1244,6 +1445,9 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn shell_single_quote_escapes_every_embedded_quote() {
         assert_eq!(shell_single_quote("plain"), "'plain'");
@@ -1253,6 +1457,9 @@ mod tests {
 
     // ── {home} placeholder (P-V4c) ──────────────────────────────────────
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn home_placeholder_substitutes_the_secrets_home_path() {
         let home = tmp_home("homeplaceholder");
@@ -1261,6 +1468,9 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn home_placeholder_with_a_spaced_path_round_trips_through_shell_quoting() {
         let base = tmp_home("homespaced-base");
@@ -1271,6 +1481,9 @@ mod tests {
         std::fs::remove_dir_all(&base).ok();
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn name_and_home_placeholders_both_substitute_correctly_together() {
         let home = tmp_home("bothplaceholders");
@@ -1286,6 +1499,9 @@ mod tests {
     /// make [`expand_template`] re-scan its own (already-quoted, already
     /// substituted) output for a second `{home}` token — module doc's
     /// "single left-to-right scan over the ORIGINAL template" guarantee.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn a_key_containing_the_literal_home_token_is_not_re_scanned() {
         let home = tmp_home("literaltoken");
@@ -1296,6 +1512,9 @@ mod tests {
 
     // ── has_value (P-67, "warn before overwrite") ───────────────────────
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn has_value_is_true_when_the_get_template_succeeds() {
         let home = tmp_home("hasvalue-true");
@@ -1320,6 +1539,9 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn the_seeded_file_backend_reports_no_value_until_one_is_stored() {
         let home = tmp_home("hasvalue-file");
@@ -1337,6 +1559,9 @@ mod tests {
         std::fs::write(backends_path(home), serde_json::to_vec(&doc).unwrap()).unwrap();
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn store_value_writes_through_the_set_template_and_fetch_value_reads_it_back() {
         let home = tmp_home("storeroundtrip");
@@ -1421,19 +1646,21 @@ mod tests {
     /// backend's `set` template must leave a `0700` store dir and a `0600`
     /// secret file behind — asserted directly against a real filesystem,
     /// not merely implied by the template text.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn the_seeded_file_backend_writes_0600_files_under_a_0700_store_dir() {
-        use std::os::unix::fs::PermissionsExt;
         let home = tmp_home("filemodes");
         seed_default_backends(&home).unwrap();
         store_value(&home, "file", "my-secret-key", "the-stored-value").unwrap();
 
         let store_dir = home.join("store");
-        let dir_mode = std::fs::metadata(&store_dir).unwrap().permissions().mode() & 0o777;
+        let dir_mode = crate::home::mode_of(&store_dir);
         assert_eq!(dir_mode, 0o700, "store dir must be 0700, got {dir_mode:o}");
 
         let file_path = store_dir.join("my-secret-key");
-        let file_mode = std::fs::metadata(&file_path).unwrap().permissions().mode() & 0o777;
+        let file_mode = crate::home::mode_of(&file_path);
         assert_eq!(file_mode, 0o600, "stored secret file must be 0600, got {file_mode:o}");
 
         assert_eq!(std::fs::read_to_string(&file_path).unwrap(), "the-stored-value");
@@ -1446,6 +1673,9 @@ mod tests {
     /// The `.tmp`-then-`mv` shape (module doc on [`FILE_BACKEND_SET`]) must
     /// leave NO trace behind on a successful `set` — only the real
     /// destination file exists afterward, never a stray `.tmp` sibling.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn a_successful_file_set_leaves_no_tmp_sibling_behind() {
         let home = tmp_home("file-set-no-tmp");
@@ -1493,6 +1723,9 @@ mod tests {
     /// [`FILE_BACKEND_GET`]/[`AGE_BACKEND_GET`] regardless of what's stored
     /// on disk. Proven by a customized `get` template that would return an
     /// obviously different value if it ever ran.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn a_customized_stored_template_under_a_builtin_name_is_ignored_at_use_time() {
         let home = tmp_home("builtin-template-ignored");
@@ -1544,6 +1777,9 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn has_value_reports_true_via_a_has_template_even_when_get_would_fail() {
         let home = tmp_home("has-template-true-get-false");
@@ -1555,6 +1791,9 @@ mod tests {
     /// The exact live shape: a `backends.json` predating `has` carries no
     /// such key at all — behavior must be BYTE-IDENTICAL to before this
     /// field existed (`fetch_value(...).is_ok()`).
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn has_value_falls_back_to_the_get_probe_when_has_is_absent() {
         let home = tmp_home("has-template-absent");
@@ -1594,7 +1833,6 @@ mod tests {
             eprintln!("skipping age_identity_is_lazily_minted_on_first_call_and_locked_to_0600: age/age-keygen not found on PATH");
             return;
         }
-        use std::os::unix::fs::PermissionsExt;
         let home = tmp_home("age-mint");
         let key_path = home.join("age.key");
         let recipient_path = home.join("age.recipient");
@@ -1604,9 +1842,9 @@ mod tests {
         let minted = mint_age_identity_if_needed(&home).unwrap();
         assert!(minted, "the first call must mint a fresh identity");
 
-        let key_mode = std::fs::metadata(&key_path).unwrap().permissions().mode() & 0o777;
+        let key_mode = crate::home::mode_of(&key_path);
         assert_eq!(key_mode, 0o600, "age.key must be 0600, got {key_mode:o}");
-        let recipient_mode = std::fs::metadata(&recipient_path).unwrap().permissions().mode() & 0o777;
+        let recipient_mode = crate::home::mode_of(&recipient_path);
         assert_eq!(recipient_mode, 0o600, "age.recipient must be 0600, got {recipient_mode:o}");
 
         let recipient = std::fs::read_to_string(&recipient_path).unwrap();
@@ -1695,7 +1933,6 @@ mod tests {
             eprintln!("skipping the_seeded_age_backend_round_trips_a_value_through_a_real_age_binary: age/age-keygen not found on PATH");
             return;
         }
-        use std::os::unix::fs::PermissionsExt;
         let home = tmp_home("age-roundtrip");
         seed_default_backends(&home).unwrap();
         assert!(mint_age_identity_if_needed(&home).unwrap());
@@ -1706,10 +1943,10 @@ mod tests {
         assert_eq!(fetch_value(&home, "age", "my-secret-key").unwrap(), "the-stored-value");
 
         let values_dir = home.join("values");
-        let dir_mode = std::fs::metadata(&values_dir).unwrap().permissions().mode() & 0o777;
+        let dir_mode = crate::home::mode_of(&values_dir);
         assert_eq!(dir_mode, 0o700, "values dir must be 0700, got {dir_mode:o}");
         let file_mode =
-            std::fs::metadata(values_dir.join("my-secret-key.age")).unwrap().permissions().mode() & 0o777;
+            crate::home::mode_of(&values_dir.join("my-secret-key.age"));
         assert_eq!(file_mode, 0o600, "the .age file must be 0600, got {file_mode:o}");
         std::fs::remove_dir_all(&home).ok();
     }
@@ -1738,6 +1975,9 @@ mod tests {
     /// under the stored `age` key, this test's old approach, is now
     /// silently ignored by design, so the missing-binary scenario has to
     /// come from making the REAL `age` unreachable instead.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn a_missing_age_binary_produces_a_taught_error_naming_the_package() {
         let home = tmp_home("age-missing-binary");
@@ -1756,8 +1996,7 @@ mod tests {
         std::fs::write(&shim, "#!/bin/sh\nexit 127\n").unwrap();
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+            crate::home::set_mode(&shim, 0o755).unwrap();
         }
 
         let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1952,6 +2191,9 @@ mod tests {
 
     // ── remove_builtin_value (P-G2, task #72, `secrets migrate`) ────────
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn remove_builtin_value_removes_the_file_backends_value() {
         let home = tmp_home("remove-file-value");
@@ -2078,6 +2320,9 @@ mod tests {
     /// subshell) so the test can confirm, from OUTSIDE this module's own
     /// bookkeeping, that the killed process is actually gone from `/proc`
     /// afterward rather than lingering as a zombie.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn a_hung_get_template_times_out_kills_and_reaps_the_child() {
         let home = tmp_home("hung-get-timeout");
@@ -2113,6 +2358,9 @@ mod tests {
     /// within bounds rather than hanging" — proven directly at the choke
     /// point `store_value` (and, transitively, `broker::put_gate`) routes
     /// through, with the env knob set tiny.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn store_value_against_a_hung_set_template_returns_within_bounds() {
         let home = tmp_home("hung-set-timeout");
@@ -2151,6 +2399,9 @@ mod tests {
     /// Behavior unchanged for a well-behaved template under the DEFAULT
     /// (untouched) timeout — the bound must never slow down the common
     /// case.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn a_fast_template_is_unaffected_by_the_default_timeout() {
         let home = tmp_home("fast-template-unaffected");
@@ -2165,6 +2416,9 @@ mod tests {
     /// to a consumer would be corruption, strictly worse than a timeout
     /// (P-G3 review). Proves `wait_bounded`'s per-tick, non-blocking drain
     /// never lets a fast writer stall on a full pipe.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn a_large_output_survives_the_drain_loop_intact() {
         let home = tmp_home("large-output-drain");
@@ -2191,6 +2445,9 @@ mod tests {
     /// real `age` binary needed) proves `mint_age_identity_if_needed` now
     /// returns a timeout error within bounds, and reaps the shim rather
     /// than leaving it running.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn mint_age_identity_against_a_hung_age_keygen_returns_within_bounds() {
         let home = tmp_home("mint-hung-age-keygen");
@@ -2204,8 +2461,7 @@ mod tests {
         std::fs::write(&shim, "#!/bin/sh\nsleep 60\n").unwrap();
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+            crate::home::set_mode(&shim, 0o755).unwrap();
         }
 
         // Held across BOTH the raw PATH mutation below and the EnvGuard's
@@ -2234,5 +2490,76 @@ mod tests {
         assert!(!home.join("age.key").exists(), "a hung age-keygen must never leave a half-written key file");
         std::fs::remove_dir_all(&home).ok();
         std::fs::remove_dir_all(&shim_dir).ok();
+    }
+
+    /// The native-Windows arm of the spawn path, END TO END: a `cmd /C`
+    /// template runs, its stdout is drained by the reader thread, and the
+    /// bounded wait returns its value. This is the test that proves the
+    /// Windows half of `run_backend_command`/`wait_bounded` is not merely
+    /// compiled — and it is the crate's only template test that does not need
+    /// a POSIX shell, because its template is written for the host it runs on.
+    #[cfg(windows)]
+    #[test]
+    fn a_native_windows_template_spawns_drains_and_exits() {
+        let home = tmp_home("native-template");
+        // No placeholder: the substitution quoting is a separate seam, and
+        // this test is about the SPAWN, the drain and the exit.
+        write_backends(&home, "echo hello");
+        assert_eq!(fetch_value(&home, "scratch", "quick").unwrap(), "hello");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A `cmd /C` child that outlives the deadline: the timeout kill runs, the
+    /// child is reaped, and the caller gets the taught timeout error — never a
+    /// hang, and never the template text in the message. Covers
+    /// [`kill_process_group`]'s Windows arm (kill and reap the child alone).
+    #[cfg(windows)]
+    #[test]
+    fn a_native_windows_template_that_outlives_the_deadline_is_killed_and_reported() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var(BACKEND_TIMEOUT_ENV).ok();
+        let home = tmp_home("native-timeout");
+        write_backends(&home, "ping -n 30 127.0.0.1 > nul");
+        std::env::set_var(BACKEND_TIMEOUT_ENV, "1");
+        let err = fetch_value(&home, "scratch", "slow").unwrap_err();
+        match saved {
+            Some(v) => std::env::set_var(BACKEND_TIMEOUT_ENV, v),
+            None => std::env::remove_var(BACKEND_TIMEOUT_ENV),
+        }
+        assert!(err.contains("timed out"), "{err}");
+        assert!(!err.contains("ping"), "the template text never rides into the error: {err}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A built-in POSIX preset REFUSES BY NAME at resolution on native Windows
+    /// — never spawned, so never an obscure `cmd` exit status — while a
+    /// host-shaped template for any other backend still runs under `cmd /C`.
+    /// The refusal is about the CLASS (`file` and `age` alike), not one name.
+    #[cfg(windows)]
+    #[test]
+    fn a_builtin_posix_preset_refuses_by_name_and_a_host_shaped_template_still_runs() {
+        let home = tmp_home("preset-refusal");
+        let doc = serde_json::json!({
+            "file": { "get": "cat {home}/store/{name}" },
+            "age": { "get": "age -d -i {home}/age.key {home}/store/{name}" },
+            "scratch": { "get": "echo {name}" },
+        });
+        std::fs::write(crate::backend::backends_path(&home), serde_json::to_vec(&doc).unwrap()).unwrap();
+
+        let err = fetch_value(&home, "file", "k").unwrap_err();
+        assert!(err.contains("POSIX-shell preset"), "{err}");
+        assert!(err.contains("cat {home}/store/{name}"), "the refusal shows what it refused: {err}");
+        assert!(err.contains("host-shaped template"), "and how to fix it: {err}");
+        // `age` refuses the same way — once its OWN, more specific taught
+        // error (a missing identity) is out of the way.
+        std::fs::write(home.join("age.key"), b"not-a-real-key").unwrap();
+        assert!(
+            fetch_value(&home, "age", "k").unwrap_err().contains("POSIX-shell preset"),
+            "the class, not one name"
+        );
+
+        // The same host, a template written for it: unchanged behaviour.
+        assert_eq!(fetch_value(&home, "scratch", "quick").unwrap(), "quick");
+        std::fs::remove_dir_all(&home).ok();
     }
 }

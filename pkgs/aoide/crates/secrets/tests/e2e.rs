@@ -35,9 +35,23 @@
 //! identically regardless of what `run_exec` set the inherited fd to. This
 //! exercises the real, unmodified `run_exec`/`Stdio::inherit()` path.
 
-use aoide_secrets::{backend, broker, client, home, policy::Policy, store, watch};
+#[cfg(unix)]
+use aoide_secrets::{backend, watch};
+use aoide_secrets::{broker, client, home, policy::Policy, store};
+#[cfg(unix)]
 use std::io::Read;
-use std::path::{Path, PathBuf};
+/// The client half of the socket, chosen at the SEAM: `std`'s on Unix, the
+/// native `AF_UNIX` binding on native Windows (`aoide_protocol::win_unix`).
+/// An integration test is its own crate, so it cannot reach the lib's own
+/// `test_net` alias — this is that alias, one type per host, no second
+/// implementation anywhere.
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
+#[cfg(windows)]
+use aoide_protocol::win_unix::UnixStream;
+#[cfg(unix)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// `cargo test` runs every `#[test]` fn in this binary concurrently by
@@ -65,12 +79,18 @@ fn short_tmp(tag: &str) -> PathBuf {
     PathBuf::from(format!("/tmp/av-{tag}-{}-{nanos}", std::process::id()))
 }
 
+#[cfg(unix)]
 fn read_to_string(path: &Path) -> String {
     let mut s = String::new();
     std::fs::File::open(path).unwrap().read_to_string(&mut s).unwrap();
     s
 }
 
+// cfg(unix): the fixture writes a POSIX-shaped secrets home under /tmp and an
+// `sh -c` file-backend template (the built-in presets refuse by name here — see
+// backend::tests::a_builtin_posix_preset_refuses_by_name_and_a_host_shaped_template_still_runs,
+// which covers the same resolution path natively).
+#[cfg(unix)]
 #[test]
 fn end_to_end_resolve_denies_and_grants_env_round_trip() {
     let _guard = audit_env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -112,7 +132,7 @@ fn end_to_end_resolve_denies_and_grants_env_round_trip() {
     // it a bounded number of short retries.
     let mut connected = false;
     for _ in 0..50 {
-        if std::os::unix::net::UnixStream::connect(&socket_path).is_ok() {
+        if UnixStream::connect(&socket_path).is_ok() {
             connected = true;
             break;
         }
@@ -196,6 +216,11 @@ fn end_to_end_resolve_denies_and_grants_env_round_trip() {
 /// (`backend::seed_default_backends`) is what puts the `file` backend
 /// there, proving the seeding site works end-to-end, not merely in
 /// isolation.
+// cfg(unix): the fixture writes a POSIX-shaped secrets home under /tmp and an
+// `sh -c` file-backend template (the built-in presets refuse by name here — see
+// backend::tests::a_builtin_posix_preset_refuses_by_name_and_a_host_shaped_template_still_runs,
+// which covers the same resolution path natively).
+#[cfg(unix)]
 #[test]
 fn put_then_get_round_trips_through_the_real_socket_with_the_seeded_file_backend() {
     let _guard = audit_env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -219,7 +244,7 @@ fn put_then_get_round_trips_through_the_real_socket_with_the_seeded_file_backend
 
     let mut connected = false;
     for _ in 0..50 {
-        if std::os::unix::net::UnixStream::connect(&socket_path).is_ok() {
+        if UnixStream::connect(&socket_path).is_ok() {
             connected = true;
             break;
         }
@@ -235,10 +260,9 @@ fn put_then_get_round_trips_through_the_real_socket_with_the_seeded_file_backend
     let store_dir = secrets_home.join("store");
     let stored_file = store_dir.join("filed-key");
     {
-        use std::os::unix::fs::PermissionsExt;
-        let dir_mode = std::fs::metadata(&store_dir).unwrap().permissions().mode() & 0o777;
+        let dir_mode = mode_of(&store_dir);
         assert_eq!(dir_mode, 0o700, "store dir must be 0700, got {dir_mode:o}");
-        let file_mode = std::fs::metadata(&stored_file).unwrap().permissions().mode() & 0o777;
+        let file_mode = mode_of(&stored_file);
         assert_eq!(file_mode, 0o600, "stored secret file must be 0600, got {file_mode:o}");
     }
     assert_eq!(read_to_string(&stored_file), "sentinel-put-value");
@@ -284,6 +308,11 @@ fn put_then_get_round_trips_through_the_real_socket_with_the_seeded_file_backend
 /// code and the request actually landing), assert the grant AND the
 /// backend marker, then the SAME code again denied (replay) — also
 /// through the real socket, not the pure `resolve_gate` function.
+// cfg(unix): the fixture writes a POSIX-shaped secrets home under /tmp and an
+// `sh -c` file-backend template (the built-in presets refuse by name here — see
+// backend::tests::a_builtin_posix_preset_refuses_by_name_and_a_host_shaped_template_still_runs,
+// which covers the same resolution path natively).
+#[cfg(unix)]
 #[test]
 fn end_to_end_requiretotp_resolve_grants_then_denies_replay_through_the_socket() {
     let _guard = audit_env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -321,7 +350,7 @@ fn end_to_end_requiretotp_resolve_grants_then_denies_replay_through_the_socket()
 
     let mut connected = false;
     for _ in 0..50 {
-        if std::os::unix::net::UnixStream::connect(&socket_path).is_ok() {
+        if UnixStream::connect(&socket_path).is_ok() {
             connected = true;
             break;
         }
@@ -364,6 +393,11 @@ fn end_to_end_requiretotp_resolve_grants_then_denies_replay_through_the_socket()
 /// an in-process `ParkRegistry` shared directly (`broker.rs`'s own unit
 /// tests already cover that half; this is the "real socketpair/test
 /// socket" half the phase brief calls for explicitly).
+// cfg(unix): the fixture writes a POSIX-shaped secrets home under /tmp and an
+// `sh -c` file-backend template (the built-in presets refuse by name here — see
+// backend::tests::a_builtin_posix_preset_refuses_by_name_and_a_host_shaped_template_still_runs,
+// which covers the same resolution path natively).
+#[cfg(unix)]
 #[test]
 fn park_then_approve_over_the_real_socket_releases_the_value_to_the_original_caller() {
     let _guard = audit_env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -387,7 +421,7 @@ fn park_then_approve_over_the_real_socket_releases_the_value_to_the_original_cal
     });
     let mut connected = false;
     for _ in 0..50 {
-        if std::os::unix::net::UnixStream::connect(&socket_path).is_ok() {
+        if UnixStream::connect(&socket_path).is_ok() {
             connected = true;
             break;
         }
@@ -450,6 +484,11 @@ fn park_then_approve_over_the_real_socket_releases_the_value_to_the_original_cal
 /// proving the broker's accept loop never blocks on a parked connection.
 /// Bounded by a short deadline so a regression back to a serial accept loop
 /// fails this test instead of hanging the suite.
+// cfg(unix): the fixture writes a POSIX-shaped secrets home under /tmp and an
+// `sh -c` file-backend template (the built-in presets refuse by name here — see
+// backend::tests::a_builtin_posix_preset_refuses_by_name_and_a_host_shaped_template_still_runs,
+// which covers the same resolution path natively).
+#[cfg(unix)]
 #[test]
 fn a_second_connection_is_accepted_and_served_while_the_first_sits_parked() {
     let _guard = audit_env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -475,7 +514,7 @@ fn a_second_connection_is_accepted_and_served_while_the_first_sits_parked() {
     });
     let mut connected = false;
     for _ in 0..50 {
-        if std::os::unix::net::UnixStream::connect(&socket_path).is_ok() {
+        if UnixStream::connect(&socket_path).is_ok() {
             connected = true;
             break;
         }
@@ -556,6 +595,11 @@ fn secrets_home_resolves_through_the_env_override() {
 /// unit tests (`events_default_is_a_sibling_of_the_socket_path`), so using
 /// the env override here for isolation costs this test nothing — it still
 /// exercises `append_events_feed`/`Follower` against a real file on disk.
+// cfg(unix): the fixture writes a POSIX-shaped secrets home under /tmp and an
+// `sh -c` file-backend template (the built-in presets refuse by name here — see
+// backend::tests::a_builtin_posix_preset_refuses_by_name_and_a_host_shaped_template_still_runs,
+// which covers the same resolution path natively).
+#[cfg(unix)]
 #[test]
 fn watch_follower_sees_a_parked_event_within_about_a_second_through_the_real_events_feed() {
     let _guard = audit_env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -583,7 +627,7 @@ fn watch_follower_sees_a_parked_event_within_about_a_second_through_the_real_eve
     });
     let mut connected = false;
     for _ in 0..50 {
-        if std::os::unix::net::UnixStream::connect(&socket_path).is_ok() {
+        if UnixStream::connect(&socket_path).is_ok() {
             connected = true;
             break;
         }
@@ -643,4 +687,123 @@ fn watch_follower_sees_a_parked_event_within_about_a_second_through_the_real_eve
     std::env::remove_var("AOIDE_SECRETS_EVENTS");
     std::fs::remove_dir_all(&secrets_home).ok();
     std::fs::remove_file(&socket_path).ok();
+}
+
+/// This object's privacy as the mode a reader would recognise — the
+/// integration-test twin of the lib's own `home::mode_of` (an integration test
+/// can only see the crate's public API, so the helper is not reachable here).
+/// Unix: the actual bits. Native Windows: `0o600`/`0o700` for an object whose
+/// policy reads back owner-only, `0o644` for one that does not.
+#[cfg(unix)]
+fn mode_of(path: &std::path::Path) -> u32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).expect("stat").permissions().mode() & 0o777
+    }
+    #[cfg(windows)]
+    {
+        let is_dir = std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false);
+        let reason = if is_dir {
+            aoide_protocol::owner_only::dir_privacy(path)
+        } else {
+            aoide_protocol::owner_only::file_privacy(path)
+        };
+        match reason.expect("read the object's own policy back") {
+            None => {
+                if is_dir {
+                    0o700
+                } else {
+                    0o600
+                }
+            }
+            Some(_) => 0o644,
+        }
+    }
+}
+
+/// The gated POSIX fixtures' contract, exercised NATIVELY: a real
+/// `broker::serve` on a Windows `AF_UNIX` socket, a real policy, and a
+/// **user-supplied** backend whose templates are written for `cmd` (no built-in
+/// preset is involved — those refuse by name here). `put` and `resolve`
+/// therefore travel the whole path on this host: accept on the socket →
+/// kernel-truth peer identity → gate → `cmd /C` spawn → drain → reply, and the
+/// value never touches argv.
+#[cfg(windows)]
+#[test]
+fn native_windows_a_user_supplied_cmd_backend_puts_and_resolves_over_the_real_socket() {
+    let _guard = audit_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let secrets_home = std::env::temp_dir().join(format!("aoide-e2e-native-{}-{nanos}", std::process::id()));
+    std::fs::create_dir_all(&secrets_home).unwrap();
+    // The store directory is created the way the crate creates one: a plain
+    // `create_dir_all` here leaves it owned by Administrators (an elevated
+    // token's default owner), which a filtered token cannot write into.
+    let store_dir = secrets_home.join("store");
+    std::fs::create_dir_all(&store_dir).unwrap();
+    home::secure_dir(&store_dir).expect("pin the store directory to this user");
+    let socket_path = secrets_home.join("secrets.sock");
+    std::env::set_var("AOIDE_AUDIT_LOG", secrets_home.join("mirrored-aoide-log"));
+
+    // `findstr "^"` reads the value from stdin and writes it to the store
+    // file; `type` reads it back. Both are commands this host has. The
+    // separators are this host's own: `cmd`'s builtins refuse a MIXED path
+    // (`type C:\a\b/file` is "The syntax of the command is incorrect.",
+    // measured), so a Windows template spells its joins with `\` — the
+    // template's language is cmd's, and that includes its separators.
+    let backends = serde_json::json!({
+        "native": {
+            "get": "type {home}\\store\\{name}.txt",
+            "set": "findstr \"^\" >{home}\\store\\{name}.txt",
+        }
+    });
+    // Written the way this CRATE writes it, then pinned: on an elevated
+    // token a plain `std::fs::write` leaves the file owned by Administrators,
+    // and under a filtered token that owner is unreadable even by its
+    // creator — `home::secure_file` is what pins it to this user.
+    let backends_file = aoide_secrets::backend::backends_path(&secrets_home);
+    std::fs::write(&backends_file, serde_json::to_vec(&backends).unwrap()).unwrap();
+    home::secure_file(&backends_file).expect("pin the backends file to this user");
+
+    let mut policy = Policy::new("nativ", "native", "k");
+    policy.consumers = vec!["m".to_string()];
+    store::save_policies(&secrets_home, &[policy]).unwrap();
+
+    let home_for_thread = secrets_home.clone();
+    let sock_for_thread = socket_path.clone();
+    std::thread::spawn(move || {
+        let _ = broker::serve(&home_for_thread, &sock_for_thread);
+    });
+    let mut connected = false;
+    for _ in 0..50 {
+        if UnixStream::connect(&socket_path).is_ok() {
+            connected = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(connected, "broker did not bind {} in time", socket_path.display());
+
+    // ── put: the value reaches the store through the template ────────────
+    assert_eq!(client::put(&socket_path, "nativ", "sentinel-native-value", false).unwrap(), false);
+    assert_eq!(
+        std::fs::read_to_string(secrets_home.join("store").join("k.txt")).unwrap().trim(),
+        "sentinel-native-value"
+    );
+
+    // ── resolve: the same value comes back over the socket ───────────────
+    assert_eq!(client::resolve(&socket_path, "nativ", "m", None, None, None).unwrap(), "sentinel-native-value");
+
+    // ── the gate: an unknown consumer is refused on this host too ────────
+    let denied = client::resolve(&socket_path, "nativ", "not-a-consumer", None, None, None).unwrap_err();
+    assert!(!denied.contains("sentinel-native-value"), "the refusal never carries the value: {denied}");
+
+    // ── `status` answers the inventory question over the same socket ─────
+    let report = client::status(&socket_path).expect("status");
+    assert!(format!("{report:?}").contains("nativ"), "{report:?}");
+
+    // ── no audit log carries the value ──────────────────────────────────
+    let own_log = std::fs::read_to_string(secrets_home.join("audit.log")).unwrap();
+    assert!(!own_log.contains("sentinel-native-value"), "the broker's own audit log leaked the value:\n{own_log}");
+    let _ = std::fs::remove_dir_all(&secrets_home);
 }

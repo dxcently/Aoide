@@ -82,9 +82,14 @@ use aoide_protocol::Invocation;
 use serde_json::{json, Value};
 use std::io;
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
+#[cfg(unix)]
 use std::os::unix::io::{FromRawFd, RawFd};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
+#[cfg(windows)]
+use aoide_protocol::win_unix::UnixStream;
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
@@ -103,11 +108,13 @@ use std::time::Duration;
 /// are taught, since either genuinely works and which is more convenient
 /// depends on the caller.
 ///
-/// [`io::ErrorKind::NotFound`]/[`io::ErrorKind::ConnectionRefused`]: nothing
-/// is listening at `socket_path` at all — the broker isn't running, or the
-/// resolved path doesn't match the deployed one (`socket.rs`'s module doc:
-/// `AOIDE_SECRETS_SOCKET`, or its `/run/aoide-secrets/secrets.sock`
-/// default).
+/// [`io::ErrorKind::NotFound`]/[`io::ErrorKind::ConnectionRefused`] — and, on
+/// native Windows, `WSAENETDOWN`, which is what an `AF_UNIX` connect to a
+/// path whose own directory is absent reports ([`nothing_is_listening`] owns
+/// that fact): nothing is listening at `socket_path` at all — the broker
+/// isn't running, or the resolved path doesn't match the deployed one
+/// (`socket.rs`'s module doc: `AOIDE_SECRETS_SOCKET`, or its
+/// `/run/aoide-secrets/secrets.sock` default).
 ///
 /// Every other `io::ErrorKind` (a transient `EMFILE`, an unreadable
 /// destination directory, ...) rides through with just the socket path
@@ -128,8 +135,38 @@ fn describe_connect_error(socket_path: &Path, err: &io::Error, reinvoke: &str) -
              AOIDE_SECRETS_SOCKET if this host's broker socket lives somewhere else.",
             socket_path.display()
         ),
+        _ if nothing_is_listening(err) => format!(
+            "connecting to the secrets broker at {}: {err} — the broker doesn't look like it's running \
+             (or the socket path is wrong). Check `systemctl status aoide-secrets-serve`, or set \
+             AOIDE_SECRETS_SOCKET if this host's broker socket lives somewhere else.",
+            socket_path.display()
+        ),
         _ => format!("connecting to the secrets broker at {}: {err}", socket_path.display()),
     }
+}
+
+/// **"Nothing is listening there" is ONE question, with one spelling per
+/// host.** Unix spells a missing socket path `ENOENT`/`ECONNREFUSED`, which
+/// Rust surfaces as [`io::ErrorKind::NotFound`]/
+/// [`io::ErrorKind::ConnectionRefused`]. Native Windows spells the same fact
+/// two ways: `ECONNREFUSED` for a path with nobody behind it, and —
+/// `WSAENETDOWN` (10050, "a socket operation encountered a dead network") —
+/// when the path's own DIRECTORY does not exist, a code Rust has no
+/// `ErrorKind` for (`NetworkDown` is still unstable). Unread, an absent
+/// broker on Windows becomes a hard failure instead of the "nobody is
+/// listening" answer every caller's fallback is keyed on.
+#[cfg(unix)]
+fn nothing_is_listening(err: &io::Error) -> bool {
+    matches!(err.kind(), io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused)
+}
+
+#[cfg(windows)]
+fn nothing_is_listening(err: &io::Error) -> bool {
+    /// `WSAENETDOWN` (`WinError.h`) — see this function's own doc for why it
+    /// answers this question rather than a network-outage report.
+    const WSAENETDOWN: i32 = 10050;
+    matches!(err.kind(), io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused)
+        || err.raw_os_error() == Some(WSAENETDOWN)
 }
 
 /// The bound on the CONNECT half of every socket op this module makes
@@ -164,9 +201,11 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// override — same posture [`CONNECT_TIMEOUT`] documents.
 const STATUS_TIMEOUT: Duration = Duration::from_secs(5);
 
+#[cfg(unix)]
 /// Put `fd` into (or out of) non-blocking mode — same `fcntl(F_GETFL)`/
 /// `fcntl(F_SETFL)` idiom `backend::set_nonblocking` already uses for a
 /// backend child's output pipes, applied here to a socket fd instead.
+#[cfg(unix)]
 fn set_fd_nonblocking(fd: RawFd, nonblocking: bool) {
     // SAFETY: `fd` is a fd this function's caller owns for the duration of
     // this call (a freshly created socket, never shared); `fcntl(F_GETFL)`/
@@ -197,6 +236,7 @@ fn set_fd_nonblocking(fd: RawFd, nonblocking: bool) {
 /// the standard library's convention instead of inventing an ABI value for a
 /// target with no runner here. `offset_of!` still accounts for the byte when
 /// the struct has it.
+#[cfg(unix)]
 fn unix_sockaddr(path: &Path) -> io::Result<(libc::sockaddr_un, libc::socklen_t)> {
     let bytes = path.as_os_str().as_bytes();
 
@@ -235,6 +275,7 @@ fn unix_sockaddr(path: &Path) -> io::Result<(libc::sockaddr_un, libc::socklen_t)
 /// Short sleep between retries of the raw `connect(2)` syscall itself,
 /// on `EAGAIN` (review-bounce fix, this commit — see [`connect_bounded`]'s
 /// own doc for why `EAGAIN` gets a retry loop rather than `poll()`).
+#[cfg(unix)]
 const CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(15);
 
 /// Bounded replacement for `UnixStream::connect`, over TWO genuinely
@@ -266,6 +307,7 @@ const CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(15);
 /// shape `UnixStream::connect` already returned, so every existing
 /// `.map_err(describe_connect_error(...))` call site needed no change
 /// beyond the function name.
+#[cfg(unix)]
 fn connect_bounded(socket_path: &Path, timeout: Duration) -> io::Result<UnixStream> {
     let (addr, addr_len) = unix_sockaddr(socket_path)?;
 
@@ -385,6 +427,20 @@ fn connect_bounded(socket_path: &Path, timeout: Duration) -> io::Result<UnixStre
     set_fd_nonblocking(fd, false);
     // SAFETY: same as the immediate-success path above.
     Ok(unsafe { UnixStream::from_raw_fd(fd) })
+}
+
+/// The bounded connect, natively — `aoide_protocol::win_unix`'s own
+/// `connect_timeout`, which is the Windows arm of the very thing the Unix arm
+/// above hand-rolls. The CONTRACT is the one above, whole: an
+/// `io::Result<UnixStream>` bounded by `timeout`, `TimedOut` when the budget
+/// runs out, and the socket's own verdict otherwise. The mechanism differs by
+/// host, and that is the point of the seam — `EAGAIN`/`EINPROGRESS`/
+/// `POLLOUT` are the Linux kernel's spelling of what a Winsock socket says
+/// with `WSAEWOULDBLOCK` and a writability wait, so neither host pretends to
+/// run the other's code.
+#[cfg(windows)]
+fn connect_bounded(socket_path: &Path, timeout: Duration) -> io::Result<UnixStream> {
+    UnixStream::connect_timeout(socket_path, timeout)
 }
 
 /// Parsed `secrets exec` arguments — pure, no I/O, fully unit-testable
@@ -717,9 +773,11 @@ pub fn put(socket_path: &Path, secret: &str, value: &str, overwrite: bool) -> Re
 }
 
 /// Task #79: whether [`admin_request`]'s CONNECT attempt hit "nothing is
-/// listening" (`io::ErrorKind::NotFound`: no socket file at all;
-/// `ConnectionRefused`: a stale socket file with nothing behind it) — the
-/// ONLY two cases `commands.rs`'s admin commands fall back to their
+/// listening" ([`nothing_is_listening`]: `io::ErrorKind::NotFound` — no
+/// socket file at all; `ConnectionRefused` — a stale socket file with nothing
+/// behind it; and, on native Windows, `WSAENETDOWN` for a path whose
+/// directory is absent, the same fact in that host's own spelling) — the
+/// ONLY cases `commands.rs`'s admin commands fall back to their
 /// direct-write path on ([`NoSocket`](AdminError::NoSocket)). Every other
 /// failure — a different connect error, a write/read failure, an
 /// unparseable reply, or the broker's own `{"ok":false}` domain denial
@@ -750,9 +808,12 @@ pub enum AdminError {
 /// own `req` through this SAME function, never a hand-rolled write/read
 /// pair.
 pub fn admin_request(socket_path: &Path, req: Value) -> Result<Value, AdminError> {
-    let mut stream = connect_bounded(socket_path, CONNECT_TIMEOUT).map_err(|e| match e.kind() {
-        io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => AdminError::NoSocket,
-        _ => AdminError::Other(describe_connect_error(socket_path, &e, "aoide secrets <admin command> ...")),
+    let mut stream = connect_bounded(socket_path, CONNECT_TIMEOUT).map_err(|e| {
+        if nothing_is_listening(&e) {
+            AdminError::NoSocket
+        } else {
+            AdminError::Other(describe_connect_error(socket_path, &e, "aoide secrets <admin command> ..."))
+        }
     })?;
 
     let mut line = req.to_string();
@@ -794,6 +855,12 @@ pub struct PendingAsk {
     pub consumer: String,
     pub requested_at: u64,
     pub peer_uid: Option<u32>,
+    /// Additive over `peer_uid` (the wire shape keeps the Unix number where
+    /// it always was, so an old reader needs no change): native Windows'
+    /// identity, the peer's token-user SID in its `S-1-5-…` form. `None`
+    /// on every host that has uids, and ABSENT from the wire there rather
+    /// than null.
+    pub peer_sid: Option<String>,
     /// Additive over the pre-P3 shape (`peer_uid`'s own precedent, task
     /// #73) — the wire's optional, self-asserted, display-only
     /// `resolve.reason`, `None` when the caller sent none.
@@ -867,6 +934,7 @@ pub fn pending(socket_path: &Path) -> Result<Vec<PendingAsk>, String> {
                 // #73: additive — absent (an older broker) and an explicit
                 // `null` (unidentified at park time) both read as `None`.
                 peer_uid: a.get("peerUid").and_then(Value::as_u64).map(|u| u as u32),
+                peer_sid: a.get("peerSid").and_then(Value::as_str).map(str::to_string),
                 // P3: additive again — same absent-or-null tolerance.
                 reason: a.get("reason").and_then(Value::as_str).map(str::to_string),
                 origin: a
@@ -1305,6 +1373,16 @@ pub fn run_exec(inv: &Invocation, socket_path: &Path) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── the POSIX-shell fixture class (gated, with the reason) ───────────
+    //
+    // Every test below carrying `#[cfg(unix)]` drives the backend TEMPLATE
+    // mechanism with a POSIX fixture: an `sh -c` command line, or a
+    // `#!/bin/sh` shim script on `PATH`. The mechanism itself is portable and
+    // HAS a native arm — `sh -c` on Unix, `cmd /C` on native Windows
+    // (`backend::run_backend_command`'s own doc) — so these gates name the
+    // FIXTURE, never the code under test. The Windows arm of the same path is
+    // exercised natively by `backend::tests::a_native_windows_template_*`.
     use aoide_protocol::Door;
     use std::collections::BTreeMap;
 
@@ -1372,6 +1450,12 @@ mod tests {
     /// A path too long for `sun_path` is a clean, immediate `Err` — never a
     /// panic, and never reached via a raw slice-index that could.
     #[test]
+    // `cfg(unix)`: this reads the UNIX arm'"'"'s own body
+    // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests
+    // call `libc::socket`/`connect` directly), and the Windows side is
+    // `aoide_protocol::win_unix`, tested beside it. A gate with the
+    // reason beats a rewritten test asserting a different mechanism.
+    #[cfg(unix)]
     fn unix_sockaddr_rejects_a_path_too_long_for_sun_path() {
         let long = "/tmp/".to_string() + &"x".repeat(200);
         let err = unix_sockaddr(Path::new(&long)).unwrap_err();
@@ -1381,6 +1465,7 @@ mod tests {
     /// This target's own `sun_path` capacity — read off the struct in the
     /// test too, so the same assertions cover a 104-byte BSD/Haiku-width
     /// buffer, not only this runner's 108.
+    #[cfg(unix)]
     fn sun_path_capacity() -> usize {
         // SAFETY: `sockaddr_un` is POD; an all-zero one is a valid value.
         unsafe { std::mem::zeroed::<libc::sockaddr_un>() }.sun_path.len()
@@ -1393,6 +1478,12 @@ mod tests {
     /// is asserted alongside so this is the shared contract, not a private
     /// restatement of it.
     #[test]
+    // `cfg(unix)`: this reads the UNIX arm'"'"'s own body
+    // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests
+    // call `libc::socket`/`connect` directly), and the Windows side is
+    // `aoide_protocol::win_unix`, tested beside it. A gate with the
+    // reason beats a rewritten test asserting a different mechanism.
+    #[cfg(unix)]
     fn unix_sockaddr_accepts_sun_path_minus_one_and_rejects_the_width() {
         let cap = sun_path_capacity();
         let offset = std::mem::offset_of!(libc::sockaddr_un, sun_path);
@@ -1417,6 +1508,12 @@ mod tests {
     /// the same path through `std`, which reads the buffer back the way the
     /// kernel does.
     #[test]
+    // `cfg(unix)`: this reads the UNIX arm'"'"'s own body
+    // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests
+    // call `libc::socket`/`connect` directly), and the Windows side is
+    // `aoide_protocol::win_unix`, tested beside it. A gate with the
+    // reason beats a rewritten test asserting a different mechanism.
+    #[cfg(unix)]
     fn unix_sockaddr_reports_offset_plus_path_plus_terminator() {
         let path = Path::new("/tmp/aoide-secrets-test.sock");
         let bytes = path.as_os_str().as_bytes();
@@ -1437,6 +1534,12 @@ mod tests {
     /// error — in both cases the same answer `std`'s own
     /// `SocketAddr::from_pathname` gives for the same input.
     #[test]
+    // `cfg(unix)`: this reads the UNIX arm'"'"'s own body
+    // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests
+    // call `libc::socket`/`connect` directly), and the Windows side is
+    // `aoide_protocol::win_unix`, tested beside it. A gate with the
+    // reason beats a rewritten test asserting a different mechanism.
+    #[cfg(unix)]
     fn unix_sockaddr_null_and_empty_paths_match_std() {
         let nul = Path::new("a\u{0}b");
         let ours = unix_sockaddr(nul).unwrap_err();
@@ -1454,6 +1557,12 @@ mod tests {
     /// `sun_path.len() - 1` bytes long, and `connect_bounded` actually
     /// reaches it — the boundary accepted, over a real socket.
     #[test]
+    // `cfg(unix)`: this reads the UNIX arm'"'"'s own body
+    // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests
+    // call `libc::socket`/`connect` directly), and the Windows side is
+    // `aoide_protocol::win_unix`, tested beside it. A gate with the
+    // reason beats a rewritten test asserting a different mechanism.
+    #[cfg(unix)]
     fn connect_bounded_reaches_a_max_length_pathname() {
         let cap = sun_path_capacity();
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
@@ -1466,7 +1575,7 @@ mod tests {
         let sock = Path::new(&name).to_path_buf();
         assert_eq!(sock.as_os_str().as_bytes().len(), cap - 1);
 
-        let _listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        let _listener = crate::test_net::UnixListener::bind(&sock).unwrap();
         let stream = connect_bounded(&sock, Duration::from_secs(5)).unwrap();
         drop(stream);
         std::fs::remove_file(&sock).ok();
@@ -1480,7 +1589,7 @@ mod tests {
     fn connect_bounded_succeeds_against_a_real_listener_fast() {
         let dir = tmp_socket_dir("ok");
         let sock = dir.join("s.sock");
-        let _listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        let _listener = crate::test_net::UnixListener::bind(&sock).unwrap();
 
         let start = std::time::Instant::now();
         let stream = connect_bounded(&sock, Duration::from_secs(5)).unwrap();
@@ -1506,7 +1615,7 @@ mod tests {
 
     /// Hand-rolled listener + a single unaccepted connection, exactly the
     /// reviewer's own reproduction recipe (review-bounce fix, this
-    /// commit): `std::os::unix::net::UnixListener::bind` hardcodes a
+    /// commit): `crate::test_net::UnixListener::bind` hardcodes a
     /// backlog of 128, far too large to saturate cheaply in a test, so
     /// this builds the listener directly with `libc::listen(fd, 1)` —
     /// the same raw-socket construction `connect_bounded`/`unix_sockaddr`
@@ -1516,6 +1625,7 @@ mod tests {
     /// saturated (a probe connect must observe a real `EAGAIN`) before
     /// handing control to the caller, so this is never a simulated
     /// condition.
+    #[cfg(unix)]
     fn saturate_backlog_of_one(sock: &Path) -> (RawFd, Vec<RawFd>) {
         let (addr, addr_len) = unix_sockaddr(sock).unwrap();
 
@@ -1587,6 +1697,12 @@ mod tests {
     /// LONG ENOUGH to prove it actually waited (not a lucky race past a
     /// backlog that was never really full).
     #[test]
+    // `cfg(unix)`: this reads the UNIX arm'"'"'s own body
+    // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests
+    // call `libc::socket`/`connect` directly), and the Windows side is
+    // `aoide_protocol::win_unix`, tested beside it. A gate with the
+    // reason beats a rewritten test asserting a different mechanism.
+    #[cfg(unix)]
     fn connect_bounded_retries_through_a_saturated_backlog_until_a_slot_frees() {
         let dir = tmp_socket_dir("saturated-frees");
         let sock = dir.join("s.sock");
@@ -1628,6 +1744,12 @@ mod tests {
     /// `EAGAIN` retry loop must still respect the overall bound rather
     /// than retrying forever.
     #[test]
+    // `cfg(unix)`: this reads the UNIX arm'"'"'s own body
+    // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests
+    // call `libc::socket`/`connect` directly), and the Windows side is
+    // `aoide_protocol::win_unix`, tested beside it. A gate with the
+    // reason beats a rewritten test asserting a different mechanism.
+    #[cfg(unix)]
     fn connect_bounded_times_out_when_the_backlog_stays_saturated() {
         let dir = tmp_socket_dir("saturated-stuck");
         let sock = dir.join("s.sock");
@@ -1790,6 +1912,9 @@ mod tests {
     /// that `overwrite: true` reports `replaced: true` back — a REAL
     /// broker + socket round trip, same shape as `commands.rs`'s own
     /// `require_totp_on_add_births_a_gated_policy_denied_without_a_code`.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn put_reports_exists_then_replaced_true_through_a_real_broker() {
         let home = std::env::temp_dir().join(format!(
@@ -1870,6 +1995,9 @@ mod tests {
     /// shape as `put_reports_exists_then_replaced_true_through_a_real_broker`
     /// (a single `serve` call for the whole test, dropped-not-joined, same
     /// pattern that test already establishes).
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn pending_approve_round_trips_through_a_real_broker_and_releases_to_the_original_caller() {
         let home = std::env::temp_dir().join(format!(
@@ -1929,7 +2057,10 @@ mod tests {
         // process's own euid (the resolving thread and this thread are one
         // process) — proves the peer uid survives the full accept ->
         // park -> pending round trip, not just the in-process unit tests.
-        assert_eq!(ask.peer_uid, Some(unsafe { libc::geteuid() }));
+        match crate::home::effective_user().expect("this process has an identity") {
+            crate::peercred::PeerUser::Uid(uid) => assert_eq!(ask.peer_uid, Some(uid)),
+            crate::peercred::PeerUser::Sid(sid) => assert_eq!(ask.peer_sid, Some(sid)),
+        }
 
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
         let step = crate::totp::timestep(now);
@@ -2020,6 +2151,9 @@ mod tests {
     /// A real broker + socket round trip proving [`resolve_bounded`] returns
     /// the value on a granted, TOTP-free resolve — the deployed automation-
     /// open happy path task #84's PINNED CONSTRAINTS describe.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn resolve_bounded_returns_the_value_on_a_granted_resolve() {
         let home = std::env::temp_dir().join(format!(
@@ -2069,6 +2203,9 @@ mod tests {
     /// immediately instead of parking at all, so this returns well inside
     /// the bound (asserted against a generous few-second wall-clock budget,
     /// never the full park timeout) with a denial, not a hang.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn resolve_bounded_never_parks_on_a_requiretotp_secret_with_no_code() {
         let home = std::env::temp_dir().join(format!(
@@ -2133,7 +2270,7 @@ mod tests {
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos()
         ));
-        let listener = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
+        let listener = crate::test_net::UnixListener::bind(&socket_path).unwrap();
         let reply = reply.map(str::to_string);
         std::thread::spawn(move || {
             if let Ok((stream, _)) = listener.accept() {
@@ -2220,6 +2357,9 @@ mod tests {
     /// answers must not hang this call — the read timeout
     /// ([`STATUS_TIMEOUT`]) fires and the caller gets the taught "did not
     /// answer" error, well inside a generous wall-clock budget.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn status_gives_up_on_a_broker_that_never_answers() {
         let sock = one_shot_broker("status-silent", None);

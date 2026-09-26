@@ -52,8 +52,11 @@
 //! broker-home write outside `commands.rs`'s own dispatch.
 
 use std::io;
+#[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+
+use crate::peercred::PeerUser;
 
 /// Resolve the secrets home: `$AOIDE_SECRETS_HOME` when set to a non-blank
 /// value, else the placeholder default (see module doc).
@@ -68,33 +71,94 @@ pub fn secrets_home() -> PathBuf {
 
 /// Lock a secrets-home-owned DIRECTORY down to `0700` (owner rwx only).
 /// Called immediately after every `create_dir_all(secrets_home)` in this
-/// crate — see module doc.
+/// crate — see module doc. The native Windows arm attaches the owner-only
+/// policy (`aoide_protocol::owner_only`) rather than a mode, which is the
+/// same guarantee in the host's own terms.
 pub fn secure_dir(path: &Path) -> io::Result<()> {
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+    #[cfg(unix)]
+    {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(windows)]
+    {
+        aoide_protocol::owner_only::ensure_private_dir(path)
+    }
 }
 
 /// Lock a secrets-home-owned FILE down to `0600` (owner rw only). Called
 /// after writing a sensitive secrets-home file (`store::save_policies`'s
-/// `policy.json`).
+/// `policy.json`). Native Windows attaches the owner-only DACL — the same
+/// guarantee, said in the one vocabulary that host has for it.
 pub fn secure_file(path: &Path) -> io::Result<()> {
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+    #[cfg(unix)]
+    {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+    }
+    #[cfg(windows)]
+    {
+        aoide_protocol::owner_only::set_file_access(path)
+    }
 }
 
 /// This process's real effective uid. `std` has no `geteuid(2)` wrapper, but
 /// `libc` is already a workspace dependency this crate links for
 /// `enroll::local_hostname`'s `gethostname(2)` call (`Cargo.toml`'s
 /// comment), so this costs nothing new in the lockfile — zero new
-/// dependencies, per this crate's own house rule.
+/// dependencies, per this crate's own house rule. Unix only: a host with no
+/// uid answers [`effective_user`] with the identity it does have.
+#[cfg(unix)]
 pub fn effective_uid() -> u32 {
     // SAFETY: `geteuid(2)` takes no arguments, can't fail, and touches no
     // memory this process doesn't already own.
     unsafe { libc::geteuid() }
 }
 
+/// This process's OWN user identity, in the host's own terms — the other half
+/// of every same-user comparison `peercred::PeerUser` is the first half of.
+/// `None` when the host cannot say who this process is (a token read that
+/// failed), which every comparison reads as "cannot match", the same
+/// fail-closed answer an unidentified peer gets.
+pub fn effective_user() -> Option<PeerUser> {
+    #[cfg(unix)]
+    {
+        Some(PeerUser::Uid(effective_uid()))
+    }
+    #[cfg(windows)]
+    {
+        aoide_protocol::win_proc::current_user_sid().ok().map(PeerUser::Sid)
+    }
+}
+
+/// Is this process the host's super-user — the one identity for which the
+/// ownership checks below are vacuous, because it can write anywhere
+/// regardless of who owns the file? `euid == 0` on Unix.
+///
+/// **`false` on native Windows, and that is a fact rather than a stub**:
+/// there is no uid 0 there, and the hazard root poses — creating the home
+/// as an identity other than the broker's own — is answered at creation
+/// instead, because every private file and directory this crate creates
+/// pins its owner to the creating token user (`aoide_protocol::owner_only`).
+/// A caller here therefore has nothing to refuse.
+pub fn running_as_root() -> bool {
+    #[cfg(unix)]
+    {
+        effective_uid() == 0
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+/// The effective uid as a [`PeerUser`] — the shape the admin-identity check
+/// compares, for a caller that has a uid rather than a peer.
+pub fn peer_user_for_uid(uid: u32) -> PeerUser {
+    PeerUser::Uid(uid)
+}
+
 /// The admin-command identity guard's decision, PURE so it's testable with
 /// injected uids (`euid`/`home_owner`) rather than a real stat + a real
 /// process uid — see [`admin_identity_check`] for the live wiring.
-///
 /// `None` when `euid` already owns `home` (the expected shape: an admin
 /// command run as the broker user, or a test/dev host where one ordinary uid
 /// created the home itself). `Some(message)` otherwise, naming the actual
@@ -104,20 +168,48 @@ pub fn effective_uid() -> u32 {
 /// which is exactly what silently reowns `policy.json` to `root:root` and
 /// bricks the broker (the yomi-strix incident, 2026-08-22, this guard
 /// exists to make impossible).
-pub fn admin_identity_error(euid: u32, home_owner: u32, home: &Path, subcommand: &str) -> Option<String> {
-    if euid == home_owner {
+/// The identity that owns the object at `path` — the ownership fact Unix
+/// answers with `MetadataExt::uid` and native Windows with the object's own
+/// owner SID (`aoide_protocol::owner_only::owner_sid`). `None` when the path
+/// is not there or its owner cannot be read; never a guessed owner.
+pub fn owner_of(path: &Path) -> Option<PeerUser> {
+    #[cfg(unix)]
+    {
+        std::fs::metadata(path).ok().map(|m| PeerUser::Uid(m.uid()))
+    }
+    #[cfg(windows)]
+    {
+        aoide_protocol::owner_only::owner_sid(path).ok().flatten().map(PeerUser::Sid)
+    }
+}
+
+/// An identity as a refusal spells it: `uid 1000` on the host that has uids
+/// (the wording every existing message already uses, unchanged), `user
+/// S-1-5-…` on the host that has SIDs.
+fn describe(user: &PeerUser) -> String {
+    match user {
+        PeerUser::Uid(uid) => format!("uid {uid}"),
+        PeerUser::Sid(sid) => format!("user {sid}"),
+    }
+}
+
+/// The admin-command identity guard's decision, PURE so it's testable with
+/// injected identities rather than a real stat + a real process identity —
+/// the live wiring is [`admin_identity_check`].
+pub fn admin_identity_error(euid: &PeerUser, home_owner: &PeerUser, home: &Path, subcommand: &str) -> Option<String> {    if euid == home_owner {
         return None;
     }
-    let running_as = if euid == 0 {
+    let running_as = if *euid == PeerUser::Uid(0) {
         "root (uid 0) — plain `sudo` runs as root, and root CAN write here regardless of file ownership, \
          which is exactly what silently corrupts it"
             .to_string()
     } else {
-        format!("uid {euid}")
+        describe(euid)
     };
     Some(format!(
-        "secrets {subcommand} must run as the broker user (uid {home_owner}, the owner of {}) — this process is running as {running_as}. \
+        "secrets {subcommand} must run as the broker user ({}, the owner of {}) — this process is running as {running_as}. \
          Run: sudo -u aoide-secrets aoide secrets {subcommand} ...",
+        describe(home_owner),
         home.display()
     ))
 }
@@ -139,8 +231,8 @@ pub fn admin_identity_error(euid: u32, home_owner: u32, home: &Path, subcommand:
 /// be the one to create the secrets home, full stop; first-time
 /// provisioning belongs to the broker's own systemd unit
 /// (`StateDirectory=`) or an explicit `sudo -u aoide-secrets` invocation.
-pub fn admin_identity_error_for_missing_home(euid: u32, home: &Path, subcommand: &str) -> Option<String> {
-    if euid != 0 {
+pub fn admin_identity_error_for_missing_home(euid: &PeerUser, home: &Path, subcommand: &str) -> Option<String> {
+    if *euid != PeerUser::Uid(0) {
         return None;
     }
     Some(format!(
@@ -166,9 +258,18 @@ pub fn admin_identity_error_for_missing_home(euid: u32, home: &Path, subcommand:
 /// would CREATE a root-owned home — refused for that reason alone, a
 /// non-root uid still passes through to create it itself.
 pub fn admin_identity_check(home: &Path, subcommand: &str) -> Option<String> {
-    match std::fs::metadata(home) {
-        Ok(meta) => admin_identity_error(effective_uid(), meta.uid(), home, subcommand),
-        Err(_) => admin_identity_error_for_missing_home(effective_uid(), home, subcommand),
+    // A process whose OWN identity cannot be read cannot be compared to
+    // anything: refused, the same fail-closed answer an unidentified peer
+    // gets, rather than a pass.
+    let Some(me) = effective_user() else {
+        return Some(format!(
+            "secrets {subcommand} must run as the broker user, and this process's own identity could not be \
+             read on this host — refusing rather than assuming. Run: sudo -u aoide-secrets aoide secrets {subcommand} ..."
+        ));
+    };
+    match owner_of(home) {
+        Some(owner) => admin_identity_error(&me, &owner, home, subcommand),
+        None => admin_identity_error_for_missing_home(&me, home, subcommand),
     }
 }
 
@@ -199,20 +300,23 @@ pub fn describe_home_file_error(home: &Path, file: &Path, err: &io::Error) -> St
     if err.kind() != io::ErrorKind::PermissionDenied {
         return format!("{}: {err}", file.display());
     }
-    let home_owner = std::fs::metadata(home).ok().map(|m| m.uid());
-    let file_owner = std::fs::metadata(file).ok().map(|m| m.uid());
+    let home_owner = owner_of(home);
+    let file_owner = owner_of(file);
     let owner_note = match (home_owner, file_owner) {
         (Some(h), Some(f)) if h != f => format!(
-            " — {} is owned by uid {f}, but the secrets home ({}) is owned by uid {h}; this looks \
+            " — {} is owned by {}, but the secrets home ({}) is owned by {}; this looks \
              like a file poisoned by a historical plain `sudo` run from before the admin-identity \
              guard existed",
             file.display(),
-            home.display()
+            describe(&f),
+            home.display(),
+            describe(&h)
         ),
         (Some(h), Some(_)) => format!(
-            " — {} and the secrets home are both owned by uid {h}, but this process still cannot \
+            " — {} and the secrets home are both owned by {}, but this process still cannot \
              write it (check its permission bits)",
-            file.display()
+            file.display(),
+            describe(&h)
         ),
         _ => String::new(),
     };
@@ -228,6 +332,16 @@ pub fn describe_home_file_error(home: &Path, file: &Path, err: &io::Error) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── the POSIX-shell fixture class (gated, with the reason) ───────────
+    //
+    // Every test below carrying `#[cfg(unix)]` drives the backend TEMPLATE
+    // mechanism with a POSIX fixture: an `sh -c` command line, or a
+    // `#!/bin/sh` shim script on `PATH`. The mechanism itself is portable and
+    // HAS a native arm — `sh -c` on Unix, `cmd /C` on native Windows
+    // (`backend::run_backend_command`'s own doc) — so these gates name the
+    // FIXTURE, never the code under test. The Windows arm of the same path is
+    // exercised natively by `backend::tests::a_native_windows_template_*`.
 
     #[test]
     fn env_override_wins_when_set_and_non_blank() {
@@ -282,7 +396,7 @@ mod tests {
     fn secure_dir_sets_owner_only_permissions() {
         let dir = tmp_dir("dir");
         secure_dir(&dir).unwrap();
-        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        let mode = crate::home::mode_of(&dir);
         assert_eq!(mode, 0o700, "secrets home must be owner-rwx-only, got {mode:o}");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -293,7 +407,7 @@ mod tests {
         let file = dir.join("policy.json");
         std::fs::write(&file, b"[]").unwrap();
         secure_file(&file).unwrap();
-        let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        let mode = crate::home::mode_of(&file);
         assert_eq!(mode, 0o600, "a secrets-home file must be owner-rw-only, got {mode:o}");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -302,15 +416,15 @@ mod tests {
 
     #[test]
     fn admin_identity_error_is_none_when_euid_owns_the_home() {
-        assert_eq!(admin_identity_error(1000, 1000, Path::new("/var/lib/aoide-secrets"), "add"), None);
+        assert_eq!(admin_identity_error(&PeerUser::Uid(1000), &PeerUser::Uid(1000), Path::new("/var/lib/aoide-secrets"), "add"), None);
         // Root owning its own home (an unusual but not impossible
         // deployment) is also a match, not a special case.
-        assert_eq!(admin_identity_error(0, 0, Path::new("/var/lib/aoide-secrets"), "add"), None);
+        assert_eq!(admin_identity_error(&PeerUser::Uid(0), &PeerUser::Uid(0), Path::new("/var/lib/aoide-secrets"), "add"), None);
     }
 
     #[test]
     fn admin_identity_error_flags_root_explicitly_as_the_wrong_uid() {
-        let msg = admin_identity_error(0, 1000, Path::new("/var/lib/aoide-secrets"), "add").unwrap();
+        let msg = admin_identity_error(&PeerUser::Uid(0), &PeerUser::Uid(1000), Path::new("/var/lib/aoide-secrets"), "add").unwrap();
         assert!(msg.contains("secrets add"), "{msg}");
         assert!(msg.contains("/var/lib/aoide-secrets"), "{msg}");
         assert!(msg.contains("uid 1000"), "{msg}");
@@ -320,7 +434,7 @@ mod tests {
 
     #[test]
     fn admin_identity_error_flags_an_arbitrary_mismatched_uid() {
-        let msg = admin_identity_error(1001, 1000, Path::new("/var/lib/aoide-secrets"), "grant").unwrap();
+        let msg = admin_identity_error(&PeerUser::Uid(1001), &PeerUser::Uid(1000), Path::new("/var/lib/aoide-secrets"), "grant").unwrap();
         assert!(msg.contains("uid 1001"), "{msg}");
         assert!(msg.contains("uid 1000"), "{msg}");
         assert!(msg.contains("sudo -u aoide-secrets aoide secrets grant"), "{msg}");
@@ -338,7 +452,7 @@ mod tests {
 
     #[test]
     fn admin_identity_error_for_missing_home_refuses_root() {
-        let msg = admin_identity_error_for_missing_home(0, Path::new("/var/lib/aoide-secrets"), "add").unwrap();
+        let msg = admin_identity_error_for_missing_home(&PeerUser::Uid(0), Path::new("/var/lib/aoide-secrets"), "add").unwrap();
         assert!(msg.contains("secrets add"), "{msg}");
         assert!(msg.contains("/var/lib/aoide-secrets"), "{msg}");
         assert!(msg.to_lowercase().contains("root"), "{msg}");
@@ -348,11 +462,11 @@ mod tests {
     #[test]
     fn admin_identity_error_for_missing_home_passes_a_non_root_uid() {
         assert_eq!(
-            admin_identity_error_for_missing_home(1000, Path::new("/var/lib/aoide-secrets"), "add"),
+            admin_identity_error_for_missing_home(&PeerUser::Uid(1000), Path::new("/var/lib/aoide-secrets"), "add"),
             None
         );
         assert_eq!(
-            admin_identity_error_for_missing_home(1, Path::new("/var/lib/aoide-secrets"), "enroll"),
+            admin_identity_error_for_missing_home(&PeerUser::Uid(1), Path::new("/var/lib/aoide-secrets"), "enroll"),
             None
         );
     }
@@ -370,13 +484,16 @@ mod tests {
         // Defensive either way (this suite never actually runs as root),
         // but this keeps the assertion honest rather than assuming a
         // non-root test runner.
-        let expected = admin_identity_error_for_missing_home(effective_uid(), &dir, "add");
+        let expected = admin_identity_error_for_missing_home(&effective_user().expect("this process has an identity"), &dir, "add");
         assert_eq!(admin_identity_check(&dir, "add"), expected);
-        if effective_uid() != 0 {
+        if !running_as_root() {
             assert_eq!(admin_identity_check(&dir, "add"), None, "non-root creating a fresh home must still be allowed");
         }
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn admin_identity_check_is_none_when_this_process_owns_the_home() {
         // A tmpdir this test process just created is owned by this
@@ -413,6 +530,9 @@ mod tests {
         assert!(!msg.contains("is owned by uid"), "{msg}");
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn permission_denied_with_a_stat_able_pair_names_the_shared_owning_uid() {
         // Both this process's own tempdir and a file inside it are owned by
@@ -429,13 +549,80 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
-    fn effective_uid_matches_a_freshly_created_files_owner() {
-        // No root/setuid assumption needed: whatever this process's euid
-        // is, a file it just created is owned by exactly that uid.
+    fn a_freshly_created_directory_is_owned_by_this_process() {
+        // No root/setuid assumption needed: whatever this process's identity
+        // is, a directory it just created belongs to exactly that identity —
+        // a uid on Unix, that token user's SID on native Windows.
         let dir = tmp_dir("euid-sanity");
-        let owner = std::fs::metadata(&dir).unwrap().uid();
-        assert_eq!(effective_uid(), owner);
+        assert_eq!(owner_of(&dir), effective_user());
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+// ── the private-policy assertion, in the host's own terms ────────────────
+//
+// Every privacy test in this crate used to ask `mode() & 0o777`. That is one
+// host's spelling of the guarantee; the guarantee itself is "nobody but the
+// owner can read it", which Unix answers with mode bits and native Windows
+// with the object's DACL. These two helpers are the ONE place the two
+// spellings meet, so a test keeps asserting `0o600`/`0o700` — the numbers a
+// reader recognises — and gets an answer that is real on whatever host it
+// runs on.
+
+/// This object's privacy as the mode a reader would recognise: Unix's actual
+/// bits; on native Windows `0o600`/`0o700` for an object whose policy reads
+/// back owner-only, `0o644` for one that does not (so a test asserting "this
+/// is NOT private" is answered honestly there too).
+#[cfg(test)]
+pub fn mode_of(path: &Path) -> u32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).expect("stat").permissions().mode() & 0o777
+    }
+    #[cfg(windows)]
+    {
+        let is_dir = std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false);
+        let reason = if is_dir {
+            aoide_protocol::owner_only::dir_privacy(path)
+        } else {
+            aoide_protocol::owner_only::file_privacy(path)
+        };
+        match reason.expect("read the object's own policy back") {
+            None => {
+                if is_dir {
+                    0o700
+                } else {
+                    0o600
+                }
+            }
+            Some(_) => 0o644,
+        }
+    }
+}
+
+/// Arrange `path`'s policy for a test. `0o600`/`0o700` ask for the private
+/// policy on either host — the native call on Windows, `chmod` on Unix. A
+/// LOOSENING mode is a Unix-only fixture: there is no "world-writable" native
+/// policy to attach, and the object keeps whatever default policy it was
+/// created with (which is what a test wants when it is arranging an object
+/// that must FAIL the privacy check), so the Windows arm is a no-op.
+#[cfg(test)]
+pub fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+    }
+    #[cfg(windows)]
+    {
+        match mode {
+            0o600 => aoide_protocol::owner_only::set_file_access(path),
+            0o700 => aoide_protocol::owner_only::ensure_private_dir(path),
+            _ => Ok(()),
+        }
     }
 }

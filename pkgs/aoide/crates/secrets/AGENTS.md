@@ -7,6 +7,24 @@
   The order is test environment lock, then broker `put_lock`; temporary
   homes do not isolate the shared timeout or deliberately hanging puts.
 
+- **On native Windows, a fixture that creates a home creates it the way the
+  crate does**: `create_dir_all` and then `home::secure_dir` (a file:
+  `home::secure_file`), which pins the owner. A bare `create_dir_all` is a
+  different object there — an elevated token's NEW directory is owned by
+  `BUILTIN\Administrators` (`S-1-5-32-544`), and every same-user check this
+  crate makes (`home::admin_identity_check`, `owner_of`) then reads a home
+  this process does not own. That is why the crate pins at creation rather
+  than tightening later.
+
+- **A `cfg(unix)` gate names the FIXTURE, never the mechanism.** The template,
+  feed and socket machinery all have native arms (`aoide_protocol::
+  host_shell`, the feed's owner-only DACL arm, `win_unix`); a test that spells
+  a POSIX command line (`cat`, `install -m`, `sleep`), an `sh` shim, a
+  `/tmp`-hardcoded socket path, a mode bit or a `geteuid`, says so in the
+  comment above it, and the same contract keeps at least one test that runs
+  natively. A test that cannot run there is gated — never deleted, never
+  rewritten to say something weaker.
+
 - **A secret's VALUE never appears on a `Serialize`/`Deserialize` type in
   this crate.** `policy::Policy` is still the only such type, and it holds
   no value. P-V2's resolve response and both audit lines are the exact
