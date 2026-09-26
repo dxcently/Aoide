@@ -11,6 +11,15 @@
 #   - Font/colours are left to the Stylix facet (aoide.facets.stylix), exactly
 #     as dxflake left them to its stylix layer — so no colours are hard-coded
 #     here.
+#   - Staged colours (house rule 10: staging hot-loads, never waits on a
+#     rebuild): kitty.conf includes `<aoide.root>/song/stage/terminal-colors.conf`
+#     AFTER Stylix's baked colour include, so a new window opens in the song
+#     `rice stage` last staged, and opens a per-instance control socket
+#     (`listen_on`, `allow_remote_control socket-only`) that `rice stage`
+#     pushes the same file down to recolour the windows already open. `rice
+#     mode declarative` rewrites the file from the declared twin, so leaving
+#     staging restores the baked colours the same live way. The path is the
+#     runtime root's contract path, read off `aoide.root` like `aoide.user`.
 #
 # Adapted vs dxflake: dxflake gated this on `dx.aggregations.desktop`; Aoide has
 # no aggregation flags, so it gates on its own aoide.kitty.enable per §2. The
@@ -85,51 +94,76 @@
         '';
       in
       {
-        programs.kitty = lib.mkForce {
-          enable = true;
-          package = pkgs.kitty;
-          # font.name / font.size and colours are set by the Stylix facet.
-          settings = {
-            # Conduct-by-default: every window's shell is the wrapper above.
-            shell = "${aoide-shell}/bin/aoide-shell";
-            scrollback_lines = 2000;
-            wheel_scroll_min_lines = 1;
-            confirm_os_window_close = 0;
-            window_padding_width = 5;
-            window_border_width = 1.5;
-            # Aero-glass terminal: a translucent background so the compositor's
-            # blur reads through as frosted glass (the Win7-style sheen), while
-            # the TEXT stays fully opaque and crisp (background_opacity fades only
-            # the cell background, not the glyphs). Hyprland owns the blur pass —
-            # it blurs behind any translucent surface when decoration:blur is on
-            # (compositor facet, global) — so kitty's own background_blur (a
-            # macOS/KDE-only path, inert under Hyprland) is turned off here and
-            # the compositor does the frosting instead. The kitty window class is
-            # additionally pinned in the compositor's Aero window rules.
-            #
-            # Brightness (the User): keep the CREAM cell colour (song base00), just
-            # make the terminal read brighter — a high background_opacity (0.86)
-            # so the bright cream dominates over the warm painting behind it
-            # instead of the wallpaper muddying it dim; hyprglass then glosses
-            # the surface on top (compositor manage_window_blur). The cream +
-            # dark-ink look is unchanged; only the surface got brighter.
-            background_opacity = "0.86";
-            background_blur = 0;
-            enable_audio_bell = false;
-            tab_bar_style = "powerline";
-            tab_powerline_style = "slanted";
-          };
-          keybindings = {
-            "alt+j" = "next_window";
-            "alt+k" = "previous_window";
-            "alt+h" = "previous_tab";
-            "alt+l" = "next_tab";
-            "alt+enter" = "new_window_with_cwd";
-            "alt+shift+t" = "new_tab_with_cwd";
-            "alt+q" = "close_window";
-            "ctrl+shift+U" = "none"; # for vim's page up
-          };
-        };
+        programs.kitty = lib.mkMerge [
+          (lib.mkForce {
+            enable = true;
+            package = pkgs.kitty;
+            # font.name / font.size and colours are set by the Stylix facet.
+            settings = {
+              # Conduct-by-default: every window's shell is the wrapper above.
+              shell = "${aoide-shell}/bin/aoide-shell";
+              scrollback_lines = 2000;
+              wheel_scroll_min_lines = 1;
+              confirm_os_window_close = 0;
+              window_padding_width = 5;
+              window_border_width = 1.5;
+              # Aero-glass terminal: a translucent background so the compositor's
+              # blur reads through as frosted glass (the Win7-style sheen), while
+              # the TEXT stays fully opaque and crisp (background_opacity fades only
+              # the cell background, not the glyphs). Hyprland owns the blur pass —
+              # it blurs behind any translucent surface when decoration:blur is on
+              # (compositor facet, global) — so kitty's own background_blur (a
+              # macOS/KDE-only path, inert under Hyprland) is turned off here and
+              # the compositor does the frosting instead. The kitty window class is
+              # additionally pinned in the compositor's Aero window rules.
+              #
+              # Brightness (the User): keep the CREAM cell colour (song base00), just
+              # make the terminal read brighter — a high background_opacity (0.86)
+              # so the bright cream dominates over the warm painting behind it
+              # instead of the wallpaper muddying it dim; hyprglass then glosses
+              # the surface on top (compositor manage_window_blur). The cream +
+              # dark-ink look is unchanged; only the surface got brighter.
+              background_opacity = "0.86";
+              background_blur = 0;
+              enable_audio_bell = false;
+              tab_bar_style = "powerline";
+              tab_powerline_style = "slanted";
+
+              # Staged colours reach OPEN windows over kitty's control socket:
+              # `rice stage` runs `kitty @ --to unix:<sock> set-colors --all
+              # --configured <file>` against every socket this line opens
+              # (aoide-song's live.rs finds them by the `kitty-<pid>` name in
+              # the runtime dir — a directory listing, no process-table walk).
+              # socket-only: remote control is accepted on this socket and
+              # nowhere else, never from a program writing the escape code into
+              # its own pty. The socket sits in the 0700 runtime dir, so only
+              # this user reaches it. kitty expands the env var and
+              # `{kitty_pid}` itself: one socket per kitty instance.
+              allow_remote_control = "socket-only";
+              listen_on = "unix:\${XDG_RUNTIME_DIR}/kitty-{kitty_pid}";
+            };
+            keybindings = {
+              "alt+j" = "next_window";
+              "alt+k" = "previous_window";
+              "alt+h" = "previous_tab";
+              "alt+l" = "next_tab";
+              "alt+enter" = "new_window_with_cwd";
+              "alt+shift+t" = "new_tab_with_cwd";
+              "alt+q" = "close_window";
+              "ctrl+shift+U" = "none"; # for vim's page up
+            };
+          })
+          # The staged song's terminal colours, for every NEW window: the
+          # file `rice stage` writes at the runtime root's contract path,
+          # included AFTER Stylix's baked base16 include (mkAfter) so the
+          # staged colours win. Outside the mkForce on purpose: a forced
+          # extraConfig would drop Stylix's include. kitty skips a missing
+          # include with one log line, so a host that has not staged a song
+          # since boot keeps the baked colours.
+          {
+            extraConfig = lib.mkAfter "include ${config.aoide.root}/song/stage/terminal-colors.conf";
+          }
+        ];
       };
   };
 }

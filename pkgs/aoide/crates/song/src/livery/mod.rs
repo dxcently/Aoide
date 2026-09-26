@@ -13,7 +13,8 @@
 //!       │       null/empty→palette fallback → flat Resolved set
 //!       ▼
 //!   emit/       one Emitter trait, one registry: stage · hyprctl · osc
-//!               (+ file, the arbitrary-config-template generalization proof)
+//!               (+ file, the arbitrary-config-template generalization proof,
+//!               + kitty, the staged terminal colour file)
 //! ```
 //!
 //! Pure computation only: the effectful half (running `hyprctl --batch`,

@@ -67,6 +67,25 @@
   caller needing the widget-sync/hyprctl-apply tail reuses THAT, or the bare
   `crate::live`/`crate::widgets` primitives directly, never
   `handle_rice_stage`.
+- **`commands::rice::stage_terminal_colors` is the ONE writer of
+  `stage/terminal-colors.conf`, and every path that rewrites the staged
+  livery calls it.** Today: `handle_rice_stage` (so `rice stage`, `rice mode
+  stage` and `rice mode declarative`'s re-pin), `rice back`'s restore and
+  `lyra reload`'s `sync_draft_in_place`. A new path that writes
+  `stage/livery.json` calls it too, off the same notes, or the terminals
+  keep the previous song. It adds no mode gate of its own and is never
+  fatal. Open windows are reached ONLY through kitty's control socket
+  (`live::push_kitty_colors`), never a raw OSC write into a pty — that
+  interleaves with the program's own output and gets eaten. Sockets are
+  found by the `kitty-<pid>` name the kitty dendrite's `listen_on` gives
+  them, a directory listing: no `/proc` or process-table discovery. **A test
+  build never pushes** (`#[cfg(test)]` in `stage_terminal_colors`): handler
+  tests run against the real `$XDG_RUNTIME_DIR`, and a push from one would
+  recolour the operator's own terminals. Test the push through
+  `live::push_kitty_colors` with a stand-in `kitty` on `PATH`, as `live.rs`
+  does. Every colour is hex-linted in the `kitty` emitter before it is
+  written: the file is an `include` in kitty.conf, so a value carrying a
+  newline would be a config directive.
 - **`song/declared/livery.json` (the declared twin, CONTRACTS.md §4) is
   READ-ONLY for this crate — only the nix facet writes it.** The quickshell
   facet's activation seed (`modules/facets/quickshell/default.nix`,
@@ -184,7 +203,7 @@
 - **A new `rice`/`livery`/`cover`/`element` command** adds a `cmd!`/
   `register` entry in `commands/`, wired into `lyra`'s `commands::all()`
   only.
-- **A new emitter target** (stage/hyprctl/osc/file exist today) extends
+- **A new emitter target** (stage/hyprctl/osc/file/kitty exist today) extends
   `livery::emit`, keeping the schema-validate → resolve → emit pipeline
   shape.
 - **A new element-descriptor field** extends `elements::Descriptor`/

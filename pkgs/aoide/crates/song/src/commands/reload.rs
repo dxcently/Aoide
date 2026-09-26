@@ -169,10 +169,10 @@ fn reload_staging_or_draft(inv: &Invocation, marker: mode::ModeMarker) -> Outcom
     }))
 }
 
-/// Draft mode's own "sync" beat: apply hyprctl geometry/border keywords
-/// (derived from the CURRENT staged livery — already the draft's own
-/// content via its routing symlink) and sync widget bodies + the
-/// widget-type registry into `run/qml` — the SAME primitives
+/// Draft mode's own "sync" beat: apply hyprctl geometry/border keywords and
+/// the terminal colours (both derived from the CURRENT staged livery —
+/// already the draft's own content via its routing symlink) and sync
+/// widget bodies + the widget-type registry into `run/qml` — the SAME primitives
 /// [`super::rice::handle_rice_stage`] itself calls (`crate::live`/
 /// `crate::widgets`), minus the "read the committed songbook and (re)write
 /// `stage/livery.json`" step that function opens with. That step is
@@ -200,6 +200,8 @@ fn sync_draft_in_place(song: &str) -> Outcome {
     };
 
     let hyprctl_status = crate::live::apply_live(&crate::live::geometry_keywords(&parsed));
+    let (terminal_changed, terminal_data) =
+        super::rice::stage_terminal_colors(crate::live::terminal_colors(&parsed).as_deref());
 
     let widget_sync = match crate::widgets::sync_song_widgets(song) {
         Ok(sync) => sync,
@@ -216,13 +218,15 @@ fn sync_draft_in_place(song: &str) -> Outcome {
         }
     };
 
-    let mut changed = widget_sync.changed.clone();
+    let mut changed = terminal_changed;
+    changed.extend(widget_sync.changed.clone());
     changed.extend(registry_sync.changed.clone());
 
     Outcome::ok("reload", format!("synced `{song}`'s draft in place — {}", widget_sync.note))
         .changed(changed)
         .with_data(json!({
             "hyprctl": hyprctl_status,
+            "terminal": terminal_data,
             "widgets": widget_sync.note,
             "registry": registry_sync.note,
         }))

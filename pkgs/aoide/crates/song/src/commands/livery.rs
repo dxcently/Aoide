@@ -25,7 +25,7 @@ pub fn register(r: &mut Registry) {
         path: ["livery", "emit"],
         summary: "Emit the fully-resolved livery set through a backend: stage JSON, hyprctl keyword lines, terminal OSC sequences, or a file template ({{group.key}}).",
         args: [
-            arg!("target", "string", true, "Emitter backend: stage, hyprctl, osc, or file."),
+            arg!("target", "string", true, "Emitter backend: stage, hyprctl, osc, file, or kitty."),
             arg!("name", "string", false, "Song name or path to a livery file; defaults to the staged livery."),
         ],
         flags: [
@@ -258,7 +258,7 @@ fn handle_livery_emit(inv: &Invocation) -> Outcome {
         None => {
             return Outcome::usage(
                 "livery.emit",
-                format!("emit: unknown target \"{target}\" (stage|hyprctl|osc|file)"),
+                format!("emit: unknown target \"{target}\" (stage|hyprctl|osc|file|kitty)"),
             )
             .with_data(json!({ "reason": "unknown-target", "target": target }));
         }

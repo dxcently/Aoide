@@ -147,10 +147,10 @@ fn file_backend_errors_on_an_unknown_placeholder() {
 }
 
 #[test]
-fn registry_lists_exactly_the_four_backends_in_order() {
+fn registry_lists_exactly_the_five_backends_in_order() {
     let targets: Vec<&str> = aoide_song::livery::emit::registry()
         .iter()
         .map(|e| e.target())
         .collect();
-    assert_eq!(targets, ["stage", "hyprctl", "osc", "file"]);
+    assert_eq!(targets, ["stage", "hyprctl", "osc", "file", "kitty"]);
 }

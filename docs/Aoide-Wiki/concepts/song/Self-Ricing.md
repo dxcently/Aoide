@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-27
+updated: 2026-09-26
 tags: [aoide, rice, agent]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Aoide ships the rice engine as a builtin. The engine provides the loop, the schema, and the staging mechanism. Everything else — the songs, the preferences, the accumulated taste — it learns by doing.
 
-**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[livery]] engine), `rice stage`, `rice compose`, `lyra reload` (the one mode-aware iteration command — absorbed `quickshell reload` outright), the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, and geometry + window-border colours apply to the running compositor over `hyprctl` in the same step (terminal-OSC fan-out is not yet wired into it) — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, the activation seed reseeds `stage/livery.json` from the active song's committed notes with the venue's `aoide.livery.override` applied and publishes the same bytes at `song/declared/livery.json`, the declared twin the runtime writers re-derive the declared song from ([[Codebase#Runtime contracts (socket + stage files)]]) — so a host that boots without ever staging still carries the correct stage twin, and a later re-stage of that song reproduces the venue recolour instead of reverting it. `rice declare` is implemented — gated, it copies the composed song from the runtime songbook into the checkout's `song/songbook/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
+**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[livery]] engine), `rice stage`, `rice compose`, `lyra reload` (the one mode-aware iteration command — absorbed `quickshell reload` outright), the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, geometry, window-border colours and the hyprglass switch apply to the running compositor over `hyprctl` in the same step, and the terminals follow: `stage/terminal-colors.conf` for every new kitty window, pushed over kitty's control socket to the open ones — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, the activation seed reseeds `stage/livery.json` from the active song's committed notes with the venue's `aoide.livery.override` applied and publishes the same bytes at `song/declared/livery.json`, the declared twin the runtime writers re-derive the declared song from ([[Codebase#Runtime contracts (socket + stage files)]]) — so a host that boots without ever staging still carries the correct stage twin, and a later re-stage of that song reproduces the venue recolour instead of reverting it. `rice declare` is implemented — gated, it copies the composed song from the runtime songbook into the checkout's `song/songbook/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
 
 ## The Rice Loop
 
@@ -243,6 +243,27 @@ IPC reload (rebuilds the whole scene fresh from `shell.qml` — the absorbed
 `quickshell reload` mechanism, byte-for-byte in the `declarative` arm);
 whether that also re-reads `manifest.json` and closes this gap is still
 unconfirmed against a live instance.
+
+The terminals and the compositor's glass follow the stage too, from the
+same staged notes and under the same gate. `rice stage` writes
+`$AOIDE_ROOT/song/stage/terminal-colors.conf` — the staged song's base16 in
+kitty's own colour syntax (the tinted-kitty template Stylix bakes, key for
+key; a song with no base16 tier gets its four palette anchors only), through
+the livery engine's `kitty` emitter. The kitty dendrite includes that file
+after Stylix's baked colours, so every NEW window opens in the staged song;
+for the windows already open, `rice stage` runs `kitty @ set-colors --all
+--configured <file>` over every kitty control socket
+(`$XDG_RUNTIME_DIR/kitty-<pid>`, the dendrite's `listen_on`) and reports how
+many windows it recoloured. Never a raw OSC write into a pty: that
+interleaves with whatever the program there is printing and gets eaten. `rice
+mode declarative` rewrites the file from the declared twin through the same
+re-pin, so leaving staging restores the declared colours the same live way;
+`rice back` and `lyra reload`'s draft sync write it too. On the compositor
+side, `geometry.blurEnabled` now switches hyprglass along with Hyprland's
+blur: `plugin:hyprglass:enabled` and `plugin:hyprglass:layers:enabled` are
+live keywords, so a song with blur off (cadenza) turns the glass off without
+unloading the plugin, and a song with blur on turns it back on. A song with
+no `blurEnabled` opinion leaves both as they are.
 
 `lyra rice mode status` reports the current mode plus, in `staging`/
 `draft`, which song (and, in `draft`, which draft) it is pointed at and

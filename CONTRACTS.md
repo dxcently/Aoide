@@ -182,13 +182,17 @@ paragraph — in addition to baking the value at build time into
 | `geometry.gapsIn`     | `nullOr int`  | `6`      | `general:gaps_in`       |
 | `geometry.borderSize` | `nullOr int`  | `2`      | `general:border_size`   |
 | `geometry.rounding`   | `nullOr int`  | `0`      | `decoration:rounding`   |
-| `geometry.blurEnabled`| `nullOr bool` | `true`   | `decoration:blur:enabled` |
+| `geometry.blurEnabled`| `nullOr bool` | `true`   | `decoration:blur:enabled`; live, also `plugin:hyprglass:enabled` + `plugin:hyprglass:layers:enabled` |
 | `geometry.blurSize`   | `nullOr int`  | `8`      | `decoration:blur:size`  |
 | `geometry.blurPasses` | `nullOr int`  | `3`      | `decoration:blur:passes`|
 
 Border *colours* (`window.border` / `window.borderInactive`, component tier
 above) already map to `col.active_border` / `col.inactive_border` and are
-unaffected by this tier.
+unaffected by this tier. `blurEnabled` also switches hyprglass (the
+liquid-glass plugin the compositor facet loads) on a live stage: both of its
+enable keys are read per frame, so a song with blur off turns the glass off
+without unloading the plugin, and a song with blur on turns it back on. The
+baked `hyprland.conf` does not gate hyprglass on this key yet.
 
 ### Cover-art tier (v0 — the wallpaper note)
 
@@ -1415,6 +1419,33 @@ name is an error, not idempotent-silent, and dropping the CURRENTLY-ROUTED
 draft is refused (`draft-is-live`) rather than silently also tearing down
 the routing and falling back to `staging` — switch modes first
 (`rice mode stage`/`rice mode declarative`), then drop it.
+
+### `song/stage/terminal-colors.conf` — **v0**
+
+The staged song's terminal colours in kitty's own config syntax: one
+`<key> #rrggbb` line per colour, `#` comment lines, nothing else. The kitty
+dendrite (`modules/dendrites/kitty.nix`) `include`s it after Stylix's baked
+colour include, so every NEW kitty window opens in the staged song; kitty
+skips the include with a log line while the file is absent, and the baked
+colours stand.
+
+Writer: `aoide-song`'s `commands::rice::stage_terminal_colors`, the one
+writer every stage path shares — `rice stage`, `rice mode stage`, `rice mode
+declarative`'s re-pin (which renders it from the declared twin when that is
+the song re-pinned, so leaving staging restores the declared colours), `rice
+back` and `lyra reload`'s draft sync. It rides each caller's mode gate and
+adds none. The content is the `kitty` livery emitter's output
+(`livery::emit::kitty`): the tinted-kitty base16 template Stylix bakes,
+key for key, or the four palette anchors on their conventional ANSI slots
+when the note carries no base16 tier. Every value is hex-linted before it is
+written; a non-hex value drops its line, never reaches the file.
+
+After each write the same file is pushed to every OPEN kitty through its
+control socket: `kitty @ --to unix:<sock> set-colors --all --configured
+<file>` for each `$XDG_RUNTIME_DIR/kitty-<pid>` unix socket (the dendrite's
+`listen_on`). Best-effort, bounded per call, never fatal; the outcome
+envelope's `terminal` object reports `{status, message, instances, windows,
+failed, file}`.
 
 ### `state/stage/sessions.json` / `hooks.json` — **v0**
 

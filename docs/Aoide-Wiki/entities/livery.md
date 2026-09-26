@@ -32,7 +32,7 @@ module. The coupling discipline is contractual, not polite.
 
 ```
 livery (single source)
-    ├── stage/livery.json  →  Quickshell + hyprctl + terminal OSC  (rehearsal / live)
+    ├── stage/livery.json  →  Quickshell + hyprctl + kitty socket  (rehearsal / live)
     └── rice.nix → Stylix   →  every nix-manageable app             (recording / adopted)
 ```
 

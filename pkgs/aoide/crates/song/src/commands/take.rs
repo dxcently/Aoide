@@ -1395,6 +1395,9 @@ struct BackResult {
     changed: Vec<String>,
     registry_note: String,
     hyprctl_status: &'static str,
+    /// The terminal colour push's envelope data
+    /// (`super::rice::stage_terminal_colors`).
+    terminal: serde_json::Value,
 }
 
 /// The unlocked revert core — see the section banner above for the shape.
@@ -1511,6 +1514,13 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
     // SAME livery just written), never fatal: the stage-file write above is
     // already the source of truth for the hot-reload half.
     let hyprctl_status = crate::live::apply_live(&crate::live::geometry_keywords(&target_record.livery));
+    // The terminal half off the same restored livery: the colour file every
+    // new kitty window includes, pushed to the open ones — same best-effort
+    // tier, through the one writer `rice stage` uses.
+    let (terminal_changed, terminal) = super::rice::stage_terminal_colors(
+        crate::live::terminal_colors(&target_record.livery).as_deref(),
+    );
+    changed.extend(terminal_changed);
 
     // Cover restore is narrowed to the STAGE ONLY (advisor verdict D4):
     // `stage/cover.json` is not symlink-routed the way `livery.json` is
@@ -1577,6 +1587,7 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
         changed,
         registry_note: registry_sync.note,
         hyprctl_status,
+        terminal,
     })
 }
 
@@ -1674,6 +1685,7 @@ fn render_back_outcome(result: BackResult) -> Outcome {
             "mark": result.mark,
             "drifted": result.drifted,
             "hyprctl": result.hyprctl_status,
+            "terminal": result.terminal,
             "registry": result.registry_note,
         }))
 }

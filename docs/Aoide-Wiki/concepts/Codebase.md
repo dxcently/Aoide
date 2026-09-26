@@ -386,8 +386,9 @@ commands — `rice declare/transpose`, the five-command `content` pipeline, `mak
 `update`. Their arg-parsing, schema, gate flag, and audit trail are
 real; only the live-system action is deferred. (`rice stage`/`rice compose`/
 the `rice draft` group are **real** — `rice stage` stages
-`song/stage/livery.json` for Quickshell hot-reload today; only the
-hyprctl/OSC dispatch fan-out remains unwired into `stage` itself. There is
+`song/stage/livery.json` for Quickshell hot-reload, applies geometry,
+borders and the hyprglass switch over `hyprctl`, and recolours kitty through
+`stage/terminal-colors.conf` and kitty's control socket. There is
 no `rice gen` — a speculative prompt/wallpaper generator that was cut
 outright rather than left as a stub with no design behind it.)
 
