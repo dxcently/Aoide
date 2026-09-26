@@ -89,6 +89,20 @@ use std::time::{Duration, Instant};
 /// How much of a quoted `say`/prompt reaches the parent's line — one short
 /// phrase, never a paragraph in somebody else's composer.
 const SAY_MAX: usize = 80;
+/// The largest count a re-rendered event may claim — calls, tool errors, a
+/// failing run (L1 of the S8/S9 review). A peer's arithmetic is its own, and
+/// `18446744073709551615 calls` in a parent's composer is noise at best:
+/// beyond this bound the number reads as "this many, or more".
+const COUNT_MAX: u64 = 9_999;
+/// The longest a re-rendered turn may claim to have run — a week. The local
+/// producer floors its own `mins` at 0 (`(to - from).max(0)`), so a peer's
+/// negative is clamped to the same floor rather than printed.
+const MINS_MAX: i64 = 10_080;
+/// The largest exit status a real process can have (`ExitStatus::code()`
+/// answers 0..=255). An event claiming anything else has its code DROPPED, not
+/// clamped: `exit 0` would be a fabricated success, and the renderer already
+/// prints no code when there is none.
+const EXIT_CODE_MAX: i32 = 255;
 /// How long a turn may sit with no new record before the child is called
 /// silent (the brief's ten minutes).
 const SILENCE_MS: i64 = 10 * 60 * 1000;
@@ -1416,29 +1430,53 @@ fn ping_event_of(event: &Value) -> Option<PingEvent> {
 /// `match`, which is the point).
 fn reclamp(event: PingEvent) -> PingEvent {
     let one = |s: Option<String>| s.map(|s| reclean(&s));
+    let calls = |c: Option<u64>| c.map(|c| c.min(COUNT_MAX));
+    let mins = |m: Option<i64>| m.map(|m| m.clamp(0, MINS_MAX));
     match event {
-        PingEvent::Settled { stop, calls, mins, say, errors } => {
-            PingEvent::Settled { stop: one(stop), calls, mins, say: one(say), errors }
+        PingEvent::Settled { stop, calls: c, mins: m, say, errors } => PingEvent::Settled {
+            stop: one(stop),
+            calls: calls(c),
+            mins: mins(m),
+            say: one(say),
+            errors: errors.min(COUNT_MAX),
+        },
+        PingEvent::Cancelled { calls: c, mins: m, say, errors } => PingEvent::Cancelled {
+            calls: calls(c),
+            mins: mins(m),
+            say: one(say),
+            errors: errors.min(COUNT_MAX),
+        },
+        PingEvent::DiedMidTurn { calls: c, say, errors } => PingEvent::DiedMidTurn {
+            calls: calls(c),
+            say: one(say),
+            errors: errors.min(COUNT_MAX),
+        },
+        PingEvent::Asking { prompt, errors } => {
+            PingEvent::Asking { prompt: reclean(&prompt), errors: errors.min(COUNT_MAX) }
         }
-        PingEvent::Cancelled { calls, mins, say, errors } => {
-            PingEvent::Cancelled { calls, mins, say: one(say), errors }
+        PingEvent::WrappingUp { calls_left, secs_left, errors } => PingEvent::WrappingUp {
+            calls_left: one(calls_left),
+            secs_left: one(secs_left),
+            errors: errors.min(COUNT_MAX),
+        },
+        PingEvent::Failing { run, tool } => {
+            PingEvent::Failing { run: run.min(COUNT_MAX), tool: one(tool) }
         }
-        PingEvent::DiedMidTurn { calls, say, errors } => {
-            PingEvent::DiedMidTurn { calls, say: one(say), errors }
-        }
-        PingEvent::Asking { prompt, errors } => PingEvent::Asking { prompt: reclean(&prompt), errors },
-        PingEvent::WrappingUp { calls_left, secs_left, errors } => {
-            PingEvent::WrappingUp { calls_left: one(calls_left), secs_left: one(secs_left), errors }
-        }
-        PingEvent::Failing { run, tool } => PingEvent::Failing { run, tool: one(tool) },
-        PingEvent::Silent { mins, last } => {
+        PingEvent::Silent { mins: m, last } => {
             let last = last.map(|last| match last {
                 Last::Said(say) => Last::Said(reclean(&say)),
                 Last::Did(label) => Last::Did(reclean(&label)),
             });
-            PingEvent::Silent { mins, last }
+            PingEvent::Silent { mins: m.clamp(0, MINS_MAX), last }
         }
-        PingEvent::Exited { code, outcome } => PingEvent::Exited { code, outcome: one(outcome) },
+        PingEvent::Exited { code, outcome } => {
+            // An out-of-range code is no code: the renderer then falls back to
+            // the outcome, exactly as it does for a signal death.
+            PingEvent::Exited {
+                code: code.filter(|c| (0..=EXIT_CODE_MAX).contains(c)),
+                outcome: one(outcome),
+            }
+        }
     }
 }
 
@@ -3007,6 +3045,48 @@ mod tests {
         assert_eq!(cursor_of("a2a-4411-1790"), 2);
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_peers_numbers_are_clamped_and_an_impossible_exit_code_is_dropped() {
+        let line = |event: serde_json::Value| {
+            let event = ping_event_of(&event).expect("a closed kind deserializes");
+            render_line("[nodeb/a2a-1]", &event)
+        };
+
+        // Counts and durations are clamped, not believed: the renderer prints a
+        // number a reader can act on, never a peer's arithmetic raw.
+        assert_eq!(
+            line(serde_json::json!({ "settled": {
+                "stop": "end_turn", "calls": u64::MAX, "mins": i64::MIN,
+                "say": null, "errors": u64::MAX } })),
+            "[nodeb/a2a-1] settled end_turn · 9999 calls · 0 min · 9999 tool errors"
+        );
+        assert_eq!(
+            line(serde_json::json!({ "failing": { "run": u64::MAX, "tool": null } })),
+            "[nodeb/a2a-1] failing · 9999 tool errors in a row"
+        );
+        assert_eq!(
+            line(serde_json::json!({ "silent": { "mins": -9999, "last": null } })),
+            "[nodeb/a2a-1] silent 0 min"
+        );
+
+        // A code no process can return is DROPPED, never clamped: `exit 0`
+        // would be a fabricated success, so the line falls back to the
+        // outcome, exactly as it does for a signal death.
+        assert_eq!(
+            line(serde_json::json!({ "exited": { "code": 2_147_483_647, "outcome": "exit" } })),
+            "[nodeb/a2a-1] exited · exit"
+        );
+        assert_eq!(
+            line(serde_json::json!({ "exited": { "code": -1, "outcome": null } })),
+            "[nodeb/a2a-1] exited"
+        );
+        assert_eq!(
+            line(serde_json::json!({ "exited": { "code": 7, "outcome": "exit" } })),
+            "[nodeb/a2a-1] exited · exit 7",
+            "a real status is still shown"
+        );
     }
 
     #[test]
