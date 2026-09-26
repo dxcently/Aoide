@@ -316,9 +316,15 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
         });
     }
     for drop in dropped {
-        let Some(parent) = drop.parent_session_id.clone().filter(|p| !p.is_empty()) else {
+        let remote = drop.remote;
+        let parent = drop.parent_session_id.clone().filter(|p| !p.is_empty()).unwrap_or_default();
+        // The same rule as the roster above, plus the drop's own: a child the
+        // sync just removed whose parent is on another node still owes that
+        // parent its exit, and this pass is the last one that will ever decide
+        // over it.
+        if parent.is_empty() && !remote {
             continue;
-        };
+        }
         children.push(Child {
             id: drop.session_id.clone(),
             petname: drop.petname.clone(),
@@ -329,8 +335,10 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
                 .as_deref()
                 .and_then(|path| read_trace(&drop.agent, path)),
             dropped_mid_turn: true,
-            remote: false,
-            ended: None,
+            remote,
+            // No record is left to say `done`: the sync's own drop IS the
+            // observation that this child ended.
+            ended: remote.then(|| Ended { code: drop.exit_code, outcome: drop.outcome.clone() }),
         });
     }
 
@@ -410,7 +418,19 @@ fn claim_locked(
     for child in children {
         let entry = next.get(&child.id).cloned().unwrap_or_default();
         let (event, updated) = decide(child, &entry, now_ms);
-        if let Some(event) = event {
+        let mut events: Vec<PingEvent> = event.into_iter().collect();
+        // A child the sync DROPPED is never decided again — its record is gone
+        // from the roster, so its cursor entry leaves the file on this same
+        // pass — which means the exit `decide` would otherwise owe on a LATER
+        // tick has to be claimed here, after the trace row the drop could
+        // still produce. Local dropped children are skipped: their parent is
+        // told by the run's own report, exactly as for a live one.
+        if child.dropped_mid_turn && child.remote {
+            if let Some(exit) = exit_event(child, entry.exited) {
+                events.push(exit);
+            }
+        }
+        for event in events {
             // Where an event GOES is the child's own record's business: a
             // remote parent has no local transport, and this node's `deliver`
             // is that transport.
@@ -465,7 +485,7 @@ fn decide(child: &Child, entry: &CursorEntry, now_ms: i64) -> (Option<PingEvent>
     // The child's own end is the LAST thing a parent hears, never the first:
     // an event the tail still holds is delivered (or spooled) first, and the
     // exit — which a remote parent's pull stops at — follows on a later tick.
-    let (event, exited) = match (event, exit_event(child, entry)) {
+    let (event, exited) = match (event, exit_event(child, entry.exited)) {
         (Some(event), _) => (Some(event), entry.exited),
         (None, Some(event)) => (Some(event), true),
         (None, None) => (None, entry.exited),
@@ -476,14 +496,15 @@ fn decide(child: &Child, entry: &CursorEntry, now_ms: i64) -> (Option<PingEvent>
     )
 }
 
-/// The `Exited` event a child still owes, given its cursor: only for a child
-/// whose parent is on another node (Q5's ruled default — a local parent hears
-/// the run's own report instead), only once its record says `done`, and only
-/// until the cursor's own latch has claimed it. A record that stays on the
-/// roster after its run ended would otherwise re-decide the same exit every
-/// twelve seconds, which is exactly what the latch is for.
-fn exit_event(child: &Child, entry: &CursorEntry) -> Option<PingEvent> {
-    if !child.remote || entry.exited {
+/// The `Exited` event a child still owes, given whether its cursor has already
+/// claimed one: only for a child whose parent is on another node (Q5's ruled
+/// default — a local parent hears the run's own report instead), only once its
+/// record says `done`, and only until the cursor's own latch has claimed it. A
+/// record that stays on the roster after its run ended would otherwise
+/// re-decide the same exit every twelve seconds, which is exactly what the
+/// latch is for.
+fn exit_event(child: &Child, claimed: bool) -> Option<PingEvent> {
+    if !child.remote || claimed {
         return None;
     }
     let ended = child.ended.as_ref()?;
@@ -1725,6 +1746,9 @@ mod tests {
                 parent_session_id: Some("wrap-1".to_string()),
                 agent: "eidolon".to_string(),
                 trace: Some(trace),
+                remote: false,
+                exit_code: None,
+                outcome: None,
             }],
         );
         let bytes = acc.join().unwrap();
@@ -1886,6 +1910,68 @@ mod tests {
         let line = render_line("[eidolon brave-otter]", &event);
         assert_eq!(line, "[eidolon brave-otter] asking: \" /compact now!rm -rf /\"", "{line:?}");
         assert!(!line.chars().any(char::is_control), "{line:?}");
+    }
+
+    #[test]
+    fn a_dropped_remote_child_ends_its_ring_with_one_exited() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("pingback-dropped-remote");
+        // A remote eidolon child, mid-turn, whose presence the sync just
+        // removed: its record is gone, so THIS is the only pass that can ever
+        // tell its parent anything again.
+        child_fixture(&root, "user-0001", "wrap-1", &[USER, ASSISTANT]);
+        make_remote("user-0001");
+        let trace = root.join("sessions").join("user-0001.jsonl");
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        file.sessions.retain(|s| s.session_id != "user-0001");
+        write_stage(&sessions_path(), &file).unwrap();
+
+        let report = pingback(
+            &daemon_inv(),
+            &[DroppedEidolon {
+                session_id: "user-0001".to_string(),
+                petname: Some("brave-otter".to_string()),
+                parent_session_id: None,
+                agent: "eidolon".to_string(),
+                trace: Some(trace),
+                remote: true,
+                exit_code: Some(7),
+                outcome: Some("exit".to_string()),
+            }],
+        );
+        assert!(report.delivered.is_empty(), "{report:?}");
+
+        // Two events, in that order: the row the drop could still produce, then
+        // the exit that closes the ring.
+        let read = aoide_storage::pingback_remote::events_for("user-0001", 0);
+        assert_eq!(read.events.len(), 2, "{read:?}");
+        assert_eq!(read.events[0].seq, 1);
+        assert!(
+            read.events[0].event.get("died_mid_turn").is_some(),
+            "the turn was open when the process went away: {read:?}"
+        );
+        assert_eq!(read.events[1].seq, 2);
+        assert_eq!(
+            read.events[1].event,
+            serde_json::json!({ "exited": { "code": 7, "outcome": "exit" } }),
+            "the ring ENDS with one exit, from the record's own end facts"
+        );
+
+        // Exactly one: no later tick can decide this child again (its record is
+        // gone and its cursor entry left with it), and a second pass with the
+        // same dropped set is what proves the ring is not appended to twice.
+        let again = pingback(&daemon_inv(), &[]);
+        assert_eq!(again, PingbackReport::default(), "{again:?}");
+        assert_eq!(aoide_storage::pingback_remote::events_for("user-0001", 0).events.len(), 2);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

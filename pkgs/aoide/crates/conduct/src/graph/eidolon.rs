@@ -175,6 +175,15 @@ pub(crate) struct DroppedEidolon {
     pub parent_session_id: Option<String>,
     pub agent: String,
     pub trace: Option<PathBuf>,
+    /// The dropped record's own `remoteParent` stamp (P-RSA S8). A remote
+    /// child that vanishes is still a child that ENDED, and this pass is the
+    /// only one that can ever tell its parent so: the record is gone from the
+    /// roster, so no later tick will decide over it again.
+    pub remote: bool,
+    /// The dropped record's own end facts, carried for the same reason — a run
+    /// that exited cleanly stamped them before its presence was removed.
+    pub exit_code: Option<i32>,
+    pub outcome: Option<String>,
 }
 
 /// Is this roster record one of THIS module's own enrolments — the one and
@@ -792,6 +801,9 @@ fn dropped_this_pass(before: &[SessionRecord], after: &[SessionRecord]) -> Vec<D
             trace: agent_profile(&s.agent).and_then(|p| {
                 (p.transcript.locate)(&s.session_id, Some(&s.cwd), s.log_path.as_deref())
             }),
+            remote: s.remote_parent.is_some(),
+            exit_code: s.exit_code,
+            outcome: s.outcome.clone(),
         })
         .collect()
 }
