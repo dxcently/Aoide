@@ -12,6 +12,16 @@ See an existing song (`song/songbook/sonata/rice.nix`,
 the same values as a hand/agent-maintained JSON file — kept in sync with
 `rice.nix`, not derived from it.
 
+A song's `rice.nix` is handed two things by ARGUMENT and never by a path
+(`CONTRACTS.md` §5): `song` — the `lib/song.nix` API — and `borrow`, where
+`borrow "sonata"` is sonata's rolled-up `_widgets/` (the one cross-song idiom).
+So the signature is `{ lib, config, song, borrow, ... }:`, and a shelf's
+`_widgets/default.nix` is `{ lib, song, borrow, ... }:`; name only what the file
+uses and keep the `...`. A `../` path literal in any `.nix` under a song folder
+breaks every machine whose songbook is not this checkout — which is what
+`pkgs/lyra-songbook`, `aoideSeedSongbook` and the offline generator assume — and
+`checks.song-shape` scans for it.
+
 ## Per-song flavor widgets (`widgets/<slot>.qml`)
 
 **Which slots are live is not listed here.**

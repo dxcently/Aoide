@@ -16,9 +16,9 @@
 # unchanged, `owner` field and all. quodlibet therefore contributes zero
 # widget records of its own — this file never types `owner = "quodlibet"`
 # anywhere, which is the point.
-{ lib }:
+{ borrow, ... }:
 let
-  sonataWidgets = import ../../sonata/_widgets { inherit lib; };
-  fugueWidgets = import ../../fugue/_widgets { inherit lib; };
+  sonataWidgets = borrow "sonata";
+  fugueWidgets = borrow "fugue";
 in
 sonataWidgets // { inherit (fugueWidgets) bar herald; }

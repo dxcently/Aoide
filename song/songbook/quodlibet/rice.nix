@@ -8,10 +8,14 @@
 #
 # HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.livery.
 # All livery values are literal nix expressions (no song/ runtime reads).
-{ lib, config, ... }:
+{
+  lib,
+  config,
+  song,
+  borrow,
+  ...
+}:
 let
-  song = import ../../../lib/song.nix { inherit lib; };
-
   # `_widgets/default.nix` here is NOT a shelf roll-up (contrast sonata's and
   # fugue's, which `readDir` their own sibling `<slot>.nix` files) — it is the
   # composition itself: `sonataWidgets // { inherit (fugueWidgets) bar herald; }`,
@@ -20,7 +24,10 @@ let
   # it returns keeps whichever `owner` its authoring song's roll-up bound
   # (`fugue` for `bar`/`herald`, `sonata` for the rest) — quodlibet mints no
   # `owner = "quodlibet"` record anywhere.
-  widgets = import ./_widgets { inherit lib; };
+  # Its OWN composition, through the name-keyed door — which is also how it
+  # reaches the two parents it composes: `borrow "sonata"` and `borrow "fugue"`,
+  # never a path to their folders (CONTRACTS.md §5).
+  widgets = borrow "quodlibet";
 in
 {
   # Guard: apply only when this host performs "quodlibet".
