@@ -1678,6 +1678,7 @@ mod tests {
             session_id: child.to_string(),
             spawned_at: "2026-09-25T00:00:00Z".to_string(),
             lines_after: 0,
+            drained: false,
             extra: Default::default(),
         }
     }

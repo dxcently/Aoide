@@ -65,8 +65,25 @@ pub struct RemoteChild {
     /// at-most-once direction `pingback.json`'s cursor holds.
     #[serde(rename = "linesAfter", default)]
     pub lines_after: u64,
+    /// The pull is FINISHED for this child: the parent has drained the ring's
+    /// `Exited` (CONTRACTS.md §4). A ring is never pruned and a child that has
+    /// left this roster never pushes again, so without this latch every tick
+    /// afterward would ask a far node about a session that has nothing left to
+    /// say — one request per child per tick, forever. Set by
+    /// [`mark_drained`], and never cleared: the row itself leaves when its
+    /// parent leaves the roster.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub drained: bool,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+/// The `serde` skip for a latch: a `false` field is never written, so every
+/// row written before this field existed stays byte-identical to what it was
+/// (the same discipline `records.rs`/`node_store.rs` hold for their own
+/// flags).
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// The `state/stage/remote-children.json` container — `extra` for the same
@@ -175,6 +192,28 @@ pub fn advance_lines_after(key: &str, session_id: &str, seq: u64) -> Result<bool
     })
 }
 
+/// Latch one child's pull as DONE ([`RemoteChild::drained`]), under the stage
+/// lock; a row already latched is a no-op, and so is an unknown child. The
+/// latch is the row's last write: nothing ever clears it.
+pub fn mark_drained(key: &str, session_id: &str) -> Result<bool, String> {
+    with_stage_lock(|| {
+        let mut file: RemoteChildrenFile = load_stage(&remote_children_path()).unwrap_or_default();
+        let Some(entry) = file
+            .children
+            .iter_mut()
+            .find(|c| c.key == key && c.session_id == session_id)
+        else {
+            return Ok(false);
+        };
+        if entry.drained {
+            return Ok(false);
+        }
+        entry.drained = true;
+        save(&mut file)?;
+        Ok(true)
+    })
+}
+
 /// Write the container back, stamping the version. The file always carries a
 /// non-empty `children` by the time this is called.
 fn save(file: &mut RemoteChildrenFile) -> Result<(), String> {
@@ -234,6 +273,7 @@ mod tests {
             session_id: id.to_string(),
             spawned_at: "2026-09-25T00:00:00Z".to_string(),
             lines_after: 0,
+            drained: false,
             extra: Default::default(),
         }
     }
@@ -351,6 +391,28 @@ mod tests {
         assert_eq!(advance_lines_after("aa", "nope", 9).unwrap(), false);
         assert_eq!(advance_lines_after("bb", "c1", 9).unwrap(), false, "the key is half the identity");
         assert_eq!(load_remote_children()[0].lines_after, 7);
+    }
+
+    #[test]
+    fn mark_drained_latches_once_and_never_clears() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = StageEnv::new("drained");
+        append_remote_child(&child("par1", "nodeb", "aa", "c1")).unwrap();
+
+        // A row before this field existed carries no `drained` key at all, and
+        // an unlatched row writes none either — the field is additive.
+        let raw = std::fs::read_to_string(remote_children_path()).unwrap();
+        assert!(!raw.contains("drained"), "a false latch is never written: {raw}");
+
+        assert_eq!(mark_drained("aa", "c1").unwrap(), true);
+        assert!(load_remote_children()[0].drained);
+        assert_eq!(mark_drained("aa", "c1").unwrap(), false, "the latch is one-way");
+        assert!(load_remote_children()[0].drained, "and nothing clears it");
+
+        // The cursor is a separate field: latching moved nothing.
+        assert_eq!(load_remote_children()[0].lines_after, 0);
+        assert_eq!(mark_drained("aa", "nope").unwrap(), false);
+        assert_eq!(mark_drained("bb", "c1").unwrap(), false, "the key is half the identity");
     }
 
     #[test]

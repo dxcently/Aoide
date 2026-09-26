@@ -60,7 +60,8 @@ fn run_curl(extra: &[&str], stdin_body: Option<&str>) -> Result<(u16, String), S
 const MAX_RESPONSE_BYTES: usize = 20 * 1024 * 1024; // 20 MiB
 
 /// The ceiling ONE read gets instead of [`MAX_RESPONSE_BYTES`]: the watch
-/// frame (`tasks/get` + `metadata["aoide/frame"]`, P-RSA S7).
+/// frame (`tasks/get` + `metadata["aoide/frame"]`, P-RSA S7) and the ping-back
+/// history read (`metadata["aoide/linesAfter"]`, P-RSA S9).
 ///
 /// **The arithmetic, honestly.** The far door bounds a frame's SHEDDABLE
 /// content to 256 KiB, but the instruction block is exempt from that cap by
@@ -79,6 +80,14 @@ const MAX_RESPONSE_BYTES: usize = 20 * 1024 * 1024; // 20 MiB
 /// it is stated as arithmetic instead. Widening either bound is what this
 /// comment is for.)
 const FRAME_MAX_RESPONSE_BYTES: usize = 512 * 1024;
+
+/// The `--max-time` one PING-BACK PULL gets (P-RSA S9): shorter than the 15 s
+/// every interactive node read carries, because this call is one step of the
+/// daemon's own reap tick (~12 s apart) rather than a command an operator is
+/// waiting on. A dead far node must not eat the tick that reaps live sessions —
+/// the same reasoning `pull_node_live`'s own short probe holds, and the pull
+/// makes its own retry on the next tick, from the same cursor.
+const HISTORY_PULL_TIMEOUT_SECS: u64 = 5;
 
 /// `run_curl`'s parameterised core: same transport, an explicit `--max-time`
 /// instead of the hardcoded `15`. Split out for `pull_node_live` (the
@@ -1239,6 +1248,60 @@ pub fn task_get_on_node(
     crate::node::parse_frame_response(&parsed)
 }
 
+/// [`task_get_on_node`]'s twin for the PING-BACK HISTORY read (P-RSA S9,
+/// CONTRACTS.md §6, `aoide/linesAfter`): the events a child published on its
+/// own node for a parent that lives HERE. It is signed exactly as the frame
+/// read is — the far door serves the ring only to a caller whose signature
+/// verified against the CHILD's stamped `remoteParent.key`, so an
+/// unsigned/unpaired caller gets a guaranteed refusal — and it reuses the same
+/// signed-POST sequence the frame read does, through the same two transport
+/// helpers, never a second spelling of it.
+///
+/// Two things differ, and both are the caller's to state:
+/// - **`tunnel_key` is explicit.** The frame read keys its forward under
+///   `node.name`; this one runs from the daemon's own tick on behalf of the
+///   PARENT, so the key is the parent session id — the forward then reuses the
+///   session's existing ssh path and `close_all_for_session` closes it when the
+///   session ends. The daemon never holds a standing forward of its own
+///   (`docs/architecture/PAIRING.md`, Transport).
+/// - **the timeout is shorter.** A frame read is an operator's foreground
+///   command; this one is one step of a tick that repeats every ~12 s, and a
+///   dead node must not eat its own cadence (the same reasoning
+///   `pull_node_live`'s ~2 s probe holds).
+///
+/// Returns the ring read's JSON itself, bounded by
+/// [`FRAME_MAX_RESPONSE_BYTES`] — the same "one read" ceiling the frame gets:
+/// the door caps the ring at 16 events, and a status envelope beside them is
+/// smaller than a frame's instruction block. The failure text is the peer's
+/// OWN bytes, verbatim (one sanitizer, at the door that prints it).
+pub fn task_history_on_node(
+    node: &aoide_storage::node_store::Node,
+    id: &str,
+    lines_after: u64,
+    tunnel_key: &str,
+) -> Result<Value, crate::node::FrameReadError> {
+    let wire = crate::node::build_task_get_history_request(id, lines_after);
+    let body_str = serde_json::to_string(&wire).unwrap_or_default();
+    let plain = |message: String| crate::node::FrameReadError { code: None, message };
+    let bearer = resolve_node_bearer(node).map_err(plain)?;
+    let extra_headers = sign_headers_for_node(node, &body_str).map_err(plain)?;
+    let (code, resp) = post_json_to_node_with_tunnel_key(
+        node,
+        &body_str,
+        bearer.as_deref(),
+        &extra_headers,
+        HISTORY_PULL_TIMEOUT_SECS,
+        tunnel_key,
+        FRAME_MAX_RESPONSE_BYTES,
+    )
+    .map_err(plain)?;
+    if code != 200 {
+        return Err(plain(format!("HTTP {code}")));
+    }
+    let parsed: Value = serde_json::from_str(&resp).map_err(|e| plain(format!("unparseable response: {e}")))?;
+    crate::node::parse_history_response(&parsed)
+}
+
 /// Prompt `y/N` before spawning on a node — a LOCAL UX confirmation only
 /// (mirrors `confirm_invite`'s exact idiom), never a security gate: the
 /// remote door's own paired+signature+allows∋spawn check (PAIRING.md
@@ -1535,6 +1598,7 @@ fn remote_child_row(
         session_id: child_session_id.to_string(),
         spawned_at: aoide_storage::time::now_iso_utc(),
         lines_after: 0,
+        drained: false,
         extra: Default::default(),
     })
 }

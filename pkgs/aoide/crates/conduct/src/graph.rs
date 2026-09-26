@@ -116,7 +116,7 @@ pub use self::doorbell::{mail_ring, ring, RingReport};
 // `reap.rs` (a SIBLING of this module) is its one caller, from the sweep's
 // post-lock collector block — so this stays `pub(crate)`, never crossing the
 // crate boundary.
-pub(crate) use self::pingback::pingback;
+pub(crate) use self::pingback::{pingback, pingback_pull};
 pub use self::model::{
     anchor_for, effective_project_for, lead_over, leads_project, project_for, canonical_state, merged_sessions, HookRecord, HooksFile, Project, ProjectsFile,
     SessionRecord, SessionsFile,

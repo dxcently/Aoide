@@ -1189,6 +1189,7 @@ mod tests {
             session_id: "C".into(),
             spawned_at: "2026-09-25T00:00:00Z".into(),
             lines_after: 0,
+            drained: false,
             extra: Default::default(),
         })
         .unwrap();
@@ -1792,6 +1793,7 @@ mod tests {
                 key: "cd".repeat(32),
                 session_id: "C".into(),
                 spawned_at: "2026-09-25T00:00:00Z".into(),
+                drained: false,
                 lines_after: 0,
                 extra: Default::default(),
             },

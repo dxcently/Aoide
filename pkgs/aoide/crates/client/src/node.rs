@@ -299,6 +299,59 @@ pub fn parse_frame_response(resp: &Value) -> Result<Value, FrameReadError> {
         .ok_or_else(|| plain("the `frame` artifact's part carries no `data`"))
 }
 
+/// Build the JSON-RPC `tasks/get` body that asks a node for one session's
+/// PING-BACK HISTORY (P-RSA S9, CONTRACTS.md §6): `params.id` is the remote
+/// `sessionId`, and `metadata["aoide/linesAfter"]` is the `seq` the caller has
+/// already delivered — a number, so nothing but a cursor can be smuggled into
+/// the key. [`build_task_get_frame_request`]'s sibling, keyed by
+/// `aoide_protocol::wire::a2a::LINES_AFTER_KEY`, the ONE spelling of that key,
+/// shared with the door that serves it. Pure.
+pub fn build_task_get_history_request(id: &str, after: u64) -> Value {
+    let req = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: json!(1),
+        method: "tasks/get".to_string(),
+        params: json!({ "id": id, "metadata": { aoide_protocol::wire::a2a::LINES_AFTER_KEY: after } }),
+    };
+    serde_json::to_value(&req).expect("JsonRpcRequest always serializes")
+}
+
+/// Parse a `tasks/get` history response into the ring read itself — the `data`
+/// of the `history` message `messageId: "pingback"`, which is what
+/// `aoide_storage::pingback_remote::RingRead` deserializes from, field for
+/// field. [`parse_frame_response`]'s sibling, and it reads the same envelope
+/// (a JSON-RPC `error`, a missing `result`, no `history`, no message with that
+/// id) while leaving the ring's own SHAPE to the type that owns it. Pure.
+pub fn parse_history_response(resp: &Value) -> Result<Value, FrameReadError> {
+    if let Some(err) = resp.get("error") {
+        return Err(FrameReadError {
+            code: err.get("code").and_then(Value::as_i64),
+            message: err.get("message").and_then(Value::as_str).unwrap_or("(no message)").to_string(),
+        });
+    }
+    let plain = |message: &str| FrameReadError { code: None, message: message.to_string() };
+    let result = resp.get("result").ok_or_else(|| plain("response has no `result`"))?;
+    let history = result
+        .get("history")
+        .and_then(Value::as_array)
+        .ok_or_else(|| plain("response carries no `history` — the ring was not asked for"))?;
+    let message = history
+        .iter()
+        .find(|m| {
+            m.get("messageId").and_then(Value::as_str)
+                == Some(aoide_protocol::wire::a2a::HISTORY_MESSAGE_ID)
+        })
+        .ok_or_else(|| plain("response carries no ping-back message"))?;
+    let part = message
+        .get("parts")
+        .and_then(Value::as_array)
+        .and_then(|p| p.first())
+        .ok_or_else(|| plain("the ping-back message carries no part"))?;
+    part.get("data")
+        .cloned()
+        .ok_or_else(|| plain("the ping-back message's part carries no `data`"))
+}
+
 /// `aoide/pairReveal`'s reply carries only `{ok}` — a JSON-RPC `error`
 /// becomes a refusal message; anything else is `Ok(())`. Pure.
 pub fn check_pair_reveal_response(resp: &Value) -> Result<(), String> {
@@ -371,6 +424,67 @@ mod tests {
         let e = parse_frame_response(&wrong_shape).unwrap_err();
         assert_eq!(e.code, None);
         assert!(e.message.contains("artifacts"), "{}", e.message);
+    }
+
+    #[test]
+    fn build_task_get_history_request_puts_the_cursor_where_the_door_reads_it() {
+        let body = build_task_get_history_request("a2a-4411-1790", 3);
+        assert_eq!(body["jsonrpc"], "2.0");
+        assert_eq!(body["method"], "tasks/get");
+        assert_eq!(body["params"]["id"], "a2a-4411-1790");
+        assert_eq!(body["params"]["metadata"]["aoide/linesAfter"], 3);
+        assert!(body["params"]["message"].is_null());
+        // The frame key is NOT sent along: asking for both is asking for the
+        // stricter gate (`a2a.rs::task_get_outputs`), and the pull wants only
+        // the ring.
+        assert!(body["params"]["metadata"]["aoide/frame"].is_null());
+    }
+
+    #[test]
+    fn parse_history_response_hands_back_the_ring_and_keeps_the_door_s_code() {
+        let ring = json!({
+            "events": [{ "seq": 2, "event": { "exited": { "outcome": "exit" } } }],
+            "gap": false, "last": 2
+        });
+        let ok = json!({
+            "jsonrpc": "2.0", "id": 1,
+            "result": {
+                "id": "a2a-4411-1790", "contextId": "a2a-4411-1790", "kind": "task",
+                "status": { "state": "done", "timestamp": "2026-09-25T05:00:00Z" },
+                "history": [{
+                    "role": "agent", "messageId": "pingback",
+                    "parts": [{ "kind": "data", "data": ring }],
+                }],
+            }
+        });
+        assert_eq!(parse_history_response(&ok).unwrap()["events"][0]["seq"], 2);
+
+        // The key-match refusal — the ONE read the 2026-09-25 ruling kept
+        // gated — arrives with the same code as the frame's.
+        let refused = json!({
+            "jsonrpc": "2.0", "id": 1,
+            "error": {
+                "code": aoide_protocol::wire::a2a::OUTPUT_READ_REFUSED_CODE,
+                "message": "output read refused: history belongs to the parent",
+            }
+        });
+        let e = parse_history_response(&refused).unwrap_err();
+        assert_eq!(e.code, Some(aoide_protocol::wire::a2a::OUTPUT_READ_REFUSED_CODE));
+
+        // A frame-only answer — a history read that came back with artifacts
+        // and no history — is an error with no code, never a silent empty ring
+        // (an empty ring is a real answer, and must not be confused with one).
+        let no_history = json!({ "jsonrpc": "2.0", "id": 1, "result": { "id": "x", "artifacts": [] } });
+        let e = parse_history_response(&no_history).unwrap_err();
+        assert_eq!(e.code, None);
+        assert!(e.message.contains("history"), "{}", e.message);
+
+        // A history of the wrong id is not the ring: identity, never position.
+        let other = json!({
+            "jsonrpc": "2.0", "id": 1,
+            "result": { "history": [{ "role": "agent", "messageId": "other", "parts": [] }] }
+        });
+        assert!(parse_history_response(&other).unwrap_err().message.contains("ping-back"));
     }
 
     #[test]

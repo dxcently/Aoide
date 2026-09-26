@@ -68,8 +68,9 @@ use aoide_protocol::Invocation;
 use aoide_protocol::agents::{agent_profile, AgentProfile, CLAUDE_PROFILE};
 use crate::graph::{
     canonical_state, codex_home, drop_remote_child_rows, drop_sessions, hooks_path, hyprctl_clients,
-    ledger_session_exit, lineage_of, load_stage, normalize_addr, now_iso_utc, pingback, prune_done,
-    refresh_subagent_says, refresh_transcript_fields, restage_graph, sessions_path, stage_error,
+    ledger_session_exit, lineage_of, load_stage, normalize_addr, now_iso_utc, pingback, pingback_pull,
+    prune_done, refresh_subagent_says, refresh_transcript_fields, restage_graph, sessions_path,
+    stage_error,
     sync_codex_app_threads, sync_eidolon_sessions, upsert_hook, write_stage, HookRecord, HooksFile,
     SessionRecord,
     SessionsFile, STAGE_GRAPH_VERSION,
@@ -1121,6 +1122,15 @@ pub fn reap(inv: &Invocation) -> Outcome {
     // something must not toast the desktop every twelve seconds. Each actual
     // delivery prints its own `[aoide/reap]` line from inside `pingback`.
     let _pingback_report = pingback(inv, &eidolon_dropped);
+    // …and the other half of the same conversation, one lane over: a child of
+    // THIS node whose parent sits on another node published its events on ITS
+    // node's ring, and this node — the parent's own policy and audit boundary
+    // — pulls them, re-validates them against the closed event set, renders
+    // them locally and delivers them through the same `deliver()`. A pull, not
+    // a push: reachability is proven only from the parent toward the child
+    // (`pingback_pull`'s own doc). Not folded into `changed` either — a parent
+    // hearing a far child must not toast the desktop every twelve seconds.
+    let _pingback_remote = pingback_pull(inv);
     // The refresh is reported but deliberately NOT folded into `changed`: that
     // vec is the sweep's ledger (what entered or left the roster), and it is
     // what decides whether the timer toasts. An agent merely speaking must not
@@ -2702,6 +2712,7 @@ mod tests {
                     session_id: child.into(),
                     spawned_at: "2026-09-25T00:00:00Z".into(),
                     lines_after: 0,
+                    drained: false,
                     extra: Default::default(),
                 },
             )
